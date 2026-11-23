@@ -1,0 +1,16 @@
+{
+  "gap": "G96",
+  "id": "g96",
+  "controls": [
+    "sr-12"
+  ],
+  "ownerRole": "owner",
+  "title": "Component disposal needs approved methods and custody evidence",
+  "remediation": "The asset custodian and disposal authority identify assessed components and approved disposal or sanitization methods by component and information sensitivity. Track a representative item through approved removal and custody transfer, method verification, and dated disposition. Retain an authorized disposal receipt and reconcile the inventory.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved disposal methods, a redacted custody and disposal receipt, and the reconciled inventory update"
+    }
+  ]
+}

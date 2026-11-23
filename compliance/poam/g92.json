@@ -1,0 +1,16 @@
+{
+  "gap": "G92",
+  "id": "g92",
+  "controls": [
+    "sr-08"
+  ],
+  "ownerRole": "shared",
+  "title": "Supplier notification agreements and escalation routes need verification",
+  "remediation": "The deployment contracting and incident response leads review notification agreements for assessed suppliers. Verify what triggers notice, the reporting time, approved contacts and permitted information sharing. Product security supplies applicable advisory procedures. Exercise a harmless supplier notification and retain a redacted receipt, acknowledgement and escalation record.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed agreement references, contact and timing rules, and a redacted notification exercise receipt"
+    }
+  ]
+}

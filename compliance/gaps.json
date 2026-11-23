@@ -981,6 +981,90 @@
     },
     {
       "controls": [
+        "sr-01",
+        "sr-02",
+        "sr-02.01"
+      ],
+      "id": "G89",
+      "ownerRole": "owner",
+      "poam": "g89",
+      "remediation": "The sponsor supply chain risk official approves the policy, procedures and protected lifecycle plan for assessed components and services. Name the team and coordinator across acquisition, operations, security and disposal. Record who receives and reviews the documents, their access controls and review triggers, and a dated coordination decision.",
+      "title": "Supply chain risk policy, plan and team need approved operating evidence"
+    },
+    {
+      "controls": [
+        "sr-05"
+      ],
+      "id": "G90",
+      "ownerRole": "owner",
+      "poam": "g90",
+      "remediation": "The contracting authority and deployment procurement lead identify acquisition safeguards for assessed goods and services. Sample an acquisition using documented selection criteria, integrity and provenance requirements, supplier obligations and acceptance decisions. Record any exceptions and their approval.",
+      "title": "Acquisition safeguards need evidence from a reviewed procurement"
+    },
+    {
+      "controls": [
+        "sr-03",
+        "sr-06"
+      ],
+      "id": "G91",
+      "ownerRole": "shared",
+      "poam": "g91",
+      "remediation": "The deployment supplier assurance lead and component maintainers identify in-scope suppliers, delivered components and services, reviewers and assessment cadence. Review a representative supplier against approved requirements. Record the finding, selected safeguards in the supply chain or system plans, corrective action owner, follow-up and disposition. Use G10 for scoped root dependency safeguards and G77 for the supply chain risk assessment.",
+      "title": "Supplier assessments and treatment of supply chain findings need evidence"
+    },
+    {
+      "controls": [
+        "sr-08"
+      ],
+      "id": "G92",
+      "ownerRole": "shared",
+      "poam": "g92",
+      "remediation": "The deployment contracting and incident response leads review notification agreements for assessed suppliers. Verify what triggers notice, the reporting time, approved contacts and permitted information sharing. Product security supplies applicable advisory procedures. Exercise a harmless supplier notification and retain a redacted receipt, acknowledgement and escalation record.",
+      "title": "Supplier notification agreements and escalation routes need verification"
+    },
+    {
+      "controls": [
+        "sr-10"
+      ],
+      "id": "G93",
+      "ownerRole": "shared",
+      "poam": "g93",
+      "remediation": "The deployment acceptance manager and component custodians identify the items and events that require inspection. For assessed software, verify expected artifact digests and provenance before acceptance and exercise refusal of a harmless changed copy. For assessed physical items, record approved seal and custody checks and their disposition. Use existing release attestations as a supplier input.",
+      "title": "Tamper inspection needs approved triggers and observed acceptance evidence"
+    },
+    {
+      "controls": [
+        "sr-11",
+        "sr-11.01"
+      ],
+      "id": "G94",
+      "ownerRole": "shared",
+      "poam": "g94",
+      "remediation": "The sponsor component assurance lead and supplier maintainers establish trusted acquisition and authenticity checks for the assessed component types. Name reporting recipients and roles that detect suspect hardware, software or firmware. Verify required training and a harmless detection and escalation exercise. Use G4 and G13 for their scoped provenance and attestation receipts.",
+      "title": "Component authenticity procedures and anti-counterfeit training need evidence"
+    },
+    {
+      "controls": [
+        "sr-11.02"
+      ],
+      "id": "G95",
+      "ownerRole": "owner",
+      "poam": "g95",
+      "remediation": "The maintenance authority and component custodian identify assessed components subject to service or repair. Sample approved custody and baseline records before service, authorized changes and access while held, and verification against the approved configuration before return to service. Record any variance and the decision to release or retain the component.",
+      "title": "Service and repair components need controlled configuration and return records"
+    },
+    {
+      "controls": [
+        "sr-12"
+      ],
+      "id": "G96",
+      "ownerRole": "owner",
+      "poam": "g96",
+      "remediation": "The asset custodian and disposal authority identify assessed components and approved disposal or sanitization methods by component and information sensitivity. Track a representative item through approved removal and custody transfer, method verification, and dated disposition. Retain an authorized disposal receipt and reconcile the inventory.",
+      "title": "Component disposal needs approved methods and custody evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

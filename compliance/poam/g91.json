@@ -1,0 +1,17 @@
+{
+  "gap": "G91",
+  "id": "g91",
+  "controls": [
+    "sr-03",
+    "sr-06"
+  ],
+  "ownerRole": "shared",
+  "title": "Supplier assessments and treatment of supply chain findings need evidence",
+  "remediation": "The deployment supplier assurance lead and component maintainers identify in-scope suppliers, delivered components and services, reviewers and assessment cadence. Review a representative supplier against approved requirements. Record the finding, selected safeguards in the supply chain or system plans, corrective action owner, follow-up and disposition. Use G10 for scoped root dependency safeguards and G77 for the supply chain risk assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a dated supplier review, selected control references, and a sampled weakness through treatment and follow-up"
+    }
+  ]
+}
