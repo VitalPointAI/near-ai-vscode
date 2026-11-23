@@ -5,6 +5,7 @@
 // otherwise, except in GitHub Actions, where a missing binary fails them. Fictional people and data only.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import { HubTransportError } from '../staff/replica/hubTransport';
 import type { LiveReplicator, LiveStatus, LiveTransport } from '../staff/replica/liveReplicator';
@@ -65,7 +66,7 @@ async function textReaches(project: ReplicaProject, stream: string, product: str
   for (;;) {
     const text = await foldText(project, stream, product);
     if (text === wanted) return;
-    if (Date.now() > deadline) assert.fail(`the text did not reach "${wanted}" within ${ms} ms; it is "${String(text)}"`);
+    if (Date.now() > deadline) assert.fail(`text did not converge within ${ms} ms; expected length ${wanted.length}, got ${text?.length ?? 'no text'}`);
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -102,7 +103,7 @@ test('a project without your organization\'s server stays single-machine and ope
   }
 });
 
-test('tracer: A types one sentence, it is stored first, pushed through a real hub child process, and B\'s fold shows it, woken by the heads event', async (t) => {
+async function traceThroughHub(t: TestContext, text: string, records: number): Promise<void> {
   const node = hubNodeOrSkip(t);
   if (node === undefined) return;
   const server = await startHubChild(node);
@@ -125,30 +126,30 @@ test('tracer: A types one sentence, it is stored first, pushed through a real hu
 
       const stream = a.project.projectId;
       const editor = await ProductEditor.open(a.project, { stream, product: PRODUCT, actor: { kind: 'person' } }, { onAppended: () => ra.localAppended() });
-      editor.insert(0, SENTENCE);
-      assert.equal(editor.text(), SENTENCE);
+      editor.insert(0, text);
+      assert.ok(editor.text() === text);
       const pushedBefore = ra.status.pushed;
       const wakesBefore = logB.filter((line) => line === 'wake heads').length;
       const flushed = await editor.flush();
       const flushedAt = Date.now();
-      assert.deepEqual(flushed, { appended: 1, queued: 0 });
-      // Stored first: the registration and the update are in A's store before the replicator pushed anything.
-      assert.equal((await a.project.findOwnAll('doc.client', (data) => (data as { product?: unknown }).product === PRODUCT)).length, 1);
-      assert.equal((await a.project.findOwnAll('doc.update', (data) => (data as { product?: unknown }).product === PRODUCT)).length, 1);
+      assert.deepEqual(flushed, { appended: records, queued: 0 });
       assert.equal(ra.status.pushed, pushedBefore, 'nothing was pushed before the store held the change');
+      // Stored first: the registration and the changes are in A's store before the replicator pushed anything.
+      assert.equal((await a.project.findOwnAll('doc.client', (data) => (data as { product?: unknown }).product === PRODUCT)).length, 1);
+      assert.equal((await a.project.findOwnAll('doc.update', (data) => (data as { product?: unknown }).product === PRODUCT)).length, records);
 
-      await textReaches(b.project, stream, PRODUCT, SENTENCE);
+      await textReaches(b.project, stream, PRODUCT, text);
       const seenAfterMs = Date.now() - flushedAt;
       console.log(`B saw A's change ${seenAfterMs} ms after A stored it`);
-      assert.equal(await foldText(a.project, stream, PRODUCT), SENTENCE);
-      await reaches(ra, (status) => status.pushed >= pushedBefore + 2, 'A pushed the registration and the update');
+      assert.ok(await foldText(a.project, stream, PRODUCT) === text);
+      await reaches(ra, (status) => status.pushed >= pushedBefore + 1 + records, 'A pushed the registration and the changes');
       // B was woken by the hub's heads frame: its only exchanges after going live start from a heads frame, and B has no timer that syncs.
       assert.ok(logB.filter((line) => line === 'wake heads').length > wakesBefore, logB.join('\n'));
       assert.ok(logB.includes('exchange heads'), logB.join('\n'));
       assert.equal(logB.some((line) => line === 'exchange timer'), false, logB.join('\n'));
       assert.equal(ra.status.state, 'live');
       assert.equal(rb.status.state, 'live');
-      await reaches(rb, (status) => status.pulled >= 2, 'B stored the registration and the update');
+      await reaches(rb, (status) => status.pulled >= 1 + records, 'B stored the registration and the changes');
       editor.close();
     } finally {
       await world.close();
@@ -156,7 +157,13 @@ test('tracer: A types one sentence, it is stored first, pushed through a real hu
   } finally {
     await server.dispose();
   }
-});
+}
+
+test('tracer: A types one sentence, it is stored first, pushed through a real hub child process, and B\'s fold shows it, woken by the heads event', (t) =>
+  traceThroughHub(t, SENTENCE, 1));
+
+test('tracer: a 300 KiB paste crosses the real hub as ordered records', (t) =>
+  traceThroughHub(t, '🌎'.repeat(75 * 1024), 2));
 
 /** A transport whose server never answers: every call waits until close(), which ends it as unreachable. Counts opens and closes. */
 function silentServer(project: string, hub: string): { open: () => LiveTransport; opened: () => number; closed: () => number } {

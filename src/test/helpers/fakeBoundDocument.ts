@@ -39,8 +39,11 @@ export class FakeBoundDocument implements BoundDocument {
     return this.text === expectedText;
   }
 
-  public deliverAppliedEvents(): void {
-    for (const event of this.heldEvents.splice(0)) this.emit(event);
+  public deliverAppliedEvents(newestFirst = false): number {
+    const events = this.heldEvents.splice(0);
+    if (newestFirst) events.reverse();
+    for (const event of events) this.emit(event);
+    return events.length;
   }
 
   private changed(edits: readonly DocumentEdit[], defer: boolean, reason?: 'undo' | 'redo'): void {

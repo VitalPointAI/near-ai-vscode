@@ -6,6 +6,7 @@ import { acceptedUpdates, productOutput } from '../staff/replica/productFeed';
 import { ProductEditor } from '../staff/replica/productEditing';
 import { FakeBoundDocument } from './helpers/fakeBoundDocument';
 import { carryThroughFake, createLiveWorld } from './helpers/liveWorld';
+import { rng } from './helpers/replicaWorld';
 
 const HEADER = '---\nproduct: bridge-status\n---\n\n';
 const PRODUCT = 'bridge-status';
@@ -325,4 +326,73 @@ test('a large Unicode replacement reaches the peer and remains one local undo an
     assert.ok((await updateSizes(0)).every((size) => size <= MAX_UPDATE_BYTES));
     assert.equal(await updates(1), 1, 'the peer never echoes paste or history');
   });
+});
+
+test('fuzz: seeded concurrent editing preserves convergence and local history', { timeout: 120_000 }, async (t) => {
+  for (const seed of [3304, 43117]) {
+    await t.test(`seed ${seed}`, async (trial) => {
+      trial.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+      const random = rng(seed);
+      const ownerToken = [/[a-z]/, /[A-Z]/];
+      let round = 0;
+      try {
+        await withEditors(async ({ documents, bindings, exchange, body, logs }) => {
+          for (const document of documents) document.deferAppliedEvents = true;
+          let repairs = 0;
+          let reordered = 0;
+          let historyChanges = 0;
+          const send = async (side: 0 | 1): Promise<void> => {
+            await exchange(side);
+            if (random.chance(0.5)) documents[side === 0 ? 1 : 0].deliverAppliedEvents();
+          };
+          const verifyConvergence = async (first: 0 | 1): Promise<void> => {
+            await send(first);
+            await send(first === 0 ? 1 : 0);
+            for (const document of documents) {
+              if (document.deliverAppliedEvents(true) > 1) reordered += 1;
+            }
+            assert.equal(documents[0].getText(), documents[1].getText());
+            for (const side of [0, 1] as const) {
+              assert.equal(documents[side].getText(), HEADER + bindings[side].text());
+              assert.equal(await body(side), bindings[side].text());
+            }
+          };
+
+          for (round = 1; round <= 100; round += 1) {
+            const side = random.chance(0.5) ? 0 : 1;
+            const other = side === 0 ? 1 : 0;
+            const document = documents[side];
+            const oldBody = document.getText().slice(HEADER.length);
+            const operation = random.int(6);
+            trial.mock.timers.tick(random.int(150));
+            if (operation < 3) {
+              const token = String.fromCharCode((side === 0 ? 97 : 65) + random.int(26));
+              document.type({ offset: HEADER.length + random.int(oldBody.length + 1), length: 0, text: token });
+            } else if (operation === 3) {
+              const candidates = [...oldBody].flatMap((character, index) => ownerToken[side].test(character) ? [index] : []);
+              if (candidates.length > 0) document.type({ offset: HEADER.length + random.pick(candidates), length: 1, text: '' });
+            } else {
+              const peerText = (text: string): string => [...text].filter((character) => ownerToken[other].test(character)).join('');
+              if (await bindings[side][operation === 4 ? 'undo' : 'redo']()) historyChanges += 1;
+              assert.equal(peerText(document.getText().slice(HEADER.length)), peerText(oldBody));
+            }
+
+            if (random.chance(0.3)) await send(side);
+            if (round === 37 || round === 83) {
+              documents[other].dropNextApply = true;
+              document.type({ offset: document.getText().length, length: 0, text: '!' });
+              await send(side);
+              repairs += 1;
+              assert.deepEqual(logs, Array(repairs).fill(RESYNC_LOG_LINE));
+            }
+            if (round % 20 === 0) await verifyConvergence(side);
+          }
+          assert.ok(reordered > 0, 'some remote notifications arrived newest first');
+          assert.ok(historyChanges > 0, 'local history actually changed during the schedule');
+        }, { seedBody: '0123456789' });
+      } catch (error) {
+        throw new Error(`seed ${seed}, round ${round}`, { cause: error });
+      }
+    });
+  }
 });
