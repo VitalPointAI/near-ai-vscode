@@ -19,7 +19,7 @@ import { markKey } from '../staff/replica/marks';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import {
-  ReplicaStore, START_AGAIN_COMMAND_TITLE, START_AGAIN_INTENT_FILE, START_AGAIN_REFUSALS, START_AGAIN_STEPS, STORE_REFUSALS, setStartAgainProbe
+  ReplicaStore, START_AGAIN_COMMAND_TITLE, START_AGAIN_INTENT_FILE, START_AGAIN_REFUSALS, START_AGAIN_STEPS, STORE_GITIGNORE, STORE_REFUSALS, setStartAgainProbe
 } from '../staff/replica/store';
 import type { ForeignCheck, ReplicaStoreDeps, StartAgainStep, StoreRefused } from '../staff/replica/store';
 import { setFolderSyncProbe, syncFolder } from '../staff/staffFiles';
@@ -255,8 +255,8 @@ test('an uninterrupted Start Again runs its steps in order, each followed by a s
     setStartAgainProbe(undefined);
     setFolderSyncProbe(undefined);
   }
-  assert.deepEqual(log, ['built', 'temporary synced', 'intent-written', 'staff synced', 'set-aside', 'staff synced', 'moved-in', 'staff synced', 'marked', 'staff synced']);
-  assert.deepEqual([...START_AGAIN_STEPS], ['built', 'intent-written', 'set-aside', 'moved-in', 'marked']);
+  assert.deepEqual(log, ['temporary synced', 'built', 'temporary synced', 'intent-written', 'staff synced', 'set-aside', 'staff synced', 'moved-in', 'staff synced', 'marked', 'staff synced']);
+  assert.deepEqual([...START_AGAIN_STEPS], ['built', 'intent-written', 'set-aside', 'rebuild-started', 'moved-in', 'marked']);
   await assertFinished(seed);
 });
 
@@ -293,6 +293,71 @@ test('an intent found with the store and the temporary folder both gone builds t
   // The temporary folder goes missing as well (moved away by hand).
   renameSync(path.join(seed.staff, intent.temporary), path.join(tempDir('moved'), intent.temporary));
   await assertFinished(seed);
+});
+
+function intendedTemporary(seed: Seed): string {
+  const intent = JSON.parse(readFileSync(seed.intent, 'utf8')) as { temporary: string; carried: number; grants: number; blobs: number };
+  assert.deepEqual([intent.carried, intent.grants, intent.blobs], [3, 1, 1]);
+  return path.join(seed.staff, intent.temporary);
+}
+
+for (const damage of ['cut stream line', 'missing grant', 'missing blob'] as const) {
+  test(`Start Again rebuilds a partial temporary store with a ${damage}`, async () => {
+    const seed = await seeded();
+    await crashAt(seed, 'set-aside');
+    const temporary = intendedTemporary(seed);
+    if (damage === 'cut stream line') {
+      const file = path.join(temporary, 'streams', STREAM, `${seed.lead.writer}.jsonl`);
+      const lines = readFileSync(file, 'utf8').split('\n');
+      writeFileSync(file, `${lines.slice(0, 2).join('\n')}\n${lines[2].slice(0, 9)}`);
+    } else {
+      const relative = damage === 'missing grant'
+        ? path.join('grants', streamId('start-again/cell'), `1-${seed.grantHash}.json`)
+        : path.join('blobs', seed.own[0].blobs[0].hash);
+      renameSync(path.join(temporary, relative), path.join(tempDir('moved'), path.basename(relative)));
+    }
+    const partial = filesOf(temporary);
+    await assertFinished(seed);
+    const preserved = staffNames(seed.root).filter((name) => name.startsWith('replica.incomplete-'));
+    assert.equal(preserved.length, 1);
+    assert.deepEqual(filesOf(path.join(seed.staff, preserved[0])), partial);
+  });
+}
+
+test('killed at rebuild-started: an interrupted recovery rebuild never becomes the store', async () => {
+  const seed = await seeded();
+  await crashAt(seed, 'set-aside');
+  const temporary = intendedTemporary(seed);
+  renameSync(temporary, path.join(tempDir('moved'), path.basename(temporary)));
+  const end = await runChild(['recover', seed.root, seed.secretsFile, 'lead', 'rebuild-started']);
+  assert.equal(end.signal, 'SIGKILL', end.stderr + JSON.stringify(end.messages));
+  assert.equal(existsSync(seed.dir), false);
+  assert.ok(existsSync(temporary), 'the rebuild created a temporary folder before the crash');
+  const ignore = readFileSync(path.join(temporary, '.gitignore'), 'utf8');
+  assert.ok(ignore.startsWith(STORE_GITIGNORE), 'Git ignores the folder before files are copied');
+  assert.notEqual(ignore, STORE_GITIGNORE, 'the rebuild is not marked complete yet');
+  await assertFinished(seed);
+});
+
+test('an unfinished temporary folder with matching counts stays ignored and is rebuilt', async () => {
+  const seed = await seeded();
+  await crashAt(seed, 'set-aside');
+  const temporary = intendedTemporary(seed);
+  writeFileSync(path.join(temporary, '.gitignore'), STORE_GITIGNORE + '# Start Again is still copying this folder.\n');
+  const partial = filesOf(temporary);
+  await assertFinished(seed);
+  const preserved = staffNames(seed.root).find((name) => name.startsWith('replica.incomplete-'));
+  assert.ok(preserved, 'the unfinished folder was kept');
+  assert.deepEqual(filesOf(path.join(seed.staff, preserved)), partial);
+  assert.equal(readFileSync(path.join(seed.dir, '.gitignore'), 'utf8'), STORE_GITIGNORE);
+});
+
+test('a temporary folder with all intended counts is moved in without a rebuild', async () => {
+  const seed = await seeded();
+  await crashAt(seed, 'set-aside');
+  const inode = statSync(intendedTemporary(seed)).ino;
+  await assertFinished(seed);
+  assert.equal(statSync(seed.dir).ino, inode);
 });
 
 test('two opens at once after a crash at set-aside both open, on one store and one folder set aside', async () => {

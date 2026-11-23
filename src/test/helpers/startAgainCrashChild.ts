@@ -3,7 +3,7 @@
 // for the editor's secret storage. The file has no .test suffix on purpose so the test glob does not run it as a suite, and it only starts when it is
 // the entry point of a forked process.
 //
-// Arguments: <store|project> <project root> <secrets file> <signer label (store) | global storage folder (project)> [step]
+// Arguments: <store|recover|project> <project root> <secrets file> <signer label (store or recover) | global storage folder (project)> [step]
 // With a step it never answers: it is killed there. Without one it sends { type: 'done', result } when Start Again returns.
 import { ReplicaProject } from '../../staff/replica/replicaProject';
 import { ReplicaStore, START_AGAIN_STEPS, setStartAgainProbe } from '../../staff/replica/store';
@@ -34,9 +34,10 @@ async function main(mode: string, root: string, secretsFile: string, who: string
   const secrets = new FileSecrets(secretsFile);
   const now = (): Date => new Date(CRASH_CHILD_NOW);
   let result: unknown;
-  if (mode === 'store') {
+  if (mode === 'store' || mode === 'recover') {
     const device = fixedSigner(who);
-    result = await ReplicaStore.startAgain(root, { secrets, signer: () => Promise.resolve(device.signer), keyStatus: () => Promise.resolve(ACTIVE), now });
+    const deps = { secrets, signer: () => Promise.resolve(device.signer), keyStatus: () => Promise.resolve(ACTIVE), now };
+    result = mode === 'recover' ? await ReplicaStore.open(root, deps) : await ReplicaStore.startAgain(root, deps);
   } else if (mode === 'project') {
     result = await ReplicaProject.startHistoryAgain(root, { secrets, globalStorageDir: who, now });
   } else {
