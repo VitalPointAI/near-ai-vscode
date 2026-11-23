@@ -1,7 +1,7 @@
 import { MAX_DEPS } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
-import { validateVersionsData } from '../../domain/replica/kindSchemas/versions';
+import { MAX_DECISIONS_SEEN, validateVersionsData } from '../../domain/replica/kindSchemas/versions';
 import { VERSION_REFUSALS } from '../../domain/replica/versions';
 import type { ProductVersions, VersionRefusalReason } from '../../domain/replica/versions';
 import { LOCKED_RELEASE_STATES, RELEASE_REFUSALS, TERMINAL_RELEASE_STATES } from '../../domain/staff/release';
@@ -29,13 +29,15 @@ type DecideInput = VersionTarget & { outcome: 'approve' | 'reject'; reasons: rea
 const REQUIRED_STATE = {
   'version.verdict': undefined,
   'version.submit': 'guard-checked',
-  'version.decide': 'awaiting-decision'
+  'version.decide': 'awaiting-decision',
+  'version.release': 'approved'
 } as const;
 type VersionAction = keyof typeof REQUIRED_STATE;
 const OBSERVED_ACTIONS: Record<VersionAction, readonly string[]> = {
   'version.verdict': ['version.verdict'],
   'version.submit': ['version.verdict', 'version.submit'],
-  'version.decide': ['version.verdict', 'version.submit']
+  'version.decide': ['version.verdict', 'version.submit'],
+  'version.release': []
 };
 type VerdictInput = VersionTarget & { reasons: readonly string[] } &
   ({ gate: 'guard'; verdict: GuardVerdict } | { gate: 'tradecraft'; verdict: TradecraftVerdict });
@@ -83,6 +85,13 @@ export class VersionActs {
     return this.write('version.decide', { ...data, reasons: [...data.reasons] });
   }
 
+  public async release(input: VersionTarget): Promise<Written | Refused> {
+    if (this.actor.kind !== 'person') return refuse('agent-cannot-decide');
+    const data = { product: input.product, hash: input.hash, decisionsSeen: [] };
+    if (validateVersionsData('version.release', data, 'release') !== undefined) return refuse('bad-input');
+    return this.write('version.release', data);
+  }
+
   private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
@@ -98,20 +107,31 @@ export class VersionActs {
         const required = REQUIRED_STATE[kind];
         if (required !== undefined && state !== required) {
           if (TERMINAL_RELEASE_STATES.includes(state)) return refuse('terminal');
+          if (kind === 'version.release' && state !== 'released') return refuse('no-approval');
           return refuse(kind === 'version.submit' && LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
         }
+        const decision = product.versions.find((item) => item.hash === data.hash)?.decision;
         if (kind === 'version.decide') {
-          const decision = product.versions.find((item) => item.hash === data.hash)?.decision;
           // Ordinary approval and rejection require an undecided request. Confirming or settling requires a separate action.
           if (decision?.status !== 'none' || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
         }
+        let decisionsSeen: string[] = [];
+        if (kind === 'version.release') {
+          if (decision?.status !== 'effective' || decision.outcome !== 'APPROVE' || decision.effective.length === 0) return refuse('no-approval');
+          if (decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
+          if (decision.effective.length > MAX_DECISIONS_SEEN) return refuse('too-many-dependencies');
+          decisionsSeen = [...decision.effective].sort();
+        }
         const refused = new Set(product.refusals.map((item) => item.entry));
-        // Observe the prior actions this step depends on. This writer's stream head already cites its own actions.
-        const prior = version.acts.filter((act) => observed.includes(act.kind) && !refused.has(act.entry) && act.writer !== this.project.deviceWriter);
+        const seen = new Set(decisionsSeen);
+        // Observe the prior actions this step depends on. A release follows the approvals, which already observe the gates and submission.
+        // This writer's stream head already cites its own actions.
+        const prior = version.acts.filter((act) =>
+          (observed.includes(act.kind) || seen.has(act.entry)) && !refused.has(act.entry) && act.writer !== this.project.deviceWriter);
         const deps = [version.entry, ...prior.map((act) => act.entry)];
         if (deps.length > MAX_DEPS) return refuse('too-many-dependencies');
         return {
-          kind, data, options: { stream: product.stream, actor, deps },
+          kind, data: kind === 'version.release' ? { ...data, decisionsSeen } : data, options: { stream: product.stream, actor, deps },
           check: (preview, hash) => checkWrite(preview, product.stream, product.product, hash)
         };
       });
