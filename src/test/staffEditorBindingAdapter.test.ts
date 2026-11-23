@@ -3,6 +3,7 @@ import test from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import type { BindingSource } from '../services/staffEditorBinding';
 import { ProductEditor } from '../staff/replica/productEditing';
+import { updateMember } from '../staff/replica/membership';
 import { productOutput } from '../staff/replica/productFeed';
 import { carryThroughFake, createLiveWorld } from './helpers/liveWorld';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -14,6 +15,7 @@ const servicePath = '../services/staffEditorBinding';
 const CONTEXT = 'nearAi.staffBoundEditor';
 const UNDO = 'nearAi.staff.undoMyChange';
 const REDO = 'nearAi.staff.redoMyChange';
+const ATTRIBUTION = 'nearAi.staff.showWhoWroteThis';
 const OWN_HISTORY_NOTICE = 'Undo in a shared product removes only your own changes.';
 
 async function until(check: () => boolean | Promise<boolean>): Promise<void> {
@@ -28,10 +30,11 @@ async function withAdapter(run: (fixture: {
   stub: ReturnType<typeof createVscodeStub>;
   notify(): void;
   dispose(): void;
+  renameLead(name: string): Promise<void>;
   body(): Promise<string | undefined>;
   updateCount(): Promise<number>;
   remoteEdit(edits: Array<{ offset: number; length: number; text: string }>): Promise<void>;
-}) => Promise<void>): Promise<void> {
+}) => Promise<void>, initialLeadName?: string): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'ana', name: 'Avery Lead' }, { label: 'ben', name: 'Blake Rivers' }] });
   const [a, b] = world.devices;
   const stream = a.project.projectId;
@@ -41,7 +44,12 @@ async function withAdapter(run: (fixture: {
   const restore = installVscodeStub(stub);
   const listeners = new Set<() => void>();
   const dispose = (): void => { for (const subscription of context.subscriptions.splice(0)) subscription.dispose(); };
+  const renameLead = async (name: string): Promise<void> => {
+    const renamed = await updateMember(a.host, { member: a.member, name });
+    assert.equal(renamed.ok, true, renamed.message);
+  };
   try {
+    if (initialLeadName !== undefined) await renameLead(initialLeadName);
     const seed = await ProductEditor.open(a.project, target);
     try {
       seed.insert(0, 'Alpha Bravo');
@@ -65,6 +73,7 @@ async function withAdapter(run: (fixture: {
     await run({
       stub,
       dispose,
+      renameLead,
       notify() { for (const listener of listeners) listener(); },
       async body() { return productOutput((await a.project.state()).fold, stream, PRODUCT)?.text; },
       async updateCount() { return (await a.project.findOwnAll('doc.update', () => true)).length; },
@@ -259,4 +268,51 @@ test('native undo and redo events use the shared history and show its notice onc
     assert.equal(document.getText(), HEADER + 'Alpha Bravo!?');
     assert.deepEqual(stub.notifications.map(({ message }) => message), [OWN_HISTORY_NOTICE]);
   });
+});
+
+test('attribution uses historical roster names and offers the same labels without color', async () => {
+  await withAdapter(async ({ stub, renameLead }) => {
+    await renameLead('Avery Updated');
+    const document = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    stub.setActiveDocument(document);
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+    const show = stub.commands.get(ATTRIBUTION);
+    assert.ok(show);
+
+    await show();
+    const [pick] = stub.attributionPicks;
+    assert.equal(pick.visible, true);
+    assert.deepEqual(pick.items, [{ label: 'Avery Lead', description: '100% of text' }]);
+    assert.deepEqual(stub.decorationTypes.map(({ options }) => (options.borderColor as { id: string }).id), ['charts.blue']);
+    const [decoration] = stub.decorations[0].values;
+    assert.equal(decoration.hoverMessage.value, 'Avery Lead');
+    assert.equal(decoration.renderOptions.after.contentText, 'Avery Lead');
+    assert.equal(document.offsetAt(decoration.range.start), HEADER.length);
+    assert.equal(document.offsetAt(decoration.range.end), document.getText().length);
+
+    await show();
+    assert.equal(pick.visible, false);
+    assert.equal(stub.decorationTypes[0].disposed, true);
+  }, 'Avery Lead');
+});
+
+test('attribution closes when provenance refreshes or the editor starts changing', async () => {
+  await withAdapter(async ({ stub, notify }) => {
+    const document = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    stub.setActiveDocument(document);
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+    const show = stub.commands.get(ATTRIBUTION);
+    assert.ok(show);
+    await show();
+    notify();
+    assert.equal(stub.attributionPicks[0].visible, false);
+    assert.equal(stub.decorationTypes[0].disposed, true);
+
+    await show();
+    stub.fireDocumentChange(document, [{ rangeOffset: document.getText().length, rangeLength: 0, text: '!' }]);
+    assert.equal(stub.attributionPicks[1].visible, false);
+    assert.equal(stub.decorationTypes[1].disposed, true);
+    await show();
+    assert.equal(stub.attributionPicks.length, 2, 'pending local text has no verified attribution yet');
+  }, 'Avery Lead');
 });
