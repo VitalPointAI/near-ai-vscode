@@ -1,0 +1,17 @@
+{
+  "gap": "G169",
+  "id": "g169",
+  "controls": [
+    "pe-14",
+    "pe-15"
+  ],
+  "ownerRole": "owner",
+  "title": "Environmental monitoring and water isolation need facility evidence",
+  "remediation": "The sponsor building operations lead approves applicable environmental thresholds and monitoring intervals. Review a representative monitoring trend or alert and confirm water shutoff or isolation valves are accessible, operational and known to responsible staff. Document any provider inheritance by location for sponsor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved thresholds, representative monitoring evidence, and valve inspection or test with staff acknowledgement"
+    }
+  ]
+}

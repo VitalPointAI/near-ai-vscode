@@ -1,0 +1,16 @@
+{
+  "gap": "G174",
+  "id": "g174",
+  "controls": [
+    "ps-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Personnel security policy requires sponsor approval",
+  "remediation": "The sponsor personnel security official defines policy scope, accountable roles, procedures, recipients, review intervals and update triggers. Record approval, distribution and recent review. Confirm the applicable boundary for employee and external personnel procedures with sponsor security and privacy officials.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved personnel security policy, role assignments, dissemination record and dated procedure review"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G165",
+  "id": "g165",
+  "controls": [
+    "pe-08"
+  ],
+  "ownerRole": "owner",
+  "title": "Visitor records and anomaly escalation need facility evidence",
+  "remediation": "The sponsor visitor-services lead defines retention, review frequency and anomaly recipients. Sample controlled visitor registration, a dated record review and an anomaly escalation or exercise. Use a restricted evidence reference or redacted record to avoid redisclosing visitor identities.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the visitor record procedure, a dated review and a redacted escalation record or exercise result"
+    }
+  ]
+}
