@@ -2192,7 +2192,10 @@
       "ownerRole": "owner",
       "poam": "g194",
       "remediation": "The sponsor registration owner and designated official approve the assessed legal entity and site scope. Review the change register for application and ownership information, assigned review and notification duties, and any notice already submitted. Retain a dated decision and protected receipt reference for an applicable change or a signed pending-scope record.",
-      "title": "Controlled Goods registration changes need an accountable evidence record"
+      "title": "Controlled Goods registration changes need an accountable evidence record",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2203,7 +2206,10 @@
       "ownerRole": "owner",
       "poam": "g195",
       "remediation": "The designated official and privacy records steward review the assessment and eligibility evidence sets separately. Document the approved record custody, access roles, retention triggers and retention verification. Use opaque case references and sanitized review results in the assessor package. Keep personal assessment and eligibility documents in their approved repositories.",
-      "title": "Controlled Goods assessment and eligibility records need protected retention evidence"
+      "title": "Controlled Goods assessment and eligibility records need protected retention evidence",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2214,7 +2220,10 @@
       "ownerRole": "owner",
       "poam": "g196",
       "remediation": "The designated official and training owner identify the assessed workforce and visitor populations after approving scope. Review approved training and separate visitor briefing material. Verify sampled completion records using protected references, dates, role categories and exceptions. Keep identities and all training material containing controlled details in the approved repository.",
-      "title": "Controlled Goods role training and visitor briefings need completion evidence"
+      "title": "Controlled Goods role training and visitor briefings need completion evidence",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2224,7 +2233,10 @@
       "ownerRole": "owner",
       "poam": "g197",
       "remediation": "The designated official and records custodian approve the scoped inventory of controlled goods accountability, assessment and eligibility records. Verify an authorized custodian can locate and account for the records through a synthetic or redacted preparation exercise. Record the handling approval and protected references, with regulator disclosure decisions reserved to the responsible official.",
-      "title": "Controlled Goods records availability needs an authorized evidence review"
+      "title": "Controlled Goods records availability needs an authorized evidence review",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2234,7 +2246,10 @@
       "ownerRole": "owner",
       "poam": "g198",
       "remediation": "The sponsor registration owner and designated official determine reporting applicability and approve custody, review and reconciliation responsibilities. Verify a sampled reporting period against a protected assessment register, review approval and any existing submission receipt. Record missing evidence as pending. Exclude personal fields and report contents from the general assessor export.",
-      "title": "Controlled Goods assessment reporting needs a protected review and receipt trail"
+      "title": "Controlled Goods assessment reporting needs a protected review and receipt trail",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2245,7 +2260,10 @@
       "ownerRole": "owner",
       "poam": "g199",
       "remediation": "The sponsor registration owner and privacy officer review the proposed designated official role, applicable qualification records, assessment and acceptance. Verify an approved appointment and its current review status with evidence references controlled by the responsible custodian. Record pending applicability or missing authority before making an assessment finding.",
-      "title": "Controlled Goods designated official authority needs verified appointment evidence"
+      "title": "Controlled Goods designated official authority needs verified appointment evidence",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2257,7 +2275,10 @@
       "ownerRole": "owner",
       "poam": "g200",
       "remediation": "The designated official, registration owner and privacy authority review the approved assessment scope and decision authority. Verify a protected case reference for completed assessment review, official decision, the assessed duties and limits, and how the organization documents reliance on that decision. Keep personal case files and controlled information outside the general export.",
-      "title": "Controlled Goods assessment and scope decisions need protected authority evidence"
+      "title": "Controlled Goods assessment and scope decisions need protected authority evidence",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2267,7 +2288,10 @@
       "ownerRole": "owner",
       "poam": "g201",
       "remediation": "The sponsor designated official and counsel record whether this provision was considered for the defined deployment and, if already relied on, retain the existing authority decision and supporting reference under restricted custody. Record a dated pending decision if applicability is unresolved. The assessor export carries a scope summary and reference only.",
-      "title": "Controlled Goods class exemption applicability needs a protected authority decision"
+      "title": "Controlled Goods class exemption applicability needs a protected authority decision",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2280,7 +2304,10 @@
       "ownerRole": "owner",
       "poam": "g202",
       "remediation": "The sponsor designated official and privacy authority assess the applicability of individual exemption records to the deployment. Where an existing case is in scope, separately verify protected references for the eligibility review, application record, ministerial assessment status and validity determination. Keep identity documents and application contents in restricted custody. Record pending scope and review ownership.",
-      "title": "Controlled Goods individual exemption records need independent evidence review"
+      "title": "Controlled Goods individual exemption records need independent evidence review",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2291,7 +2318,10 @@
       "ownerRole": "owner",
       "poam": "g203",
       "remediation": "The designated official and counsel review the assessed legal entity and boundaries against the recorded statutory objectives. Verify the applicable registration or approved authority record and examine whether the deployment evidence matches the documented access boundary. Preserve open scope and missing records. Link X1 through X4 and X10 as separate technical paths.",
-      "title": "Controlled Goods statutory scope needs a recorded sponsor authority review"
+      "title": "Controlled Goods statutory scope needs a recorded sponsor authority review",
+      "profiles": [
+        "overlay-cgp"
+      ]
     },
     {
       "controls": [
@@ -2301,7 +2331,10 @@
       "ownerRole": "owner",
       "poam": "g204",
       "remediation": "The sponsor empowered official and trade counsel review which assessed deployment activities and information categories require an ITAR scope decision. Retain a signed applicability record that identifies the affected systems, evidence custody and unresolved questions. Keep any supporting controlled information in restricted custody and use approved references in the assessor package.",
-      "title": "ITAR export-scope applicability needs an authoritative deployment determination"
+      "title": "ITAR export-scope applicability needs an authoritative deployment determination",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2313,7 +2346,10 @@
       "ownerRole": "owner",
       "poam": "g205",
       "remediation": "The sponsor empowered official, trade counsel and credential custodian review the assessed access-information boundary and existing authorization decisions. Assess whether current credential governance and access reviews respect the approved limits, using synthetic or redacted verification evidence only. Retain signed findings and references for open conditions. Keep credentials and controlled information outside the assessor export.",
-      "title": "ITAR release and access-information controls need a protected scope and access review"
+      "title": "ITAR release and access-information controls need a protected scope and access review",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2323,7 +2359,10 @@
       "ownerRole": "owner",
       "poam": "g206",
       "remediation": "The sponsor empowered official and trade counsel review registration applicability for the assessed legal entity and approved operating scope. Verify an existing official registration record and its current review status where applicable. Record a dated pending determination when the scope or supporting record remains unresolved.",
-      "title": "ITAR registration applicability needs a scoped authority record"
+      "title": "ITAR registration applicability needs a scoped authority record",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2333,7 +2372,10 @@
       "ownerRole": "owner",
       "poam": "g207",
       "remediation": "The sponsor empowered official and trade counsel review the assessed operating boundary against the provision and the current authoritative restrictions. Verify dated review ownership, the applicable source reference, approved boundary evidence and unresolved findings. Copy only the approved summary and reference into the assessor package.",
-      "title": "ITAR restricted-scope review needs a signed applicability record"
+      "title": "ITAR restricted-scope review needs a signed applicability record",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2343,7 +2385,10 @@
       "ownerRole": "owner",
       "poam": "g208",
       "remediation": "The sponsor empowered official, counsel and personnel security owner review whether the provision is relevant to the assessed personnel boundary. Where the organization already relies on a decision, verify signed scope and review records and separately confirm custody of the existing supporting evidence. Keep personal and controlled information restricted. Record unresolved applicability.",
-      "title": "ITAR personnel-scope determinations need protected evidence references"
+      "title": "ITAR personnel-scope determinations need protected evidence references",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2355,7 +2400,10 @@
       "ownerRole": "owner",
       "poam": "g209",
       "remediation": "The sponsor trade counsel and authorized EAR owner review the three objectives individually for the assessed operating boundary. Record export, release and encrypted activity scope decisions with separate dated evidence references where relevant. Where the organization already relies on a decision, verify the approved supporting review. Leave unresolved scope pending and keep controlled and key material outside the assessor export.",
-      "title": "EAR export, release and encrypted activity reviews need separate scoped decisions"
+      "title": "EAR export, release and encrypted activity reviews need separate scoped decisions",
+      "profiles": [
+        "overlay-itar"
+      ]
     },
     {
       "controls": [
@@ -2365,7 +2413,10 @@
       "ownerRole": "owner",
       "poam": "g210",
       "remediation": "The sponsor account management owner confirms the CPCSC Level 1 contract boundary and approves which accounts, users, roles and privileges apply there. Collect redacted authorization, creation or change, usage monitoring and removal samples. Include approved inactivity and expiration rules, a documented disablement and notification, and proof the assigned logout rule applies. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 account lifecycle and use need assessed records"
+      "title": "CPCSC Level 1 account lifecycle and use need assessed records",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2375,7 +2426,10 @@
       "ownerRole": "owner",
       "poam": "g211",
       "remediation": "The sponsor access control owner maps logical access rules to specified contract information and assessed resources. Review effective permissions and record a permitted role accessing its assigned resource and a refused request by a role without that authorization. Document inherited access control with the accountable service owner. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 logical access enforcement needs authorization and decisions"
+      "title": "CPCSC Level 1 logical access enforcement needs authorization and decisions",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2385,7 +2439,10 @@
       "ownerRole": "owner",
       "poam": "g212",
       "remediation": "The sponsor external-service owner inventories systems used for the contract to access, process, store or transmit specified information. Record the default prohibition, authorization criteria, security verification, approved connection or processing agreements, and restrictions for organization-controlled portable storage. Retain approved and refused cases from the effective boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 external system use needs approvals and enforcement evidence"
+      "title": "CPCSC Level 1 external system use needs approvals and enforcement evidence",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2395,7 +2452,10 @@
       "ownerRole": "owner",
       "poam": "g213",
       "remediation": "The sponsor public information owner identifies assessed public systems and authorized publishers. Verify training that keeps specified contract information out of publicly accessible content. Retain a periodic review sample and a redacted correction or safe exercise showing removal and escalation of improperly posted material. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 public posting review and removal need operating records"
+      "title": "CPCSC Level 1 public posting review and removal need operating records",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2405,7 +2465,10 @@
       "ownerRole": "owner",
       "poam": "g214",
       "remediation": "The sponsor identity owner maps in-scope user identities to accounts and processes acting on their behalf, with approved re-authentication triggers. Review the effective identity configuration and retain a dated test of unique identification, process attribution and re-authentication when an approved trigger occurs. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 user identity and re-authentication need scoped verification"
+      "title": "CPCSC Level 1 user identity and re-authentication need scoped verification",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2415,7 +2478,10 @@
       "ownerRole": "owner",
       "poam": "g215",
       "remediation": "The sponsor endpoint identity owner defines the contract-scope devices that must identify and authenticate before connecting. Review enrolment, unique identity and connection policy records. Verify an authorized synthetic device can connect and an unrecognized or de-authorized one is refused before session establishment. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 device identification and authentication need connection evidence"
+      "title": "CPCSC Level 1 device identification and authentication need connection evidence",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2425,7 +2491,10 @@
       "ownerRole": "owner",
       "poam": "g216",
       "remediation": "The sponsor identity owner approves strong factor policy for the assessed privileged and non-privileged user accounts. Inventory applicable sign-in paths, review the enforced factor settings and record a successful authorized sign-in plus a refusal when the required factor is missing for each account category. Record any documented exception with its authority and scope for assessor review. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 strong multi-factor authentication needs role coverage evidence"
+      "title": "CPCSC Level 1 strong multi-factor authentication needs role coverage evidence",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2435,7 +2504,10 @@
       "ownerRole": "owner",
       "poam": "g217",
       "remediation": "The sponsor information custodian and media disposal owner identify assessed media and approved sanitization methods for reuse, disposal and transfer outside organizational control. Sample a controlled case showing custody, authorization, the sanitization result and verification before release. Store evidence under controlled identifiers without exposing contract information. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 media sanitization needs controlled disposition receipts"
+      "title": "CPCSC Level 1 media sanitization needs controlled disposition receipts",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2445,7 +2517,10 @@
       "ownerRole": "owner",
       "poam": "g218",
       "remediation": "The sponsor physical security owner inventories assessed facilities and maintains approved lists of people with physical access, credential issuance records and the approved review cadence. Retain a redacted review and a credential removal sample showing access ended when no longer required. Cite hosting provider evidence for any inherited facility. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 physical access authorization needs dated approval and removal records"
+      "title": "CPCSC Level 1 physical access authorization needs dated approval and removal records",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2455,7 +2530,10 @@
       "ownerRole": "owner",
       "poam": "g219",
       "remediation": "The sponsor site security owner confirms assessed entrances, exits and output locations. Review verification before entry, ingress and egress controls, access logs, visitor escort and activity controls, protection of keys or equivalent devices and controls for physical output. Collect a redacted operating sample or authorized hosting receipt for each applicable boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 physical access control needs operating records for facilities and output"
+      "title": "CPCSC Level 1 physical access control needs operating records for facilities and output",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2465,7 +2543,10 @@
       "ownerRole": "owner",
       "poam": "g220",
       "remediation": "The sponsor network security owner maps assessed external and key internal interfaces, public and private segments, and approved external connections. Review the effective monitored interface and boundary settings and verify with benign authorized fixtures that an approved route is observed and an unapproved route is refused. Scope evidence to the contract environment and record inherited control ownership. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 managed interface and subnet controls need deployment evidence"
+      "title": "CPCSC Level 1 managed interface and subnet controls need deployment evidence",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2475,7 +2556,10 @@
       "ownerRole": "owner",
       "poam": "g221",
       "remediation": "The sponsor vulnerability and update owner inventories assessed software and firmware and approves the remediation window. Follow a sampled flaw from identification and reporting through correction. Retain release and installation timestamps, relevant post-update verification, and authorized treatment for any outstanding update. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 flaw handling and timely updates need sampled receipts"
+      "title": "CPCSC Level 1 flaw handling and timely updates need sampled receipts",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2485,7 +2569,10 @@
       "ownerRole": "owner",
       "poam": "g222",
       "remediation": "The sponsor endpoint protection owner inventories assessed entry and exit points. Verify configured protection and update cadence, scheduled system scans, real-time scanning for external files, and mitigation behavior. Use a harmless approved test artifact to record an observed block, quarantine or approved alternate protection with its dated response record. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
-      "title": "CPCSC Level 1 malicious code protection needs deployed coverage and response evidence"
+      "title": "CPCSC Level 1 malicious code protection needs deployed coverage and response evidence",
+      "profiles": [
+        "cpcsc-level-1"
+      ]
     },
     {
       "controls": [
@@ -2495,7 +2582,10 @@
       "ownerRole": "owner",
       "poam": "g225",
       "remediation": "The sponsor identity governance lead and system owner approve account types, user and role memberships, intended use, authorization and monitoring. Verify expiry, inactivity, orphaned accounts, policy violations and significant risk triggers. Sample approvals, privilege changes, disablement, notices for changes in employment or need, and a required logout outcome. Record the applicable ITSP.10.171 deployment boundary.",
-      "title": "Supplementary account lifecycle needs sponsor evidence"
+      "title": "Supplementary account lifecycle needs sponsor evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2505,7 +2595,10 @@
       "ownerRole": "owner",
       "poam": "g226",
       "remediation": "The sponsor system and resource owners approve logical access to assessed information and resources, including identities or groups and allowed operations. Demonstrate authorized and denied operations using representative test identities and cite the governing policy and resource boundary. Record applicable scope for ITSP.10.171. Treat mapped base-profile evidence as supporting material until checked against the deployment.",
-      "title": "Authorized logical access needs deployment enforcement evidence"
+      "title": "Authorized logical access needs deployment enforcement evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2515,7 +2608,10 @@
       "ownerRole": "owner",
       "poam": "g227",
       "remediation": "The sponsor data owner and network security lead approve internal and intersystem flows for the specified information categories. Trace representative approved and denied flows through assessed enforcement points. Referenced product records may help establish the path, while sponsor confirms the assessed routing boundary and inherited rules.",
-      "title": "Information flow approvals and enforcement need deployed evidence"
+      "title": "Information flow approvals and enforcement need deployed evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2525,7 +2621,10 @@
       "ownerRole": "owner",
       "poam": "g228",
       "remediation": "The sponsor access governance and business process owners identify duties that must be separated and assign corresponding access authorization. Sample assigned users and a conflicting role request or workflow exercise to verify that access supports the separation. Record any approved exception and its scope for assessment.",
-      "title": "Separation of duties needs authorized role and access evidence"
+      "title": "Separation of duties needs authorized role and access evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2537,7 +2636,10 @@
       "ownerRole": "owner",
       "poam": "g229",
       "remediation": "The sponsor identity and privileged access leads define minimum task access for users and delegated processes, authorized security functions and privileged roles. Review representative rights and reassignment or removal. Verify separate ordinary accounts, dedicated isolated administrative workstations for privileged actions, denied privileged functions for standard accounts, and logged authorized execution.",
-      "title": "Least privilege and privileged operations need sponsor verification"
+      "title": "Least privilege and privileged operations need sponsor verification",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2547,7 +2649,10 @@
       "ownerRole": "owner",
       "poam": "g230",
       "remediation": "The sponsor authentication owner approves the observation window, consecutive failure limit and automatic response, including any unlock or delay criteria. Exercise a representative sign-in route through threshold and recovery with a controlled account. Record inherited service policy and prove it covers the assessed route before accepting it.",
-      "title": "Failed logon limits and automatic responses need a test result"
+      "title": "Failed logon limits and automatic responses need a test result",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2557,7 +2662,10 @@
       "ownerRole": "owner",
       "poam": "g231",
       "remediation": "The sponsor privacy and system owners approve notice text covering security and privacy rules for specified information. Demonstrate that the assessed human access routes display the notice before granting access. Record where routes have no direct human sign-in and submit that scope decision for assessor review.",
-      "title": "Pre-access system use notices need sponsor approval and display evidence"
+      "title": "Pre-access system use notices need sponsor approval and display evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2568,7 +2676,10 @@
       "ownerRole": "owner",
       "poam": "g232",
       "remediation": "The sponsor endpoint and session service owners approve device lock timing or manual lock requirements, renewed authentication, screen concealment and automatic session disconnect triggers. Test lock and unlock on an assessed device and separately demonstrate session termination on a specified trigger. Record provider or platform inheritance for sponsor approval.",
-      "title": "Device lock and session termination need distinct test evidence"
+      "title": "Device lock and session termination need distinct test evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2578,7 +2689,10 @@
       "ownerRole": "owner",
       "poam": "g233",
       "remediation": "The sponsor remote access and security operations leads inventory each remote access type, approve connection and configuration requirements, and route connections through managed control points. Separately verify permissions for remote privileged commands and security-relevant information. Sample a permitted and denied route or action and document inherited control points for review.",
-      "title": "Remote access routes and privileged remote actions need authorization evidence"
+      "title": "Remote access routes and privileged remote actions need authorization evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2589,7 +2703,10 @@
       "ownerRole": "owner",
       "poam": "g234",
       "remediation": "The sponsor network and endpoint owners approve connection types and configuration for wireless and mobile access before connection. Verify wireless authentication and encryption and that unused radios are disabled before issue or deployment. Sample authorized mobile enrollment and full-device or container encryption for specified information, with a denied or quarantined unapproved connection where practical.",
-      "title": "Wireless and mobile access need approved configurations and separate checks"
+      "title": "Wireless and mobile access need approved configurations and separate checks",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2599,7 +2716,10 @@
       "ownerRole": "owner",
       "poam": "g235",
       "remediation": "The sponsor information and service owners record prohibited and specifically authorized external uses, applicable requirements from security and privacy plans, and approved connection or processing agreements. Sample verification before use of a permitted system and verify restrictions on organization-controlled portable storage there. Record the assessed ITSP.10.171 boundary.",
-      "title": "External system use needs approved scope, terms and verification"
+      "title": "External system use needs approved scope, terms and verification",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2609,7 +2729,10 @@
       "ownerRole": "owner",
       "poam": "g236",
       "remediation": "The sponsor public communications and information owners identify authorized publishers and train them to keep specified information out of public content. Sample a periodic review and a removal or controlled exercise if information is discovered. Record deployment scope for ITSP.10.171 and submit any no-public-content boundary for review.",
-      "title": "Public publishing training, review and removal need sponsor evidence"
+      "title": "Public publishing training, review and removal need sponsor evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2620,7 +2743,10 @@
       "ownerRole": "owner",
       "poam": "g237",
       "remediation": "The sponsor security and privacy training leads establish initial and recurring literacy that covers insider threat, social engineering and social mining. Set role-specific training before access or duties and at reviewed intervals. Track refresh after system or event changes and revisions to both training streams. Use de-identified learner evidence.",
-      "title": "Security literacy and role-based training need deployment records"
+      "title": "Security literacy and role-based training need deployment records",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2632,7 +2758,10 @@
       "ownerRole": "owner",
       "poam": "g238",
       "remediation": "The sponsor logging and records owners select and periodically review logged event types. Verify generation with event type, time, place, source, outcome and affected identities or entities, plus any approved additional data. Sample retention settings and available logs against the approved records schedule. Document any product-only or provider-only scope limits.",
-      "title": "Selected audit events, record content and retention need verification"
+      "title": "Selected audit events, record content and retention need verification",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2642,7 +2771,10 @@
       "ownerRole": "owner",
       "poam": "g239",
       "remediation": "The sponsor monitoring and service owners set notification recipients, response time and additional action when logging fails. Use an authorized simulation or a sanitized incident reference to demonstrate detection, timely alert, response and recovery. Confirm which failure modes and components are assessed.",
-      "title": "Audit logging failure alerts and response need exercise evidence"
+      "title": "Audit logging failure alerts and response need exercise evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2652,7 +2784,10 @@
       "ownerRole": "owner",
       "poam": "g240",
       "remediation": "The sponsor security operations lead sets review frequency, criteria for unusual activity and impact, findings recipients and repositories to correlate. Sample a dated review linking records from more than one assessed repository to findings and their reporting. Identify unmonitored sources or provider dependencies for review.",
-      "title": "Audit review, correlation and reporting need operational evidence"
+      "title": "Audit review, correlation and reporting need operational evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2662,7 +2797,10 @@
       "ownerRole": "owner",
       "poam": "g241",
       "remediation": "The sponsor security analytics and records leads demonstrate an approved reduction and reporting workflow for review or investigation. Compare a representative report with original events and verify that the original contents and time ordering remain intact. Document provider or tool boundary and access to originals for assessment.",
-      "title": "Audit reduction and reporting need original record preservation evidence"
+      "title": "Audit reduction and reporting need original record preservation evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2672,7 +2810,10 @@
       "ownerRole": "owner",
       "poam": "g242",
       "remediation": "The sponsor platform and logging leads document clocks used to produce audit time stamps, precision and permitted UTC or local offset convention. Verify representative records from assessed components against the configuration and show their dates sort and correlate as expected across the specified boundary.",
-      "title": "Audit time stamps need clock and precision verification"
+      "title": "Audit time stamps need clock and precision verification",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2682,7 +2823,10 @@
       "ownerRole": "owner",
       "poam": "g243",
       "remediation": "The sponsor logging platform and privileged access owners protect audit records and tooling against unauthorized reading, modification and removal. Limit management to a named subset of privileged roles. Review representative access assignments and use controlled checks or dated evidence of protected operations, including a non-management role refusal.",
-      "title": "Audit information and logging management need access protection evidence"
+      "title": "Audit information and logging management need access protection evidence",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
@@ -2699,7 +2843,10 @@
       "ownerRole": "owner",
       "poam": "g244",
       "remediation": "The sponsor assessment authority confirms each displayed identifier and edition against the checked-in ITSP.10.171 source, which marks it not allocated and withdrawn by NIST. Record a source-cited scope decision per identifier, including any replacement objective reference where the authority supplies one. Keep the path open pending the reviewed determination.",
-      "title": "Unallocated supplementary rows need sponsor source and scope review"
+      "title": "Unallocated supplementary rows need sponsor source and scope review",
+      "profiles": [
+        "itsp-10-171"
+      ]
     },
     {
       "controls": [
