@@ -183,6 +183,7 @@ class Memento {
 const warnings: string[] = [];
 const windowListeners: Array<(state: { focused: boolean }) => void> = [];
 let confirmClose: string | undefined;
+let collapseChatDrawer: (() => boolean) | undefined;
 /**
  * PERF-05: whether nearAi.agent.autoResumeAfterReload is on in these tests. Off by default here, so the tests of the Resume and Dismiss buttons keep
  * testing what a person does with the setting off; the auto-resume test turns it on.
@@ -191,7 +192,7 @@ const autoResume = { on: false };
 const vscodeStub = {
   workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (key: string, fallback?: unknown) => (key === 'agent.autoResumeAfterReload' ? autoResume.on : fallback), inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: async (text: string) => { warnings.push(text); return /Stop it and close/.test(text) ? confirmClose : undefined; }, activeTextEditor: undefined, state: { focused: true }, onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => { windowListeners.push(listener); return { dispose() {} }; } },
-  commands: { executeCommand: async () => undefined },
+  commands: { executeCommand: async (id: string) => id === 'sterling.chat.closeDrawer' ? collapseChatDrawer?.() : undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
 };
 
@@ -478,6 +479,26 @@ test('sidebar: Stop stops only the conversation on screen; the emergency stop st
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(near.requests.length, 3, 'nothing more was sent');
   });
+});
+
+test('sidebar: the last tab can dismiss the native drawer and preserve the conversation', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  let dismissals = 0;
+  collapseChatDrawer = () => { dismissals += 1; return true; };
+  try {
+    const sidebar = await openSidebar(root, auth, shared);
+    const id = sidebar.summary()!.activeId;
+    await sidebar.send({ type: 'close-conversation', id });
+    assert.equal(dismissals, 1);
+    await sidebar.send({ type: 'chat-ready' });
+    assert.equal(sidebar.summary()!.activeId, id, 'reopening the drawer keeps the same conversation');
+
+    collapseChatDrawer = undefined;
+    await sidebar.send({ type: 'close-conversation', id });
+    assert.notEqual(sidebar.summary()!.activeId, id, 'a host without a drawer command still closes the tab');
+  } finally {
+    collapseChatDrawer = undefined;
+  }
 });
 
 test('sidebar: closing a running conversation asks, stops it, and keeps its transcript in history', async () => {

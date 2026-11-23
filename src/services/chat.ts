@@ -647,7 +647,18 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // A (re)loaded view shows the conversation on screen again, with the prompts still waiting pinned.
     if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); refreshSyncHomeHere(); return; }
     if (message.type === 'switch-conversation') { const target = tabs.find((candidate) => candidate.id === message.id); if (target) show(target); return; }
-    if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
+    if (message.type === 'close-conversation') {
+      if (tabs.length === 1 && tabs[0].id === message.id) {
+        try {
+          // In the Sterling workbench, dismissing the last tab hides the drawer while preserving the conversation.
+          if (await vscode.commands.executeCommand<boolean>('sterling.chat.closeDrawer') === true) return;
+        } catch {
+          // Other hosts keep their existing conversation close behavior.
+        }
+      }
+      await closeConversation(message.id);
+      return;
+    }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
     if (message.type === 'pickup-card') {

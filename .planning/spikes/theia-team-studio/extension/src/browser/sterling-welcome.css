@@ -21,6 +21,9 @@ body.theia-dark .sterling-ca {
 .sterling-rail-shortcuts {
   display: grid;
   flex: 0 0 auto;
+  max-height: calc(100dvh - 112px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* The Chat shortcut opens this panel through its VS Code focus command. */
@@ -44,8 +47,13 @@ body.theia-dark .sterling-ca {
   font-size: var(--theia-private-sidebar-icon-size, 20px);
 }
 
-.sterling-rail-shortcut:hover,
-.sterling-rail-shortcut:focus-visible {
+.sterling-rail-shortcut[aria-disabled="true"] {
+  color: var(--theia-disabledForeground);
+  cursor: default;
+}
+
+.sterling-rail-shortcut:not([aria-disabled]):hover,
+.sterling-rail-shortcut:not([aria-disabled]):focus-visible {
   color: var(--theia-activityBar-foreground);
 }
 
@@ -230,8 +238,7 @@ body.theia-dark .sterling-ca {
 
 .sterling-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
 
-.sterling-actions button,
-.sterling-example {
+.sterling-actions button {
   display: inline-flex;
   justify-content: center;
   align-items: center;
@@ -249,8 +256,6 @@ body.theia-dark .sterling-ca {
 .sterling-primary:hover { background: #fff; }
 .sterling-actions .sterling-secondary { background: #14233caa; border-color: #a4bddb75; color: #edf6ff; }
 .sterling-secondary:hover { background: #24426a; }
-.sterling-example { background: transparent; color: var(--theia-textLink-foreground); text-align: left; padding: 0 2px; }
-.sterling-example:hover { text-decoration: underline; }
 
 .sterling-welcome button:focus-visible { outline: 2px solid var(--theia-focusBorder, #4296f2); outline-offset: 3px; }
 .sterling-actions button:focus-visible { outline-color: #b7dbff; }
@@ -259,10 +264,13 @@ body.theia-dark .sterling-ca {
 .sterling-destinations { margin-top: 30px; }
 .sterling-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .sterling-section-heading h2 { margin: 0; font-size: 20px; font-weight: 730; letter-spacing: -.02em; }
+.sterling-active-area,
+.sterling-area-components { margin: 0 0 14px; color: var(--theia-descriptionForeground); overflow-wrap: anywhere; }
 .sterling-destination-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 
 .sterling-destination {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   align-content: start;
   gap: 8px;
@@ -280,8 +288,8 @@ body.theia-dark .sterling-ca {
 
 .sterling-destination:hover { border-color: var(--theia-focusBorder); }
 .sterling-destination-icon { color: var(--theia-textLink-foreground); font-size: 19px; }
-.sterling-destination strong { font-size: 15px; }
-.sterling-destination span { color: var(--theia-descriptionForeground); line-height: 1.4; }
+.sterling-destination strong { font-size: 15px; overflow-wrap: anywhere; }
+.sterling-destination span { overflow-wrap: anywhere; color: var(--theia-descriptionForeground); line-height: 1.4; }
 
 @container (max-width: 760px) {
   .sterling-page { width: calc(100% - 40px); }
@@ -302,4 +310,8 @@ body.theia-dark .sterling-ca {
   .sterling-hero h1 { font-size: clamp(32px, 11cqw, 45px); }
   .sterling-section-heading { align-items: flex-start; flex-direction: column; gap: 0; }
   .sterling-destination { min-height: 115px; padding: 12px; }
+}
+
+@container (max-width: 340px) {
+  .sterling-destination-grid { grid-template-columns: minmax(0, 1fr); }
 }

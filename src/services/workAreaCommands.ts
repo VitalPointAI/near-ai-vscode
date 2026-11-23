@@ -9,6 +9,14 @@ export const CREATE_WORK_AREA_COMMAND = 'sterling.workAreas.create';
 const WORK_AREA_KINDS = ['capability-development', 'projects', 'training', 'operations', 'resources'] as const;
 type WorkAreaKind = (typeof WORK_AREA_KINDS)[number];
 
+const WORK_AREA_DIALOGS: Record<WorkAreaKind, readonly [title: string, prompt: string]> = {
+  'capability-development': ['New Capability Development work area', 'Capability title'],
+  projects: ['New Products & Projects work area', 'Project or product title'],
+  training: ['New Exercises & Training work area', 'Exercise or training title'],
+  operations: ['New Operations work area', 'Operation title'],
+  resources: ['New Resource Management work area', 'Resource management title']
+};
+
 const PROJECT_CATEGORIES = [
   { id: 'major-capital', label: 'Major capital project' },
   { id: 'minor-capital', label: 'Minor capital project' },
@@ -108,10 +116,7 @@ export async function createWorkArea(kind: unknown): Promise<{ uri: string; titl
   const parent = await chooseParent();
   if (!parent) return undefined;
   const capabilityDevelopment = kind === 'capability-development';
-  const title = await askTitle(
-    capabilityDevelopment ? 'New Capability Development work area' : 'New defence work area',
-    capabilityDevelopment ? 'Capability title' : 'Work area title'
-  );
+  const title = await askTitle(...WORK_AREA_DIALOGS[kind]);
   if (title === undefined) return undefined;
   const components = capabilityDevelopment ? await chooseCapabilityComponents() : undefined;
   if (capabilityDevelopment && components === undefined) return undefined;

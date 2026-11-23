@@ -1,6 +1,6 @@
 # Sterling in Eclipse Theia
 
-The Docker workbench opens to Sterling Get Started. Set up a project or open Chat from the welcome page. The native Team Studio sample uses the extension's existing team parser and four packaged sample projects.
+The Docker workbench opens to Sterling Get Started. Set up Sterling or open Chat from the welcome page. The native Team Studio sample uses the extension's existing team parser and four packaged sample projects.
 
 ## Run locally
 
@@ -12,7 +12,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Get Started](http://127.0.0.1:18771/) and choose **Explore a sample team**. Use the home icon at the top of the right rail to reopen Get Started. **SovAI: Get Started** and **SovAI: Open Team Studio Preview** are also available from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/). The home icon at the top of the right rail reopens the landing page. **SovAI: Open Team Studio Preview** in the command palette opens a read-only sample. Its project picker includes two valid teams, a folder without a team, and a folder with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
@@ -36,7 +36,36 @@ docker run --detach --name near-ai-theia-vsix \
   --session-preference nearAi.autoInstallGsd=false
 ```
 
-Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. The Get Started page links to project setup, Chat, Teams, Activity, and Governance. The right rail opens Get Started, Documentation, Compliance, and Chat. The compatibility container is for synthetic projects and has an in-memory credential store.
+Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. Get Started opens Sterling setup, Chat, and the four Defence work-area creation flows. The right rail opens Get Started, Portfolio, Chat, Team Studio, Agent Activity, Governance, Compliance, and Documentation. Data Management and Model Factory are marked as planned. To hide the Chat drawer, click its rail icon again or close its last conversation tab. Reopening it shows the same conversation. The compatibility container is for synthetic projects and has an in-memory credential store.
+
+## Defence work areas and Portfolio
+
+Use the four cards in Get Started to name a work area. Sterling creates it in the current folder or asks which folder to use. Capability Development also lets you name the programs, major and minor capital projects, initiatives, and products that form the capability. Sterling opens the new folder and shows its name on Get Started. Its title and capability components are kept in Git-ignored local metadata.
+
+Portfolio can display an approved non-sensitive export from an explicitly selected, trusted folder. Store it at `.planning/.near-ai/portfolio.snapshot.json` in that folder, then open **Portfolio** and choose **Load snapshot**. While visible, the view checks for file changes every five seconds and displays the reported source and generation time. The signed DND/CAF publication feed requires separate deployment and access.
+
+A synthetic example has this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "source": "Synthetic portfolio example",
+  "generatedAt": "2026-11-23T15:00:00Z",
+  "nodes": [
+    { "id": "example", "level": "L0", "name": "Example portfolio" },
+    {
+      "id": "sample-unit",
+      "parentId": "example",
+      "level": "L1",
+      "name": "Example unit",
+      "status": "green",
+      "asOf": "2026-11-23T14:30:00Z"
+    }
+  ]
+}
+```
+
+Use levels L0 through L5, with each child linked to a parent at the preceding level. Status values are `green`, `amber`, and `red`. Omit status when the source has no report.
 
 ## Research
 

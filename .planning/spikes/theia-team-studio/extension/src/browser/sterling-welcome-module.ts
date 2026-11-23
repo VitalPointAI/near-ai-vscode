@@ -1,5 +1,8 @@
 import { inject, injectable, ContainerModule, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
+import URI from '@theia/core/lib/common/uri.js';
+import { FileService } from '@theia/filesystem/lib/browser/file-service.js';
+import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application.js';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
@@ -9,23 +12,35 @@ import { BaseWidget, Panel } from '@theia/core/lib/browser/widgets/widget.js';
 import './sterling-welcome.css';
 
 const welcomeId = 'sterling-get-started';
+const chatContainerId = 'plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer';
 const edition = {
   label: 'Canadian Defence Edition',
   hero: 'sterling-hero-ca-defence.webp',
   workbenchClass: 'sterling-ca'
 };
-const railActions = [
+const railActions: ReadonlyArray<{ label: string; icon: string; command?: string }> = [
   { label: 'Get Started', icon: 'home', command: 'sterling.getStarted' },
+  { label: 'Portfolio', icon: 'graph', command: 'sterling.portfolio.open' },
   { label: 'Chat', icon: 'comment-discussion', command: 'nearAi.openChat' },
   { label: 'Team Studio', icon: 'organization', command: 'nearAi.manageTeams' },
+  { label: 'Agent Activity', icon: 'pulse', command: 'nearAi.openAgentActivity' },
+  { label: 'Governance', icon: 'law', command: 'nearAi.policy.open' },
+  { label: 'Data Management', icon: 'database' },
+  { label: 'Model Factory', icon: 'circuit-board' },
   { label: 'Compliance', icon: 'shield', command: 'sterling.compliance.open' },
   { label: 'Documentation', icon: 'book', command: 'sterling.documentation.open' }
 ];
-const destinations = [
-  { label: 'Projects', icon: 'folder-opened', description: 'Set up your project and choose how it works.', command: 'nearAi.projectSetup' },
-  { label: 'Teams', icon: 'organization', description: 'Build teams and give each agent a clear role.', command: 'nearAi.manageTeams' },
-  { label: 'Activity', icon: 'pulse', description: 'Follow agent runs and review what happened.', command: 'nearAi.openAgentActivity' },
-  { label: 'Governance', icon: 'shield', description: 'Review the rules that govern your project.', command: 'nearAi.policy.open' }
+
+const componentLabels = new Map([
+  ['program', 'Program'], ['major-capital', 'Major capital project'], ['minor-capital', 'Minor capital project'],
+  ['initiative', 'Initiative'], ['product', 'Product']
+]);
+
+const workAreas = [
+  { label: 'Capability Development', icon: 'project', description: 'Organize the programs, projects, and products that deliver a capability.', kind: 'capability-development' },
+  { label: 'Exercises & Training', icon: 'mortar-board', description: 'Prepare exercises and organize training.', kind: 'training' },
+  { label: 'Operations', icon: 'briefcase', description: 'Organize coordination, reporting, and records.', kind: 'operations' },
+  { label: 'Resource Management', icon: 'layers', description: 'Coordinate people, equipment, and capacity.', kind: 'resources' }
 ];
 
 @injectable()
@@ -35,6 +50,12 @@ class SterlingWelcomeWidget extends BaseWidget {
 
   @inject(ThemeService)
   protected readonly themes!: ThemeService;
+
+  @inject(WorkspaceService)
+  protected readonly workspaces!: WorkspaceService;
+
+  @inject(FileService)
+  protected readonly files!: FileService;
 
   @postConstruct()
   protected initialize(): void {
@@ -70,7 +91,7 @@ class SterlingWelcomeWidget extends BaseWidget {
             <p>Choose where your models run, build agent teams, and govern what they can do.</p>
             <p class="sterling-domains">Cyber · Space · Land · Sea · Air</p>
             <div class="sterling-actions">
-              <button type="button" class="sterling-primary" data-command="nearAi.setup">Set up a project <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
+              <button type="button" class="sterling-primary" data-command="nearAi.setup">Set up Sterling <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
               <button type="button" class="sterling-secondary" data-command="nearAi.openChat">Open Chat</button>
             </div>
           </div>
@@ -78,12 +99,13 @@ class SterlingWelcomeWidget extends BaseWidget {
         <p class="sterling-status" role="status" hidden></p>
         <section class="sterling-destinations" aria-labelledby="sterling-destinations">
           <div class="sterling-section-heading">
-            <h2 id="sterling-destinations">Your workspace</h2>
-            <button type="button" class="sterling-example" data-command="near-ai.team-studio.preview">Explore a sample team <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
+            <h2 id="sterling-destinations">Defence work areas</h2>
           </div>
+          <p class="sterling-active-area" hidden></p>
+          <ul class="sterling-area-components" aria-label="Capability components" hidden></ul>
           <div class="sterling-destination-grid">
-            ${destinations.map(({ command, icon, label, description }) => `
-              <button type="button" class="sterling-destination" data-command="${command}">
+            ${workAreas.map(({ kind, icon, label, description }) => `
+              <button type="button" class="sterling-destination" data-command="sterling.workAreas.create" data-work-area="${kind}">
                 <i class="sterling-destination-icon codicon codicon-${icon}" aria-hidden="true"></i>
                 <strong>${label}</strong>
                 <span>${description}</span>
@@ -110,20 +132,66 @@ class SterlingWelcomeWidget extends BaseWidget {
       motionButton.firstElementChild!.className = paused ? 'codicon codicon-play' : 'codicon codicon-debug-pause';
     });
 
+    const area = this.node.querySelector<HTMLElement>('.sterling-active-area')!;
+    const components = this.node.querySelector<HTMLUListElement>('.sterling-area-components')!;
+    let areaRequest = 0;
+    const showActiveArea = async (): Promise<void> => {
+      const request = ++areaRequest;
+      const roots = await this.workspaces.roots;
+      if (request !== areaRequest || this.isDisposed) return;
+      area.hidden = true;
+      area.textContent = '';
+      components.hidden = true;
+      components.replaceChildren();
+      if (roots.length !== 1) return;
+      const root = roots[0].resource;
+      if (root.scheme !== 'file' || root.authority || !/^work-area-[a-f0-9]{16}$/.test(root.path.base)) return;
+      try {
+        const file = await this.files.read(root.resolve('.planning/.near-ai/work-area.json'), { limits: { size: 32768 }, acceptTextOnly: true });
+        const metadata = JSON.parse(file.value);
+        if (request !== areaRequest || this.isDisposed || metadata?.version !== 1) return;
+        if (typeof metadata.title !== 'string' || !metadata.title.trim() || metadata.title.length > 100) return;
+        area.textContent = `Open work area: ${metadata.title}`;
+        area.hidden = false;
+        if (metadata.kind === 'capability-development' && Array.isArray(metadata.components)) {
+          for (const component of metadata.components.slice(0, 50)) {
+            const label = componentLabels.get(component?.kind);
+            if (!label || typeof component.title !== 'string' || !component.title.trim() || component.title.length > 100) continue;
+            const item = document.createElement('li');
+            item.textContent = `${label} · ${component.title}`;
+            components.append(item);
+          }
+          components.hidden = components.childElementCount === 0;
+        }
+      } catch {
+        // Regular folders and incomplete local records have no work-area title.
+      }
+    };
+    this.toDispose.push(this.workspaces.onWorkspaceChanged(() => void showActiveArea()));
+    void showActiveArea();
+
     const status = this.node.querySelector<HTMLElement>('.sterling-status')!;
     this.node.querySelectorAll<HTMLButtonElement>('button[data-command]').forEach(button => {
       button.addEventListener('click', async () => {
         const command = button.dataset.command!;
         status.hidden = true;
         if (!this.commands.getCommand(command)) {
-          status.textContent = 'This action is unavailable. Wait for the workbench to finish opening, or explore the sample team.';
+          status.textContent = 'This action is unavailable while the workbench is opening. Try again in a moment.';
           status.hidden = false;
           return;
         }
         try {
-          await this.commands.executeCommand(command);
+          if (button.dataset.workArea) {
+            const created = await this.commands.executeCommand<{ uri: string } | undefined>(command, button.dataset.workArea);
+            if (created?.uri) {
+              const folder = new URI(created.uri);
+              if (folder.scheme === 'file' && !folder.authority) this.workspaces.open(folder, { preserveWindow: true });
+            }
+          } else {
+            await this.commands.executeCommand(command);
+          }
         } catch {
-          status.textContent = 'Sterling could not open this view. Try again after the workspace finishes loading.';
+          status.textContent = 'Sterling could not open this view. Try again after the workbench finishes loading.';
           status.hidden = false;
         }
       });
@@ -155,15 +223,29 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'sterling-rail-shortcut';
-        button.title = label;
-        button.setAttribute('aria-label', label);
+        button.title = command ? label : `${label} (planned)`;
+        button.setAttribute('aria-label', button.title);
         const glyph = document.createElement('i');
         glyph.className = `codicon codicon-${icon}`;
         glyph.setAttribute('aria-hidden', 'true');
         button.append(glyph);
-        button.addEventListener('click', () => {
-          void this.commandRegistry.executeCommand(command).catch(error => console.warn(`Sterling could not open ${label}.`, error));
-        });
+        if (command) {
+          if (command === 'nearAi.openChat') {
+            const syncExpanded = (): void => button.setAttribute('aria-expanded', String(this.chatIsOpen()));
+            syncExpanded();
+            tabBar.currentChanged.connect(syncExpanded);
+            button.addEventListener('click', () => {
+              const action = this.chatIsOpen() ? this.collapseChat() : this.commandRegistry.executeCommand(command);
+              void action.catch(error => console.warn('Sterling could not toggle Chat.', error));
+            });
+          } else {
+            button.addEventListener('click', () => {
+              void this.commandRegistry.executeCommand(command).catch(error => console.warn(`Sterling could not open ${label}.`, error));
+            });
+          }
+        } else {
+          button.setAttribute('aria-disabled', 'true');
+        }
         shortcuts.append(button);
       }
       tabBar.parent.insertWidget(0, new BaseWidget({ node: shortcuts }));
@@ -181,7 +263,18 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     if (outline) await app.shell.addWidget(outline, { area: 'left', rank: 500 });
   }
 
+  private chatIsOpen(): boolean {
+    return this.shell.rightPanelHandler.tabBar.currentTitle?.owner.id === chatContainerId;
+  }
+
+  private async collapseChat(): Promise<boolean> {
+    if (!this.chatIsOpen()) return false;
+    await this.shell.collapsePanel('right');
+    return true;
+  }
+
   override registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand({ id: 'sterling.chat.closeDrawer' }, { execute: () => this.collapseChat() });
     commands.registerCommand({ id: 'sterling.getStarted', category: 'SovAI', label: 'Get Started' }, {
       execute: () => this.openView({ activate: true })
     });

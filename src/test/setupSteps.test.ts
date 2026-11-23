@@ -200,6 +200,7 @@ const settings: Record<string, unknown> = {};
 let quickPick: (items: Array<Record<string, unknown>>) => Record<string, unknown> | undefined = () => undefined;
 let infoChoice: string | undefined;
 let inputBoxes: string[] = [];
+const inputRequests: Array<{ title?: string; prompt?: string }> = [];
 
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
@@ -217,7 +218,10 @@ const vscodeStub = {
     showErrorMessage: async (text: string) => { throw new Error(`unexpected error: ${text}`); },
     showInformationMessage: async (text: string, ...items: string[]) => { infos.push({ text, items }); return infoChoice; },
     showQuickPick: async (items: Array<Record<string, unknown>>, options: Record<string, unknown>) => { picks.push({ items, options }); return quickPick(items); },
-    showInputBox: async () => inputBoxes.shift(),
+    showInputBox: async (options: { title?: string; prompt?: string }) => {
+      inputRequests.push({ title: options?.title, prompt: options?.prompt });
+      return inputBoxes.shift();
+    },
     withProgress: async (_options: unknown, task: () => Promise<unknown>) => task(),
     createWebviewPanel: () => webviewPanel,
     createOutputChannel: () => ({ appendLine() {}, dispose() {} })
@@ -237,7 +241,7 @@ function load<T>(id: string): T {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try { return require(id) as T; } finally { nodeModule._load = originalLoad; }
 }
-const reset = () => { warnings.length = 0; confirmation = undefined; executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
+const reset = () => { warnings.length = 0; confirmation = undefined; executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; inputRequests.length = 0; for (const key of Object.keys(settings)) delete settings[key]; };
 const secrets = new MemorySecrets();
 const context = { subscriptions: [] as unknown[], secrets };
 let chatOnScreen = false;
@@ -321,6 +325,25 @@ test('Defence work-area creation uses the selected root and stores its type and 
     assert.match(warnings[0], /Renewal & Equipment/);
     assert.deepEqual(await readdir(first), []);
     assert.deepEqual(executed, [], 'opening the returned folder is the native caller’s decision');
+  } finally { host.close(); }
+});
+
+test('each Defence card opens a naming dialog for its work-area type', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  const host = workAreaCommand();
+  try {
+    for (const kind of ['capability-development', 'training', 'operations', 'resources']) {
+      assert.equal(await host.create(kind), undefined, 'cancel from the naming dialog');
+    }
+    assert.deepEqual(inputRequests, [
+      { title: 'New Capability Development work area', prompt: 'Capability title' },
+      { title: 'New Exercises & Training work area', prompt: 'Exercise or training title' },
+      { title: 'New Operations work area', prompt: 'Operation title' },
+      { title: 'New Resource Management work area', prompt: 'Resource management title' }
+    ]);
+    assert.deepEqual(await readdir(root), []);
   } finally { host.close(); }
 });
 

@@ -1193,7 +1193,7 @@
     close.type = 'button';
     close.tabIndex = -1;
     close.innerHTML = ICONS.close;
-    close.title = 'Close (Delete)' + (item.status === 'running' || item.status === 'waiting' ? ': stops its run first' : '');
+    close.title = 'Close (Delete)' + (conversations.length > 1 && (item.status === 'running' || item.status === 'waiting') ? ': stops its run first' : '');
     close.setAttribute('aria-label', 'Close ' + title);
     close.addEventListener('click', (event) => { event.stopPropagation(); closeConversation(item.id); });
     tab.addEventListener('click', () => switchConversation(item.id));
