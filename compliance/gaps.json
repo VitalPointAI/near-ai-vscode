@@ -1051,6 +1051,62 @@
     },
     {
       "controls": [
+        "ca-01",
+        "ca-02",
+        "ca-02.01"
+      ],
+      "id": "G97",
+      "ownerRole": "owner",
+      "poam": "g97",
+      "remediation": "The sponsor assessment lead obtains approved policy, procedures and a scoped assessment plan with controls, methods, environments, responsibilities and reporting dates. Record the assessor appointment and independence determination. Collect the dated assessment results, evidence references, sponsor distribution and retained findings.",
+      "title": "Assessment policy and independent assessment need approved records"
+    },
+    {
+      "controls": [
+        "ca-03",
+        "ca-09",
+        "ca-09.01"
+      ],
+      "id": "G98",
+      "ownerRole": "owner",
+      "poam": "g98",
+      "remediation": "The sponsor boundary owner and privacy authority inventory internal connections and external exchanges separately. Approve interfaces, information types, safeguards, owners and review rules. Retain an approved external agreement and a sampled internal configuration and security and privacy check before connection, as applicable. Record approved review, termination conditions and any exceptions.",
+      "title": "External exchange and internal connection authorization need reviewed evidence"
+    },
+    {
+      "controls": [
+        "ca-05"
+      ],
+      "id": "G99",
+      "ownerRole": "owner",
+      "poam": "g99",
+      "remediation": "The sponsor remediation authority records assessment findings and known weaknesses with owners, milestones and closure receipts. Approve the review cadence and sampled updates when results change. Link the deployment register to the product POA&M where relevant and retain independent assessor dispositions for closures.",
+      "title": "Deployment POA&M needs tracked ownership and revision evidence"
+    },
+    {
+      "controls": [
+        "ca-06"
+      ],
+      "id": "G100",
+      "ownerRole": "owner",
+      "poam": "g100",
+      "remediation": "The sponsor designates system and common-control authorizing officials, reviews the submitted scope, assessment and outstanding risks, and records authorization conditions, duration and review triggers. Keep the formal signed decision or current authorized submission step, including approved inherited-control responsibilities. Update scope decisions when significant changes occur.",
+      "title": "Authorization and inherited control decisions need designated officials and signed records"
+    },
+    {
+      "controls": [
+        "ca-07",
+        "ca-07.01",
+        "ca-07.04"
+      ],
+      "id": "G101",
+      "ownerRole": "shared",
+      "poam": "g101",
+      "remediation": "The deployment monitoring and risk leads approve metrics, collection and review frequencies, reporting authority and the independent assessment arrangement. Component maintainers provide scoped evidence sources. Sample effectiveness, obligation and change monitoring results, findings and response decisions. Record escalation and follow-up within the approved deployment scope.",
+      "title": "Continuous monitoring needs independent reviews and operating risk evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

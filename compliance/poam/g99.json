@@ -1,0 +1,16 @@
+{
+  "gap": "G99",
+  "id": "g99",
+  "controls": [
+    "ca-05"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment POA&M needs tracked ownership and revision evidence",
+  "remediation": "The sponsor remediation authority records assessment findings and known weaknesses with owners, milestones and closure receipts. Approve the review cadence and sampled updates when results change. Link the deployment register to the product POA&M where relevant and retain independent assessor dispositions for closures.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved deployment POA&M and a sampled change from initial finding through dated action or reviewed closure"
+    }
+  ]
+}

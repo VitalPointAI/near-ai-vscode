@@ -1,0 +1,18 @@
+{
+  "gap": "G101",
+  "id": "g101",
+  "controls": [
+    "ca-07",
+    "ca-07.01",
+    "ca-07.04"
+  ],
+  "ownerRole": "shared",
+  "title": "Continuous monitoring needs independent reviews and operating risk evidence",
+  "remediation": "The deployment monitoring and risk leads approve metrics, collection and review frequencies, reporting authority and the independent assessment arrangement. Component maintainers provide scoped evidence sources. Sample effectiveness, obligation and change monitoring results, findings and response decisions. Record escalation and follow-up within the approved deployment scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved monitoring strategy, independent assessor assignment, metrics samples and an evidenced risk review and response"
+    }
+  ]
+}
