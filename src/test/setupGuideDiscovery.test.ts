@@ -170,6 +170,45 @@ test('project discovery transports use current signed Gate authority and the cap
   run.abort();
 });
 
+test('project discovery reads local network configuration only after signed scope permits it', async (t) => {
+  const { host, root, deps, audit } = await setup();
+  const fake = fixture({}, FOUND);
+  const reads: string[] = [];
+  const fileReads = require('node:fs/promises') as typeof import('node:fs/promises');
+  const originalRead = fileReads.readFile;
+  t.mock.method(fileReads, 'readFile', async (file: string, options?: Parameters<typeof originalRead>[1]) => {
+    if (file === '/proc/net/route' || file === '/etc/resolv.conf') {
+      reads.push(file);
+      return file === '/proc/net/route' ? '' : 'search corp.example.org';
+    }
+    return originalRead(file, options);
+  });
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  assert.ok(platform);
+  Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
+  t.after(() => Object.defineProperty(process, 'platform', platform));
+  const { networkFacts: _fixtureReader, ...transports } = fake.deps;
+  const guide = createProjectGuideDiscovery({
+    gate: host, root, currentRoot: () => root, readPolicy: deps.readPolicy, clock: () => at, audit,
+    transports,
+  });
+  const run = new AbortController();
+  t.after(() => run.abort());
+  await guide.refresh(run.signal);
+  assert.deepEqual(reads, []);
+  assert.deepEqual(fake.calls, []);
+
+  const personal = host.policyLayers().personal;
+  assert.ok(personal);
+  await host.applyPolicyDraft(JSON.stringify({
+    ...personal.document, requires: [...new Set([...personal.document.requires, 'onboarding@1'])].sort(),
+    onboarding: { v: 1, discovery: section },
+  }), personal.hash);
+  await guide.refresh(run.signal);
+  assert.deepEqual(reads, ['/proc/net/route', '/etc/resolv.conf']);
+  assert.equal(guide.rows()[0]?.host, FOUND);
+});
+
 test('listed announcements yield an unapproved Ollama row after just one pinned signature check', async () => {
   const { guide, calls, requests } = fixture();
   let raised = 0;

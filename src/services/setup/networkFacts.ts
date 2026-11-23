@@ -1,8 +1,13 @@
+import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import { checkKeys, isRecord } from '../../domain/gate/shape';
 import type { NetworkFacts } from '../../domain/setup/network';
 import { withCheckTimeout } from './probe';
 
+const execFileAsync = promisify(execFile);
 const READ_TIMEOUT_MS = 3_000;
 const MAX_OUTPUT_BYTES = 65_536;
 const UNKNOWN: NetworkFacts = Object.freeze({ dnsSearch: Object.freeze([]), source: 'unknown' });
@@ -109,6 +114,14 @@ async function readCommand(deps: NetworkFactsDeps, absolute: string, fallback: s
     if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw error;
     return run(fallback);
   }
+}
+
+/** Read local OS configuration after the project discovery policy has authorized the attempt. */
+export function readHostNetworkFacts(parent?: AbortSignal): Promise<NetworkFacts> {
+  return readNetworkFacts({
+    platform: process.platform, readFile, tmpdir,
+    execFile: (file, args, options) => execFileAsync(file, args, { ...options, encoding: 'utf8' }),
+  }, parent);
 }
 
 export async function readNetworkFacts(deps: NetworkFactsDeps, parent?: AbortSignal): Promise<NetworkFacts> {

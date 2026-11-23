@@ -3,8 +3,11 @@ import type { GuideDiscoveryPort } from '../../domain/setup/screens';
 import type { GateHost } from '../../gate/host';
 import type { GuideControllerDeps, GuideRouteSnapshot } from './guideController';
 import { createGuideDiscovery, type GuideDiscoveryDeps } from './guideDiscovery';
+import { readHostNetworkFacts } from './networkFacts';
 
-export type ProjectDiscoveryTransports = Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind'>;
+export type ProjectDiscoveryTransports =
+  Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind' | 'networkFacts'> &
+  Partial<Pick<GuideDiscoveryDeps, 'networkFacts'>>;
 
 interface DiscoveryAttempt {
   readonly controller: AbortController;
@@ -37,6 +40,7 @@ export function createProjectGuideDiscovery(deps: {
   }
   const discovery = createGuideDiscovery({
     ...deps.transports, audit: deps.audit, editor: deps.editor, hostKind: deps.hostKind,
+    networkFacts: deps.transports.networkFacts ?? readHostNetworkFacts,
     policy: () => authority()?.policy ?? unavailable,
     endpoints: () => authority()?.snapshot.route.endpoints ?? [],
     get organization() {
