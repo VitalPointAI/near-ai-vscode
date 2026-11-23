@@ -1,7 +1,6 @@
 import type { PrivacyModeSetting } from '../../domain/config';
 import type { HostKind } from '../../domain/setup/device';
 import { createAuditEventRegistry, GUIDE_AUDIT_EVENT_SPECS } from '../../domain/setup/records';
-import type { GuideDiscoveryPort } from '../../domain/setup/screens';
 import type { StepContext } from '../../domain/setup/steps';
 import { projectLogKey } from '../../gate/decisionLog';
 import type { GateHost } from '../../gate/host';
@@ -15,6 +14,7 @@ import { createGateGuideChecks } from './guideFacts';
 import { createLandingHost, type LandingHostDeps } from './landingHost';
 import type { LocalServersDeps } from './localServersOption';
 import { createScopedNearAiSource } from './nearAiOption';
+import { createProjectGuideDiscovery, type ProjectDiscoveryTransports } from './projectGuideDiscovery';
 import { singleMachineSink } from './projectLayerSink';
 
 type GuideProject = Readonly<{ root: string; name: string }>;
@@ -34,7 +34,7 @@ export function createProjectGetStartedDeps(deps: {
   readonly configureConnection: (root: string, reviewed: ReviewedConnection) => Promise<boolean>;
   readonly projectLayerSource?: { invalidate(root: string): void };
   readonly policyEditor?: Pick<PolicyEditorPort, 'propose'>;
-  readonly discovery?: (project: GuideProject, audit: SetupAuditLog) => GuideDiscoveryPort;
+  readonly discovery?: ProjectDiscoveryTransports;
   readonly profiles?: (root: string) => ProjectProfiles;
   readonly fetchFn?: typeof fetch;
   readonly clock?: () => number;
@@ -71,7 +71,10 @@ export function createProjectGetStartedDeps(deps: {
           ...deps.landing, steps: registries.steps, request, context: () => deps.landing.context(root),
           project: { root, currentRoot: () => deps.project()?.root },
         }),
-        discovery: deps.discovery?.(project, audit),
+        discovery: deps.discovery && createProjectGuideDiscovery({
+          root, currentRoot: () => deps.project()?.root, gate, readPolicy, clock, audit,
+          editor: deps.policyEditor, hostKind, transports: deps.discovery,
+        }),
         apply: {
           audit, labelHost: gate, policyEditor: deps.policyEditor,
           sink: singleMachineSink(root, { effective: () => gate.policyLayers().effective, source: deps.projectLayerSource }),

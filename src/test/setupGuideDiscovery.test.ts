@@ -17,8 +17,9 @@ import { projectLogKey } from '../gate/decisionLog';
 import { SETUP_AUDIT_DIR } from '../gate/setupAuditLog';
 import { peerFingerprint } from '../services/connectionBinding';
 import { createGuideDiscovery, type GuideDiscoveryDeps } from '../services/setup/guideDiscovery';
+import { createProjectGuideDiscovery } from '../services/setup/projectGuideDiscovery';
 import { SCAN_STOPPED_TEXT } from '../services/setup/scan';
-import { setup } from './helpers/getStartedHostFixture';
+import { at, setup } from './helpers/getStartedHostFixture';
 import { recordingPolicyEditor } from './helpers/policyEditorFake';
 import { deviceKey, policyDocumentFor } from './helpers/policyFixtures';
 
@@ -101,8 +102,73 @@ function fixture(overrides: Partial<GuideDiscoveryDeps> = {}, address = HOST) {
       clearTimeout: (handle) => { if (handle) clearImmediate(handle as NodeJS.Immediate); } },
     ...overrides
   };
-  return { guide: createGuideDiscovery(deps), calls, requests, setPolicy(value: GuidePolicy) { currentPolicy = value; } };
+  return { guide: createGuideDiscovery(deps), deps, calls, requests, setPolicy(value: GuidePolicy) { currentPolicy = value; } };
 }
+
+test('project discovery transports use current signed Gate authority and the captured project', async () => {
+  const { host, root, deps, audit } = await setup();
+  let selected = root;
+  const issued = async (discovery: DiscoverySection) => {
+    const personal = host.policyLayers().personal;
+    assert.ok(personal);
+    await host.applyPolicyDraft(JSON.stringify({
+      ...personal.document, requires: [...new Set([...personal.document.requires, 'onboarding@1'])].sort(),
+      onboarding: { v: 1, discovery },
+    }), personal.hash);
+  };
+  const fake = fixture({}, FOUND);
+  let holdFacts = false;
+  let readFacts!: () => void;
+  let releaseFacts!: () => void;
+  const factsStarted = new Promise<void>((resolve) => { readFacts = resolve; });
+  const factsHeld = new Promise<void>((resolve) => { releaseFacts = resolve; });
+  let scopeSignal: AbortSignal | undefined;
+  const guide = createProjectGuideDiscovery({
+    gate: host, root, currentRoot: () => selected, readPolicy: deps.readPolicy, clock: () => at, audit,
+    transports: {
+      ...fake.deps,
+      async networkFacts(signal) {
+        scopeSignal = signal;
+        if (holdFacts) { readFacts(); await factsHeld; }
+        return fake.deps.networkFacts(signal);
+      },
+    },
+  });
+  const run = new AbortController();
+  await guide.refresh(run.signal);
+  assert.deepEqual(fake.calls, []);
+  await issued(section);
+  await guide.refresh(run.signal);
+  const [candidate] = guide.rows();
+  assert.ok(candidate);
+  assert.equal(candidate.host, FOUND);
+  assert.equal(candidate.action, 'approve');
+
+  selected = 'different-project';
+  const previousCalls = [...fake.calls];
+  assert.deepEqual(guide.rows(), []);
+  assert.equal(await guide.approve(candidate.id), 'not-allowed');
+  assert.equal(scopeSignal?.aborted, true);
+  selected = root;
+  assert.deepEqual(guide.rows(), []);
+  assert.equal(await guide.approve(candidate.id), 'not-allowed');
+
+  selected = 'different-project';
+  await guide.refresh(run.signal);
+  assert.deepEqual(fake.calls, previousCalls);
+
+  selected = root;
+  holdFacts = true;
+  const refreshing = guide.refresh(run.signal);
+  await Promise.race([factsStarted, refreshing.then(() => assert.fail('the facts read never started'))]);
+  await issued({ ...section, announce: false });
+  assert.equal(scopeSignal?.aborted, true);
+  releaseFacts();
+  await refreshing;
+  assert.deepEqual(fake.calls, [...previousCalls, 'facts']);
+  assert.deepEqual(guide.rows(), []);
+  run.abort();
+});
 
 test('listed announcements yield an unapproved Ollama row after just one pinned signature check', async () => {
   const { guide, calls, requests } = fixture();
