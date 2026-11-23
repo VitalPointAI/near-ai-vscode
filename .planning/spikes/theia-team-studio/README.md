@@ -36,11 +36,11 @@ docker run --detach --name near-ai-theia-vsix \
   --session-preference nearAi.autoInstallGsd=false
 ```
 
-Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. Get Started opens Sterling setup, Chat, and the four Defence work-area creation flows. The right rail opens Get Started, Portfolio, Chat, Team Studio, Agent Activity, Governance, Compliance, and Documentation. Data Management and Model Factory are marked as planned. To hide the Chat drawer, click its rail icon again or close its last conversation tab. Reopening it shows the same conversation. The compatibility container is for synthetic projects and has an in-memory credential store.
+Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. Get Started opens Sterling setup, Chat, and the four Defence work-area landing pages. The right rail opens Get Started, Portfolio, Chat, Team Studio, Agent Activity, Governance, Compliance, and Documentation. Data Management and Model Factory are marked as planned. Chat slides from the right rail and respects reduced-motion preferences. Click its rail icon again or close its last conversation tab to dismiss the drawer. Reopening it shows the same conversation. The compatibility container is for synthetic projects and has an in-memory credential store.
 
 ## Defence work areas and Portfolio
 
-Use the four cards in Get Started to name a work area. Sterling creates it in the current folder or asks which folder to use. Capability Development also lets you name the programs, major and minor capital projects, initiatives, and products that form the capability. Sterling opens the new folder and shows its name on Get Started. Its title and capability components are kept in Git-ignored local metadata.
+Use the four cards in Get Started to open their landing pages. Browse existing work areas in an open folder, or choose Create to name a new work area. Sterling creates it in the current folder or asks which folder to use. Capability Development also lets you name the programs, major and minor capital projects, initiatives, and products that form the capability. Sterling opens the new folder and shows its name on Get Started. Its title and capability components are kept in Git-ignored local metadata.
 
 Portfolio can display an approved non-sensitive export from an explicitly selected, trusted folder. Store it at `.planning/.near-ai/portfolio.snapshot.json` in that folder, then open **Portfolio** and choose **Load snapshot**. While visible, the view checks for file changes every five seconds and displays the reported source and generation time. The signed DND/CAF publication feed requires separate deployment and access.
 
@@ -66,6 +66,42 @@ A synthetic example has this shape:
 ```
 
 Use levels L0 through L5, with each child linked to a parent at the preceding level. Status values are `green`, `amber`, and `red`. Omit status when the source has no report.
+
+## Resource Inventory
+
+Place an approved non-sensitive export at `.planning/.near-ai/resource-inventory.snapshot.json` in the trusted folder that contains the work areas. Open **Resource Management** and choose **Open resource inventory**, then load the snapshot. Search by resource ID or name, and filter by category and reported status.
+
+Use **Link a resource** on an existing work area to open the inventory scoped to that folder. Pick an item and choose **Link resource**. The work area stores the source ID and resource ID in its local metadata while the inventory retains the source record. Allocation belongs to the signed approval workflow in Phase 40. The preview reads an optional reported `assetDid`, `usagePolicyRef`, `stockNumber`, `description`, and `imageRef` from the inventory source. Durable identity issuance and usage policy checks belong in the governed host.
+
+A synthetic inventory export has this shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceId": "example-inventory",
+  "source": "Synthetic resource example",
+  "generatedAt": "2026-11-23T15:00:00Z",
+  "resources": [
+    {
+      "id": "training-kit",
+      "name": "Example training kit",
+      "category": "Training equipment",
+      "quantity": 3,
+      "unit": "kits",
+      "status": "available",
+      "asOf": "2026-11-23T14:30:00Z"
+    }
+  ]
+}
+```
+
+### Equipment catalogues and asset identity
+
+The public CAF equipment CSV inspected on 2026-11-23 has 57 rows and three columns for equipment type, name, and description. The CAF service pages publish selected equipment images. These are model-level references. [CAF Open Government dataset](https://open.canada.ca/data/en/dataset/18beb583-8dbe-434e-ba49-970658fcd6ef) · [CAF equipment pages](https://www.canada.ca/en/services/defence/caf/equipment.html)
+
+The NATO Master Catalogue of References for Logistics is the stock catalogue, available through NSPA. Use an authorized, licensed organisation export matched against the department's approved materiel records. DND records master data in DRMIS where security requirements permit and maintains photographs and supporting technical records under its Materiel Identification directive. [NSPA catalogue](https://eportal.nspa.nato.int/ac135/nmcrl) · [DND Materiel Identification directive](https://www.canada.ca/en/department-national-defence/corporate/policies-standards/defence-administrative-orders-directives/3000-series/3038/3038-0-materiel-identification.html)
+
+Use the NATO stock number for the catalogue item where assigned. Identify each individual asset with an opaque DID issued by its authorized controller. Multiple individual assets can refer to the same catalogue item. Store approved images and their provenance in governed data management. Apply signed usage policy to the individual asset; keep custody, location, serial and other restricted data in permissioned records. [W3C DID Core](https://www.w3.org/TR/did/)
 
 ## Research
 
@@ -107,3 +143,12 @@ Use the `build/compliance` directory populated by the docs site’s existing ref
 The [Defence Edition hero](extension/assets/sterling-hero-ca-defence.webp) adds motifs for cyber, space, land, sea, and air around the maple leaf. A pulse travels along the trails. The hero pause button and reduced-motion setting also stop the pulses.
 
 > Localized image edit for the Sterling Sovereign AI Canadian Defence Edition Get Started hero. Preserve the existing 16:9 wide blue and brushed-metal design, strong red Canadian maple leaf exactly in the ring's opening, pedestal, camera framing and original dark clean left 40 percent for the website headline. Add five distinct, understated cyan-blue holographic symbols in the open dark space around the outside of the ring, linked by slender curved dotted orbital tracks. The five symbols represent cyber (small circuit network), space (recognizable satellite with solar panels), land (topographic ground contour or mountain ridge), sea (wave lines and a small ship silhouette), and air (simple aircraft silhouette). Keep the symbols readable but restrained and visually secondary to the ring and red maple leaf. Keep all five clear within the central-right composition with generous edge margins. No writing, labels, brand text, watermarks, weapons, combat, explosions, or targeting graphics.
+
+### Defence work-area heroes
+
+Sterling uses built-in ImageGen illustrations for the four landing pages. The common prompt requested a wide 16:9 realistic editorial photograph shaped for dark left-side web copy, cool steel and navy lighting, and an unoccupied scene without people or uniforms.
+
+- **Capability Development** shows a scale model of the Harry DeWolf-class ship in a naval design studio. [Asset](extension/assets/sterling-area-capability.webp) · [Royal Canadian Navy reference](https://www.canada.ca/en/navy/corporate/fleet-units/surface/harry-dewolf-class.html)
+- **Exercises & Training** shows a parked yellow and red CH-149 Cormorant in an empty search-and-rescue training bay. [Asset](extension/assets/sterling-area-training.webp) · [Royal Canadian Air Force reference](https://www.canada.ca/en/air-force/services/aircraft/ch-149.html)
+- **Operations** shows a parked CC-177 Globemaster III from an empty coordination room at blue hour. [Asset](extension/assets/sterling-area-operations.webp) · [Royal Canadian Air Force reference](https://www.canada.ca/en/air-force/services/aircraft/cc-177.html)
+- **Resource Management** shows the Canadian Army's Mack Defence MSVS Standard Military Pattern truck in an empty logistics depot. The edit used the official vehicle photo as a reference for the cab profile, four axles, flat deck, and stowed crane. [Asset](extension/assets/sterling-area-resources.webp) · [DND reference](https://www.canada.ca/en/department-national-defence/services/procurement/medium-support-vehicle-system-project.html)

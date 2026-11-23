@@ -35,4 +35,6 @@ An isolated browser and a deterministic keyless provider verified model selectio
 
 From the command palette, **SovAI: Generate SA&A Package…** accepted the published v0.4.36 evidence, honored save cancellation, and delivered a valid ZIP through **Download ZIP**.
 
+An isolated browser verified that **Sync Project Now** writes an encrypted state branch to a synthetic Git remote and reconnects after a container replacement using a dedicated test keyring. The code branch stayed intact. The default preview still uses an in-memory keyring. Two-device recovery and the Phase 33 live hub need separate browser checks.
+
 Retest the rail and restored layout, the plugin commands, and the workflow matrix above when changing the pinned Theia version.

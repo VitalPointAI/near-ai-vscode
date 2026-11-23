@@ -1,6 +1,5 @@
 import { inject, injectable, ContainerModule, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
-import URI from '@theia/core/lib/common/uri.js';
 import { FileService } from '@theia/filesystem/lib/browser/file-service.js';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application.js';
@@ -105,7 +104,7 @@ class SterlingWelcomeWidget extends BaseWidget {
           <ul class="sterling-area-components" aria-label="Capability components" hidden></ul>
           <div class="sterling-destination-grid">
             ${workAreas.map(({ kind, icon, label, description }) => `
-              <button type="button" class="sterling-destination" data-command="sterling.workAreas.create" data-work-area="${kind}">
+              <button type="button" class="sterling-destination" data-command="sterling.workAreas.open" data-work-area="${kind}">
                 <i class="sterling-destination-icon codicon codicon-${icon}" aria-hidden="true"></i>
                 <strong>${label}</strong>
                 <span>${description}</span>
@@ -182,11 +181,7 @@ class SterlingWelcomeWidget extends BaseWidget {
         }
         try {
           if (button.dataset.workArea) {
-            const created = await this.commands.executeCommand<{ uri: string } | undefined>(command, button.dataset.workArea);
-            if (created?.uri) {
-              const folder = new URI(created.uri);
-              if (folder.scheme === 'file' && !folder.authority) this.workspaces.open(folder, { preserveWindow: true });
-            }
+            await this.commands.executeCommand(command, button.dataset.workArea);
           } else {
             await this.commands.executeCommand(command);
           }
