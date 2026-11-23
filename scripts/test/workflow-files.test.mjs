@@ -66,9 +66,23 @@ test('release jobs that hold a write token or VSCE_PAT run no npm install script
     }
     assert.doesNotMatch(job, /cache:\s*npm/, `${id} must not restore an npm cache`);
   }
-  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'build, which runs npm ci with scripts, is read-only');
+  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'the build job is read-only');
   const writers = [...all].filter(([, job]) => /contents:\s*write/.test(job)).map(([id]) => id);
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
+});
+
+test('root lint, root tests and both VSIX build paths disable dependency lifecycle scripts', () => {
+  const ci = jobs(read('ci.yml'));
+  const lint = ci.get('lint');
+  assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
+  assert.match(lint, /^\s*- run: npm run lint$/m);
+  assert.match(ci.get('test'), /^\s*- run: npm ci --ignore-scripts$/m);
+  assert.match(ci.get('test'), /^\s*run: npm test$/m);
+  for (const job of [ci.get('release-content'), jobs(read('release.yml')).get('build')]) {
+    assert.match(job, /^\s*- run: npm ci --ignore-scripts$/m);
+    assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m);
+    assert.match(job, /^\s*run: npm run verify:release$/m);
+  }
 });
 
 test('publish checks the VSIX checksum from the build job before it does anything else', () => {
@@ -126,6 +140,8 @@ test('the agent review workflow posts and approves only as near-ai-reviewer, fro
     assert.match(job, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/, `${id} runs the scripts from main`);
   }
   const review = all.get('review');
+  assert.match(review, /^      pr: \$\{\{ steps\.target\.outputs\.pr \}\}$/m);
+  assert.match(review, /^      sha: \$\{\{ steps\.review\.outputs\.sha \}\}$/m);
   assert.match(review, /REVIEW_MODEL_API_KEY: \$\{\{ secrets\.REVIEW_MODEL_API_KEY \}\}/);
   assert.match(review, /REVIEW_MODEL: \$\{\{ vars\.REVIEW_MODEL \}\}/);
   assert.match(review, /REVIEW_MODEL_BASE_URL: \$\{\{ vars\.REVIEW_MODEL_BASE_URL \}\}/);
@@ -133,6 +149,7 @@ test('the agent review workflow posts and approves only as near-ai-reviewer, fro
   assert.match(review, /--expected-head "\$EXPECTED_HEAD"/, 'a PR whose head moved after CI is skipped');
   // The gate holds no secrets and is the owner's click.
   const gate = all.get('owner-approval');
+  assert.match(gate, /^    name: 'owner approval \(gate change\) PR #\$\{\{ needs\.review\.outputs\.pr \}\} @ \$\{\{ needs\.review\.outputs\.sha \}\}'$/m);
   assert.match(gate, /environment: agent-review-gates/);
   assert.match(gate, /needs\.review\.outputs\.gate == 'true'/);
   assert.doesNotMatch(gate, /secrets\./, 'agent-review-gates holds no secrets');
@@ -170,6 +187,12 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   assert.match(job, /if:\s*always\(\)/);
   assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
   assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  const installer = steps(job).find((step) => /path: compliance\/out\/vsix/.test(step));
+  assert.match(installer, /name: vsix-\$\{\{ github\.sha \}\}/);
+  assert.match(installer, /needs\.release-content\.result == 'success'/);
+  const inputs = steps(job).find((step) => /name: Write collector inputs and changed paths/.test(step));
+  assert.match(inputs, /VSIX_RESULT: \$\{\{ needs\.release-content\.result \}\}/);
+  assert.match(inputs, /if \(process\.env\.VSIX_RESULT === "success"\)[\s\S]*read\("extension\/sbom\.cdx\.json"\)[\s\S]*retainVsix: true/);
   const scan = steps(job).find((step) => /secret-scan\.mjs --dir/.test(step));
   const upload = steps(job).find((step) => /name: compliance-bundle/.test(step));
   assert.match(scan, /id: bundle_scan/);
@@ -205,6 +228,13 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   assert.match(daily, /if: github\.ref == 'refs\/heads\/main' && \(/);
   assert.match(daily, /mkdir -p compliance\/out\n[\s\S]*> compliance\/out\/audit-root\.json/);
   assert.match(daily, /environment:\s*compliance-settings/);
+  const scheduledCheckout = steps(daily).find((step) => step.includes('uses: actions/checkout@'));
+  const scheduledPrior = steps(daily).find((step) => step.includes('name: Download CI evidence for the assessed commit'));
+  assert.ok(scheduledCheckout.includes('ref: ${{ github.sha }}'));
+  assert.ok(scheduledPrior.includes('COMMIT: ${{ github.sha }}'));
+  assert.ok(scheduledPrior.includes('--branch main --event push --status success --commit "$COMMIT"'));
+  const scheduledInputs = steps(daily).find((step) => /name: Write scheduled collector inputs/.test(step));
+  assert.match(scheduledInputs, /documents: \{ repoRoot: "\." \}, crypto: \{ repoRoot: "\." \}/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
   const scheduledBundleScan = steps(daily).find((step) => /secret-scan\.mjs --dir/.test(step));
   assert.ok(scheduledBundleScan, 'daily evidence secret-scans the completed bundle');
@@ -277,6 +307,8 @@ test('only main pushes and versioned hotfix branch dispatches publish compliance
   }
   assert.match(job, /if: steps\.has_compliance\.outputs\.publish_as != ''[\s\S]*secret-scan\.mjs --dir/);
   assert.match(job, /if: steps\.bundle_scan\.outcome == 'success'/);
+  const inputs = steps(job).find((step) => /name: Write collector inputs and changed paths/.test(step));
+  assert.match(inputs, /documents: \{ repoRoot: "\." \}, crypto: \{ repoRoot: "\." \}/);
 });
 
 test('releases require GitHub CI evidence on the exact release head when the base supports compliance', () => {
@@ -297,6 +329,109 @@ test('releases require GitHub CI evidence on the exact release head when the bas
     assert.match(job, /if \[ "\$PACKAGE_REQUIRED" = true \]; then[\s\S]*"\$PACKAGE"/);
   }
   assert.match(all.get('release'), /needs\.attest\.result == 'success'/);
+});
+
+test('releases supplement CI only with usable daily evidence from the exact main commit in this repository', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-release-evidence-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'compliance', 'out');
+  const verifiedCI = path.join(out, 'bundle', 'manifest.json');
+  mkdirSync(path.dirname(verifiedCI), { recursive: true });
+  writeFileSync(verifiedCI, 'original verified CI manifest');
+
+  const pkg = jobs(read('release.yml')).get('package');
+  const scheduled = steps(pkg).find((step) => /id: scheduled/.test(step));
+  const pack = steps(pkg).find((step) => /id: pack/.test(step));
+  assert.match(scheduled, /if: needs\.build\.outputs\.evidence_branch == 'main'/);
+  assert.match(pack, /RELEASE_BUNDLE: \$\{\{ steps\.scheduled\.outputs\.bundle \}\}/);
+  assert.match(pack, /--bundle "\$\{RELEASE_BUNDLE:-compliance\/out\/bundle\}"/);
+  const script = scheduled.split('run: |\n')[1];
+
+  const commit = 'a'.repeat(40);
+  const run = {
+    head_sha: commit, head_branch: 'main', status: 'completed', conclusion: 'success', event: 'schedule',
+    repository: { id: 321 }, head_repository: { id: 321 },
+  };
+  const runs = path.join(dir, 'runs.json');
+  writeFileSync(runs, JSON.stringify({ workflow_runs: [
+    { ...run, id: 110 },
+    { ...run, id: 109, head_sha: 'b'.repeat(40) },
+    { ...run, id: 108, head_repository: { id: 999 } },
+    { ...run, id: 107, event: 'pull_request' },
+    { ...run, id: 106, head_branch: 'feature' },
+    { ...run, id: 105 },
+    { ...run, id: 104 },
+    { ...run, id: 103 },
+    { ...run, id: 102 },
+    { ...run, id: 101, event: 'workflow_dispatch' },
+  ] }));
+  writeFileSync(path.join(dir, 'gh'), `#!/bin/bash -e
+case "$4" in
+  repos/acme/demo/actions/workflows/compliance-scheduled.yml/runs)
+    [[ "$*" == *"-f branch=main -f head_sha=$COMMIT -f status=success -F per_page=10" ]]
+    cat runs.json
+    ;;
+  repos/acme/demo/actions/runs/*/jobs)
+    [[ "$*" == *"-f filter=latest" ]]
+    conclusion=success
+    upload=success
+    if [[ "$4" == */105/jobs ]]; then conclusion=skipped; fi
+    if [[ "$4" == */110/jobs ]]; then upload=skipped; fi
+    printf '{"jobs":[{"name":"daily evidence","head_sha":"%s","status":"completed","conclusion":"%s","steps":[{"name":"Run actions/upload-artifact@hash","conclusion":"%s"}]}]}\\n' "$COMMIT" "$conclusion" "$upload"
+    ;;
+  repos/acme/demo/actions/runs/*/artifacts)
+    [[ "$*" == *"-f name=compliance-bundle" ]]
+    expired=false
+    if [[ "$4" == */104/artifacts ]]; then expired=true; fi
+    printf '{"artifacts":[{"name":"compliance-bundle","expired":%s}]}\\n' "$expired"
+    ;;
+  --repo)
+    [[ "$1 $2 $5 $6 $7 $8" == "run download acme/demo --name compliance-bundle --dir" ]]
+    printf '%s\\n' "$3" >> downloads
+    mkdir -p "$9"
+    printf '%s\\n' "$3" > "$9/manifest.json"
+    [[ "$3" != 103 ]]
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(path.join(dir, 'node'), `#!/bin/bash -e
+[[ "$1 $2 $3 $5 $7 $8 $9 \${11}" == "compliance/src/cli.ts bundle --inputs --out --previous compliance/out/bundle --scheduled --scheduled-run" ]]
+run_id="$(cat "\${10}/manifest.json")"
+[[ "\${12}" == "https://github.com/acme/demo/actions/runs/$run_id" ]]
+jq -e --arg commit "$COMMIT" '.repository == "acme/demo" and .commit == $commit and .kind == "release" and .repoRoot == "." and .collectors == {}' "$4" >/dev/null
+printf '%s\\n' "$run_id" >> merges
+mkdir -p "$6"
+printf 'partial or complete combined manifest\\n' > "$6/manifest.json"
+[[ "$run_id" != 102 ]]
+`, { mode: 0o755 });
+
+  const summary = path.join(dir, 'summary');
+  const output = path.join(dir, 'output');
+  const env = {
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`, COMMIT: commit, REPOSITORY_ID: '321',
+    GITHUB_REPOSITORY: 'acme/demo', GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary,
+  };
+  execFileSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], { cwd: dir, env });
+  assert.equal(readFileSync(path.join(dir, 'downloads'), 'utf8'), '103\n102\n101\n');
+  assert.equal(readFileSync(path.join(dir, 'merges'), 'utf8'), '102\n101\n');
+  assert.match(readFileSync(output, 'utf8'), /^bundle=compliance\/out\/scheduled-release\.[^/]+\/combined\n$/);
+  assert.match(readFileSync(summary, 'utf8'), /https:\/\/github\.com\/acme\/demo\/actions\/runs\/101/);
+  assert.equal(readFileSync(verifiedCI, 'utf8'), 'original verified CI manifest');
+
+  for (const response of [{ workflow_runs: [{ ...run, id: 103 }, { ...run, id: 102 }] }, { workflow_runs: [] }, { message: 'raw unexpected response' }]) {
+    writeFileSync(runs, JSON.stringify(response));
+    writeFileSync(output, '');
+    writeFileSync(summary, '');
+    const log = execFileSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], { cwd: dir, env, encoding: 'utf8' });
+    assert.match(log, /::warning::/);
+    assert.doesNotMatch(log, /raw unexpected response/);
+    assert.equal(readFileSync(output, 'utf8'), '');
+    assert.match(readFileSync(summary, 'utf8'), /unavailable or unverified/);
+    assert.equal(readFileSync(verifiedCI, 'utf8'), 'original verified CI manifest');
+  }
 });
 
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {

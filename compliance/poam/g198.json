@@ -1,0 +1,16 @@
+{
+  "gap": "G198",
+  "id": "g198",
+  "controls": [
+    "cgp-10-j"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods assessment reporting needs a protected review and receipt trail",
+  "remediation": "The sponsor registration owner and designated official determine reporting applicability and approve custody, review and reconciliation responsibilities. Verify a sampled reporting period against a protected assessment register, review approval and any existing submission receipt. Record missing evidence as pending. Exclude personal fields and report contents from the general assessor export.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted reporting period review, approval and existing receipt reference, or the signed pending-scope decision"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G143",
+  "id": "g143",
+  "controls": [
+    "at-04"
+  ],
+  "ownerRole": "owner",
+  "title": "Training record monitoring and retention need operating evidence",
+  "remediation": "The training records steward establishes monitoring and retention rules for literacy and role-based training. Verify a redacted completion and overdue-training sample against the records repository. Retain evidence of authorized review, follow-up and the configured retention period, and restrict personal training data to approved holders.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the retention rule, redacted training extracts, and a sampled overdue item and follow-up record"
+    }
+  ]
+}

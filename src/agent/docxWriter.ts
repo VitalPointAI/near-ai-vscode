@@ -31,6 +31,12 @@ const EMU_PER_PIXEL = 9525;
 export const xml = (value: string) => value.replace(/[^\x09\x0a\x0d\x20-퟿-�\u{10000}-\u{10ffff}]/gu, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export interface DocxResult { bytes: Buffer; headings: number; tables: number; images: number; notes: number }
+interface DocxSpec extends DocumentSpec {
+  /** Heading blocks that must start a new page. */
+  pageBreakBeforeHeadings?: ReadonlySet<Block>;
+  /** Insert an editable Word table of contents before this heading. */
+  tableOfContentsBefore?: Block;
+}
 type Rel = { id: string; type: string; target: string; external?: boolean };
 
 class DocumentBuilder {
@@ -94,9 +100,15 @@ class DocumentBuilder {
     return `<w:p>${style || extra ? `<w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ''}${extra}</w:pPr>` : ''}${content}</w:p>`;
   }
 
-  public block(block: Block): string {
+  public block(block: Block, pageBreakBefore = false, bookmarkId?: number): string {
     switch (block.kind) {
-      case 'heading': this.headings += 1; return this.paragraph(`Heading${block.level}`, this.runs(block.inlines));
+      case 'heading': {
+        this.headings += 1;
+        const runs = this.runs(block.inlines);
+        const content = bookmarkId === undefined ? runs :
+          `<w:bookmarkStart w:id="${bookmarkId}" w:name="DocxContents${bookmarkId}"/>${runs}<w:bookmarkEnd w:id="${bookmarkId}"/>`;
+        return this.paragraph(`Heading${block.level}`, content, pageBreakBefore ? '<w:pageBreakBefore/>' : '');
+      }
       case 'paragraph': return this.paragraph(undefined, this.runs(block.inlines));
       case 'quote': return block.paragraphs.map((paragraph) => this.paragraph('Quote', this.runs(paragraph))).join('');
       case 'code': return this.paragraph('CodeBlock', block.text.split('\n').map((line) => `<w:r><w:t xml:space="preserve">${xml(line)}</w:t></w:r>`).join('<w:r><w:br/></w:r>'));
@@ -105,6 +117,22 @@ class DocumentBuilder {
       case 'table': return this.table(block);
       case 'image': return this.image(block.src, block.alt);
     }
+  }
+
+  public tableOfContents(headings: ReadonlyMap<Extract<Block, { kind: 'heading' }>, number>): string {
+    const title = this.paragraph('Title', this.runs([{ text: 'Table of contents' }]), '<w:pageBreakBefore/>');
+    const field = [
+      '<w:r><w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>',
+      '<w:r><w:instrText xml:space="preserve"> TOC \\o "1-2" \\h \\z \\u </w:instrText></w:r>',
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r>'
+    ].join('');
+    // The cached result works as a clickable outline even before an editor calculates page numbers.
+    const cached = Array.from(headings, ([heading, id]) => this.paragraph(
+      undefined,
+      this.runs([{ text: heading.inlines.map((run) => run.text).join(''), link: `#DocxContents${id}` }]),
+      heading.level === 2 ? '<w:ind w:left="360"/>' : ''
+    )).join('');
+    return title + this.paragraph(undefined, field) + cached + this.paragraph(undefined, '<w:r><w:fldChar w:fldCharType="end"/></w:r>');
   }
 
   /** Bullets share one numbering; each numbered list gets its own, so it starts at its first number. */
@@ -205,12 +233,21 @@ const relationships = (entries: Rel[]) => `${XML_HEAD}<Relationships xmlns="${NS
 /** W3CDTF from an ISO date, for the core properties. */
 const coreDate = (value: string) => { const d = pdfDate(value); return `${d.slice(2, 6)}-${d.slice(6, 8)}-${d.slice(8, 10)}T${d.slice(10, 12)}:${d.slice(12, 14)}:${d.slice(14, 16)}Z`; };
 
-export function createDocx(spec: DocumentSpec): DocxResult {
+export function createDocx(spec: DocxSpec): DocxResult {
   const page = PAGE[spec.pageSize ?? 'A4'];
   const notes = spec.notes ?? [];
   const kind: 'footnote' | 'endnote' = (spec.noteStyle ?? 'endnotes') === 'footnotes' ? 'footnote' : 'endnote';
   const builder = new DocumentBuilder(spec.images, page.width - 2 * MARGIN, page.height - 2 * MARGIN, notes, kind);
-  const body = spec.blocks.map((block) => builder.block(block)).join('');
+  const contents = new Map<Extract<Block, { kind: 'heading' }>, number>();
+  if (spec.tableOfContentsBefore) {
+    for (const block of spec.blocks) {
+      if (block.kind === 'heading' && block.level <= 2) contents.set(block, contents.size + 1);
+    }
+  }
+  const body = spec.blocks.map((block) => {
+    const toc = block === spec.tableOfContentsBefore ? builder.tableOfContents(contents) : '';
+    return toc + builder.block(block, spec.pageBreakBeforeHeadings?.has(block), block.kind === 'heading' ? contents.get(block) : undefined);
+  }).join('');
   const notesXml = notes.length ? notesPart(builder, notes, kind) : undefined;
   const footer = `${XML_HEAD}<w:ftr xmlns:w="${NS.w}" xmlns:r="${NS.r}"><w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve"> of </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`;
   const section = `<w:sectPr><w:footerReference w:type="default" r:id="rId4"/>${kind === 'endnote' && notes.length ? '<w:endnotePr><w:numFmt w:val="decimal"/></w:endnotePr>' : ''}<w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="${MARGIN}" w:right="${MARGIN}" w:bottom="${MARGIN}" w:left="${MARGIN}" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>`;
@@ -228,7 +265,8 @@ export function createDocx(spec: DocumentSpec): DocxResult {
     + '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
     + '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
   const notePr = !notesXml ? '' : kind === 'footnote' ? '<w:footnotePr><w:footnote w:id="-1"/><w:footnote w:id="0"/></w:footnotePr>' : '<w:endnotePr><w:numFmt w:val="decimal"/><w:endnote w:id="-1"/><w:endnote w:id="0"/></w:endnotePr>';
-  const settings = `${XML_HEAD}<w:settings xmlns:w="${NS.w}"><w:defaultTabStop w:val="720"/>${notePr}<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
+  const updateFields = contents.size ? '<w:updateFields w:val="true"/>' : '';
+  const settings = `${XML_HEAD}<w:settings xmlns:w="${NS.w}"><w:defaultTabStop w:val="720"/>${updateFields}${notePr}<w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
   const documentRels = relationships([
     { id: 'rId1', type: `${REL}/styles`, target: 'styles.xml' },
     { id: 'rId2', type: `${REL}/settings`, target: 'settings.xml' },

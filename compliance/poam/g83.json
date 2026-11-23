@@ -1,0 +1,18 @@
+{
+  "gap": "G83",
+  "id": "g83",
+  "controls": [
+    "ir-02",
+    "ir-03",
+    "ir-03.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Response training and coordinated exercises need dated deployment evidence",
+  "remediation": "The deployment incident response lead assigns role-specific training and exercise cadence, then coordinates a representative drill with continuity, privacy and other applicable plan owners. Retain attendance, scope, scenario, measured performance, corrective actions and follow-up retest. Use supplier drills only for the exercised component and event.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect training history, approved scenario and coordination records, exercise results and retested corrective actions"
+    }
+  ]
+}

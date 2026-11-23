@@ -1,0 +1,17 @@
+{
+  "gap": "G255",
+  "id": "g255",
+  "controls": [
+    "itsp171-03.05.07",
+    "itsp171-03.05.11"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 password protections and obscured authentication feedback need evidence",
+  "remediation": "The sponsor credential owner reviews how assessed sign-in paths update and enforce prohibited-password lists, protect transmission and stored verifier material, require a changed password after recovery and enforce approved composition rules. Use synthetic values to verify obscured entry, responses that avoid exposing authentication information and the applied policy. Retain sanitized settings and results only. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved password and feedback policy, effective protection settings and redacted prohibited-password, recovery and obscured feedback verification"
+    }
+  ]
+}

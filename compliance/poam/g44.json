@@ -1,0 +1,16 @@
+{
+  "gap": "G44",
+  "id": "g44",
+  "controls": [
+    "au-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment audit and accountability policy needs approval and operating records",
+  "remediation": "The deployment audit policy owner approves the scope, roles, responsibilities and audit procedures with the component and monitoring owners. Record who received the policy, its accountable official and review triggers, and confirm the procedures reflect the deployment boundary and applicable obligations.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and procedures, distribution record and evidence of their required review"
+    }
+  ]
+}

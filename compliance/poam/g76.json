@@ -1,0 +1,18 @@
+{
+  "gap": "G76",
+  "id": "g76",
+  "controls": [
+    "ra-02",
+    "ra-03",
+    "ra-09"
+  ],
+  "ownerRole": "shared",
+  "title": "System sensitivity, risks and critical dependencies need assessed deployment evidence",
+  "remediation": "The sponsor categorization and risk owners approve information impact and handling decisions. Component maintainers supply current data flows and trust boundaries. Review the actual deployment threat and privacy risks, critical assets and supporting dependencies and verify traceability to selected safeguards and open actions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved categorization and rationale, assessed deployment risk record and approved criticality analysis"
+    }
+  ]
+}

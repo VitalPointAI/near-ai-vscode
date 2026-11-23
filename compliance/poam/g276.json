@@ -1,0 +1,16 @@
+{
+  "gap": "G276",
+  "id": "g276",
+  "controls": [
+    "itsp171-03.09.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary personnel separation and transfer need access and property records",
+  "remediation": "The workforce separation owner, identity services lead and facility custodian approve termination and transfer duties and timing. Sample termination and reassignment records to verify credentials, authenticators, logical and physical access, and security property were recovered, revoked or adjusted as required. Compare actual completion times and retain redacted decisions and exceptions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved time targets and sampled separation and transfer records linked to access changes, recovered property and review"
+    }
+  ]
+}

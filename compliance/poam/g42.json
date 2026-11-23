@@ -1,0 +1,19 @@
+{
+  "gap": "G42",
+  "id": "g42",
+  "controls": [
+    "ac-20",
+    "ac-20.01",
+    "ac-20.02",
+    "ac-20.04"
+  ],
+  "ownerRole": "shared",
+  "title": "External system use and storage restrictions need deployment evidence",
+  "remediation": "The sponsor identifies which external systems may access the deployment or process, store or transmit its information. Deployment operators verify those systems against approved security and privacy controls and retain applicable connection or processing agreements. Record authorized restrictions for portable storage and prohibited network-accessible storage. Collect the approved system inventory, verification records and representative permitted and refused access and storage tests, with evidence references for sensitive agreements.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Review external-system applicability and collect control verification, agreements, removable and network storage settings and representative test receipts"
+    }
+  ]
+}

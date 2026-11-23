@@ -1,0 +1,19 @@
+{
+  "gap": "G168",
+  "id": "g168",
+  "controls": [
+    "pe-13",
+    "pe-13.01",
+    "pe-13.04",
+    "pe-13.400"
+  ],
+  "ownerRole": "owner",
+  "title": "Fire detection, suppression and emergency response need facility evidence",
+  "remediation": "The sponsor fire safety lead verifies independently powered detection and suppression, automatic notifications to named responders, qualified inspections at approved intervals and timely remediation. Review site safeguarding decisions against firefighting water capacity and emergency response assumptions. Assess landlord or provider evidence for each covered site.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect fire system test records, notification exercise, inspection and deficiency follow-up, and documented emergency service assumptions"
+    }
+  ]
+}

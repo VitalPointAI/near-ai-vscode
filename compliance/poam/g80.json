@@ -1,0 +1,18 @@
+{
+  "gap": "G80",
+  "id": "g80",
+  "controls": [
+    "pl-01",
+    "pl-02",
+    "pl-08"
+  ],
+  "ownerRole": "owner",
+  "title": "System security and privacy plans need approved deployment scope and diagrams",
+  "remediation": "The sponsor security and privacy owners approve planning policy and procedures, named responsibilities and the assessed boundary. Complete the system security and privacy plan with current component and trust-boundary diagrams, data flows, roles, requirements, shared responsibilities, exceptions and links to assessor evidence. Record review and release or deployment change triggers.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved planning procedures, system security and privacy plan, reviewed deployment diagrams and linked evidence"
+    }
+  ]
+}

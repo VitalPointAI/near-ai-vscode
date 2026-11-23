@@ -1,0 +1,16 @@
+{
+  "gap": "G312",
+  "id": "g312",
+  "controls": [
+    "itsp171-03.15.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Specified information security procedures need sponsor adoption and review evidence",
+  "remediation": "The sponsor governance and information security leads approve and document the policies and procedures needed to protect specified information, identify recipients, and define review frequency. Demonstrate that relevant personnel or roles received the current material and trace a dated approval or review against the required cadence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and procedure set, scope and recipient list, dissemination receipt and recent review record"
+    }
+  ]
+}

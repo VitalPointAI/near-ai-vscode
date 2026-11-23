@@ -54,11 +54,17 @@ Component and rule source files never carry a state. The generated dashboard com
 
 The `test`, `relay`, and `hub` jobs write per-test reports. The `compliance` job validates the compliance package, rebuilds those reports into a redacted evidence bundle, and shows control-state changes in the pull-request job summary. On `main` it secret-scans and stores the bundle for 30 days. `relay-image-scan` separately records the relay image SBOM and known fixed vulnerabilities. These reporting jobs do not turn a finding into a failed required check; a tool that cannot run still fails its step.
 
+When the installer build succeeds, the evidence job reads its SBOM from the current run's commit-named VSIX artifact. The evidence bundle retains the exact installer SBOM and records its component count and digest. The assessor package carries that same file under `evidence/bundle/`. Its observation describes the software shipped in that installer. Record the actual installed configuration and its approval when assessing a deployment.
+
 The pull-request summary is report-only by default. After the owner has seen stable results and made `compliance` a required check, set its `FAIL_ON_DROP` environment value to `--fail-on-drop` and remove any masking behavior from that summary step to make an unexplained evidence drop blocking.
+
+For CM-03, use the configured protections on main and the agent review attached to the pull-request head that produced the assessed commit. Deployment environment settings show whether a reviewer is required. The protected environment owner's approval belongs to its particular run. The read-only settings token cannot confirm which actors may bypass release-tag rules. These approval and bypass checks remain open until their records are verified.
 
 ## Release package
 
 Releases with compliance sources attach `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. An unmerged hotfix based on an older release that predates the compliance sources can still publish an attested VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations. Verify the checksum with `sha256sum --check <package>.sha256`. Verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
+
+A main release can include settings and review observations from a verified daily evidence run for the same commit. The package retains the CI test evidence, the installer inventory, and the collection-run links. The release summary records when it uses the CI bundle alone. The package flags expired settings evidence as stale.
 
 ## Owner steps
 

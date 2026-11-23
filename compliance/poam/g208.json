@@ -1,0 +1,16 @@
+{
+  "gap": "G208",
+  "id": "g208",
+  "controls": [
+    "itar-126.18"
+  ],
+  "ownerRole": "owner",
+  "title": "ITAR personnel-scope determinations need protected evidence references",
+  "remediation": "The sponsor empowered official, counsel and personnel security owner review whether the provision is relevant to the assessed personnel boundary. Where the organization already relies on a decision, verify signed scope and review records and separately confirm custody of the existing supporting evidence. Keep personal and controlled information restricted. Record unresolved applicability.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a signed applicability or pending decision and a redacted review linking to protected personnel and authority records"
+    }
+  ]
+}

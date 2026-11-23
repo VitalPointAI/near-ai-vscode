@@ -1,0 +1,16 @@
+{
+  "gap": "G127",
+  "id": "g127",
+  "controls": [
+    "sc-10"
+  ],
+  "ownerRole": "shared",
+  "title": "Connection termination and idle timing need end-to-end evidence",
+  "remediation": "Deployment service and network operators and component maintainers approve idle limits and normal termination behavior for each assessed connection type. Observe the transport closing on end-of-session and at the effective idle threshold, including intermediate gateways where applicable. Distinguish a closed connection from invalidation of an application token under SC-23.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved inactivity limits, effective service and gateway configurations, and measured transport closure records"
+    }
+  ]
+}

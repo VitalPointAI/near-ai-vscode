@@ -1,0 +1,18 @@
+{
+  "gap": "G121",
+  "id": "g121",
+  "controls": [
+    "sc-07",
+    "sc-07.03",
+    "sc-07.04"
+  ],
+  "ownerRole": "shared",
+  "title": "Managed boundary interfaces and telecom service exceptions need reviewed evidence",
+  "remediation": "The deployment network authority and component maintainers inventory external and key internal interfaces, authorized access points, public subnet separation and managed connections for each assessed telecom service. Review confidentiality, integrity and control-plane restrictions, evidence of required external operator notices, and each flow exception’s business reason, duration and reapproval. Use scoped route and X4 evidence for only the restrictions the product enforces.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect assessed network diagrams, access-point inventory, interface configurations and reviewed flow exceptions with scoped traffic evidence"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G254",
+  "id": "g254",
+  "controls": [
+    "itsp171-03.05.05"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 identifier issuance, status and non-reuse need operating evidence",
+  "remediation": "The sponsor identity governance lead defines authorization and non-reuse periods for individual, group, role, service and device identifiers, plus required individual status markers. Sample approved assignment and retirement, and verify the corresponding recovery or non-reuse handling for the observed period. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved issuance and non-reuse rules with redacted identity assignment, status and retirement samples"
+    }
+  ]
+}

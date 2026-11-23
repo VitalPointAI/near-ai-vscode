@@ -1,0 +1,18 @@
+{
+  "gap": "G180",
+  "id": "g180",
+  "controls": [
+    "pm-01",
+    "pm-02",
+    "pm-03"
+  ],
+  "ownerRole": "owner",
+  "title": "Security program leadership and authorized investment need records",
+  "remediation": "The sponsor security executive and investment authority approve the organization-wide security program plan and its distribution. Document appointment, responsibilities, resources and authority, and trace required security and privacy funding or approved exceptions to planning and investment records.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved program plan and distribution, accountable appointment and a sampled resourcing decision"
+    }
+  ]
+}

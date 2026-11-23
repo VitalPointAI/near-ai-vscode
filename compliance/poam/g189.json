@@ -1,0 +1,18 @@
+{
+  "gap": "G189",
+  "id": "g189",
+  "controls": [
+    "pm-18",
+    "pm-19",
+    "pm-27"
+  ],
+  "ownerRole": "owner",
+  "title": "Privacy program ownership and reporting need approved governance evidence",
+  "remediation": "The sponsor privacy executive approves and distributes the organizational program plan, records delegated authority and resources, and approves reporting content, recipients and cadence. Retain a dated privacy accountability report, its review and approved delivery evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved privacy plan and appointment, plus a sampled reviewed report and dissemination record"
+    }
+  ]
+}

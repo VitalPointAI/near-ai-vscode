@@ -1,0 +1,17 @@
+{
+  "gap": "G253",
+  "id": "g253",
+  "controls": [
+    "itsp171-03.05.03",
+    "itsp171-03.05.04"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 strong factors and replay-resistant sign-in need role coverage",
+  "remediation": "The sponsor identity authority identifies assessed sign-in paths for privileged and non-privileged accounts. Review strong multi-factor and replay-resistance configuration and applicable provider evidence. Capture sanitized verification that each category requires its approved strong factors and that a previously used authentication proof is refused by the applicable mechanism. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect role and sign-in coverage, approved factor and replay-resistance settings, and reviewed operating or controlled verification receipts"
+    }
+  ]
+}

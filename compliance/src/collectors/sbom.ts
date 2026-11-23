@@ -4,7 +4,7 @@ import type { Collector, CollectorContext } from './types.ts';
 import { collectorError } from './github.ts';
 
 /** Reads CycloneDX SBOMs and Grype relay image scans without copying their sensitive detail (D-24). */
-export interface SbomInput { readonly sboms: readonly { readonly subject: string; readonly file: string }[]; readonly scans?: readonly { readonly subject: string; readonly file: string }[]; }
+export interface SbomInput { readonly sboms: readonly { readonly subject: string; readonly file: string }[]; readonly scans?: readonly { readonly subject: string; readonly file: string }[]; readonly retainVsix?: boolean; }
 const SUBJECT = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SEVERITIES = ['critical', 'high', 'medium', 'low', 'unknown'] as const;
 const isEntry = (entry: unknown): entry is { subject: string; file: string } => Boolean(entry && typeof (entry as { subject?: unknown }).subject === 'string' && SUBJECT.test((entry as { subject: string }).subject) && typeof (entry as { file?: unknown }).file === 'string' && (entry as { file: string }).file !== '');

@@ -40,7 +40,7 @@
           "$ref": "#/definitions/isoTime"
         },
         "gap": {
-          "pattern": "^[GX][0-9]{1,2}$",
+          "pattern": "^[GX][0-9]+$",
           "type": "string"
         },
         "id": {

@@ -3,9 +3,8 @@
 #
 #   build    read-only token. Checks the tag (and that no release exists for it yet), runs the
 #            tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
-#            release notes as job outputs. It runs `npm ci` with install scripts, so the
-#            checksums only show that later jobs use what this job made; they do not protect
-#            the build itself from a compromised dependency.
+#            release notes as job outputs. Dependency install scripts are disabled. The
+#            checksums tie the later jobs' artifacts to this build's outputs.
 #   release  holds contents: write to create the GitHub release, so it installs and runs nothing:
 #            it downloads the build's artifact, checks both checksums, and runs `gh release`.
 #   publish  runs in the protected "marketplace" environment, so it waits until the owner
@@ -103,7 +102,7 @@ jobs:
           echo "vsix=$name-$version.vsix" >> "$GITHUB_OUTPUT"
           echo "evidence_branch=$evidence_branch" >> "$GITHUB_OUTPUT"
           echo "package_required=$package_required" >> "$GITHUB_OUTPUT"
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Run the tests
         run: npm test
       - name: Package the VSIX and check what it contains
@@ -234,6 +233,67 @@ jobs:
               throw new Error("CI evidence bundle must verify and match the release commit");
             }
           '
+      - name: Include scheduled evidence for the exact release commit when available
+        id: scheduled
+        if: needs.build.outputs.evidence_branch == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          warn() {
+            echo '::warning::Scheduled compliance evidence unavailable or unverified for this release commit; using the verified CI bundle.'
+            echo 'Scheduled compliance evidence was unavailable or unverified for this release commit. The package uses the verified CI bundle.' >> "$GITHUB_STEP_SUMMARY"
+          }
+          if ! run_ids="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/compliance-scheduled.yml/runs" \
+            -f branch=main -f head_sha="$COMMIT" -f status=success -F per_page=10 2>/dev/null |
+            jq -r --arg commit "$COMMIT" --arg repo "$REPOSITORY_ID" '
+              .workflow_runs | sort_by(.id) | reverse | .[] |
+              select(.head_sha == $commit and .head_branch == "main" and .status == "completed" and .conclusion == "success"
+                and (.event == "schedule" or .event == "workflow_dispatch")
+                and (.repository.id | tostring) == $repo and (.head_repository.id | tostring) == $repo) |
+              .id | select(type == "number" and . > 0 and . == floor)
+            ' 2>/dev/null)"; then
+            warn
+            exit 0
+          fi
+          while IFS= read -r run_id; do
+            [ -n "$run_id" ] || continue
+            # Weekly jobs and suppressed uploads can leave a successful run without daily evidence.
+            run_api="repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+            if ! gh api --method GET "$run_api/jobs" -f filter=latest 2>/dev/null |
+              jq -e --arg commit "$COMMIT" '
+                any(.jobs[]; .name == "daily evidence" and .head_sha == $commit and .status == "completed" and .conclusion == "success"
+                  and any(.steps[]; (.name | startswith("Run actions/upload-artifact@")) and .conclusion == "success"))
+              ' >/dev/null 2>&1; then
+              continue
+            fi
+            if ! gh api --method GET "$run_api/artifacts" -f name=compliance-bundle 2>/dev/null |
+              jq -e '[.artifacts[] | select(.name == "compliance-bundle" and .expired == false)] | length == 1' >/dev/null 2>&1; then
+              continue
+            fi
+            # Each transfer and merge gets a fresh directory. A failed attempt cannot replace CI evidence.
+            if ! stage="$(mktemp -d compliance/out/scheduled-release.XXXXXX)"; then
+              break
+            fi
+            if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name compliance-bundle --dir "$stage/download" >/dev/null 2>&1; then
+              continue
+            fi
+            if ! jq -n --arg repository "$GITHUB_REPOSITORY" --arg commit "$COMMIT" \
+              '{repository: $repository, commit: $commit, kind: "release", repoRoot: ".", collectors: {}}' > "$stage/inputs.json"; then
+              break
+            fi
+            run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id"
+            if node compliance/src/cli.ts bundle --inputs "$stage/inputs.json" --out "$stage/combined" \
+                --previous compliance/out/bundle --scheduled "$stage/download" --scheduled-run "$run_url" >/dev/null 2>&1 &&
+                [ -s "$stage/combined/manifest.json" ]; then
+              echo "bundle=$stage/combined" >> "$GITHUB_OUTPUT"
+              printf 'The compliance package includes scheduled evidence from [run %s](%s).\n' "$run_id" "$run_url" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done <<< "$run_ids"
+          warn
       - name: Resolve every level profile
         run: |
           mkdir -p compliance/out/resolved
@@ -248,8 +308,9 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_BUNDLE: ${{ steps.scheduled.outputs.bundle }}
         run: |
-          node compliance/src/cli.ts package --release "$TAG" --bundle compliance/out/bundle --resolved compliance/out/resolved --sbom compliance/out/sbom/relay-image-sbom.json --out compliance/out/release
+          node compliance/src/cli.ts package --release "$TAG" --bundle "${RELEASE_BUNDLE:-compliance/out/bundle}" --resolved compliance/out/resolved --sbom compliance/out/sbom/relay-image-sbom.json --out compliance/out/release
           directory="compliance/out/release/compliance-package-$TAG"
           sh compliance/ci/oscal-validate.sh package "$directory"
           package="compliance-package-$VERSION.tar.gz"

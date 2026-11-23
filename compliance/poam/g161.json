@@ -1,0 +1,17 @@
+{
+  "gap": "G161",
+  "id": "g161",
+  "controls": [
+    "pe-02",
+    "pe-02.400"
+  ],
+  "ownerRole": "owner",
+  "title": "Physical access authorization and identification credentials need evidence",
+  "remediation": "The sponsor facilities access manager approves zone access, credential and identification card standards. Sample authorization, issuance, periodic list review and removal when access ends. Confirm required identification fields through the approved template or a redacted issuance checklist without collecting staff photographs or badge identifiers.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the zone access roster procedure, approved badge template and redacted issuance, review and removal records"
+    }
+  ]
+}

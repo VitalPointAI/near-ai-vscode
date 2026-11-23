@@ -1,0 +1,16 @@
+{
+  "gap": "G230",
+  "id": "g230",
+  "controls": [
+    "itsp171-03.01.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Failed logon limits and automatic responses need a test result",
+  "remediation": "The sponsor authentication owner approves the observation window, consecutive failure limit and automatic response, including any unlock or delay criteria. Exercise a representative sign-in route through threshold and recovery with a controlled account. Record inherited service policy and prove it covers the assessed route before accepting it.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect authentication settings and timestamped threshold, response and recovery test evidence"
+    }
+  ]
+}

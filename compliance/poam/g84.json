@@ -1,0 +1,18 @@
+{
+  "gap": "G84",
+  "id": "g84",
+  "controls": [
+    "ir-04",
+    "ir-04.03",
+    "ir-04.09"
+  ],
+  "ownerRole": "shared",
+  "title": "Incident handling and continuity actions need a tested response trace",
+  "remediation": "The deployment response and continuity leads and component maintainers identify incident classes, required mission continuity actions and approved dynamic response mechanisms. Exercise a benign declared event through detection, analysis, containment, recovery and a continuity decision. Record the authorized roles, measured transitions, tool readiness and follow-up.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved response and continuity scenario with dated decisions, recovery checks and observed dynamic response"
+    }
+  ]
+}

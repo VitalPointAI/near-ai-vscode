@@ -1,0 +1,16 @@
+{
+  "gap": "G213",
+  "id": "g213",
+  "controls": [
+    "itsp171-03.01.22"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 public posting review and removal need operating records",
+  "remediation": "The sponsor public information owner identifies assessed public systems and authorized publishers. Verify training that keeps specified contract information out of publicly accessible content. Retain a periodic review sample and a redacted correction or safe exercise showing removal and escalation of improperly posted material. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect the approved public-system and publisher inventory, training record, latest content review and removal or exercise record"
+    }
+  ]
+}

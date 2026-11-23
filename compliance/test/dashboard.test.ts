@@ -71,6 +71,26 @@ test('buildDashboard over the tracer fixtures validates against dashboard.schema
   assert.equal(row.components[0].statement, 'Each tracer event is recorded by the fixture component.');
 });
 
+test('only the selected profile receives a scoped gap for a shared control', () => {
+  const input = tracerInput();
+  const first = input.levels[0];
+  const second = { ...first, id: 'other-profile', components: ['other'] };
+  const dashboard = buildDashboard(tracerInput({
+    levels: [first, second],
+    gapRegister: {
+      gaps: [{ id: 'G100', controls: ['tr-01'], profiles: [first.id], ownerRole: 'owner', remediation: 'Verify scoped evidence', closesInPhase: '44.1' }],
+      poam: [],
+      attestationsDir: path.join(TRACER, 'unused-attestations')
+    }
+  }));
+  assert.deepEqual(validateOurs(JSON.parse(JSON.stringify(dashboard)), 'dashboard'), { ok: true, errors: [] });
+  assert.deepEqual(dashboard.rows.map(row => [row.level, row.gap]), [[first.id, 'G100'], [second.id, undefined]]);
+  assert.deepEqual(dashboard.gaps, [{
+    id: 'G100', state: 'closed', overdue: false, title: 'G100', controls: ['tr-01'],
+    remediation: 'Verify scoped evidence', ownerRole: 'owner', levelsBlocked: 0, profiles: [first.id]
+  }]);
+});
+
 test('responsibility falls back to the family only when the component has no explicit allocation', () => {
   const base = tracerInput();
   const dashboard = buildDashboard(tracerInput({

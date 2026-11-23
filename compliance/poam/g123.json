@@ -1,0 +1,17 @@
+{
+  "gap": "G123",
+  "id": "g123",
+  "controls": [
+    "sc-07.07",
+    "sc-07.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Remote tunnel safeguards and authenticated proxy use need operating evidence",
+  "remediation": "Endpoint, VPN and proxy operators map assessed remote access and outbound flows. Verify prevention of unapproved split tunneling, safeguards and expiry for approved exceptions, and authenticated proxy enforcement for defined destinations. Capture only redacted configurations and authenticated and refused connection results. Record authorized scope decisions where a mechanism is unused.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved remote networking scope, tunnel and proxy settings, and enforced exception and authentication results"
+    }
+  ]
+}

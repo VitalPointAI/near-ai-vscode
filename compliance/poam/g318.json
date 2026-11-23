@@ -1,0 +1,16 @@
+{
+  "gap": "G318",
+  "id": "g318",
+  "controls": [
+    "itsp171-03.17.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supply chain risk management plan needs lifecycle and access evidence",
+  "remediation": "The sponsor supply chain risk owner and system owner document how risks are managed across research, development, design, manufacture, acquisition, delivery, integration, operation, maintenance and disposal for assessed systems, components and services. Confirm approved review cadence and protection from unauthorized disclosure. Record scope decisions for stages reliant on suppliers.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved lifecycle risk plan and assessed supplier boundary, a dated review and plan access-control evidence"
+    }
+  ]
+}

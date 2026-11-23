@@ -1,0 +1,17 @@
+{
+  "gap": "G234",
+  "id": "g234",
+  "controls": [
+    "itsp171-03.01.16",
+    "itsp171-03.01.18"
+  ],
+  "ownerRole": "owner",
+  "title": "Wireless and mobile access need approved configurations and separate checks",
+  "remediation": "The sponsor network and endpoint owners approve connection types and configuration for wireless and mobile access before connection. Verify wireless authentication and encryption and that unused radios are disabled before issue or deployment. Sample authorized mobile enrollment and full-device or container encryption for specified information, with a denied or quarantined unapproved connection where practical.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect wireless and mobile authorization records, secure wireless configuration and a disabled radio sample, plus mobile enrollment and encryption evidence"
+    }
+  ]
+}

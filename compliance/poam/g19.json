@@ -1,0 +1,19 @@
+{
+  "gap": "G19",
+  "id": "g19",
+  "controls": [
+    "ia-05",
+    "ia-05.02",
+    "ia-05.06",
+    "ia-05.13"
+  ],
+  "ownerRole": "shared",
+  "title": "Deployment authenticator lifecycle needs verified evidence",
+  "remediation": "The deployment identity owner and component maintainers inventory the authenticators in scope. Record approved issuance and recovery, strength and storage requirements, rotation and revocation. Exercise revocation and stale cached credential denial where applicable. Identify missing controls and retest them before closure.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Record approved authenticator lifecycle policy, redacted credential events and denied revoked or stale authenticator tests"
+    }
+  ]
+}

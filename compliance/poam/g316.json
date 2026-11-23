@@ -1,0 +1,16 @@
+{
+  "gap": "G316",
+  "id": "g316",
+  "controls": [
+    "itsp171-03.16.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Unsupported components need replacement or an approved mitigation path",
+  "remediation": "The sponsor component and service owners reconcile installed components to authoritative vendor support status. Sample replacement of a component after support ends or document why it cannot be replaced and the evaluated mitigation or credible alternative support. Record accountable decisions, time limits and evidence of implemented safeguards or alternative support where applicable.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the support status inventory and a representative replacement record or approved mitigations and alternative-support evidence"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G61",
+  "id": "g61",
+  "controls": [
+    "ac-03.02"
+  ],
+  "ownerRole": "shared",
+  "title": "Dual authorization for designated actions needs evidence",
+  "remediation": "The deployment sponsor and privilege owners identify actions with significant impact that require separate authorized approvers. Implement or verify enforcement for those actions and retain the approved action and approver mapping. Exercise denial with one approver, denial when the same identity attempts both approvals, and success with two eligible approvers. Where relevant, use the product gate's per-action decision evidence as input and verify the second independent approval at the assessed enforcement boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve actions requiring dual authorization and retain denied single or duplicate approvals and accepted independent approvals"
+    }
+  ]
+}

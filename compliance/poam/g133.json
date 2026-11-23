@@ -1,0 +1,16 @@
+{
+  "gap": "G133",
+  "id": "g133",
+  "controls": [
+    "sc-20"
+  ],
+  "ownerRole": "owner",
+  "title": "Authoritative DNS integrity and delegation evidence need verified scope",
+  "remediation": "The deployment DNS authority inventories assessed zones, authoritative service providers and delegated child zones. Review the authenticated resolution configuration, retained signatures and parent-child trust evidence for applicable chains. Capture verification of the in-scope resolver view and relevant child-zone status without publishing protected internal names.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect redacted authoritative zone settings, response verification and parent-child delegation evidence or approved scope treatment"
+    }
+  ]
+}

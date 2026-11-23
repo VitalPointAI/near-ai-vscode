@@ -1,0 +1,17 @@
+{
+  "gap": "G191",
+  "id": "g191",
+  "controls": [
+    "pm-21",
+    "pm-22"
+  ],
+  "ownerRole": "owner",
+  "title": "Privacy disclosure and information quality procedures need reviewed records",
+  "remediation": "The sponsor disclosure and information quality authorities approve rules for required disclosures and authorized corrections. Use protected records to demonstrate dates, required recipients and reasons for disclosure, and sample a quality review or correction with approved outcome. Retain only redacted references for assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved procedures, a reviewed disclosure record and a dated accuracy or correction sample"
+    }
+  ]
+}

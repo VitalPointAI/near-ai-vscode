@@ -1,0 +1,16 @@
+{
+  "gap": "G231",
+  "id": "g231",
+  "controls": [
+    "itsp171-03.01.09"
+  ],
+  "ownerRole": "owner",
+  "title": "Pre-access system use notices need sponsor approval and display evidence",
+  "remediation": "The sponsor privacy and system owners approve notice text covering security and privacy rules for specified information. Demonstrate that the assessed human access routes display the notice before granting access. Record where routes have no direct human sign-in and submit that scope decision for assessor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved notice text and timestamped or captured pre-access display evidence for the assessed routes"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G313",
+  "id": "g313",
+  "controls": [
+    "itsp171-03.15.02"
+  ],
+  "ownerRole": "owner",
+  "title": "System security and privacy plan needs sponsor approval and boundary evidence",
+  "remediation": "The sponsor system owner, security lead and privacy lead document constituent components, information types and flows, specific threats, environment and dependencies, requirements, existing and planned safeguards and accountable individuals. Approve the review cadence and verify that unauthorized access to the plan is restricted. Record unresolved provider or deployment boundaries for sponsor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved system security and privacy plan with scoped diagrams, safeguards and role references, plus review record and document access evidence"
+    }
+  ]
+}

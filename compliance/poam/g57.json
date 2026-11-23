@@ -1,0 +1,17 @@
+{
+  "gap": "G57",
+  "id": "g57",
+  "controls": [
+    "cm-12",
+    "cm-12.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Information locations, access and automated discovery need scoped deployment evidence",
+  "remediation": "The deployment data steward and component maintainers inventory approved information types, processing and storage locations, and users with access. Include approved provider, relay, hub and local scope as applicable. Sample authorized location changes and test the approved automated discovery tool against seeded benign data in each assessed component. Record scope or sensing gaps for follow-up and preserve only sanitized references.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved information location and access inventory, reviewed location change and scoped automated discovery results"
+    }
+  ]
+}

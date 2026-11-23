@@ -1,0 +1,16 @@
+{
+  "gap": "G206",
+  "id": "g206",
+  "controls": [
+    "itar-122.1"
+  ],
+  "ownerRole": "owner",
+  "title": "ITAR registration applicability needs a scoped authority record",
+  "remediation": "The sponsor empowered official and trade counsel review registration applicability for the assessed legal entity and approved operating scope. Verify an existing official registration record and its current review status where applicable. Record a dated pending determination when the scope or supporting record remains unresolved.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the signed applicability determination, reviewed legal entity and protected registration or pending-decision reference"
+    }
+  ]
+}

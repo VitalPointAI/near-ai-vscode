@@ -1,0 +1,16 @@
+{
+  "gap": "G288",
+  "id": "g288",
+  "controls": [
+    "itsp171-03.12.04"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated supplementary assessment row needs a sponsor scope decision",
+  "remediation": "The contracting sponsor assessment lead and authorized assessor reconcile the displayed identifier and contract selection to the authoritative edition, which identifies the row as not allocated after NIST withdrawal. Retain the dated source citation and signed scope decision or record the unresolved decision and responsible official.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the reviewed source and contract selection references and a dated disposition for 03.12.04"
+    }
+  ]
+}

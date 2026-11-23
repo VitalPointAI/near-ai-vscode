@@ -1,0 +1,16 @@
+{
+  "gap": "G116",
+  "id": "g116",
+  "controls": [
+    "sa-22"
+  ],
+  "ownerRole": "shared",
+  "title": "Unsupported components need lifecycle decisions and replacement evidence",
+  "remediation": "Component maintainers and the deployment asset owner reconcile installed versions against dated supplier support commitments. For a sampled unsupported component, retain a verified replacement or an approved alternative support arrangement, its authority, residual risk and review date. Link the deployed inventory, updated support evidence and verification results.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect current inventory and supplier support dates, and a sampled replacement verification or signed alternative support decision"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G142",
+  "id": "g142",
+  "controls": [
+    "at-03"
+  ],
+  "ownerRole": "owner",
+  "title": "Role-based training needs a verified link to authorized duties and access",
+  "remediation": "The sponsor workforce assurance and access owners identify roles and training required before access or assigned duties. Compare sampled eligibility and access approvals with completion dates. Retain the approved refresher schedule, a role-specific exercise and a content update triggered by a system change or applicable incident lesson.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the role and training matrix, redacted pre-access completion and authorization records, and a dated curriculum or refresher review"
+    }
+  ]
+}

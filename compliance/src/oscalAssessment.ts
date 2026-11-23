@@ -3,10 +3,10 @@ import { stableOscalUuid as uuid } from './oscalSsp.ts';
 
 const metadata = (title: string, at: string) => ({ title, 'last-modified': at, version: '1.0.0', 'oscal-version': OSCAL_VERSION });
 const reviewed = (controls: readonly string[]) => ({ 'control-selections': [{ 'include-controls': controls.map((control) => ({ 'control-id': control })) }] });
-type Row = Readonly<{ control: string; state: string; reasonText: string }>;
+type Row = Readonly<{ control: string; state: string; reasonText: string; dashboardIndex?: number }>;
 type AssessmentScope = Readonly<{ level: string; title: string; rows: readonly Row[]; generatedAt: string }>;
 const controls = (rows: readonly Row[]) => [...new Set(rows.map((row) => row.control))].sort();
-const needsFinding = (row: Row) => row.state === 'not-met' || row.state === 'stale';
+const needsFinding = (row: Row) => row.state === 'not-met' || row.state === 'stale' || row.state === 'partly-met';
 
 /** The plan imports the SSP for its level and schedules review of the release evidence. */
 export function buildAssessmentPlan(input: AssessmentScope & { readonly collectors: readonly { id: string; window: string }[] }) {
@@ -23,7 +23,7 @@ export function buildAssessmentPlan(input: AssessmentScope & { readonly collecto
   };
 }
 
-/** Build results from redacted bundle observations and the dashboard's honest non-met rows. */
+/** Build results from redacted observations and controls with open findings. */
 export function buildAssessmentResults(input: AssessmentScope & {
   readonly plan: string;
   readonly statements: ReadonlyMap<string, string>;
@@ -51,7 +51,7 @@ export function buildAssessmentResults(input: AssessmentScope & {
     };
   });
   const unlinked: string[] = [];
-  const findings = input.rows.filter(needsFinding).flatMap(({ control, state, reasonText }) => {
+  const findings = input.rows.filter(needsFinding).flatMap(({ control, state, reasonText, dashboardIndex }) => {
     const statement = input.statements.get(control);
     if (!statement) {
       unlinked.push(`${control} (${state}): ${reasonText}`);
@@ -60,6 +60,10 @@ export function buildAssessmentResults(input: AssessmentScope & {
     return [{
       uuid: uuid(`assessment-finding:${input.level}:${control}`), title: `${control} release evidence finding`, description: reasonText,
       props: [{ name: 'evidence-state', ns: NS, value: state }],
+      ...(state === 'partly-met' && dashboardIndex !== undefined ? { links: [{
+        href: `../evidence/bundle/dashboard/dashboard.json#/rows/${dashboardIndex}`,
+        rel: 'evidence', text: 'Verified bundle control row and mapped evidence'
+      }] } : {}),
       target: { type: 'statement-id', 'target-id': statement, status: { state: 'not-satisfied', reason: 'other' } }
     }];
   });

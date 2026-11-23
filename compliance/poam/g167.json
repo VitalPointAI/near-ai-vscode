@@ -1,0 +1,17 @@
+{
+  "gap": "G167",
+  "id": "g167",
+  "controls": [
+    "pe-11",
+    "pe-12"
+  ],
+  "ownerRole": "owner",
+  "title": "Backup power and emergency egress lighting need test records",
+  "remediation": "The sponsor continuity and facilities leads approve the required orderly shutdown or long-term power transfer mode. Collect an authorized power-loss test showing UPS behavior and maintenance records for automatic emergency lighting along exits and evacuation routes. Validate site and provider coverage before accepting inheritance.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved power continuity mode, UPS test and automatic emergency lighting inspection with evacuation route coverage"
+    }
+  ]
+}

@@ -176,6 +176,7 @@
         "state": { "type": "string", "enum": ["open", "planned", "in-progress", "closed", "risk-accepted"] },
         "overdue": { "type": "boolean" },
         "levelsBlocked": { "type": "integer", "minimum": 0 },
+        "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/id" } },
         "controls": { "type": "array", "maxItems": 500, "items": { "$ref": "#/definitions/id" } },
         "remediation": { "$ref": "#/definitions/text" },
         "ownerRole": { "$ref": "#/definitions/shortText" },

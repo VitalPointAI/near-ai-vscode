@@ -1,0 +1,20 @@
+{
+  "gap": "G60",
+  "id": "g60",
+  "controls": [
+    "ac-02.07"
+  ],
+  "ownerRole": "shared",
+  "title": "Privileged account assignment and removal need monitoring evidence",
+  "remediation": "The deployment identity owner approves the role-based or attribute-based scheme and the authorities who assign privileged accounts. Account operators inventory applicable privileged assignments and monitor changes. Collect redacted configuration, sampled approved assignments, change-monitoring records and timely revocation evidence. Verify that a removed assignment cannot use the privileged action.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved privileged account inventory, role or attribute change monitoring, and denial after revocation"
+    },
+    {
+      "phase": "33.1",
+      "title": "Where assigned staff positions are deployed, verify scoped signed handover records and refusal of the former holder's decision"
+    }
+  ]
+}

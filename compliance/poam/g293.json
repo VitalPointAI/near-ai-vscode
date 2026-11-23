@@ -1,0 +1,16 @@
+{
+  "gap": "G293",
+  "id": "g293",
+  "controls": [
+    "itsp171-03.13.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary confidentiality in transit and storage needs scoped protection evidence",
+  "remediation": "The deployment data protection and network owners confirm assessed storage, backups, replicas and transmissions for specified information. Review effective encryption settings and authorized exceptions for each scoped boundary. Verify a redacted configuration and benign synthetic observation for storage and transmission, with separate provider evidence for inherited controls.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved data-flow and storage inventory, reviewed effective cryptographic settings, and a scoped confidentiality verification for both states"
+    }
+  ]
+}

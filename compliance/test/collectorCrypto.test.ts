@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { cryptoCollector } from '../src/collectors/crypto.ts';
 import type { CollectorContext } from '../src/collectors/types.ts';
+import { redactObservation } from '../src/redact.ts';
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'collectors', 'crypto', 'crypto-inventory.md');
 const ROOT = '/fixture-checkout';
@@ -47,4 +48,13 @@ test('a missing review statement or malformed headers are collector errors', asy
   const text = await fixture();
   await assert.rejects(cryptoCollector.collect({ repoRoot: ROOT }, context(text.replace('Last reviewed: 2026-10-22\n\n', ''))), /Last reviewed/);
   await assert.rejects(cryptoCollector.collect({ repoRoot: ROOT }, context(text.replace('Where used', 'Use'))), /headers/);
+});
+
+test('the published inventory produces safe identifiers even for formatted algorithm names', async () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const observations = (await cryptoCollector.collect({ repoRoot }, {
+    now: NOW, commit: COMMIT, readFile: (file) => readFile(file, 'utf8')
+  })).map(redactObservation);
+  assert.ok(observations.some(({ subject }) => subject === 'random-numbers-from-nodes-randombytes'));
+  assert.ok(observations.some(({ subject, passed }) => subject === 'tls-through-nodes-defaults' && !passed));
 });

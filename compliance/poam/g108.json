@@ -1,0 +1,17 @@
+{
+  "gap": "G108",
+  "id": "g108",
+  "controls": [
+    "sa-05",
+    "sa-16"
+  ],
+  "ownerRole": "shared",
+  "title": "Administrator and user documentation and training need versioned delivery evidence",
+  "remediation": "The deployment service owner and supplier leads identify documentation and training for assessed controls and user roles. Verify secure installation and operation guidance, known configuration weaknesses, user privacy responsibilities and an administrator and user training sample. Record attempts to obtain missing guidance, approved next actions, distribution and training completion. Preserve X12 as the specific export-control guidance path.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect versioned user and administrator guidance, distribution receipts, missing-document dispositions, and dated training and operating exercise evidence"
+    }
+  ]
+}
