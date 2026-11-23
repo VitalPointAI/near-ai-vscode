@@ -1,0 +1,88 @@
+export const inventoryDirectory = '.planning/.near-ai';
+export const inventoryFileName = 'resource-inventory.snapshot.json';
+export const inventorySizeLimit = 512 * 1024;
+export const inventoryStatuses = {
+  available: 'Available',
+  allocated: 'Allocated',
+  unavailable: 'Unavailable'
+} as const;
+export type InventoryStatus = keyof typeof inventoryStatuses;
+
+export interface InventoryRecord {
+  id: string;
+  name: string;
+  category: string;
+  quantity?: number;
+  unit?: string;
+  status?: InventoryStatus;
+  asOf?: string;
+}
+
+export interface InventorySnapshot {
+  sourceId: string;
+  source: string;
+  generatedAt: string;
+  resources: InventoryRecord[];
+}
+
+/** Stable identifier passed to a native work-area association action. */
+export interface InventoryResourceReference {
+  readonly sourceId: string;
+  readonly resourceId: string;
+}
+
+export interface InventoryLinkRequest {
+  readonly rootUri: string;
+  readonly onSelect: (reference: InventoryResourceReference) => Promise<void>;
+}
+
+const idPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function record(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function id(value: unknown): value is string {
+  return typeof value === 'string' && idPattern.test(value);
+}
+
+function label(value: unknown, limit = 120): value is string {
+  return typeof value === 'string' && value.trim() === value && value.length > 0
+    && value.length <= limit && !/[\x00-\x1f\x7f]/.test(value);
+}
+
+function timestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value)) return false;
+  const instant = new Date(value);
+  return Number.isFinite(instant.getTime()) && instant.toISOString() === value.replace(/(\d\d:\d\d:\d\d)Z$/, '$1.000Z');
+}
+
+function resource(value: unknown): value is InventoryRecord {
+  return record(value) && id(value.id) && label(value.name) && label(value.category, 80)
+    && (value.quantity === undefined || (typeof value.quantity === 'number' && Number.isSafeInteger(value.quantity) && value.quantity >= 0))
+    && (value.unit === undefined || (value.quantity !== undefined && label(value.unit, 32)))
+    && (value.status === undefined || (typeof value.status === 'string' && Object.hasOwn(inventoryStatuses, value.status)))
+    && (value.asOf === undefined || timestamp(value.asOf));
+}
+
+/** Read only the approved fields in a bounded local export. Source and status are claims supplied by the file. */
+export function parseInventorySnapshot(text: string): InventorySnapshot | undefined {
+  if (text.length > inventorySizeLimit) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return undefined; }
+  if (!record(value) || value.schemaVersion !== 1 || !id(value.sourceId) || !label(value.source) || !timestamp(value.generatedAt)
+    || !Array.isArray(value.resources) || value.resources.length > 1200 || !value.resources.every(resource)) return undefined;
+  const resources: InventoryRecord[] = value.resources;
+  if (new Set(resources.map(item => item.id)).size !== resources.length) return undefined;
+  return {
+    sourceId: value.sourceId,
+    source: value.source,
+    generatedAt: value.generatedAt,
+    resources: resources.map(({ id, name, category, quantity, unit, status, asOf }) => ({ id, name, category, quantity, unit, status, asOf }))
+  };
+}
+
+/** This identifier names a record in a published namespace. It contains no workspace paths or credentials. */
+export function inventoryReference(snapshot: InventorySnapshot, record: InventoryRecord): string {
+  return `resource:${snapshot.sourceId}/${record.id}`;
+}
