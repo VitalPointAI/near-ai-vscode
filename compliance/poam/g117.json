@@ -1,0 +1,16 @@
+{
+  "gap": "G117",
+  "id": "g117",
+  "controls": [
+    "sa-400"
+  ],
+  "ownerRole": "owner",
+  "title": "Sovereignty and jurisdiction risk needs an approved sponsor assessment",
+  "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the scoped injury, threat, vulnerability and jurisdiction risk assessments, plus the signed treatment and categorization decision"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "gap": "G112",
+  "id": "g112",
+  "controls": [
+    "sa-10",
+    "sa-10.07"
+  ],
+  "ownerRole": "shared",
+  "title": "Developer change control and security and privacy review need exact change evidence",
+  "remediation": "The sponsor change authority and developer configuration lead agree control scope across approved lifecycle stages and designate security and privacy reviewers and flaw-report recipients. Trace a representative change using the protected baseline, approval, impact assessment, changed configuration, and evidence that unauthorized changes are refused. Record a tracked flaw through resolution and reporting.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect change-control scope and named reviewers, an approved change and impact trace, and the linked flaw and reporting records"
+    }
+  ]
+}

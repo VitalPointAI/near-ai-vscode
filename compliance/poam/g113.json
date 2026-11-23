@@ -1,0 +1,16 @@
+{
+  "gap": "G113",
+  "id": "g113",
+  "controls": [
+    "sa-10.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Delivered software and firmware integrity verification needs a tested acceptance record",
+  "remediation": "The developer release lead and deployment acceptance authority identify assessed software and firmware, including applicable updates. Verify exact artifact signatures, digests or provenance against independently trusted release information. Exercise refusal of a harmless mismatched artifact and retain the result for each applicable artifact class. Use existing artifact attestations for the release components they cover.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved verification scope, an accepted artifact and provenance reference, and a recorded mismatch refusal"
+    }
+  ]
+}
