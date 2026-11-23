@@ -58,6 +58,8 @@ When the installer build succeeds, the evidence job reads its SBOM from the curr
 
 The pull-request summary is report-only by default. After the owner has seen stable results and made `compliance` a required check, set its `FAIL_ON_DROP` environment value to `--fail-on-drop` and remove any masking behavior from that summary step to make an unexplained evidence drop blocking.
 
+For CM-03, use the configured protections on main and the agent review attached to the pull-request head that produced the assessed commit. Deployment environment settings show whether a reviewer is required. The protected environment owner's approval belongs to its particular run. The read-only settings token cannot confirm which actors may bypass release-tag rules. These approval and bypass checks remain open until their records are verified.
+
 ## Release package
 
 Releases with compliance sources attach `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. An unmerged hotfix based on an older release that predates the compliance sources can still publish an attested VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations. Verify the checksum with `sha256sum --check <package>.sha256`. Verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
