@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Generate a Security Assessment and Authorization package from the NEAR AI Command Palette. The ZIP includes a consolidated sponsor Word draft, verified release evidence, an editable control matrix, and administrative forms.
+- **Generate an SA&A package on demand.** Choose a published release in **NEAR AI: Generate SA&A Package…**. The ZIP includes an editable sponsor Word draft, a control and evidence workbook, verified release records, and administrative forms.
+- **Follow the evidence for each finding.** OSCAL keeps partially met controls open and links each finding to its evidence in the bundle. Protected A has scoped product evidence for gate audit warnings, timestamps, and permissions on new POSIX log files.
+- **Verify Marketplace publication.** The export includes a checksummed approval receipt when GitHub confirms the approval for the selected release.
 
 ## 0.4.36
 
