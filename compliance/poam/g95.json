@@ -1,0 +1,16 @@
+{
+  "gap": "G95",
+  "id": "g95",
+  "controls": [
+    "sr-11.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Service and repair components need controlled configuration and return records",
+  "remediation": "The maintenance authority and component custodian identify assessed components subject to service or repair. Sample approved custody and baseline records before service, authorized changes and access while held, and verification against the approved configuration before return to service. Record any variance and the decision to release or retain the component.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted service record with custody, authorized changes, post-service verification and return approval"
+    }
+  ]
+}
