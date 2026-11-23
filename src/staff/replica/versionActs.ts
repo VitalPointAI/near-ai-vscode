@@ -62,6 +62,8 @@ function refuse(reason: Refused['reason']): Refused {
 }
 
 const products = (fold: FoldResult): ProductVersions[] => (fold.families.versions as ProductVersions[] | undefined) ?? [];
+const namedProducts = (fold: FoldResult, projectId: string, product: string): ProductVersions[] =>
+  products(fold).filter((item) => item.product === product && item.stream !== projectId);
 
 /** Captures the decision view of this version without including unrelated edits or changes elsewhere in the product. */
 export function decisionStamp(product: ProductVersions, version: VersionView): string {
@@ -71,6 +73,15 @@ export function decisionStamp(product: ProductVersions, version: VersionView): s
     decision.status, decision.outcome, decision.effective, decision.contested, decision.pending, decision.held,
     decision.finalBeforeDispute
   ])).digest('hex');
+}
+
+/** Look up the exact version in an already verified shared fold. */
+export function decisionStampAt(fold: FoldResult, projectId: string, input: VersionTarget): string | undefined {
+  const candidates = namedProducts(fold, projectId, input.product);
+  if (candidates.length !== 1) return undefined;
+  const [product] = candidates;
+  const version = product.versions.find((item) => item.hash === input.hash);
+  return version === undefined ? undefined : decisionStamp(product, version);
 }
 
 function checkWrite(fold: FoldResult, stream: string, product: string, entry: string): Refused | undefined {
@@ -89,11 +100,7 @@ export class VersionActs {
 
   public async decisionStamp(input: VersionTarget): Promise<string | undefined> {
     const { fold } = await this.project.state();
-    const candidates = this.namedProducts(fold, input.product);
-    if (candidates.length !== 1) return undefined;
-    const [product] = candidates;
-    const version = product.versions.find((item) => item.hash === input.hash);
-    return version === undefined ? undefined : decisionStamp(product, version);
+    return decisionStampAt(fold, this.project.projectId, input);
   }
 
   public async verdict(input: VerdictInput): Promise<Written | Refused> {
@@ -137,16 +144,12 @@ export class VersionActs {
     return this.write('version.supersede', data);
   }
 
-  private namedProducts(fold: FoldResult, product: string): ProductVersions[] {
-    return products(fold).filter((item) => item.product === product && item.stream !== this.project.projectId);
-  }
-
   private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>, options: DecisionOptions = {}): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
     try {
       const written = await this.project.appendChecked<Refused>(({ fold }) => {
-        const candidates = this.namedProducts(fold, data.product);
+        const candidates = namedProducts(fold, this.project.projectId, data.product);
         if (candidates.length === 0) return refuse('product-unavailable');
         if (candidates.length > 1) return refuse('product-ambiguous');
         const [product] = candidates;

@@ -8,9 +8,11 @@ import { appendProductEntry, proposeVersion } from '../staff/replica/labelCells'
 import { updateMember } from '../staff/replica/membership';
 import { ReplicaProject } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
+import { StaffHost } from '../staff/staffHost';
 import { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../staff/replica/versionActs';
 import { bringIn, hostOf, leadWith, ok, orgClearance, project, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
+import { trusting } from './helpers/staffFixtures';
 
 const PRODUCT = 'logistics-estimate';
 const LABEL = 'org/Internal';
@@ -287,15 +289,33 @@ test('a stamped decision refuses after another device decides while the request 
   ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
   const { stream, target } = await awaitingVersion(lead);
   await syncTo(lead, alternate, [stream]);
-  const local = new VersionActs(lead.p, PERSON);
-  const stamp = await local.decisionStamp(target);
-  assert.ok(stamp);
-  assert.ok((await new VersionActs(alternate.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] })).ok);
-  await syncTo(alternate, lead, [stream]);
-  const before = streamEntries(lead.at, stream);
-  const stale = await local.decide({ ...target, outcome: 'reject', reasons: ['Unavailable support.'], stamp });
-  assert.deepEqual(stale, { ok: false, reason: 'changed-while-deciding', message: CHANGED_WHILE_DECIDING_TEXT });
-  assert.deepEqual(streamEntries(lead.at, stream), before);
+  const { signer } = await ReplicaProject.localDevice(lead.at.deps);
+  const host = new StaffHost({
+    root: lead.at.root, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: lead.at.secrets,
+    now: () => lead.at.clock.now.getTime(), replica: { globalStorageDir: lead.at.global }
+  });
+  try {
+    const captured = await host.sharedReplica();
+    assert.ok(captured);
+    const stamp = await captured.decisionStamp(target);
+    assert.ok(stamp);
+    assert.ok((await new VersionActs(alternate.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] })).ok);
+    await syncTo(alternate, lead, [stream]);
+
+    const refreshed = await host.sharedReplica();
+    assert.ok(refreshed);
+    assert.match(await refreshed.decisionStamp(target) ?? '', /^[a-f0-9]{64}$/);
+    assert.notEqual(await refreshed.decisionStamp(target), stamp);
+    assert.equal(await captured.decisionStamp(target), stamp, 'the open request keeps the state it was shown');
+
+    const before = streamEntries(lead.at, stream);
+    const local = new VersionActs(lead.p, PERSON);
+    const stale = await local.decide({ ...target, outcome: 'reject', reasons: ['Unavailable support.'], stamp });
+    assert.deepEqual(stale, { ok: false, reason: 'changed-while-deciding', message: CHANGED_WHILE_DECIDING_TEXT });
+    assert.deepEqual(streamEntries(lead.at, stream), before);
+  } finally {
+    await host.close();
+  }
 });
 
 test('the checked append rechecks a decision stamp after an incoming entry lands in another window', async (t) => {
