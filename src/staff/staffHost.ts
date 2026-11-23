@@ -89,7 +89,7 @@ export { SharedProjectError } from './logisticsHost';
 type SharedProject = import('./replica/replicaProject').ReplicaProject;
 type SharedProjectDeps = import('./replica/replicaProject').ReplicaProjectDeps;
 /** A shared project this host opened, with the identity its store had (storeIdentity): a different identity means the store changed under it. */
-interface SharedOpened { readonly project: SharedProject; readonly deps: SharedProjectDeps; identity: string }
+interface SharedOpened { readonly project: SharedProject; readonly deps: SharedProjectDeps; identity: readonly [folder: string, rosterHead: string | null] }
 
 export const LEDGER_DIR = '.planning/staff/ledger';
 export const LEDGER_FILE = 'products.jsonl';
@@ -394,14 +394,8 @@ export class StaffHost {
   private sharedOpen: Promise<SharedOpened | { readonly problem: string }> | undefined;
   private sharedCache: { readonly key: string; readonly context: unknown; readonly replay: LedgerReplay } | undefined;
 
-  /**
-   * The identity of this project's store as this host sees it (D-09): the store folder's device and inode numbers ('missing' when it is absent), and
-   * the roster head this device's mark names (null when there is no mark or it names none, 'unreadable' when its value does not parse). Start Again,
-   * here or in another window, moves the folder aside and makes a new one; a folder copied back gets a new inode; another window that folds a roster
-   * change records a new head. It is an identity, not a trust decision: the mark is read, never verified here, and the store verifies it itself when
-   * the project is opened again. Called on the shared path only, so marks.ts is never loaded for a project that is not shared.
-   */
-  private async storeIdentity(): Promise<string> {
+  /** Shared-path only. The folder inode detects replacement and the unverified mark detects another window advancing the roster. */
+  private async storeIdentity(): Promise<SharedOpened['identity']> {
     const storeDir = path.join(path.resolve(this.options.root), REPLICA_DIR);
     let folder: string;
     try {
@@ -425,14 +419,10 @@ export class StaffHost {
         head = 'unreadable';
       }
     }
-    return JSON.stringify([folder, head]);
+    return [folder, head];
   }
 
-  /**
-   * The shared project of this host, opened once and kept while its store keeps the same identity, so its fold context is reused from call to call.
-   * The replica modules are loaded here, for a shared project only. A project that cannot be opened is not kept: the next read tries again. The
-   * identity is taken before the open, so a change made while it opens is seen by the next read.
-   */
+  /** Reuses one lazy replica open per host. A failed open is forgotten and may be retried. */
   private openShared(): Promise<SharedOpened | { readonly problem: string }> {
     if (this.sharedOpen) return this.sharedOpen;
     const pending = (async (): Promise<SharedOpened | { readonly problem: string }> => {
@@ -454,24 +444,19 @@ export class StaffHost {
     return pending;
   }
 
-  /**
-   * The opened shared project whose store still has the identity it was opened with. When the identity changed (Start Again here or in another
-   * window, the folder replaced, a roster change another window recorded), the old project is closed and the project is opened again (D-09).
-   */
+  /** A folder or roster-mark change from another window closes the old replica and opens the current one. */
   private async currentShared(): Promise<{ readonly pending: Promise<SharedOpened | { readonly problem: string }>; readonly opened: SharedOpened | { readonly problem: string } }> {
     const pending = this.openShared();
     const opened = await pending;
-    if ('problem' in opened || (await this.storeIdentity()) === opened.identity) return { pending, opened };
+    if ('problem' in opened) return { pending, opened };
+    const identity = await this.storeIdentity();
+    if (identity[0] === opened.identity[0] && identity[1] === opened.identity[1]) return { pending, opened };
     await this.dropShared(pending);
     const again = this.openShared();
     return { pending: again, opened: await again };
   }
 
-  /**
-   * Forgets the shared project this host opened and its replay cache, so the next read opens the project again, then closes the old project after
-   * the work already asked of it (ReplicaProject.close waits for it). Start Again and Make a Single-Machine Copy call it (D-09); close() goes through
-   * it. A host that opened nothing (a project that is not shared) has nothing to forget and loads nothing.
-   */
+  /** Forgets the cached project and replay, then closes the old replica after its queued work. */
   public async invalidateShared(): Promise<void> {
     const pending = this.sharedOpen;
     this.sharedOpen = undefined;
@@ -486,18 +471,33 @@ export class StaffHost {
     if (this.sharedOpen === pending) await this.invalidateShared();
   }
 
-  /**
-   * A shared project's products, read from the fold through the projection (projection.ts projectLedgerReplay with the imported-ledger overlay), as
-   * today's LedgerReplay. The projection is made again only when the fold or its context changed. A project that cannot be opened or folded shows no
-   * product and reads as broken with the reason, so nothing reads as fine and nothing is written.
-   */
+  /** Acquires this host's project only after checking the current store and the device's signed roster admission. */
+  public async sharedReplica(): Promise<{ readonly project: SharedProject } | undefined> {
+    if (await this.sharedProjectRefusal() !== SHARED_PROJECT_REFUSAL) return undefined;
+    const { pending, opened } = await this.currentShared();
+    if ('problem' in opened || this.sharedOpen !== pending) return undefined;
+    const folder = opened.identity[0];
+    try {
+      const { roster } = await opened.project.state();
+      const head = roster.positions[roster.positions.length - 1];
+      const identity = await this.storeIdentity();
+      if (this.sharedOpen === pending && identity[0] === folder && folder !== 'missing' && folder !== 'unreadable' && identity[1] === (roster.positions.length > 1 ? head : null)) {
+        opened.identity = identity;
+        return opened.project.context().roster.isAdmitted(opened.project.deviceWriter, head) ? { project: opened.project } : undefined;
+      }
+    } catch {
+      // A refused fold must never hand out its previous project.
+    }
+    await this.dropShared(pending);
+    return undefined;
+  }
+  /** Reuses the projection until its verified fold or context changes. A refusal returns a broken replay. */
   private async sharedReplay(): Promise<LedgerReplay> {
     const { pending, opened } = await this.currentShared();
     if ('problem' in opened) return unavailableReplay(opened.problem);
     try {
       const { fold } = await opened.project.state();
-      // state() records the roster head in this device's mark: the identity is taken again, so the host's own mark writes never count as a change
-      // from outside. A change another window makes between the two is still met: the next state() reads it, or is refused and reopens below.
+      // The host's own mark update belongs to this read, so it does not cause the next read to reopen.
       opened.identity = await this.storeIdentity();
       const context = opened.project.context();
       const key = `${fold.order.length}|${fold.order[fold.order.length - 1] ?? ''}|${fold.checkpoint ?? ''}|${JSON.stringify(fold.digests)}`;
