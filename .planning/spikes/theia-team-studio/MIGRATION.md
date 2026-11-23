@@ -25,4 +25,4 @@ Run each group against the actual browser container. Installed and registered co
 
 The released 0.4.36 VSIX started under Theia 1.77. Chromium rendered the Setup, Team Studio, Chat, and Compare Models webviews, and opened the New Team wizard. Setup and Compare Models returned live webview objects from their command handlers, which caused an RPC encoding error. Controlled reruns with each handler returning no value opened the same view without that error.
 
-Team save and reopen, configured-provider behavior, restart persistence, and the rest of the workflow matrix still require verification.
+The locally built VSIX with both command fixes passed the same four webview checks in the Docker workbench without uncaught page errors. A synthetic team saved through the New Team wizard produced a Markdown file and reappeared in the library from a fresh browser session. Configured-provider behavior, credential persistence across container restart, and the rest of the workflow matrix still require verification.
