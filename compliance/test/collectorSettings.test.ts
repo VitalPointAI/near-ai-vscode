@@ -8,7 +8,7 @@ const now = new Date('2026-11-21T00:00:00Z');
 const sha = 'a'.repeat(40);
 const flag = (enabled: boolean) => ({ enabled });
 
-function protection(docs = false) {
+function protection(docs = true) {
   const checks = ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', ...(docs ? ['docs'] : [])]
     .map((context) => ({ context, app_id: 15368 }));
   return {
@@ -27,7 +27,7 @@ function environment(name: string) {
   };
 }
 
-const context = (docs = false): CollectorContext => ({
+const context = (docs = true): CollectorContext => ({
   now, commit: sha, readFile: async () => '',
   fetchJson: async (input) => {
     const { pathname } = new URL(input);
@@ -44,13 +44,15 @@ function replaceResponse(pathSuffix: string, reply: unknown, ctx = context()): C
   return { ...ctx, fetchJson: async (url, init) => new URL(url).pathname.endsWith(pathSuffix) ? reply : ctx.fetchJson!(url, init) };
 }
 
-test('main protection requires the documented flags and CI app sources, while docs remains visible', async () => {
+test('main protection requires the documented flags and CI app sources, docs among them', async () => {
   const rows = await collect();
   assert.equal(rows.find((row) => row.subject === 'required-checks')?.passed, true);
   assert.equal(rows.find((row) => row.subject === 'main-change-protection')?.passed, true);
-  assert.equal(rows.find((row) => row.subject === 'docs-required')?.passed, false);
+  assert.equal(rows.find((row) => row.subject === 'docs-required')?.passed, true);
   assert.equal(rows.find((row) => row.subject === 'review-required')?.passed, true);
-  assert.equal((await collect(context(true))).find((row) => row.subject === 'docs-required')?.passed, true);
+  const withoutDocs = await collect(context(false));
+  assert.equal(withoutDocs.find((row) => row.subject === 'docs-required')?.passed, false);
+  assert.equal(withoutDocs.find((row) => row.subject === 'required-checks')?.passed, false);
 });
 
 test('names without the right check app, non-strict checks and duplicate checks cannot pass', async () => {

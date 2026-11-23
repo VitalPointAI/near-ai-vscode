@@ -7,3 +7,9 @@
 /compliance/sources.json @ALuhning
 /compliance/catalogs/ @ALuhning
 /compliance/attestations/ @ALuhning
+/compliance/src/ @ALuhning
+/compliance/components/ @ALuhning
+/compliance/evidence-rules/ @ALuhning
+/compliance/responsibility/ @ALuhning
+/compliance/profiles/ @ALuhning
+/compliance/levels.json @ALuhning

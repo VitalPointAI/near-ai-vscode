@@ -128,7 +128,16 @@ test('a control no component implements is not met with reason no-statement', ()
   const { row } = fixtureRow(input({ components: [] }));
   assert.equal(row.state, 'not-met');
   assert.equal(row.reason, 'no-statement');
-  assert.equal(row.components.length, 0);
+  assert.deepEqual(row.components.map(({ component, state, reason }) => [component, state, reason]), [['tracer-fixture', 'not-met', 'no-statement']]);
+});
+
+test('one component meeting a control does not make it met while another in-scope component is silent', () => {
+  const level = { id: 'fixture', title: 'Fixture level', controls: catalogControls(), components: ['tracer-fixture', 'silent-service'] };
+  const { row, dashboard } = fixtureRow(input({ levels: [level] }));
+  assert.equal(row.state, 'partly-met');
+  assert.deepEqual(row.components.map(({ component, state, reason }) => [component, state, reason]),
+    [['tracer-fixture', 'met', 'met'], ['silent-service', 'not-met', 'no-statement']]);
+  assert.equal(dashboard.matrix.some((entry) => entry.component === 'silent-service'), false, 'a silent component adds no responsibility matrix row');
 });
 
 function statusInput(overrides: Partial<StatusInput> = {}): StatusInput {

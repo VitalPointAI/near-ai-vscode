@@ -82,7 +82,6 @@ function configuredResponsibility(control: string, component: string | undefined
   return 'product';
 }
 
-/** Builds the dashboard: one row per level and control in scope, each with one component row per component that implements the control. */
 /** Count rows by state; Stale is intentionally included in the not-met total. */
 export function countStates(rows: readonly Pick<DashboardRow, 'state'>[]): DashboardCounts {
   const counts = Object.fromEntries(STATES.map((state) => [state, 0])) as Record<State, number>;
@@ -95,6 +94,7 @@ export function fillReason(reason: keyof typeof REASONS, detail?: Readonly<Recor
   return REASONS[reason].replace(/\{(date|reason|text|question|provider)\}/g, (_match, key: string) => detail?.[key] ?? '');
 }
 
+/** Builds the dashboard: one row per level and control in scope, each with one component row per component in that level's scope. */
 export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const results = evaluateRules(input);
   const components = new Map(input.components.map((component) => [component.id, component]));
@@ -111,7 +111,10 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
         const implemented = components.get(componentId)?.implemented.find((requirement) => requirement.control === control);
         const tailoring = input.tailoring && notApplicableFor(input.tailoring, level.id, control, componentId);
         const exception = input.responsibilityTable?.exceptions.some((entry) => entry.control === control && entry.component === componentId);
-        if (!implemented && !tailoring && !exception) continue;
+        // An in-scope component that says nothing about the control is not skipped: it is assessed as "No statement yet" (or its family's
+        // reviewed responsibility), so one component's evidence never makes the whole control Met while another in-scope component is silent.
+        // A component the control does not apply to needs a reviewed tailoring record, as any other Not applicable does.
+        const declared = Boolean(implemented || tailoring || exception);
         const responsibility = configuredResponsibility(control, componentId, input.responsibilityTable, implemented?.responsibility);
         const statements = implemented?.statements ?? [];
         const rulesByStatement = implemented ? rulesFor(input.rules, componentId, control) : {};
@@ -144,7 +147,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
           ...(implemented?.inheritedFrom ? { inheritedFrom: implemented.inheritedFrom } : {})
         };
         componentRows.push(component);
-        if (level.claim !== false && outcome.state !== 'not-applicable' &&
+        if (declared && level.claim !== false && outcome.state !== 'not-applicable' &&
           (responsibility === 'shared' || responsibility === 'your-organization' || responsibility === 'inherited')) {
           matrix.set(`${control}:${componentId}`, {
             control,

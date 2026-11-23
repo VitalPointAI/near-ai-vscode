@@ -225,7 +225,7 @@ function sponsorResponse(control: Control, profile: Profile, duties: readonly st
     draft: 'We will confirm the applicable objective and resolve the product or evidence gap before proposing closure.' + responsibility,
     followUp: gaps.length
       ? `Review related gaps ${gaps.map(({ id }) => id).join(', ')}. Verify the applicable implementation and record closure evidence.`
-      : 'No closure path assigned. In Phase 44.1, record the accountable role, milestone, and required evidence or approved tailoring decision.'
+      : 'No closure path assigned yet. Record the accountable role, milestone, and required evidence or approved tailoring decision.'
   };
 }
 
@@ -439,7 +439,7 @@ This export uses the product evidence published for NEAR AI for VS Code v${evide
 The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
-- The coverage tab counts missing product and deployment evidence paths. The product gaps tab labels these actions Unassigned or Unassigned deployment. Phase 44.1 records a role, milestone, and closure evidence or approved tailoring decision for each applicable row.
+- The coverage tab counts missing product and deployment evidence paths. The product gaps tab labels these actions Unassigned or Unassigned deployment. Each applicable row is to receive a role, milestone, and closure evidence or approved tailoring decision.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - ${approval
     ? `The [Marketplace approval receipt](marketplace-approval.json) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`
