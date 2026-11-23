@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import Module from 'node:module';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
-import type { PrivacyModeSetting } from '../domain/config';
+import { createProjectCredentialScope, type OrganizationProfile } from '../domain/auth';
+import { DEFAULT_BASE_URL, type PrivacyModeSetting } from '../domain/config';
 import type { GuideInbound, GuideOutbound } from '../domain/setup/guideMessages';
 import { KIND_OF_WORK_STATE_KEY } from '../domain/setup/ids';
 import { createSetupRegistries } from '../domain/setup/registries';
 import type { OptionCheckInput } from '../domain/setup/viability';
+import { GATE_DIR_NAME } from '../gate/bundleStore';
+import { projectLogKey } from '../gate/decisionLog';
+import { SETUP_AUDIT_DIR } from '../gate/setupAuditLog';
+import { AuthService } from '../services/auth';
 import { memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
+import { createProjectGetStartedDeps } from '../services/setup/getStartedRun';
 import { createGuideController } from '../services/setup/guideController';
 import { createGateGuideChecks, routeFactsOf } from '../services/setup/guideFacts';
 import { readSetupGuide } from '../services/setup/projectStore';
 
 import { at, local, near, setup } from './helpers/getStartedHostFixture';
+import { MemorySecrets } from './helpers/teamHarness';
 
 test('route facts use the observed option and do not invent an unavailable route', () => {
   assert.equal(routeFactsOf(local, at), undefined);
@@ -88,6 +98,76 @@ test('Gate-backed checks use the current signed snapshot and cancel the register
   assert.deepEqual(sourceInput.candidates, []);
   assert.deepEqual(progress, []);
   assert.equal(sourceCalls, 1);
+});
+
+test('the Get Started run factory binds profile, writes and cancellation to the captured project', async () => {
+  const { host, root, storage } = await setup();
+  const otherRoot = await mkdtemp(path.join(tmpdir(), 'near-started-other-'));
+  const auth = new AuthService(new MemorySecrets());
+  const profile: OrganizationProfile = {
+    version: 1, profileId: 'profile-fixture', displayName: 'Fixture', organization: 'Fixture', provider: 'near-ai',
+    baseUrl: DEFAULT_BASE_URL, authMode: 'apiKey', validation: { status: 'valid' },
+    createdAt: new Date(at).toISOString(), updatedAt: new Date(at).toISOString()
+  };
+  const scopeFor = (projectRoot: string) => createProjectCredentialScope(projectRoot, profile.profileId);
+  await auth.saveScopedApiKey(scopeFor(root), 'fixture-first', DEFAULT_BASE_URL);
+  await auth.saveScopedApiKey(scopeFor(otherRoot), 'fixture-other', DEFAULT_BASE_URL);
+  let chosenRoot = root;
+  let firstProfile = true;
+  const configured: string[] = [];
+  const requests: (string | null)[] = [];
+  let notifyRequest!: () => void;
+  const otherRequest = new Promise<void>((resolve) => { notifyRequest = resolve; });
+  let otherSignal: AbortSignal | null | undefined;
+  const unexpected = () => assert.fail('the fixture must not probe or modify profiles');
+  const factory = createProjectGetStartedDeps({
+    project: () => ({ root: chosenRoot, name: 'Fixture' }), gate: host, auth, globalStorageDir: storage,
+    hostKind: 'container', machine: 'fixture', privacy: () => 'standard', clock: () => at,
+    landing: () => ({ land: unexpected }), onAuditFailure: unexpected,
+    local: { identify: unexpected, listModels: unexpected, localClient: unexpected },
+    configureConnection: async (projectRoot) => { configured.push(projectRoot); firstProfile = true; return true; },
+    profiles: (projectRoot) => ({
+      getScope: () => scopeFor(projectRoot),
+      getActiveProfile: async () => projectRoot === root && !firstProfile ? undefined : profile,
+      list: async () => [], select: unexpected, configure: unexpected,
+    }),
+    fetchFn: async (_url, init) => {
+      const credential = new Headers(init?.headers).get('authorization');
+      requests.push(credential);
+      if (credential !== 'Bearer fixture-other') return Response.json({ data: [] });
+      otherSignal = init?.signal;
+      notifyRequest();
+      return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true }));
+    },
+  });
+  const registries = createSetupRegistries();
+  const first = factory.createRun(undefined, registries);
+  chosenRoot = otherRoot;
+  const second = factory.createRun(undefined, registries);
+  assert.deepEqual([first.root, second.root], [root, otherRoot]);
+  const firstPolicy = await first.readPolicy(at);
+  assert.ok('route' in firstPolicy);
+  (await first.check(firstPolicy, () => {}, new AbortController().signal)).dispose();
+  assert.deepEqual(requests, ['Bearer fixture-first', 'Bearer fixture-first']);
+  assert.equal(first.apply.connection({ ...near, kind: 'org-server' }), undefined);
+  firstProfile = false;
+  assert.equal((await first.apply.connection(near)?.run())?.outcome, 'done');
+  assert.deepEqual(configured, [root]);
+  const written = await first.apply.audit.append('setup.guide.abandoned', { answers: {}, screen: 'kind-of-work', hostKind: 'container' });
+  assert.equal(written.ok, true);
+  const audit = await readFile(path.join(storage, GATE_DIR_NAME, SETUP_AUDIT_DIR, projectLogKey(root) + '.jsonl'), 'utf8');
+  assert.match(audit, /setup\.guide\.abandoned/);
+  assert.doesNotMatch(audit, /fixture-first|fixture-other/);
+
+  const secondPolicy = await second.readPolicy(at);
+  assert.ok('route' in secondPolicy);
+  const abort = new AbortController();
+  const running = second.check(secondPolicy, unexpected, abort.signal);
+  await Promise.race([otherRequest, running.then(() => assert.fail('the fixture request did not start'))]);
+  abort.abort();
+  await assert.rejects(running, { name: 'AbortError' });
+  assert.equal(otherSignal?.aborted, true);
+  assert.deepEqual(requests, ['Bearer fixture-first', 'Bearer fixture-first', 'Bearer fixture-other']);
 });
 
 test('the guide reviews and applies a viable private route through the real label writer and audit', async (t) => {

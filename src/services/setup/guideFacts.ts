@@ -13,7 +13,7 @@ import { isGetStartedTarget } from '../../domain/setup/ids';
 import type { SetupRegistries } from '../../domain/setup/registries';
 import type { IdentifyServer } from '../../domain/setup/servers';
 import type { StartSessionInput } from '../../domain/setup/session';
-import { CHECKING_CEILING_MS, type ViabilityResult } from '../../domain/setup/viability';
+import { CHECKING_CEILING_MS, type OptionSource, type ViabilityResult } from '../../domain/setup/viability';
 import type { GateHost } from '../../gate/host';
 import { floorFor } from '../privateRoute';
 import { memoryOnlyDeviceProvider } from './deviceFacts';
@@ -106,6 +106,7 @@ export function createGateGuideChecks(deps: {
   readonly hostKind: HostKind;
   readonly registries: Pick<SetupRegistries, 'devices' | 'options'>;
   readonly identify: IdentifyServer;
+  readonly projectSource?: OptionSource;
   readonly clock?: () => number;
 }): Pick<GuideControllerDeps, 'readPolicy' | 'check'> {
   const { gate, root, privacy, hostKind, registries, identify, clock = Date.now } = deps;
@@ -122,8 +123,12 @@ export function createGateGuideChecks(deps: {
           !isDeepStrictEqual(current.projectLabel, snapshot.projectLabel)) {
         throw new Error('The project rules changed before checking connections.');
       }
+      const sources = registries.options.active();
+      const { projectSource } = deps;
+      const useProjectSource = projectSource && !sources.some(({ id, supersedes }) =>
+        id === projectSource.id || supersedes?.includes(projectSource.id));
       return runViability({
-        sources: registries.options.active(), signal, onProgress: progress,
+        sources: useProjectSource ? [...sources, projectSource] : sources, signal, onProgress: progress,
         input: {
           now: clock, hostKind, device, identify, candidates: [], endpoints: current.route.endpoints,
           policyHash: current.hash, floorOn: current.floor !== undefined,
