@@ -169,7 +169,7 @@ test('without a working profile only the Connect panel shows, its words follow t
   assert.equal(parts['welcome-ready'].hidden, true, 'no Open-GSD cards and no team card');
   assert.equal(parts['welcome-choose-profile'].hidden, true);
   assert.equal(parts['welcome-connect-reason'].hidden, true);
-  assert.equal(parts['welcome-connect-title'].textContent, 'Connect NEAR AI to start');
+  assert.equal(parts['welcome-connect-title'].textContent, 'Connect AI to start');
   assert.equal(focus, parts['welcome-new-profile'], 'focus goes to Set up a new profile the first time');
   // A saved profile that needs its key checked: Choose a profile, with that reason.
   assert.equal(setup.applyWelcomeState(doc, 'choose', memory), undefined, 'not focused again');
@@ -196,7 +196,7 @@ test('with no folder open the panel asks to open one, and its button is the only
   // Once a folder is open (a new window), the usual Connect panel.
   setup.applyWelcomeState(doc, 'connect', { connectShown: true });
   assert.deepEqual(['welcome-new-profile', 'welcome-open-folder'].map((id) => parts[id].hidden), [false, true]);
-  assert.equal(parts['welcome-connect-title'].textContent, 'Connect NEAR AI to start');
+  assert.equal(parts['welcome-connect-title'].textContent, 'Connect AI to start');
 });
 
 test('the Connect panel never takes focus from a text box, a list, or a window in the background', () => {
@@ -234,7 +234,7 @@ test('when the Connect panel goes away under the focus, focus moves to the messa
 test('the sidebar HTML has the Connect panel, hidden until the profile is known, and the chat wires it', () => {
   const panel = readFileSync(path.join(ROOT, 'src', 'services', 'panelView.ts'), 'utf8');
   assert.match(panel, /<div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>/);
-  assert.match(panel, /<h2 id="welcome-connect-title">Connect NEAR AI to start<\/h2>/);
+  assert.match(panel, /<h2 id="welcome-connect-title">Connect AI to start<\/h2>/);
   assert.match(panel, /<button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile<\/button>/);
   assert.match(panel, /<button id="welcome-choose-profile" class="text-button" type="button" hidden>Choose a profile<\/button>/);
   assert.match(panel, /<p id="welcome-connect-reason" hidden><\/p>/);

@@ -12,7 +12,7 @@ export const MORE_SETUP_STEPS = 'More setup steps';
 
 export interface SetupMenuHost {
   secrets: Pick<vscode.SecretStorage, 'get'>;
-  /** Whether the NEAR AI chat is on screen now. */
+  /** Whether Chat is visible. */
   chatVisible?: () => boolean;
 }
 
@@ -47,10 +47,10 @@ export async function showSetupMenu(host: SetupMenuHost, options: { title?: stri
 export async function offerNextStep(_host: SetupMenuHost, profileName: string): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (root && !await projectHasTeam(root)) {
-    void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Your next steps are in the NEAR AI chat.`);
+    void vscode.window.showInformationMessage(`Models are ready for “${profileName}”. Open Chat for your next steps.`);
     return;
   }
-  void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
+  void vscode.window.showInformationMessage(`Models are ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
     if (choice === REVIEW_PROJECT_TEAM) await vscode.commands.executeCommand('nearAi.manageTeams');
     if (choice === MORE_SETUP_STEPS) await vscode.commands.executeCommand(PROJECT_SETUP_COMMAND);
   }).then(undefined, (error: unknown) => {

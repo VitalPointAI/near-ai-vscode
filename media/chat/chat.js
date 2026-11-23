@@ -41,7 +41,7 @@
   // The empty chat's "no team yet" card; without its helper the chat simply shows no card.
   // Without its helper, the chat shows the usual welcome rather than a blank one.
   const setupKit = window.nearSetup || { renderSetupNudge: () => undefined, welcomeState: () => 'ready', applyWelcomeState: () => { const ready = $('welcome-ready'); if (ready) ready.hidden = false; } };
-  // Until the project has a working profile, the welcome shows only the Connect NEAR AI panel.
+  // Until the project has a working profile, the welcome shows only the provider setup panel.
   const welcomeReady = $('welcome-ready') || welcome;
   // The "Pick up where you left off" card; without its helper the chat simply shows no card.
   const pickupKit = window.nearPickup || { renderPickupCard: () => undefined };
@@ -1400,7 +1400,7 @@
       case 'pickup-card': pickupKit.renderPickupCard(document, welcomeReady, m.model, post, () => input.focus()); break;
       case 'sync-status':
         syncKit.renderSyncControl(document, syncButton, m.model, post);
-        // The invitation sits in the ready area (shown once a profile works, after "Connect NEAR AI to start") and steps aside while the pick-up card carries its own (syncControl.js decides).
+        // The invitation sits in the ready area (shown once a profile works, after "Connect AI to start") and steps aside while the pick-up card carries its own (syncControl.js decides).
         syncKit.renderSyncPrompt(document, welcomeReady, post, m.prompt === true);
         break;
       case 'conversation-show': {
