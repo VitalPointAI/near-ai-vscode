@@ -441,6 +441,77 @@
     },
     {
       "controls": [
+        "au-01"
+      ],
+      "id": "G44",
+      "ownerRole": "owner",
+      "poam": "g44",
+      "remediation": "The deployment audit policy owner approves the scope, roles, responsibilities and audit procedures with the component and monitoring owners. Record who received the policy, its accountable official and review triggers, and confirm the procedures reflect the deployment boundary and applicable obligations.",
+      "title": "Deployment audit and accountability policy needs approval and operating records"
+    },
+    {
+      "controls": [
+        "au-03",
+        "au-03.01",
+        "au-12"
+      ],
+      "id": "G45",
+      "ownerRole": "shared",
+      "poam": "g45",
+      "remediation": "Extension, relay and hub maintainers map the approved AU-02 event inventory to generation tests for every assessed component. Capture redacted records proving event type, time, component or location, source, outcome and relevant actor or entity, plus each approved additional field. The deployment audit owner approves the list and verifies who can select the events. Document adjustments and retest omissions without exposing secrets or record payloads.",
+      "title": "Selected component events and audit record fields need coverage evidence"
+    },
+    {
+      "controls": [
+        "au-04",
+        "au-04.01"
+      ],
+      "id": "G46",
+      "ownerRole": "shared",
+      "poam": "g46",
+      "remediation": "The deployment logging operator and component owners document expected and peak volumes, retention, local buffer limits and capacity for all assessed sources. Verify scheduled offloading of audit records to the designated separate store and reconcile a measured sample from production and retrieval. Exercise delivery loss and recovery, track any unforwarded records, and retest gaps. Use Phase 84 for the relay runbook when the relay is in scope.",
+      "title": "Audit capacity planning and offloading need measured deployment evidence"
+    },
+    {
+      "controls": [
+        "au-06",
+        "au-06.01",
+        "au-06.03",
+        "au-06.04",
+        "au-12.01"
+      ],
+      "id": "G47",
+      "ownerRole": "shared",
+      "poam": "g47",
+      "remediation": "Deployment monitoring and incident response owners approve review cadence, review triggers, reporting recipients, and the sources and clock tolerance for a system-wide trail. Component maintainers provide redacted event samples. Demonstrate central review, correlation across repositories and automated routing of a harmless test event to the approved response process. Record measured clock tolerance, owner review and follow-up, then assign and retest coverage gaps.",
+      "title": "Audit review, centralized analysis and time correlation need operating evidence"
+    },
+    {
+      "controls": [
+        "au-07",
+        "au-07.01"
+      ],
+      "id": "G48",
+      "ownerRole": "shared",
+      "poam": "g48",
+      "remediation": "The deployment audit analyst and reporting system owner identify approved search and sorting fields and the reporting tool. Generate an on-demand review and a representative incident report from sanitized source records. Compare source checksums and record order before and after reduction to verify that the tool preserves original records. Assign missing capabilities to the component or monitoring owner and retest.",
+      "title": "Audit analysis and reports need authorized field searches and source integrity evidence"
+    },
+    {
+      "controls": [
+        "au-09",
+        "au-09.02",
+        "au-09.04",
+        "au-09.06"
+      ],
+      "id": "G49",
+      "ownerRole": "shared",
+      "poam": "g49",
+      "remediation": "Deployment logging and identity owners review the audit store topology and approved separation frequency. Verify the store is on a physically different system or component where required. Review the privileged roles authorized to administer logging, and the separate read-only roles. Test allowed reads, denied changes and deletions, and delivery of unauthorized-change alerts through an approved exercise. Component maintainers preserve scoped file permission evidence and investigate missing protection.",
+      "title": "Audit infrastructure separation, privileged roles and protection alerts need evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

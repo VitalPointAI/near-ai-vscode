@@ -1,0 +1,21 @@
+{
+  "gap": "G46",
+  "id": "g46",
+  "controls": [
+    "au-04",
+    "au-04.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Audit capacity planning and offloading need measured deployment evidence",
+  "remediation": "The deployment logging operator and component owners document expected and peak volumes, retention, local buffer limits and capacity for all assessed sources. Verify scheduled offloading of audit records to the designated separate store and reconcile a measured sample from production and retrieval. Exercise delivery loss and recovery, track any unforwarded records, and retest gaps. Use Phase 84 for the relay runbook when the relay is in scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved capacity and offload configuration with a volume sample, delivery reconciliation and recorded recovery"
+    },
+    {
+      "phase": "84",
+      "title": "Document relay offloading, retention and operator recovery for measured deployment verification"
+    }
+  ]
+}

@@ -2426,6 +2426,7 @@ health check connects only to itself; and no hub source file names a client netw
 
 | Limitation | Plan |
 | --- | --- |
+| The approval test verifies the extension's preflight and preview audit event types. Required audit fields and coverage across assessed components need separate evidence. | Deployment and component owners verify approved audit fields from each assessed source under G45. |
 | Approval attribution is verified for extension decisions. The deployment still needs evidence of authenticator issuance, protection, recovery, rotation and revocation. | The deployment identity owner documents credential lifecycle controls and samples issuance, recovery and denied use after revocation. |
 | Branch protection and an agent review do not establish the owner's approval for a protected environment or verify release-tag bypass authority. | Record each required protected deployment approval and authoritatively review the release-tag ruleset's bypass settings. |
 | The dependency audit and one verified policy remediation do not establish complete flaw coverage or that fixes were installed in a particular deployment. | Track findings through reviewed fixes and releases. Deployment operators verify installed versions and record patch deadlines and retest results. |

@@ -1,0 +1,19 @@
+{
+  "gap": "G49",
+  "id": "g49",
+  "controls": [
+    "au-09",
+    "au-09.02",
+    "au-09.04",
+    "au-09.06"
+  ],
+  "ownerRole": "shared",
+  "title": "Audit infrastructure separation, privileged roles and protection alerts need evidence",
+  "remediation": "Deployment logging and identity owners review the audit store topology and approved separation frequency. Verify the store is on a physically different system or component where required. Review the privileged roles authorized to administer logging, and the separate read-only roles. Test allowed reads, denied changes and deletions, and delivery of unauthorized-change alerts through an approved exercise. Component maintainers preserve scoped file permission evidence and investigate missing protection.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved topology and privileged role assignments, redacted access checks, and a verified unauthorized-change alert receipt"
+    }
+  ]
+}
