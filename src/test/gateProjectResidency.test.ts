@@ -67,6 +67,23 @@ test('a project file without the layer key leaves the route policy unchanged', a
   assert.equal(JSON.stringify(runtime.routePolicy?.(FIXED_NOW)), JSON.stringify(before));
 });
 
+test('one Gate host keeps restrictions scoped to the runtime project', async () => {
+  const restricted = await fixture(canada);
+  const unrestricted = await fixture('{}');
+  const { host } = restricted;
+  const source = createProjectLayerSource({ readFileSync, statSync, scales: () => host.labelPolicy().scales, now: () => FIXED_NOW });
+  const registration = host.useProjectLayerSource(source.read);
+  const otherRuntime = await host.runtimeFor({
+    root: unrestricted.root, actor: { kind: 'agent', sessionId: 'other-project' }, presence: 'person', context: 'interactive'
+  });
+
+  assert.equal(route(NEAR, restricted.runtime.routePolicy?.(FIXED_NOW)).rule, 'route.residency');
+  assert.equal(route(NEAR, otherRuntime.routePolicy?.(FIXED_NOW)).allowed, true);
+  assert.equal(route(NEAR, restricted.runtime.routePolicy?.(FIXED_NOW)).rule, 'route.residency');
+  registration.dispose();
+  assert.equal(route(NEAR, restricted.runtime.routePolicy?.(FIXED_NOW)).allowed, true);
+});
+
 test('sessionless routes also use the open project rule', async () => {
   const { host } = await fixture(canada);
   const session = host.sessionRouteWithoutContext();

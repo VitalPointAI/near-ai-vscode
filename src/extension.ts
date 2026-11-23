@@ -1,3 +1,4 @@
+import { readFileSync, statSync } from 'node:fs';
 import * as vscode from 'vscode';
 import { redactSecrets } from './domain/redaction';
 import { homeFolder, startTeamsMove } from './domain/teamStorage';
@@ -55,6 +56,7 @@ import { openConversationIds } from './services/chat';
 import { deriveProfileId } from './domain/auth';
 import { DEFAULT_BASE_URL, isNearCloudEndpoint, isSecureEndpoint } from './domain/config';
 import { isLoopbackConnection, supportsReviewedConnection, type ReviewedConnection } from './services/setup/applyConnection';
+import { createProjectLayerSource } from './services/setup/projectStore';
 import { registerChatParticipant } from './services/chatParticipant';
 import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
@@ -140,6 +142,8 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   // A person's decisions on staff products (approve, reject, release, withdraw) are these commands only; no agent tool reaches them.
   registerStaffCommands(context);
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
+  const projectLayerSource = createProjectLayerSource({ readFileSync, statSync, scales: () => gate.labelPolicy().scales, now: Date.now });
+  context.subscriptions.push(gate.useProjectLayerSource(projectLayerSource.read));
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
   registerStaffRoom(context, gate, sidebar);
