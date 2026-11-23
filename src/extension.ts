@@ -54,7 +54,7 @@ import { NearAiPanelViewProvider } from './services/panelView';
 import { openConversationIds } from './services/chat';
 import { deriveProfileId } from './domain/auth';
 import { DEFAULT_BASE_URL, isNearCloudEndpoint, isSecureEndpoint } from './domain/config';
-import { isLoopbackEndpointHost } from './domain/gate/endpoints';
+import { isLoopbackConnection, supportsReviewedConnection, type ReviewedConnection } from './services/setup/applyConnection';
 import { registerChatParticipant } from './services/chatParticipant';
 import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
@@ -289,27 +289,35 @@ async function saveCheckpoint(): Promise<void> {
 
 /** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
 export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider,
-  options: { offerNextStep?: boolean; projectRoot?: string } = {}): Promise<void> {
+  options: { offerNextStep?: boolean; projectRoot?: string; reviewedConnection?: ReviewedConnection } = {}): Promise<void> {
   const getLegacyRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const scoped = options.projectRoot !== undefined;
   const root = options.projectRoot ?? getLegacyRoot();
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
-  const kind = await vscode.window.showQuickPick([
+  const reviewed = options.reviewedConnection;
+  if (reviewed && (!scoped || !supportsReviewedConnection(reviewed))) {
+    void vscode.window.showWarningMessage('Check the connection in Get Started before setting it up.');
+    return;
+  }
+  const fixedLocal = reviewed && 'localBaseUrl' in reviewed ? reviewed.localBaseUrl : undefined;
+  const fixedCloud = reviewed && 'nearBaseUrl' in reviewed ? reviewed.nearBaseUrl : undefined;
+  const provider = reviewed?.provider ?? (await vscode.window.showQuickPick([
     { label: 'NEAR AI Cloud', description: 'Private TEE models and others NEAR forwards; needs an API key', provider: 'near-ai' as const },
     { label: 'Local runtime', description: 'Ollama, LM Studio, vLLM, or any OpenAI-compatible server on this machine', provider: 'local' as const },
     { label: 'NEAR AI Cloud + local runtime', description: 'Both: pick a local or a cloud model for each chat', provider: 'hybrid' as const }
-  ], { title: 'NEAR AI Set Up', placeHolder: 'Where should models run?', ignoreFocusOut: true });
-  if (!kind) return;
-  const usesLocal = kind.provider !== 'near-ai';
-  const usesCloud = kind.provider !== 'local';
-  const scopedCloudEndpoint = scoped && usesCloud
+  ], { title: 'NEAR AI Set Up', placeHolder: 'Where should models run?', ignoreFocusOut: true }))?.provider;
+  if (!provider) return;
+  const usesLocal = provider !== 'near-ai';
+  const usesCloud = provider !== 'local';
+  const scopedCloudEndpoint = fixedCloud ?? (scoped && usesCloud
     ? vscode.workspace.getConfiguration('nearAi', vscode.Uri.file(root)).get<string>('baseUrl', DEFAULT_BASE_URL)
-    : undefined;
+    : undefined);
   if (scopedCloudEndpoint !== undefined && (!scopedCloudEndpoint.trim() || !isNearCloudEndpoint(scopedCloudEndpoint))) {
     void vscode.window.showWarningMessage('Get Started requires the NEAR AI Cloud endpoint for a cloud connection.');
     return;
   }
-  const steps = 2 + (usesLocal ? 2 : 0) + (usesCloud ? 1 : 0);
+  const localSteps = usesLocal ? (fixedLocal === undefined ? 2 : 1) : 0;
+  const steps = 2 + localSteps + (usesCloud ? 1 : 0);
   let step = 0;
   const title = () => `NEAR AI Set Up (${++step}/${steps})`;
   const projectName = scoped
@@ -322,15 +330,10 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   if (!displayName) return;
   const organization = await vscode.window.showInputBox({ title: title(), prompt: 'Organization or company (optional, used for cost reports)', placeHolder: displayName, ignoreFocusOut: true });
   if (organization === undefined) return;
-  let localBaseUrl: string | undefined;
+  let localBaseUrl = fixedLocal;
   let localApiKey = '';
-  if (usesLocal) {
-    const loopback = (value: string) => {
-      if (!isSecureEndpoint(value)) return false;
-      const url = new URL(value);
-      return isLoopbackEndpointHost(url.hostname) && !url.username && !url.password && !url.search && !url.hash;
-    };
-    const validEndpoint = scoped ? loopback : isSecureEndpoint;
+  if (usesLocal && localBaseUrl === undefined) {
+    const validEndpoint = scoped ? isLoopbackConnection : isSecureEndpoint;
     const invalidEndpoint = scoped ? 'Use a local runtime address on this computer.' : 'Use http://localhost, http://127.0.0.1, or an https:// URL.';
     const prompt = scoped
       ? 'Local runtime URL on this computer (OpenAI-compatible, ending in /v1).'
@@ -340,8 +343,10 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
       validateInput: (value) => validEndpoint(value.trim()) ? undefined : invalidEndpoint
     }))?.trim();
     if (!entered) return;
-    if (scoped && !loopback(entered)) return;
+    if (scoped && !isLoopbackConnection(entered)) return;
     localBaseUrl = entered.replace(/\/$/, '');
+  }
+  if (usesLocal) {
     const key = await vscode.window.showInputBox({ title: title(), prompt: 'API key for the local runtime (leave empty if it needs none)', password: true, ignoreFocusOut: true });
     if (key === undefined) return;
     localApiKey = key.trim();
@@ -355,13 +360,13 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
     if (!key) return;
     cloudApiKey = key;
   }
-  const suffix = kind.provider === 'local' ? ' (local)' : kind.provider === 'hybrid' ? ' (cloud + local)' : '';
-  const input = kind.provider === 'local'
+  const suffix = provider === 'local' ? ' (local)' : provider === 'hybrid' ? ' (cloud + local)' : '';
+  const input = provider === 'local'
     ? { baseUrl: localBaseUrl!, apiKey: localApiKey, localApiKey: '' }
-    : { baseUrl: scopedCloudEndpoint ?? readSettings().baseUrl, apiKey: cloudApiKey, localApiKey, ...(kind.provider === 'hybrid' ? { localBaseUrl } : {}) };
+    : { baseUrl: scopedCloudEndpoint ?? readSettings().baseUrl, apiKey: cloudApiKey, localApiKey, ...(provider === 'hybrid' ? { localBaseUrl } : {}) };
   try {
     const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: usesCloud ? 'Checking your NEAR AI key…' : 'Connecting to the local runtime…' }, () =>
-      new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider: kind.provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
+      new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
     clearProviderCache();
     if (profile.validation.status === 'valid') {
       if (scoped && root !== getLegacyRoot()) {

@@ -1,12 +1,13 @@
 import { deriveProfileId, type OrganizationProfile } from '../../domain/auth';
-import { isSecureEndpoint } from '../../domain/config';
+import { isNearCloudEndpoint, isSecureEndpoint } from '../../domain/config';
+import { isLoopbackEndpointHost } from '../../domain/gate/endpoints';
 import type { ViabilityResult } from '../../domain/setup/viability';
 import type { ProfileStore } from '../profileStore';
 import type { ApplyStep } from './apply';
 
 export type ProfileSlice = Pick<ProfileStore, 'getActiveProfile' | 'list' | 'select' | 'configure'>;
 
-type DesiredProfile =
+export type ReviewedConnection =
   | { readonly provider: 'local'; readonly localBaseUrl: string }
   | { readonly provider: 'near-ai'; readonly nearBaseUrl: string }
   | { readonly provider: 'hybrid'; readonly localBaseUrl: string; readonly nearBaseUrl: string };
@@ -21,8 +22,18 @@ function normalizedBase(value: string): string | undefined {
   }
 }
 
+export function isLoopbackConnection(value: string): boolean {
+  const base = normalizedBase(value);
+  return base !== undefined && isLoopbackEndpointHost(new URL(base).hostname);
+}
+
+export function supportsReviewedConnection(connection: ReviewedConnection): boolean {
+  return (!('localBaseUrl' in connection) || isLoopbackConnection(connection.localBaseUrl)) &&
+    (!('nearBaseUrl' in connection) || Boolean(connection.nearBaseUrl.trim()) && isNearCloudEndpoint(connection.nearBaseUrl));
+}
+
 /** Translate only the standard connection types the profile store can configure. */
-export function profileFor(chosen: readonly ViabilityResult[]): DesiredProfile | undefined {
+export function profileFor(chosen: readonly ViabilityResult[]): ReviewedConnection | undefined {
   let localBaseUrl: string | undefined;
   let nearBaseUrl: string | undefined;
   for (const option of chosen) {
@@ -46,7 +57,7 @@ export function profileFor(chosen: readonly ViabilityResult[]): DesiredProfile |
   return undefined;
 }
 
-function matches(profile: OrganizationProfile | undefined, desired: DesiredProfile): boolean {
+function matches(profile: OrganizationProfile | undefined, desired: ReviewedConnection): boolean {
   if (!profile || profile.provider !== desired.provider || profile.validation.status !== 'valid') return false;
   if (desired.provider === 'local') return normalizedBase(profile.baseUrl) === desired.localBaseUrl;
   return normalizedBase(profile.baseUrl) === desired.nearBaseUrl &&
@@ -58,7 +69,7 @@ export function connectionStep(input: {
   readonly profiles: ProfileSlice;
   readonly chosen: readonly ViabilityResult[];
   readonly projectName: string;
-  configureConnection(): Promise<boolean>;
+  configureConnection(reviewed: ReviewedConnection): Promise<boolean>;
 }): ApplyStep {
   const { root, profiles, chosen, projectName } = input;
   const desired = profileFor(chosen);
@@ -87,7 +98,7 @@ export function connectionStep(input: {
           return waiting;
         }
       }
-      return await input.configureConnection() && matches(await profiles.getActiveProfile(), desired) ? done : waiting;
+      return await input.configureConnection(desired) && matches(await profiles.getActiveProfile(), desired) ? done : waiting;
     }
   };
 }

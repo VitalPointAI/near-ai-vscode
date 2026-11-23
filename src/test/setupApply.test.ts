@@ -369,7 +369,8 @@ test('a connection requiring a key delegates to the existing flow and rechecks w
       select: async () => assert.fail('no saved hybrid profile exists'),
       configure: async () => assert.fail('the guide must hand key entry to the existing flow')
     },
-    async configureConnection() {
+    async configureConnection(reviewed) {
+      assert.deepEqual(reviewed, { provider: 'hybrid', nearBaseUrl: chosen.routeFacts?.host, localBaseUrl });
       prompts++;
       if (accepted) active = { ...profile, provider: 'hybrid', localBaseUrl };
       return accepted;

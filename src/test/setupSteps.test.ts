@@ -393,7 +393,7 @@ test('a caller with its own next steps (offerNextStep: false) gets only the read
   assert.deepEqual(executed, []);
 });
 
-test('connection setup keeps the explicitly selected project through a failed attempt and workspace reorder', async () => {
+test('reviewed connection setup keeps the exact provider, endpoint and project through retry', async () => {
   reset();
   const root = await emptyProject();
   const otherRoot = await emptyProject();
@@ -402,14 +402,13 @@ test('connection setup keeps the explicitly selected project through a failed at
   const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
   const { ProfileStore } = load<typeof import('../services/profileStore')>('../services/profileStore');
   const auth = new AuthService(new MemorySecrets());
-  inputBoxes = ['Scoped project', '', 'http://127.0.0.1:11434/v1', 'fixture-local-key',
-    'Scoped project', '', 'http://127.0.0.1:11434/v1', 'fixture-local-key'];
-  quickPick = (items) => items.find((item) => item.provider === 'local');
+  const localBaseUrl = 'http://127.0.0.1:5678/v1';
+  inputBoxes = ['Scoped project', '', 'fixture-local-key', 'Scoped project', '', 'fixture-local-key'];
   const originalFetch = globalThis.fetch;
   const originalError = vscodeStub.window.showErrorMessage;
   let attempts = 0;
   globalThis.fetch = async (input) => {
-    assert.equal(String(input), 'http://127.0.0.1:11434/v1/models');
+    assert.equal(String(input), localBaseUrl + '/models');
     return ++attempts === 1 ? new Response('{}', { status: 400 }) : Response.json({ data: [{ id: 'fixture' }] });
   };
   vscodeStub.window.showErrorMessage = async () => {
@@ -419,7 +418,9 @@ test('connection setup keeps the explicitly selected project through a failed at
   let refreshed = 0;
   try {
     await configureApiKey({ ...context, secrets: new MemorySecrets() } as never, auth,
-      { refresh: async () => { refreshed++; } } as never, { projectRoot: root, offerNextStep: false });
+      { refresh: async () => { refreshed++; } } as never, {
+        projectRoot: root, offerNextStep: false, reviewedConnection: { provider: 'local', localBaseUrl }
+      });
   } finally {
     globalThis.fetch = originalFetch;
     vscodeStub.window.showErrorMessage = originalError;
@@ -429,9 +430,11 @@ test('connection setup keeps the explicitly selected project through a failed at
   const saved = await own.getActiveProfile();
   assert.ok(saved);
   assert.equal(saved.validation.status, 'valid');
-  assert.equal(await auth.getScopedApiKeyFor(own.getScope(saved.profileId), 'http://127.0.0.1:11434/v1'), 'fixture-local-key');
+  assert.equal(saved.baseUrl, localBaseUrl);
+  assert.equal(await auth.getScopedApiKeyFor(own.getScope(saved.profileId), localBaseUrl), 'fixture-local-key');
   assert.deepEqual(await new ProfileStore(otherRoot, auth).list(), []);
   assert.equal(refreshed, 0);
+  assert.deepEqual(picks, []);
   assert.deepEqual(executed, []);
   assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Scoped project (local)”.', items: [] }]);
 });
@@ -466,12 +469,50 @@ test('explicit connection setup refuses mismatched cloud and named local endpoin
     inputBoxes = ['Profile name', '', 'https://named.example/v1', 'fixture-local-key'];
     await configureApiKey(app, auth, sidebar, { projectRoot: root });
     assert.deepEqual(inputBoxes, ['fixture-local-key']);
+    const pickerCount = picks.length;
+    await configureApiKey(app, auth, sidebar, {
+      projectRoot: root, reviewedConnection: { provider: 'local', localBaseUrl: 'https://named.example/v1' }
+    });
+    assert.deepEqual(inputBoxes, ['fixture-local-key']);
+    assert.equal(picks.length, pickerCount);
   } finally {
     globalThis.fetch = originalFetch;
     vscodeStub.workspace.getConfiguration = originalConfiguration;
   }
   assert.deepEqual(await new ProfileStore(root, auth).list(), []);
   assert.equal(storage.values.size, 0);
+});
+
+test('reviewed cloud connection ignores a different configured endpoint', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }];
+  const { configureApiKey } = load<typeof import('../extension')>('../extension');
+  const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
+  const { ProfileStore } = load<typeof import('../services/profileStore')>('../services/profileStore');
+  const auth = new AuthService(new MemorySecrets());
+  settings.baseUrl = 'https://different.example/v1';
+  inputBoxes = ['Cloud project', '', 'fixture-cloud-key'];
+  const nearBaseUrl = 'https://cloud-api.near.ai/v1';
+  const targets: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    targets.push(String(input));
+    assert.equal(new URL(String(input)).origin, new URL(nearBaseUrl).origin);
+    return Response.json({ data: [] });
+  };
+  try {
+    await configureApiKey(context as never, auth, { refresh: async () => undefined } as never, {
+      projectRoot: root, offerNextStep: false, reviewedConnection: { provider: 'near-ai', nearBaseUrl }
+    });
+  } finally { globalThis.fetch = originalFetch; }
+  const own = new ProfileStore(root, auth);
+  const saved = await own.getActiveProfile();
+  assert.ok(saved);
+  assert.equal(saved.baseUrl, nearBaseUrl);
+  assert.equal(await auth.getScopedApiKeyFor(own.getScope(saved.profileId), nearBaseUrl), 'fixture-cloud-key');
+  assert.ok(targets.includes(nearBaseUrl + '/models'));
+  assert.deepEqual(picks, []);
 });
 
 test('NEAR AI: Set Up a New Profile runs the key setup straight away, then points to the chat', async () => {

@@ -1,5 +1,4 @@
 import type { PrivacyModeSetting } from '../../domain/config';
-import { isLoopbackEndpointHost } from '../../domain/gate/endpoints';
 import type { OpenGetStartedRequest } from '../../domain/setup/answers';
 import type { HostKind } from '../../domain/setup/device';
 import type { LandingPort } from '../../domain/setup/landing';
@@ -11,7 +10,7 @@ import { SetupAuditLog } from '../../gate/setupAuditLog';
 import type { AuthService } from '../auth';
 import type { PolicyEditorPort } from '../policyEditorWiring';
 import { ProfileStore } from '../profileStore';
-import { connectionStep, profileFor, type ProfileSlice } from './applyConnection';
+import { connectionStep, profileFor, supportsReviewedConnection, type ProfileSlice, type ReviewedConnection } from './applyConnection';
 import type { GetStartedDeps } from './getStarted';
 import { createGateGuideChecks } from './guideFacts';
 import type { LocalServersDeps } from './localServersOption';
@@ -32,7 +31,7 @@ export function createProjectGetStartedDeps(deps: {
   readonly local: LocalServersDeps;
   readonly landing: (project: GuideProject, request?: OpenGetStartedRequest) => LandingPort;
   readonly onAuditFailure: (message: string) => void;
-  readonly configureConnection: (root: string) => Promise<boolean>;
+  readonly configureConnection: (root: string, reviewed: ReviewedConnection) => Promise<boolean>;
   readonly projectLayerSource?: { invalidate(root: string): void };
   readonly policyEditor?: Pick<PolicyEditorPort, 'propose'>;
   readonly discovery?: (project: GuideProject, audit: SetupAuditLog) => GuideDiscoveryPort;
@@ -75,10 +74,9 @@ export function createProjectGetStartedDeps(deps: {
           connection(result) {
             // A generic local profile cannot preserve the verified pin for a named server.
             const desired = profileFor([result]);
-            if (!desired || result.kind === 'org-server' ||
-                desired.provider === 'local' && !isLoopbackEndpointHost(new URL(desired.localBaseUrl).hostname)) return undefined;
+            if (!desired || result.kind === 'org-server' || !supportsReviewedConnection(desired)) return undefined;
             return connectionStep({ root, profiles, chosen: [result], projectName: name,
-              configureConnection: () => deps.configureConnection(root) });
+              configureConnection: (reviewed) => deps.configureConnection(root, reviewed) });
           },
         },
       };

@@ -114,7 +114,7 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   await auth.saveScopedApiKey(scopeFor(otherRoot), 'fixture-other', DEFAULT_BASE_URL);
   let chosenRoot = root;
   let firstProfile = true;
-  const configured: string[] = [];
+  const configured: unknown[] = [];
   const requests: (string | null)[] = [];
   let notifyRequest!: () => void;
   const otherRequest = new Promise<void>((resolve) => { notifyRequest = resolve; });
@@ -125,7 +125,7 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
     hostKind: 'container', machine: 'fixture', privacy: () => 'standard', clock: () => at,
     landing: () => ({ land: unexpected }), onAuditFailure: unexpected,
     local: { identify: unexpected, listModels: unexpected, localClient: unexpected },
-    configureConnection: async (projectRoot) => { configured.push(projectRoot); firstProfile = true; return true; },
+    configureConnection: async (projectRoot, reviewed) => { configured.push([projectRoot, reviewed]); firstProfile = true; return true; },
     profiles: (projectRoot) => ({
       getScope: () => scopeFor(projectRoot),
       getActiveProfile: async () => projectRoot === root && !firstProfile ? undefined : profile,
@@ -152,7 +152,7 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   assert.equal(first.apply.connection({ ...near, kind: 'org-server' }), undefined);
   firstProfile = false;
   assert.equal((await first.apply.connection(near)?.run())?.outcome, 'done');
-  assert.deepEqual(configured, [root]);
+  assert.deepEqual(configured, [[root, { provider: 'near-ai', nearBaseUrl: DEFAULT_BASE_URL }]]);
   const written = await first.apply.audit.append('setup.guide.abandoned', { answers: {}, screen: 'kind-of-work', hostKind: 'container' });
   assert.equal(written.ok, true);
   const audit = await readFile(path.join(storage, GATE_DIR_NAME, SETUP_AUDIT_DIR, projectLogKey(root) + '.jsonl'), 'utf8');
