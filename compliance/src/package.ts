@@ -215,7 +215,7 @@ export function buildPackage(options: PackageOptions): PackageResult {
   const collectors = dashboard.collectors as readonly { id: string; window: string }[];
   const generatedAt = dashboard.generatedAt;
   for (const level of levels) {
-    const rows = dashboard.rows.filter((row) => row.level === level.id);
+    const rows = dashboard.rows.flatMap((row, dashboardIndex) => row.level === level.id ? [{ ...row, dashboardIndex }] : []);
     const input: SspInput = { level: { ...level, profile: `../${level.profile}` }, rows, components: loaded.components, generatedAt };
     const ssp = buildSsp(input);
     validateDocument(level.id, ssp, 'system-security-plan');

@@ -106,6 +106,35 @@ test('unmet and stale evidence become findings against published statements in e
   }
 });
 
+test('a partial control retains an unsatisfied finding linked to its exact bundled evidence row', () => {
+  const bundle = output();
+  cpSync(fixture, bundle, { recursive: true });
+  const dashboardFile = path.join(bundle, 'dashboard', 'dashboard.json');
+  const dashboard = JSON.parse(readFileSync(dashboardFile, 'utf8'));
+  const rowIndex = dashboard.rows.findIndex(({ level, control }: { level: string; control: string }) =>
+    level === 'protected-a' && control === 'ac-01');
+  assert.ok(rowIndex > 0, 'the row index includes preceding entries from other levels');
+  const row = dashboard.rows[rowIndex];
+  row.state = 'partly-met';
+  row.reason = 'limitation';
+  row.reasonText = 'Deployment verification remains open.';
+  writeFileSync(dashboardFile, JSON.stringify(dashboard));
+  writeManifest(bundle, { createdAt: dashboard.generatedAt, commit: dashboard.commit });
+
+  const { directory, verify } = buildPackage({ release: 'v0.4.99', bundle, out: output() });
+  const resultsFile = path.join(directory, 'oscal', 'assessment-results-protected-a.json');
+  const results = JSON.parse(readFileSync(resultsFile, 'utf8'))['assessment-results'];
+  const [finding] = results.results[0].findings;
+  assert.equal(finding.target.status.state, 'not-satisfied');
+  assert.equal(finding.props[0].value, 'partly-met');
+  assert.equal(finding.description, row.reasonText);
+  const [href, pointer] = finding.links[0].href.split('#');
+  const evidence = JSON.parse(readFileSync(path.resolve(path.dirname(resultsFile), href), 'utf8'));
+  assert.equal(pointer, `/rows/${rowIndex}`);
+  assert.deepEqual(evidence.rows[rowIndex], row);
+  verify();
+});
+
 test('package CSVs carry dashboard responsibilities and the full ITSG-33 crosswalk', () => {
   const result = buildPackage({ release: 'v0.4.99', bundle: fixture, out: output() });
   const matrix = readFileSync(path.join(result.directory, 'readable/responsibility-matrix.csv'), 'utf8');
