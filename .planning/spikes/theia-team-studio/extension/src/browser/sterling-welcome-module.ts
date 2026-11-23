@@ -9,6 +9,11 @@ import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import './sterling-welcome.css';
 
 const welcomeId = 'sterling-get-started';
+const edition = {
+  label: 'Canadian Edition',
+  hero: 'sterling-hero-ca.webp',
+  workbenchClass: 'sterling-ca'
+};
 const chatContainerId = 'plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer';
 const destinations = [
   { label: 'Projects', icon: 'folder-opened', description: 'Set up your project and choose how it works.', command: 'nearAi.projectSetup' },
@@ -29,15 +34,18 @@ class SterlingWelcomeWidget extends BaseWidget {
   protected initialize(): void {
     this.id = welcomeId;
     this.title.label = 'Get Started';
-    this.title.caption = 'Sterling';
+    this.title.caption = `Sterling Sovereign AI (${edition.label})`;
     this.title.closable = true;
     this.node.tabIndex = -1;
     this.addClass('sterling-welcome');
     this.node.innerHTML = `
       <main class="sterling-page">
-        <header class="sterling-wordmark"><img width="1600" height="595" alt="Sterling"></header>
+        <header class="sterling-wordmark">
+          <img width="1600" height="595" alt="Sterling">
+          <span class="sterling-edition">${edition.label}</span>
+        </header>
         <section class="sterling-hero" aria-labelledby="sterling-title">
-          <img class="sterling-hero-image" src="sterling-hero.webp" alt="" decoding="async">
+          <img class="sterling-hero-image" src="${edition.hero}" alt="" decoding="async">
           <div class="sterling-hero-glow" aria-hidden="true"></div>
           <button type="button" class="sterling-motion" aria-label="Pause hero animation" title="Pause hero animation">
             <i class="codicon codicon-debug-pause" aria-hidden="true"></i>
@@ -121,6 +129,7 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   protected readonly commandRegistry!: CommandRegistry;
 
   onStart(app: FrontendApplication): void {
+    app.shell.addClass(edition.workbenchClass);
     const { tabBar } = app.shell.rightPanelHandler;
     let openingChat = false;
     let chatOpened = false;

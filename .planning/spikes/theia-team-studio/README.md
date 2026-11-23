@@ -55,3 +55,11 @@ See [Theia migration and acceptance](MIGRATION.md) for the full extension cutove
 The built-in ImageGen tool generated [the Sterling hero](extension/assets/sterling-hero.webp). The app animates the image and a light sweep in CSS and honors reduced-motion preferences.
 
 > Editorial 3D hero image for the Sterling sovereign AI desktop workbench. A polished, monumental brushed-silver torus assembled from precisely machined interlocking arc segments floats above a dark graphite circular platform. A fine translucent icy-blue light traces one arc and echoes in thin concentric rings on the floor. Futuristic, architectural, restrained and tactile, with a soft cobalt atmospheric horizon, deep ink shadows, realistic metal reflections and a little film grain. Wide landscape composition, sculpture centred around 56% width, usable empty dark navy first quarter on the left for HTML text, generous framing. Clean high-end industrial photography, no text, no logos, no interface, no watermark.
+
+### Canadian Edition
+
+The Canadian Edition uses [the maple leaf hero](extension/assets/sterling-hero-ca.webp). The welcome page’s edition artwork, label, and shell accent class are paired in [the welcome module](extension/src/browser/sterling-welcome-module.ts) for future Sterling territories. The original hero remains available as a shared asset.
+
+ImageGen edit prompt:
+
+> Edit the supplied Sterling Sovereign AI hero with one localized change. Add a single clearly recognizable Canadian red maple leaf, matching the iconic symmetrical 11-point silhouette on Canada's flag, suspended at the exact visual center of the open steel ring. Make it a crisp, premium red enamel emblem with subtle dimensionality and a faint cool rim reflection from the blue light, facing the camera. Give it breathing room around all points within the opening, about 55% of the opening's width. Preserve the ring, camera position, framing, platform, dark navy and cobalt lighting, and especially the dark negative space on the left for webpage typography. Keep the same wide landscape composition. No flag rectangle, no extra symbols, no lettering, no watermark.

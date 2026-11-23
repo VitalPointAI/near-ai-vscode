@@ -31,7 +31,7 @@
     "target": "browser",
     "frontend": {
       "config": {
-        "applicationName": "Sterling"
+        "applicationName": "Sterling Sovereign AI"
       }
     }
   }
