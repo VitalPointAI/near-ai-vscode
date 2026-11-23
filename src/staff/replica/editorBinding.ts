@@ -19,8 +19,8 @@ export interface BoundDocumentChange {
 export interface BoundDocument {
   readonly version: number;
   getText(): string;
-  /** Apply against baseVersion only. An applied edit emits one change event with the new text. */
-  applyEdits(edits: readonly DocumentEdit[], expectedText: string, baseVersion: number): Promise<boolean>;
+  /** Apply against baseVersion only. Set the editor EOL when requested and emit one event with the new text. */
+  applyEdits(edits: readonly DocumentEdit[], expectedText: string, baseVersion: number, lineEndings?: 'lf'): Promise<boolean>;
   onDidChange(listener: (change: BoundDocumentChange) => void): () => void;
 }
 
@@ -38,6 +38,20 @@ export const UNDO_OWN_TEXT = 'Undo in a shared product removes only your own cha
 const MISMATCH_TEXT = 'The editor no longer matches the shared product. Close the product and open it again.';
 const HEADER_NOTICE_INTERVAL_MS = 500;
 const BATCH_MS = 500;
+
+const lf = (text: string): string => text.replaceAll('\r\n', '\n');
+
+/** Translate offsets only when queued input and the shared body still differ in line endings. */
+function offsetInBody(offset: number, raw: string, body: string): number {
+  if (raw === body) return offset;
+  let remaining = lf(raw.slice(0, offset)).length;
+  let index = 0;
+  while (index < body.length && remaining > 0) {
+    index += body.startsWith('\r\n', index) ? 2 : 1;
+    remaining -= 1;
+  }
+  return index;
+}
 
 /** Consecutive delete and insert operations form one replacement against the old document. */
 function editsOf(operations: readonly TextOp[], start: number): DocumentEdit[] {
@@ -73,7 +87,9 @@ interface ExpectedEdit {
 export class EditorBinding {
   private readonly expected: ExpectedEdit[] = [];
   private readonly disconnect: () => void;
-  private readonly header: string;
+  private header: string;
+  // Captured input may still contain CRLF until the last queued edit is rendered.
+  private rawBody: string | undefined;
   private version: number;
   private pending: Promise<void> = Promise.resolve();
   private failure: Error | undefined;
@@ -84,9 +100,11 @@ export class EditorBinding {
 
   private constructor(private readonly document: BoundDocument, private readonly product: BoundProduct, private readonly editor: ProductEditor,
     private readonly hooks: BindingHooks) {
-    this.header = product.header();
+    this.header = lf(product.header());
     this.version = document.version;
-    if (document.getText() !== this.header + editor.text()) throw new Error(MISMATCH_TEXT);
+    const actual = document.getText();
+    const canonical = this.header + editor.text();
+    if (actual !== canonical && lf(actual) !== canonical) throw new Error(MISMATCH_TEXT);
     this.disconnect = document.onDidChange((change) => {
       const index = change.reason === undefined ? this.expected.findIndex((item) => item.text === change.text &&
         (item.version === undefined ? change.version > item.baseVersion : change.version === item.version)) : -1;
@@ -101,11 +119,15 @@ export class EditorBinding {
 
   public static async open(document: BoundDocument, product: BoundProduct, hooks: BindingHooks = {}): Promise<EditorBinding> {
     const editor = await ProductEditor.open(product.project, product, hooks);
+    let binding: EditorBinding | undefined;
     try {
       if (editor.refusal) throw new Error(editor.refusal.message);
-      return new EditorBinding(document, product, editor, hooks);
+      binding = new EditorBinding(document, product, editor, hooks);
+      await binding.normalizeOpenDocument();
+      return binding;
     } catch (error) {
-      editor.close();
+      if (binding) await binding.close();
+      else editor.close();
       throw error;
     }
   }
@@ -125,26 +147,49 @@ export class EditorBinding {
   }
 
   /** Reads accepted updates this editor has yet to apply, including those placed earlier by a refold. */
-  public refresh(): Promise<void> {
-    return this.enqueue(async () => {
-      const feed = await this.editor.unappliedUpdates();
-      for (const update of feed.updates) {
-        // A local notification queued during a read is processed before a later refresh.
-        if (this.document.version !== this.version) return;
-        const before = this.header + this.editor.text();
-        if (this.product.header() !== this.header || this.document.getText() !== before) throw new Error(MISMATCH_TEXT);
-        let edits: DocumentEdit[] = [];
-        const remove = this.editor.onRemoteChange((operations) => { edits = editsOf(operations, this.header.length); });
-        try {
-          this.editor.applyRemote([update]);
-        } finally {
-          remove();
-        }
-        if (this.editor.refusal) throw new Error(this.editor.refusal.message);
-        const after = this.header + this.editor.text();
-        if (after !== before) await this.applyRemoteEdits(edits, after);
+  public async refresh(): Promise<void> {
+    const waitingAt = await this.enqueue(() => this.refreshNow());
+    if (waitingAt !== undefined) {
+      // A local change delivered during the read can run before this retry.
+      await this.enqueue(async () => {
+        if (this.version !== waitingAt) await this.refreshNow();
+      });
+    }
+  }
+
+  private async refreshNow(): Promise<number | undefined> {
+    const feed = await this.editor.unappliedUpdates();
+    if (this.document.version !== this.version) return this.version;
+    const body = this.editor.text();
+    if (this.document.getText() !== this.header + body) throw new Error(MISMATCH_TEXT);
+    const header = lf(this.product.header());
+    if (header !== this.header) {
+      await this.applyRemoteEdits([{ offset: 0, length: this.header.length, text: header }], header + body);
+      this.header = header;
+    }
+    for (const update of feed.updates) {
+      if (this.document.version !== this.version) return this.version;
+      const before = this.header + this.editor.text();
+      let edits: DocumentEdit[] = [];
+      const remove = this.editor.onRemoteChange((operations) => { edits = editsOf(operations, this.header.length); });
+      try {
+        this.editor.applyRemote([update]);
+      } finally {
+        remove();
       }
-    });
+      if (this.editor.refusal) throw new Error(this.editor.refusal.message);
+      const after = this.header + this.editor.text();
+      if (after !== before) await this.applyRemoteEdits(edits, after);
+    }
+    return undefined;
+  }
+
+  private async normalizeOpenDocument(): Promise<void> {
+    const actual = this.document.getText();
+    const canonical = this.header + this.editor.text();
+    if (actual !== canonical) {
+      await this.enqueue(() => this.applyRemoteEdits([{ offset: 0, length: actual.length, text: canonical }], canonical, 'lf'));
+    }
   }
 
   /** Call flush before closing to save queued updates. */
@@ -183,7 +228,7 @@ export class EditorBinding {
   }
 
   private async applyLocalChange(change: BoundDocumentChange): Promise<void> {
-    if (change.version <= this.version || this.product.header() !== this.header) throw new Error(MISMATCH_TEXT);
+    if (change.version <= this.version) throw new Error(MISMATCH_TEXT);
     if (change.reason !== undefined) {
       await this.applyHistory(change.reason, change);
       if (!this.showedUndoNotice) {
@@ -203,25 +248,35 @@ export class EditorBinding {
       return;
     }
     const body = this.editor.text();
+    const raw = this.rawBody ?? body;
+    let rawNext = raw;
     let next = body;
-    let end = body.length;
+    let end = raw.length;
     const edits = [...change.edits].sort((a, b) => b.offset - a.offset).map(({ offset, length, text }) => {
       const index = offset - this.header.length;
       if (!Number.isSafeInteger(index) || !Number.isSafeInteger(length) || index < 0 || length < 0 || index + length > end) {
         throw new Error(MISMATCH_TEXT);
       }
-      next = next.slice(0, index) + text + next.slice(index + length);
+      rawNext = rawNext.slice(0, index) + text + rawNext.slice(index + length);
       end = index;
-      return { offset: index, length, text };
+      const startInBody = offsetInBody(index, raw, body);
+      const endInBody = offsetInBody(index + length, raw, body);
+      const normalized = lf(text);
+      next = next.slice(0, startInBody) + normalized + next.slice(endInBody);
+      return { offset: startInBody, length: endInBody - startInBody, text: normalized };
     });
-    if (this.header + next !== change.text) throw new Error(MISMATCH_TEXT);
+    if (this.header + rawNext !== change.text || (rawNext !== next && lf(rawNext) !== lf(next))) throw new Error(MISMATCH_TEXT);
     this.editor.edit(edits);
     this.version = change.version;
+    this.rawBody = rawNext === next ? undefined : rawNext;
+    if (this.rawBody !== undefined && this.document.version === this.version) {
+      await this.restoreCanonicalText(change.text, change.version);
+    }
     this.scheduleBatch();
   }
 
   private checkDocument(text: string, version: number): void {
-    if (this.product.header() !== this.header || this.document.version !== version || this.document.getText() !== text) {
+    if (this.document.version !== version || this.document.getText() !== text) {
       throw new Error(MISMATCH_TEXT);
     }
   }
@@ -239,17 +294,18 @@ export class EditorBinding {
 
   private async restoreCanonicalText(current: string, version: number): Promise<void> {
     this.version = version;
+    this.rawBody = undefined;
     const canonical = this.header + this.editor.text();
     if (current === canonical) return;
     const offset = current.startsWith(this.header) ? this.header.length : 0;
     await this.applyRemoteEdits([{ offset, length: current.length - offset, text: canonical.slice(offset) }], canonical);
   }
 
-  private async applyRemoteEdits(edits: readonly DocumentEdit[], text: string): Promise<void> {
+  private async applyRemoteEdits(edits: readonly DocumentEdit[], text: string, lineEndings?: 'lf'): Promise<void> {
     if (edits.length === 0) throw new Error(MISMATCH_TEXT);
     const expected: ExpectedEdit = { text, baseVersion: this.version };
     this.expected.push(expected);
-    const applied = await this.document.applyEdits(edits, text, this.version);
+    const applied = await this.document.applyEdits(edits, text, this.version, lineEndings);
     if (!applied) throw new Error(MISMATCH_TEXT);
     // An event may arrive before or after the apply promise. If it has not
     // arrived yet, capture the version it should report for this exact text.

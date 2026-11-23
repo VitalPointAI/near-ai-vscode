@@ -5,6 +5,7 @@ export class FakeBoundDocument implements BoundDocument {
   private readonly heldEvents: BoundDocumentChange[] = [];
   private revision = 1;
   public applied = 0;
+  public lastAppliedEdits: readonly DocumentEdit[] = [];
   public deferAppliedEvents = false;
 
   public constructor(private text: string) {}
@@ -28,6 +29,7 @@ export class FakeBoundDocument implements BoundDocument {
   public async applyEdits(edits: readonly DocumentEdit[], expectedText: string, baseVersion: number): Promise<boolean> {
     if (this.version !== baseVersion) return false;
     this.applied += 1;
+    this.lastAppliedEdits = edits;
     this.changed(edits, this.deferAppliedEvents);
     return this.text === expectedText;
   }

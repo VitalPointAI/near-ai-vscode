@@ -14,31 +14,37 @@ async function withEditors(run: (world: {
   documents: [FakeBoundDocument, FakeBoundDocument];
   bindings: [EditorBinding, EditorBinding];
   notices: string[];
+  setHeader(value: string): void;
   exchange(from: 0 | 1): Promise<void>;
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
-}) => Promise<void>, onLeftAppended?: () => void): Promise<void> {
+}) => Promise<void>, options: { onLeftAppended?: () => void; crlf?: boolean; seedBody?: string } = {}): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'ana', name: 'Avery Lead' }, { label: 'ben', name: 'Blake Rivers' }] });
   const stream = world.lead.project.projectId;
-  const targets = world.devices.map(({ project }) => ({ project, stream, product: PRODUCT, actor: ACTOR, header: () => HEADER }));
+  let header = HEADER;
+  const targets = world.devices.map(({ project }) => ({ project, stream, product: PRODUCT, actor: ACTOR, header: () => header }));
   const bindings: EditorBinding[] = [];
+  const seedBody = options.seedBody ?? 'Alpha Bravo';
   try {
     const seed = await ProductEditor.open(world.lead.project, targets[0]);
     try {
-      seed.insert(0, 'Alpha Bravo');
+      seed.insert(0, seedBody);
       assert.deepEqual(await seed.flush(), { appended: 1, queued: 0 });
     } finally {
       seed.close();
     }
     await carryThroughFake(world.devices[0], world.devices[1], stream);
-    const documents: [FakeBoundDocument, FakeBoundDocument] = [new FakeBoundDocument(HEADER + 'Alpha Bravo'), new FakeBoundDocument(HEADER + 'Alpha Bravo')];
+    const canonical = HEADER + seedBody;
+    const initial = options.crlf ? canonical.replaceAll('\n', '\r\n') : canonical;
+    const documents: [FakeBoundDocument, FakeBoundDocument] = [new FakeBoundDocument(initial), new FakeBoundDocument(initial)];
     const notices: string[] = [];
-    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text), onAppended: onLeftAppended }));
+    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text), onAppended: options.onLeftAppended }));
     bindings.push(await EditorBinding.open(documents[1], targets[1]));
     await run({
       documents,
       bindings: [bindings[0], bindings[1]],
       notices,
+      setHeader(value) { header = value; },
       async exchange(from) {
         const to = from === 0 ? 1 : 0;
         await bindings[from].flush();
@@ -97,7 +103,7 @@ test('a typing burst is saved on the batch timer as one shared update', { timeou
     await exchange(0);
     assert.equal(b.getText(), a.getText());
     assert.equal(await updates(1), 0);
-  }, onSaved);
+  }, { onLeftAppended: onSaved });
 });
 
 test('a late notification of the applied remote edit stays ignored after local typing', async () => {
@@ -176,5 +182,49 @@ test('an edit spanning the header and body is restored without a shared write an
     assert.equal(a.getText(), HEADER + '• Alpha Bravo');
     assert.equal(a.getText(), b.getText());
     assert.equal(await updates(0), 2);
+  });
+});
+
+test('opening and pasting normalize CRLF while edits queued after a paste keep their offsets', async () => {
+  await withEditors(async ({ documents: [a, b], exchange, body, updates }) => {
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo\nAfter');
+    assert.equal(b.getText(), HEADER + 'Alpha Bravo\nAfter');
+
+    a.type({ offset: HEADER.length + 6, length: 0, text: 'one\r\ntwo\r\n' });
+    const index = a.getText().indexOf('Bravo');
+    a.type({ offset: index, length: 5, text: 'Three' });
+    await exchange(0);
+
+    const expected = 'Alpha one\ntwo\nThree\nAfter';
+    assert.equal(await body(1), expected);
+    assert.equal(a.getText(), HEADER + expected);
+    assert.equal(b.getText(), a.getText());
+    assert.equal(await updates(0), 2);
+    assert.equal(await updates(1), 0);
+  }, { crlf: true, seedBody: 'Alpha Bravo\nAfter' });
+});
+
+test('a new generated header replaces only the header while body edits are pending', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left, right], exchange, setHeader, notices, updates }) => {
+    a.deferAppliedEvents = true;
+    const newHeader = HEADER.replace('bridge-status', 'bridge-situation-status');
+    setHeader(newHeader);
+    const refreshed = left.refresh();
+    await Promise.resolve();
+    a.type({ offset: HEADER.length + 6, length: 5, text: 'Charlie' });
+    await refreshed;
+    assert.deepEqual(a.lastAppliedEdits, [{ offset: 0, length: HEADER.length, text: newHeader }]);
+    assert.equal(a.getText(), newHeader + 'Alpha Charlie');
+
+    a.type({ offset: newHeader.length + 5, length: 0, text: '!' });
+    a.deliverAppliedEvents();
+    await right.refresh();
+    await exchange(0);
+
+    assert.equal(a.getText(), newHeader + 'Alpha! Charlie');
+    assert.equal(b.getText(), a.getText());
+    assert.deepEqual(notices, []);
+    assert.equal(await updates(0), 2);
+    assert.equal(await updates(1), 0);
   });
 });
