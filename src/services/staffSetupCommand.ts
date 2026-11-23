@@ -64,12 +64,14 @@ export interface StaffSetupPreset { settings?: StaffSettings; locality?: 'cloud'
 export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
-export function readyMessage(teamName: string, slug: string, archived: boolean): string {
-  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+export function readyMessage(teamName: string, slug: string, archived: boolean, offerActions = true): string {
+  const next = offerActions ? ' Task it now to put its command in the NEAR AI chat, or open the Staff Room.' : '';
+  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT}${next}${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
-export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat, preset?: StaffSetupPreset): Promise<string | undefined> {
-  const root = await projectFolder();
+export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection,
+  chat?: StaffSetupChat, preset?: StaffSetupPreset, projectRoot?: string): Promise<string | undefined> {
+  const root = projectRoot ?? await projectFolder();
   if (!root) return undefined;
   const inputs = await readStaffSetupInputs(root);
   const existing = existingStaffSettings(inputs.projectJson);
@@ -120,9 +122,11 @@ export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(ho
   try {
     const result = await applyStaffSetup(root, library, plan, { replace: target.exists });
     const slug = path.basename(result.teamFile, '.md');
-    const actions = chat ? [TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION] : [OPEN_STAFF_ROOM_ACTION];
-    void Promise.resolve(vscode.window.showInformationMessage(readyMessage(plan.roster.teamName, slug, Boolean(result.archived)), ...actions))
+    const canOpenProjectView = () => projectRoot === undefined || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath === root;
+    const actions = canOpenProjectView() ? (chat ? [TASK_NOW_ACTION, OPEN_STAFF_ROOM_ACTION] : [OPEN_STAFF_ROOM_ACTION]) : [];
+    void Promise.resolve(vscode.window.showInformationMessage(readyMessage(plan.roster.teamName, slug, Boolean(result.archived), actions.length > 0), ...actions))
       .then((choice) => {
+        if (!canOpenProjectView()) return;
         if (choice === TASK_NOW_ACTION && chat) void chat.prefill(`/team:${slug}`);
         if (choice === OPEN_STAFF_ROOM_ACTION) void vscode.commands.executeCommand(OPEN_STAFF_ROOM_COMMAND);
       }, () => undefined);

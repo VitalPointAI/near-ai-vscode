@@ -270,14 +270,15 @@ test('S5: the J2 and J4 team files carry the PRC-origin sentence in their "Priva
 const staffSetupVscode = createVscodeStub();
 Object.assign(staffSetupVscode.vscode as object, { QuickPickItemKind: { Separator: -1 } });
 
-async function runStaffSetup(chosen?: readonly string[], preset?: import('../services/staffSetupCommand').StaffSetupPreset) {
+async function runStaffSetup(chosen?: readonly string[], preset?: import('../services/staffSetupCommand').StaffSetupPreset, scoped = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'staff-setup-command-'));
   const project = path.join(root, 'project');
   const configFile = path.join(project, '.planning', '.near-ai', 'project.json');
   await mkdir(path.dirname(configFile), { recursive: true });
   if (chosen) await writeFile(configFile, JSON.stringify({ setupGuide: { v: 1, answers: { data: [] }, chosen, pending: [] } }));
   const library = new TeamLibrary(path.join(root, 'store'));
-  staffSetupVscode.setWorkspaceFolders([project]);
+  const other = path.join(root, 'other-project');
+  staffSetupVscode.setWorkspaceFolders(scoped ? [other, project] : [project]);
   staffSetupVscode.quickPickRequests.length = 0;
   staffSetupVscode.notifications.length = 0;
   const { window } = staffSetupVscode.vscode as typeof import('vscode');
@@ -289,8 +290,9 @@ async function runStaffSetup(chosen?: readonly string[], preset?: import('../ser
   const uninstall = installVscodeStub(staffSetupVscode);
   try {
     const command = await import('../services/staffSetupCommand');
-    const file = await command.setUpStaffTeam(library, 'j2', undefined, preset);
+    const file = await command.setUpStaffTeam(library, 'j2', undefined, preset, scoped ? project : undefined);
     assert.ok(file, 'the setup wrote a team file');
+    if (scoped) await assert.rejects(readFile(path.join(other, '.planning', '.near-ai', 'project.json')), { code: 'ENOENT' });
     return {
       team: parseTeam(await readFile(file, 'utf8'), file),
       settings: parseStaffSettings(JSON.parse(await readFile(configFile, 'utf8')).staff),
@@ -302,6 +304,12 @@ async function runStaffSetup(chosen?: readonly string[], preset?: import('../ser
     uninstall();
   }
 }
+
+test('staff setup from Get Started writes to its captured project without a folder picker', async () => {
+  const { picks, settings } = await runStaffSetup(undefined, { settings: defaultStaffSettings() }, true);
+  assert.ok(settings);
+  assert.equal(picks.some(({ title }) => title?.includes('which project')), false);
+});
 
 test('S5 and D-25: staff setup keeps the private-model sentence and asks no models-run question', async () => {
   const { STAFF_PRIVATE_MODELS_TEXT } = await import('../domain/staff/products');

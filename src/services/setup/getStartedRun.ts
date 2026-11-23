@@ -1,9 +1,8 @@
 import type { PrivacyModeSetting } from '../../domain/config';
-import type { OpenGetStartedRequest } from '../../domain/setup/answers';
 import type { HostKind } from '../../domain/setup/device';
-import type { LandingPort } from '../../domain/setup/landing';
 import { createAuditEventRegistry, GUIDE_AUDIT_EVENT_SPECS } from '../../domain/setup/records';
 import type { GuideDiscoveryPort } from '../../domain/setup/screens';
+import type { StepContext } from '../../domain/setup/steps';
 import { projectLogKey } from '../../gate/decisionLog';
 import type { GateHost } from '../../gate/host';
 import { SetupAuditLog } from '../../gate/setupAuditLog';
@@ -13,6 +12,7 @@ import { ProfileStore } from '../profileStore';
 import { connectionStep, profileFor, supportsReviewedConnection, type ProfileSlice, type ReviewedConnection } from './applyConnection';
 import type { GetStartedDeps } from './getStarted';
 import { createGateGuideChecks } from './guideFacts';
+import { createLandingHost, type LandingHostDeps } from './landingHost';
 import type { LocalServersDeps } from './localServersOption';
 import { createScopedNearAiSource } from './nearAiOption';
 import { singleMachineSink } from './projectLayerSink';
@@ -29,7 +29,7 @@ export function createProjectGetStartedDeps(deps: {
   readonly machine: string;
   readonly privacy: (root: string) => PrivacyModeSetting;
   readonly local: LocalServersDeps;
-  readonly landing: (project: GuideProject, request?: OpenGetStartedRequest) => LandingPort;
+  readonly landing: Omit<LandingHostDeps, 'steps' | 'context' | 'project' | 'request'> & { context(root: string): Promise<StepContext> };
   readonly onAuditFailure: (message: string) => void;
   readonly configureConnection: (root: string, reviewed: ReviewedConnection) => Promise<boolean>;
   readonly projectLayerSource?: { invalidate(root: string): void };
@@ -67,7 +67,11 @@ export function createProjectGetStartedDeps(deps: {
       });
       return {
         root, machine, hostKind, readPolicy, check, clock,
-        landing: deps.landing(project, request), discovery: deps.discovery?.(project, audit),
+        landing: createLandingHost({
+          ...deps.landing, steps: registries.steps, request, context: () => deps.landing.context(root),
+          project: { root, currentRoot: () => deps.project()?.root },
+        }),
+        discovery: deps.discovery?.(project, audit),
         apply: {
           audit, labelHost: gate, policyEditor: deps.policyEditor,
           sink: singleMachineSink(root, { effective: () => gate.policyLayers().effective, source: deps.projectLayerSource }),

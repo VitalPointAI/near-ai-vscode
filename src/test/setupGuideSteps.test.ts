@@ -19,9 +19,9 @@ function fixture(ctx: StepContext = { root: 'project', kind: 'software', setting
   const runCommand = async (id: string) => { calls.push(['command', id]); };
   const registration = registerGuideSteps({
     registries, runCommand, facts: context,
-    openStudio: async (options) => { calls.push(['studio', options]); },
-    setUpStaffTeam: async (section, preset) => { calls.push(['staff', section, preset]); return 'j2.md'; },
-    configureConnection: async () => { calls.push(['configure']); return true; },
+    openStudio: async (options, root) => { calls.push(['studio', options, root]); },
+    setUpStaffTeam: async (section, preset, root) => { calls.push(['staff', section, preset, root]); return 'j2.md'; },
+    configureConnection: async (root) => { calls.push(['configure', root]); return true; },
     useSavedConnection: async () => { calls.push(['use-saved']); return true; },
     openGetStarted: async (request?: OpenGetStartedRequest) => { calls.push(['guide', request]); }
   });
@@ -44,7 +44,8 @@ test('D-24: running the steps never dispatches a Get Started alias', async () =>
   for (const step of steps.list()) await step.run(ctx);
   const aliases = new Set<string>([...ALIAS_COMMAND_IDS, 'nearAi.setup']);
   for (const [category, id] of calls) if (category === 'command') assert.equal(aliases.has(String(id)), false);
-  assert.ok(calls.some(([action]) => action === 'configure'));
+  assert.deepEqual(calls.find(([action]) => action === 'configure'), ['configure', ctx.root]);
+  assert.deepEqual(calls.find(([action]) => action === 'studio'), ['studio', { wizard: 'project' }, ctx.root]);
   assert.deepEqual(calls.find(([action]) => action === 'guide'), ['guide', { step: 'kind-of-work' }]);
 });
 
@@ -109,7 +110,7 @@ function frontDoorFixture(hasAnswers: boolean) {
 test('D-24: saved answers run the requested staff step with its validated section', async () => {
   const { calls, open } = frontDoorFixture(true);
   await open({ step: 'staff-team', prefill: { section: 'j2', fixed: [] } });
-  assert.deepEqual(calls, [['staff', 'j2', { settings: defaultStaffSettings() }]]);
+  assert.deepEqual(calls, [['staff', 'j2', { settings: defaultStaffSettings() }, 'project']]);
 });
 
 test('without answers a step opens the guide and remains the target after Apply', async () => {
@@ -126,7 +127,7 @@ test('without answers a step opens the guide and remains the target after Apply'
   });
   await landing.land(target, request);
   assert.deepEqual(calls.slice(1), [
-    ['staff', 'j2', { settings: defaultStaffSettings() }], ['nearAi.openStaffRoom'],
+    ['staff', 'j2', { settings: defaultStaffSettings() }, 'project'], ['nearAi.openStaffRoom'],
     ['workbench.action.openWalkthrough', 'example.near-ai#nearAi.getStarted', false]
   ]);
 });

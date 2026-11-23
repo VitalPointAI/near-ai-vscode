@@ -115,6 +115,7 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   let chosenRoot = root;
   let firstProfile = true;
   const configured: unknown[] = [];
+  const destinations: unknown[][] = [];
   const requests: (string | null)[] = [];
   let notifyRequest!: () => void;
   const otherRequest = new Promise<void>((resolve) => { notifyRequest = resolve; });
@@ -123,7 +124,13 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   const factory = createProjectGetStartedDeps({
     project: () => ({ root: chosenRoot, name: 'Fixture' }), gate: host, auth, globalStorageDir: storage,
     hostKind: 'container', machine: 'fixture', privacy: () => 'standard', clock: () => at,
-    landing: () => ({ land: unexpected }), onAuditFailure: unexpected,
+    landing: {
+      walkthroughId: 'example.near-ai#nearAi.getStarted',
+      context: async (projectRoot) => ({ root: projectRoot, setting: () => undefined, facts: {} }),
+      runCommand: async (...args) => { destinations.push(args); },
+      openPolicyEditor: unexpected, openGuideOptions: unexpected,
+    },
+    onAuditFailure: unexpected,
     local: { identify: unexpected, listModels: unexpected, localClient: unexpected },
     configureConnection: async (projectRoot, reviewed) => { configured.push([projectRoot, reviewed]); firstProfile = true; return true; },
     profiles: (projectRoot) => ({
@@ -141,7 +148,11 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
     },
   });
   const registries = createSetupRegistries();
-  const first = factory.createRun(undefined, registries);
+  registries.steps.register({
+    id: 'mcp', title: 'Manage tools', detail: '', state: () => 'to-do', viability: () => ({ available: true }),
+    async run(ctx) { destinations.push(['mcp', ctx.root]); return { outcome: 'opened' }; },
+  });
+  const first = factory.createRun({ step: 'mcp' }, registries);
   chosenRoot = otherRoot;
   const second = factory.createRun(undefined, registries);
   assert.deepEqual([first.root, second.root], [root, otherRoot]);
@@ -168,6 +179,14 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   await assert.rejects(running, { name: 'AbortError' });
   assert.equal(otherSignal?.aborted, true);
   assert.deepEqual(requests, ['Bearer fixture-first', 'Bearer fixture-first', 'Bearer fixture-other']);
+
+  await first.landing.land({ target: 'chat', checklist: [] });
+  assert.deepEqual(destinations, []);
+  chosenRoot = root;
+  await first.landing.land({ target: 'chat', checklist: [] });
+  assert.deepEqual(destinations, [
+    ['nearAi.openChat'], ['workbench.action.openWalkthrough', 'example.near-ai#nearAi.getStarted', false], ['mcp', root]
+  ]);
 });
 
 test('the guide reviews and applies a viable private route through the real label writer and audit', async (t) => {

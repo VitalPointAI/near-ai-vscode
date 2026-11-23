@@ -12,6 +12,8 @@ export interface LandingHostDeps {
   openGuideOptions: () => Promise<void>;
   walkthroughId: string;
   context: () => Promise<StepContext>;
+  readonly project?: { readonly root: string; currentRoot(): string | undefined };
+  readonly request?: OpenGetStartedRequest;
 }
 
 export interface LandingHost extends LandingPort {
@@ -20,21 +22,31 @@ export interface LandingHost extends LandingPort {
 }
 
 export function createLandingHost(deps: LandingHostDeps): LandingHost {
+  const { project } = deps;
+  const isCurrent = () => !project || project.currentRoot() === project.root;
+  async function currentContext(): Promise<StepContext | undefined> {
+    if (!isCurrent()) return undefined;
+    const context = await deps.context();
+    return isCurrent() && (!project || context.root === project.root) ? context : undefined;
+  }
   async function openChecklist(): Promise<void> {
-    await deps.runCommand('workbench.action.openWalkthrough', deps.walkthroughId, false);
+    if (isCurrent()) await deps.runCommand('workbench.action.openWalkthrough', deps.walkthroughId, false);
   }
   return {
     openChecklist,
-    async land(landing, request) {
+    async land(landing, request = deps.request) {
+      if (!isCurrent()) return;
       if (landing.target === 'get-started-options') {
         await deps.openGuideOptions();
         return;
       }
       const step = landing.runFirst && deps.steps.get(landing.runFirst);
       if (step) {
-        const ctx = await deps.context();
+        const ctx = await currentContext();
+        if (!ctx) return;
         await step.run(landing.section === undefined ? ctx : { ...ctx, facts: { ...ctx.facts, staffSection: landing.section } });
       }
+      if (!isCurrent()) return;
       switch (landing.target) {
         case 'chat': await deps.runCommand(START_CHATTING.command); break;
         case 'staff-room': await deps.runCommand(OPEN_STAFF_ROOM_COMMAND); break;
@@ -46,7 +58,9 @@ export function createLandingHost(deps: LandingHostDeps): LandingHost {
       const target = request?.step;
       if (target !== landing.runFirst) {
         const requested = requestedSetupStep(deps.steps, target);
-        if (requested) await requested.run(await deps.context());
+        if (!requested) return;
+        const ctx = await currentContext();
+        if (ctx) await requested.run(ctx);
       }
     }
   };

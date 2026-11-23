@@ -37,9 +37,9 @@ export function requestedSetupStep(registry: StepRegistry, target: unknown): Set
 
 export interface GuideStepDeps {
   registries: SetupRegistries;
-  openStudio: (options: { wizard?: 'project' }) => void | Promise<void>;
-  setUpStaffTeam: (section?: StaffTeamSection, preset?: StaffSetupPreset) => Promise<string | undefined>;
-  configureConnection: () => Promise<boolean>;
+  openStudio: (options: { wizard?: 'project' }, projectRoot?: string) => void | Promise<void>;
+  setUpStaffTeam: (section?: StaffTeamSection, preset?: StaffSetupPreset, projectRoot?: string) => Promise<string | undefined>;
+  configureConnection: (projectRoot?: string) => Promise<boolean>;
   useSavedConnection: () => Promise<boolean>;
   runCommand: (id: string, ...args: unknown[]) => PromiseLike<unknown>;
   openGetStarted: OpenGetStarted;
@@ -74,16 +74,16 @@ export function registerGuideSteps(deps: GuideStepDeps): { dispose(): void } {
     id: 'connection', ...STEP_TEXT.connection,
     state: (ctx) => stateOf(ctx.facts.workingProfile === true),
     viability: available,
-    async run() {
-      return { outcome: await deps.configureConnection() ? 'done' : 'cancelled' };
+    async run(ctx) {
+      return { outcome: await deps.configureConnection(ctx.root) ? 'done' : 'cancelled' };
     }
   };
   const software: SetupStepContract = {
     id: 'software-team', ...STEP_TEXT['software-team'], kinds: ['software'],
     state: async (ctx) => ctx.root && await PROJECT_TEAM_STEP.isDone({ ...ctx, root: ctx.root }) ? 'done' : 'to-do',
     viability: available,
-    async run() {
-      await deps.openStudio({ wizard: 'project' });
+    async run(ctx) {
+      await deps.openStudio({ wizard: 'project' }, ctx.root);
       return { outcome: 'opened' };
     }
   };
@@ -96,7 +96,7 @@ export function registerGuideSteps(deps: GuideStepDeps): { dispose(): void } {
       const section = requestedSection({ section: ctx.facts.staffSection ?? guide?.answers.staffSection });
       const project = ctx.root ? await readFile(path.join(ctx.root, PROJECT_JSON_FILE), 'utf8').catch(() => undefined) : undefined;
       const settings = existingStaffSettings(project) ?? defaultStaffSettings();
-      const team = await deps.setUpStaffTeam(section, { settings });
+      const team = await deps.setUpStaffTeam(section, { settings }, ctx.root);
       return { outcome: team ? 'done' : 'cancelled' };
     }
   };

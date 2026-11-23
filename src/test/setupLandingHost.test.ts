@@ -35,7 +35,7 @@ test('SC6 (host level): staff J2 runs the preset before opening the Staff Room a
   const ctx: StepContext = { root: 'project', kind: 'staff', facts: {}, setting: () => undefined };
   const { calls, landing, registries, walkthroughId } = host(ctx);
   await landing.land({ target: 'staff-room', runFirst: 'staff-team', section: 'j2', checklist: ['share-with-people', 'my-computers'] });
-  assert.deepEqual(calls, [['staff', 'j2', { settings: defaultStaffSettings() }], ['nearAi.openStaffRoom'], checklistCall(walkthroughId)]);
+  assert.deepEqual(calls, [['staff', 'j2', { settings: defaultStaffSettings() }, 'project'], ['nearAi.openStaffRoom'], checklistCall(walkthroughId)]);
 
   const keys = new Map<string, unknown>();
   await refreshSetupContext({ registry: registries.steps, ctx, setContext: async (key: string, value: unknown) => { keys.set(key, value); } });
@@ -64,4 +64,23 @@ test('administrator proposals open in the policy editor before the checklist', a
   const { calls, landing, walkthroughId } = host({ kind: 'software', facts: {}, setting: () => undefined });
   await landing.land(resolveLanding({ isAdmin: true, proposalsOpened: true, hasTeam: false, firstRun: { allowedModel: true } }));
   assert.deepEqual(calls, [['policy'], checklistCall(walkthroughId)]);
+});
+
+test('landing skips the team step and the next commands if projects change while its context is loading', async () => {
+  const { calls, registries, walkthroughId } = host({ root: 'selected', kind: 'staff', facts: {}, setting: () => undefined });
+  let current = 'selected';
+  let resolveContext!: (ctx: StepContext) => void;
+  const pendingContext = new Promise<StepContext>((resolve) => { resolveContext = resolve; });
+  const landing = createLandingHost({
+    steps: registries.steps, walkthroughId, request: { step: 'mcp' },
+    project: { root: 'selected', currentRoot: () => current },
+    context: () => pendingContext,
+    runCommand: async (...args) => { calls.push(args); },
+    openPolicyEditor: () => assert.fail('policy editor must not open'), openGuideOptions: () => assert.fail('options must not open')
+  });
+  const running = landing.land({ target: 'staff-room', runFirst: 'staff-team', section: 'j2', checklist: [] });
+  current = 'other';
+  resolveContext({ root: 'selected', kind: 'staff', facts: {}, setting: () => undefined });
+  await running;
+  assert.deepEqual(calls, []);
 });
