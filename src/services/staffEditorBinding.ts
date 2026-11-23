@@ -8,8 +8,17 @@ export interface BindingSource {
 }
 
 export const BOUND_EDITOR_CONTEXT = 'nearAi.staffBoundEditor';
+export const STAFF_BINDING_COMMANDS = {
+  undo: 'nearAi.staff.undoMyChange',
+  redo: 'nearAi.staff.redoMyChange'
+} as const;
 
 type Register = (id: string, run: () => Promise<void>) => void;
+
+interface BindingSession {
+  readonly opened: Promise<void>;
+  binding?: EditorBinding;
+}
 
 const OPEN_FAILED = 'This editor could not open the shared product. Close the product and open it again.';
 
@@ -56,32 +65,48 @@ function adaptDocument(document: vscode.TextDocument, active: () => boolean): Bo
 
 /** Registers the binding lifecycle. The caller supplies the shared-product lookup and change notifications. */
 export function registerStaffEditorBindings(
-  context: Pick<vscode.ExtensionContext, 'subscriptions'>, _register: Register, source: BindingSource
+  context: Pick<vscode.ExtensionContext, 'subscriptions'>, register: Register, source: BindingSource
 ): void {
-  const sessions = new Map<vscode.TextDocument, Promise<EditorBinding | undefined>>();
+  const sessions = new Map<vscode.TextDocument, BindingSession>();
+  const activeBinding = (): EditorBinding | undefined => {
+    const document = vscode.window.activeTextEditor?.document;
+    return document && !document.isClosed ? sessions.get(document)?.binding : undefined;
+  };
+  const updateContext = (): void => {
+    void vscode.commands.executeCommand('setContext', BOUND_EDITOR_CONTEXT, activeBinding() !== undefined).then(undefined, () => undefined);
+  };
+  register(STAFF_BINDING_COMMANDS.undo, async () => { await activeBinding()?.undo(); });
+  register(STAFF_BINDING_COMMANDS.redo, async () => { await activeBinding()?.redo(); });
+
   const open = (document: vscode.TextDocument): void => {
     if (document.isClosed || sessions.has(document)) return;
     const product = source.productFor(document.uri);
     if (!product) return;
 
-    const binding: Promise<EditorBinding | undefined> = import('../staff/replica/editorBinding').then(({ EditorBinding }) => {
-      const active = (): boolean => !document.isClosed && sessions.get(document) === binding;
-      if (!active()) return undefined;
-      return EditorBinding.open(adaptDocument(document, active), product, {
-        notice: (text) => { if (active()) void vscode.window.showWarningMessage(text); }
-      });
-    }).catch(() => {
-      if (sessions.get(document) === binding) sessions.delete(document);
-      if (!document.isClosed) void vscode.window.showWarningMessage(OPEN_FAILED);
-      return undefined;
-    });
-    sessions.set(document, binding);
+    const session: BindingSession = {
+      opened: import('../staff/replica/editorBinding').then(async ({ EditorBinding }) => {
+        const active = (): boolean => !document.isClosed && sessions.get(document) === session;
+        if (!active()) return;
+        session.binding = await EditorBinding.open(adaptDocument(document, active), product, {
+          notice: (text) => { if (active()) void vscode.window.showWarningMessage(text); }
+        });
+        if (active()) updateContext();
+      }).catch(() => {
+        if (sessions.get(document) !== session) return;
+        sessions.delete(document);
+        updateContext();
+        if (!document.isClosed) void vscode.window.showWarningMessage(OPEN_FAILED);
+      })
+    };
+    sessions.set(document, session);
   };
   const close = (document: vscode.TextDocument): void => {
     const session = sessions.get(document);
     if (!session) return;
     sessions.delete(document);
-    void session.then(async (binding) => {
+    if (document === vscode.window.activeTextEditor?.document) updateContext();
+    void session.opened.then(async () => {
+      const binding = session.binding;
       if (!binding) return;
       try {
         await binding.flush();
@@ -94,10 +119,11 @@ export function registerStaffEditorBindings(
   const subscriptions = [
     vscode.workspace.onDidOpenTextDocument(open),
     vscode.workspace.onDidCloseTextDocument(close),
+    vscode.window.onDidChangeActiveTextEditor(updateContext),
     source.onProductChanged(() => {
       for (const [document, session] of sessions) {
-        void session.then((binding) => {
-          if (!document.isClosed && sessions.get(document) === session) return binding?.refresh();
+        void session.opened.then(() => {
+          if (!document.isClosed && sessions.get(document) === session) return session.binding?.refresh();
         }).catch(() => undefined);
       }
     })
@@ -106,7 +132,9 @@ export function registerStaffEditorBindings(
     dispose() {
       for (const subscription of subscriptions) subscription.dispose();
       for (const document of sessions.keys()) close(document);
+      updateContext();
     }
   });
   for (const document of vscode.workspace.textDocuments) open(document);
+  updateContext();
 }

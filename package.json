@@ -436,6 +436,16 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.undoMyChange",
+        "title": "Staff: Undo My Change",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "nearAi.staff.redoMyChange",
+        "title": "Staff: Redo My Change",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.makeMultiUser",
         "title": "Staff: Make This Staff Project Multi-User",
         "category": "NEAR AI"
@@ -1060,6 +1070,27 @@
         }
       }
     },
+    "keybindings": [
+      {
+        "command": "nearAi.staff.undoMyChange",
+        "key": "ctrl+z",
+        "mac": "cmd+z",
+        "when": "editorTextFocus && nearAi.staffBoundEditor"
+      },
+      {
+        "command": "nearAi.staff.redoMyChange",
+        "key": "ctrl+shift+z",
+        "mac": "cmd+shift+z",
+        "when": "editorTextFocus && nearAi.staffBoundEditor"
+      },
+      {
+        "command": "nearAi.staff.redoMyChange",
+        "key": "",
+        "linux": "ctrl+y",
+        "win": "ctrl+y",
+        "when": "editorTextFocus && nearAi.staffBoundEditor"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
@@ -1089,6 +1120,14 @@
         {
           "command": "nearAi.team.verifyLog",
           "when": "config.nearAi.team.preview || nearAi.team.active"
+        },
+        {
+          "command": "nearAi.staff.undoMyChange",
+          "when": "false"
+        },
+        {
+          "command": "nearAi.staff.redoMyChange",
+          "when": "false"
         },
         {
           "command": "nearAi.staff.makeMultiUser",
