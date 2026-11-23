@@ -175,6 +175,12 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     await this.openView({ activate: true });
   }
 
+  async onDidInitializeLayout(app: FrontendApplication): Promise<void> {
+    // Move the editor's Outline on both fresh and restored layouts.
+    const outline = app.shell.getWidgets('right').find(widget => widget.id === 'outline-view');
+    if (outline) await app.shell.addWidget(outline, { area: 'left', rank: 500 });
+  }
+
   override registerCommands(commands: CommandRegistry): void {
     commands.registerCommand({ id: 'sterling.getStarted', category: 'SovAI', label: 'Get Started' }, {
       execute: () => this.openView({ activate: true })

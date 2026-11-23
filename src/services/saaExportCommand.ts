@@ -7,6 +7,7 @@ import { buildSaaPackage } from './saaPackage';
 import { loadSaaMarketplaceApproval, loadSaaOfficialPrivacyForms, loadSaaReleaseEvidence, SAA_RELEASE_VERSION } from './saaReleaseEvidence';
 
 export const GENERATE_SAA_PACKAGE_COMMAND = 'nearAi.generateSaaPackage';
+const downloadCommand = 'sterling.compliance.downloadPackage';
 
 async function generateSaaPackage(context: vscode.ExtensionContext): Promise<void> {
   const installed: unknown = context.extension.packageJSON.version;
@@ -78,7 +79,18 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
     return;
   }
 
-  void vscode.window.showInformationMessage(`Saved ${basename(destination)}. The assessment and approval forms are ready for your organization to complete.`);
+  const saved = `Saved ${basename(destination)}. The assessment and approval forms are ready for your organization to complete.`;
+  if (!clientFile && (await vscode.commands.getCommands(true)).includes(downloadCommand)) {
+    if (await vscode.window.showInformationMessage(saved, 'Download ZIP') === 'Download ZIP') {
+      try {
+        await vscode.commands.executeCommand(downloadCommand, vscode.Uri.file(destination).toString());
+      } catch {
+        void vscode.window.showErrorMessage('Could not download the SA&A package. The ZIP is still saved in the workbench.');
+      }
+    }
+  } else {
+    void vscode.window.showInformationMessage(saved);
+  }
 }
 
 export function registerSaaExport(context: vscode.ExtensionContext): void {

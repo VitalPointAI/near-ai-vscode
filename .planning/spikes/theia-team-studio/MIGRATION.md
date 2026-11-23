@@ -26,3 +26,13 @@ Run each group against the actual browser container. Installed and registered co
 The released 0.4.36 VSIX started under Theia 1.77. Chromium rendered the Setup, Team Studio, Chat, and Compare Models webviews, and opened the New Team wizard. Setup and Compare Models returned live webview objects from their command handlers, which caused an RPC encoding error. Controlled reruns with each handler returning no value opened the same view without that error.
 
 The locally built VSIX with both command fixes passed the same four webview checks in the Docker workbench without uncaught page errors. A synthetic team saved through the New Team wizard produced a Markdown file and reappeared in the library from a fresh browser session. Configured-provider behavior, credential persistence across container restart, and the rest of the workflow matrix still require verification.
+
+## Local parity checks on Theia 1.77.0
+
+Chromium opened Get Started, Chat, Team Studio, Compliance, and Documentation from the Sterling rail. Theia's Outline moved to the left editor rail on a fresh layout and stayed there after reload. The First Project page opened its Cloud, Local runtime, and Hybrid provider picker and the Team Studio builder. The Projects shortcut opened the existing Project Setup checklist.
+
+An isolated browser and a deterministic keyless provider verified model selection, a streamed Chat reply, and reopening the conversation from Chat History after reload. The live preview uses the local VSIX bridge. It can be built and tested without publishing to the VS Code Marketplace.
+
+From the command palette, **SovAI: Generate SA&A Package…** accepted the published v0.4.36 evidence, honored save cancellation, and delivered a valid ZIP through **Download ZIP**.
+
+Retest the rail and restored layout, the plugin commands, and the workflow matrix above when changing the pinned Theia version.
