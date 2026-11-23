@@ -31,7 +31,10 @@ test('proxy advice applies only in a browser or remote host, with proxy support 
   assert.equal(proxyAdviceApplies({ web: true, env: { http_proxy: 'http://proxy:3128' } }), false);
   assert.match(proxyAdviceText(true), /browser tab/);
   assert.match(proxyAdviceText(false), /this window/);
-  for (const web of [true, false]) assert.doesNotMatch(proxyAdviceText(web), /—/);
+  for (const web of [true, false]) {
+    assert.doesNotMatch(proxyAdviceText(web), /—|VS Code|Theia/);
+    assert.match(proxyAdviceText(web), /http\.proxySupport: off/);
+  }
 });
 
 test('proxy advice: the setting changes only after the click, and a dismissal is remembered', async () => {
