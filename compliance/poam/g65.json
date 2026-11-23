@@ -11,7 +11,7 @@
   "milestones": [
     {
       "phase": "44.1",
-      "title": "Collect approved mobile connection scope, managed device and encryption reports, and compliant and noncompliant access results"
+      "title": "Collect approved mobile connection scope, managed device and encryption reports, and allowed and denied access results"
     },
     {
       "phase": "91",
