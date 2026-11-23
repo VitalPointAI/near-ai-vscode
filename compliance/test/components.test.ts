@@ -80,17 +80,19 @@ test('Protected A credits scoped audit evidence only when its mapped tests pass'
     head: commit, commit, generatedAt: now.toISOString(), now, components, rules, observations: [], testRows,
     levels: [{ id: 'protected-a', title: 'Protected A', controls, components: ['extension'] }]
   }).rows.find((row) => row.control === control);
-  for (const [control, name] of [
-    ['au-05', 'a gate audit write failure produces one local VS Code warning'],
-    ['au-08', 'gate decision logs preserve runtime timestamps as epoch milliseconds']
+  for (const [control, file, name] of [
+    ['au-05', 'gateHostLogs', 'a gate audit write failure produces one local VS Code warning'],
+    ['au-08', 'gateHostLogs', 'gate decision logs preserve runtime timestamps as epoch milliseconds'],
+    ['au-09', 'gateDecisionLog', 'gate decision log creation and rotation grant no group or other access on POSIX']
   ] as const) {
     const receipt: TestReportRow = {
-      file: 'src/test/gateHostLogs.test.ts', path: [], name, status: 'passed', skip: null, ms: 1
+      file: `src/test/${file}.test.ts`, path: [], name, status: 'passed', skip: null, ms: 1
     };
     const passing = result(control, [receipt]);
     assert.equal(passing?.state, 'partly-met', control);
     assert.equal(passing?.reason, 'limitation', control);
     assert.equal(result(control, [{ ...receipt, status: 'failed' }])?.state, 'not-met', control);
+    assert.equal(result(control, [{ ...receipt, status: 'skipped' }])?.state, 'not-met', control);
     assert.equal(result(control, [])?.state, 'not-met', control);
   }
 });
