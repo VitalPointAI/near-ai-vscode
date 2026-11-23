@@ -1476,10 +1476,12 @@
       case 'profile-status': {
         const value = m.value || {};
         const active = (value.profiles || []).find((item) => item.profileId === value.activeProfileId);
+        const setupState = setupKit.welcomeState(value);
         profile.textContent = active ? active.displayName : 'Set up';
         profile.title = active ? active.displayName + (active.organization && active.organization !== active.displayName ? ' · ' + active.organization : '') + ' — click to switch profile' : 'Set up AI for this project';
-        profile.dataset.state = active ? (active.validation && active.validation.status === 'valid' ? 'ready' : 'attention') : 'missing';
-        { const focus = setupKit.applyWelcomeState(document, setupKit.welcomeState(value), welcomeMemory); if (focus && !welcome.hidden) focus.focus(); }
+        profile.dataset.state = active ? (setupState === 'ready' ? 'ready' : 'attention') : 'missing';
+        const focus = setupKit.applyWelcomeState(document, setupState, welcomeMemory);
+        if (focus && !welcome.hidden) focus.focus();
         break;
       }
       case 'chat-label': {
