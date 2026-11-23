@@ -22,6 +22,7 @@ async function withEditors(run: (world: {
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
   updateSizes(at: 0 | 1): Promise<number[]>;
+  otherProductPosition(): Promise<string | undefined>;
 }) => Promise<void>, options: { onLeftAppended?: () => void; crlf?: boolean; seedBody?: string } = {}): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'ana', name: 'Avery Lead' }, { label: 'ben', name: 'Blake Rivers' }] });
   const stream = world.lead.project.projectId;
@@ -66,7 +67,15 @@ async function withEditors(run: (world: {
       },
       async body(at) { return productOutput((await world.devices[at].project.state()).fold, stream, PRODUCT)?.text; },
       async updates(at) { return (await ownUpdates(at)).length; },
-      async updateSizes(at) { return (await ownUpdates(at)).map(({ bytes }) => bytes.length); }
+      async updateSizes(at) { return (await ownUpdates(at)).map(({ bytes }) => bytes.length); },
+      async otherProductPosition() {
+        const other = await ProductEditor.open(targets[0].project, { ...targets[0], product: 'other-product' });
+        try {
+          return other.relativeAt(0);
+        } finally {
+          other.close();
+        }
+      }
     });
   } finally {
     await Promise.all(bindings.map((binding) => binding.close()));
@@ -325,6 +334,51 @@ test('a large Unicode replacement reaches the peer and remains one local undo an
     assert.equal(a.getText() === b.getText(), true, 'the devices converge after redo');
     assert.ok((await updateSizes(0)).every((size) => size <= MAX_UPDATE_BYTES));
     assert.equal(await updates(1), 1, 'the peer never echoes paste or history');
+  });
+});
+
+test('relative positions follow edits across replicas and reject unrelated or malformed positions', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left, right], exchange, otherProductPosition }) => {
+    const anchor = left.relativeAt(HEADER.length + 6);
+    const end = left.relativeAt(a.getText().length);
+    assert.ok(anchor && end);
+    assert.equal(right.indexOf(anchor), HEADER.length + 6);
+    assert.equal(right.indexOf(end), b.getText().length);
+
+    b.type({ offset: HEADER.length, length: 0, text: 'Hi ' });
+    assert.equal(right.indexOf(anchor), undefined, 'editor offsets are stale until the local change is applied');
+    await exchange(1);
+    assert.equal(left.indexOf(anchor), HEADER.length + 9);
+    assert.equal(right.indexOf(anchor), HEADER.length + 9);
+    assert.equal(right.indexOf(end), b.getText().length);
+
+    b.type({ offset: HEADER.length + 9, length: 1, text: '' });
+    await exchange(1);
+    assert.equal(left.indexOf(anchor), HEADER.length + 9, 'the deleted anchor collapses to its boundary');
+    assert.equal(right.indexOf(anchor), left.indexOf(anchor));
+
+    a.type({ offset: HEADER.length, length: 0, text: 'New' });
+    await left.flush();
+    const unseen = left.relativeAt(HEADER.length);
+    assert.ok(unseen);
+    assert.equal(right.indexOf(unseen), undefined, 'the peer has yet to receive the referenced item');
+    await exchange(0);
+    assert.equal(right.indexOf(unseen), HEADER.length);
+
+    const other = await otherProductPosition();
+    assert.ok(other);
+    assert.equal(right.indexOf(other), undefined);
+    const encoded = Buffer.from(anchor, 'base64url');
+    for (const bad of [
+      null, '', anchor + '=', Buffer.alloc(128).toString('base64url'),
+      encoded.subarray(0, -1).toString('base64url'),
+      Buffer.concat([encoded, Uint8Array.of(0)]).toString('base64url')
+    ]) {
+      assert.equal(right.indexOf(bad), undefined);
+    }
+    assert.equal(left.relativeAt(HEADER.length - 1), undefined);
+    assert.equal(left.relativeAt(a.getText().length + 1), undefined);
+    assert.equal(left.relativeAt(Number.NaN), undefined);
   });
 });
 

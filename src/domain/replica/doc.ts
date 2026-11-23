@@ -6,13 +6,16 @@
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import type * as YTypes from 'yjs';
-import { MAX_STATE_BYTES, MAX_STRUCTS, MAX_UPDATE_BYTES } from './kindSchemas/doc';
+import { MAX_CLIENT_ID, MAX_STATE_BYTES, MAX_STRUCTS, MAX_UPDATE_BYTES } from './kindSchemas/doc';
+import { isBase64urlBytes } from './kindSchemas/shared';
 import { skimSnapshot, skimUpdate } from './updateGuard';
 
 type YjsApi = typeof YTypes;
 export type CrdtDoc = YTypes.Doc;
 const TEXT_NAME = 'body';
 const REMOTE = 'remote';
+// One discriminator, a five-byte client id, an eight-byte safe clock, and the default association.
+const MAX_RELATIVE_POSITION_BYTES = 15;
 // Yjs content kinds (getRef) a product may carry: typed text and the tombstone of deleted text. Everything else widens the parser surface (D-35).
 const REF_DELETED = 1;
 const REF_STRING = 4;
@@ -229,6 +232,8 @@ function splitLocalUpdate(update: Uint8Array): Uint8Array[] {
 /** A local editing document with one origin and a guarded, plain-data update boundary. */
 export interface BoundText {
   text(): string;
+  relativeAt(index: number): string | undefined;
+  indexOf(relative: unknown): number | undefined;
   edit(edits: readonly BoundTextEdit[]): void;
   insert(index: number, text: string): void;
   remove(index: number, length: number): void;
@@ -240,7 +245,10 @@ export interface BoundText {
   destroy(): void;
 }
 
-export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = []): BoundText {
+export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [], positionScope?: string): BoundText {
+  const Y = loadYjs();
+  // Root names and item IDs can be reused in different products.
+  const scope = positionScope === undefined ? Buffer.alloc(0) : createHash('sha256').update(positionScope).digest();
   const doc = createLocalDoc(clientId);
   for (const bytes of seeds) {
     if (applyRemote(doc, bytes)) continue;
@@ -249,7 +257,8 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
   }
   const body = doc.getText(TEXT_NAME);
   const localOrigin = {};
-  const history = new (loadYjs().UndoManager)(body, { trackedOrigins: new Set([localOrigin]), captureTimeout: 500 });
+  const history = new Y.UndoManager(body, { trackedOrigins: new Set([localOrigin]), captureTimeout: 500 });
+  const validIndex = (index: number): boolean => Number.isSafeInteger(index) && index >= 0 && index <= body.length;
   const edit = (edits: readonly BoundTextEdit[]): void => {
     const ordered = [...edits].sort((a, b) => b.offset - a.offset);
     let end = body.length;
@@ -268,6 +277,31 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
   };
   return {
     text: () => body.toString(),
+    relativeAt(index) {
+      if (!validIndex(index)) return undefined;
+      const position = Y.createRelativePositionFromTypeIndex(body, index);
+      return Buffer.concat([scope, Y.encodeRelativePosition(position)]).toString('base64url');
+    },
+    indexOf(relative) {
+      if (!isBase64urlBytes(relative, scope.length + MAX_RELATIVE_POSITION_BYTES)) return undefined;
+      const token = Buffer.from(relative, 'base64url');
+      if (!token.subarray(0, scope.length).equals(scope)) return undefined;
+      const bytes = token.subarray(scope.length);
+      try {
+        const position = Y.decodeRelativePosition(bytes);
+        const { item, tname } = position;
+        if (position.type !== null || position.assoc !== 0 || (tname !== TEXT_NAME && item === null)) return undefined;
+        if (item !== null && (!Number.isSafeInteger(item.client) || item.client < 1 || item.client > MAX_CLIENT_ID ||
+          !Number.isSafeInteger(item.clock) || item.clock < 0)) return undefined;
+        // This also rejects missing fields, trailing bytes and overlong binary encodings.
+        if (!bytes.equals(Y.encodeRelativePosition(position))) return undefined;
+        // Following undo's local bookkeeping would resolve the same token differently on different replicas.
+        const absolute = Y.createAbsolutePositionFromRelativePosition(position, doc, false);
+        return absolute?.type === body && validIndex(absolute.index) ? absolute.index : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     edit,
     insert: (offset, text) => edit([{ offset, length: 0, text }]),
     remove: (offset, length) => edit([{ offset, length, text: '' }]),

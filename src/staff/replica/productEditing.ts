@@ -87,7 +87,8 @@ export class ProductEditor {
     if (clientId === undefined) throw new ProductEditError('no-room');
     held.add(clientId);
     HELD.set(key, held);
-    const editor = new ProductEditor(project, target, hooks, openBoundText(clientId), clientId, undefined);
+    const positionScope = JSON.stringify([project.projectId, target.stream, target.product]);
+    const editor = new ProductEditor(project, target, hooks, openBoundText(clientId, [], positionScope), clientId, undefined);
     try {
       const feed = await acceptedUpdates(project, target.stream, target.product);
       editor.applyRemote(feed.updates);
@@ -101,6 +102,16 @@ export class ProductEditor {
   /** The text of the local document. */
   public text(): string {
     return this.doc.text();
+  }
+
+  public relativeAt(index: number): string | undefined {
+    if (this.closedNow || this.stoppedBy !== undefined) return undefined;
+    return this.doc.relativeAt(index);
+  }
+
+  public indexOf(relative: unknown): number | undefined {
+    if (this.closedNow || this.stoppedBy !== undefined) return undefined;
+    return this.doc.indexOf(relative);
   }
 
   /** The hash of the newest accepted update this session has applied, as a cursor for acceptedUpdates. */

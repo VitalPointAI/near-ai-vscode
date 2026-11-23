@@ -142,6 +142,23 @@ export class EditorBinding {
 
   public text(): string { return this.editor.text(); }
 
+  /** Convert a document offset in the body to a product-scoped position. */
+  public relativeAt(offset: number): string | undefined {
+    if (!Number.isSafeInteger(offset) || !this.positionsReady()) return undefined;
+    return this.editor.relativeAt(offset - this.header.length);
+  }
+
+  /** Resolve a product position to an offset in the currently rendered document. */
+  public indexOf(relative: unknown): number | undefined {
+    if (!this.positionsReady()) return undefined;
+    const index = this.editor.indexOf(relative);
+    return index === undefined ? undefined : this.header.length + index;
+  }
+
+  private positionsReady(): boolean {
+    return this.failure === undefined && this.closing === undefined && this.rawBody === undefined && this.document.version === this.version;
+  }
+
   public undo(): Promise<boolean> { return this.enqueue(() => this.applyHistory('undo')); }
 
   public redo(): Promise<boolean> { return this.enqueue(() => this.applyHistory('redo')); }
