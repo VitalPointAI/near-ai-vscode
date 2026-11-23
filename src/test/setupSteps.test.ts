@@ -3,9 +3,10 @@
 // Mode: where the project is kept, who else works on it) extend without changing the menu.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { SecretStorageLike } from '../services/auth';
 import {
@@ -190,6 +191,8 @@ test('setup texts are plain words: no dashes for punctuation, no developer terms
 
 const executed: unknown[][] = [];
 let webviewPanel: unknown;
+const warnings: string[] = [];
+let confirmation: string | undefined;
 const infos: Array<{ text: string; items: string[] }> = [];
 const picks: Array<{ items: Array<Record<string, unknown>>; options: Record<string, unknown> }> = [];
 const commands = new Map<string, (...args: unknown[]) => unknown>();
@@ -203,13 +206,14 @@ const vscodeStub = {
   ProgressLocation: { Notification: 15 },
   ViewColumn: { One: 1 },
   workspace: {
-    workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+    workspaceFolders: [] as Array<{ uri: { fsPath: string; scheme?: string }; name?: string }>,
     name: 'Demo',
     getConfiguration: () => ({ get: <T>(key: string, fallback?: T) => (key in settings ? settings[key] : fallback) as T, inspect: () => undefined, update: async () => undefined }),
-    onDidChangeConfiguration: () => ({ dispose() {} })
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidSaveTextDocument: () => ({ dispose() {} })
   },
   window: {
-    showWarningMessage: async () => undefined,
+    showWarningMessage: async (message: string, _options?: { detail?: string }) => { warnings.push(message); return confirmation; },
     showErrorMessage: async (text: string) => { throw new Error(`unexpected error: ${text}`); },
     showInformationMessage: async (text: string, ...items: string[]) => { infos.push({ text, items }); return infoChoice; },
     showQuickPick: async (items: Array<Record<string, unknown>>, options: Record<string, unknown>) => { picks.push({ items, options }); return quickPick(items); },
@@ -224,7 +228,7 @@ const vscodeStub = {
   },
   env: {},
   UIKind: { Desktop: 1, Web: 2 },
-  Uri: { file: (fsPath: string) => ({ fsPath }), parse: (value: string) => ({ toString: () => value }), joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }) }
+  Uri: { file: (fsPath: string) => ({ fsPath, scheme: 'file', toString: () => pathToFileURL(fsPath).href }), parse: (value: string) => ({ toString: () => value }), joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }) }
 };
 
 function load<T>(id: string): T {
@@ -233,7 +237,7 @@ function load<T>(id: string): T {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try { return require(id) as T; } finally { nodeModule._load = originalLoad; }
 }
-const reset = () => { executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
+const reset = () => { warnings.length = 0; confirmation = undefined; executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
 const secrets = new MemorySecrets();
 const context = { subscriptions: [] as unknown[], secrets };
 let chatOnScreen = false;
@@ -280,6 +284,94 @@ test('Project Setup does not apply a choice after the workspace selection change
   };
   assert.equal(await menu.showSetupMenu(host), undefined);
   assert.deepEqual(executed, [], 'the reviewed step belongs to the original project');
+});
+
+function workAreaCommand() {
+  const { registerWorkspaceCommands } = load<typeof import('../services/workspaceCommands')>('../services/workspaceCommands');
+  const subscriptions: Array<{ dispose(): void }> = [];
+  registerWorkspaceCommands({ subscriptions, globalState: {} } as never, () => undefined);
+  const create = commands.get('sterling.workAreas.create');
+  assert.ok(create, 'the workbench can call the registered VSIX command');
+  return { create, close: () => subscriptions.forEach((item) => item.dispose()) };
+}
+
+test('Defence work-area creation uses the selected root and stores its type and project category', async () => {
+  reset();
+  const first = await emptyProject();
+  const selected = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [
+    { uri: vscodeStub.Uri.file(first), name: 'First project' },
+    { uri: vscodeStub.Uri.file(selected), name: 'Selected project' }
+  ];
+  quickPick = (items) => items.find((item) => ['Selected project', 'Minor capital project'].includes(String(item.label)));
+  inputBoxes = [' Renewal & Equipment '];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    const created = await host.create('projects') as { uri: string; title: string };
+    assert.equal(created.title, 'Renewal & Equipment');
+    const folder = fileURLToPath(created.uri);
+    assert.equal(path.dirname(folder), await realpath(selected));
+    assert.match(path.basename(folder), /^work-area-[0-9a-f]{16}$/);
+    assert.deepEqual(JSON.parse(await readFile(path.join(folder, '.planning/.near-ai/work-area.json'), 'utf8')), {
+      version: 1, kind: 'projects', title: 'Renewal & Equipment', category: 'minor-capital'
+    });
+    assert.equal(await readFile(path.join(folder, '.planning/.near-ai/.gitignore'), 'utf8'), '/work-area.json\n');
+    assert.deepEqual(await readdir(path.join(folder, '.planning/.near-ai')), ['.gitignore', 'work-area.json']);
+    assert.match(warnings[0], /Renewal & Equipment/);
+    assert.deepEqual(await readdir(first), []);
+    assert.deepEqual(executed, [], 'opening the returned folder is the native caller’s decision');
+  } finally { host.close(); }
+});
+
+test('Defence work-area creation rejects stale roots, cancel and conflicting folders', async () => {
+  reset();
+  const root = await emptyProject();
+  const other = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Original' }];
+  const host = workAreaCommand();
+  try {
+    assert.equal(await host.create({ kind: 'training' }), undefined, 'only a known kind string is accepted');
+    inputBoxes = ['Courseware'];
+    assert.equal(await host.create('training'), undefined, 'confirmation was dismissed');
+    assert.deepEqual(await readdir(root), []);
+
+    confirmation = 'Create';
+    inputBoxes = ['Exercises'];
+    const showWarning = vscodeStub.window.showWarningMessage;
+    vscodeStub.window.showWarningMessage = async (message) => {
+      if (message.includes('Exercises')) vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(other), name: 'Other' }];
+      return showWarning(message);
+    };
+    try { assert.equal(await host.create('training'), undefined, 'a removed root cannot receive new writes'); }
+    finally { vscodeStub.window.showWarningMessage = showWarning; }
+    assert.deepEqual(await readdir(root), []);
+    assert.deepEqual(await readdir(other), []);
+
+    await writeFile(path.join(other, 'notes.txt'), 'existing');
+    vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Original' }];
+    inputBoxes = ['Existing area'];
+    vscodeStub.window.showWarningMessage = async (message, options) => {
+      if (message.includes('Existing area')) {
+        const destination = options?.detail?.match(/ at (.*)\.$/)?.[1];
+        assert.ok(destination);
+        await symlink(other, destination, 'junction');
+      }
+      return showWarning(message, options);
+    };
+    try { assert.equal(await host.create('operations'), undefined, 'a substituted link was refused'); }
+    finally { vscodeStub.window.showWarningMessage = showWarning; }
+    assert.equal(await readFile(path.join(other, 'notes.txt'), 'utf8'), 'existing');
+    assert.deepEqual(await readdir(other), ['notes.txt']);
+
+    inputBoxes = ['Resource register', 'Resource register'];
+    const results = await Promise.all([host.create('resources'), host.create('resources')]) as { uri: string; title: string }[];
+    assert.notEqual(results[0].uri, results[1].uri, 'concurrent creations reserve separate folders');
+    for (const result of results) {
+      const saved = JSON.parse(await readFile(path.join(fileURLToPath(result.uri), '.planning/.near-ai/work-area.json'), 'utf8'));
+      assert.deepEqual(saved, { version: 1, kind: 'resources', title: 'Resource register' });
+    }
+  } finally { host.close(); }
 });
 
 test('a step registered through the extension point shows in the Project Setup menu, reading a registered fact', async () => {
