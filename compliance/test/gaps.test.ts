@@ -173,7 +173,16 @@ test('release assessment gaps have named open paths', () => {
   }
 });
 test('a gap closes only when every control has met or reviewed-not-applicable evidence', () => assert.equal(stateFor('G13', [{ level: 'protected-b', control: 'sc-08', state: 'met' }, { level: 'protected-b', control: 'sr-11', state: 'not-applicable' }]).state, 'closed'));
-test('some evidence for a gap is in progress', () => assert.equal(stateFor('G13', [{ level: 'protected-b', control: 'sc-08', state: 'met' }]).state, 'in-progress'));
+test('a gap reports progress when any affected control has evidence, regardless of order', () => {
+  for (const control of ['sc-08', 'sr-11']) {
+    const covered = { level: 'protected-b', control, state: 'met' } as const;
+    assert.equal(stateFor('G13', [covered]).state, 'in-progress');
+  }
+  assert.equal(stateFor('G13', [
+    { level: 'protected-b', control: 'sc-08', state: 'not-met' },
+    { level: 'protected-b', control: 'sr-11', state: 'met' },
+  ]).state, 'in-progress');
+});
 test('a POA&M milestone makes an untouched gap planned', () => assert.equal(stateFor('G13').state, 'planned'));
 test('the product incident exercise and advisory evidence are planned for Phase 44.1', () => assert.equal(stateFor('G1').phase, '44.1'));
 test('a past target date is an overdue flag', () => assert.equal(stateFor('G13', [], [], new Date('2028-01-01T00:00:00.000Z')).overdue, true));

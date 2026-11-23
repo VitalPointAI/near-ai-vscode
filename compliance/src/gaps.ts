@@ -56,19 +56,11 @@ export function gapCoversRow(gap: Gap, row: Pick<GapRow, 'level' | 'control'>): 
 }
 
 function evidenceProgress(gap: Gap, rows: readonly GapRow[]): 'closed' | 'in-progress' | 'none' {
-  let anyCovered = false;
   const scoped = rows.filter((row) => gapCoversRow(gap, row));
-  for (const control of gap.controls) {
-    const controlRows = scoped.filter((row) => row.control === control);
-    if (controlRows.length === 0) return anyCovered ? 'in-progress' : 'none';
-    const covered = controlRows.every((row) => row.state === 'met' || row.state === 'not-applicable');
-    if (!covered) {
-      if (controlRows.some((row) => row.state === 'met' || row.state === 'not-applicable')) anyCovered = true;
-      return anyCovered ? 'in-progress' : 'none';
-    }
-    anyCovered = true;
-  }
-  return 'closed';
+  const isCovered = (row: GapRow) => row.state === 'met' || row.state === 'not-applicable';
+  if (!scoped.some(isCovered)) return 'none';
+  const everyControlPresent = gap.controls.every((control) => scoped.some((row) => row.control === control));
+  return everyControlPresent && scoped.every(isCovered) ? 'closed' : 'in-progress';
 }
 
 /** Computes states only from rows, registered milestones, verified acceptances and the clock. */
