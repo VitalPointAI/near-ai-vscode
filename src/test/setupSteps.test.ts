@@ -324,6 +324,62 @@ test('Defence work-area creation uses the selected root and stores its type and 
   } finally { host.close(); }
 });
 
+test('Capability Development saves named components in their entered order', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  const choices = ['Program', 'Product', 'Major capital project', 'Finish adding components'];
+  quickPick = (items) => {
+    const selection = choices.shift();
+    return items.find((item) => item.label === selection);
+  };
+  inputBoxes = [' Defence capability ', 'Readiness programme', 'Resource register', 'Fleet renewal'];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    const created = await host.create('capability-development') as { uri: string; title: string } | undefined;
+    assert.ok(created);
+    assert.equal(created.title, 'Defence capability');
+    const metadata = path.join(fileURLToPath(created.uri), '.planning/.near-ai/work-area.json');
+    assert.deepEqual(JSON.parse(await readFile(metadata, 'utf8')), {
+      version: 1, kind: 'capability-development', title: 'Defence capability', components: [
+        { kind: 'program', title: 'Readiness programme' },
+        { kind: 'product', title: 'Resource register' },
+        { kind: 'major-capital', title: 'Fleet renewal' }
+      ]
+    });
+    assert.equal(picks.length, 4, 'the component picker returns after each named component');
+    assert.deepEqual(picks[0].items.map((item) => item.label), ['Program', 'Major capital project', 'Minor capital project', 'Initiative', 'Product', 'Finish adding components']);
+  } finally { host.close(); }
+});
+
+test('Capability Development cancels the entire draft from the component picker or title prompt', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    inputBoxes = ['Cancelled from picker', 'First component'];
+    let chooseFirst = true;
+    quickPick = (items) => {
+      if (!chooseFirst) return undefined;
+      chooseFirst = false;
+      return items[0];
+    };
+    assert.equal(await host.create('capability-development'), undefined);
+    assert.equal(picks.length, 2, 'the second component picker was cancelled');
+    assert.equal(warnings.length, 0, 'cancelling skips confirmation');
+    assert.deepEqual(await readdir(root), []);
+
+    inputBoxes = ['Cancelled from title'];
+    quickPick = (items) => items[0];
+    assert.equal(await host.create('capability-development'), undefined);
+    assert.equal(picks.length, 3, 'cancelling a component title does not reopen its picker');
+    assert.deepEqual(await readdir(root), []);
+  } finally { host.close(); }
+});
+
 test('Defence work-area creation rejects stale roots, cancel and conflicting folders', async () => {
   reset();
   const root = await emptyProject();
