@@ -1,0 +1,18 @@
+{
+  "gap": "G78",
+  "id": "g78",
+  "controls": [
+    "ra-05",
+    "ra-05.02",
+    "ra-05.05"
+  ],
+  "ownerRole": "shared",
+  "title": "Vulnerability monitoring needs current coverage and bounded scan authority",
+  "remediation": "The deployment vulnerability management owner approves scope, schedule, coverage, detection content updates and any authorized elevated scanner identities. Reconcile scoped assets against inventory and verify current detection content and authorized access in a permitted test environment. Review and track redacted results. Preserve exact release inventory checks and verify deployments separately.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the scoped monitoring schedule, recorded detection content version and authorized scan-role evidence with a redacted result and follow-up"
+    }
+  ]
+}

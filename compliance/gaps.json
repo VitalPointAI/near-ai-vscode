@@ -892,6 +892,95 @@
     },
     {
       "controls": [
+        "ra-01",
+        "ra-07"
+      ],
+      "id": "G75",
+      "ownerRole": "owner",
+      "poam": "g75",
+      "remediation": "The sponsor risk authority approves risk assessment and response procedures, owners, review triggers and tolerance. Sample an actual finding through assignment, accepted treatment or remediation, authorized approval and follow-up. Record scope, residual risk, review or expiry date and reassessment responsibility.",
+      "title": "Assessment policy and risk treatment decisions need authority and follow-up evidence"
+    },
+    {
+      "controls": [
+        "ra-02",
+        "ra-03",
+        "ra-09"
+      ],
+      "id": "G76",
+      "ownerRole": "shared",
+      "poam": "g76",
+      "remediation": "The sponsor categorization and risk owners approve information impact and handling decisions. Component maintainers supply current data flows and trust boundaries. Review the actual deployment threat and privacy risks, critical assets and supporting dependencies and verify traceability to selected safeguards and open actions.",
+      "title": "System sensitivity, risks and critical dependencies need assessed deployment evidence"
+    },
+    {
+      "controls": [
+        "ra-03.01"
+      ],
+      "id": "G77",
+      "ownerRole": "shared",
+      "poam": "g77",
+      "remediation": "The deployment procurement and risk owners identify assessed suppliers, services, release dependencies and trust boundaries. Release maintainers supply available inventory and provenance. Assess concentration, integrity and continuity risks, record owners and treatments, and retain the review trigger and date. Use supplier evidence and approved exception references rather than unverified assertions.",
+      "title": "Supply chain risk assessments need reviewed service and dependency scope"
+    },
+    {
+      "controls": [
+        "ra-05",
+        "ra-05.02",
+        "ra-05.05"
+      ],
+      "id": "G78",
+      "ownerRole": "shared",
+      "poam": "g78",
+      "remediation": "The deployment vulnerability management owner approves scope, schedule, coverage, detection content updates and any authorized elevated scanner identities. Reconcile scoped assets against inventory and verify current detection content and authorized access in a permitted test environment. Review and track redacted results. Preserve exact release inventory checks and verify deployments separately.",
+      "title": "Vulnerability monitoring needs current coverage and bounded scan authority"
+    },
+    {
+      "controls": [
+        "ra-05.11"
+      ],
+      "id": "G79",
+      "ownerRole": "shared",
+      "poam": "g79",
+      "remediation": "Product security and deployment intake owners verify the published instructions reach the approved private channel. Exercise a clearly marked benign report through receipt, triage and owner handoff, retaining restricted and redacted evidence. Record how deployed services receive reports or inherit the approved organizational route.",
+      "title": "Public reporting instructions and private vulnerability intake need an exercised handoff"
+    },
+    {
+      "controls": [
+        "pl-01",
+        "pl-02",
+        "pl-08"
+      ],
+      "id": "G80",
+      "ownerRole": "owner",
+      "poam": "g80",
+      "remediation": "The sponsor security and privacy owners approve planning policy and procedures, named responsibilities and the assessed boundary. Complete the system security and privacy plan with current component and trust-boundary diagrams, data flows, roles, requirements, shared responsibilities, exceptions and links to assessor evidence. Record review and release or deployment change triggers.",
+      "title": "System security and privacy plans need approved deployment scope and diagrams"
+    },
+    {
+      "controls": [
+        "pl-04",
+        "pl-04.01"
+      ],
+      "id": "G81",
+      "ownerRole": "owner",
+      "poam": "g81",
+      "remediation": "Deployment access and privacy owners approve rules of behaviour and external application and public posting restrictions. Verify the rules reach assigned users, acknowledgements or equivalent authorized records exist before access and on revision, and applicable external access restrictions have an operating sample. Record approved scope for external services.",
+      "title": "Rules of behaviour and external-site restrictions need acknowledged deployment records"
+    },
+    {
+      "controls": [
+        "pl-10",
+        "pl-11"
+      ],
+      "id": "G82",
+      "ownerRole": "owner",
+      "poam": "g82",
+      "remediation": "The sponsor security and privacy authorities approve the applicable baseline and overlays using categorization and deployment boundaries. Link every inclusion, enhancement, inheritance, exclusion or alternative to its rationale, affected control and component, approving authority and evidence or open action. Reassess the baseline when the release, configuration or scope changes.",
+      "title": "Selected control baselines and tailoring need authorized decisions"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

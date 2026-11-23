@@ -1,0 +1,17 @@
+{
+  "gap": "G82",
+  "id": "g82",
+  "controls": [
+    "pl-10",
+    "pl-11"
+  ],
+  "ownerRole": "owner",
+  "title": "Selected control baselines and tailoring need authorized decisions",
+  "remediation": "The sponsor security and privacy authorities approve the applicable baseline and overlays using categorization and deployment boundaries. Link every inclusion, enhancement, inheritance, exclusion or alternative to its rationale, affected control and component, approving authority and evidence or open action. Reassess the baseline when the release, configuration or scope changes.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved baseline and tailoring register with reviewed control-level rationale, authority and outstanding evidence paths"
+    }
+  ]
+}
