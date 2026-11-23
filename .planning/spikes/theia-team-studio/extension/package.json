@@ -22,6 +22,9 @@
     },
     {
       "frontend": "lib/browser/sterling-compliance-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-portfolio-module"
     }
   ]
 }
