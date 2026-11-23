@@ -3,6 +3,8 @@ import Module from 'node:module';
 import { test } from 'node:test';
 import type { GuideInbound, GuideOutbound } from '../domain/setup/guideMessages';
 import { KIND_OF_WORK_STATE_KEY } from '../domain/setup/ids';
+import { createSetupRegistries } from '../domain/setup/registries';
+import { memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
 import { createGuideController } from '../services/setup/guideController';
 import { routeFactsOf } from '../services/setup/guideFacts';
 import { readSetupGuide } from '../services/setup/projectStore';
@@ -124,9 +126,40 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
     ? Promise.resolve({ view: { organization: 'failed', startingRules: false, issuedHere: false } })
     : originalPolicy(now);
   let project = { ...deps, readPolicy };
-  const run = registrar.registerGetStarted(context, { createRun: () => project });
+  const registries = createSetupRegistries();
+  const providedDevice = { ...memoryOnlyDeviceProvider(), id: 'provided', rank: 1 };
+  registries.devices.register(providedDevice);
+  const unexpectedCheck = () => assert.fail('registration must not check a source');
+  let failProjectLoad = true;
+  const run = registrar.registerGetStarted(context, {
+    registries,
+    sources: {
+      local: { identify: unexpectedCheck, listModels: unexpectedCheck, localClient: unexpectedCheck },
+      near: { hasKey: unexpectedCheck, client: unexpectedCheck, binding: unexpectedCheck, baseUrl: unexpectedCheck },
+      device: { platform: () => 'linux', hostKind: 'container', totalmem: () => 16_000_000_000 }
+    },
+    createRun(_request, active) {
+      assert.equal(active, registries);
+      assert.deepEqual(active.options.active().map(({ id }) => id), ['local-servers', 'near-ai']);
+      assert.deepEqual(active.devices.list().map(({ id }) => id), ['provided', 'memory-only']);
+      if (failProjectLoad) throw new Error('fixture project load failed');
+      return project;
+    }
+  });
   try {
+    assert.deepEqual(registries.options.active(), []);
+    await assert.rejects(run.openGetStarted(), /fixture project load failed/);
+    assert.deepEqual(registries.options.active(), []);
+    assert.deepEqual(registries.devices.list(), [providedDevice]);
+    assert.equal(views, 0);
+    failProjectLoad = false;
     await run.openGetStarted();
+    const fallback = registries.devices.list().find(({ id }) => id === 'memory-only');
+    assert.ok(fallback);
+    const device = await fallback.read();
+    assert.equal(device.hostKind, 'container');
+    assert.equal(device.totalMemoryBytes, 16_000_000_000);
+    assert.equal(registries.devices.best(), providedDevice);
     const first = posted[0];
     assert.ok(first?.type === 'screen' && first.screen.kind === 'question');
     assert.equal(first.screen.screen, 'kind-of-work');
@@ -196,6 +229,8 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
     assert.ok(changed?.type === 'screen' && changed.screen.kind === 'question');
     assert.deepEqual(changed.screen.fields[0].selected, ['analysis']);
   } finally { run.dispose(); }
+  assert.deepEqual(registries.options.active(), []);
+  assert.deepEqual(registries.devices.list(), [providedDevice]);
 });
 
 test('a live gate refusal during Apply leaves the project and connection untouched', async (t) => {

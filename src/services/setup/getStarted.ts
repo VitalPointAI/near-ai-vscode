@@ -3,11 +3,15 @@ import { parseGuideAnswers, type OpenGetStarted, type OpenGetStartedRequest } fr
 import { isRecord } from '../../domain/gate/shape';
 import { parseGuideInbound, type GuideInbound, type GuideOutbound } from '../../domain/setup/guideMessages';
 import { KIND_OF_WORK_STATE_KEY } from '../../domain/setup/ids';
+import { setupRegistries, type SetupRegistries } from '../../domain/setup/registries';
 import { GET_STARTED_BODY, GET_STARTED_PAGE } from '../../domain/setup/screens';
 import { projectLogKey } from '../../gate/decisionLog';
 import { openPanel } from '../webview/openPanel';
 import { definePage, listenTo, postTo } from '../webview/protocol';
+import { memoryOnlyDeviceProvider } from './deviceFacts';
 import { createGuideController, type GuideController, type GuideControllerDeps } from './guideController';
+import { createLocalServersSource, type LocalServersDeps } from './localServersOption';
+import { createNearAiSource, type NearAiOptionDeps } from './nearAiOption';
 
 export { gateGuidePolicy } from './guideFacts';
 
@@ -15,8 +19,28 @@ const page = definePage<GuideInbound, GuideOutbound>(parseGuideInbound);
 const progressKeyPrefix = 'nearAi.setup.progress.';
 
 export interface GetStartedDeps {
+  readonly registries?: SetupRegistries;
+  readonly sources?: {
+    readonly local: LocalServersDeps;
+    readonly near: NearAiOptionDeps;
+    readonly device?: Parameters<typeof memoryOnlyDeviceProvider>[0];
+  };
   /** Capture the current project and its trusted service adapters when the panel opens. */
-  createRun(request?: OpenGetStartedRequest): Omit<GuideControllerDeps, 'post' | 'close'>;
+  createRun(request: OpenGetStartedRequest | undefined, registries: SetupRegistries): Omit<GuideControllerDeps, 'post' | 'close'>;
+}
+
+function registerSources(registries: SetupRegistries, deps: NonNullable<GetStartedDeps['sources']>): vscode.Disposable {
+  const registrations: vscode.Disposable[] = [];
+  const dispose = () => registrations.reverse().forEach((registration) => registration.dispose());
+  try {
+    registrations.push(registries.options.register(createLocalServersSource(deps.local)));
+    registrations.push(registries.options.register(createNearAiSource(deps.near)));
+    registrations.push(registries.devices.register(memoryOnlyDeviceProvider(deps.device)));
+    return { dispose };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 }
 
 export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'extensionUri' | 'workspaceState' | 'globalState'>, deps: GetStartedDeps): {
@@ -25,6 +49,7 @@ export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'exten
   let view: vscode.WebviewPanel | undefined;
   let controller: GuideController | undefined;
   let closing: Promise<void> | undefined;
+  let registeredSources: vscode.Disposable | undefined;
   let disposed = false;
   const kindStore: NonNullable<GuideControllerDeps['kindStore']> = {
     get() {
@@ -42,8 +67,18 @@ export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'exten
     while (closing) await closing;
     if (disposed) return;
     if (view) { view.reveal(); await controller?.receive({ type: 'ready' }); return; }
-    const run = deps.createRun(request);
-    const panel = openPanel(context, { ...GET_STARTED_PAGE, body: GET_STARTED_BODY });
+    const registries = deps.registries ?? setupRegistries();
+    const firstRegistration = !registeredSources && deps.sources ? registerSources(registries, deps.sources) : undefined;
+    let run: ReturnType<GetStartedDeps['createRun']>;
+    let panel: vscode.WebviewPanel;
+    try {
+      run = deps.createRun(request, registries);
+      panel = openPanel(context, { ...GET_STARTED_PAGE, body: GET_STARTED_BODY });
+    } catch (error) {
+      firstRegistration?.dispose();
+      throw error;
+    }
+    registeredSources ??= firstRegistration;
     const key = progressKeyPrefix + projectLogKey(run.root);
     const progress: NonNullable<GuideControllerDeps['progress']> = {
       read: () => context.workspaceState.get(key),
@@ -67,5 +102,12 @@ export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'exten
     await active.open(request);
   };
 
-  return { openGetStarted, dispose() { disposed = true; view?.dispose(); } };
+  return {
+    openGetStarted,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      try { view?.dispose(); } finally { registeredSources?.dispose(); }
+    }
+  };
 }
