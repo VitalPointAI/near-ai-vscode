@@ -17,6 +17,9 @@ const REMOTE = 'remote';
 const REF_DELETED = 1;
 const REF_STRING = 4;
 const REF_GC = 0;
+const SPLIT_UPDATE_BYTES = 200 * 1024;
+const RECORD_HEADER_BYTES = 32;
+const STRUCT_GROUP_BYTES = SPLIT_UPDATE_BYTES - RECORD_HEADER_BYTES;
 // Most clock positions one struct may claim (D-35). A GC struct is only a few bytes on the wire but moves a client's clock by its length, so the
 // length needs a cap of its own. The struct and delete-range cap lives with the byte limits in kindSchemas/doc.ts and is re-exported here.
 export const MAX_STRUCT_LENGTH = 1_000_000;
@@ -124,9 +127,103 @@ export type TextOp = { retain: number } | { insert: string } | { delete: number 
 
 /** Coalesce captured local edits when the resulting record fits the wire format. */
 export function mergeBoundUpdates(updates: readonly Uint8Array[]): Uint8Array | undefined {
-  if (updates.length < 2 || updates.reduce((bytes, update) => bytes + update.length, 0) > MAX_UPDATE_BYTES) return undefined;
+  if (updates.length < 2 || updates.reduce((bytes, update) => bytes + update.length, 0) > SPLIT_UPDATE_BYTES) return undefined;
   const merged = loadYjs().mergeUpdates([...updates]);
-  return merged.length <= MAX_UPDATE_BYTES && skimUpdate(merged).ok ? merged : undefined;
+  return merged.length <= SPLIT_UPDATE_BYTES && skimUpdate(merged).ok ? merged : undefined;
+}
+
+/** Text clocks count UTF-16 units. Split only between complete code points to preserve those clocks and the encoded text. */
+function* stringParts(text: string, maxBytes: number): Generator<string> {
+  let start = 0;
+  let end = 0;
+  let bytes = 0;
+  for (const point of text) {
+    const count = Buffer.byteLength(point);
+    if (bytes + count > maxBytes) {
+      yield text.slice(start, end);
+      start = end;
+      bytes = 0;
+    }
+    end += point.length;
+    bytes += count;
+  }
+  if (end > start) yield text.slice(start);
+}
+
+function* localStructParts(struct: YTypes.AbstractStruct): Generator<YTypes.AbstractStruct> {
+  const Y = loadYjs();
+  const item = 'content' in struct ? struct as YTypes.Item : undefined;
+  const text = item?.content.getRef() === REF_STRING ? (item.content as YTypes.ContentString).str : undefined;
+  const maxTextBytes = STRUCT_GROUP_BYTES - RECORD_HEADER_BYTES;
+  if (item === undefined || text === undefined || Buffer.byteLength(text) <= maxTextBytes) {
+    yield struct;
+    return;
+  }
+  const { client } = item.id;
+  let clock = item.id.clock;
+  let origin = item.origin;
+  for (const part of stringParts(text, maxTextBytes)) {
+    yield new Y.Item(Y.createID(client, clock), null, origin, null, item.rightOrigin, item.parent, item.parentSub, new Y.ContentString(part));
+    clock += part.length;
+    origin = Y.createID(client, clock - 1);
+  }
+}
+
+/** Re-encode captured local structs and delete sets as complete V1 records. The editing transaction and undo item stay whole. */
+function splitLocalUpdate(update: Uint8Array): Uint8Array[] {
+  if (update.length <= SPLIT_UPDATE_BYTES) return [update];
+  const Y = loadYjs();
+  const { structs, ds } = Y.decodeUpdate(update);
+  const result: Uint8Array[] = [];
+  let group: Uint8Array[] = [];
+  let groupBytes = 0;
+  let first: YTypes.ID | undefined;
+  const flushGroup = (): void => {
+    if (first === undefined) return;
+    const header = new Y.UpdateEncoderV1();
+    header.writeLen(1); // one client group
+    header.writeLen(group.length);
+    header.writeClient(first.client);
+    header.writeLen(first.clock);
+    result.push(Buffer.concat([header.toUint8Array(), ...group, new Uint8Array(1)])); // empty delete set
+    group = [];
+    groupBytes = 0;
+    first = undefined;
+  };
+  for (const struct of structs) {
+    for (const part of localStructParts(struct)) {
+      const encoder = new Y.UpdateEncoderV1();
+      part.write(encoder, 0, 0);
+      const encoded = encoder.toUint8Array();
+      if (groupBytes + encoded.length > STRUCT_GROUP_BYTES || (first !== undefined && first.client !== part.id.client)) flushGroup();
+      first ??= part.id;
+      group.push(encoded);
+      groupBytes += encoded.length;
+    }
+  }
+  flushGroup();
+
+  // Inserted clocks must arrive before any delete range that may refer to them.
+  const maxRanges = Math.floor(STRUCT_GROUP_BYTES / 16); // two varuints of at most eight bytes each
+  for (const [client, ranges] of ds.clients) {
+    for (let start = 0; start < ranges.length; start += maxRanges) {
+      const end = Math.min(start + maxRanges, ranges.length);
+      const encoder = new Y.UpdateEncoderV1();
+      encoder.writeLen(0); // no structs
+      encoder.writeLen(1); // one client in the delete set
+      encoder.writeClient(client);
+      encoder.writeLen(end - start);
+      for (let index = start; index < end; index += 1) {
+        encoder.writeDsClock(ranges[index].clock);
+        encoder.writeDsLen(ranges[index].len);
+      }
+      result.push(encoder.toUint8Array());
+    }
+  }
+  if (result.some((part) => part.length > SPLIT_UPDATE_BYTES || !skimUpdate(part).ok)) {
+    throw new Error('The shared text change could not be written in parts.');
+  }
+  return result;
 }
 
 /** A local editing document with one origin and a guarded, plain-data update boundary. */
@@ -179,7 +276,9 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
     applyRemote: (bytes) => applyRemote(doc, bytes),
     onLocalUpdate(listener) {
       const capture = (bytes: Uint8Array, origin: unknown): void => {
-        if (origin === localOrigin || origin === history) listener(bytes);
+        if (origin === localOrigin || origin === history) {
+          for (const part of splitLocalUpdate(bytes)) listener(part);
+        }
       };
       doc.on('update', capture);
       return () => doc.off('update', capture);

@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { clientIdOf } from '../domain/replica/clientIds';
-import { createLocalDoc, docText, localInsert, applyRemote } from '../domain/replica/doc';
+import { createLocalDoc, docText, localInsert, applyRemote, inspectUpdate } from '../domain/replica/doc';
 import type { Actor } from '../domain/replica/entry';
 import { deviceAt } from '../domain/replica/rosterMembers';
 import { updateMember } from '../staff/replica/membership';
@@ -200,6 +200,37 @@ test('a refused batch stays ahead of new edits on retry without leaving a clock 
       assert.equal(output?.accepted.length, 2);
       assert.equal(output?.incomplete, false);
       assert.equal((await a.project.findOwnAll('doc.client', () => true)).length, 1);
+    } finally {
+      editor.close();
+    }
+  });
+});
+
+test('a refused paste record keeps its clocks ahead of later captured text', async () => {
+  await withWorld(1, async ([a]) => {
+    const stream = a.project.projectId;
+    const editor = await ProductEditor.open(refusingOnce(a.project, new Set([2])), { stream, product: PRODUCT, actor: PERSON });
+    try {
+      const paste = 'p'.repeat(300 * 1024);
+      editor.insert(0, paste);
+      assert.deepEqual(await editor.flushBatch(), { appended: 1, queued: 1 });
+      const early = productOutput((await a.project.state()).fold, stream, PRODUCT);
+      assert.ok(early && early.text.length > 0 && early.text.length < paste.length);
+      editor.insert(paste.length, ' tail');
+
+      assert.deepEqual(await editor.flushBatch(), { appended: 2, queued: 0 });
+      const output = productOutput((await a.project.state()).fold, stream, PRODUCT);
+      assert.equal(output?.text === paste + ' tail', true);
+      assert.equal(output?.incomplete, false);
+      const { updates } = await acceptedUpdates(a.project, stream, PRODUCT);
+      let clock = 0;
+      for (const { bytes } of updates) {
+        const decoded = inspectUpdate(bytes);
+        assert.ok(!('error' in decoded));
+        assert.deepEqual(decoded.clients.map(({ client, start }) => ({ client, start })), [{ client: editor.clientId, start: clock }]);
+        clock = decoded.clients[0].end;
+      }
+      assert.equal(clock, (paste + ' tail').length);
     } finally {
       editor.close();
     }

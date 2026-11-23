@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { MAX_UPDATE_BYTES } from '../domain/replica/kindSchemas/doc';
 import { EditorBinding, HEADER_KEPT_TEXT, RESYNC_LOG_LINE, UNDO_OWN_TEXT } from '../staff/replica/editorBinding';
 import { acceptedUpdates, productOutput } from '../staff/replica/productFeed';
 import { ProductEditor } from '../staff/replica/productEditing';
@@ -19,12 +20,18 @@ async function withEditors(run: (world: {
   exchange(from: 0 | 1, beforeRefresh?: () => void): Promise<void>;
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
+  updateSizes(at: 0 | 1): Promise<number[]>;
 }) => Promise<void>, options: { onLeftAppended?: () => void; crlf?: boolean; seedBody?: string } = {}): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'ana', name: 'Avery Lead' }, { label: 'ben', name: 'Blake Rivers' }] });
   const stream = world.lead.project.projectId;
   let header = HEADER;
   const targets = world.devices.map(({ project }) => ({ project, stream, product: PRODUCT, actor: ACTOR, header: () => header }));
   const bindings: EditorBinding[] = [];
+  const ownUpdates = async (at: 0 | 1) => {
+    const { project } = world.devices[at];
+    const feed = await acceptedUpdates(project, stream, PRODUCT);
+    return feed.updates.filter(({ writer }) => writer === project.deviceWriter);
+  };
   const seedBody = options.seedBody ?? 'Alpha Bravo';
   try {
     const seed = await ProductEditor.open(world.lead.project, targets[0]);
@@ -57,11 +64,8 @@ async function withEditors(run: (world: {
         await bindings[to].refresh();
       },
       async body(at) { return productOutput((await world.devices[at].project.state()).fold, stream, PRODUCT)?.text; },
-      async updates(at) {
-        const { project } = world.devices[at];
-        const feed = await acceptedUpdates(project, stream, PRODUCT);
-        return feed.updates.filter(({ writer }) => writer === project.deviceWriter).length;
-      }
+      async updates(at) { return (await ownUpdates(at)).length; },
+      async updateSizes(at) { return (await ownUpdates(at)).map(({ bytes }) => bytes.length); }
     });
   } finally {
     await Promise.all(bindings.map((binding) => binding.close()));
@@ -292,5 +296,33 @@ test('a newer local document survives a conflicting remote write', async (t) => 
     assert.equal(b.applied, 0);
     assert.equal(await updates(1), 0);
     assert.deepEqual(logs, []);
+  });
+});
+
+test('a large Unicode replacement reaches the peer and remains one local undo and redo', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left], exchange, body, updates, updateSizes }) => {
+    const pasted = 'x' + '🌎'.repeat(75 * 1024);
+    b.type({ offset: HEADER.length, length: 0, text: 'Remote ' });
+    await exchange(1);
+    a.type({ offset: HEADER.length + 'Remote Alpha '.length, length: 5, text: pasted });
+    await exchange(0);
+
+    const shared = 'Remote Alpha ' + pasted;
+    assert.ok(await updates(0) > 2, 'the seed plus multiple records');
+    assert.equal((await body(1)) === shared, true, 'the shared paste stays intact');
+    assert.equal(b.getText() === HEADER + shared, true, 'the peer renders the whole paste');
+
+    assert.equal(await left.undo(), true);
+    assert.equal(await left.undo(), false);
+    await exchange(0);
+    assert.equal(await body(1), 'Remote Alpha Bravo');
+
+    assert.equal(await left.redo(), true);
+    assert.equal(await left.redo(), false);
+    await exchange(0);
+    assert.equal((await body(1)) === shared, true, 'redo persists the whole paste');
+    assert.equal(a.getText() === b.getText(), true, 'the devices converge after redo');
+    assert.ok((await updateSizes(0)).every((size) => size <= MAX_UPDATE_BYTES));
+    assert.equal(await updates(1), 1, 'the peer never echoes paste or history');
   });
 });
