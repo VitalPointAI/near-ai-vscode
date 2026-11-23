@@ -161,6 +161,26 @@ test('the welcome state follows the folder and the profile', () => {
   assert.equal(setup.welcomeState({ profiles: [profile('a', 'valid'), profile('b', 'invalid')] }), 'choose');
 });
 
+test('a saved cloud profile with a missing credential needs reconnection, while a validated keyless local profile remains ready', () => {
+  const { doc, parts } = welcomeDom();
+  const memory = {};
+  for (const provider of ['near-ai', 'hybrid']) {
+    const value = { ...profileValue('valid'), configured: false, profiles: [{ ...profile('profile-a', 'valid'), provider }] };
+    const disconnected = setup.welcomeState(value);
+    assert.equal(disconnected, 'choose');
+    setup.applyWelcomeState(doc, disconnected, memory);
+    assert.equal(parts['welcome-connect'].hidden, false);
+    assert.equal(parts['welcome-choose-profile'].hidden, false);
+    assert.equal(parts['welcome-ready'].hidden, true);
+    setup.applyWelcomeState(doc, setup.welcomeState({ ...value, configured: true }), memory);
+    assert.equal(parts['welcome-connect'].hidden, true);
+    assert.equal(parts['welcome-ready'].hidden, false);
+  }
+  const local = { ...profileValue('valid'), configured: false, profiles: [{ ...profile('profile-a', 'valid'), provider: 'local' }] };
+  assert.equal(setup.welcomeState(local), 'ready');
+  assert.equal(setup.welcomeState({ ...local, profiles: [{ ...local.profiles[0], validation: { status: 'invalid' } }] }), 'choose');
+});
+
 test('without a working profile only the Connect panel shows, its words follow the state, and setup switches to the usual welcome', () => {
   const { doc, parts } = welcomeDom();
   const memory = {};
@@ -174,7 +194,7 @@ test('without a working profile only the Connect panel shows, its words follow t
   // A saved profile that needs its key checked: Choose a profile, with that reason.
   assert.equal(setup.applyWelcomeState(doc, 'choose', memory), undefined, 'not focused again');
   assert.equal(parts['welcome-choose-profile'].hidden, false);
-  assert.deepEqual([parts['welcome-connect-reason'].hidden, parts['welcome-connect-reason'].textContent], [false, 'Your saved profile needs its key checked again.']);
+  assert.deepEqual([parts['welcome-connect-reason'].hidden, parts['welcome-connect-reason'].textContent], [false, 'Your saved profile needs its connection checked again.']);
   // Working profiles, none selected: a different reason.
   setup.applyWelcomeState(doc, 'select', memory);
   assert.equal(parts['welcome-choose-profile'].hidden, false);
@@ -246,7 +266,8 @@ test('the sidebar HTML has the Connect panel, hidden until the profile is known,
   assert.match(script, /\$\('welcome-new-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'new-profile' \}\)\)/);
   assert.match(script, /\$\('welcome-choose-profile'\)\.addEventListener\('click', \(\) => post\(\{ type: 'select-profile' \}\)\)/);
   assert.match(script, /\$\('welcome-open-folder'\)\.addEventListener\('click', \(\) => post\(\{ type: 'open-folder' \}\)\)/);
-  assert.match(script, /setupKit\.applyWelcomeState\(document, setupKit\.welcomeState\(value\), welcomeMemory\)/);
+  assert.match(script, /const setupState = setupKit\.welcomeState\(value\)/);
+  assert.match(script, /setupKit\.applyWelcomeState\(document, setupState, welcomeMemory\)/);
   // Without the helper the usual welcome shows, not a blank one.
   assert.match(script, /applyWelcomeState: \(\) => \{ const ready = \$\('welcome-ready'\); if \(ready\) ready\.hidden = false; \}/);
   // The sign-in notice uses the panel's words.
