@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 218);
-  assert.equal(poam.length, 210);
+  assert.equal(gaps.length, 238);
+  assert.equal(poam.length, 230);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -113,7 +113,19 @@ test('release assessment gaps have named open paths', () => {
     ['itsp171-03.01.22', 'G213', '44.1'], ['itsp171-03.05.01', 'G214', '44.1'], ['itsp171-03.05.02', 'G215', '44.1'],
     ['itsp171-03.05.03', 'G216', '44.1'], ['itsp171-03.08.03', 'G217', '44.1'], ['itsp171-03.10.01', 'G218', '44.1'],
     ['itsp171-03.10.07', 'G219', '44.1'], ['itsp171-03.13.01', 'G220', '44.1'], ['itsp171-03.14.01', 'G221', '44.1'],
-    ['itsp171-03.14.02', 'G222', '44.1']
+    ['itsp171-03.14.02', 'G222', '44.1'],
+    ['itsp171-03.01.01', 'G225', '44.1'], ['itsp171-03.01.02', 'G226', '44.1'], ['itsp171-03.01.03', 'G227', '44.1'],
+    ['itsp171-03.01.04', 'G228', '44.1'], ['itsp171-03.01.05', 'G229', '44.1'], ['itsp171-03.01.06', 'G229', '44.1'],
+    ['itsp171-03.01.07', 'G229', '44.1'], ['itsp171-03.01.08', 'G230', '44.1'], ['itsp171-03.01.09', 'G231', '44.1'],
+    ['itsp171-03.01.10', 'G232', '44.1'], ['itsp171-03.01.11', 'G232', '44.1'], ['itsp171-03.01.12', 'G233', '44.1'],
+    ['itsp171-03.01.16', 'G234', '44.1'], ['itsp171-03.01.18', 'G234', '44.1'], ['itsp171-03.01.20', 'G235', '44.1'],
+    ['itsp171-03.01.22', 'G236', '44.1'], ['itsp171-03.02.01', 'G237', '44.1'], ['itsp171-03.02.02', 'G237', '44.1'],
+    ['itsp171-03.03.01', 'G238', '44.1'], ['itsp171-03.03.02', 'G238', '44.1'], ['itsp171-03.03.03', 'G238', '44.1'],
+    ['itsp171-03.03.04', 'G239', '44.1'], ['itsp171-03.03.05', 'G240', '44.1'], ['itsp171-03.03.06', 'G241', '44.1'],
+    ['itsp171-03.03.07', 'G242', '44.1'], ['itsp171-03.03.08', 'G243', '44.1'], ['itsp171-03.01.13', 'G244', '44.1'],
+    ['itsp171-03.01.14', 'G244', '44.1'], ['itsp171-03.01.15', 'G244', '44.1'], ['itsp171-03.01.17', 'G244', '44.1'],
+    ['itsp171-03.01.19', 'G244', '44.1'], ['itsp171-03.01.21', 'G244', '44.1'], ['itsp171-03.02.03', 'G244', '44.1'],
+    ['itsp171-03.03.09', 'G244', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);

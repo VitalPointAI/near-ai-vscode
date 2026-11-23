@@ -1,0 +1,16 @@
+{
+  "gap": "G240",
+  "id": "g240",
+  "controls": [
+    "itsp171-03.03.05"
+  ],
+  "ownerRole": "owner",
+  "title": "Audit review, correlation and reporting need operational evidence",
+  "remediation": "The sponsor security operations lead sets review frequency, criteria for unusual activity and impact, findings recipients and repositories to correlate. Sample a dated review linking records from more than one assessed repository to findings and their reporting. Identify unmonitored sources or provider dependencies for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved review schedule and a de-identified cross-repository analysis with findings and reporting evidence"
+    }
+  ]
+}

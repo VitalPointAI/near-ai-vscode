@@ -2316,6 +2316,220 @@
     },
     {
       "controls": [
+        "itsp171-03.01.01"
+      ],
+      "id": "G225",
+      "ownerRole": "owner",
+      "poam": "g225",
+      "remediation": "The sponsor identity governance lead and system owner approve account types, user and role memberships, intended use, authorization and monitoring. Verify expiry, inactivity, orphaned accounts, policy violations and significant risk triggers. Sample approvals, privilege changes, disablement, notices for changes in employment or need, and a required logout outcome. Record the applicable ITSP.10.171 deployment boundary.",
+      "title": "Supplementary account lifecycle needs sponsor evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.02"
+      ],
+      "id": "G226",
+      "ownerRole": "owner",
+      "poam": "g226",
+      "remediation": "The sponsor system and resource owners approve logical access to assessed information and resources, including identities or groups and allowed operations. Demonstrate authorized and denied operations using representative test identities and cite the governing policy and resource boundary. Record applicable scope for ITSP.10.171. Treat mapped base-profile evidence as supporting material until checked against the deployment.",
+      "title": "Authorized logical access needs deployment enforcement evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.03"
+      ],
+      "id": "G227",
+      "ownerRole": "owner",
+      "poam": "g227",
+      "remediation": "The sponsor data owner and network security lead approve internal and intersystem flows for the specified information categories. Trace representative approved and denied flows through assessed enforcement points. Referenced product records may help establish the path, while sponsor confirms the assessed routing boundary and inherited rules.",
+      "title": "Information flow approvals and enforcement need deployed evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.04"
+      ],
+      "id": "G228",
+      "ownerRole": "owner",
+      "poam": "g228",
+      "remediation": "The sponsor access governance and business process owners identify duties that must be separated and assign corresponding access authorization. Sample assigned users and a conflicting role request or workflow exercise to verify that access supports the separation. Record any approved exception and its scope for assessment.",
+      "title": "Separation of duties needs authorized role and access evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.05",
+        "itsp171-03.01.06",
+        "itsp171-03.01.07"
+      ],
+      "id": "G229",
+      "ownerRole": "owner",
+      "poam": "g229",
+      "remediation": "The sponsor identity and privileged access leads define minimum task access for users and delegated processes, authorized security functions and privileged roles. Review representative rights and reassignment or removal. Verify separate ordinary accounts, dedicated isolated administrative workstations for privileged actions, denied privileged functions for standard accounts, and logged authorized execution.",
+      "title": "Least privilege and privileged operations need sponsor verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.08"
+      ],
+      "id": "G230",
+      "ownerRole": "owner",
+      "poam": "g230",
+      "remediation": "The sponsor authentication owner approves the observation window, consecutive failure limit and automatic response, including any unlock or delay criteria. Exercise a representative sign-in route through threshold and recovery with a controlled account. Record inherited service policy and prove it covers the assessed route before accepting it.",
+      "title": "Failed logon limits and automatic responses need a test result"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.09"
+      ],
+      "id": "G231",
+      "ownerRole": "owner",
+      "poam": "g231",
+      "remediation": "The sponsor privacy and system owners approve notice text covering security and privacy rules for specified information. Demonstrate that the assessed human access routes display the notice before granting access. Record where routes have no direct human sign-in and submit that scope decision for assessor review.",
+      "title": "Pre-access system use notices need sponsor approval and display evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.10",
+        "itsp171-03.01.11"
+      ],
+      "id": "G232",
+      "ownerRole": "owner",
+      "poam": "g232",
+      "remediation": "The sponsor endpoint and session service owners approve device lock timing or manual lock requirements, renewed authentication, screen concealment and automatic session disconnect triggers. Test lock and unlock on an assessed device and separately demonstrate session termination on a specified trigger. Record provider or platform inheritance for sponsor approval.",
+      "title": "Device lock and session termination need distinct test evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.12"
+      ],
+      "id": "G233",
+      "ownerRole": "owner",
+      "poam": "g233",
+      "remediation": "The sponsor remote access and security operations leads inventory each remote access type, approve connection and configuration requirements, and route connections through managed control points. Separately verify permissions for remote privileged commands and security-relevant information. Sample a permitted and denied route or action and document inherited control points for review.",
+      "title": "Remote access routes and privileged remote actions need authorization evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.16",
+        "itsp171-03.01.18"
+      ],
+      "id": "G234",
+      "ownerRole": "owner",
+      "poam": "g234",
+      "remediation": "The sponsor network and endpoint owners approve connection types and configuration for wireless and mobile access before connection. Verify wireless authentication and encryption and that unused radios are disabled before issue or deployment. Sample authorized mobile enrollment and full-device or container encryption for specified information, with a denied or quarantined unapproved connection where practical.",
+      "title": "Wireless and mobile access need approved configurations and separate checks"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.20"
+      ],
+      "id": "G235",
+      "ownerRole": "owner",
+      "poam": "g235",
+      "remediation": "The sponsor information and service owners record prohibited and specifically authorized external uses, applicable requirements from security and privacy plans, and approved connection or processing agreements. Sample verification before use of a permitted system and verify restrictions on organization-controlled portable storage there. Record the assessed ITSP.10.171 boundary.",
+      "title": "External system use needs approved scope, terms and verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.22"
+      ],
+      "id": "G236",
+      "ownerRole": "owner",
+      "poam": "g236",
+      "remediation": "The sponsor public communications and information owners identify authorized publishers and train them to keep specified information out of public content. Sample a periodic review and a removal or controlled exercise if information is discovered. Record deployment scope for ITSP.10.171 and submit any no-public-content boundary for review.",
+      "title": "Public publishing training, review and removal need sponsor evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.02.01",
+        "itsp171-03.02.02"
+      ],
+      "id": "G237",
+      "ownerRole": "owner",
+      "poam": "g237",
+      "remediation": "The sponsor security and privacy training leads establish initial and recurring literacy that covers insider threat, social engineering and social mining. Set role-specific training before access or duties and at reviewed intervals. Track refresh after system or event changes and revisions to both training streams. Use de-identified learner evidence.",
+      "title": "Security literacy and role-based training need deployment records"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.01",
+        "itsp171-03.03.02",
+        "itsp171-03.03.03"
+      ],
+      "id": "G238",
+      "ownerRole": "owner",
+      "poam": "g238",
+      "remediation": "The sponsor logging and records owners select and periodically review logged event types. Verify generation with event type, time, place, source, outcome and affected identities or entities, plus any approved additional data. Sample retention settings and available logs against the approved records schedule. Document any product-only or provider-only scope limits.",
+      "title": "Selected audit events, record content and retention need verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.04"
+      ],
+      "id": "G239",
+      "ownerRole": "owner",
+      "poam": "g239",
+      "remediation": "The sponsor monitoring and service owners set notification recipients, response time and additional action when logging fails. Use an authorized simulation or a sanitized incident reference to demonstrate detection, timely alert, response and recovery. Confirm which failure modes and components are assessed.",
+      "title": "Audit logging failure alerts and response need exercise evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.05"
+      ],
+      "id": "G240",
+      "ownerRole": "owner",
+      "poam": "g240",
+      "remediation": "The sponsor security operations lead sets review frequency, criteria for unusual activity and impact, findings recipients and repositories to correlate. Sample a dated review linking records from more than one assessed repository to findings and their reporting. Identify unmonitored sources or provider dependencies for review.",
+      "title": "Audit review, correlation and reporting need operational evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.06"
+      ],
+      "id": "G241",
+      "ownerRole": "owner",
+      "poam": "g241",
+      "remediation": "The sponsor security analytics and records leads demonstrate an approved reduction and reporting workflow for review or investigation. Compare a representative report with original events and verify that the original contents and time ordering remain intact. Document provider or tool boundary and access to originals for assessment.",
+      "title": "Audit reduction and reporting need original record preservation evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.07"
+      ],
+      "id": "G242",
+      "ownerRole": "owner",
+      "poam": "g242",
+      "remediation": "The sponsor platform and logging leads document clocks used to produce audit time stamps, precision and permitted UTC or local offset convention. Verify representative records from assessed components against the configuration and show their dates sort and correlate as expected across the specified boundary.",
+      "title": "Audit time stamps need clock and precision verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.03.08"
+      ],
+      "id": "G243",
+      "ownerRole": "owner",
+      "poam": "g243",
+      "remediation": "The sponsor logging platform and privileged access owners protect audit records and tooling against unauthorized reading, modification and removal. Limit management to a named subset of privileged roles. Review representative access assignments and use controlled checks or dated evidence of protected operations, including a non-management role refusal.",
+      "title": "Audit information and logging management need access protection evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.13",
+        "itsp171-03.01.14",
+        "itsp171-03.01.15",
+        "itsp171-03.01.17",
+        "itsp171-03.01.19",
+        "itsp171-03.01.21",
+        "itsp171-03.02.03",
+        "itsp171-03.03.09"
+      ],
+      "id": "G244",
+      "ownerRole": "owner",
+      "poam": "g244",
+      "remediation": "The sponsor assessment authority confirms each displayed identifier and edition against the checked-in ITSP.10.171 source, which marks it not allocated and withdrawn by NIST. Record a source-cited scope decision per identifier, including any replacement objective reference where the authority supplies one. Keep the path open pending the reviewed determination.",
+      "title": "Unallocated supplementary rows need sponsor source and scope review"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

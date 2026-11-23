@@ -1,0 +1,16 @@
+{
+  "gap": "G225",
+  "id": "g225",
+  "controls": [
+    "itsp171-03.01.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary account lifecycle needs sponsor evidence",
+  "remediation": "The sponsor identity governance lead and system owner approve account types, user and role memberships, intended use, authorization and monitoring. Verify expiry, inactivity, orphaned accounts, policy violations and significant risk triggers. Sample approvals, privilege changes, disablement, notices for changes in employment or need, and a required logout outcome. Record the applicable ITSP.10.171 deployment boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved account lifecycle criteria and redacted provisioning, reviewed use, timed notice or disablement and logout evidence"
+    }
+  ]
+}

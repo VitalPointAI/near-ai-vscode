@@ -1,0 +1,18 @@
+{
+  "gap": "G229",
+  "id": "g229",
+  "controls": [
+    "itsp171-03.01.05",
+    "itsp171-03.01.06",
+    "itsp171-03.01.07"
+  ],
+  "ownerRole": "owner",
+  "title": "Least privilege and privileged operations need sponsor verification",
+  "remediation": "The sponsor identity and privileged access leads define minimum task access for users and delegated processes, authorized security functions and privileged roles. Review representative rights and reassignment or removal. Verify separate ordinary accounts, dedicated isolated administrative workstations for privileged actions, denied privileged functions for standard accounts, and logged authorized execution.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the role review and a change record, administrative workstation and ordinary account evidence, and a redacted permitted, denied and logged function sample"
+    }
+  ]
+}

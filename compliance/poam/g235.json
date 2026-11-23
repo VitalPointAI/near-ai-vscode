@@ -1,0 +1,16 @@
+{
+  "gap": "G235",
+  "id": "g235",
+  "controls": [
+    "itsp171-03.01.20"
+  ],
+  "ownerRole": "owner",
+  "title": "External system use needs approved scope, terms and verification",
+  "remediation": "The sponsor information and service owners record prohibited and specifically authorized external uses, applicable requirements from security and privacy plans, and approved connection or processing agreements. Sample verification before use of a permitted system and verify restrictions on organization-controlled portable storage there. Record the assessed ITSP.10.171 boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved external system inventory, terms and agreement, a dated verification result and applicable portable storage restrictions"
+    }
+  ]
+}

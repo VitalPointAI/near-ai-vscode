@@ -1,0 +1,23 @@
+{
+  "gap": "G244",
+  "id": "g244",
+  "controls": [
+    "itsp171-03.01.13",
+    "itsp171-03.01.14",
+    "itsp171-03.01.15",
+    "itsp171-03.01.17",
+    "itsp171-03.01.19",
+    "itsp171-03.01.21",
+    "itsp171-03.02.03",
+    "itsp171-03.03.09"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated supplementary rows need sponsor source and scope review",
+  "remediation": "The sponsor assessment authority confirms each displayed identifier and edition against the checked-in ITSP.10.171 source, which marks it not allocated and withdrawn by NIST. Record a source-cited scope decision per identifier, including any replacement objective reference where the authority supplies one. Keep the path open pending the reviewed determination.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a dated sponsor or assessor decision that reconciles each displayed identifier to the authoritative edition and records the scope disposition"
+    }
+  ]
+}
