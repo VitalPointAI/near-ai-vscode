@@ -184,7 +184,9 @@ const evidenceWindows: Readonly<Record<string, number>> = {
 };
 
 function ruleOutcome(result: RuleResult, snapshot: number, commit: string): string {
-  if (result.reason === 'missing-result') return 'Missing';
+  if (['missing-result', 'test-not-run', 'test-missing-file', 'test-missing-name'].includes(result.reason)) return 'Missing';
+  if (result.reason === 'test-skipped') return 'Skipped';
+  if (result.reason === 'test-todo') return 'Pending test';
   if (!result.passed || result.reason !== 'met') return 'Failed';
   if (result.window === 'head') return result.commit === commit ? 'Passed' : 'Stale';
   const window = result.window && Object.hasOwn(evidenceWindows, result.window) ? evidenceWindows[result.window] : undefined;
@@ -405,7 +407,7 @@ These documents are drafts. The sponsor supplies the deployment, departmental te
 
 This export uses the product evidence published for NEAR AI for VS Code v${evidence.version} at ${evidence.commit}. The source archive was checked against its GitHub release asset SHA-256 and the release package's internal checksums.
 
-The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish a passing, failing, missing or stale result at that snapshot. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
+The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
 - The product gaps tab lists original published gaps and separate Phase 44.1 triage entries for unresolved rows without a related gap. Triage identifies where a reviewer still needs to determine whether to implement a control, collect evidence or obtain a tailoring decision.

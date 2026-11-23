@@ -119,6 +119,9 @@ test('distinguishes missing, stale and failed evidence and adds unresolved in-sc
   const [rule] = component.evidence;
   const data = { ...dashboard, rows: [{ ...base, state: 'stale', components: [{ ...component, evidence: [
     { ...rule, rule: 'missing', passed: false, reason: 'missing-result' },
+    { ...rule, rule: 'not-run', passed: false, reason: 'test-not-run' },
+    { ...rule, rule: 'skipped', passed: false, reason: 'test-skipped' },
+    { ...rule, rule: 'todo', passed: false, reason: 'test-todo' },
     { ...rule, rule: 'stale', commit: 'b'.repeat(40) },
     { ...rule, rule: 'expired', collectedAt: '2026-11-20T18:00:00.000Z', window: 'audit' },
     { ...rule, rule: 'failed', passed: false, reason: 'test-failed' }
@@ -126,6 +129,9 @@ test('distinguishes missing, stale and failed evidence and adds unresolved in-sc
   const result = readZip(await buildSaaPackage({ ...evidence, dashboard: data }, formsDir, new Map()), 'SA&A package');
   const rules = result.get('evidence/component-evidence.csv')!().toString();
   assert.match(rules, /"missing","Missing","missing-result","","","","head"/);
+  assert.match(rules, /"not-run","Missing","test-not-run","","","","head"/);
+  assert.match(rules, /"skipped","Skipped","test-skipped"/);
+  assert.match(rules, /"todo","Pending test","test-todo"/);
   assert.match(rules, /"stale","Stale","met"/);
   assert.match(rules, /"expired","Stale","met"/);
   assert.match(rules, /"failed","Failed","test-failed"/);
