@@ -541,6 +541,7 @@ Plans:
 **Goal**: Demand and supply across units are matched by skill, clearance and period, reallocations become taskings each unit fills in its own mode, and cross-unit dependencies and gate calendars show what will slip.
 **Depends on**: Phase 38 (and Phase 39 for decisions).
 **Requirements**: PORT-10, PORT-11, PORT-12
+**Resource Inventory**: Capability Development, Exercises & Training, Operations, and Resource Management work areas refer to the same authorized resource records by source and stable ID. Approved allocation remains a separate signed decision. Connect authoritative asset, facilities, personnel-capacity, and other approved resource systems through the Phase 100 source catalog.
 **Success Criteria** (what must be TRUE):
   1. A Secret demand is never matched by Protected B supply; an approved reallocation reaches a unit as a tasking, its tasker posts two people, and the next supply publication shows the change. (PORT-10)
   2. A viewer who cannot see an upstream milestone sees their own item at risk only through its own published forecast, with no hint of the hidden edge. (PORT-11)
@@ -952,6 +953,7 @@ Plans:
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
 
 ### Phase 71: Identities, credentials and delegation that only narrows
+**Asset identity**: Issue one opaque DID per tracked asset through the organization's identity authority. Link the asset to the applicable catalogue item and authorized custodian in governed records. Record custody changes and retirement as signed lifecycle events. Keep serials, holdings, and locations in permissioned records.
 **Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
 **Depends on**: Phase 70 (and Phase 69's signer and key status)
 **Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07
@@ -1012,6 +1014,7 @@ Plans:
 - [ ] TBD (run /gsd-plan-phase 73 to break down)
 
 ### Phase 74: Run contracts
+**Asset usage**: Resolve the target asset DID and check a signed, versioned usage policy at the existing gate. A work-area resource reference carries provenance for that check. It grants no permission by itself.
 **Goal**: Every run no person started from the chat carries a signed contract with caps on cost, tool calls, time and sub-agents; a contract wider than its issuer's authority is refused before anything runs, and run admission works offline.
 **Depends on**: Phase 71, Phase 72, Phase 73
 **Requirements**: CTRT-01, CTRT-02, CTRT-03, CTRT-04, CTRT-05, CTRT-06, OFFL-04
@@ -1196,6 +1199,7 @@ Plans:
 ### Stage B: the data map and the sources (Phases 88-92)
 
 ### Phase 88: Ingestion core, governed store and the data map
+**Defence digital twin**: Use the same governed store and ledger for catalogue items, individual asset DIDs, custody and provenance. Preserve source checkpoints and issue asset identities in retryable batches. See [digital twin foundation](research/data-platform/05-defence-digital-twin.md).
 **Goal**: Your organization sees a live map of what data exists, where, how big, who owns it and how fresh it is (inventory and metadata only, no content), and everything shown is filtered by the viewer's clearance and the source's permissions from the first screen.
 **Depends on**: Phase 85; the Stage 1 gate (Phases 70, 71, 73 and 74).
 **Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-08, DSEC-01, DSEC-02, DSEC-03
@@ -1409,6 +1413,7 @@ Plans:
 **Depends on**: Phase 88; Phases 72 and 73. May start any time after Phase 92 if capacity allows.
 **Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32
 **From the portfolio design (2026-11-20)**: financial, procurement and schedule sources feed the portfolio's publications (Phases 38 to 40) as released, labelled items, never as raw cross-unit access (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
+**Defence Resource Inventory**: approved inventory sources contribute records with stable source IDs, category, freshness, and viewer permissions. The Resource Management search and filters show only records the viewer can read. Work-area references resolve against those same records.
 **Success Criteria** (what must be TRUE):
   1. An agent writes a connector for a REST source that passes conformance and runs after one approval. (DATA-28, DATA-29, DATA-30)
   2. A connector that tries an undeclared host is blocked and recorded. (DATA-29)
