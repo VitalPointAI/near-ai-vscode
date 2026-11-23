@@ -70,6 +70,8 @@ Next, in order (owner, 2026-11-18):
 - Phase 26 completed on branch perf/research-runs: Performance, faster agent and research runs (PERF-01…07, 5 plans, verified).
 - Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Owner 2026-11-15: deferred until everything else in this plan is finished; it may move to its own product.
 
+- Phase 88 planned in 8 plans and 5 waves. Independent plan review passed. Phase 85 and Stage 1 remain prerequisites for deployment.
+
 ### Locked decisions (encode, do not re-litigate)
 
 - Platform direction (owner, 2026-11-15; verbatim in PROJECT.md): no IronClaw fork; our TypeScript engine gains the DID trust and governance layer; the gate works fully offline from a signed local copy and fails closed; edge devices group locally and federate to HQ; Theia container appliance first, desktop second, VS Code extension kept while cheap; IronClaw, Hermes Agent and OpenShell are design sources only (plus OpenShell's policy format and prover); NVIDIA and AMD GPUs, arm64 and amd64, linked machines, HQ cluster and NEAR AI Cloud burst.
@@ -162,6 +164,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261113-lbo | fix the chat task list not checking off finished tasks | 2026-11-13 | a770848 | [261113-lbo-fix-the-chat-task-list-not-checking-off-](./quick/261113-lbo-fix-the-chat-task-list-not-checking-off-/) |
+| 2 | Keep the Planning page open after creating its workspace | 2026-11-23 | 9893c76b | — |
 
 ## Notes
 

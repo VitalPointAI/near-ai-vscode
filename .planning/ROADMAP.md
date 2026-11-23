@@ -1210,11 +1210,18 @@ Plans:
   4. No content is read in dry-run mode, every discovered item carries the ingest-default label from its first moment, every label, permission and lifecycle event is in the signed governance log, and the canary scan finds no content in the store, logs or caches. (DATA-07, DSEC-03)
 **Research flags**: Standard patterns documented in the research; plan without a research step. The host parts of L1a land here (the governed store and its RLS on the Phase 85 stack).
 **Undo cost**: High: the connector contract, the item ledger keys and the label store format are what every connector and every later phase writes to.
-**Plans:** 0 plans
+**Plans:** 8 plans across 5 waves. Synthetic verification can run before the deployment prerequisites. Real sources require the Phase 85 host and verified Stage 1 gate.
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 88 to break down)
+- [ ] [88-01-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-01-PLAN.md) — Synthetic PostgreSQL-to-Data Map path and cold extension activation
+- [ ] [88-02-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-02-PLAN.md) — Forced row-level security and signed governance facts
+- [ ] [88-03-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-03-PLAN.md) — Connector intake, ledger, and source lifecycle
+- [ ] [88-04-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-04-PLAN.md) — Folder metadata, degradation, and reconciliation
+- [ ] [88-05-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-05-PLAN.md) — Asset stewardship, identity, and stored media
+- [ ] [88-06-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-06-PLAN.md) — Bulk synchronization, version checks, and worker fencing
+- [ ] [88-07-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-07-PLAN.md) — Theia Data Management entry and scoped updates
+- [ ] [88-08-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-08-PLAN.md) — Phase 85 integration, production authorization approval, and acceptance
 
 ### Phase 89: Microsoft 365 connector with one-click connection
 **Goal**: An administrator connects Microsoft 365 with one sign-in, and SharePoint, OneDrive and Exchange appear in the data map, then backfill and stay in sync, with their permissions and labels.

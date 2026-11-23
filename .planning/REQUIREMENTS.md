@@ -456,7 +456,7 @@ Added 2026-11-18 (owner: collectors must be super simple to install).
 
 - [ ] **DSEC-01**: RLS on every table of the governed store, with `FORCE ROW LEVEL SECURITY`; the clearance is set only through a short-lived gate-signed token checked by a security-definer function, never by a plain `SET`, and the application role cannot bypass it.
 - [ ] **DSEC-02**: The `source.acl` layer in `decide` after the label check (an agent's access is its clearance, intersected with the person's clearance and the person's source permissions), a directory snapshot with group expansion at query time, and fail-closed handling of permission snapshots older than the limit (24 hours by default).
-- [ ] **DSEC-03**: The ingest-default label on every discovered item, and the governance log (paused Phase 13's log with envelope v2) recording every label, permission and lifecycle event.
+- [ ] **DSEC-03**: Apply the ingest-default label to every discovered item. Record every label, permission and lifecycle event as a signed governance fact in the host ledger, with delivery through the established signed replica and sync hub when available.
 - [ ] **DSEC-04**: Classification rules and the source label map in the signed bundle; the pure `classify.ts`; label v2 with the handling flags `no-train` and `no-summarize-down`. Automatic steps only ever raise a label.
 - [ ] **DSEC-05**: A signed Merkle root per sync batch over item labels.
 - [ ] **DSEC-06**: The exception queue, ordered by impact and grouped by steward into a weekly batch, with bulk actions on clusters and "could be lower" suggestions; lowering happens only through a signed `lowerByPerson`.
