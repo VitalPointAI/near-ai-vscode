@@ -118,8 +118,8 @@
       "id": "G10",
       "ownerRole": "maintainers",
       "poam": "g10",
-      "remediation": "Save exact versions for the root package, turn install scripts off where the build allows it, and turn on alerts for security updates only.",
-      "title": "Root installs run dependency install scripts, development dependencies use ranges, and there are no automated update alerts"
+      "remediation": "Keep exact versions for root dependencies, turn install scripts off where the build allows it, and turn on alerts for security updates only.",
+      "title": "Root install scripts and automated security update alerts still need closure"
     },
     {
       "controls": [

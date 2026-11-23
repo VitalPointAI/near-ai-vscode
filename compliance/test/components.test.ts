@@ -20,6 +20,20 @@ test('the responsibility table is present for controls without statements', () =
   assert.ok(existsSync(path.join(ROOT, 'compliance', 'responsibility', 'families.json')), 'family responsibilities must be present');
 });
 
+test('the root development dependency baseline declares the exact locked versions', () => {
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as {
+    devDependencies: Record<string, string>;
+  };
+  const lock = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8')) as {
+    packages: Record<string, { devDependencies?: Record<string, string>; version?: string }>;
+  };
+  assert.deepEqual(lock.packages[''].devDependencies, manifest.devDependencies);
+  for (const [name, version] of Object.entries(manifest.devDependencies)) {
+    assert.equal(version, lock.packages[`node_modules/${name}`]?.version, `${name} must specify its exact locked version`);
+  }
+  assert.match(readFileSync(path.join(ROOT, '.npmrc'), 'utf8'), /^save-exact=true$/m);
+});
+
 test('the extension evidence file names a real gate decision test', () => {
   const file = path.join(ROOT, 'compliance', 'evidence-rules', 'extension.json');
   assert.ok(existsSync(file), 'extension evidence rules must be present');

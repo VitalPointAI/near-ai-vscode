@@ -8,6 +8,7 @@ test/**
 scripts/**
 tsconfig.json
 package-lock.json
+.npmrc
 *.tsbuildinfo
 *.map
 **/*.map
