@@ -6,9 +6,12 @@ import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/
 import { ThemeService } from '@theia/core/lib/browser/theming.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget, Panel } from '@theia/core/lib/browser/widgets/widget.js';
+import { sterlingComplianceCommand } from './sterling-compliance-module.js';
+import { sterlingDocumentationCommand } from './sterling-documentation-module.js';
 import './sterling-welcome.css';
 
 const welcomeId = 'sterling-get-started';
+const openWelcome = { id: 'sterling.getStarted', category: 'SovAI', label: 'Get Started' };
 const edition = {
   label: 'Canadian Defence Edition',
   hero: 'sterling-hero-ca-defence.webp',
@@ -105,6 +108,9 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     super({ widgetId: welcomeId, widgetName: 'Get Started', defaultWidgetOptions: { area: 'main' } });
   }
 
+  @inject(CommandRegistry)
+  protected readonly commandRegistry!: CommandRegistry;
+
   onStart(app: FrontendApplication): void {
     app.shell.addClass(edition.workbenchClass);
     const { tabBar } = app.shell.rightPanelHandler;
@@ -113,19 +119,26 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     const shortcuts = document.createElement('nav');
     shortcuts.className = 'sterling-rail-shortcuts';
     shortcuts.setAttribute('aria-label', 'Sterling shortcuts');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'sterling-rail-shortcut';
-    button.title = 'Get Started';
-    button.setAttribute('aria-label', 'Get Started');
-    const glyph = document.createElement('i');
-    glyph.className = 'codicon codicon-home';
-    glyph.setAttribute('aria-hidden', 'true');
-    button.append(glyph);
-    button.addEventListener('click', () => {
-      void this.openView({ activate: true }).catch(error => console.warn('Sterling could not open Get Started.', error));
-    });
-    shortcuts.append(button);
+    const actions = [
+      { label: 'Get Started', icon: 'home', command: openWelcome.id },
+      { label: 'Compliance', icon: 'shield', command: sterlingComplianceCommand.id },
+      { label: 'Documentation', icon: 'book', command: sterlingDocumentationCommand.id }
+    ];
+    for (const { label, icon, command } of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sterling-rail-shortcut';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      const glyph = document.createElement('i');
+      glyph.className = `codicon codicon-${icon}`;
+      glyph.setAttribute('aria-hidden', 'true');
+      button.append(glyph);
+      button.addEventListener('click', () => {
+        void this.commandRegistry.executeCommand(command).catch(error => console.warn(`Sterling could not open ${label}.`, error));
+      });
+      shortcuts.append(button);
+    }
     tabBar.parent.insertWidget(0, new BaseWidget({ node: shortcuts }));
   }
 
@@ -134,7 +147,7 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   }
 
   override registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand({ id: 'sterling.getStarted', category: 'SovAI', label: 'Get Started' }, {
+    commands.registerCommand(openWelcome, {
       execute: () => this.openView({ activate: true })
     });
   }
