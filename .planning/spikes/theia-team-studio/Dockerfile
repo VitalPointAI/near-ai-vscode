@@ -9,6 +9,9 @@ RUN npm ci --ignore-scripts --no-audit --no-fund
 RUN npm_config_build_from_source=true npm_config_nodedir=/usr/local npm rebuild drivelist
 
 COPY src /repo/src
+COPY README.md SECURITY.md CHANGELOG.md CONTRIBUTING.md /repo/
+COPY docs/*.md /repo/docs/
+COPY docs-site/content /repo/docs-site/content
 COPY .planning/spikes/theia-team-studio/tools ./tools
 COPY .planning/spikes/theia-team-studio/extension/tsconfig.json ./extension/tsconfig.json
 COPY .planning/spikes/theia-team-studio/extension/src ./extension/src

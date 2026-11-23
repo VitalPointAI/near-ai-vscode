@@ -5,15 +5,19 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser/fronten
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { ThemeService } from '@theia/core/lib/browser/theming.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
-import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
+import { BaseWidget, Panel } from '@theia/core/lib/browser/widgets/widget.js';
 import './sterling-welcome.css';
 
 const welcomeId = 'sterling-get-started';
 const edition = {
-  label: 'Canadian Edition',
-  hero: 'sterling-hero-ca.webp',
+  label: 'Canadian Defence Edition',
+  hero: 'sterling-hero-ca-defence.webp',
   workbenchClass: 'sterling-ca'
 };
+const referenceViews = [
+  { label: 'Documentation', icon: 'book', command: 'sterling.documentation.open' },
+  { label: 'Compliance', icon: 'shield', command: 'sterling.compliance.open' }
+];
 const chatContainerId = 'plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer';
 const destinations = [
   { label: 'Projects', icon: 'folder-opened', description: 'Set up your project and choose how it works.', command: 'nearAi.projectSetup' },
@@ -45,7 +49,16 @@ class SterlingWelcomeWidget extends BaseWidget {
           <span class="sterling-edition">${edition.label}</span>
         </header>
         <section class="sterling-hero" aria-labelledby="sterling-title">
-          <img class="sterling-hero-image" src="${edition.hero}" alt="" decoding="async">
+          <svg class="sterling-hero-image" viewBox="0 0 1672 941" preserveAspectRatio="xMidYMin slice" aria-hidden="true" focusable="false">
+            <image href="${edition.hero}" width="1672" height="941"/>
+            <g class="sterling-trails">
+              <path pathLength="100" d="M731 189 Q766 167 811 152 M1241 110 Q1303 100 1354 105"/>
+              <path pathLength="100" d="M1504 141 C1557 167 1582 216 1538 273"/>
+              <path pathLength="100" d="M1556 347 C1611 377 1600 434 1511 493"/>
+              <path pathLength="100" d="M1429 559 Q1377 589 1275 615 M762 572 C684 554 611 530 590 486"/>
+              <path pathLength="100" d="M582 415 C538 368 580 296 660 236"/>
+            </g>
+          </svg>
           <div class="sterling-hero-glow" aria-hidden="true"></div>
           <button type="button" class="sterling-motion" aria-label="Pause hero animation" title="Pause hero animation">
             <i class="codicon codicon-debug-pause" aria-hidden="true"></i>
@@ -53,6 +66,7 @@ class SterlingWelcomeWidget extends BaseWidget {
           <div class="sterling-hero-copy">
             <h1 id="sterling-title">Sovereign AI<br>for real work.</h1>
             <p>Choose where your models run, build agent teams, and govern what they can do.</p>
+            <p class="sterling-domains">Cyber · Space · Land · Sea · Air</p>
             <div class="sterling-actions">
               <button type="button" class="sterling-primary" data-command="nearAi.setup">Set up a project <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
               <button type="button" class="sterling-secondary" data-command="nearAi.openChat">Open Chat</button>
@@ -131,6 +145,30 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   onStart(app: FrontendApplication): void {
     app.shell.addClass(edition.workbenchClass);
     const { tabBar } = app.shell.rightPanelHandler;
+    if (tabBar.parent instanceof Panel) {
+      const shortcuts = document.createElement('nav');
+      shortcuts.className = 'sterling-rail-shortcuts';
+      shortcuts.setAttribute('aria-label', 'Sterling shortcuts');
+      const actions = [
+        { label: 'Get Started', icon: 'home', command: 'sterling.getStarted' },
+        ...referenceViews
+      ];
+      for (const { label, icon, command } of actions) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sterling-rail-shortcut';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        const glyph = document.createElement('i');
+        glyph.className = `codicon codicon-${icon}`;
+        glyph.setAttribute('aria-hidden', 'true');
+        button.append(glyph);
+        button.addEventListener('click', () => void this.commandRegistry.executeCommand(command));
+        shortcuts.append(button);
+      }
+      tabBar.parent.insertWidget(0, new BaseWidget({ node: shortcuts }));
+    }
+
     let openingChat = false;
     let chatOpened = false;
     tabBar.currentChanged.connect(async (_sender, { currentTitle }) => {

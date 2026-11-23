@@ -12,7 +12,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Get Started](http://127.0.0.1:18771/) and choose **Explore a sample team**. Use **SovAI: Get Started** or **SovAI: Open Team Studio Preview** to reopen either tab from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/) and choose **Explore a sample team**. Use the home icon at the top of the right rail to reopen Get Started. **SovAI: Get Started** and **SovAI: Open Team Studio Preview** are also available from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
@@ -36,7 +36,7 @@ docker run --detach --name near-ai-theia-vsix \
   --session-preference nearAi.autoInstallGsd=false
 ```
 
-Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. The Get Started page links to project setup, Chat, Teams, Activity, and Governance. The Chat icon opens the conversation drawer. The compatibility container is for synthetic projects and has an in-memory credential store.
+Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. The Get Started page links to project setup, Chat, Teams, Activity, and Governance. The right rail opens Get Started, Documentation, Compliance, and Chat. The compatibility container is for synthetic projects and has an in-memory credential store.
 
 ## Research
 
@@ -63,3 +63,18 @@ The Canadian Edition uses [the maple leaf hero](extension/assets/sterling-hero-c
 ImageGen edit prompt:
 
 > Edit the supplied Sterling Sovereign AI hero with one localized change. Add a single clearly recognizable Canadian red maple leaf, matching the iconic symmetrical 11-point silhouette on Canada's flag, suspended at the exact visual center of the open steel ring. Make it a crisp, premium red enamel emblem with subtle dimensionality and a faint cool rim reflection from the blue light, facing the camera. Give it breathing room around all points within the opening, about 55% of the opening's width. Preserve the ring, camera position, framing, platform, dark navy and cobalt lighting, and especially the dark negative space on the left for webpage typography. Keep the same wide landscape composition. No flag rectangle, no extra symbols, no lettering, no watermark.
+
+### Canadian Defence Edition
+
+Documentation and Compliance open as Theia tabs. The Docker build bundles the existing Markdown sources for Documentation. The Compliance tab shows the published public evidence and explains when it is unavailable. To supply the refreshed bundle at startup, add this option to the workbench’s `docker run` command before the image name:
+
+```sh
+--mount "type=bind,source=/absolute/path/to/docs-site/build/compliance,target=/repo/.planning/spikes/theia-team-studio/lib/frontend/compliance,readonly"
+```
+
+Use the `build/compliance` directory populated by the docs site’s existing refresh workflow. Private overlays stay with the docs service.
+
+
+The [Defence Edition hero](extension/assets/sterling-hero-ca-defence.webp) adds motifs for cyber, space, land, sea, and air around the maple leaf. A pulse travels along the trails. The hero pause button and reduced-motion setting also stop the pulses.
+
+> Localized image edit for the Sterling Sovereign AI Canadian Defence Edition Get Started hero. Preserve the existing 16:9 wide blue and brushed-metal design, strong red Canadian maple leaf exactly in the ring's opening, pedestal, camera framing and original dark clean left 40 percent for the website headline. Add five distinct, understated cyan-blue holographic symbols in the open dark space around the outside of the ring, linked by slender curved dotted orbital tracks. The five symbols represent cyber (small circuit network), space (recognizable satellite with solar panels), land (topographic ground contour or mountain ridge), sea (wave lines and a small ship silhouette), and air (simple aircraft silhouette). Keep the symbols readable but restrained and visually secondary to the ring and red maple leaf. Keep all five clear within the central-right composition with generous edge margins. No writing, labels, brand text, watermarks, weapons, combat, explosions, or targeting graphics.

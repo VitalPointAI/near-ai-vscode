@@ -17,3 +17,13 @@
 !.planning/spikes/theia-team-studio/tools/**
 !.planning/spikes/theia-team-studio/extension/assets/
 !.planning/spikes/theia-team-studio/extension/assets/**
+!README.md
+!SECURITY.md
+!CHANGELOG.md
+!CONTRIBUTING.md
+!docs/
+!docs/*.md
+!docs-site/
+!docs-site/content/
+!docs-site/content/**
+docs-site/content/**/*.synced.md
