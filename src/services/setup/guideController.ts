@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { decideRoute, type RoutePolicy, type RoutingTable, type RoutingTier } from '../../domain/gate/routing';
 import type { Label } from '../../domain/gate/labels';
 import { MODE_IDS } from '../../domain/org/modes';
-import type { OpenGetStartedRequest } from '../../domain/setup/answers';
+import type { KindOfWorkAnswer, OpenGetStartedRequest } from '../../domain/setup/answers';
 import { cardFor } from '../../domain/setup/cards';
 import { changeList } from '../../domain/setup/changes';
 import type { HostKind } from '../../domain/setup/device';
@@ -70,6 +70,10 @@ function factsFor(result: ViabilityResult, snapshot: GuideRouteSnapshot, now: nu
 
 function contactFor(policy: GuidePolicy): string {
   return (policy.contacts.find(({ topic }) => topic === 'security') ?? policy.contacts[0])?.name ?? GENERIC_CONTACT_TEXT;
+}
+
+function offersKind(policy: ReadyPolicy, kind: KindOfWorkAnswer): boolean {
+  return kind === 'something-else' || policy.kindsOfWork.includes(kind);
 }
 
 function labelFor(session: GuideSession, policy: ReadyPolicy, snapshot: GuideRouteSnapshot) {
@@ -236,7 +240,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     }).filter(({ id }) => id !== 'your-rules:clearance' || clearance !== undefined);
     applyContext = {
       label,
-      project: { mode: mode.mode, ...(canadaOnly ? { residency: { required: ['CA'] } } : {}),
+      project: { ...(mode.changeable ? { mode: mode.mode } : {}), ...(canadaOnly ? { residency: { required: ['CA'] } } : {}),
         ...(exercise.exercise && exercise.reason ? { exercise: { reason: exercise.reason, setAt: new Date(now()).toISOString() } } : layer?.exercise ? { exercise: null } : {}) },
       proposals: clearance ? [{ id: 'clearance', kind: 'clearance', change: clearance }] : []
     };
@@ -330,6 +334,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
 
   async function dispatch(event: GuideEvent): Promise<void> {
     if (!session || policy?.state !== 'ready' || lifetime.signal.aborted) return;
+    if (event.type === 'answer' && event.key === 'kindOfWork' && !offersKind(policy, event.value)) return;
     const previous = session;
     const result = nextSession(previous, event, now());
     session = result.session;
@@ -361,6 +366,12 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
           const input = { now: now(), previous: readSetupGuide(deps.root), locked: { canada: policy.locked.canada === true } };
           const restored = restoreProgress(deps.progress?.read(), input);
           session = restored ?? startSession(input);
+          const kind = session.answers.kindOfWork;
+          if (kind !== undefined && !offersKind(policy, kind)) {
+            session = startSession({ ...input, prefill: {
+              ...session.answers, kindOfWork: undefined, otherKind: undefined, staffSection: undefined, agentWork: undefined
+            } });
+          }
           if (restored) await storeProgress();
           if (lifetime.signal.aborted) return;
           if (session.state === 'paused') await dispatch({ type: 'resume' });

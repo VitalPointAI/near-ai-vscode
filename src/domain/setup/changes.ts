@@ -156,7 +156,7 @@ export function changeList(input: ChangeInput): readonly ChangeItem[] {
       ? { ...item, effect: 'waits', waitsFor: 'rules-change', text: fillSlots(CHANGE_TEXT.waitsForRules, { change: item.text }) }
       : item);
   }
-  if (current.mode !== mode.mode && mode.source !== 'set-by-project') {
+  if (current.mode !== mode.mode && mode.changeable) {
     const { name, join } = modeRowOf(mode);
     addProject({ id: 'mode', group: 'changed', area: 'mode', effect: 'apply', text: fillSlots(CHANGE_TEXT.mode, { name, join }) });
   }

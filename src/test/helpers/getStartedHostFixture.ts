@@ -11,6 +11,7 @@ import { projectLogKey } from '../../gate/decisionLog';
 import { GateHost } from '../../gate/host';
 import { SetupAuditLog } from '../../gate/setupAuditLog';
 import type { GuideControllerDeps } from '../../services/setup/guideController';
+import { gateGuidePolicy } from '../../services/setup/guideFacts';
 import { singleMachineSink } from '../../services/setup/projectLayerSink';
 import { createProjectLayerSource } from '../../services/setup/projectStore';
 import { MemorySecrets } from './teamHarness';
@@ -40,21 +41,11 @@ export async function setup(options: { results?: readonly ViabilityResult[]; ini
   const registry = createAuditEventRegistry();
   for (const spec of GUIDE_AUDIT_EVENT_SPECS) registry.register(spec);
   const audit = new SetupAuditLog({ globalStorageDir: storage, projectRoot: root, projectKey: projectLogKey(root), registry, clock: () => time, onWriteFailure: assert.fail });
-  const runtime = await host.runtimeFor({ root, actor: { kind: 'person', sessionId: 'setup-test' }, presence: 'person', context: 'interactive' });
   const posted: GuideOutbound[] = [];
   const calls = { checks: 0, lands: 0 };
   const deps: GuideControllerDeps = {
     root, hostKind: 'container', machine: 'test host', clock: () => time,
-    readPolicy: async (now) => {
-      const state = runtime.bundleState();
-      const layers = host.policyLayers();
-      const route = runtime.routePolicy?.(now);
-      return state.state === 'valid' && route ? {
-        view: { effective: layers.effective, organization: layers.organization.state, startingRules: true, issuedHere: false },
-        route, hash: state.hash, routing: state.bundle.routing, defaultLabel: state.bundle.defaultLabel,
-        floor: undefined, projectLabel: (await host.labelsFor(root).view(state.bundle.scales)).resolve('', state.bundle.defaultLabel).mark[0]
-      } : { view: { organization: 'failed', startingRules: false, issuedHere: false } };
-    },
+    readPolicy: gateGuidePolicy(host, root, () => 'standard'),
     check: async (snapshot, progress) => {
       calls.checks++;
       const results = (options.results ?? [local, near]).map((result) => ({ ...result,

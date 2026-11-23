@@ -4,7 +4,7 @@ import type { ProjectResidency } from '../../domain/gate/residency';
 import type { LockableAnswer } from '../../domain/gate/sections';
 import { MODE_IDS, type ModeId } from '../../domain/org/modes';
 import { parseSetupGuideEntry, type SetupGuideEntry } from '../../domain/setup/answers';
-import { isSharedProject, projectLayerOf, updateProjectJson, PROJECT_JSON_UNREADABLE_TEXT, PROJECT_JSON_WRITE_FAILED_TEXT } from './projectStore';
+import { isSharedProject, projectLayerOf, projectModeAllowed, updateProjectJson, PROJECT_JSON_UNREADABLE_TEXT, PROJECT_JSON_WRITE_FAILED_TEXT } from './projectStore';
 
 export const WAITS_SHARED_TEXT = 'Waits for the next update: shared project settings';
 export const PROJECT_LAYER_WIDENING_TEXT = "This change would widen this project's rules";
@@ -56,8 +56,7 @@ export function singleMachineSink(root: string, deps: ProjectLayerSinkDeps): Pro
         };
         if (previous.state === 'unreadable') return refuse(PROJECT_JSON_UNREADABLE_TEXT);
         const layer = previous.state === 'valid' ? previous.layer : undefined;
-        const allowedModes = effective?.people?.organization?.allowedModes;
-        if (change.mode !== undefined && (!MODE_IDS.includes(change.mode) || (allowedModes && !allowedModes.includes(change.mode)))) {
+        if (change.mode !== undefined && (!MODE_IDS.includes(change.mode) || !projectModeAllowed(change.mode, effective))) {
           return refuse(PROJECT_LAYER_WIDENING_TEXT);
         }
         const required = layer?.residency?.required;

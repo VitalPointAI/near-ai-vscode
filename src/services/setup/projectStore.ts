@@ -169,14 +169,18 @@ export function readSetupGuide(root: string): SetupGuideEntry | undefined {
   }
 }
 
+export function projectModeAllowed(mode: ModeId, effective?: PolicyDocument): boolean {
+  const organization = effective?.people?.organization;
+  return organization === undefined || (organization.projectMayChoose ? organization.allowedModes.includes(mode) : organization.mode === mode);
+}
+
 export function projectMode(root: string, effective?: PolicyDocument): ModeId {
   const project = readProjectLayer(root, effective?.labels.scales);
-  const organization = effective?.people?.organization;
   if (project.state === 'valid') {
     const mode = MODE_IDS.find((id) => id === project.layer.mode);
-    if (mode !== undefined && (organization === undefined || organization.allowedModes.includes(mode))) return mode;
+    if (mode !== undefined && projectModeAllowed(mode, effective)) return mode;
   }
-  return organization?.mode ?? DEFAULT_MODE;
+  return effective?.people?.organization?.mode ?? DEFAULT_MODE;
 }
 
 export async function isSharedProject(root: string): Promise<boolean> {
