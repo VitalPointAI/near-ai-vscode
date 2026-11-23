@@ -264,6 +264,47 @@
     },
     {
       "controls": [
+        "ia-03"
+      ],
+      "id": "G23",
+      "ownerRole": "shared",
+      "poam": "g23",
+      "remediation": "The deployment identity and network owners approve which device classes and connection boundaries require authentication before access. Component maintainers and the deployment operators document the device identity, enrollment, trust settings and revocation at each boundary. Collect redacted results showing an enrolled device is admitted and an unknown or revoked device is refused before the connection is established. Record inherited controls and assign fixes for applicable boundaries without a verified mechanism.",
+      "title": "Device authentication needs connection-specific evidence"
+    },
+    {
+      "controls": [
+        "ia-05.01",
+        "ia-06"
+      ],
+      "id": "G24",
+      "ownerRole": "shared",
+      "poam": "g24",
+      "remediation": "The deployment identity owner inventories each interactive sign-in and recovery surface and identifies the operator responsible for it. For each password-based surface, collect provider or component evidence for the password blocklist, protected transport, approved salted storage where passwords are stored, recovery reset and approved password selection rules. For every in-scope authentication surface, verify that input and responses obscure sensitive authentication details. Retain redacted screenshots and permitted and denied test results. Review password-specific applicability separately from feedback protection.",
+      "title": "Interactive authentication needs password and feedback evidence"
+    },
+    {
+      "controls": [
+        "ia-05.07"
+      ],
+      "id": "G25",
+      "ownerRole": "shared",
+      "poam": "g25",
+      "remediation": "Release maintainers associate the existing source scan with the exact candidate commit and record its scope and exceptions. Review unpacked installers and other shipped artifacts, then have the deployment operator review applicable images, scripts, configuration and static stores for embedded unencrypted authenticators. Record the artifact digests, coverage, redacted results and reviewed exception dispositions. Remediate confirmed findings and rescan. Identify how skipped formats and files are assessed.",
+      "title": "Release and deployment artifacts need embedded authenticator review"
+    },
+    {
+      "controls": [
+        "ia-07"
+      ],
+      "id": "G26",
+      "ownerRole": "shared",
+      "poam": "g26",
+      "remediation": "The deployment security owner confirms which cryptographic modules are in scope and which module authentication requirements apply. The module operator and component maintainers document the deployed module identity, version and mode, its boundary, operator roles and authentication mechanisms. Collect configuration and redacted authorized and denied operation results. Where a validation is required, verify its applicability to the configured module, version and operating mode. Record and remediate unsupported requirements before closure.",
+      "title": "Cryptographic module authentication needs deployment evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

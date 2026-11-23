@@ -1,0 +1,16 @@
+{
+  "gap": "G26",
+  "id": "g26",
+  "controls": [
+    "ia-07"
+  ],
+  "ownerRole": "shared",
+  "title": "Cryptographic module authentication needs deployment evidence",
+  "remediation": "The deployment security owner confirms which cryptographic modules are in scope and which module authentication requirements apply. The module operator and component maintainers document the deployed module identity, version and mode, its boundary, operator roles and authentication mechanisms. Collect configuration and redacted authorized and denied operation results. Where a validation is required, verify its applicability to the configured module, version and operating mode. Record and remediate unsupported requirements before closure.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Verify the assessed module inventory, applicable authentication requirements, role restrictions and authorized and denied operation evidence"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G25",
+  "id": "g25",
+  "controls": [
+    "ia-05.07"
+  ],
+  "ownerRole": "shared",
+  "title": "Release and deployment artifacts need embedded authenticator review",
+  "remediation": "Release maintainers associate the existing source scan with the exact candidate commit and record its scope and exceptions. Review unpacked installers and other shipped artifacts, then have the deployment operator review applicable images, scripts, configuration and static stores for embedded unencrypted authenticators. Record the artifact digests, coverage, redacted results and reviewed exception dispositions. Remediate confirmed findings and rescan. Identify how skipped formats and files are assessed.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect exact-commit and artifact-digest scan receipts and reviewed coverage for deployment scripts, configuration and static stores"
+    }
+  ]
+}
