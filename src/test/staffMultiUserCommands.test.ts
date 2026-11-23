@@ -1222,6 +1222,28 @@ test('declare for yourself org/Internal: the confirmation names the labels the p
   assert.deepEqual(await leadClearanceOf(at), INTERNAL, 'the roster at its head holds the declared clearance for the lead');
 });
 
+test('conversion shows the names of products whose ledger lines and versions were left behind', async () => {
+  const at = await staffProject('withheld-notices', 'org/Internal');
+  const host = hosts.staffHostFor(at.root);
+  assert.ok(host);
+  await writeBody(at.root, 'j5', 'public-annex', CLEAN_BODY);
+  const proposed = await callTool({ root: at.root, host } as StaffWorld, J5_TEAM, 'mcp__staff-products__propose', {
+    product: 'public-annex', kind: 'annex', label: 'org/Public', dependsOn: ['concept-of-operations@1']
+  }, 'lead-planner');
+  assert.ok(proposed.ok, proposed.text);
+  stub.quickPickAnswers.push('Internal');
+  stub.messageAnswers.push(multi.MAKE_MULTI_USER_ACTION);
+  await run(C.makeMultiUser);
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  says(result.message, [
+    'now multi-user',
+    'Some history for public-annex was left out',
+    'Ask someone cleared for org/Public to make a single-machine copy and share it again.',
+    'public-annex was brought in without its versions'
+  ], 'the conversion notice');
+});
+
 test('copy notices: Make a Single-Machine Copy shows every notice the copy returns beyond the three every screen shows, each once', async () => {
   const at = await staffProject('copy-notices', 'org/Internal');
   stub.quickPickAnswers.push('Internal');

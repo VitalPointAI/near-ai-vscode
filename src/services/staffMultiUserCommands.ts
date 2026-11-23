@@ -23,6 +23,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { STAFF_MULTI_USER_COMMANDS } from '../domain/staff/commands';
+import { conversionNoticeLines } from '../domain/staff/conversionNotice';
 import { STAFF_SECTION_IDS } from '../domain/staff/doctrine';
 import { REPLICA_PROJECT_FILE, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
@@ -435,7 +436,11 @@ async function makeMultiUserCommand(context: StaffCommandContext): Promise<void>
   // The staff host reopens the project as shared on its next read.
   await staffHostFor(root)?.close();
   const count = result.imported.length;
-  tell(`This staff project is now multi-user, and you are its staff lead. ${count === 1 ? 'One ledger was' : `${count} ledgers were`} brought into the shared record, and the original files are kept in .planning/staff/legacy/. To bring someone in, use Staff: Invite to Staff Project.`);
+  const labels = new Map(result.cells.map(({ cell, label }) => [cell, label]));
+  tell([
+    `This staff project is now multi-user, and you are its staff lead. ${count === 1 ? 'One ledger was' : `${count} ledgers were`} brought into the shared record, and the original files are kept in .planning/staff/legacy/. To bring someone in, use Staff: Invite to Staff Project.`,
+    ...conversionNoticeLines(result.withheld, result.unversioned, (cell) => labels.get(cell))
+  ].join('\n'));
 }
 
 /** Invite to Staff Project (D-14): the person's name, seat, roles and declared clearance, then where to save the invitation. */
