@@ -22,7 +22,8 @@ key-files:
     - src/test/helpers/liveWorld.ts
     - src/test/staffProductFeed.test.ts
     - src/test/staffLiveTracer.test.ts
-requirements-completed: [MUS-09]
+requirements: [MUS-09]
+requirements-completed: []
 actuals:
   tokens: 21332
   tasks: 2
