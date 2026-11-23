@@ -30,6 +30,10 @@ async function versionOn(lead: Seat) {
   const doc = createLocalDoc(clientId);
   const update = Buffer.from(localInsert(doc, 0, 'Fuel for three days.')).toString('base64url');
   assert.ok((await appendProductEntry(lead.host, 'doc.update', { product: PRODUCT, update })).ok);
+  return { ...await proposeText(lead, doc), doc };
+}
+
+async function proposeText(lead: Seat, doc: ReturnType<typeof createLocalDoc>) {
   const proposed = await proposeVersion(lead.host, {
     product: PRODUCT, text: docText(doc), header: { kind: 'estimate', label: LABEL, profile: 'j4', level: 'official' }, pins: [], snapshot: snapshotOf(doc)
   });
@@ -253,6 +257,8 @@ test('ordinary decisions made offline can contest, and a known contest requires 
   const before = streamEntries(lead.at, stream);
   const retry = await first.decide({ ...target, outcome: 'approve', reasons: [] });
   assert.equal(retry.ok ? undefined : retry.reason, 'wrong-state');
+  const withdrawal = await first.withdraw({ ...target, reason: 'The version is no longer needed.' });
+  assert.equal(withdrawal.ok ? undefined : withdrawal.reason, 'wrong-state');
   assert.deepEqual(streamEntries(lead.at, stream), before);
 });
 
@@ -330,4 +336,130 @@ test('a signed roster change in a second window removes release authority before
   assert.equal(result.ok ? undefined : result.reason, 'not-decision-holder');
   assert.deepEqual(streamEntries(alternate.at, stream), before);
   assert.equal((await versionFold(alternate, stream)).product.versions[0]?.state, 'approved');
+});
+
+test('a person on the owner side may withdraw before approval but an agent and an unrelated person write nothing', async () => {
+  const lead = await leadWith({ roles: ['member', 'section_lead:j4'] });
+  const member = await bringIn(lead, 'withdraw-member', 'Staff Member', orgClearance('Internal'));
+  const { stream, version } = await versionOn(lead);
+  await syncTo(lead, member, [stream]);
+  const input = { product: PRODUCT, hash: version, reason: 'The figures need revision.' };
+  const beforeLead = streamEntries(lead.at, stream);
+  const beforeMember = streamEntries(member.at, stream);
+  const agent = await new VersionActs(lead.p, OWNER).withdraw(input);
+  assert.equal(agent.ok ? undefined : agent.reason, 'agent-cannot-decide');
+  const stranger = await new VersionActs(member.p, PERSON).withdraw(input);
+  assert.equal(stranger.ok ? undefined : stranger.reason, 'not-owner-or-person');
+  const owner = new VersionActs(lead.p, PERSON);
+  const missing = await owner.withdraw({ ...input, reason: '' });
+  assert.equal(missing.ok ? undefined : missing.reason, 'bad-input');
+  assert.deepEqual(streamEntries(lead.at, stream), beforeLead);
+  assert.deepEqual(streamEntries(member.at, stream), beforeMember);
+  const withdrawn = await owner.withdraw(input);
+  assert.ok(withdrawn.ok, withdrawn.ok ? undefined : withdrawn.message);
+  const [entry] = await lead.p.findOwnAll('version.withdraw', () => true);
+  assert.deepEqual(entry?.data, { ...input, decisionsSeen: [] });
+  assert.equal(entry.stream, stream);
+  assert.equal(entry.hash, withdrawn.hash);
+  const repeated = await owner.withdraw(input);
+  assert.equal(repeated.ok ? undefined : repeated.reason, 'terminal');
+  await syncTo(lead, member, [stream]);
+  const a = await versionFold(lead, stream);
+  const b = await versionFold(member, stream);
+  assert.equal(a.product.versions[0]?.state, 'withdrawn');
+  assert.equal(a.product.records[0]?.release.withdrawal?.reason, input.reason);
+  assert.equal(a.fold.digests[stream], b.fold.digests[stream]);
+  assert.deepEqual(a.product.refusals, []);
+});
+
+test('only a decision holder may withdraw after approval and a concurrent window’s release is observed on retry', async (t) => {
+  const lead = await leadWith({ roles: ['member', 'section_lead:j4'] });
+  const approver = await bringIn(lead, 'withdraw-approver', 'Approver', orgClearance('Internal'));
+  const alternate = await bringIn(lead, 'withdraw-alternate', 'Alternate Approver', orgClearance('Internal'));
+  for (const seat of [approver, alternate]) {
+    ok(await updateMember(lead.host, { member: seat.member, roles: ['member', 'decision_for:commander'] }), 'authorize decision holder');
+  }
+  const { stream, target } = await awaitingVersion(lead);
+  await syncTo(lead, approver, [stream]);
+  const approval = await new VersionActs(approver.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] });
+  assert.ok(approval.ok, approval.ok ? undefined : approval.message);
+  await syncTo(approver, lead, [stream]);
+  await syncTo(lead, alternate, [stream]);
+  const input = { ...target, reason: 'The release is no longer needed.' };
+  const before = streamEntries(lead.at, stream);
+  const owner = await new VersionActs(lead.p, PERSON).withdraw(input);
+  assert.equal(owner.ok ? undefined : owner.reason, 'not-decision-holder');
+  assert.deepEqual(streamEntries(lead.at, stream), before);
+  const other = project(await ReplicaProject.open(alternate.at.root, alternate.at.deps));
+  const otherSeat = { ...alternate, p: other, host: hostOf(other, alternate.at) };
+  let releaseHash: string | undefined;
+  let raced = false;
+  const append = ReplicaStore.prototype.appendOwn;
+  t.mock.method(ReplicaStore.prototype, 'appendOwn', async function (this: ReplicaStore, built: readonly BuiltEntry[], expectedSnapshot?: string) {
+    if (expectedSnapshot !== undefined && !raced) {
+      raced = true;
+      const released = await new VersionActs(approver.p, PERSON).release(target);
+      assert.ok(released.ok, released.ok ? undefined : released.message);
+      releaseHash = released.hash;
+      await syncTo(approver, otherSeat, [stream]);
+    }
+    return append.call(this, built, expectedSnapshot);
+  });
+  const withdrawn = await new VersionActs(alternate.p, PERSON).withdraw(input);
+  assert.ok(withdrawn.ok, withdrawn.ok ? undefined : withdrawn.message);
+  assert.ok(releaseHash);
+  const [entry] = await alternate.p.findOwnAll('version.withdraw', () => true);
+  assert.deepEqual(entry?.data, { ...input, decisionsSeen: [releaseHash] });
+  await syncTo(alternate, lead, [stream]);
+  assert.equal((await versionFold(lead, stream)).product.records[0]?.release.state, 'withdrawn');
+});
+
+test('supersession requires both releases and writes their exact version references on a second replica', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const alternate = await bringIn(lead, 'supersede-holder', 'Alternate Commander', orgClearance('Internal'));
+  ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
+  ok(await updateMember(lead.host, { member: lead.member, agentSeats: [ROLES.releaseGuard] }), 'authorize guard');
+  const { stream, version, doc } = await versionOn(lead);
+  const acts = new VersionActs(lead.p, PERSON);
+  const prepare = async (hash: string) => {
+    const target = { product: PRODUCT, hash };
+    assert.ok((await new VersionActs(lead.p, GUARD).verdict({ ...target, gate: 'guard', verdict: 'CLEARED', reasons: [] })).ok);
+    assert.ok((await new VersionActs(lead.p, OWNER).submit({ ...target, decisionFor: 'commander' })).ok);
+    assert.ok((await acts.decide({ ...target, outcome: 'approve', reasons: [] })).ok);
+    return target;
+  };
+  const previous = await prepare(version);
+  const noRelease = await acts.supersede({ ...previous, byHash: version });
+  assert.equal(noRelease.ok ? undefined : noRelease.reason, 'no-release');
+  assert.ok((await acts.release(previous)).ok);
+  const update = Buffer.from(localInsert(doc, 'Fuel for three days.'.length, ' Reserve in place.')).toString('base64url');
+  assert.ok((await appendProductEntry(lead.host, 'doc.update', { product: PRODUCT, update })).ok);
+  const next = await prepare((await proposeText(lead, doc)).version);
+  const input = { ...previous, byHash: next.hash };
+  const before = streamEntries(lead.at, stream);
+  const earlier = await acts.supersede({ ...previous, byHash: previous.hash });
+  assert.equal(earlier.ok ? undefined : earlier.reason, 'out-of-order');
+  const unreleased = await acts.supersede(input);
+  assert.equal(unreleased.ok ? undefined : unreleased.reason, 'not-released');
+  const stale = await acts.supersede({ ...previous, byHash: '0'.repeat(64) });
+  assert.equal(stale.ok ? undefined : stale.reason, 'stale-version');
+  assert.deepEqual(streamEntries(lead.at, stream), before);
+  assert.ok((await acts.release(next)).ok);
+  await syncTo(lead, alternate, [stream]);
+  const replacer = new VersionActs(alternate.p, PERSON);
+  const agent = await new VersionActs(alternate.p, OWNER).supersede(input);
+  assert.equal(agent.ok ? undefined : agent.reason, 'agent-cannot-decide');
+  const written = await replacer.supersede(input);
+  assert.ok(written.ok, written.ok ? undefined : written.message);
+  const [entry] = await alternate.p.findOwnAll('version.supersede', () => true);
+  assert.deepEqual(entry?.data, input);
+  assert.equal(entry.hash, written.hash);
+  assert.equal(entry.stream, stream);
+  await syncTo(alternate, lead, [stream]);
+  const a = await versionFold(lead, stream);
+  const b = await versionFold(alternate, stream);
+  assert.deepEqual(a.product.versions.map((version) => version.state), ['superseded', 'released']);
+  assert.equal(a.product.records[0]?.release.supersededBy, 2);
+  assert.equal(a.fold.digests[stream], b.fold.digests[stream]);
+  assert.deepEqual(a.product.refusals, []);
 });

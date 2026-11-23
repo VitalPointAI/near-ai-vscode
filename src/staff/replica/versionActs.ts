@@ -12,6 +12,7 @@ import type { ReplicaProject } from './replicaProject';
 export const VERSION_ACT_WORDS = {
   ...RELEASE_REFUSALS,
   ...VERSION_REFUSALS,
+  'agent-cannot-decide': 'Only a named person can take this step.',
   'unsupported-kind': 'This step is unavailable in this version.',
   'hash-mismatch': 'The contents do not match this version.',
   'text-not-in-document': 'The proposed text was never part of this product at the selected point.',
@@ -25,19 +26,25 @@ export const VERSION_ACT_WORDS = {
 type VersionTarget = { product: string; hash: string };
 type SubmitInput = VersionTarget & { decisionFor: string };
 type DecideInput = VersionTarget & { outcome: 'approve' | 'reject'; reasons: readonly string[] };
+type WithdrawInput = VersionTarget & { reason: string };
+type SupersedeInput = VersionTarget & { byHash: string };
 
 const REQUIRED_STATE = {
   'version.verdict': undefined,
   'version.submit': 'guard-checked',
   'version.decide': 'awaiting-decision',
-  'version.release': 'approved'
+  'version.release': 'approved',
+  'version.withdraw': undefined,
+  'version.supersede': 'released'
 } as const;
 type VersionAction = keyof typeof REQUIRED_STATE;
 const OBSERVED_ACTIONS: Record<VersionAction, readonly string[]> = {
   'version.verdict': ['version.verdict'],
   'version.submit': ['version.verdict', 'version.submit'],
   'version.decide': ['version.verdict', 'version.submit'],
-  'version.release': []
+  'version.release': [],
+  'version.withdraw': ['version.verdict', 'version.submit'],
+  'version.supersede': []
 };
 type VerdictInput = VersionTarget & { reasons: readonly string[] } &
   ({ gate: 'guard'; verdict: GuardVerdict } | { gate: 'tradecraft'; verdict: TradecraftVerdict });
@@ -92,6 +99,20 @@ export class VersionActs {
     return this.write('version.release', data);
   }
 
+  public async withdraw(input: WithdrawInput): Promise<Written | Refused> {
+    if (this.actor.kind !== 'person') return refuse('agent-cannot-decide');
+    const data = { product: input.product, hash: input.hash, reason: input.reason, decisionsSeen: [] };
+    if (validateVersionsData('version.withdraw', data, 'withdrawal') !== undefined) return refuse('bad-input');
+    return this.write('version.withdraw', data);
+  }
+
+  public async supersede(input: SupersedeInput): Promise<Written | Refused> {
+    if (this.actor.kind !== 'person') return refuse('agent-cannot-decide');
+    const data = { product: input.product, hash: input.hash, byHash: input.byHash };
+    if (validateVersionsData('version.supersede', data, 'supersession') !== undefined) return refuse('bad-input');
+    return this.write('version.supersede', data);
+  }
+
   private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
@@ -105,9 +126,11 @@ export class VersionActs {
         if (version === undefined) return refuse('stale-version');
         const { state } = version.release;
         const required = REQUIRED_STATE[kind];
+        if (kind === 'version.withdraw' && TERMINAL_RELEASE_STATES.includes(state)) return refuse('terminal');
         if (required !== undefined && state !== required) {
           if (TERMINAL_RELEASE_STATES.includes(state)) return refuse('terminal');
           if (kind === 'version.release' && state !== 'released') return refuse('no-approval');
+          if (kind === 'version.supersede') return refuse('no-release');
           return refuse(kind === 'version.submit' && LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
         }
         const decision = product.versions.find((item) => item.hash === data.hash)?.decision;
@@ -116,22 +139,37 @@ export class VersionActs {
           if (decision?.status !== 'none' || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
         }
         let decisionsSeen: string[] = [];
+        const additionalDeps: string[] = [];
         if (kind === 'version.release') {
           if (decision?.status !== 'effective' || decision.outcome !== 'APPROVE' || decision.effective.length === 0) return refuse('no-approval');
           if (decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
-          if (decision.effective.length > MAX_DECISIONS_SEEN) return refuse('too-many-dependencies');
           decisionsSeen = [...decision.effective].sort();
         }
+        if (kind === 'version.withdraw' || kind === 'version.supersede') {
+          // These ordinary actions must not resolve a dispute or confirm a pending decision implicitly.
+          if (decision === undefined || decision.status === 'contested' || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
+          decisionsSeen = [...decision.effective].sort();
+        }
+        if (kind === 'version.supersede') {
+          const replacement = product.versions.find((item) => item.hash === data.byHash);
+          if (replacement === undefined) return refuse('stale-version');
+          if (replacement.number <= version.number) return refuse('out-of-order');
+          if (replacement.state !== 'released' || replacement.decision.status !== 'effective' ||
+            replacement.decision.pending.length > 0 || replacement.decision.held.length > 0) return refuse('not-released');
+          additionalDeps.push(...replacement.decision.effective);
+        }
+        const writesDecisionsSeen = kind === 'version.release' || kind === 'version.withdraw';
+        if (writesDecisionsSeen && decisionsSeen.length > MAX_DECISIONS_SEEN) return refuse('too-many-dependencies');
         const refused = new Set(product.refusals.map((item) => item.entry));
         const seen = new Set(decisionsSeen);
-        // Observe the prior actions this step depends on. A release follows the approvals, which already observe the gates and submission.
-        // This writer's stream head already cites its own actions.
+        // A release observes approvals, and a supersession observes both releases. Those actions already cite their gates and submissions.
+        // This writer's stream head already cites its own actions on the version.
         const prior = version.acts.filter((act) =>
           (observed.includes(act.kind) || seen.has(act.entry)) && !refused.has(act.entry) && act.writer !== this.project.deviceWriter);
-        const deps = [version.entry, ...prior.map((act) => act.entry)];
+        const deps = [...new Set([version.entry, ...prior.map((act) => act.entry), ...additionalDeps])];
         if (deps.length > MAX_DEPS) return refuse('too-many-dependencies');
         return {
-          kind, data: kind === 'version.release' ? { ...data, decisionsSeen } : data, options: { stream: product.stream, actor, deps },
+          kind, data: writesDecisionsSeen ? { ...data, decisionsSeen } : data, options: { stream: product.stream, actor, deps },
           check: (preview, hash) => checkWrite(preview, product.stream, product.product, hash)
         };
       });
