@@ -242,6 +242,13 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   assert.match(scheduledBundleScan, /id: bundle_scan/);
   const upload = steps(daily).find((step) => /name: compliance-bundle/.test(step));
   assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
+  const weekly = jobs(scheduled).get('weekly-oscal');
+  assert.match(weekly, /npm --prefix compliance ci --ignore-scripts[\s\S]*node compliance\/src\/cli\.ts validate/);
+  const weeklyValidation = steps(weekly).find((step) => step.includes('Validate and resolve every OSCAL profile'));
+  assert.ok(weekly.includes('stageAssessorItsg33Profile(process.argv[1])'));
+  assert.ok(weeklyValidation.includes('profile="compliance/out/assessor-oscal/profiles/$name"'));
+  assert.ok(weeklyValidation.includes("! -path 'compliance/catalogs/itsg-33/annex-3a.json'"));
+  assert.match(weeklyValidation, /continue-on-error:\s*true/);
   assert.match(jobs(codeql).get('codeql'), /contents:\s*read[\s\S]*security-events:\s*write/);
   assert.match(codeql, /languages:\s*javascript-typescript/);
   assert.match(codeql, /build-mode:\s*none/);
