@@ -301,7 +301,8 @@ Plans:
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
 **Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
-**Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (defined in `.planning/research/portfolio-and-assignment/DESIGN.md`; added to REQUIREMENTS.md when Phase 33.1 is planned)
+**Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08
+**Prerequisite**: POST-01 belongs to Phase 33.
 **Success Criteria** (what must be TRUE):
   1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
   2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
@@ -310,11 +311,18 @@ Plans:
   5. An existing multi-user project switched to Military mode gives the same decisions and grants after migration from seats; invitation-mode projects are unchanged. (POST-08)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 0 plans
+**Plans:** 8 plans in 7 waves. The Phase 33 roster and Phase 41 organization policy remain integration prerequisites.
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 33.1 to break down)
+- [ ] [33.1-01-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md) — Signed position and posting tracer
+- [ ] [33.1-02-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-02-PLAN.md) — Delegation, device proof, and posting delivery
+- [ ] [33.1-03-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-03-PLAN.md) — Atomic handover and offline convergence
+- [ ] [33.1-04-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-04-PLAN.md) — Report unable and personnel privacy
+- [ ] [33.1-05-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-05-PLAN.md) — Acting postings, dual-hat scope, and protected decisions
+- [ ] [33.1-06-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-06-PLAN.md) — Seat migration and invitation compatibility
+- [ ] [33.1-07-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-07-PLAN.md) — Staff Room posting workflows
+- [ ] [33.1-08-PLAN.md](phases/33.1-assigned-positions-and-handover/33.1-08-PLAN.md) — Position-specific workspaces and scoped presence
 
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
