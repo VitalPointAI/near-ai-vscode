@@ -12,11 +12,11 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 48);
-  assert.equal(poam.length, 40);
+  assert.equal(gaps.length, 55);
+  assert.equal(poam.length, 47);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
-test('new account, label, privilege, audit, identity and contingency gaps have named open paths', () => {
+test('release assessment gaps have named open paths', () => {
   for (const [control, id, phase] of [
     ['ac-02', 'G14', '33'], ['au-02', 'G11', '44.1'], ['si-03', 'G15', '44.1'],
     ['ac-16.05', 'G16', '41'], ['ac-06.09', 'G17', '33.1'], ['au-05.01', 'G18', '44.1'], ['ia-05', 'G19', '44.1'],
@@ -32,7 +32,15 @@ test('new account, label, privilege, audit, identity and contingency gaps have n
     ['ia-08.02', 'G29', '44.1'], ['ia-08.04', 'G29', '44.1'], ['ia-05.14', 'G30', '44.1'],
     ['cp-02.02', 'G31', '44.1'], ['cp-04.01', 'G32', '44.1'], ['cp-07.06', 'G33', '44.1'],
     ['cp-08.05', 'G34', '44.1'], ['cp-09', 'G35', '44.1'], ['cp-09.07', 'G35', '44.1'],
-    ['cp-10', 'G36', '44.1'], ['cp-10.04', 'G36', '44.1']
+    ['cp-10', 'G36', '44.1'], ['cp-10.04', 'G36', '44.1'],
+    ['ac-07', 'G37', '44.1'], ['ac-08', 'G38', '44.1'], ['ac-14', 'G38', '44.1'],
+    ['ac-11', 'G39', '44.1'], ['ac-11.01', 'G39', '44.1'],
+    ['ac-02.05', 'G40', '44.1'], ['ac-12', 'G40', '44.1'],
+    ['ac-17', 'G41', '44.1'], ['ac-17.01', 'G41', '44.1'], ['ac-17.02', 'G41', '44.1'],
+    ['ac-17.03', 'G41', '44.1'], ['ac-17.04', 'G41', '44.1'], ['ac-17.400', 'G41', '44.1'],
+    ['ac-20', 'G42', '44.1'], ['ac-20.01', 'G42', '44.1'], ['ac-20.02', 'G42', '44.1'],
+    ['ac-20.04', 'G42', '44.1'], ['ac-21', 'G43', '44.1'], ['ac-21.400', 'G43', '44.1'],
+    ['ac-21.401', 'G43', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);
