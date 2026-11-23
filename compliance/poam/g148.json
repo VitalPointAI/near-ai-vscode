@@ -1,0 +1,17 @@
+{
+  "gap": "G148",
+  "id": "g148",
+  "controls": [
+    "ma-04",
+    "ma-04.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Non-local maintenance needs monitored authorization and session closure evidence",
+  "remediation": "The deployment remote maintenance owner and security monitoring lead identify approved tools and diagnostic access in the system plan. Verify approval and strong authentication for a sampled session, retained activity and required audit events, review for anomalous behavior, and termination of the session and its network connections at completion.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved system-plan scope and a redacted session authorization, authentication, audit review and termination record"
+    }
+  ]
+}
