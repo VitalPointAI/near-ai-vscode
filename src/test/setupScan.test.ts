@@ -352,3 +352,19 @@ test('Stop and a hung connection both abort the transport and leave an end audit
     assert.equal(clock.now(), stop === 'user' ? 15 : 800);
   }
 });
+
+test('an adapter that closes a filtered port at its timeout can continue scanning', async () => {
+  const clock = new VirtualScanClock();
+  let attempts = 0;
+  const result = await clock.drain(runScan({
+    plan: offer(), confirmed: true, ways: () => ways, clock, signal: new AbortController().signal,
+    async connect(_host, _port, timeout) {
+      if (++attempts === 1) await new Promise<void>((resolve) => clock.setTimeout(resolve, timeout));
+      return false;
+    },
+    onFound: () => assert.fail('a closed port is never found'),
+    onProgress() {}, record() {}
+  }));
+  assert.deepEqual(result, { found: 0, stopped: false });
+  assert.equal(attempts, 2 * MODEL_SERVER_PORTS.length);
+});

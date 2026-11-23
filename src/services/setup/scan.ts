@@ -145,24 +145,26 @@ function attempt(input: ScanInput, plan: ScanPlan, host: string, port: number): 
     const { clock, signal } = input;
     const transport = new AbortController();
     let finished = false;
+    let timer: unknown;
     const stop = () => finish('stopped');
     function finish(result: Attempt) {
       if (finished) return;
       finished = true;
-      clock.clearTimeout(timer);
+      if (timer !== undefined) clock.clearTimeout(timer);
       signal.removeEventListener('abort', stop);
       if (result === 'stopped') transport.abort();
       resolve(result);
     }
-    const timer = clock.setTimeout(stop, SCAN_CONNECT_TIMEOUT_MS);
     signal.addEventListener('abort', stop, { once: true });
-    if (signal.aborted) stop();
-    // An adapter that never settles may still own a socket. A timeout stops the run.
-    void Promise.resolve().then(() => {
-      if (!stillAllowed(input, plan)) stop();
-      return finished ? false : input.connect(host, port, SCAN_CONNECT_TIMEOUT_MS, transport.signal);
-    })
-      .then((open) => finish(open ? 'open' : 'closed'), () => finish('closed'));
+    if (!stillAllowed(input, plan) || finished) return stop();
+    try {
+      const connection = input.connect(host, port, SCAN_CONNECT_TIMEOUT_MS, transport.signal);
+      // Let the adapter close an ordinary timed-out port before applying the watchdog.
+      if (!finished) timer = clock.setTimeout(stop, SCAN_CONNECT_TIMEOUT_MS);
+      void Promise.resolve(connection).then((open) => finish(open ? 'open' : 'closed'), () => finish('closed'));
+    } catch {
+      finish('closed');
+    }
   });
 }
 
