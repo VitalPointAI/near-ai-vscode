@@ -205,6 +205,8 @@ class SterlingWelcomeWidget extends BaseWidget {
 
 @injectable()
 class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelcomeWidget> implements FrontendApplicationContribution {
+  private chatMotion?: { animation: Animation; opening: boolean };
+
   constructor() {
     super({ widgetId: welcomeId, widgetName: 'Get Started', defaultWidgetOptions: { area: 'main' } });
   }
@@ -215,6 +217,10 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   onStart(app: FrontendApplication): void {
     app.shell.addClass(edition.workbenchClass);
     const { tabBar } = app.shell.rightPanelHandler;
+    tabBar.currentChanged.connect((_bar, { previousTitle, currentTitle }) => {
+      if (currentTitle?.owner.id === chatContainerId) this.slideChat(true);
+      else if (previousTitle?.owner.id === chatContainerId) this.stopChatMotion();
+    });
     if (tabBar.parent instanceof Panel) {
       const shortcuts = document.createElement('nav');
       shortcuts.className = 'sterling-rail-shortcuts';
@@ -235,6 +241,10 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
             syncExpanded();
             tabBar.currentChanged.connect(syncExpanded);
             button.addEventListener('click', () => {
+              if (this.chatMotion?.opening === false) {
+                this.slideChat(true);
+                return;
+              }
               const action = this.chatIsOpen() ? this.collapseChat() : this.commandRegistry.executeCommand(command);
               void action.catch(error => console.warn('Sterling could not toggle Chat.', error));
             });
@@ -267,8 +277,43 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     return this.shell.rightPanelHandler.tabBar.currentTitle?.owner.id === chatContainerId;
   }
 
+  private stopChatMotion(): void {
+    this.chatMotion?.animation.cancel();
+    this.chatMotion = undefined;
+  }
+
+  private slideChat(opening: boolean): Animation | undefined {
+    const drawer = this.shell.rightPanelHandler.dockPanel.parent?.node;
+    const shown = { transform: 'translateX(0)', clipPath: 'inset(0 0 0 0)' };
+    const retracted = { transform: 'translateX(100%)', clipPath: 'inset(0 100% 0 0)' };
+    const current = drawer && this.chatMotion ? getComputedStyle(drawer) : undefined;
+    const from = current ? { transform: current.transform, clipPath: current.clipPath }
+      : opening ? retracted : shown;
+    this.stopChatMotion();
+    if (!drawer || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    // Clip the moving content so it stays inside the drawer area and clear of the rail.
+    const animation = drawer.animate([from, opening ? shown : retracted], {
+      duration: opening ? 220 : 180,
+      easing: opening ? 'cubic-bezier(.16, 1, .3, 1)' : 'cubic-bezier(.5, 0, .75, 0)',
+      fill: 'both'
+    });
+    this.chatMotion = { animation, opening };
+    if (opening) {
+      void animation.finished.then(() => {
+        if (this.chatMotion?.animation === animation) this.stopChatMotion();
+      }, () => {});
+    }
+    return animation;
+  }
+
   private async collapseChat(): Promise<boolean> {
     if (!this.chatIsOpen()) return false;
+    if (this.chatMotion?.opening === false) return true;
+    const animation = this.slideChat(false);
+    if (animation) {
+      const finished = await animation.finished.then(() => true, () => false);
+      if (!finished || this.chatMotion?.animation !== animation || !this.chatIsOpen()) return true;
+    }
     await this.shell.collapsePanel('right');
     return true;
   }
