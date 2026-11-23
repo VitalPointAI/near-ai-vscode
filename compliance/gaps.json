@@ -441,6 +441,89 @@
     },
     {
       "controls": [
+        "ac-07"
+      ],
+      "id": "G37",
+      "ownerRole": "shared",
+      "poam": "g37",
+      "remediation": "The deployment identity owner approves the failed-attempt threshold, time window and automatic response for each applicable sign-in path. The sign-in operator records the active settings. Using authorized test accounts, verify the response when the limit is exceeded and collect redacted results for the required lock, delay, notification or recovery behavior. Record inherited mechanisms and assign gaps to the responsible component or provider.",
+      "title": "Failed sign-in limits and responses need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-08",
+        "ac-14"
+      ],
+      "id": "G38",
+      "ownerRole": "shared",
+      "poam": "g38",
+      "remediation": "The sponsor approves the notice text with privacy and security owners and documents each action allowed before authentication with its rationale in the system security plan. Interface and service operators inventory public and restricted entry points. Collect redacted captures of notice timing and required acknowledgment before access, and test that approved public actions work while protected actions require authentication. Record any distinct notice for publicly accessible systems.",
+      "title": "System use notices and actions before authentication need review"
+    },
+    {
+      "controls": [
+        "ac-11",
+        "ac-11.01"
+      ],
+      "id": "G39",
+      "ownerRole": "shared",
+      "poam": "g39",
+      "remediation": "The deployment endpoint owner records which workstations and managed devices are in scope. The sponsor approves inactivity thresholds and unattended locking rules. Collect managed settings and redacted captures showing the inactivity or manual lock as applicable, previously visible information concealed by a publicly viewable lock display, and access restored only through approved authentication. Assign missing inherited or component controls for implementation and retest.",
+      "title": "Device locking and obscured displays need endpoint evidence"
+    },
+    {
+      "controls": [
+        "ac-02.05",
+        "ac-12"
+      ],
+      "id": "G40",
+      "ownerRole": "shared",
+      "poam": "g40",
+      "remediation": "Deployment identity and session operators identify in-scope local, browser and remote user sessions. The sponsor approves when users must log out and the conditions for automatic session termination. Collect the approved user procedure and deployed settings. Exercise the configured triggers and verify that the old session cannot continue or regain protected access. Record any approved work allowed to continue after termination and its access boundary.",
+      "title": "Inactivity logout and logical session termination need evidence"
+    },
+    {
+      "controls": [
+        "ac-17",
+        "ac-17.01",
+        "ac-17.02",
+        "ac-17.03",
+        "ac-17.04",
+        "ac-17.400"
+      ],
+      "id": "G41",
+      "ownerRole": "shared",
+      "poam": "g41",
+      "remediation": "The sponsor authorizes each applicable remote access method and documents its conditions and privileged-use rationale in the system security plan. Network and service operators record managed entry points, monitoring and control settings, session cryptographic configuration and approved dedicated management consoles. Collect redacted tests for allowed access, denied unapproved paths and denied privileged access from ordinary endpoints, plus trustworthy records of authorized remote privileged commands and access to security-relevant information.",
+      "title": "Remote access methods and privileged access need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-20",
+        "ac-20.01",
+        "ac-20.02",
+        "ac-20.04"
+      ],
+      "id": "G42",
+      "ownerRole": "shared",
+      "poam": "g42",
+      "remediation": "The sponsor identifies which external systems may access the deployment or process, store or transmit its information. Deployment operators verify those systems against approved security and privacy controls and retain applicable connection or processing agreements. Record authorized restrictions for portable storage and prohibited network-accessible storage. Collect the approved system inventory, verification records and representative permitted and refused access and storage tests, with evidence references for sensitive agreements.",
+      "title": "External system use and storage restrictions need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-21",
+        "ac-21.400",
+        "ac-21.401"
+      ],
+      "id": "G43",
+      "ownerRole": "shared",
+      "poam": "g43",
+      "remediation": "The sponsor and information owner identify applicable sharing with external public-sector organizations and sharing between or within federal institutions. Retain authorized references to the applicable written agreements or arrangements and their safeguarding terms. Component and deployment operators demonstrate how users compare partner authorization to the information restrictions and collect redacted results for allowed and disallowed sharing. Reuse approved export-control evidence only for that part of the assessed boundary.",
+      "title": "Information-sharing safeguards and agreements need deployment evidence"
+    },
+    {
+      "controls": [
         "au-01"
       ],
       "id": "G44",

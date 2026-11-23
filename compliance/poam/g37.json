@@ -1,0 +1,16 @@
+{
+  "gap": "G37",
+  "id": "g37",
+  "controls": [
+    "ac-07"
+  ],
+  "ownerRole": "shared",
+  "title": "Failed sign-in limits and responses need deployment evidence",
+  "remediation": "The deployment identity owner approves the failed-attempt threshold, time window and automatic response for each applicable sign-in path. The sign-in operator records the active settings. Using authorized test accounts, verify the response when the limit is exceeded and collect redacted results for the required lock, delay, notification or recovery behavior. Record inherited mechanisms and assign gaps to the responsible component or provider.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved failed-attempt policy and configuration and an observed threshold and recovery exercise for each sign-in path"
+    }
+  ]
+}

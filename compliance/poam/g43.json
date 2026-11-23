@@ -1,0 +1,18 @@
+{
+  "gap": "G43",
+  "id": "g43",
+  "controls": [
+    "ac-21",
+    "ac-21.400",
+    "ac-21.401"
+  ],
+  "ownerRole": "shared",
+  "title": "Information-sharing safeguards and agreements need deployment evidence",
+  "remediation": "The sponsor and information owner identify applicable sharing with external public-sector organizations and sharing between or within federal institutions. Retain authorized references to the applicable written agreements or arrangements and their safeguarding terms. Component and deployment operators demonstrate how users compare partner authorization to the information restrictions and collect redacted results for allowed and disallowed sharing. Reuse approved export-control evidence only for that part of the assessed boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve sharing scope and verify signed agreements or arrangements, partner authorization rules and allowed and denied information transfers"
+    }
+  ]
+}
