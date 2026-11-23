@@ -145,7 +145,7 @@ test('a verified receipt is supplemental, checksummed and tied to the selected r
   }
 });
 
-test('distinguishes missing, stale and failed evidence and adds unresolved in-scope controls to triage', async () => {
+test('distinguishes missing, stale and failed evidence and counts unresolved in-scope controls with no closure path', async () => {
   const evidence = release();
   const base = dashboard.rows[0];
   const [component] = base.components;
@@ -170,7 +170,11 @@ test('distinguishes missing, stale and failed evidence and adds unresolved in-sc
   assert.match(rules, /"expired","Stale","met"/);
   assert.match(rules, /"failed","Failed","test-failed"/);
   const triage = result.get('evidence/gap-and-action-register.csv')!().toString();
-  assert.match(triage, /TRIAGE-protected-a-au-2/);
+  assert.match(triage, /"TRIAGE-protected-a-au-2","Control implementation or evidence review","Unassigned","au-2","","No closure path assigned\. In Phase 44\.1,[^\n]+?decision\.","",/);
+  const coverage = result.get('evidence/coverage-summary.csv')!().toString();
+  assert.match(coverage, /"Deployment assessment","Unassigned product gaps"/);
+  assert.match(coverage, /"protected-a",[^\n]+,"Not assessed","1"/);
+  assert.match(coverage, /"classified",[^\n]+,"Reference only",""/);
   assert.doesNotMatch(triage, /TRIAGE-classified/);
 });
 

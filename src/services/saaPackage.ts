@@ -221,12 +221,12 @@ function sponsorResponse(control: Control, profile: Profile, duties: readonly st
     draft: 'We will confirm the applicable objective and resolve the product or evidence gap before proposing closure.' + responsibility,
     followUp: gaps.length
       ? `Review related gaps ${gaps.map(({ id }) => id).join(', ')}. Verify the applicable implementation and record closure evidence.`
-      : 'Route to Phase 44.1 to determine whether implementation, evidence, or an approved tailoring decision is needed.'
+      : 'No closure path assigned. In Phase 44.1, record the accountable role, milestone, and required evidence or approved tailoring decision.'
   };
 }
 
 function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): { tables: Table[]; profiles: SaaSponsorReportInput['profiles'] } {
-  const coverage: CsvRow[] = [['Profile ID', 'Profile name', 'Product rows', ...STATES, 'Deployment assessment']];
+  const coverage: CsvRow[] = [['Profile ID', 'Profile name', 'Product rows', ...STATES, 'Deployment assessment', 'Unassigned product gaps']];
   const controls: CsvRow[] = [[
     'Profile ID', 'Profile kind', 'OSCAL control ID', 'Control label', 'Control title', 'Product state', 'Product reason',
     'Product snapshot (UTC)', 'Product commit', 'Mapped components and responsibilities', 'Product rule IDs', 'Related published gap IDs',
@@ -263,6 +263,7 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
   for (const profile of dashboard.levels) {
     const rows = dashboard.rows.filter((row) => row.level === profile.id);
     const counts = new Map<ProductState, number>();
+    let unassigned = 0;
     const drafts: SaaSponsorReportInput['profiles'][number]['rows'][number][] = [];
     for (const row of rows) {
       counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
@@ -290,8 +291,9 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
         publishedReason: reasonText, sponsorDraft: response.draft, followUp: response.followUp });
       if (profile.claim && !related.length && (['not-met', 'partly-met', 'stale'].includes(row.state) ||
           (row.state === 'met' && !passingEvidence))) {
-        actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Control implementation or evidence review', 'Triage', row.control,
-          '', response.followUp, '44.1', '', '', '', '', '', '', '', profile.id]);
+        unassigned++;
+        actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Control implementation or evidence review', 'Unassigned', row.control,
+          '', response.followUp, '', '', '', '', '', '', '', '', profile.id]);
       }
       const textFile = row.textFile ? `evidence/bundle/dashboard/${row.textFile}` : '';
       const official = textFile && safePath(textFile) && release.files.has(textFile) ? `release-package/${textFile}` : '';
@@ -315,7 +317,7 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
       }
     }
     coverage.push([profile.id, profile.title, rows.length, ...STATES.map((state) => counts.get(state) ?? 0),
-      profile.claim ? 'Not assessed' : 'Reference only']);
+      profile.claim ? 'Not assessed' : 'Reference only', profile.claim ? unassigned : '']);
     profiles.push({ id: profile.id, title: profile.title, referenceOnly: !profile.claim, rows: drafts });
   }
   for (const gap of dashboard.gaps) {
@@ -426,7 +428,7 @@ This export uses the product evidence published for NEAR AI for VS Code v${evide
 The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
-- The product gaps tab lists original published gaps and separate Phase 44.1 triage entries for unresolved rows without a related gap. Triage identifies where a reviewer still needs to determine whether to implement a control, collect evidence or obtain a tailoring decision.
+- The coverage tab counts unresolved product rows with no assigned closure path. The product gaps tab labels these rows Unassigned. Before release, Phase 44.1 records a role, milestone, and closure evidence or approved tailoring decision for each applicable row.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - ${approval
     ? `The [Marketplace approval receipt](marketplace-approval.json) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`
