@@ -16,6 +16,11 @@ export interface InventoryRecord {
   unit?: string;
   status?: InventoryStatus;
   asOf?: string;
+  assetDid?: string;
+  usagePolicyRef?: string;
+  stockNumber?: string;
+  description?: string;
+  imageRef?: string;
 }
 
 export interface InventorySnapshot {
@@ -57,12 +62,27 @@ function timestamp(value: unknown): value is string {
   return Number.isFinite(instant.getTime()) && instant.toISOString() === value.replace(/(\d\d:\d\d:\d\d)Z$/, '$1.000Z');
 }
 
+function assetDid(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 256
+    && /^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$/.test(value)
+    && !value.endsWith(':') && !/%(?![0-9a-f]{2})/i.test(value);
+}
+
+function catalogueStockNumber(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:\d{13}|\d{4}-\d{2}-\d{3}-\d{4})$/.test(value);
+}
+
 function resource(value: unknown): value is InventoryRecord {
   return record(value) && id(value.id) && label(value.name) && label(value.category, 80)
     && (value.quantity === undefined || (typeof value.quantity === 'number' && Number.isSafeInteger(value.quantity) && value.quantity >= 0))
     && (value.unit === undefined || (value.quantity !== undefined && label(value.unit, 32)))
     && (value.status === undefined || (typeof value.status === 'string' && Object.hasOwn(inventoryStatuses, value.status)))
-    && (value.asOf === undefined || timestamp(value.asOf));
+    && (value.asOf === undefined || timestamp(value.asOf))
+    && (value.assetDid === undefined || (assetDid(value.assetDid) && (value.quantity === undefined || Number(value.quantity) <= 1)))
+    && (value.usagePolicyRef === undefined || label(value.usagePolicyRef, 192))
+    && (value.stockNumber === undefined || catalogueStockNumber(value.stockNumber))
+    && (value.description === undefined || label(value.description, 400))
+    && (value.imageRef === undefined || label(value.imageRef, 192));
 }
 
 /** Read only the approved fields in a bounded local export. Source and status are claims supplied by the file. */
@@ -74,11 +94,15 @@ export function parseInventorySnapshot(text: string): InventorySnapshot | undefi
     || !Array.isArray(value.resources) || value.resources.length > 1200 || !value.resources.every(resource)) return undefined;
   const resources: InventoryRecord[] = value.resources;
   if (new Set(resources.map(item => item.id)).size !== resources.length) return undefined;
+  const reportedDids = resources.flatMap(item => item.assetDid === undefined ? [] : [item.assetDid]);
+  if (new Set(reportedDids).size !== reportedDids.length) return undefined;
   return {
     sourceId: value.sourceId,
     source: value.source,
     generatedAt: value.generatedAt,
-    resources: resources.map(({ id, name, category, quantity, unit, status, asOf }) => ({ id, name, category, quantity, unit, status, asOf }))
+    resources: resources.map(({
+      id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef
+    }) => ({ id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef }))
   };
 }
 
