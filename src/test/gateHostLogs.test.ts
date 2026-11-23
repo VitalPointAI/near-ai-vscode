@@ -2,7 +2,7 @@
 // folder's log is let go when the window's folders change, and past MAX_PROJECT_LOGS the one used longest ago is let go too. No record is lost either way:
 // flush() waits for a log let go with records queued, and a later record (a run still going there, or a new one) opens the log again.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -65,6 +65,26 @@ test('gate decision logs preserve runtime timestamps as epoch milliseconds', asy
   assert.deepEqual(records.map((record) => [record.api.request.uid, record.time]), [
     ['first-decision', first], ['second-decision', first + 17]
   ]);
+});
+
+test('a gate audit write failure produces one local VS Code warning', async () => {
+  const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-host-logs-warning-'));
+  const root = path.join(storage, 'warning-project');
+  const host = gateCommands.registerGate(createFakeContext(storage, new MemorySecrets()) as never);
+  await host.state();
+  const runtime = await runtimeIn(host, root);
+  const file = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  await mkdir(file, { recursive: true });
+
+  const before = stub.notifications.length;
+  record(runtime, 'first-failed-record');
+  record(runtime, 'second-failed-record');
+  await host.flush();
+  const notices = stub.notifications.slice(before);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]?.level, 'warn');
+  assert.match(notices[0]?.message ?? '', /could not save its record of what was allowed or refused/);
+  assert.ok(!notices[0]?.message.includes(storage));
 });
 
 test('the host holds at most MAX_PROJECT_LOGS project logs, lets go of the one used longest ago, and loses no record', async () => {
