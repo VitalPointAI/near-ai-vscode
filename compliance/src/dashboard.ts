@@ -21,7 +21,7 @@ export interface DashboardBuildInput extends DashboardInput {
 }
 export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
 export type DashboardComponentRow = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
-export type DashboardOutputRow = DashboardRow & Readonly<{ label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
+export type DashboardOutputRow = DashboardRow & Readonly<{ gap?: string; label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
 type MatrixRow = Readonly<{ control: string; component: string; responsibility: Responsibility; weProvide: string; youDo: string }>;
 export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts; readonly notes?: LevelNotes }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly MatrixRow[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
 
