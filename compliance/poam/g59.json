@@ -1,0 +1,25 @@
+{
+  "gap": "G59",
+  "id": "g59",
+  "controls": [
+    "ac-02.01",
+    "ac-02.02",
+    "ac-02.03",
+    "ac-02.04",
+    "ac-02.10",
+    "ac-02.13"
+  ],
+  "ownerRole": "shared",
+  "title": "Account automation, disablement and audit need deployment evidence",
+  "remediation": "The deployment identity owner approves managed account types, automated lifecycle mechanisms, expiry and inactivity limits, high-risk criteria and disablement deadlines. Using authorized test identities, verify temporary and emergency expiry, disablement for expiration, inactivity, separation, policy violation and significant risk, and automatic auditing of creation, modification, enabling, disabling and removal. Retain redacted event and timing evidence. The catalogue incorporates shared-account credential changes into AC-02. Reconcile the selected AC-02(10) row with the sponsor, recording AC-02 evidence for any shared accounts and an approved tailoring decision.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved lifecycle rules, automation and timed disablement results, audit records and the documented AC-02(10) reconciliation"
+    },
+    {
+      "phase": "33",
+      "title": "When staff accounts are in scope, retain the release's signed membership and removal records for the staff contribution tracked under G14"
+    }
+  ]
+}
