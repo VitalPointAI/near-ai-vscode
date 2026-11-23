@@ -775,7 +775,14 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
 - [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.
 - [ ] **MUS-12**: Standing watches on the hub under draft-only, rate, spend, route and kill-switch guards.
-- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1; POST-02 to POST-08 are added when Phase 33.1 is planned).
+- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1).
+- [ ] **POST-02**: Define stable roster positions with required clearance, decision scope, key groups and posting eligibility. Retain time-bounded holder history.
+- [ ] **POST-03**: Enforce signed posting orders from an authorized position or scoped delegate. Record the ordering principal, position, authority and effective time.
+- [ ] **POST-04**: Enforce the posting lifecycle, including report for duty, report unable, tasker decision and overdue status. Keep assignment-mode transitions distinct from invitations.
+- [ ] **POST-05**: Prove the recipient device and deliver its authorized keys. An expired or failed safety code leaves the posting recoverable.
+- [ ] **POST-06**: Switch the effective holder and key epoch in one handover transition. Reject stale staging and protected writes by a relieved holder.
+- [ ] **POST-07**: Enforce the single-effective-holder invariant for acting and temporary postings. Keep dual-hatted positions scoped independently and enforce separation of duties on decisions.
+- [ ] **POST-08**: Scope Personnel reasons and position workspaces to authorized viewers. Preserve posting roles, decisions and grants on migration from seats, and preserve invitation-mode behavior.
 
 | Requirement | Phase |
 |-------------|-------|
@@ -783,6 +790,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-04 … MUS-06 | Phase 31 |
 | MUS-07, MUS-08 | Phase 32 |
 | MUS-09, POST-01 | Phase 33 |
+| POST-02 … POST-08 | Phase 33.1 |
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
