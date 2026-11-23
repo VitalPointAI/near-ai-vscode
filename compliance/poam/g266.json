@@ -1,0 +1,17 @@
+{
+  "gap": "G266",
+  "id": "g266",
+  "controls": [
+    "itsp171-03.08.04",
+    "itsp171-03.08.05"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 media markings and transport outside controlled areas need traceable evidence",
+  "remediation": "The sponsor media transport authority approves distribution markings, handling caveats and transport safeguards for assessed media. Verify markings on a representative item and sample transport outside controlled areas with sender and recipient accountability, agreed protective handling, and a dated custody and delivery record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the marking rules and sanitized example with approved transport safeguards and documented custody and delivery"
+    }
+  ]
+}

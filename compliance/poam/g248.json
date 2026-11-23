@@ -1,0 +1,16 @@
+{
+  "gap": "G248",
+  "id": "g248",
+  "controls": [
+    "itsp171-03.04.08"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 authorized execution and deny-by-default settings need operating evidence",
+  "remediation": "The sponsor endpoint control owner maintains and periodically reviews the approved software list. Review effective deny-all and allow-by-exception policy for the assessed execution paths. Retain redacted allowed and denied decisions using harmless approved examples. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the current approved software list, its dated review, effective execution policy and scoped allow and refusal results"
+    }
+  ]
+}

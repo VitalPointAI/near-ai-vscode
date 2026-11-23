@@ -1,0 +1,16 @@
+{
+  "gap": "G263",
+  "id": "g263",
+  "controls": [
+    "itsp171-03.07.06"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 maintenance personnel authorization and supervision need operating records",
+  "remediation": "The sponsor maintenance access owner approves personnel and contractor organizations, keeps the authorized list current, and validates access for unescorted personnel. Sample an authorized visit and a supervised visit with the assigned supervisor’s required authorization and documented technical competence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved personnel and provider roster, an unescorted access decision and a supervised maintenance sample"
+    }
+  ]
+}

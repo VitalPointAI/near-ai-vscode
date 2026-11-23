@@ -1,0 +1,16 @@
+{
+  "gap": "G265",
+  "id": "g265",
+  "controls": [
+    "itsp171-03.08.03"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 media sanitization before reuse, release or disposal needs verification",
+  "remediation": "The sponsor information custodian documents approved sanitization methods for the assessed media and disposition types. Sample a traceable authorization, sanitization result and verification before reuse, disposal or release outside organizational control. Keep this ITSP deployment decision separate from any CPCSC contract disposition. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved sanitization procedures and a redacted custody, verification and final disposition record"
+    }
+  ]
+}

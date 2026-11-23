@@ -2850,6 +2850,350 @@
     },
     {
       "controls": [
+        "itsp171-03.04.01",
+        "itsp171-03.04.02"
+      ],
+      "id": "G245",
+      "ownerRole": "owner",
+      "poam": "g245",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor configuration owner maintains the approved component baseline under configuration control and records its review cadence and changes triggered by installations or modifications. Compare effective settings with the most restrictive baseline consistent with approved operations. Record each deviation with approved purpose, scope, authority and review. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 configuration baselines and restrictive settings need approved evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.03",
+        "itsp171-03.04.04",
+        "itsp171-03.04.05"
+      ],
+      "id": "G246",
+      "ownerRole": "owner",
+      "poam": "g246",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor change authority defines controlled change types and approves physical and logical restrictions for change personnel. Trace a representative change through proposal, pre-change security and privacy impact analysis, approval or refusal, implementation, post-change verification and monitoring review. Review allowed and denied change access using redacted records. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 configuration changes, impact review and change privileges need operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.06"
+      ],
+      "id": "G247",
+      "ownerRole": "owner",
+      "poam": "g247",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor infrastructure owner defines mission-essential capabilities and the restricted functions, ports, protocols, connections and services. Compare operating settings to this list and sample a periodic review that identified and disabled or removed an unnecessary or nonsecure item. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 least-functionality reviews and removals need effective evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.08"
+      ],
+      "id": "G248",
+      "ownerRole": "owner",
+      "poam": "g248",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor endpoint control owner maintains and periodically reviews the approved software list. Review effective deny-all and allow-by-exception policy for the assessed execution paths. Retain redacted allowed and denied decisions using harmless approved examples. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 authorized execution and deny-by-default settings need operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.10",
+        "itsp171-03.04.11"
+      ],
+      "id": "G249",
+      "ownerRole": "owner",
+      "poam": "g249",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor asset manager and information custodian identify assessed components and where specified information is processed and stored. Sample a periodic inventory review and a recorded installation, removal or update. Verify an applicable change in processing or storage location is reflected in the inventory and flow record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 component inventory and specified-information locations need reconciliation"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.12"
+      ],
+      "id": "G250",
+      "ownerRole": "owner",
+      "poam": "g250",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor travel security owner defines high-risk locations and the device configurations and return safeguards for the assessed population. Review authorized issue and return evidence such as a redacted configuration record and completion of required checks. Record an authorized applicability decision if the deployment has no covered travel. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 travel device configuration and return safeguards need disposition"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.01"
+      ],
+      "id": "G251",
+      "ownerRole": "owner",
+      "poam": "g251",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor identity owner maps unique system users to accounts and processes acting for them. Document the re-authentication triggers and effective policies. Collect sanitized operating or controlled verification evidence that the expected user identity is retained in process attribution and re-authentication occurs on an approved trigger. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 unique user identity and re-authentication need assessed records"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.02"
+      ],
+      "id": "G252",
+      "ownerRole": "owner",
+      "poam": "g252",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor endpoint identity owner specifies applicable devices, unique identifiers and approved enrollment and authentication rules. Review effective settings and verify that an authorized synthetic device can connect while an unrecognized or deauthorized synthetic device is refused before an assessed session is established. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 device identity and authentication before connection need evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.03",
+        "itsp171-03.05.04"
+      ],
+      "id": "G253",
+      "ownerRole": "owner",
+      "poam": "g253",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor identity authority identifies assessed sign-in paths for privileged and non-privileged accounts. Review strong multi-factor and replay-resistance configuration and applicable provider evidence. Capture sanitized verification that each category requires its approved strong factors and that a previously used authentication proof is refused by the applicable mechanism. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 strong factors and replay-resistant sign-in need role coverage"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.05"
+      ],
+      "id": "G254",
+      "ownerRole": "owner",
+      "poam": "g254",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor identity governance lead defines authorization and non-reuse periods for individual, group, role, service and device identifiers, plus required individual status markers. Sample approved assignment and retirement, and verify the corresponding recovery or non-reuse handling for the observed period. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 identifier issuance, status and non-reuse need operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.07",
+        "itsp171-03.05.11"
+      ],
+      "id": "G255",
+      "ownerRole": "owner",
+      "poam": "g255",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor credential owner reviews how assessed sign-in paths update and enforce prohibited-password lists, protect transmission and stored verifier material, require a changed password after recovery and enforce approved composition rules. Use synthetic values to verify obscured entry, responses that avoid exposing authentication information and the applied policy. Retain sanitized settings and results only. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 password protections and obscured authentication feedback need evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.12"
+      ],
+      "id": "G256",
+      "ownerRole": "owner",
+      "poam": "g256",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor authenticator custodian documents recipient identity verification, approved initial authenticator settings, distribution, default replacement, lost or damaged handling, compromise reporting, refresh triggers and revocation. Review protective access and sample a sanitized initial issue and a rotation or revocation. Retain no authenticator material. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 authenticator issuance, refresh and revocation need lifecycle proof"
+    },
+    {
+      "controls": [
+        "itsp171-03.06.01",
+        "itsp171-03.06.03"
+      ],
+      "id": "G257",
+      "ownerRole": "owner",
+      "poam": "g257",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor incident lead maps the assessed incident handling capability to the approved plan. Record a dated authorized exercise or defensively handled incident covering preparation, detection and analysis, containment, eradication and recovery with review of scope, timing and improvements. Verify the approved exercise cadence and corrective action follow-up. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 incident handling and periodic exercises need assessed records"
+    },
+    {
+      "controls": [
+        "itsp171-03.06.02"
+      ],
+      "id": "G258",
+      "ownerRole": "owner",
+      "poam": "g258",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor response desk owner identifies approved reporting windows, recipient authorities and support contacts for assessed systems. Sample a redacted incident or an approved exercise through recording, timed notification and response assistance. Review that support guidance is available to affected users. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 incident tracking, reporting deadlines and support need operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.06.04"
+      ],
+      "id": "G259",
+      "ownerRole": "owner",
+      "poam": "g259",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor incident training owner approves initial training deadlines for new roles or system access, changes that require new training, recurring cadence and content review triggers. Sample dated completion by an assessed role and a reviewed content update or authorized confirmation of current content. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 role-based incident response training needs completion and refresh records"
+    },
+    {
+      "controls": [
+        "itsp171-03.06.05"
+      ],
+      "id": "G260",
+      "ownerRole": "owner",
+      "poam": "g260",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor incident authority approves a plan for the assessed system that identifies organization structure, response capability, reportable incidents, sharing boundaries and assigned roles. Review controlled distribution and protections against unauthorized disclosure. Sample a revision based on a system change, exercise or tracked issue. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 the incident response plan needs approval, distribution and protected maintenance"
+    },
+    {
+      "controls": [
+        "itsp171-03.07.04"
+      ],
+      "id": "G261",
+      "ownerRole": "owner",
+      "poam": "g261",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor maintenance custodian approves and monitors tools used on assessed systems. Sample a diagnostic-media safe inspection record before use and an equipment removal record showing absence of specified information, approved sanitization or destruction, or retention on site. Keep only traceable sanitized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 maintenance tools and diagnostic media need approved custody evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.07.05"
+      ],
+      "id": "G262",
+      "ownerRole": "owner",
+      "poam": "g262",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor maintenance and identity owners approve non-local maintenance and diagnostics and review monitored records. Verify required multi-factor and replay-resistant authentication for these sessions and retain a redacted observation that both session and network connection terminate when work concludes. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 approved remote maintenance and session closure need evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.07.06"
+      ],
+      "id": "G263",
+      "ownerRole": "owner",
+      "poam": "g263",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor maintenance access owner approves personnel and contractor organizations, keeps the authorized list current, and validates access for unescorted personnel. Sample an authorized visit and a supervised visit with the assigned supervisor’s required authorization and documented technical competence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 maintenance personnel authorization and supervision need operating records"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.01",
+        "itsp171-03.08.02"
+      ],
+      "id": "G264",
+      "ownerRole": "owner",
+      "poam": "g264",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor media custodian inventories system media holding specified information and approves storage controls, custodians and access roles. Review physical safeguards and effective access, and sample a controlled retrieval or checkout and return. Document inherited storage boundaries and authorized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 media storage safeguards and authorized access need assessment evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.03"
+      ],
+      "id": "G265",
+      "ownerRole": "owner",
+      "poam": "g265",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor information custodian documents approved sanitization methods for the assessed media and disposition types. Sample a traceable authorization, sanitization result and verification before reuse, disposal or release outside organizational control. Keep this ITSP deployment decision separate from any CPCSC contract disposition. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 media sanitization before reuse, release or disposal needs verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.04",
+        "itsp171-03.08.05"
+      ],
+      "id": "G266",
+      "ownerRole": "owner",
+      "poam": "g266",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor media transport authority approves distribution markings, handling caveats and transport safeguards for assessed media. Verify markings on a representative item and sample transport outside controlled areas with sender and recipient accountability, agreed protective handling, and a dated custody and delivery record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 media markings and transport outside controlled areas need traceable evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.07"
+      ],
+      "id": "G267",
+      "ownerRole": "owner",
+      "poam": "g267",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor endpoint and information custodians define restricted or prohibited media types and permitted uses. Review effective access controls and verify a removable item with no identifiable owner is refused, using a harmless fixture or an authorized implementation record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 authorized media types and identifiable owners need enforcement evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.09"
+      ],
+      "id": "G268",
+      "ownerRole": "owner",
+      "poam": "g268",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor backup and cryptographic custodians inventory assessed backup stores and specified information, including replicas where applicable. Review effective confidentiality protection and who can use the cryptographic mechanism. Retain sanitized storage and key custody settings and scoped verification that unauthorized roles cannot disclose protected backup information. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 cryptographic protection of backup information needs scoped evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.04.07",
+        "itsp171-03.04.09",
+        "itsp171-03.05.06",
+        "itsp171-03.05.08",
+        "itsp171-03.05.09",
+        "itsp171-03.05.10",
+        "itsp171-03.07.01",
+        "itsp171-03.07.02",
+        "itsp171-03.07.03",
+        "itsp171-03.08.06",
+        "itsp171-03.08.08"
+      ],
+      "id": "G269",
+      "ownerRole": "owner",
+      "poam": "g269",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor assessment lead and control owners reconcile each identifier with the checked-in ITSP.10.171 catalogue, which labels these entries unallocated and notes NIST withdrawal. Record the source edition and the accountable authority’s separate disposition for every listed identifier, including any successor that applies to the deployment. Leave the assessment rows open pending that authoritative decision. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "title": "ITSP.10.171 unallocated configuration, identity, maintenance and media entries need sponsor reconciliation"
+    },
+    {
+      "controls": [
         "itsp171-03.14.01"
       ],
       "id": "G305",

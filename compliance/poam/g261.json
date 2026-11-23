@@ -1,0 +1,16 @@
+{
+  "gap": "G261",
+  "id": "g261",
+  "controls": [
+    "itsp171-03.07.04"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 maintenance tools and diagnostic media need approved custody evidence",
+  "remediation": "The sponsor maintenance custodian approves and monitors tools used on assessed systems. Sample a diagnostic-media safe inspection record before use and an equipment removal record showing absence of specified information, approved sanitization or destruction, or retention on site. Keep only traceable sanitized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved tool inventory, sampled use and media inspection evidence, and an approved equipment release or retention record"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G262",
+  "id": "g262",
+  "controls": [
+    "itsp171-03.07.05"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 approved remote maintenance and session closure need evidence",
+  "remediation": "The sponsor maintenance and identity owners approve non-local maintenance and diagnostics and review monitored records. Verify required multi-factor and replay-resistant authentication for these sessions and retain a redacted observation that both session and network connection terminate when work concludes. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect assessed remote-maintenance authorization and monitoring with scoped authentication and measured termination evidence"
+    }
+  ]
+}

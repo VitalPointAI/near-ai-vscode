@@ -1,0 +1,18 @@
+{
+  "gap": "G246",
+  "id": "g246",
+  "controls": [
+    "itsp171-03.04.03",
+    "itsp171-03.04.04",
+    "itsp171-03.04.05"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 configuration changes, impact review and change privileges need operating evidence",
+  "remediation": "The sponsor change authority defines controlled change types and approves physical and logical restrictions for change personnel. Trace a representative change through proposal, pre-change security and privacy impact analysis, approval or refusal, implementation, post-change verification and monitoring review. Review allowed and denied change access using redacted records. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the change scope and privileges, one approved or refused decision, reviewed impact analysis and post-change verification"
+    }
+  ]
+}

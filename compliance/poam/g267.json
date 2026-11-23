@@ -1,0 +1,16 @@
+{
+  "gap": "G267",
+  "id": "g267",
+  "controls": [
+    "itsp171-03.08.07"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 authorized media types and identifiable owners need enforcement evidence",
+  "remediation": "The sponsor endpoint and information custodians define restricted or prohibited media types and permitted uses. Review effective access controls and verify a removable item with no identifiable owner is refused, using a harmless fixture or an authorized implementation record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved media restrictions, effective settings and redacted authorized and ownerless media decisions"
+    }
+  ]
+}
