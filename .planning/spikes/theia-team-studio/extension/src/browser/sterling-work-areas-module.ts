@@ -21,6 +21,7 @@ const inventory = { label: 'Open resource inventory', command: 'sterling.resourc
 interface Shortcut {
   readonly label: string;
   readonly command: string;
+  readonly args?: readonly string[];
   readonly currentProject?: true;
 }
 
@@ -59,7 +60,7 @@ const pages: Record<WorkAreaKind, AreaPage> = {
     image: 'sterling-area-operations.webp',
     create: 'Create operations work area',
     shortcuts: [
-      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom', currentProject: true },
+      { label: 'Open Staff Center', command: 'nearAi.openStaffRoom', args: ['war-room'], currentProject: true },
       { label: 'Open Agent Activity', command: 'nearAi.openAgentActivity', currentProject: true }
     ]
   },
@@ -302,13 +303,13 @@ class WorkAreaLanding extends BaseWidget {
       this.showFeedback('Open the intended work area before using this tool.');
       return;
     }
-    await this.run(shortcut.command);
+    await this.run(shortcut.command, ...(shortcut.args ?? []));
   }
 
-  private async run(command: string): Promise<void> {
+  private async run(command: string, ...args: string[]): Promise<void> {
     this.feedback.hidden = true;
     try {
-      await this.commands.executeCommand(command);
+      await this.commands.executeCommand(command, ...args);
     } catch {
       this.showFeedback('This tool is unavailable in the current workbench.');
     }
