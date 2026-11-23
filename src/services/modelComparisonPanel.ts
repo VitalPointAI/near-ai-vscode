@@ -67,7 +67,7 @@ let gateHost: GateHost | undefined;
 
 export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService, gate?: GateHost): void {
   gateHost = gate;
-  context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => openModelComparison(context, auth)));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => void openModelComparison(context, auth)));
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
     const configuration = vscode.workspace.getConfiguration('nearAi');
     const text = await clearProjectModelChoices({
