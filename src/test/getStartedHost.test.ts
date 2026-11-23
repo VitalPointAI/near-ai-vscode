@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import Module from 'node:module';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ import { memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
 import { createProjectGetStartedDeps } from '../services/setup/getStartedRun';
 import { createGuideController } from '../services/setup/guideController';
 import { createGateGuideChecks, routeFactsOf } from '../services/setup/guideFacts';
-import { readSetupGuide } from '../services/setup/projectStore';
+import { createProjectLayerSource, PROJECT_JSON_FILE, readSetupGuide } from '../services/setup/projectStore';
 
 import { at, local, near, setup } from './helpers/getStartedHostFixture';
 import { MemorySecrets } from './helpers/teamHarness';
@@ -156,6 +157,35 @@ test('the Get Started run factory binds profile, writes and cancellation to the 
   chosenRoot = otherRoot;
   const second = factory.createRun(undefined, registries);
   assert.deepEqual([first.root, second.root], [root, otherRoot]);
+  const inspections: string[] = [];
+  const projectSource = createProjectLayerSource({
+    readFileSync,
+    statSync: (file) => { inspections.push(file); return statSync(file); },
+    scales: () => host.labelPolicy().scales,
+    now: () => at,
+  });
+  host.useProjectLayerSource(projectSource.read, projectSource.invalidate);
+  const rootRuntime = (projectRoot: string) =>
+    host.runtimeFor({ root: projectRoot, actor: { kind: 'person', sessionId: 'project-layer-cache' }, presence: 'person', context: 'interactive' });
+  const runtime = await rootRuntime(root);
+  const otherRuntime = await rootRuntime(otherRoot);
+  const firstFile = path.join(root, PROJECT_JSON_FILE);
+  const otherFile = path.join(otherRoot, PROJECT_JSON_FILE);
+  assert.equal(runtime.routePolicy?.(at)?.residency, undefined);
+  assert.equal(otherRuntime.routePolicy?.(at)?.residency, undefined);
+  assert.deepEqual(inspections, [firstFile, otherFile]);
+
+  // The first Apply still targets the captured root after the selected project changes.
+  assert.deepEqual(await first.apply.sink.write({ residency: { required: ['CA'] } }), { state: 'written' });
+  assert.deepEqual(runtime.routePolicy?.(at)?.residency?.required, ['CA']);
+  assert.equal(otherRuntime.routePolicy?.(at)?.residency, undefined);
+  await assert.rejects(readFile(otherFile), { code: 'ENOENT' });
+  const saved = await readFile(firstFile, 'utf8');
+  assert.equal((await first.apply.sink.write({ residency: { required: ['US'] } })).state, 'refused');
+  assert.equal(await readFile(firstFile, 'utf8'), saved);
+  assert.deepEqual(runtime.routePolicy?.(at)?.residency?.required, ['CA']);
+  assert.equal(otherRuntime.routePolicy?.(at)?.residency, undefined);
+  assert.deepEqual(inspections, [firstFile, otherFile, firstFile]);
   const firstPolicy = await first.readPolicy(at);
   assert.ok('route' in firstPolicy);
   (await first.check(firstPolicy, () => {}, new AbortController().signal)).dispose();

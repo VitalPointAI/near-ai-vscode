@@ -140,13 +140,22 @@ function detailOf(error: unknown): string {
 }
 
 export class GateHost {
-  private projectLayerSource?: (root: string) => ProjectLayerRead;
+  private projectLayerSource?: {
+    read(root: string): ProjectLayerRead;
+    invalidate?(root: string): void;
+  };
 
-  public useProjectLayerSource(source: (root: string) => ProjectLayerRead): { dispose(): void } {
+  public useProjectLayerSource(read: (root: string) => ProjectLayerRead, invalidate?: (root: string) => void): { dispose(): void } {
+    const source = { read, invalidate };
     this.projectLayerSource = source;
     return { dispose: () => {
       if (this.projectLayerSource === source) this.projectLayerSource = undefined;
     } };
+  }
+
+  /** Refresh the routing snapshot for a project after its settings are durably written. */
+  public invalidateProjectLayer(root: string): void {
+    this.projectLayerSource?.invalidate?.(root);
   }
 
   private current: BundleState = failedClosed('identity-unavailable', 'The gate has not finished starting.');
@@ -765,7 +774,7 @@ export class GateHost {
 
   private readProjectLayerSafely(root: string): ProjectLayerRead | undefined {
     try {
-      return this.projectLayerSource?.(root);
+      return this.projectLayerSource?.read(root);
     } catch {
       return { state: 'unreadable' };
     }

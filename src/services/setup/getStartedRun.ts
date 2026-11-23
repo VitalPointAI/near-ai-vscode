@@ -32,7 +32,6 @@ export function createProjectGetStartedDeps(deps: {
   readonly landing: Omit<LandingHostDeps, 'steps' | 'context' | 'project' | 'request'> & { context(root: string): Promise<StepContext> };
   readonly onAuditFailure: (message: string) => void;
   readonly configureConnection: (root: string, reviewed: ReviewedConnection) => Promise<boolean>;
-  readonly projectLayerSource?: { invalidate(root: string): void };
   readonly policyEditor?: Pick<PolicyEditorPort, 'propose'>;
   readonly discovery?: ProjectDiscoveryTransports;
   readonly profiles?: (root: string) => ProjectProfiles;
@@ -77,7 +76,10 @@ export function createProjectGetStartedDeps(deps: {
         }),
         apply: {
           audit, labelHost: gate, policyEditor: deps.policyEditor,
-          sink: singleMachineSink(root, { effective: () => gate.policyLayers().effective, source: deps.projectLayerSource }),
+          sink: singleMachineSink(root, {
+            effective: () => gate.policyLayers().effective,
+            source: { invalidate: (projectRoot) => gate.invalidateProjectLayer(projectRoot) },
+          }),
           connection(result) {
             // A generic local profile cannot preserve the verified pin for a named server.
             const desired = profileFor([result]);

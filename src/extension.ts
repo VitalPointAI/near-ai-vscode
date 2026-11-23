@@ -143,7 +143,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerStaffCommands(context);
   const sidebar = new NearAiPanelViewProvider(context, auth, gate);
   const projectLayerSource = createProjectLayerSource({ readFileSync, statSync, scales: () => gate.labelPolicy().scales, now: Date.now });
-  context.subscriptions.push(gate.useProjectLayerSource(projectLayerSource.read));
+  context.subscriptions.push(gate.useProjectLayerSource(projectLayerSource.read, projectLayerSource.invalidate));
   registerAgentActivity(context, sidebar);
   registerTeamLive(context, sidebar);
   registerStaffRoom(context, gate, sidebar);
