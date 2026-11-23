@@ -42,6 +42,18 @@ docker run --detach --name near-ai-theia-vsix \
 
 Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. From the command palette choose **NEAR AI: Set Up**, **NEAR AI: Team Studio**, or **NEAR AI: Open Chat**. The compatibility container is for synthetic projects and has an in-memory credential store.
 
+## Documentation and Compliance
+
+The right sidebar opens both views in Theia. Documentation search uses the guides packaged in the image. Links to included topics open in place. Other links open in your browser.
+
+The Compliance view displays an evidence bundle's recorded states and source, with filters for level, state and control. The image starts without evidence. From a trusted checkout, run `npm --prefix docs-site run compliance:refresh` to verify the evidence manifest and write the public dashboard projection. Add the following read-only bind mount when starting the local container.
+
+```sh
+--mount "type=bind,source=$PWD/docs-site/static/compliance,target=/repo/.planning/spikes/theia-team-studio/lib/frontend/compliance,readonly"
+```
+
+Mount only the public projection written by the [documentation site's evidence refresh](../../../docs-site/README.md). The container's `node` user must be able to read its dashboard and public control text. The view reports missing, invalid or stale bundles and shows no evidence counts until a valid projection is available.
+
 ## Research
 
 Theia provides both a VS Code extension host and native application extensions. The native widget uses the Theia workbench and calls the backend through Theia JSON-RPC. See [Theia native extensions](https://theia-ide.org/docs/authoring_extensions/), [Theia JSON-RPC](https://theia-ide.org/docs/json_rpc/), and [VS Code extension support](https://theia-ide.org/docs/authoring_vscode_extensions/).
