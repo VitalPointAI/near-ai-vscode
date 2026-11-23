@@ -1,0 +1,16 @@
+{
+  "gap": "G106",
+  "id": "g106",
+  "controls": [
+    "sa-04.10"
+  ],
+  "ownerRole": "owner",
+  "title": "Digital credential products need validated recommendation and procurement evidence",
+  "remediation": "The sponsor identity assurance and procurement leads identify the credential products used by assessed systems and the required assurance and robustness levels. Match the exact product and configuration to Cyber Centre recommendation evidence obtained through the designated authority at acquisition or review. Record selection and acceptance or remediation for any unmatched product.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved identity requirements, exact product and configuration inventory, current recommendation evidence and a signed acquisition disposition"
+    }
+  ]
+}

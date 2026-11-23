@@ -1,0 +1,16 @@
+{
+  "gap": "G107",
+  "id": "g107",
+  "controls": [
+    "sa-04.12"
+  ],
+  "ownerRole": "owner",
+  "title": "Contractor data ownership, return and removal need verified records",
+  "remediation": "The contracting authority and sponsor data owner identify applicable suppliers and contract terms for ownership, the return deadline and removal from contractor systems. Verify a completed exit or approved exercise, reconcile the returned inventory with the original scope, and review the supplier removal evidence, backups, authorized retention and exceptions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed ownership and exit clauses, a dated return receipt and reconciliation, and verified removal or authorized retention records"
+    }
+  ]
+}

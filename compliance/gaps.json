@@ -1191,6 +1191,174 @@
     },
     {
       "controls": [
+        "sa-01"
+      ],
+      "id": "G102",
+      "ownerRole": "owner",
+      "poam": "g102",
+      "remediation": "The sponsor acquisition policy official approves scope, procedures, accountable procurement, security and privacy roles, distribution and review triggers. Sample one applicable procurement through the documented process and retain evidence of review and any exception.",
+      "title": "System and services acquisition policy and procedures need approved operating records"
+    },
+    {
+      "controls": [
+        "sa-02"
+      ],
+      "id": "G103",
+      "ownerRole": "owner",
+      "poam": "g103",
+      "remediation": "The sponsor business owner and financial authority map high-level security and privacy requirements to planned people, services and funds. Retain the dated investment decision and discrete security and privacy budget allocation. Record the authority and follow-up for any shortfall or change.",
+      "title": "Security and privacy resource commitments need approved budget evidence"
+    },
+    {
+      "controls": [
+        "sa-03"
+      ],
+      "id": "G104",
+      "ownerRole": "shared",
+      "poam": "g104",
+      "remediation": "The sponsor system owner and development lead identify the lifecycle stages, accountable people and review gates for each assessed component or service. Trace a selected requirement and risk from acquisition or design through testing and release, with owners, dated approvals and a follow-up disposition.",
+      "title": "Lifecycle security and privacy roles and risk reviews need operating evidence"
+    },
+    {
+      "controls": [
+        "sa-04",
+        "sa-04.01",
+        "sa-04.09"
+      ],
+      "id": "G105",
+      "ownerRole": "shared",
+      "poam": "g105",
+      "remediation": "The contracting authority, sponsor technical lead and supplier identify assessed acquisitions and approved contract language. Trace functional, strength and assurance requirements, documentation protection, development and operating environments, assigned responsibilities and acceptance criteria to contract clauses. Keep the supplier description of control behavior and required functions, ports, protocols and services, and a reviewed acceptance sample.",
+      "title": "Acquisition contracts need traceable security, privacy and interface acceptance evidence"
+    },
+    {
+      "controls": [
+        "sa-04.10"
+      ],
+      "id": "G106",
+      "ownerRole": "owner",
+      "poam": "g106",
+      "remediation": "The sponsor identity assurance and procurement leads identify the credential products used by assessed systems and the required assurance and robustness levels. Match the exact product and configuration to Cyber Centre recommendation evidence obtained through the designated authority at acquisition or review. Record selection and acceptance or remediation for any unmatched product.",
+      "title": "Digital credential products need validated recommendation and procurement evidence"
+    },
+    {
+      "controls": [
+        "sa-04.12"
+      ],
+      "id": "G107",
+      "ownerRole": "owner",
+      "poam": "g107",
+      "remediation": "The contracting authority and sponsor data owner identify applicable suppliers and contract terms for ownership, the return deadline and removal from contractor systems. Verify a completed exit or approved exercise, reconcile the returned inventory with the original scope, and review the supplier removal evidence, backups, authorized retention and exceptions.",
+      "title": "Contractor data ownership, return and removal need verified records"
+    },
+    {
+      "controls": [
+        "sa-05",
+        "sa-16"
+      ],
+      "id": "G108",
+      "ownerRole": "shared",
+      "poam": "g108",
+      "remediation": "The deployment service owner and supplier leads identify documentation and training for assessed controls and user roles. Verify secure installation and operation guidance, known configuration weaknesses, user privacy responsibilities and an administrator and user training sample. Record attempts to obtain missing guidance, approved next actions, distribution and training completion. Preserve X12 as the specific export-control guidance path.",
+      "title": "Administrator and user documentation and training need versioned delivery evidence"
+    },
+    {
+      "controls": [
+        "sa-08",
+        "sa-17"
+      ],
+      "id": "G109",
+      "ownerRole": "shared",
+      "poam": "g109",
+      "remediation": "The sponsor security and privacy architects approve applicable engineering principles and scope. Supplier architects link those principles and required controls to design decisions, component allocations and interdependent security and privacy functions. Review the design with the organization architecture owner and trace an implemented decision to its exact verification evidence. Use G9 for scoped threat models and data flows.",
+      "title": "Engineering principles and developer security and privacy design need reviewed traces"
+    },
+    {
+      "controls": [
+        "sa-09",
+        "sa-09.01",
+        "sa-09.02"
+      ],
+      "id": "G110",
+      "ownerRole": "shared",
+      "poam": "g110",
+      "remediation": "The sponsor service owner, privacy lead and acquiring authority approve security outsourcing after a scoped risk assessment. Obtain provider declarations for required functions, ports, protocols and services. Record assigned responsibilities, evidence and review cadence for each assessed provider, and verify a representative oversight review with findings and follow-up. Keep X3 as the separate export-control route path.",
+      "title": "External services need approved risk, interface and oversight evidence"
+    },
+    {
+      "controls": [
+        "sa-09.08"
+      ],
+      "id": "G111",
+      "ownerRole": "shared",
+      "poam": "g111",
+      "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation.",
+      "title": "In-scope processing and storage locations need verified Canadian boundary evidence"
+    },
+    {
+      "controls": [
+        "sa-10",
+        "sa-10.07"
+      ],
+      "id": "G112",
+      "ownerRole": "shared",
+      "poam": "g112",
+      "remediation": "The sponsor change authority and developer configuration lead agree control scope across approved lifecycle stages and designate security and privacy reviewers and flaw-report recipients. Trace a representative change using the protected baseline, approval, impact assessment, changed configuration, and evidence that unauthorized changes are refused. Record a tracked flaw through resolution and reporting.",
+      "title": "Developer change control and security and privacy review need exact change evidence"
+    },
+    {
+      "controls": [
+        "sa-10.01"
+      ],
+      "id": "G113",
+      "ownerRole": "shared",
+      "poam": "g113",
+      "remediation": "The developer release lead and deployment acceptance authority identify assessed software and firmware, including applicable updates. Verify exact artifact signatures, digests or provenance against independently trusted release information. Exercise refusal of a harmless mismatched artifact and retain the result for each applicable artifact class. Use existing artifact attestations for the release components they cover.",
+      "title": "Delivered software and firmware integrity verification needs a tested acceptance record"
+    },
+    {
+      "controls": [
+        "sa-11"
+      ],
+      "id": "G114",
+      "ownerRole": "shared",
+      "poam": "g114",
+      "remediation": "The sponsor assessment lead and developer assurance lead approve the post-design assessment plan, test methods, scope and frequency for security and privacy controls. Retain evidence of test execution and the reviewed result. Trace a flaw through triage, correction and exact-version retest with acceptance or disposition of unresolved findings. Use G6 for scoped static analysis.",
+      "title": "Developer control testing and verifiable flaw correction need reviewed release evidence"
+    },
+    {
+      "controls": [
+        "sa-15",
+        "sa-15.03"
+      ],
+      "id": "G115",
+      "ownerRole": "shared",
+      "poam": "g115",
+      "remediation": "The sponsor development assurance lead and supplier engineering lead approve security and privacy development requirements, tool and standard versions, options, integrity controls and change review. At designated lifecycle decision points, assess the criticality of scoped components and dependencies at the approved depth. Sample a tool or process change and a dated criticality decision linked to safeguards or follow-up.",
+      "title": "Developer process, tools and criticality decisions need controlled records"
+    },
+    {
+      "controls": [
+        "sa-22"
+      ],
+      "id": "G116",
+      "ownerRole": "shared",
+      "poam": "g116",
+      "remediation": "Component maintainers and the deployment asset owner reconcile installed versions against dated supplier support commitments. For a sampled unsupported component, retain a verified replacement or an approved alternative support arrangement, its authority, residual risk and review date. Link the deployed inventory, updated support evidence and verification results.",
+      "title": "Unsupported components need lifecycle decisions and replacement evidence"
+    },
+    {
+      "controls": [
+        "sa-400"
+      ],
+      "id": "G117",
+      "ownerRole": "owner",
+      "poam": "g117",
+      "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence.",
+      "title": "Sovereignty and jurisdiction risk needs an approved sponsor assessment"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

@@ -1,0 +1,16 @@
+{
+  "gap": "G104",
+  "id": "g104",
+  "controls": [
+    "sa-03"
+  ],
+  "ownerRole": "shared",
+  "title": "Lifecycle security and privacy roles and risk reviews need operating evidence",
+  "remediation": "The sponsor system owner and development lead identify the lifecycle stages, accountable people and review gates for each assessed component or service. Trace a selected requirement and risk from acquisition or design through testing and release, with owners, dated approvals and a follow-up disposition.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved lifecycle and named role assignments, a security and privacy requirement trace, and a dated lifecycle risk decision"
+    }
+  ]
+}
