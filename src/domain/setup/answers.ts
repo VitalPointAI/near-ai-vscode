@@ -17,7 +17,16 @@ export function parseGuideAnswers(value: unknown): GuideAnswers | undefined { co
 export function agentWorkDefault(kind: KindOfWorkAnswer): (typeof AGENT_WORK_ANSWERS)[number] { return kind === 'software' ? 'agents' : kind === 'analysis' || kind === 'writing' ? 'answers-only' : 'not-sure'; }
 export const FIXED_ANSWER_KEYS = Object.freeze(['canada'] as const);
 export interface GuidePrefill { readonly projectName?: string; readonly section?: (typeof STAFF_SECTION_ANSWERS)[number]; readonly fixed: readonly (typeof FIXED_ANSWER_KEYS)[number][]; }
-export function parseGuidePrefill(value: unknown): GuidePrefill | undefined { const input = object(value); if (!input || Object.keys(input).some((key) => !['projectName', 'section', 'fixed'].includes(key)) || !Array.isArray(input.fixed)) return undefined; const fixed = input.fixed.map((item) => oneOf(item, FIXED_ANSWER_KEYS)); if (fixed.some((item) => !item) || new Set(fixed).size !== fixed.length || (input.projectName !== undefined && typeof input.projectName !== 'string') || (input.section !== undefined && !oneOf(input.section, STAFF_SECTION_ANSWERS))) return undefined; return Object.freeze({ projectName: input.projectName as string | undefined, section: input.section as GuidePrefill['section'], fixed: Object.freeze(fixed as (typeof FIXED_ANSWER_KEYS)[number][]) }); }
+export function parseGuidePrefill(value: unknown): GuidePrefill | undefined {
+  const input = object(value);
+  if (!input || Object.keys(input).some((key) => !['projectName', 'section', 'fixed'].includes(key)) || !Array.isArray(input.fixed)) return undefined;
+  const fixed = input.fixed.map((item) => oneOf(item, FIXED_ANSWER_KEYS));
+  if (fixed.some((item) => !item) || new Set(fixed).size !== fixed.length) return undefined;
+  const section = oneOf(input.section, STAFF_SECTION_ANSWERS);
+  if ((input.projectName !== undefined && typeof input.projectName !== 'string') || (input.section !== undefined && !section)) return undefined;
+  const projectName = typeof input.projectName === 'string' ? cleanFreeText(input.projectName, 120).trim() || undefined : undefined;
+  return Object.freeze({ projectName, section, fixed: Object.freeze(fixed as (typeof FIXED_ANSWER_KEYS)[number][]) });
+}
 export interface OpenGetStartedRequest { readonly step?: string; readonly prefill?: GuidePrefill; }
 export type OpenGetStarted = (request?: OpenGetStartedRequest) => Promise<void>;
 export interface SetupGuideEntry { readonly v: 1; readonly answers: GuideAnswers; readonly chosen: readonly string[]; readonly recordId?: string; readonly appliedAt?: string; readonly pending: readonly string[]; }

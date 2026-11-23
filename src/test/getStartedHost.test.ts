@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import Module from 'node:module';
 import { test } from 'node:test';
 import type { GuideInbound, GuideOutbound } from '../domain/setup/guideMessages';
+import { KIND_OF_WORK_STATE_KEY } from '../domain/setup/ids';
 import { createGuideController } from '../services/setup/guideController';
 import { routeFactsOf } from '../services/setup/guideFacts';
 import { readSetupGuide } from '../services/setup/projectStore';
@@ -102,7 +103,13 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
   }
   const workspace = new Map<string, unknown>();
   let waitToSave = Promise.resolve();
-  const context = { extensionUri: uri('/extension') as never, workspaceState: {
+  const personal = new Map<string, unknown>();
+  const context = { extensionUri: uri('/extension') as never, globalState: {
+    get<T>(key: string): T | undefined { return personal.get(key) as T | undefined; },
+    async update(key: string, value: unknown) { personal.set(key, value); },
+    keys: () => [...personal.keys()],
+    setKeysForSync() {}
+  }, workspaceState: {
     get<T>(key: string): T | undefined { return workspace.get(key) as T | undefined; },
     async update(key: string, value: unknown) {
       await waitToSave;
@@ -116,7 +123,8 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
   const readPolicy: typeof originalPolicy = (now) => denied
     ? Promise.resolve({ view: { organization: 'failed', startingRules: false, issuedHere: false } })
     : originalPolicy(now);
-  const run = registrar.registerGetStarted(context, { createRun: () => ({ ...deps, readPolicy }) });
+  let project = { ...deps, readPolicy };
+  const run = registrar.registerGetStarted(context, { createRun: () => project });
   try {
     await run.openGetStarted();
     const first = posted[0];
@@ -135,6 +143,7 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
     const token = `sk-${'f'.repeat(24)}`; // secret-scan: allow (fictional fixture)
     await handlers.receive?.({ type: 'answer', key: 'kindOfWork', value: 'something-else' });
     await handlers.receive?.({ type: 'answer', key: 'otherKind', value: `Research ${token}` });
+    assert.deepEqual(personal.get(KIND_OF_WORK_STATE_KEY), { kindOfWork: 'something-else', otherKind: 'Research [REDACTED]' });
     await handlers.receive?.({ type: 'next' });
     let finishSave!: () => void;
     waitToSave = new Promise<void>((resolve) => { finishSave = resolve; });
@@ -172,6 +181,20 @@ test('Get Started opens one kit panel, validates messages, and resumes a closed 
     assert.ok(restarted?.type === 'screen' && restarted.screen.kind === 'question');
     assert.equal(restarted.screen.screen, 'kind-of-work');
     assert.equal(workspace.size, 0);
+
+    await handlers.receive?.({ type: 'answer', key: 'kindOfWork', value: 'writing' });
+    assert.deepEqual([...personal.keys()], [KIND_OF_WORK_STATE_KEY]);
+    assert.deepEqual(personal.get(KIND_OF_WORK_STATE_KEY), { kindOfWork: 'writing' });
+    panel.dispose();
+    project = (await setup()).deps;
+    await run.openGetStarted();
+    const anotherProject = posted.at(-1);
+    assert.ok(anotherProject?.type === 'screen' && anotherProject.screen.kind === 'question');
+    assert.deepEqual(anotherProject.screen.fields[0].selected, ['writing']);
+    await handlers.receive?.({ type: 'answer', key: 'kindOfWork', value: 'analysis' });
+    const changed = posted.at(-1);
+    assert.ok(changed?.type === 'screen' && changed.screen.kind === 'question');
+    assert.deepEqual(changed.screen.fields[0].selected, ['analysis']);
   } finally { run.dispose(); }
 });
 

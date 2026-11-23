@@ -2,12 +2,12 @@ import { isDeepStrictEqual } from 'node:util';
 import { decideRoute, type RoutePolicy, type RoutingTable, type RoutingTier } from '../../domain/gate/routing';
 import type { Label } from '../../domain/gate/labels';
 import { MODE_IDS } from '../../domain/org/modes';
-import type { KindOfWorkAnswer, OpenGetStartedRequest } from '../../domain/setup/answers';
+import type { GuideAnswers, KindOfWorkAnswer, OpenGetStartedRequest } from '../../domain/setup/answers';
 import { cardFor } from '../../domain/setup/cards';
 import { changeList } from '../../domain/setup/changes';
 import type { HostKind } from '../../domain/setup/device';
 import { buildAbandonedRecord } from '../../domain/setup/guideRecord';
-import type { GuideInbound, GuideOutbound } from '../../domain/setup/guideMessages';
+import { QUESTION_SCREENS, type GuideInbound, type GuideOutbound } from '../../domain/setup/guideMessages';
 import { exerciseFor, resolveLanding, type Landing, type LandingPort } from '../../domain/setup/landing';
 import { proposeLabel, raiseOnly, useFor } from '../../domain/setup/map';
 import { modeRowOf, suggestMode, type ModeRow } from '../../domain/setup/modes';
@@ -17,7 +17,7 @@ import { screenFor } from '../../domain/setup/screens';
 import { nextSession, startSession, type GuideEffect, type GuideEvent, type GuideSession } from '../../domain/setup/session';
 import { isChoosable, type ViabilityResult } from '../../domain/setup/viability';
 import { planApply, runApply, type ApplyContext, type ApplyDeps, type ApplyStep } from './apply';
-import { approvedDeviceName, proposedRoutePolicy, routeFactsOf } from './guideFacts';
+import { approvedDeviceName, guideSessionPrefill, proposedRoutePolicy, routeFactsOf } from './guideFacts';
 import { progressOf, restoreProgress, type GuideProgressStore } from './guideProgress';
 import { isSharedProject, readProjectLayer, readSetupGuide } from './projectStore';
 import { clearanceProposalFor } from './proposals';
@@ -47,6 +47,10 @@ export interface GuideControllerDeps {
   readonly hostKind: HostKind;
   readonly clock?: () => number;
   readonly progress?: GuideProgressStore;
+  readonly kindStore?: {
+    get(): Pick<GuideAnswers, 'kindOfWork' | 'otherKind'> | undefined;
+    set(kind: KindOfWorkAnswer, otherKind?: string): PromiseLike<void>;
+  };
   readPolicy(now: number): Promise<PolicySnapshot>;
   check(snapshot: GuideRouteSnapshot, progress: (result: ViabilityResult) => void, signal: AbortSignal): Promise<ViabilityRun>;
   readonly apply: ApplyPorts;
@@ -94,6 +98,8 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
   let timer: ReturnType<typeof setTimeout> | undefined;
   let openInFlight: Promise<void> | undefined;
   let progressWrite = Promise.resolve();
+  let kindWrite = Promise.resolve();
+  let projectName: string | undefined;
 
   function storeProgress(current?: GuideSession): Promise<void> {
     const store = deps.progress;
@@ -127,9 +133,11 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     }) : [];
     const kind = deps.hostKind;
     const checkedOn = deps.machine + (kind === 'container' ? ', a container' : kind === 'remote' ? ', a remote computer' : '');
-    deps.post({ type: 'screen', screen: screenFor(current, {
+    const screen = screenFor(current, {
       cards, candidates: [], scan, checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice
-    }) });
+    });
+    deps.post({ type: 'screen', screen: projectName && screen.kind !== 'fix'
+      ? { ...screen, heading: `${screen.heading} · ${projectName}` } : screen });
   }
 
   function failClosed(text: string, contacts: GuidePolicy['contacts'] = policy?.contacts ?? []): void {
@@ -344,6 +352,12 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     if (event.type === 'viability-progress') {
       deps.post({ type: 'progress', text: `Checked ${session.results.filter((row) => row.state !== 'checking' && row.state !== 'unknown').length} of ${session.results.length}` });
     }
+    const store = deps.kindStore;
+    const { kindOfWork, otherKind } = session.answers;
+    if (store && kindOfWork && event.type === 'answer' && (event.key === 'kindOfWork' || event.key === 'otherKind')) {
+      kindWrite = kindWrite.then(() => store.set(kindOfWork, otherKind)).catch(() => undefined);
+      await kindWrite;
+    }
     try {
       await Promise.all(result.effects.map((item) => effect(item, result.session)));
     } catch {
@@ -352,7 +366,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
   }
 
   return {
-    async open() {
+    async open(request) {
       if (lifetime.signal.aborted) return;
       if (openInFlight) return openInFlight;
       if (session) { postScreen(); return; }
@@ -363,7 +377,12 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
           if (lifetime.signal.aborted || !next) return;
           snapshot = next.snapshot;
           policy = next.policy;
-          const input = { now: now(), previous: readSetupGuide(deps.root), locked: { canada: policy.locked.canada === true } };
+          const prefill = guideSessionPrefill(request);
+          projectName = prefill?.projectName;
+          const input = {
+            now: now(), previous: readSetupGuide(deps.root), locked: { canada: policy.locked.canada === true },
+            answers: deps.kindStore?.get(), prefill, question: QUESTION_SCREENS.find((screen) => screen === request?.step)
+          };
           const restored = restoreProgress(deps.progress?.read(), input);
           session = restored ?? startSession(input);
           const kind = session.answers.kindOfWork;
@@ -393,13 +412,14 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
       }
     },
     async dispose() {
-      if (lifetime.signal.aborted) return progressWrite;
-      const current = session;
-      const paused = current && policy?.state === 'ready' && nextSession(current, { type: 'pause' }, now()).session;
-      lifetime.abort();
-      stopChecking();
-      if (paused && paused !== current) await storeProgress(paused);
-      else await progressWrite;
+      if (!lifetime.signal.aborted) {
+        const current = session;
+        const paused = current && policy?.state === 'ready' && nextSession(current, { type: 'pause' }, now()).session;
+        lifetime.abort();
+        stopChecking();
+        if (paused && paused !== current) storeProgress(paused);
+      }
+      await Promise.all([progressWrite, kindWrite]);
     }
   };
 }

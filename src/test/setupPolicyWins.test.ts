@@ -235,3 +235,48 @@ test('starting rules show the starting notice and generic contact without claimi
   await reviewLocal(guide);
   assert.doesNotMatch(JSON.stringify(run.posted), /Set by your organization/);
 });
+
+test('the join request displays the project name and preserves signed onboarding locks', async (t) => {
+  const run = await setup({ results: [verifiedLocal, near] });
+  await enrol(run, { lockCanada: true });
+  const guide = guideFor(t, run);
+  await guide.open({ step: 'join', prefill: { projectName: 'Example project', section: 'j2', fixed: ['canada'] } });
+  const first = screen(run, 'question');
+  assert.equal(first.screen, 'kind-of-work');
+  assert.match(first.heading, /Example project/);
+  assert.deepEqual(first.fields[0].selected, []);
+  await answerToOptions(guide, { lockedCanada: true });
+  await reviewLocal(guide);
+  const check = screen(run, 'check');
+  assert.match(check.heading, /Example project/);
+  assert.equal(check.answers.find(({ key }) => key === 'canada')?.source, MODE_SET_BY_ORGANIZATION_TEXT);
+  assert.equal(check.answers.find(({ key }) => key === 'kindOfWork')?.source, undefined);
+});
+
+test('join metadata cannot skip Canada without a signed lock or supply unrecognised fields', async (t) => {
+  const run = await setup({ results: [verifiedLocal, near] });
+  const guide = guideFor(t, run);
+  await guide.open({ step: 'join', prefill: { projectName: 'Example project', fixed: ['canada'] } });
+  for (const event of [
+    { type: 'answer', key: 'kindOfWork', value: 'analysis' }, { type: 'next' },
+    { type: 'answer', key: 'data', value: ['internal'] }, { type: 'next' }
+  ] as const) await guide.receive(event);
+  assert.equal(screen(run, 'question').screen, 'canada');
+  const forged = guideFor(t, run);
+  await forged.open({ step: 'join', prefill: { projectName: 'Unverified project', fixed: [], mode: 'military' } as never });
+  assert.doesNotMatch(screen(run, 'question').heading, /Unverified project/);
+});
+
+test('a known question target is reachable only after earlier answers exist', async (t) => {
+  const run = await setup();
+  const blocked = guideFor(t, run);
+  await blocked.open({ step: 'canada' });
+  assert.equal(screen(run, 'question').screen, 'kind-of-work');
+  assert.deepEqual(await run.deps.apply.sink.write({
+    setupGuide: { v: 1, answers: { kindOfWork: 'analysis', data: ['internal'] }, chosen: [], pending: [] }
+  }), { state: 'written' });
+  const reachable = guideFor(t, run);
+  await reachable.open({ step: 'canada' });
+  assert.equal(screen(run, 'question').screen, 'canada');
+  assert.equal(run.calls.checks, 0);
+});

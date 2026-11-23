@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import type { OpenGetStarted, OpenGetStartedRequest } from '../../domain/setup/answers';
+import { parseGuideAnswers, type OpenGetStarted, type OpenGetStartedRequest } from '../../domain/setup/answers';
+import { isRecord } from '../../domain/gate/shape';
 import { parseGuideInbound, type GuideInbound, type GuideOutbound } from '../../domain/setup/guideMessages';
+import { KIND_OF_WORK_STATE_KEY } from '../../domain/setup/ids';
 import { GET_STARTED_BODY, GET_STARTED_PAGE } from '../../domain/setup/screens';
 import { projectLogKey } from '../../gate/decisionLog';
 import { openPanel } from '../webview/openPanel';
@@ -17,13 +19,24 @@ export interface GetStartedDeps {
   createRun(request?: OpenGetStartedRequest): Omit<GuideControllerDeps, 'post' | 'close'>;
 }
 
-export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'extensionUri' | 'workspaceState'>, deps: GetStartedDeps): {
+export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'extensionUri' | 'workspaceState' | 'globalState'>, deps: GetStartedDeps): {
   openGetStarted: OpenGetStarted; dispose(): void;
 } {
   let view: vscode.WebviewPanel | undefined;
   let controller: GuideController | undefined;
   let closing: Promise<void> | undefined;
   let disposed = false;
+  const kindStore: NonNullable<GuideControllerDeps['kindStore']> = {
+    get() {
+      const remembered = context.globalState.get(KIND_OF_WORK_STATE_KEY);
+      if (!isRecord(remembered)) return undefined;
+      const parsed = parseGuideAnswers({ data: [], kindOfWork: remembered.kindOfWork, otherKind: remembered.otherKind });
+      if (!parsed?.kindOfWork) return undefined;
+      return { kindOfWork: parsed.kindOfWork, otherKind: parsed.kindOfWork === 'something-else' ? parsed.otherKind : undefined };
+    },
+    set: (kindOfWork, otherKind) => context.globalState.update(KIND_OF_WORK_STATE_KEY,
+      { kindOfWork, ...(kindOfWork === 'something-else' && otherKind !== undefined ? { otherKind } : {}) })
+  };
 
   const openGetStarted: OpenGetStarted = async (request) => {
     while (closing) await closing;
@@ -36,7 +49,7 @@ export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'exten
       read: () => context.workspaceState.get(key),
       write: (value) => context.workspaceState.update(key, value)
     };
-    const active = createGuideController({ ...run, progress, post: (message) => postTo(panel.webview, message), close: () => panel.dispose() });
+    const active = createGuideController({ ...run, progress, kindStore, post: (message) => postTo(panel.webview, message), close: () => panel.dispose() });
     view = panel;
     controller = active;
     const messages = listenTo(panel.webview, page, (message) => active.receive(message));

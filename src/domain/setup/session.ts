@@ -64,6 +64,7 @@ export type GuideEffect =
 
 export interface StartSessionInput {
   readonly now: number;
+  readonly question?: QuestionScreen;
   readonly answers?: Partial<GuideAnswers>;
   readonly prefill?: Omit<GuidePrefill, 'fixed'> & Partial<GuideAnswers> & { readonly fixed?: readonly FixedAnswerKey[] };
   readonly fixed?: readonly FixedAnswerKey[];
@@ -99,7 +100,10 @@ export function startSession(input: StartSessionInput): GuideSession {
     contractApproval, canada: locked.canada ? 'yes' : canada,
     agentWork: agentWork ?? (kindOfWork && agentWorkDefault(kindOfWork)),
   });
-  const screen = questionOrder(answers, fixed, locked)[0];
+  const order = questionOrder(answers, fixed, locked);
+  const requested = input.question === undefined ? -1 : order.indexOf(input.question);
+  const screen = requested > 0 && order.slice(0, requested).every((earlier) => earlier !== 'checking' && questionAnswered(answers, earlier))
+    ? order[requested] : order[0];
   return Object.freeze({
     state: input.started === false || screen === 'checking' ? 'not-started' : 'answering',
     screen, answers, fixed, locked, results: Object.freeze([]), stillChecking: Object.freeze([]),

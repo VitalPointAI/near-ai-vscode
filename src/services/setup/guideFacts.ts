@@ -5,7 +5,10 @@ import { labelKey, type Label } from '../../domain/gate/labels';
 import type { UseTier } from '../../domain/gate/models';
 import { narrowResidency } from '../../domain/gate/residency';
 import type { RouteFacts, RoutePolicy, RoutingTier } from '../../domain/gate/routing';
+import { parseGuidePrefill, type OpenGetStartedRequest } from '../../domain/setup/answers';
 import type { YesNoUnsure } from '../../domain/setup/changes';
+import { isGetStartedTarget } from '../../domain/setup/ids';
+import type { StartSessionInput } from '../../domain/setup/session';
 import type { ViabilityResult } from '../../domain/setup/viability';
 import type { GateHost } from '../../gate/host';
 import { floorFor } from '../privateRoute';
@@ -37,6 +40,17 @@ export function approvedDeviceName(policy: RoutePolicy, label: Label, use: UseTi
 
 export function floorTierOf(privacyMode: PrivacyModeSetting): RoutingTier | undefined {
   return floorFor({ privateOnly: privacyMode === 'tee-only' }).tier;
+}
+
+export function guideSessionPrefill(request?: OpenGetStartedRequest): StartSessionInput['prefill'] {
+  if (request?.step !== undefined && !isGetStartedTarget(request.step)) return undefined;
+  const prefill = parseGuidePrefill(request?.prefill);
+  const projectName = prefill?.projectName;
+  // Until the project stream supplies trusted answers, a join request carries only the display name.
+  if (request?.step !== 'join' && (request?.step === 'staff-team' || prefill?.section !== undefined)) {
+    return { projectName, section: prefill?.section, kindOfWork: 'staff' };
+  }
+  return projectName === undefined ? undefined : { projectName };
 }
 
 /** Adapter for the guide's decisions. Expired or unreadable policies never supply a usable route. */
