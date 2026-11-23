@@ -27,3 +27,6 @@
 !docs-site/content/
 !docs-site/content/**
 docs-site/content/**/*.synced.md
+
+!release-input/
+!release-input/sterling.vsix

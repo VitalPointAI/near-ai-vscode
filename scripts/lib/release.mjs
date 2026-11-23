@@ -47,6 +47,6 @@ export async function tagRelease(repo, version, sha, { wait = true, log = consol
   }
   if (existing) { log(`${tag} already points at ${sha.slice(0, 7)}.`); return tag; }
   createAnnotatedTag(repo, version, sha);
-  log(`Tagged ${sha.slice(0, 7)} as ${tag}. The Release workflow now builds the VSIX and the GitHub release; publishing waits for the owner's approval in the "marketplace" environment.`);
+  log(`Tagged ${sha.slice(0, 7)} as ${tag}. The Release workflow builds and checks the Sterling image. GHCR publication waits for the owner's approval in the "marketplace" environment. The GitHub release records the published digest.`);
   return tag;
 }

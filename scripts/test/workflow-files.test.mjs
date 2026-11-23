@@ -56,9 +56,9 @@ function steps(job) {
   return job.split(/\n(?= {6}- )/).slice(1);
 }
 
-test('release jobs that hold a write token or VSCE_PAT run no npm install scripts and no npm cache', () => {
+test('release jobs that hold a write token or deployment approval run no npm install scripts and no npm cache', () => {
   const all = jobs(read('release.yml'));
-  const privileged = [...all].filter(([, job]) => /contents:\s*write|environment:|secrets\.VSCE_PAT/.test(job));
+  const privileged = [...all].filter(([, job]) => /(?:contents|packages):\s*write|environment:/.test(job));
   assert.ok(privileged.length >= 2, 'the release and publish jobs are found');
   for (const [id, job] of privileged) {
     for (const line of job.split('\n').filter((l) => /\bnpm (ci|install|i)\b/.test(l))) {
@@ -66,8 +66,10 @@ test('release jobs that hold a write token or VSCE_PAT run no npm install script
     }
     assert.doesNotMatch(job, /cache:\s*npm/, `${id} must not restore an npm cache`);
   }
-  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'the build job is read-only');
-  const writers = [...all].filter(([, job]) => /contents:\s*write/.test(job)).map(([id]) => id);
+  for (const id of ['build', 'image']) {
+    assert.doesNotMatch(all.get(id), /(?:contents|packages):\s*write/, `${id} is read-only`);
+  }
+  const writers = [...all].filter(([, job]) => /(?:contents|packages):\s*write/.test(job)).map(([id]) => id);
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
@@ -85,14 +87,37 @@ test('root lint, root tests and both VSIX build paths disable dependency lifecyc
   }
 });
 
-test('publish checks the VSIX checksum from the build job before it does anything else', () => {
-  const publish = jobs(read('release.yml')).get('publish');
+test('the Sterling image bundles the verified VSIX and is smoke-tested before archiving', () => {
+  const image = jobs(read('release.yml')).get('image');
+  assert.match(image, /needs:\s*build\b/);
+  assert.match(image, /name: release-vsix/);
+  assert.match(image, /needs\.build\.outputs\.sha256/);
+  assert.match(image, /sha256sum --check[\s\S]*docker build --target release/);
+  assert.match(image, /docker run[\s\S]*curl[\s\S]*docker exec[\s\S]*docker save/);
+  assert.match(image, /archive_sha256: \$\{\{ steps\.archive\.outputs\.sha256 \}\}/);
+  assert.match(image, /image_id: \$\{\{ steps\.archive\.outputs\.image_id \}\}/);
+  assert.match(image, /name: sterling-image/);
+});
+
+test('publish waits for protected approval and verifies the tested image before registry access', () => {
+  const text = read('release.yml');
+  const publish = jobs(text).get('publish');
   const list = steps(publish);
   assert.match(list[0], /actions\/download-artifact@[0-9a-f]{40}/);
-  assert.match(list[1], /sha256sum --check/);
-  assert.match(list[1], /needs\.build\.outputs\.sha256/, 'the expected checksum comes from the build job, not the artifact');
-  assert.match(publish, /environment:\s*\n\s*name: marketplace/);
-  assert.equal((publish.match(/secrets\.VSCE_PAT/g) ?? []).length, 1);
+  assert.match(list[0], /name: sterling-image/);
+  assert.match(list[1], /needs\.image\.outputs\.archive_sha256/);
+  assert.match(list[1], /needs\.image\.outputs\.image_id/);
+  assert.match(list[1], /sha256sum --check[\s\S]*docker load[\s\S]*docker image inspect[\s\S]*docker login ghcr\.io/);
+  assert.match(list[1], /docker manifest inspect "\$ref"[\s\S]*\.config\.digest[\s\S]*docker push/);
+  assert.match(list[1], /docker manifest inspect "\$digest"[\s\S]*\.config\.digest == \$id[\s\S]*image=\$digest/);
+  assert.match(publish, /needs:\s*\[build, package, attest, image\]/);
+  assert.match(publish, /needs\.image\.result == 'success'/);
+  assert.match(publish, /needs\.attest\.result == 'success'/);
+  assert.match(publish, /needs\.build\.outputs\.package_required == 'true' && needs\.package\.result == 'success'/);
+  assert.match(publish, /permissions:\s*\n\s*packages: write/);
+  assert.match(publish, /environment:\s*(?:\n\s*name: )?marketplace/);
+  assert.match(publish, /GHCR_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.doesNotMatch(text, /VSCE_PAT|\bvsce publish\b/);
 });
 
 test('a release tag never replaces an existing GitHub release or its files', () => {
@@ -279,8 +304,12 @@ test('release package, attest and Trestle jobs keep privilege separated', () => 
   assert.match(trestle, /--require-hashes --no-deps/);
   assert.match(trestle, /continue-on-error:\s*true/);
   assert.ok(trestle.includes('trestle import -f "$root/oscal/component-definitions/extension.json"'));
-  assert.match(release, /needs:\s*\[build, package, attest\]/);
+  assert.match(release, /needs:\s*\[build, package, attest, publish\]/);
+  assert.match(release, /needs\.publish\.result == 'success'/);
+  assert.match(release, /needs\.build\.outputs\.package_required == 'true' && needs\.package\.result == 'success'/);
   assert.match(release, /package_sha256/);
+  assert.match(release, /IMAGE: \$\{\{ needs\.publish\.outputs\.image \}\}/);
+  assert.match(release, /assets\+=\(sterling-image\.txt\)[\s\S]*gh release create/);
 });
 
 test('only main pushes and versioned hotfix branch dispatches publish compliance bundles', (t) => {
