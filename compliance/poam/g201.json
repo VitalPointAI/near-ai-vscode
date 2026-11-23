@@ -1,0 +1,16 @@
+{
+  "gap": "G201",
+  "id": "g201",
+  "controls": [
+    "cgp-16"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods class exemption applicability needs a protected authority decision",
+  "remediation": "The sponsor designated official and counsel record whether this provision was considered for the defined deployment and, if already relied on, retain the existing authority decision and supporting reference under restricted custody. Record a dated pending decision if applicability is unresolved. The assessor export carries a scope summary and reference only.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a signed applicability decision or dated pending record and any already-held supporting authority reference"
+    }
+  ]
+}

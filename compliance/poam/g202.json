@@ -1,0 +1,19 @@
+{
+  "gap": "G202",
+  "id": "g202",
+  "controls": [
+    "cgp-17",
+    "cgp-18",
+    "cgp-19",
+    "cgp-23"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods individual exemption records need independent evidence review",
+  "remediation": "The sponsor designated official and privacy authority assess the applicability of individual exemption records to the deployment. Where an existing case is in scope, separately verify protected references for the eligibility review, application record, ministerial assessment status and validity determination. Keep identity documents and application contents in restricted custody. Record pending scope and review ownership.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted case review with separate evidence references, an official validity record where in scope, and any unresolved scope decisions"
+    }
+  ]
+}

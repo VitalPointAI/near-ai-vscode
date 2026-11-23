@@ -1,0 +1,17 @@
+{
+  "gap": "G203",
+  "id": "g203",
+  "controls": [
+    "cgp-37-1",
+    "cgp-37-2"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods statutory scope needs a recorded sponsor authority review",
+  "remediation": "The designated official and counsel review the assessed legal entity and boundaries against the recorded statutory objectives. Verify the applicable registration or approved authority record and examine whether the deployment evidence matches the documented access boundary. Preserve open scope and missing records. Link X1 through X4 and X10 as separate technical paths.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the signed scope decision, applicable authority reference, and redacted access-boundary review with any open conditions"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G207",
+  "id": "g207",
+  "controls": [
+    "itar-126.1"
+  ],
+  "ownerRole": "owner",
+  "title": "ITAR restricted-scope review needs a signed applicability record",
+  "remediation": "The sponsor empowered official and trade counsel review the assessed operating boundary against the provision and the current authoritative restrictions. Verify dated review ownership, the applicable source reference, approved boundary evidence and unresolved findings. Copy only the approved summary and reference into the assessor package.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the signed restriction-scope review, authoritative-source reference, dated boundary verification and any pending conditions"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G194",
+  "id": "g194",
+  "controls": [
+    "cgp-9"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods registration changes need an accountable evidence record",
+  "remediation": "The sponsor registration owner and designated official approve the assessed legal entity and site scope. Review the change register for application and ownership information, assigned review and notification duties, and any notice already submitted. Retain a dated decision and protected receipt reference for an applicable change or a signed pending-scope record.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved registration scope, a dated change review, and the protected notice reference or pending-scope decision"
+    }
+  ]
+}
