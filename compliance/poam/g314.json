@@ -1,0 +1,16 @@
+{
+  "gap": "G314",
+  "id": "g314",
+  "controls": [
+    "itsp171-03.15.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Rules of behaviour need documented acknowledgement before access",
+  "remediation": "The sponsor user governance and privacy leads approve roles and expected behaviour for using the system and protecting specified information. Provide current rules to individuals requiring access and verify a dated acknowledgement of agreement before granting access. Record assigned review and update cadence. Use de-identified or restricted evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved rules, distribution and review records, and redacted acknowledgement and subsequent access grant timestamps"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "gap": "G125",
+  "id": "g125",
+  "controls": [
+    "sc-07.12",
+    "sc-07.13"
+  ],
+  "ownerRole": "owner",
+  "title": "Host boundary protections and security-tool subnet separation need deployment evidence",
+  "remediation": "Host and network operators inventory the assessed components that require host-based controls and the designated security tools that require physical subnet separation. Collect effective host policies, approved topology and managed interconnect settings. Verify only approved communications across the tool boundary and record an authorized scope decision if physical separation is out of scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect effective host boundary settings and reviewed physical separation and interface verification for designated tool networks"
+    }
+  ]
+}

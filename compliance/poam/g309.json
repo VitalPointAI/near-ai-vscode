@@ -1,0 +1,16 @@
+{
+  "gap": "G309",
+  "id": "g309",
+  "controls": [
+    "itsp171-03.14.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Specified information handling and retention need sponsor approval",
+  "remediation": "The sponsor information governance, privacy and service owners identify specified information in system records and output. Approve applicable handling, retention and disposition schedules and record which organizational obligations drive them. Verify representative system records and outputs against the schedule while preserving restricted artifact references and provider scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved information classifications and handling schedules, and samples demonstrating retention and applicable authorized disposition of assessed records and outputs"
+    }
+  ]
+}

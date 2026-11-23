@@ -1,0 +1,16 @@
+{
+  "gap": "G210",
+  "id": "g210",
+  "controls": [
+    "itsp171-03.01.01"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 account lifecycle and use need assessed records",
+  "remediation": "The sponsor account management owner confirms the CPCSC Level 1 contract boundary and approves which accounts, users, roles and privileges apply there. Collect redacted authorization, creation or change, usage monitoring and removal samples. Include approved inactivity and expiration rules, a documented disablement and notification, and proof the assigned logout rule applies. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect the approved assessed account inventory, a redacted account lifecycle sample, disablement notification and effective logout evidence"
+    }
+  ]
+}

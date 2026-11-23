@@ -1,0 +1,16 @@
+{
+  "gap": "G221",
+  "id": "g221",
+  "controls": [
+    "itsp171-03.14.01"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 flaw handling and timely updates need sampled receipts",
+  "remediation": "The sponsor vulnerability and update owner inventories assessed software and firmware and approves the remediation window. Follow a sampled flaw from identification and reporting through correction. Retain release and installation timestamps, relevant post-update verification, and authorized treatment for any outstanding update. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect the approved update window and a redacted flaw-to-install record with release, deployment and verification dates"
+    }
+  ]
+}

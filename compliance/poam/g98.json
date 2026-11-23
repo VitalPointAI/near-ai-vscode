@@ -1,0 +1,18 @@
+{
+  "gap": "G98",
+  "id": "g98",
+  "controls": [
+    "ca-03",
+    "ca-09",
+    "ca-09.01"
+  ],
+  "ownerRole": "owner",
+  "title": "External exchange and internal connection authorization need reviewed evidence",
+  "remediation": "The sponsor boundary owner and privacy authority inventory internal connections and external exchanges separately. Approve interfaces, information types, safeguards, owners and review rules. Retain an approved external agreement and a sampled internal configuration and security and privacy check before connection, as applicable. Record approved review, termination conditions and any exceptions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved exchange and connection register entries, applicable agreements and an assessed preconnection safeguard check"
+    }
+  ]
+}

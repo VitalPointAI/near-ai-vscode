@@ -1,0 +1,16 @@
+{
+  "gap": "G250",
+  "id": "g250",
+  "controls": [
+    "itsp171-03.04.12"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 travel device configuration and return safeguards need disposition",
+  "remediation": "The sponsor travel security owner defines high-risk locations and the device configurations and return safeguards for the assessed population. Review authorized issue and return evidence such as a redacted configuration record and completion of required checks. Record an authorized applicability decision if the deployment has no covered travel. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved high-risk travel requirements, sampled issue and return verification or an authoritative scope disposition"
+    }
+  ]
+}

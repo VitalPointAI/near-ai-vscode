@@ -1,0 +1,17 @@
+{
+  "gap": "G196",
+  "id": "g196",
+  "controls": [
+    "cgp-10-f",
+    "cgp-10-g"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods role training and visitor briefings need completion evidence",
+  "remediation": "The designated official and training owner identify the assessed workforce and visitor populations after approving scope. Review approved training and separate visitor briefing material. Verify sampled completion records using protected references, dates, role categories and exceptions. Keep identities and all training material containing controlled details in the approved repository.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved training and visitor briefing references, and redacted completion or pending-scope evidence for each population"
+    }
+  ]
+}

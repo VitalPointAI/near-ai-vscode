@@ -1,0 +1,17 @@
+{
+  "gap": "G74",
+  "id": "g74",
+  "controls": [
+    "si-16",
+    "si-400"
+  ],
+  "ownerRole": "owner",
+  "title": "Managed memory protections and dedicated administration workstations need deployment evidence",
+  "remediation": "The deployment endpoint and privileged access owners identify assessed processes and the approved host memory-execution protections. Verify those settings on sampled assessed hosts. Separately inventory dedicated physical administration workstations and allowed task and network boundaries, show their isolation and verify privileged actions are restricted to the approved workstations. Record approved scope decisions and gaps.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect host hardening settings and separate evidence of administration workstation inventory, isolation, and authorized and refused privileged access"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G308",
+  "id": "g308",
+  "controls": [
+    "itsp171-03.14.06"
+  ],
+  "ownerRole": "owner",
+  "title": "System monitoring needs coverage and detection verification",
+  "remediation": "The sponsor security operations and network monitoring leads map monitored services and communications boundaries. Verify that the assessed monitoring can identify attack indicators, unauthorized connections and use, and unusual or unauthorized inbound and outbound traffic. Use authorized benign exercises or redacted incident records with operator review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the monitoring coverage diagram, reviewed detection settings and representative detection and investigation evidence across assessed boundaries"
+    }
+  ]
+}

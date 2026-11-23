@@ -1,0 +1,16 @@
+{
+  "gap": "G216",
+  "id": "g216",
+  "controls": [
+    "itsp171-03.05.03"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 strong multi-factor authentication needs role coverage evidence",
+  "remediation": "The sponsor identity owner approves strong factor policy for the assessed privileged and non-privileged user accounts. Inventory applicable sign-in paths, review the enforced factor settings and record a successful authorized sign-in plus a refusal when the required factor is missing for each account category. Record any documented exception with its authority and scope for assessor review. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect assessed privileged and non-privileged sign-in coverage, effective factor configuration and redacted allowed and refused results"
+    }
+  ]
+}

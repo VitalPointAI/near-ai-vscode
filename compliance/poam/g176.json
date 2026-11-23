@@ -1,0 +1,16 @@
+{
+  "gap": "G176",
+  "id": "g176",
+  "controls": [
+    "ps-04"
+  ],
+  "ownerRole": "owner",
+  "title": "Termination and credential revocation need timestamped sponsor evidence",
+  "remediation": "The sponsor human resources, identity and asset leads define termination notification, access disablement deadline, credential revocation, exit topics and asset recovery. Sample a termination or authorized exercise against the deadline and verify reassignment or retained access to organizational information. Record inherited directory actions at their assessed boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted termination workflow with access timestamps, credential and asset recovery and transfer of organizational information"
+    }
+  ]
+}

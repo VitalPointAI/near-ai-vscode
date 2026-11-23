@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -61,12 +61,13 @@ jobs:
       - name: Record compliance audit
         continue-on-error: true
         run: npm --prefix compliance audit --json > compliance/out/audit-compliance.json
-      - name: Download the latest evidence bundle
+      - name: Download CI evidence for the assessed commit
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
         run: |
           mkdir -p compliance/out/previous
-          run_id="$(gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          run_id="$(gh run list --workflow ci.yml --branch main --event push --status success --commit "$COMMIT" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -n "$run_id" ]; then gh run download "$run_id" --name compliance-bundle --dir compliance/out/previous || true; fi
       - name: Read the latest release metadata
         env:
@@ -82,7 +83,11 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const repository = process.env.REPOSITORY; const commit = process.env.COMMIT;
-            const collectors = { settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository }, audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] } };
+            const collectors = {
+              documents: { repoRoot: "." }, crypto: { repoRoot: "." },
+              settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository },
+              audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] }
+            };
             const release = JSON.parse(readFileSync("compliance/out/latest-release.json", "utf8"));
             if (/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
               collectors.release = { repository, tag: release.tag_name };

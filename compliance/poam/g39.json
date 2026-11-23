@@ -1,0 +1,17 @@
+{
+  "gap": "G39",
+  "id": "g39",
+  "controls": [
+    "ac-11",
+    "ac-11.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Device locking and obscured displays need endpoint evidence",
+  "remediation": "The deployment endpoint owner records which workstations and managed devices are in scope. The sponsor approves inactivity thresholds and unattended locking rules. Collect managed settings and redacted captures showing the inactivity or manual lock as applicable, previously visible information concealed by a publicly viewable lock display, and access restored only through approved authentication. Assign missing inherited or component controls for implementation and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Verify endpoint coverage, configured lock rules, obscured displays and authenticated unlock using the deployed platform settings"
+    }
+  ]
+}

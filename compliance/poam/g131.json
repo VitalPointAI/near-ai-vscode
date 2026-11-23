@@ -1,0 +1,16 @@
+{
+  "gap": "G131",
+  "id": "g131",
+  "controls": [
+    "sc-17"
+  ],
+  "ownerRole": "shared",
+  "title": "Certificate issuance and approved trust stores need deployment evidence",
+  "remediation": "Deployment PKI operators and component maintainers inventory assessed certificates, issuing authorities and trust stores. Verify approved issuance, renewal and revocation processes and collect the effective trust-anchor set for each deployment path. Use approved fixture certificates to verify accepted and refused trust decisions. Keep actual private keys out of assessment artifacts.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved authority and trust-store inventory, issuance and lifecycle sample, and scoped certificate verification results"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G66",
+  "id": "g66",
+  "controls": [
+    "ac-22"
+  ],
+  "ownerRole": "shared",
+  "title": "Public posting authority and content review need operating evidence",
+  "remediation": "The sponsor designates authorized public publishers and names the privacy or security reviewer and the operator who can remove content. Document the assessed public channels and capture publisher authorization and training, a prepublication review record, the recurring review schedule and completed sample, and an approved removal exercise or a real redacted removal record. Identify the review and release process for each public channel in scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved public channel and publisher lists, training, initial and recurring content reviews and a removal record"
+    }
+  ]
+}

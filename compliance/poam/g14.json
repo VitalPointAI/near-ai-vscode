@@ -1,0 +1,20 @@
+{
+  "gap": "G14",
+  "id": "g14",
+  "controls": [
+    "ac-02"
+  ],
+  "ownerRole": "shared",
+  "title": "Staff account lifecycle needs release and deployment evidence",
+  "remediation": "Staff maintainers verify invitation approval, signed role changes and removal through the production staff and hub flow. The deployment identity owner approves eligible accounts and roles, samples an account review and offboarding, and records the approved roster and revocation results.",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Demonstrate signed staff invitation, role change and revocation against the released application with a hub"
+    },
+    {
+      "phase": "44.1",
+      "title": "Collect exact-release membership test results and the sponsor’s approved account review and offboarding records"
+    }
+  ]
+}

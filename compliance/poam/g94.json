@@ -1,0 +1,17 @@
+{
+  "gap": "G94",
+  "id": "g94",
+  "controls": [
+    "sr-11",
+    "sr-11.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Component authenticity procedures and anti-counterfeit training need evidence",
+  "remediation": "The sponsor component assurance lead and supplier maintainers establish trusted acquisition and authenticity checks for the assessed component types. Name reporting recipients and roles that detect suspect hardware, software or firmware. Verify required training and a harmless detection and escalation exercise. Use G4 and G13 for their scoped provenance and attestation receipts.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved authenticity and reporting procedures, role-based training records, and a redacted detection and escalation exercise"
+    }
+  ]
+}

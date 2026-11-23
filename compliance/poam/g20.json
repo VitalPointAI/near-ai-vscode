@@ -1,0 +1,16 @@
+{
+  "gap": "G20",
+  "id": "g20",
+  "controls": [
+    "ia-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment identification and authentication policy needs approval and evidence",
+  "remediation": "The deployment sponsor designates the identity policy owner and approves the policy and procedures for the assessed systems. The identity policy owner specifies responsible roles and review intervals, documents dissemination and review, and provides the signed policy and versioned approval, distribution and review records.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the sponsor-approved policy and procedures, named owner, distribution receipt and scheduled or completed review record"
+    }
+  ]
+}

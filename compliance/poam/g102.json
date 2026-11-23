@@ -1,0 +1,16 @@
+{
+  "gap": "G102",
+  "id": "g102",
+  "controls": [
+    "sa-01"
+  ],
+  "ownerRole": "owner",
+  "title": "System and services acquisition policy and procedures need approved operating records",
+  "remediation": "The sponsor acquisition policy official approves scope, procedures, accountable procurement, security and privacy roles, distribution and review triggers. Sample one applicable procurement through the documented process and retain evidence of review and any exception.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and procedures, role assignment, distribution and review records, and a sampled acquisition decision"
+    }
+  ]
+}

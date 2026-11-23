@@ -1,0 +1,18 @@
+{
+  "gap": "G192",
+  "id": "g192",
+  "controls": [
+    "pm-23",
+    "pm-24",
+    "pm-25"
+  ],
+  "ownerRole": "owner",
+  "title": "Data governance, matching review and personal information minimization need scope evidence",
+  "remediation": "The sponsor data and privacy leads document committee membership, authority and reviewed decisions. Where matching is in scope, obtain the authorized board review and periodic assessment. Show minimization for testing, training and research through approved synthetic or de-identified dataset controls and exception records. Record authorized applicability decisions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect committee or board authority, applicable matching review and a sampled minimized-data approval"
+    }
+  ]
+}

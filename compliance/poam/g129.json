@@ -1,0 +1,16 @@
+{
+  "gap": "G129",
+  "id": "g129",
+  "controls": [
+    "sc-13"
+  ],
+  "ownerRole": "shared",
+  "title": "Approved cryptography by use and deployed configuration need evidence",
+  "remediation": "The sponsor cryptographic authority and component maintainers map each assessed use to an approved algorithm, key strength, provider, version and operating mode. Reconcile effective settings with the build inventory and document the required validation or accepted exception with its authority and expiry. Retain X8’s comparable-strength evaluation as an input for its stated scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the reviewed cryptography-by-use inventory, deployed provider records and required validation references or signed exceptions"
+    }
+  ]
+}

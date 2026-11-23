@@ -1,0 +1,18 @@
+{
+  "gap": "G89",
+  "id": "g89",
+  "controls": [
+    "sr-01",
+    "sr-02",
+    "sr-02.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supply chain risk policy, plan and team need approved operating evidence",
+  "remediation": "The sponsor supply chain risk official approves the policy, procedures and protected lifecycle plan for assessed components and services. Name the team and coordinator across acquisition, operations, security and disposal. Record who receives and reviews the documents, their access controls and review triggers, and a dated coordination decision.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and plan references, assigned team roles, distribution and access records, and a sampled review decision"
+    }
+  ]
+}

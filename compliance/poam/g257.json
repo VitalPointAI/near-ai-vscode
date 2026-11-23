@@ -1,0 +1,17 @@
+{
+  "gap": "G257",
+  "id": "g257",
+  "controls": [
+    "itsp171-03.06.01",
+    "itsp171-03.06.03"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 incident handling and periodic exercises need assessed records",
+  "remediation": "The sponsor incident lead maps the assessed incident handling capability to the approved plan. Record a dated authorized exercise or defensively handled incident covering preparation, detection and analysis, containment, eradication and recovery with review of scope, timing and improvements. Verify the approved exercise cadence and corrective action follow-up. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved exercise frequency and dated exercise record with decisions, response stages and follow-up actions"
+    }
+  ]
+}

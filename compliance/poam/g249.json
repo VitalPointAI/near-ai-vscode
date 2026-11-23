@@ -1,0 +1,17 @@
+{
+  "gap": "G249",
+  "id": "g249",
+  "controls": [
+    "itsp171-03.04.10",
+    "itsp171-03.04.11"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 component inventory and specified-information locations need reconciliation",
+  "remediation": "The sponsor asset manager and information custodian identify assessed components and where specified information is processed and stored. Sample a periodic inventory review and a recorded installation, removal or update. Verify an applicable change in processing or storage location is reflected in the inventory and flow record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved inventory and data locations with dated inventory review and a traced component or location change"
+    }
+  ]
+}

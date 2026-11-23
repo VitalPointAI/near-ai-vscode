@@ -1,0 +1,22 @@
+{
+  "gap": "G53",
+  "id": "g53",
+  "controls": [
+    "cm-03",
+    "cm-03.02",
+    "cm-03.04",
+    "cm-04",
+    "cm-04.01",
+    "cm-04.02",
+    "cm-05"
+  ],
+  "ownerRole": "shared",
+  "title": "Deployment change decisions, impacts and authorized access need a verified change trace",
+  "remediation": "Release maintainers and deployment change authority sample a configuration-controlled change. Record security and privacy impact review with named representatives, approval or refusal, effective access restrictions, isolated test validation, monitored change deployment and post-change verification of each affected control. Include review records and applicable authorized-access decisions. Use G7 and G12 only for their scoped repository evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect one approved change with pre-change analysis, restricted access, separate test evidence and operating-control checks after deployment"
+    }
+  ]
+}

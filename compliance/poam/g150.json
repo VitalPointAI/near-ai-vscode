@@ -1,0 +1,17 @@
+{
+  "gap": "G150",
+  "id": "g150",
+  "controls": [
+    "ma-04.04",
+    "ma-04.06"
+  ],
+  "ownerRole": "owner",
+  "title": "Non-local maintenance session isolation and cryptographic protection need verified configuration",
+  "remediation": "The deployment access and network security owners approve replay-resistant authenticators, physical or logical separation, and protections for communication confidentiality and integrity. Verify configuration and a permitted maintenance-only session in an approved test environment. Check refusal of invalid or replayed authorization with synthetic data and retain redacted records, with evidence that general sessions cannot use the maintenance path.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved authenticator and communication settings, measured isolation and protection verification, and redacted allowed and refused session results"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G188",
+  "id": "g188",
+  "controls": [
+    "pm-17"
+  ],
+  "ownerRole": "owner",
+  "title": "Outsourced controlled information needs verified protection authority",
+  "remediation": "The sponsor procurement, information and contracting authorities identify outsourced services that handle controlled information. Record approved protection terms, processor boundaries and responsibilities, evidence review and any signed applicable authorization. Sample a reviewed supplier arrangement and retained safeguard evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved outsourcing policy and a scoped supplier agreement with safeguard and approval evidence"
+    }
+  ]
+}

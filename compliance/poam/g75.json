@@ -1,0 +1,17 @@
+{
+  "gap": "G75",
+  "id": "g75",
+  "controls": [
+    "ra-01",
+    "ra-07"
+  ],
+  "ownerRole": "owner",
+  "title": "Assessment policy and risk treatment decisions need authority and follow-up evidence",
+  "remediation": "The sponsor risk authority approves risk assessment and response procedures, owners, review triggers and tolerance. Sample an actual finding through assignment, accepted treatment or remediation, authorized approval and follow-up. Record scope, residual risk, review or expiry date and reassessment responsibility.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and a sampled finding with assigned response, disposition authority and follow-up evidence"
+    }
+  ]
+}

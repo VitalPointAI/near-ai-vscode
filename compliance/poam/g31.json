@@ -1,0 +1,21 @@
+{
+  "gap": "G31",
+  "id": "g31",
+  "controls": [
+    "cp-01",
+    "cp-02",
+    "cp-02.01",
+    "cp-02.02",
+    "cp-02.03",
+    "cp-02.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Approved contingency policy, critical assets and recovery priorities need evidence",
+  "remediation": "The sponsor continuity lead approves the policy and deployment contingency plan and records who receives and reviews them. Retain the critical asset and dependency inventory, named escalation roles, coordination records for related plans, degraded processing/telecommunications/environment capacity analysis, and approved resumption objectives for essential functions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and plan, the critical asset register, capacity analysis and named recovery targets"
+    }
+  ]
+}

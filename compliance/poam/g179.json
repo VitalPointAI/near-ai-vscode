@@ -1,0 +1,16 @@
+{
+  "gap": "G179",
+  "id": "g179",
+  "controls": [
+    "ps-08"
+  ],
+  "ownerRole": "owner",
+  "title": "Personnel sanctions and timely notification need sponsor evidence",
+  "remediation": "The sponsor human resources and security officials approve a formal sanctions procedure for security and privacy violations, notification recipients and timing. Provide a restricted evidence reference or sanitized exercise showing initiation, authorized notification and oversight without circulating identities or case details.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved sanctions and notification procedure with a dated sanitized evidence reference or exercise"
+    }
+  ]
+}

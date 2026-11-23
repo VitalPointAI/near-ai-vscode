@@ -1,0 +1,16 @@
+{
+  "gap": "G197",
+  "id": "g197",
+  "controls": [
+    "cgp-10-i"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods records availability needs an authorized evidence review",
+  "remediation": "The designated official and records custodian approve the scoped inventory of controlled goods accountability, assessment and eligibility records. Verify an authorized custodian can locate and account for the records through a synthetic or redacted preparation exercise. Record the handling approval and protected references, with regulator disclosure decisions reserved to the responsible official.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved records inventory, a redacted retrieval exercise receipt, and the named authority decision for evidence handling"
+    }
+  ]
+}

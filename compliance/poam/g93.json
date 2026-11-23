@@ -1,0 +1,16 @@
+{
+  "gap": "G93",
+  "id": "g93",
+  "controls": [
+    "sr-10"
+  ],
+  "ownerRole": "shared",
+  "title": "Tamper inspection needs approved triggers and observed acceptance evidence",
+  "remediation": "The deployment acceptance manager and component custodians identify the items and events that require inspection. For assessed software, verify expected artifact digests and provenance before acceptance and exercise refusal of a harmless changed copy. For assessed physical items, record approved seal and custody checks and their disposition. Use existing release attestations as a supplier input.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved inspection procedure, a verified sample, and a recorded refusal or quarantine from a harmless tamper exercise"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G100",
+  "id": "g100",
+  "controls": [
+    "ca-06"
+  ],
+  "ownerRole": "owner",
+  "title": "Authorization and inherited control decisions need designated officials and signed records",
+  "remediation": "The sponsor designates system and common-control authorizing officials, reviews the submitted scope, assessment and outstanding risks, and records authorization conditions, duration and review triggers. Keep the formal signed decision or current authorized submission step, including approved inherited-control responsibilities. Update scope decisions when significant changes occur.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect formal appointments, the actual assessment submission, scoped inheritance decisions and the signed authorization or authorized outstanding decision step"
+    }
+  ]
+}

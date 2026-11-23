@@ -1,0 +1,16 @@
+{
+  "gap": "G178",
+  "id": "g178",
+  "controls": [
+    "ps-07"
+  ],
+  "ownerRole": "owner",
+  "title": "External personnel screening and provider notification need sponsor evidence",
+  "remediation": "The sponsor procurement and personnel security officials document external personnel screening, provider obligations, government oversight and end-user responsibilities, notification recipients and deadlines for transfers or terminations. Sample sponsor oversight and a timely credential or privilege change under the applicable agreement. Record provider scope and submit inheritance decisions for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved external personnel obligations and a redacted screening, notification or access change and provider oversight sample"
+    }
+  ]
+}

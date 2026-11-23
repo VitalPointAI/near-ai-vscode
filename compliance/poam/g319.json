@@ -1,0 +1,16 @@
+{
+  "gap": "G319",
+  "id": "g319",
+  "controls": [
+    "itsp171-03.17.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Acquisition strategies and contract tools need procurement evidence",
+  "remediation": "The sponsor acquiring authority and supply chain risk owner approve procurement methods and contract tools for identifying, guarding against and mitigating supply chain risk. Sample an acquisition with risk evaluation, evaluated options, applied safeguards and documented contract or award decisions. Reference restricted supplier evidence rather than publishing sensitive material.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved procurement approach and a representative acquisition showing risk evaluation and an applied contract or procurement safeguard"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "gap": "G33",
+  "id": "g33",
+  "controls": [
+    "cp-06",
+    "cp-06.01",
+    "cp-06.03",
+    "cp-07",
+    "cp-07.01",
+    "cp-07.02",
+    "cp-07.03",
+    "cp-07.04",
+    "cp-07.06"
+  ],
+  "ownerRole": "owner",
+  "title": "Alternate storage and processing sites need approved scope and readiness evidence",
+  "remediation": "The deployment hosting and continuity owners identify the alternate sites required by the approved recovery plan. For storage, verify retrieval agreements, equivalent controls, separation from common threats and mitigations for regional access loss. For processing, verify resumption agreements and priority provisions, equipment and approved settings, access and shared-risk analysis, tested readiness and a plan for permanent loss of the primary site. Obtain an authorized applicability decision for any exclusions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Record approved sites and agreements, common-risk and accessibility analysis, and a timed retrieval or failover exercise"
+    }
+  ]
+}

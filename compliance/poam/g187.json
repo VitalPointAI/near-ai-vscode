@@ -1,0 +1,18 @@
+{
+  "gap": "G187",
+  "id": "g187",
+  "controls": [
+    "pm-15",
+    "pm-16",
+    "pm-16.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Threat awareness and external community participation need approved sharing evidence",
+  "remediation": "The sponsor threat, privacy and external liaison leads approve participating associations, authorized recipients and sharing rules. Exercise a sanitized threat awareness handoff and the approved automated route, verify restrictions and receipt, and document subsequent review or response.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect designated participant and sharing decisions, operating contact evidence and redacted automated receipt and response"
+    }
+  ]
+}

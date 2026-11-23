@@ -1,0 +1,16 @@
+{
+  "gap": "G305",
+  "id": "g305",
+  "controls": [
+    "itsp171-03.14.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary flaw remediation requires dated release and update records",
+  "remediation": "The sponsor vulnerability and service owners approve how flaws are identified, reported and corrected, and set the time allowed from release to installation of security-relevant software and firmware updates. Sample a flaw through closure and compare release and installation dates against the approved limit for assessed components. Record supplier evidence as a supporting reference and explain any unresolved overdue exposure.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved remediation and update policy, one redacted closed flaw record and representative software and firmware release-to-installation timestamps"
+    }
+  ]
+}

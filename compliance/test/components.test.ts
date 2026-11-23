@@ -8,6 +8,9 @@ import assert from 'node:assert/strict';
 import { loadComponents } from '../src/components.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { checkRuleTargets } from '../src/rules.ts';
+import { buildDashboard } from '../src/dashboard.ts';
+import type { Observation, TestReportRow } from '../src/model.ts';
+import { selectedIds } from '../src/profiles.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const COMPONENTS = path.join(ROOT, 'compliance', 'components');
@@ -18,6 +21,20 @@ test('the phase supplies the extension component definition', () => {
 
 test('the responsibility table is present for controls without statements', () => {
   assert.ok(existsSync(path.join(ROOT, 'compliance', 'responsibility', 'families.json')), 'family responsibilities must be present');
+});
+
+test('the root development dependency baseline declares the exact locked versions', () => {
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as {
+    devDependencies: Record<string, string>;
+  };
+  const lock = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8')) as {
+    packages: Record<string, { devDependencies?: Record<string, string>; version?: string }>;
+  };
+  assert.deepEqual(lock.packages[''].devDependencies, manifest.devDependencies);
+  for (const [name, version] of Object.entries(manifest.devDependencies)) {
+    assert.equal(version, lock.packages[`node_modules/${name}`]?.version, `${name} must specify its exact locked version`);
+  }
+  assert.match(readFileSync(path.join(ROOT, '.npmrc'), 'utf8'), /^save-exact=true$/m);
 });
 
 test('the extension evidence file names a real gate decision test', () => {
@@ -51,6 +68,56 @@ test('provider responsibilities identify a provider class, not a company', () =>
 test('the release rule keeps docs-required visible as a settings observation', () => {
   const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
   assert.ok(rules.some((rule) => rule.id === 'release.cm-03.docs-required' && rule.kind === 'observation' && rule.observation?.subject === 'docs-required'));
+});
+
+test('Protected A credits scoped audit evidence only when its mapped tests pass', () => {
+  const now = new Date('2026-11-23T12:00:00Z');
+  const commit = 'a'.repeat(40);
+  const { components } = loadComponents(COMPONENTS);
+  const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
+  const controls = selectedIds(path.join(ROOT, 'compliance', 'profiles', 'protected-a.json'));
+  const result = (control: string, testRows: TestReportRow[]) => buildDashboard({
+    head: commit, commit, generatedAt: now.toISOString(), now, components, rules, observations: [], testRows,
+    levels: [{ id: 'protected-a', title: 'Protected A', controls, components: ['extension'] }]
+  }).rows.find((row) => row.control === control);
+  for (const [control, file, name] of [
+    ['au-05', 'gateHostLogs', 'a gate audit write failure produces one local VS Code warning'],
+    ['au-08', 'gateHostLogs', 'gate decision logs preserve runtime timestamps as epoch milliseconds'],
+    ['au-09', 'gateDecisionLog', 'gate decision log creation and rotation grant no group or other access on POSIX']
+  ] as const) {
+    const receipt: TestReportRow = {
+      file: `src/test/${file}.test.ts`, path: [], name, status: 'passed', skip: null, ms: 1
+    };
+    const passing = result(control, [receipt]);
+    assert.equal(passing?.state, 'partly-met', control);
+    assert.equal(passing?.reason, 'limitation', control);
+    assert.equal(result(control, [{ ...receipt, status: 'failed' }])?.state, 'not-met', control);
+    assert.equal(result(control, [{ ...receipt, status: 'skipped' }])?.state, 'not-met', control);
+    assert.equal(result(control, [])?.state, 'not-met', control);
+  }
+});
+
+test('CM-03 needs the assessed commit review and verified main protection, and credits only partial support', () => {
+  const now = new Date('2026-11-22T12:00:00Z');
+  const commit = 'a'.repeat(40);
+  const common = { passed: true, collectedAt: now.toISOString(), commit };
+  const ci: Observation = { ...common, collector: 'ci', subject: 'test' };
+  const docs: Observation = { ...common, collector: 'settings', subject: 'docs-required' };
+  const main: Observation = { ...common, collector: 'settings', subject: 'main-change-protection' };
+  const review: Observation = { ...common, collector: 'review-trail', subject: 'assessed-commit-agent-review' };
+  const { components } = loadComponents(COMPONENTS);
+  const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
+  const status = (observations: Observation[]) => buildDashboard({
+    head: commit, commit, generatedAt: now.toISOString(), now, components, rules, observations, testRows: [],
+    levels: [{ id: 'unclassified', title: 'Unclassified', controls: ['cm-03'], components: ['release-pipeline'] }]
+  }).rows[0];
+  const confirmed = status([ci, docs, main, review]);
+  assert.equal(confirmed.state, 'partly-met');
+  assert.equal(confirmed.reason, 'limitation');
+  assert.equal(status([ci, docs, main, { ...review, subject: 'gate-approvals' }]).state, 'not-met');
+  assert.equal(status([ci, docs, main, { ...review, commit: 'b'.repeat(40) }]).state, 'stale');
+  assert.equal(status([ci, docs, { ...main, passed: false }, review]).state, 'not-met');
+  assert.equal(status([ci, { ...docs, passed: false }, main, review]).state, 'not-met');
 });
 
 test('the appliance makes no claim of an implemented Classified safeguard', () => {

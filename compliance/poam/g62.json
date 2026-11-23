@@ -1,0 +1,20 @@
+{
+  "gap": "G62",
+  "id": "g62",
+  "controls": [
+    "ac-03.04"
+  ],
+  "ownerRole": "shared",
+  "title": "Discretionary access decisions need scoped permission evidence",
+  "remediation": "The sponsor and access policy owner identify the subjects, objects and discretionary access policy in scope. Component and deployment operators verify how authorized holders may share information, delegate privileges, set or change attributes, or change access rules, where the policy permits those actions. Collect the reviewed policy and exact-release allowed and refused results. Include the staff roster and cell access rules only for the component and operations those rules govern.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the discretionary access boundary and verify release and deployment allow and denial evidence for each applicable operation"
+    },
+    {
+      "phase": "31",
+      "title": "When staff cells are deployed, collect release evidence of signed roster and cell grant authority and denied access after removal"
+    }
+  ]
+}

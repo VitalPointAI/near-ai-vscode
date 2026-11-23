@@ -1,0 +1,17 @@
+{
+  "gap": "G87",
+  "id": "g87",
+  "controls": [
+    "ir-07",
+    "ir-07.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Incident reporting assistance and automated availability need an exercised user path",
+  "remediation": "The deployment incident support owner publishes the approved assistance route to users and reviews automated information delivery and access. Exercise a benign request from an allowed user, verify timely assistance and assigned escalation, and retain sanitized evidence that support guidance and intake were reachable under normal and degraded conditions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved support instructions, scoped availability settings and a dated help request, response and escalation exercise"
+    }
+  ]
+}

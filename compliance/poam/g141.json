@@ -1,0 +1,18 @@
+{
+  "gap": "G141",
+  "id": "g141",
+  "controls": [
+    "at-02",
+    "at-02.02",
+    "at-02.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Literacy training and reporting awareness need representative delivery evidence",
+  "remediation": "The deployment training lead and security and privacy awareness owners approve onboarding, renewal and change-triggered literacy training for staff, managers and contractors. Verify the content teaches recognition and authorized reporting of insider concerns, social engineering and social mining. Retain versioned awareness material, redacted delivery and completion records, and a content revision addressing a reviewed incident lesson.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved literacy and reporting modules, a sampled training and awareness delivery record, and a documented revision from incident lessons"
+    }
+  ]
+}

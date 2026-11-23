@@ -1,0 +1,16 @@
+{
+  "gap": "G281",
+  "id": "g281",
+  "controls": [
+    "itsp171-03.11.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary disclosure risk assessment needs approved scope and review evidence",
+  "remediation": "The deployment risk authority and supply chain lead assess unauthorized disclosure over the lifecycle of assessed specified information. Verify the review accounts for relevant suppliers and dependencies, data boundaries, threat and impact findings, assigned actions and approved update timing. Keep sensitive details in the assessment repository with redacted outcome references.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved boundary, dated risk assessment and supply chain review, assigned actions and next review decision"
+    }
+  ]
+}

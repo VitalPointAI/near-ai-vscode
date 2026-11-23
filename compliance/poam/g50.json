@@ -1,0 +1,17 @@
+{
+  "gap": "G50",
+  "id": "g50",
+  "controls": [
+    "cm-01",
+    "cm-09"
+  ],
+  "ownerRole": "owner",
+  "title": "Configuration policy and management plan need deployment approval",
+  "remediation": "The deployment configuration manager obtains sponsor approval for the policy and management plan. Record accountable roles, approved items under configuration control, management and change procedures, protections for the plan, and distribution and review records. Collect a sampled application of the approved workflow.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and plan, accountable roles, distribution and a sampled change trace"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "gap": "G185",
+  "id": "g185",
+  "controls": [
+    "pm-09",
+    "pm-10",
+    "pm-28",
+    "pm-29"
+  ],
+  "ownerRole": "owner",
+  "title": "Enterprise risk framing and authorization governance need accountable decisions",
+  "remediation": "The sponsor risk executive documents authorized assumptions, constraints, tolerances and trade-offs, with named risk and authorization roles. Approve the strategy and processes across assessed environments, and sample an actual authorization or risk treatment that records decision grounds, review triggers and authority.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved strategy and framing, appointments, and a sampled authorization or risk treatment record"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G158",
+  "id": "g158",
+  "controls": [
+    "mp-06.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Remote media purge or wipe needs approved scope and authorized test evidence",
+  "remediation": "The deployment endpoint management authority documents assessed devices, triggering conditions, authorized roles and strong authentication for purge or wipe. Exercise the procedure on a disposable non-production device containing only synthetic data. Record scoped authorization, denial for an unauthorized role, execution status and independent confirmation of the expected result.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved device scope and trigger rules, redacted authorization and refusal results, and verified completion on a disposable test device"
+    }
+  ]
+}

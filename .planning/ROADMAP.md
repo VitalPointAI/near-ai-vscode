@@ -26,7 +26,7 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
 | 0.4.36 | Preparing | Organization policy, routing and privacy fixes, sync hub for operators, and accreditation evidence |
 
-Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2, 33.1 and 44.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -614,6 +614,29 @@ Plans:
 - [x] 44-17-PLAN.md: Wave 4. Release documentation package and the pull request summary
 - [x] 44-18-PLAN.md: Wave 5. Component definitions, statements, evidence rules and overlay statements on the real catalogues
 - [ ] 44-19-PLAN.md: Wave 6. Workflows and gates: compliance and relay image jobs, scheduled evidence, CodeQL, release package and attestations, CODEOWNERS, the owner's steps
+
+### Phase 44.1: Accreditation control implementation and evidence closure
+
+**Goal**: Verify and close product control and evidence gaps for Unclassified and Protected A first. Extend the assessment to Protected B, the Classified appliance baseline, and applicable ITSP.10.171, CPCSC Level 1, Controlled Goods, and ITAR overlays as their prerequisites and deployment scope become available.
+
+**Depends on**: Phase 44's dashboard, evidence rules and plan of action and milestones (POA&M). Work can proceed alongside other phases and does not gate general development or releases.
+
+**Baseline for triage**: The published v0.4.36 snapshot shows 521 product rows with no implementation statement or linked gap across Unclassified (3), Protected A (259), and Protected B (259). These represent 259 distinct published control IDs. Verify the responsible component and existing implementation before assigning remediation. Track any evidence gap separately from confirmed missing implementation. The 179 Classified reference rows relate to the appliance scope.
+
+**Success Criteria** (what must be TRUE):
+
+1. Each applicable control has a responsible owner and a verifiable disposition. The POA&M distinguishes missing implementation, missing evidence, inherited or sponsor responsibilities, and reviewed exclusions. Every open action links to a delivery phase or a sponsor assessment action.
+2. Product-owned gaps close when the implementation works in the stated release and scope and the assessor can inspect dated evidence such as a screenshot, reproducible test result, configuration snapshot, or audit record.
+3. The export reports product evidence separately from inherited and sponsor evidence, and shows pending items until verified. Draft sponsor responses identify evidence to collect and decisions to confirm. Sensitive artifacts remain in the authorized assessor location.
+4. Assess Unclassified and Protected A first. Review Protected B, the Classified appliance, and each applicable overlay when scope is established. Authorization remains with the responsible organization.
+5. The submission review confirms that the report's applicable sponsor and deployment fields contain verified entries, with a rationale and authority for each exclusion. Its diagrams reflect the assessed deployment's components, trust boundaries, data flows, and operating dependencies. The submission includes the linked evidence, completed applicable forms, sponsor concurrence, independent assessor findings, and the authorized decision or the sponsor's confirmed submission route and outstanding decision step. Generated draft text and unfilled fields remain tracked until the sponsor or assessor supplies the required information.
+
+**Plans:** 4 planned waves, starting with the evidence pipeline and the existing supplier control mappings.
+
+- [x] 44.1-01-PLAN.md: Verify evidence reaches the local assessor package and map existing audit and incident practices with their documented limits. Check the published bundle after the reviewed release.
+- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner.
+- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions.
+- [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
 
 ### Export-controlled technical data: Controlled Goods Program and ITAR (Phase 45, added 2026-11-20)
 
@@ -1777,6 +1800,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
+| 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

@@ -1,0 +1,16 @@
+{
+  "gap": "G67",
+  "id": "g67",
+  "controls": [
+    "si-01"
+  ],
+  "ownerRole": "owner",
+  "title": "System integrity policy and procedures need approved operating evidence",
+  "remediation": "The sponsor system integrity lead approves the policy and procedures, identifies component and operations responsibilities, and records coordination, distribution and review. Verify a representative flaw, protection or monitoring work item followed the approved procedure.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy, named roles, review and distribution records and a sampled operating action"
+    }
+  ]
+}

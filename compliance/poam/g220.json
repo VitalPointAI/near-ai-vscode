@@ -1,0 +1,16 @@
+{
+  "gap": "G220",
+  "id": "g220",
+  "controls": [
+    "itsp171-03.13.01"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 managed interface and subnet controls need deployment evidence",
+  "remediation": "The sponsor network security owner maps assessed external and key internal interfaces, public and private segments, and approved external connections. Review the effective monitored interface and boundary settings and verify with benign authorized fixtures that an approved route is observed and an unapproved route is refused. Scope evidence to the contract environment and record inherited control ownership. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect approved trust-boundary diagrams, segmentation and interface rules, monitoring records and redacted allowed and refused route results"
+    }
+  ]
+}

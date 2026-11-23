@@ -1,0 +1,16 @@
+{
+  "gap": "G259",
+  "id": "g259",
+  "controls": [
+    "itsp171-03.06.04"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 role-based incident response training needs completion and refresh records",
+  "remediation": "The sponsor incident training owner approves initial training deadlines for new roles or system access, changes that require new training, recurring cadence and content review triggers. Sample dated completion by an assessed role and a reviewed content update or authorized confirmation of current content. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved training schedule, a dated completion sample and the last content review record"
+    }
+  ]
+}

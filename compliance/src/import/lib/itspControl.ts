@@ -11,7 +11,8 @@ const children = (node: Node): Node[] => 'childNodes' in node ? node.childNodes 
 const text = (node: Node): string => ('value' in node ? node.value : children(node).map(text).join('')).replace(/\s+/g, ' ').trim();
 const direct = (node: Node, tag: string) => children(node).filter((child): child is Element => isElement(child) && child.tagName === tag);
 const labels = new Map<string, string>([
-  ['control', 'control'], ['contrôle', 'control'], ['activity', 'activity'], ['activité', 'activity'],
+  ['control', 'control'], ['contrôle', 'control'], ['contrôles', 'control'], ['activity/control', 'control'],
+  ['activity', 'activity'], ['activité', 'activity'],
   ['discussion', 'discussion'], ['discussion within the gc', 'gc-discussion'], ['discussion au sein du gc', 'gc-discussion'],
   ['related controls and activities', 'related'], ['contrôles et activités connexes', 'related'],
   ['references', 'references']
@@ -31,13 +32,29 @@ function listText(node: Node): string[] {
   return direct(node, 'li').map(text).filter(Boolean);
 }
 
+function paragraphStatement(node: Node): { label: 'control' | 'activity'; prose: string } | undefined {
+  if (!isElement(node) || node.tagName !== 'p') return;
+  const first = children(node).find((child) => text(child) !== '');
+  if (!first || !isElement(first) || first.tagName !== 'strong') return;
+  const prefix = text(first);
+  if (!prefix.endsWith(':')) return;
+  const label = labels.get(prefix.replace(/\s*:$/, '').toLowerCase());
+  if (label === 'control' || label === 'activity') return { label, prose: text(node).slice(prefix.length).trimStart() };
+}
+
 function contentByHeading(section: Element): Readonly<Record<string, string[]>> {
   const out: Record<string, string[]> = {};
   let heading = '';
   for (const node of untilNextSection(section)) {
-    if (isElement(node) && node.tagName === 'h3') heading = labels.get(text(node).replace(/:$/, '').toLowerCase()) ?? '';
-    else if (heading && isElement(node) && ['ol', 'ul'].includes(node.tagName)) out[heading] = [...(out[heading] ?? []), ...listText(node)];
-    else if (heading) { const value = text(node); if (value) out[heading] = [...(out[heading] ?? []), value]; }
+    const statement = paragraphStatement(node);
+    if (statement) heading = statement.label;
+    else if (isElement(node) && node.tagName === 'h3') {
+      heading = labels.get(text(node).replace(/:$/, '').toLowerCase()) ?? '';
+      continue;
+    }
+    if (!heading) continue;
+    const values = isElement(node) && ['ol', 'ul'].includes(node.tagName) ? listText(node) : [statement?.prose ?? text(node)].filter(Boolean);
+    if (values.length) (out[heading] ??= []).push(...values);
   }
   return out;
 }

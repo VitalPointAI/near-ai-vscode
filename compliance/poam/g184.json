@@ -1,0 +1,16 @@
+{
+  "gap": "G184",
+  "id": "g184",
+  "controls": [
+    "pm-08"
+  ],
+  "ownerRole": "owner",
+  "title": "Critical infrastructure protection plan needs approved security and privacy scope",
+  "remediation": "The sponsor critical infrastructure authority approves the protection plan and identifies key resources, dependencies, security and privacy safeguards, coordination arrangements and update triggers. Retain applicable approval, review and exercise records or an authorized scope decision.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the protected infrastructure scope, approved plan, designated team and reviewed exercise or applicability decision"
+    }
+  ]
+}

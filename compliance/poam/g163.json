@@ -1,0 +1,17 @@
+{
+  "gap": "G163",
+  "id": "g163",
+  "controls": [
+    "pe-04",
+    "pe-05"
+  ],
+  "ownerRole": "owner",
+  "title": "Physical protection of transmission paths and output needs verification",
+  "remediation": "The sponsor network facilities lead and information custodian identify protected transmission and distribution lines and devices that can display or print in-scope information. Verify access controls on each route type and sample physical controls for output handling by authorized users. Document cases without local output for sponsor tailoring review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a controlled route and output inventory, approved safeguards and a representative inspection or output access exercise"
+    }
+  ]
+}

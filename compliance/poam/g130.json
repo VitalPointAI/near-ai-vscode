@@ -1,0 +1,17 @@
+{
+  "gap": "G130",
+  "id": "g130",
+  "controls": [
+    "sc-15",
+    "sc-15.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Collaborative-device activation and restricted-area disablement need evidence",
+  "remediation": "Endpoint operators and the secure-area owner inventory collaborative cameras, microphones and applications in scope. Review approved remote activation exceptions and the local usage indication. Verify remote activation is refused outside the exceptions and approved devices are disabled or removed in designated secure areas. Record the controlled test and area scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved device and area inventories, activation exception settings, observed usage indicators and restricted-area verification"
+    }
+  ]
+}

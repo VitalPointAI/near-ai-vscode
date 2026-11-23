@@ -1,0 +1,18 @@
+{
+  "gap": "G105",
+  "id": "g105",
+  "controls": [
+    "sa-04",
+    "sa-04.01",
+    "sa-04.09"
+  ],
+  "ownerRole": "shared",
+  "title": "Acquisition contracts need traceable security, privacy and interface acceptance evidence",
+  "remediation": "The contracting authority, sponsor technical lead and supplier identify assessed acquisitions and approved contract language. Trace functional, strength and assurance requirements, documentation protection, development and operating environments, assigned responsibilities and acceptance criteria to contract clauses. Keep the supplier description of control behavior and required functions, ports, protocols and services, and a reviewed acceptance sample.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed or otherwise approved contract references, a supplier control and interface specification, and a sampled acceptance disposition"
+    }
+  ]
+}

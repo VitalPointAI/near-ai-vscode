@@ -1,0 +1,16 @@
+{
+  "gap": "G145",
+  "id": "g145",
+  "controls": [
+    "ma-02"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled maintenance needs approval, media handling and post-service verification",
+  "remediation": "The deployment maintenance manager and component custodian identify assessed items and approved maintenance, repair and replacement rules. Trace a sampled job through scheduling, approval, monitoring and service history. For offsite service, verify the named authority approved removal and required information was sanitized. Verify potentially affected controls after the job and document return or replacement disposition.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the maintenance schedule, approved work order and monitoring record, applicable offsite and sanitization receipts, and post-service control checks"
+    }
+  ]
+}

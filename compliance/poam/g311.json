@@ -1,0 +1,18 @@
+{
+  "gap": "G311",
+  "id": "g311",
+  "controls": [
+    "itsp171-03.14.04",
+    "itsp171-03.14.05",
+    "itsp171-03.14.07"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated integrity rows need signed source and scope reconciliation",
+  "remediation": "The sponsor assessment authority reconciles each displayed identifier and edition against the ITSP.10.171 source, which marks these rows not allocated and withdrawn by NIST. Record a source-cited signed scope disposition per identifier, including any replacement objective reference supplied by the competent authority. Keep these paths open pending the reviewed determination.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a signed sponsor assessment decision that reconciles each identifier to the authoritative edition and records the scope disposition"
+    }
+  ]
+}

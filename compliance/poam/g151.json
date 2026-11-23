@@ -1,0 +1,17 @@
+{
+  "gap": "G151",
+  "id": "g151",
+  "controls": [
+    "ma-05",
+    "ma-05.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Maintenance personnel authorization and escorted service need verified records",
+  "remediation": "The maintenance authority and personnel security lead maintain approved personnel and organizations and verify authorization before unescorted service. For a sampled supervised job, record the qualified escort and approval, sanitization of volatile storage and removal or disconnection and custody of non-volatile media. Verify approved alternate controls and their implementation if equipment cannot be sanitized, removed or disconnected.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the controlled authorization register, a redacted eligibility or escorted service record, and a storage preparation receipt or documented alternate safeguards"
+    }
+  ]
+}

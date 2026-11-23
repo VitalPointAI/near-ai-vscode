@@ -1,0 +1,16 @@
+{
+  "gap": "G79",
+  "id": "g79",
+  "controls": [
+    "ra-05.11"
+  ],
+  "ownerRole": "shared",
+  "title": "Public reporting instructions and private vulnerability intake need an exercised handoff",
+  "remediation": "Product security and deployment intake owners verify the published instructions reach the approved private channel. Exercise a clearly marked benign report through receipt, triage and owner handoff, retaining restricted and redacted evidence. Record how deployed services receive reports or inherit the approved organizational route.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect published reporting instructions, destination verification and a redacted test receipt and handoff by the authorized owner"
+    }
+  ]
+}

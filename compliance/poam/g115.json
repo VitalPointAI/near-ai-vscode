@@ -1,0 +1,17 @@
+{
+  "gap": "G115",
+  "id": "g115",
+  "controls": [
+    "sa-15",
+    "sa-15.03"
+  ],
+  "ownerRole": "shared",
+  "title": "Developer process, tools and criticality decisions need controlled records",
+  "remediation": "The sponsor development assurance lead and supplier engineering lead approve security and privacy development requirements, tool and standard versions, options, integrity controls and change review. At designated lifecycle decision points, assess the criticality of scoped components and dependencies at the approved depth. Sample a tool or process change and a dated criticality decision linked to safeguards or follow-up.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved development process and tool baseline, a reviewed tool change, and a lifecycle criticality analysis and decision"
+    }
+  ]
+}
