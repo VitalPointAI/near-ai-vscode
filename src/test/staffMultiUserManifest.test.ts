@@ -34,6 +34,7 @@ const EM_DASH = '—';
 const IDS = Object.values(STAFF_MULTI_USER_COMMANDS);
 const REPLICA_DIR = path.join(path.resolve(__dirname, '..'), 'staff', 'replica') + path.sep;
 const WHEN = 'config.nearAi.staff.multiUserPreview';
+const SHOW_ATTRIBUTION = 'nearAi.staff.showWhoWroteThis';
 const EDITOR_HISTORY = ['nearAi.staff.undoMyChange', 'nearAi.staff.redoMyChange'];
 
 const TITLES: Readonly<Record<string, string>> = {
@@ -138,9 +139,18 @@ test('the Command Palette gates multi-user commands and hides editor history com
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const id of IDS) assert.deepEqual(palette.filter((entry) => entry.command === id), [{ command: id, when: WHEN }], id);
   const staffEntries = palette.filter((entry) => entry.command.startsWith('nearAi.staff.'));
-  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS, ...EDITOR_HISTORY].sort());
+  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS, ...EDITOR_HISTORY, SHOW_ATTRIBUTION].sort());
   for (const command of EDITOR_HISTORY) assert.deepEqual(staffEntries.filter((entry) => entry.command === command), [{ command, when: 'false' }]);
   assert.equal(JSON.stringify(manifest).split(WHEN).length - 1, IDS.length, 'each when clause names the setting exactly');
+});
+
+test('the attribution command appears only for a bound editor', () => {
+  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => command === SHOW_ATTRIBUTION), [
+    { command: SHOW_ATTRIBUTION, title: 'Staff: Show Who Wrote This', category: 'NEAR AI' }
+  ]);
+  assert.deepEqual(manifest.contributes.menus.commandPalette?.filter(({ command }) => command === SHOW_ATTRIBUTION), [
+    { command: SHOW_ATTRIBUTION, when: 'nearAi.staffBoundEditor' }
+  ]);
 });
 
 test('shared history shortcuts only resolve when the bound text editor has focus', () => {

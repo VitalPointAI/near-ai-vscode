@@ -14,6 +14,24 @@ class StubRange {
   public constructor(public readonly start: StubPosition, public readonly end: StubPosition) {}
 }
 
+type StubDecoration = {
+  range: StubRange;
+  hoverMessage: { value: string };
+  renderOptions: { after: { contentText: string } };
+};
+
+class StubQuickPick {
+  public title?: string;
+  public items: readonly { label: string; description?: string }[] = [];
+  public visible = false;
+  private hidden: (() => void) | undefined;
+  public readonly onDidAccept = (): void => undefined;
+  public readonly onDidHide = (listener: () => void): void => { this.hidden = listener; };
+  public show(): void { this.visible = true; }
+  public hide(): void { this.visible = false; this.hidden?.(); }
+  public dispose(): void { this.visible = false; this.hidden = undefined; }
+}
+
 class StubTextEdit {
   public newEol?: number;
   public constructor(public readonly range: StubRange, public readonly newText: string) {}
@@ -51,6 +69,9 @@ export interface VscodeStub {
   fireDocumentChange(document: StubTextDocument, edits: readonly DocumentEdit[], reason?: number): void;
   fireDocumentClose(document: StubTextDocument): void;
   setActiveDocument(document: StubTextDocument | undefined): void;
+  decorationTypes: Array<{ options: { borderColor?: unknown }; disposed: boolean }>;
+  decorations: Array<{ document: StubTextDocument; values: readonly StubDecoration[] }>;
+  attributionPicks: StubQuickPick[];
   documentChangeListeners(): number;
   beforeNextWorkspaceEdit(action: () => void): void;
   workspaceEdits: Array<{ uri: string; version: number; applied: boolean; edits: readonly StubTextEdit[] }>;
@@ -136,12 +157,18 @@ export function createVscodeStub(): VscodeStub {
   };
 
   const documents = new Set<StubTextDocument>();
-  type StubTextEditor = { document: StubTextDocument };
+  const decorationTypes: VscodeStub['decorationTypes'] = [];
+  const decorations: VscodeStub['decorations'] = [];
+  const attributionPicks: StubQuickPick[] = [];
+  type StubTextEditor = { document: StubTextDocument; setDecorations(type: unknown, values: readonly StubDecoration[]): void };
   let activeTextEditor: StubTextEditor | undefined;
   const activeEditorListeners = new Set<(editor: StubTextEditor | undefined) => void>();
   const setActiveDocument = (document: StubTextDocument | undefined): void => {
     if (activeTextEditor?.document === document) return;
-    activeTextEditor = document === undefined ? undefined : { document };
+    activeTextEditor = document === undefined ? undefined : {
+      document,
+      setDecorations(_type, values) { decorations.push({ document, values }); }
+    };
     for (const listener of [...activeEditorListeners]) listener(activeTextEditor);
   };
   const openDocumentListeners = new Set<(document: StubTextDocument) => void>();
@@ -173,6 +200,10 @@ export function createVscodeStub(): VscodeStub {
     StatusBarAlignment: { Left: 1, Right: 2 },
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+    MarkdownString: class MarkdownString {
+      public value = '';
+      public appendText(text: string): this { this.value += text; return this; }
+    },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
     ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2 },
     Uri: {
@@ -196,6 +227,16 @@ export function createVscodeStub(): VscodeStub {
       public dispose(): void { this.listeners.clear(); }
     },
     window: {
+      createTextEditorDecorationType(options: { borderColor?: unknown }) {
+        const type = { options, disposed: false, dispose(): void { this.disposed = true; } };
+        decorationTypes.push(type);
+        return type;
+      },
+      createQuickPick() {
+        const pick = new StubQuickPick();
+        attributionPicks.push(pick);
+        return pick;
+      },
       get activeTextEditor(): StubTextEditor | undefined { return activeTextEditor; },
       onDidChangeActiveTextEditor: (listener: (editor: StubTextEditor | undefined) => void) => listen(activeEditorListeners, listener),
       get state(): { focused: boolean; active: boolean } { return { focused: windowState.focused, active: windowState.active }; },
@@ -347,7 +388,7 @@ export function createVscodeStub(): VscodeStub {
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
     quickPickAnswers, quickPickRequests, messageOptions, openDialogAnswers, saveDialogAnswers, saveDialogRequests,
-    workspaceEdits,
+    workspaceEdits, decorationTypes, decorations, attributionPicks,
     documentChangeListeners: () => changeDocumentListeners.size,
     beforeNextWorkspaceEdit(action) { beforeWorkspaceEdit = action; },
     fireDocumentOpen(path, text) {

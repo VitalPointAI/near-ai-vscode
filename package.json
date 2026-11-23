@@ -446,6 +446,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.staff.showWhoWroteThis",
+        "title": "Staff: Show Who Wrote This",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.makeMultiUser",
         "title": "Staff: Make This Staff Project Multi-User",
         "category": "NEAR AI"
@@ -1128,6 +1133,10 @@
         {
           "command": "nearAi.staff.redoMyChange",
           "when": "false"
+        },
+        {
+          "command": "nearAi.staff.showWhoWroteThis",
+          "when": "nearAi.staffBoundEditor"
         },
         {
           "command": "nearAi.staff.makeMultiUser",
