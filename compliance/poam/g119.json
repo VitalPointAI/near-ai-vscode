@@ -1,0 +1,17 @@
+{
+  "gap": "G119",
+  "id": "g119",
+  "controls": [
+    "sc-02",
+    "sc-04"
+  ],
+  "ownerRole": "shared",
+  "title": "Management separation and shared-resource isolation need scoped evidence",
+  "remediation": "Component maintainers and deployment security owners map management functions separately from user functions and inventory shared storage, cache, compute and messaging resources. Document the effective privilege and isolation boundaries. In approved fixtures, verify an ordinary role cannot use the management path and distinct principals do not receive each other’s synthetic data through resource reuse.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect reviewed function and resource boundaries with allowed management and denied cross-role or cross-resource results"
+    }
+  ]
+}

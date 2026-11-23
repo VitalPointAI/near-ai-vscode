@@ -1,0 +1,17 @@
+{
+  "gap": "G126",
+  "id": "g126",
+  "controls": [
+    "sc-08",
+    "sc-08.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Confidentiality and integrity in transit need per-link deployment evidence",
+  "remediation": "Component maintainers and deployment communications owners map every assessed link, TLS termination, loopback exception and any end-to-end protection layer. Collect effective protocol and trust settings plus accepted and refused peer or integrity results for the selected cryptographic mechanism. Treat built-in TLS and G13 platform attestation as scoped inputs and record explicit inheritance and exceptions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect assessed flow and termination inventory with configuration and connection verification for each applicable transit protection"
+    }
+  ]
+}

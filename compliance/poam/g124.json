@@ -1,0 +1,16 @@
+{
+  "gap": "G124",
+  "id": "g124",
+  "controls": [
+    "sc-07.09"
+  ],
+  "ownerRole": "shared",
+  "title": "Outbound threat denial and responsible-identity auditing need scoped evidence",
+  "remediation": "Deployment monitoring and egress operators, with component maintainers, approve the outgoing traffic criteria and actor attribution requirement. Use harmless fixtures to verify the measured layer detects and blocks an unapproved outgoing condition and records the responsible identity or approved mapping. Review the path from decision to audit receipt and document gaps for traffic outside that layer.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved egress criteria, a benign blocked result and a redacted attributable audit receipt"
+    }
+  ]
+}

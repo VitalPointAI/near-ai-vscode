@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 113);
-  assert.equal(poam.length, 105);
+  assert.equal(gaps.length, 135);
+  assert.equal(poam.length, 127);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -64,7 +64,15 @@ test('release assessment gaps have named open paths', () => {
     ['sr-01', 'G89', '44.1'], ['sr-02', 'G89', '44.1'], ['sr-02.01', 'G89', '44.1'],
     ['sr-05', 'G90', '44.1'], ['sr-06', 'G91', '44.1'], ['sr-08', 'G92', '44.1'],
     ['sr-10', 'G93', '44.1'], ['sr-11.01', 'G94', '44.1'], ['sr-11.02', 'G95', '44.1'],
-    ['sr-12', 'G96', '44.1']
+    ['sr-12', 'G96', '44.1'],
+    ['sc-01', 'G118', '44.1'], ['sc-04', 'G119', '44.1'], ['sc-05.02', 'G120', '44.1'],
+    ['sc-07.04', 'G121', '44.1'], ['sc-07.11', 'G122', '44.1'], ['sc-07.08', 'G123', '44.1'],
+    ['sc-07.09', 'G124', '44.1'], ['sc-07.13', 'G125', '44.1'], ['sc-08.01', 'G126', '44.1'],
+    ['sc-10', 'G127', '44.1'], ['sc-12.01', 'G128', '44.1'], ['sc-13', 'G129', '44.1'],
+    ['sc-15.03', 'G130', '44.1'], ['sc-17', 'G131', '44.1'], ['sc-18.05', 'G132', '44.1'],
+    ['sc-20', 'G133', '44.1'], ['sc-22', 'G134', '44.1'], ['sc-23.03', 'G135', '44.1'],
+    ['sc-28.01', 'G136', '44.1'], ['sc-29', 'G137', '44.1'], ['sc-39', 'G138', '44.1'],
+    ['sc-45', 'G139', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);

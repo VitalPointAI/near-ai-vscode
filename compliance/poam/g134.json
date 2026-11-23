@@ -1,0 +1,17 @@
+{
+  "gap": "G134",
+  "id": "g134",
+  "controls": [
+    "sc-21",
+    "sc-22"
+  ],
+  "ownerRole": "owner",
+  "title": "Resolver validation, fault tolerance and role separation need evidence",
+  "remediation": "Deployment DNS operators inventory recursive and caching services, authorized callers and internal and external authoritative roles. Verify that the assessed resolver requests and validates authenticated responses and handles validation failures according to approved policy. Observe a controlled failure or failover and review effective separation of service roles.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect resolver settings and validation results, role and network diagrams, and a scoped DNS resilience exercise record"
+    }
+  ]
+}

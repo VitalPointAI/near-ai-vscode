@@ -1,0 +1,17 @@
+{
+  "gap": "G128",
+  "id": "g128",
+  "controls": [
+    "sc-12",
+    "sc-12.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Key lifecycle and authorized recovery need deployment evidence",
+  "remediation": "Deployment key custodians and component maintainers inventory assessed key uses and locations and approve generation, agreement, distribution, access, rotation, revocation and retirement. Review an authorized recovery exercise for applicable information after loss of a synthetic user key and prove access remains denied to an unauthorized role. Keep all key material out of evidence and retain X8’s scope for algorithm guidance.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved key lifecycle and custody matrix and redacted rotation, revocation and recovery exercise records"
+    }
+  ]
+}
