@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp src/browser/team-preview.css lib/browser/team-preview.css"
+    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/"
   },
   "dependencies": {
     "@theia/core": "1.77.0"
@@ -13,6 +13,9 @@
     {
       "frontend": "lib/browser/team-preview-frontend-module",
       "backend": "lib/node/team-preview-backend-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-welcome-module"
     }
   ]
 }

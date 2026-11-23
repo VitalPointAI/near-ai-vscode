@@ -13,6 +13,7 @@ COPY .planning/spikes/theia-team-studio/tools ./tools
 COPY .planning/spikes/theia-team-studio/extension/tsconfig.json ./extension/tsconfig.json
 COPY .planning/spikes/theia-team-studio/extension/src ./extension/src
 COPY .planning/spikes/theia-team-studio/extension/fixtures ./extension/fixtures
+COPY .planning/spikes/theia-team-studio/extension/assets ./extension/assets
 RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 # The runtime needs only the built app and its production dependencies: drop the CLI, bundlers and compilers.
 RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
