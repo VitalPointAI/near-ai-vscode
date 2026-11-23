@@ -2473,9 +2473,9 @@ release, the reviewed head of its hotfix branch) and attached to a GitHub releas
 checksum. Publishing to the Marketplace waits for an approval in GitHub, which is the owner's
 decision. Every GitHub Action is pinned to a full commit hash.
 
-The checksum shows that the VSIX published is the one the build job made; it does not protect
-the build itself. The build job installs dependencies with their install scripts and runs the
-tests, so a compromised dependency could change the VSIX before its checksum is taken.
+The checksum ties the published VSIX to the build output. The build job disables dependency
+install scripts and runs the lockfile-pinned build tools and tests. A compromised tool can
+still change the VSIX before its checksum is taken.
 
 AI agents do much of this work, and they act through the owner's GitHub account, which is a
 repository and organization admin. The Marketplace approval and the repository settings are

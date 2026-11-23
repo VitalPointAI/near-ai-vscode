@@ -66,15 +66,21 @@ test('release jobs that hold a write token or VSCE_PAT run no npm install script
     }
     assert.doesNotMatch(job, /cache:\s*npm/, `${id} must not restore an npm cache`);
   }
-  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'build, which runs npm ci with scripts, is read-only');
+  assert.doesNotMatch(all.get('build'), /contents:\s*write/, 'the build job is read-only');
   const writers = [...all].filter(([, job]) => /contents:\s*write/.test(job)).map(([id]) => id);
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
-test('root lint installs its pinned tools without running dependency lifecycle scripts', () => {
-  const lint = jobs(read('ci.yml')).get('lint');
+test('root lint and both VSIX build paths install pinned dependencies with lifecycle scripts disabled', () => {
+  const ci = jobs(read('ci.yml'));
+  const lint = ci.get('lint');
   assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
   assert.match(lint, /^\s*- run: npm run lint$/m);
+  for (const job of [ci.get('release-content'), jobs(read('release.yml')).get('build')]) {
+    assert.match(job, /^\s*- run: npm ci --ignore-scripts$/m);
+    assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m);
+    assert.match(job, /^\s*run: npm run verify:release$/m);
+  }
 });
 
 test('publish checks the VSIX checksum from the build job before it does anything else', () => {

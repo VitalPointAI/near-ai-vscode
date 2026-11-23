@@ -81,6 +81,7 @@ this page in the same PR.
 
 - The nine jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
+- Root lint and VSIX packaging install the pinned dependencies with `npm ci --ignore-scripts`.
 - A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
   each get their own concurrency group, so none is ever cancelled or replaced while queued.
 - `audit` and `secret-scan` do not install anything.
@@ -265,7 +266,7 @@ release checks and approvals run. Use the existing owner approval for publicatio
    - **build** has a read-only token. It checks that the tag matches package.json and points
      at a commit on `main` (or at the head of `hotfix/<x.y.z>`, see the hotfix section), runs
      the tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
-     release notes;
+     release notes. It installs dependencies with `npm ci --ignore-scripts`;
    - **release** creates the GitHub release named `<x.y.z>` with the VSIX, the checksum, and
      the CHANGELOG section as notes. It is the only job that can write to the repository, so it
      installs and runs nothing: it downloads the build's files and checks both checksums first;
@@ -289,12 +290,9 @@ gh api -X POST "repos/$repo/actions/runs/<run-id>/pending_deployments" \
 
 Rejecting it leaves the GitHub release in place and nothing published.
 
-What the checksum covers: it shows that the VSIX the release and publish jobs use is the one the
-build job made, so nothing can swap it on the way. It does not protect the build itself. The
-build job runs `npm ci` with dependency install scripts and runs the tests, so a compromised
-dependency could change the VSIX before its checksum is taken. That job has a read-only token
-and no secrets, which limits what such a dependency could reach, but not what it could put in
-the package.
+The release and publish jobs verify the VSIX against the checksum recorded by the build job.
+The build disables dependency install scripts and uses a read-only token. The pinned build
+tools and tests still execute, so a compromised tool can affect the output before it is hashed.
 
 ## 7. Recovery
 

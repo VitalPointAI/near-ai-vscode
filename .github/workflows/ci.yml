@@ -105,7 +105,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Package the VSIX and check what it contains
         run: npm run verify:release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
