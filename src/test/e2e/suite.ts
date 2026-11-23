@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { createServer, type Server } from 'node:http';
+import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -13,6 +13,7 @@ import type { LayoutReport } from '../../services/layoutProbe';
 import type { VerifyReport } from '../../team/eventLog';
 import { makeCanaries, scanFiles, scanFilesForDigests, scanGitObjects, scanGitObjectsForDigests } from '../helpers/teamCanary';
 import type { LabelledDigest } from '../helpers/teamCanary';
+import { fakeModelServer } from './fakeModelServer';
 
 // Runs inside the extension host. Messages are observed on both sides of the real sidebar webview,
 // so every request below goes host → webview script → host, as a user's click would.
@@ -1217,15 +1218,6 @@ function teamLiveSample(): Message {
   return { type: 'team-live', now, runs: [{ runId, title: 'team:market', running: true, startedAt: now - 95_000 }, { runId: 'run-1700000000000-e2e222', title: 'A second team running at the same time', running: true, startedAt: now - 5_000 }], runId, view, events: [] };
 }
 
-const WIDE_REPLY = [
-  'A wide reply:', '',
-  '| Model | Overall | Coding | Research | Planning | Execution | Passed | Median time | Tokens/s | Cost |',
-  '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
-  '| deepseek/deepseek-v4.1-flash-with-a-long-name | 8.1 | 8.4 | 7.9 | 8.0 | 8.2 | 90% | 41 s | 55 | $0.0123 |', '',
-  '```ts', `const veryLongLine = '${'x'.repeat(200)}';`, '```', '',
-  `See /home/someone/projects/${'deeply-nested-folder/'.repeat(8)}file.ts and https://example.com/${'segment/'.repeat(12)}page`
-].join('\n');
-
 /** A PNG of one colour, `width` by `height`, made here so the test needs no image file. */
 function solidPng(width: number, height: number): Buffer {
   const { deflateSync } = require('node:zlib') as typeof import('node:zlib');
@@ -1237,29 +1229,4 @@ function solidPng(width: number, height: number): Buffer {
   const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x60)]);
   const pixels = deflateSync(Buffer.concat(Array.from({ length: height }, () => row)));
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0))]);
-}
-
-/** A minimal OpenAI-compatible server: one model, a text reply, and a Write tool call. */
-async function fakeModelServer(): Promise<Server> {
-  const server = createServer((request, response) => {
-    let body = '';
-    request.on('data', (chunk) => { body += chunk; });
-    request.on('end', () => {
-      if (request.url === '/v1/models') { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ data: [{ id: 'fake-coder' }] })); return; }
-      if (request.url !== '/v1/chat/completions') { response.statusCode = 404; response.end('{}'); return; }
-      const { messages } = JSON.parse(body) as { messages: Array<{ role: string; content: string | null }> };
-      const last = messages[messages.length - 1];
-      const lastUser = [...messages].reverse().find((message) => message.role === 'user');
-      const delta = last.role === 'tool' ? { content: 'Done.' }
-        : String(lastUser?.content).includes('write notes') ? { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'Write', arguments: JSON.stringify({ file_path: 'notes.txt', content: 'hello from e2e\n' }) } }] }
-          : String(lastUser?.content).includes('wide reply') ? { content: WIDE_REPLY }
-            : { content: 'Hi from the fake model.' };
-      response.setHeader('content-type', 'text/event-stream');
-      response.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', choices: [{ delta }] })}\n\n`);
-      response.write(`data: ${JSON.stringify({ id: 'chatcmpl-e2e', choices: [{ delta: {}, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 3 } })}\n\n`);
-      response.end('data: [DONE]\n\n');
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return server;
 }
