@@ -128,6 +128,8 @@ export interface BoundText {
   edit(edits: readonly BoundTextEdit[]): void;
   insert(index: number, text: string): void;
   remove(index: number, length: number): void;
+  undo(): boolean;
+  redo(): boolean;
   applyRemote(bytes: Uint8Array): boolean;
   onLocalUpdate(listener: (bytes: Uint8Array) => void): () => void;
   onChange(listener: (operations: readonly TextOp[], source: 'remote') => void): () => void;
@@ -143,6 +145,7 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
   }
   const body = doc.getText(TEXT_NAME);
   const localOrigin = {};
+  const history = new (loadYjs().UndoManager)(body, { trackedOrigins: new Set([localOrigin]), captureTimeout: 500 });
   const edit = (edits: readonly BoundTextEdit[]): void => {
     const ordered = [...edits].sort((a, b) => b.offset - a.offset);
     let end = body.length;
@@ -164,9 +167,13 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
     edit,
     insert: (offset, text) => edit([{ offset, length: 0, text }]),
     remove: (offset, length) => edit([{ offset, length, text: '' }]),
+    undo: () => history.undo() !== null,
+    redo: () => history.redo() !== null,
     applyRemote: (bytes) => applyRemote(doc, bytes),
     onLocalUpdate(listener) {
-      const capture = (bytes: Uint8Array, origin: unknown): void => { if (origin === localOrigin) listener(bytes); };
+      const capture = (bytes: Uint8Array, origin: unknown): void => {
+        if (origin === localOrigin || origin === history) listener(bytes);
+      };
       doc.on('update', capture);
       return () => doc.off('update', capture);
     },
@@ -184,7 +191,10 @@ export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = [
       body.observe(notify);
       return () => body.unobserve(notify);
     },
-    destroy: () => doc.destroy()
+    destroy() {
+      history.destroy();
+      doc.destroy();
+    }
   };
 }
 

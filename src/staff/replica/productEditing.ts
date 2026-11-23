@@ -131,6 +131,16 @@ export class ProductEditor {
     this.doc.edit(edits);
   }
 
+  public undo(): boolean {
+    this.usable();
+    return this.doc.undo();
+  }
+
+  public redo(): boolean {
+    this.usable();
+    return this.doc.redo();
+  }
+
   public onRemoteChange(listener: (operations: readonly TextOp[]) => void): () => void {
     return this.doc.onChange(listener);
   }

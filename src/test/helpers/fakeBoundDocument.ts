@@ -21,6 +21,10 @@ export class FakeBoundDocument implements BoundDocument {
     this.changed(edits, false);
   }
 
+  public nativeHistory(reason: 'undo' | 'redo', ...edits: DocumentEdit[]): void {
+    this.changed(edits, false, reason);
+  }
+
   public async applyEdits(edits: readonly DocumentEdit[], expectedText: string, baseVersion: number): Promise<boolean> {
     if (this.version !== baseVersion) return false;
     this.applied += 1;
@@ -32,12 +36,12 @@ export class FakeBoundDocument implements BoundDocument {
     for (const event of this.heldEvents.splice(0)) this.emit(event);
   }
 
-  private changed(edits: readonly DocumentEdit[], defer: boolean): void {
+  private changed(edits: readonly DocumentEdit[], defer: boolean, reason?: 'undo' | 'redo'): void {
     for (const { offset, length, text } of [...edits].sort((a, b) => b.offset - a.offset)) {
       this.text = this.text.slice(0, offset) + text + this.text.slice(offset + length);
     }
     this.revision += 1;
-    const event = { edits, version: this.revision, text: this.text };
+    const event = { edits, version: this.revision, text: this.text, reason };
     if (defer) this.heldEvents.push(event);
     else this.emit(event);
   }

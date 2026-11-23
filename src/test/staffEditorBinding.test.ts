@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EditorBinding } from '../staff/replica/editorBinding';
+import { EditorBinding, HEADER_KEPT_TEXT, UNDO_OWN_TEXT } from '../staff/replica/editorBinding';
 import { acceptedUpdates, productOutput } from '../staff/replica/productFeed';
 import { ProductEditor } from '../staff/replica/productEditing';
 import { FakeBoundDocument } from './helpers/fakeBoundDocument';
@@ -13,6 +13,7 @@ const ACTOR = { kind: 'person' } as const;
 async function withEditors(run: (world: {
   documents: [FakeBoundDocument, FakeBoundDocument];
   bindings: [EditorBinding, EditorBinding];
+  notices: string[];
   exchange(from: 0 | 1): Promise<void>;
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
@@ -31,11 +32,13 @@ async function withEditors(run: (world: {
     }
     await carryThroughFake(world.devices[0], world.devices[1], stream);
     const documents: [FakeBoundDocument, FakeBoundDocument] = [new FakeBoundDocument(HEADER + 'Alpha Bravo'), new FakeBoundDocument(HEADER + 'Alpha Bravo')];
-    bindings.push(await EditorBinding.open(documents[0], targets[0]));
+    const notices: string[] = [];
+    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text) }));
     bindings.push(await EditorBinding.open(documents[1], targets[1]));
     await run({
       documents,
       bindings: [bindings[0], bindings[1]],
+      notices,
       async exchange(from) {
         const to = from === 0 ? 1 : 0;
         await bindings[from].flush();
@@ -93,5 +96,69 @@ test('a late notification of the applied remote edit stays ignored after local t
     assert.equal(await body(0), 'Alpha Bravo!?');
     assert.equal(right.text(), 'Alpha Bravo!?');
     assert.equal(a.getText(), b.getText());
+  });
+});
+
+test('shared undo and redo preserve remote typing and each append one local update', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left], exchange, body, updates }) => {
+    a.type({ offset: a.getText().length, length: 0, text: ' alpha' });
+    await exchange(0);
+    b.type({ offset: b.getText().length, length: 0, text: ' beta' });
+    await exchange(1);
+
+    assert.equal(await left.undo(), true);
+    await exchange(0);
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo beta');
+    assert.equal(a.getText(), b.getText());
+    assert.equal(await body(1), 'Alpha Bravo beta');
+    assert.equal(await updates(0), 3, 'seed, local edit and undo');
+    assert.equal(await left.undo(), false, 'remote typing and the seed are outside the local history');
+
+    assert.equal(await left.redo(), true);
+    await exchange(0);
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo alpha beta');
+    assert.equal(a.getText(), b.getText());
+    assert.equal(await body(1), 'Alpha Bravo alpha beta');
+    assert.equal(await updates(0), 4);
+    assert.equal(await updates(1), 1, 'the peer never echoes the history updates');
+  });
+});
+
+test('native undo and redo replace the editor result with this session’s own shared history', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left], exchange, notices, updates }) => {
+    a.type({ offset: a.getText().length, length: 0, text: '!' });
+    await exchange(0);
+    b.type({ offset: b.getText().length, length: 0, text: '?' });
+    await exchange(1);
+
+    a.nativeHistory('undo', { offset: a.getText().length - 1, length: 1, text: '' });
+    await exchange(0);
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo?');
+    assert.equal(a.getText(), b.getText());
+    assert.deepEqual(notices, [UNDO_OWN_TEXT]);
+
+    a.nativeHistory('redo', { offset: a.getText().length - 1, length: 1, text: '' });
+    await exchange(0);
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo!?');
+    assert.equal(a.getText(), b.getText());
+    assert.equal(await updates(0), 4, 'the native deltas were never appended');
+    assert.equal(await updates(1), 1);
+    assert.deepEqual(await left.flush(), { appended: 0, queued: 0 });
+  });
+});
+
+test('an edit spanning the header and body is restored without a shared write and body editing can continue', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [left], exchange, notices, updates }) => {
+    a.type({ offset: HEADER.length - 2, length: 5, text: 'tampered' });
+    assert.deepEqual(await left.flush(), { appended: 0, queued: 0 });
+    assert.equal(a.getText(), HEADER + 'Alpha Bravo');
+    assert.deepEqual(notices, [HEADER_KEPT_TEXT]);
+    assert.equal(await updates(0), 1, 'only the seed was written');
+
+    a.type({ offset: HEADER.length, length: 0, text: '• ' });
+    await exchange(0);
+    assert.equal(a.getText(), HEADER + '• Alpha Bravo');
+    assert.equal(a.getText(), b.getText());
+    assert.equal(await updates(0), 2);
   });
 });
