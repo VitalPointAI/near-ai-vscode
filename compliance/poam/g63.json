@@ -1,0 +1,24 @@
+{
+  "gap": "G63",
+  "id": "g63",
+  "controls": [
+    "ac-03.09"
+  ],
+  "ownerRole": "shared",
+  "title": "Controlled information release needs destination and approval evidence",
+  "remediation": "The sponsor and information release owner define what may leave the system, which receiving systems are eligible and which safeguards and validation they require. Operators and component maintainers verify configured release routes and content validation for each applicable channel. Retain approved policies, receiver safeguard evidence and redacted records of releases allowed and refused for content or destination. Use model-route and export eligibility evidence only for the routes it covers.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve release boundaries and collect recipient safeguard and release validation evidence for each in-scope channel"
+    },
+    {
+      "phase": "70",
+      "title": "Where model routes are assessed, verify exact-release gate decisions for permitted and refused routing under signed policy"
+    },
+    {
+      "phase": "45",
+      "title": "Where export-controlled material is assessed, verify the approved endpoint decision and corresponding transfer refusal or allowance"
+    }
+  ]
+}

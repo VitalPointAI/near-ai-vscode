@@ -1,0 +1,21 @@
+{
+  "gap": "G65",
+  "id": "g65",
+  "controls": [
+    "ac-19",
+    "ac-19.05"
+  ],
+  "ownerRole": "shared",
+  "title": "Managed mobile access and encryption need deployment evidence",
+  "remediation": "The sponsor and endpoint management owner identify and authorize organization-controlled mobile devices, including use outside controlled areas, and approve the required full-device or container encryption. Collect the approved fleet and enrollment scope, effective device management and encryption settings, and redacted tests showing that conforming devices can connect and unapproved or nonconforming devices are refused. Record inheritances and reviewed exclusions. Where collectors are deployed, use their enrollment records only for their device binding.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved mobile connection scope, managed device and encryption reports, and compliant and noncompliant access results"
+    },
+    {
+      "phase": "91",
+      "title": "If device collectors are in scope, verify deployed enrollment and binding evidence for the applicable devices"
+    }
+  ]
+}

@@ -595,6 +595,105 @@
     },
     {
       "controls": [
+        "ac-01"
+      ],
+      "id": "G58",
+      "ownerRole": "owner",
+      "poam": "g58",
+      "remediation": "The deployment sponsor designates the access control policy owner and approves the policy and operating procedures for the assessed system. The policy owner records scope, responsibilities, coordination and distribution, and sets review intervals and triggers. Retain the signed version, named owner, dissemination record and schedule and samples for policy and procedure review.",
+      "title": "Deployment access control policy needs approval and evidence"
+    },
+    {
+      "controls": [
+        "ac-02.01",
+        "ac-02.02",
+        "ac-02.03",
+        "ac-02.04",
+        "ac-02.10",
+        "ac-02.13"
+      ],
+      "id": "G59",
+      "ownerRole": "shared",
+      "poam": "g59",
+      "remediation": "The deployment identity owner approves managed account types, automated lifecycle mechanisms, expiry and inactivity limits, high-risk criteria and disablement deadlines. Using authorized test identities, verify temporary and emergency expiry, disablement for expiration, inactivity, separation, policy violation and significant risk, and automatic auditing of creation, modification, enabling, disabling and removal. Retain redacted event and timing evidence. The catalogue incorporates shared-account credential changes into AC-02. Reconcile the selected AC-02(10) row with the sponsor, recording AC-02 evidence for any shared accounts and an approved tailoring decision.",
+      "title": "Account automation, disablement and audit need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-02.07"
+      ],
+      "id": "G60",
+      "ownerRole": "shared",
+      "poam": "g60",
+      "remediation": "The deployment identity owner approves the role-based or attribute-based scheme and the authorities who assign privileged accounts. Account operators inventory applicable privileged assignments and monitor changes. Collect redacted configuration, sampled approved assignments, change-monitoring records and timely revocation evidence. Verify that a removed assignment cannot use the privileged action.",
+      "title": "Privileged account assignment and removal need monitoring evidence"
+    },
+    {
+      "controls": [
+        "ac-03.02"
+      ],
+      "id": "G61",
+      "ownerRole": "shared",
+      "poam": "g61",
+      "remediation": "The deployment sponsor and privilege owners identify actions with significant impact that require separate authorized approvers. Implement or verify enforcement for those actions and retain the approved action and approver mapping. Exercise denial with one approver, denial when the same identity attempts both approvals, and success with two eligible approvers. Where relevant, use the product gate's per-action decision evidence as input and verify the second independent approval at the assessed enforcement boundary.",
+      "title": "Dual authorization for designated actions needs evidence"
+    },
+    {
+      "controls": [
+        "ac-03.04"
+      ],
+      "id": "G62",
+      "ownerRole": "shared",
+      "poam": "g62",
+      "remediation": "The sponsor and access policy owner identify the subjects, objects and discretionary access policy in scope. Component and deployment operators verify how authorized holders may share information, delegate privileges, set or change attributes, or change access rules, where the policy permits those actions. Collect the reviewed policy and exact-release allowed and refused results. Include the staff roster and cell access rules only for the component and operations those rules govern.",
+      "title": "Discretionary access decisions need scoped permission evidence"
+    },
+    {
+      "controls": [
+        "ac-03.09"
+      ],
+      "id": "G63",
+      "ownerRole": "shared",
+      "poam": "g63",
+      "remediation": "The sponsor and information release owner define what may leave the system, which receiving systems are eligible and which safeguards and validation they require. Operators and component maintainers verify configured release routes and content validation for each applicable channel. Retain approved policies, receiver safeguard evidence and redacted records of releases allowed and refused for content or destination. Use model-route and export eligibility evidence only for the routes it covers.",
+      "title": "Controlled information release needs destination and approval evidence"
+    },
+    {
+      "controls": [
+        "ac-18",
+        "ac-18.01",
+        "ac-18.03",
+        "ac-18.04"
+      ],
+      "id": "G64",
+      "ownerRole": "shared",
+      "poam": "g64",
+      "remediation": "The sponsor authorizes each permitted wireless access type and appoints the wireless network and endpoint administrators. Collect the approved inventory and configuration requirements, effective encryption and required user or device authentication settings, pre-issuance evidence for disabled unused radios and the authorized wireless configurator roles. Exercise admission and refusal for the approved boundary and verify that unauthorized roles cannot change wireless settings.",
+      "title": "Wireless access and configuration restrictions need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-19",
+        "ac-19.05"
+      ],
+      "id": "G65",
+      "ownerRole": "shared",
+      "poam": "g65",
+      "remediation": "The sponsor and endpoint management owner identify and authorize organization-controlled mobile devices, including use outside controlled areas, and approve the required full-device or container encryption. Collect the approved fleet and enrollment scope, effective device management and encryption settings, and redacted tests showing that conforming devices can connect and unapproved or nonconforming devices are refused. Record inheritances and reviewed exclusions. Where collectors are deployed, use their enrollment records only for their device binding.",
+      "title": "Managed mobile access and encryption need deployment evidence"
+    },
+    {
+      "controls": [
+        "ac-22"
+      ],
+      "id": "G66",
+      "ownerRole": "shared",
+      "poam": "g66",
+      "remediation": "The sponsor designates authorized public publishers and names the privacy or security reviewer and the operator who can remove content. Document the assessed public channels and capture publisher authorization and training, a prepublication review record, the recurring review schedule and completed sample, and an approved removal exercise or a real redacted removal record. Identify the review and release process for each public channel in scope.",
+      "title": "Public posting authority and content review need operating evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
