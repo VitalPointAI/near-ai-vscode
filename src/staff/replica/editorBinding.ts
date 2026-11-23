@@ -31,13 +31,19 @@ export interface BoundProduct extends EditTarget {
 
 export interface BindingHooks extends EditorHooks {
   notice?(text: string): void;
+  log?(line: string): void;
 }
 
 export const HEADER_KEPT_TEXT = 'The header is kept by the project. Change it from the Staff Room.';
 export const UNDO_OWN_TEXT = 'Undo in a shared product removes only your own changes.';
+export const RESYNC_LOG_LINE = 'Resynchronized the shared product editor.';
 const MISMATCH_TEXT = 'The editor no longer matches the shared product. Close the product and open it again.';
 const HEADER_NOTICE_INTERVAL_MS = 500;
 const BATCH_MS = 500;
+const RESYNC_WINDOW_MS = 60_000;
+const MAX_RESYNCS = 5;
+
+class ResyncStopped extends Error {}
 
 const lf = (text: string): string => text.replaceAll('\r\n', '\n');
 
@@ -86,6 +92,7 @@ interface ExpectedEdit {
 
 export class EditorBinding {
   private readonly expected: ExpectedEdit[] = [];
+  private readonly resyncs: number[] = [];
   private readonly disconnect: () => void;
   private header: string;
   // Captured input may still contain CRLF until the last queued edit is rendered.
@@ -106,6 +113,7 @@ export class EditorBinding {
     const canonical = this.header + editor.text();
     if (actual !== canonical && lf(actual) !== canonical) throw new Error(MISMATCH_TEXT);
     this.disconnect = document.onDidChange((change) => {
+      if (this.failure) return;
       const index = change.reason === undefined ? this.expected.findIndex((item) => item.text === change.text &&
         (item.version === undefined ? change.version > item.baseVersion : change.version === item.version)) : -1;
       const echo = index < 0 ? undefined : this.expected.splice(index, 1)[0];
@@ -143,7 +151,7 @@ export class EditorBinding {
     return this.enqueue(() => {
       this.cancelBatchTimer();
       return this.editor.flushBatch();
-    });
+    }, true);
   }
 
   /** Reads accepted updates this editor has yet to apply, including those placed earlier by a refold. */
@@ -161,9 +169,11 @@ export class EditorBinding {
     const feed = await this.editor.unappliedUpdates();
     if (this.document.version !== this.version) return this.version;
     const body = this.editor.text();
-    if (this.document.getText() !== this.header + body) throw new Error(MISMATCH_TEXT);
     const header = lf(this.product.header());
-    if (header !== this.header) {
+    if (this.document.getText() !== this.header + body) {
+      await this.resync(header + body);
+      this.header = header;
+    } else if (header !== this.header) {
       await this.applyRemoteEdits([{ offset: 0, length: this.header.length, text: header }], header + body);
       this.header = header;
     }
@@ -215,14 +225,14 @@ export class EditorBinding {
     }, BATCH_MS);
   }
 
-  private enqueue<T>(task: () => T | Promise<T>): Promise<T> {
+  private enqueue<T>(task: () => T | Promise<T>, persistCaptured = false): Promise<T> {
     if (this.closing) return Promise.reject(new Error(MISMATCH_TEXT));
     const result = this.pending.then(() => {
-      if (this.failure) throw this.failure;
+      if (this.failure && !(persistCaptured && this.failure instanceof ResyncStopped)) throw this.failure;
       return task();
     });
     this.pending = result.then(() => undefined, (error: unknown) => {
-      this.failure = error instanceof Error ? error : new Error(MISMATCH_TEXT);
+      this.failure ??= error instanceof Error ? error : new Error(MISMATCH_TEXT);
     });
     return result;
   }
@@ -302,15 +312,44 @@ export class EditorBinding {
   }
 
   private async applyRemoteEdits(edits: readonly DocumentEdit[], text: string, lineEndings?: 'lf'): Promise<void> {
-    if (edits.length === 0) throw new Error(MISMATCH_TEXT);
+    const version = this.version;
+    if (edits.length > 0 && await this.tryApplyEdits(edits, text, lineEndings)) return;
+    // A dropped write is safe to repair only while no concurrent user edit has advanced the version.
+    if (this.document.version !== version) this.stopResync();
+    await this.resync(text, lineEndings);
+  }
+
+  private async resync(text: string, lineEndings?: 'lf'): Promise<void> {
+    const actual = this.document.getText();
+    if (actual === text) return;
+    const now = performance.now();
+    while (this.resyncs.length > 0 && this.resyncs[0] <= now - RESYNC_WINDOW_MS) this.resyncs.shift();
+    if (this.resyncs.length >= MAX_RESYNCS) this.stopResync();
+    this.resyncs.push(now);
+    const offset = actual.startsWith(this.header) && text.startsWith(this.header) ? this.header.length : 0;
+    const applied = await this.tryApplyEdits([{ offset, length: actual.length - offset, text: text.slice(offset) }], text, lineEndings);
+    if (!applied) this.stopResync();
+    this.hooks.log?.(RESYNC_LOG_LINE);
+  }
+
+  private stopResync(): never {
+    this.hooks.notice?.(MISMATCH_TEXT);
+    throw new ResyncStopped(MISMATCH_TEXT);
+  }
+
+  private async tryApplyEdits(edits: readonly DocumentEdit[], text: string, lineEndings?: 'lf'): Promise<boolean> {
     const expected: ExpectedEdit = { text, baseVersion: this.version };
     this.expected.push(expected);
     const applied = await this.document.applyEdits(edits, text, this.version, lineEndings);
-    if (!applied) throw new Error(MISMATCH_TEXT);
     // An event may arrive before or after the apply promise. If it has not
     // arrived yet, capture the version it should report for this exact text.
     if (expected.version === undefined && this.document.getText() === text) expected.version = this.document.version;
-    if (expected.version === undefined || expected.version <= expected.baseVersion) throw new Error(MISMATCH_TEXT);
+    if (!applied || expected.version === undefined || expected.version <= expected.baseVersion) {
+      const index = this.expected.indexOf(expected);
+      if (index >= 0) this.expected.splice(index, 1);
+      return false;
+    }
     this.version = expected.version;
+    return true;
   }
 }

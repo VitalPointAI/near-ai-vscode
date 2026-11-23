@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EditorBinding, HEADER_KEPT_TEXT, UNDO_OWN_TEXT } from '../staff/replica/editorBinding';
+import { EditorBinding, HEADER_KEPT_TEXT, RESYNC_LOG_LINE, UNDO_OWN_TEXT } from '../staff/replica/editorBinding';
 import { acceptedUpdates, productOutput } from '../staff/replica/productFeed';
 import { ProductEditor } from '../staff/replica/productEditing';
 import { FakeBoundDocument } from './helpers/fakeBoundDocument';
@@ -14,8 +14,9 @@ async function withEditors(run: (world: {
   documents: [FakeBoundDocument, FakeBoundDocument];
   bindings: [EditorBinding, EditorBinding];
   notices: string[];
+  logs: string[];
   setHeader(value: string): void;
-  exchange(from: 0 | 1): Promise<void>;
+  exchange(from: 0 | 1, beforeRefresh?: () => void): Promise<void>;
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
 }) => Promise<void>, options: { onLeftAppended?: () => void; crlf?: boolean; seedBody?: string } = {}): Promise<void> {
@@ -38,17 +39,21 @@ async function withEditors(run: (world: {
     const initial = options.crlf ? canonical.replaceAll('\n', '\r\n') : canonical;
     const documents: [FakeBoundDocument, FakeBoundDocument] = [new FakeBoundDocument(initial), new FakeBoundDocument(initial)];
     const notices: string[] = [];
-    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text), onAppended: options.onLeftAppended }));
-    bindings.push(await EditorBinding.open(documents[1], targets[1]));
+    const logs: string[] = [];
+    const hooks = { notice: (text: string) => notices.push(text), log: (line: string) => logs.push(line) };
+    bindings.push(await EditorBinding.open(documents[0], targets[0], { ...hooks, onAppended: options.onLeftAppended }));
+    bindings.push(await EditorBinding.open(documents[1], targets[1], hooks));
     await run({
       documents,
       bindings: [bindings[0], bindings[1]],
       notices,
+      logs,
       setHeader(value) { header = value; },
-      async exchange(from) {
+      async exchange(from, beforeRefresh) {
         const to = from === 0 ? 1 : 0;
         await bindings[from].flush();
         await carryThroughFake(world.devices[from], world.devices[to], stream);
+        beforeRefresh?.();
         await bindings[to].refresh();
       },
       async body(at) { return productOutput((await world.devices[at].project.state()).fold, stream, PRODUCT)?.text; },
@@ -226,5 +231,66 @@ test('a new generated header replaces only the header while body edits are pendi
     assert.deepEqual(notices, []);
     assert.equal(await updates(0), 2);
     assert.equal(await updates(1), 0);
+  });
+});
+
+test('one dropped remote edit is repaired once without discarding a queued local edit or echoing', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [, right], exchange, updates, logs }) => {
+    b.dropNextApply = true;
+    a.type({ offset: a.getText().length, length: 0, text: ' Remote' });
+    await exchange(0, () => b.type({ offset: HEADER.length, length: 0, text: 'Pending ' }));
+
+    const expected = HEADER + 'Pending Alpha Bravo Remote';
+    assert.equal(b.getText(), expected);
+    assert.equal(b.applied, 1);
+    assert.deepEqual(b.lastAppliedEdits, [{ offset: HEADER.length, length: 'Pending Alpha Bravo'.length, text: 'Pending Alpha Bravo Remote' }]);
+    assert.deepEqual(logs, [RESYNC_LOG_LINE]);
+    assert.doesNotMatch(logs[0], /[\r\n]|Pending|Alpha|Bravo|Remote|bridge-status/);
+    await right.refresh();
+    await exchange(1);
+    assert.equal(a.getText(), expected);
+    assert.equal(await updates(1), 1);
+    assert.deepEqual(logs, [RESYNC_LOG_LINE]);
+  });
+});
+
+test('a sixth mismatch within a minute stops the binding but allows captured edits to flush', async () => {
+  await withEditors(async ({ documents: [a, b], bindings: [, right], exchange, body, logs, notices }) => {
+    for (let i = 0; i < 5; i += 1) {
+      b.dropNextApply = true;
+      a.type({ offset: a.getText().length, length: 0, text: '!' });
+      await exchange(0);
+      assert.equal(b.getText(), a.getText());
+    }
+    const stopped = /The editor no longer matches the shared product/;
+    b.dropNextApply = true;
+    a.type({ offset: a.getText().length, length: 0, text: '?' });
+    await assert.rejects(exchange(0, () => b.type({ offset: HEADER.length, length: 0, text: 'Pending ' })), stopped);
+    assert.deepEqual(logs, Array(5).fill(RESYNC_LOG_LINE));
+    assert.equal(b.applied, 5);
+    assert.match(notices[0], stopped);
+    assert.equal(notices.length, 1);
+
+    b.type({ offset: HEADER.length, length: 0, text: 'Ignored ' });
+    await assert.rejects(right.refresh(), stopped);
+    assert.equal((await right.flush()).queued, 0);
+    assert.equal(await body(1), 'Pending Alpha Bravo!!!!!?');
+  });
+});
+
+test('a newer local document survives a conflicting remote write', async (t) => {
+  await withEditors(async ({ documents: [a, b], exchange, updates, logs }) => {
+    const apply = b.applyEdits.bind(b);
+    t.mock.method(b, 'applyEdits', (...args: Parameters<typeof apply>) => {
+      b.type({ offset: HEADER.length, length: 0, text: 'Newer ' });
+      return apply(...args);
+    }, { times: 1 });
+
+    a.type({ offset: a.getText().length, length: 0, text: ' Remote' });
+    await assert.rejects(exchange(0), /The editor no longer matches the shared product/);
+    assert.equal(b.getText(), HEADER + 'Newer Alpha Bravo');
+    assert.equal(b.applied, 0);
+    assert.equal(await updates(1), 0);
+    assert.deepEqual(logs, []);
   });
 });
