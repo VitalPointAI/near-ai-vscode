@@ -472,6 +472,19 @@ test('work-area creation refuses a dismissed confirmation, a changed root, a sub
   } finally { host.close(); }
 });
 
+test('Project Setup does not apply a choice after the workspace selection changes', async () => {
+  reset();
+  const project = await emptyProject();
+  const other = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: project } }, { uri: { fsPath: other } }];
+  quickPick = (items) => {
+    vscodeStub.workspace.workspaceFolders.reverse();
+    return items.find((item) => String(item.label).includes('project team'));
+  };
+  assert.equal(await menu.showSetupMenu(host), undefined);
+  assert.deepEqual(executed, [], 'the reviewed step belongs to the original project');
+});
+
 test('a step registered through the extension point shows in the Project Setup menu, reading a registered fact', async () => {
   reset();
   vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: await emptyProject() } }];
