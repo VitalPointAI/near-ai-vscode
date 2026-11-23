@@ -24,6 +24,7 @@ export interface DatagramLike {
   on(event: 'message', listener: (message: Uint8Array) => void): void;
   addListener?(event: 'error', listener: (error: Error) => void): void;
   close(): void;
+  setMulticastTTL?(ttl: number): number;
   address(): { port: number };
 }
 
@@ -112,6 +113,8 @@ export async function browseAnnounced(input: BrowseInput): Promise<readonly Serv
         if (finished) return;
         if (clock.now() >= deadline) return finish();
         try {
+          // Keep the announcement request on the local link.
+          datagram.setMulticastTTL?.(1);
           datagram.send(question, MDNS_PORT, MDNS_GROUP, error => {
             if (error) finish();
           });

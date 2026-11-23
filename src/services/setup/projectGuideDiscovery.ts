@@ -1,3 +1,4 @@
+import { createSocket } from 'node:dgram';
 import { readGuidePolicy, type GuidePolicy } from '../../domain/setup/policy';
 import type { GuideDiscoveryPort } from '../../domain/setup/screens';
 import type { GateHost } from '../../gate/host';
@@ -6,8 +7,8 @@ import { createGuideDiscovery, type GuideDiscoveryDeps } from './guideDiscovery'
 import { readHostNetworkFacts } from './networkFacts';
 
 export type ProjectDiscoveryTransports =
-  Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind' | 'networkFacts'> &
-  Partial<Pick<GuideDiscoveryDeps, 'networkFacts'>>;
+  Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind' | 'networkFacts' | 'createSocket'> &
+  Partial<Pick<GuideDiscoveryDeps, 'networkFacts' | 'createSocket'>>;
 
 interface DiscoveryAttempt {
   readonly controller: AbortController;
@@ -41,6 +42,7 @@ export function createProjectGuideDiscovery(deps: {
   const discovery = createGuideDiscovery({
     ...deps.transports, audit: deps.audit, editor: deps.editor, hostKind: deps.hostKind,
     networkFacts: deps.transports.networkFacts ?? readHostNetworkFacts,
+    createSocket: deps.transports.createSocket ?? (() => createSocket('udp4')),
     policy: () => authority()?.policy ?? unavailable,
     endpoints: () => authority()?.snapshot.route.endpoints ?? [],
     get organization() {

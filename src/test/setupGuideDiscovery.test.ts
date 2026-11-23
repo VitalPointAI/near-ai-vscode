@@ -170,7 +170,7 @@ test('project discovery transports use current signed Gate authority and the cap
   run.abort();
 });
 
-test('project discovery reads local network configuration only after signed scope permits it', async (t) => {
+test('project discovery reads local network configuration and opens local multicast only after signed scope permits it', async (t) => {
   const { host, root, deps, audit } = await setup();
   const fake = fixture({}, FOUND);
   const reads: string[] = [];
@@ -187,7 +187,20 @@ test('project discovery reads local network configuration only after signed scop
   assert.ok(platform);
   Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
   t.after(() => Object.defineProperty(process, 'platform', platform));
-  const { networkFacts: _fixtureReader, ...transports } = fake.deps;
+  const datagrams = require('node:dgram') as typeof import('node:dgram');
+  const socketCalls: string[] = [];
+  t.mock.method(datagrams, 'createSocket', (family: string) => {
+    assert.equal(family, 'udp4');
+    socketCalls.push('open');
+    const socket = fake.deps.createSocket();
+    return {
+      ...socket,
+      setMulticastTTL(ttl: number) { socketCalls.push('ttl:' + ttl); return ttl; },
+      send(...args: Parameters<typeof socket.send>) { socketCalls.push('send'); socket.send(...args); },
+      close() { socketCalls.push('close'); socket.close(); },
+    };
+  });
+  const { networkFacts: _fixtureReader, createSocket: _fixtureSocket, ...transports } = fake.deps;
   const guide = createProjectGuideDiscovery({
     gate: host, root, currentRoot: () => root, readPolicy: deps.readPolicy, clock: () => at, audit,
     transports,
@@ -197,6 +210,7 @@ test('project discovery reads local network configuration only after signed scop
   await guide.refresh(run.signal);
   assert.deepEqual(reads, []);
   assert.deepEqual(fake.calls, []);
+  assert.deepEqual(socketCalls, []);
 
   const personal = host.policyLayers().personal;
   assert.ok(personal);
@@ -206,6 +220,7 @@ test('project discovery reads local network configuration only after signed scop
   }), personal.hash);
   await guide.refresh(run.signal);
   assert.deepEqual(reads, ['/proc/net/route', '/etc/resolv.conf']);
+  assert.deepEqual(socketCalls, ['open', 'ttl:1', 'send', 'close']);
   assert.equal(guide.rows()[0]?.host, FOUND);
 });
 

@@ -92,6 +92,7 @@ function guardedDatagram(socket: DatagramLike, permitted: () => boolean): Datagr
     addListener: socket.addListener?.bind(socket),
     address: socket.address.bind(socket),
     close: socket.close.bind(socket),
+    setMulticastTTL: socket.setMulticastTTL?.bind(socket),
     send(bytes, port, address, callback) {
       if (!permitted()) {
         callback?.(new Error('Discovery authority changed before sending'));
