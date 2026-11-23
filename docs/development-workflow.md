@@ -81,7 +81,7 @@ this page in the same PR.
 
 - The nine jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
-- Root lint and VSIX packaging install the pinned dependencies with `npm ci --ignore-scripts`.
+- Root lint, root tests and VSIX packaging install the pinned dependencies with `npm ci --ignore-scripts`.
 - A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
   each get their own concurrency group, so none is ever cancelled or replaced while queued.
 - `audit` and `secret-scan` do not install anything.

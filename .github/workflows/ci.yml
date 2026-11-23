@@ -53,7 +53,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Run tests and write the evidence report
         env:
           NEAR_AI_TEST_REPORT: test-report-root.ndjson

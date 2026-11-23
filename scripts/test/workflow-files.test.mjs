@@ -71,11 +71,13 @@ test('release jobs that hold a write token or VSCE_PAT run no npm install script
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
-test('root lint and both VSIX build paths install pinned dependencies with lifecycle scripts disabled', () => {
+test('root lint, root tests and both VSIX build paths disable dependency lifecycle scripts', () => {
   const ci = jobs(read('ci.yml'));
   const lint = ci.get('lint');
   assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
   assert.match(lint, /^\s*- run: npm run lint$/m);
+  assert.match(ci.get('test'), /^\s*- run: npm ci --ignore-scripts$/m);
+  assert.match(ci.get('test'), /^\s*run: npm test$/m);
   for (const job of [ci.get('release-content'), jobs(read('release.yml')).get('build')]) {
     assert.match(job, /^\s*- run: npm ci --ignore-scripts$/m);
     assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m);
