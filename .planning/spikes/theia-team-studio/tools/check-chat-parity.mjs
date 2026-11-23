@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access } from 'node:fs/promises';
+import { access, mkdtemp } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ const require = createRequire(import.meta.url);
 const puppeteer = require(puppeteerPath ? path.resolve(puppeteerPath) : 'puppeteer');
 const fixture = fileURLToPath(new URL('../../../../dist/test/e2e/fakeModelServer.js', import.meta.url));
 await access(fixture).catch(() => { throw new Error('Run npm run compile from the repository root first'); });
+const browserData = await mkdtemp(fileURLToPath(new URL('../../../../dist/theia-chat-browser-', import.meta.url)));
 const label = randomUUID();
 const network = `sterling-chat-test-${label}`;
 const container = `sterling-chat-workbench-${label}`;
@@ -22,8 +23,9 @@ const docker = promisify(execFile);
 const host = 'sterling-chat-test.localhost';
 const origin = `http://${host}:3000`;
 const prompt = 'Synthetic browser smoke test';
-const partial = 'Hi from the ';
-const reply = partial + 'fake model.';
+const partial = 'Hi from the';
+const reply = `${partial} fake model.`;
+const replyGapMs = 2200;
 const mockUrl = 'http://127.0.0.1:11434/v1';
 
 // The container has no host workspace or credentials, no egress and no published port.
@@ -31,13 +33,19 @@ await docker('docker', ['network', 'create', '--internal', network]);
 let browser;
 try {
   await docker('docker', [
-    'run', '--detach', '--rm', '--pull=never', '--name', container, '--network', network,
+    'run', '--detach', '--pull=never', '--name', container, '--network', network,
     '--mount', `type=bind,source=${path.resolve(pluginDirectory)},target=/plugins,readonly`,
     '--mount', `type=bind,source=${fixture},target=/chat-fixture.js,readonly`,
     '--env', 'THEIA_DEFAULT_PLUGINS=local-dir:///plugins', image, 'sh', '-ec',
     `mkdir -p "$HOME/.theia"
 printf '%s\n' '{"security.workspace.trust.startupPrompt":"never"}' > "$HOME/.theia/settings.json"
-node -e 'require("/chat-fixture.js").fakeModelServer({ port: 11434, replyGapMs: 2200 })' &
+node -e 'require("/chat-fixture.js").fakeModelServer({ port: 11434, replyGapMs: ${replyGapMs} }).then(server => {
+  server.on("request", (request, response) => {
+    if (request.url === "/v1/chat/completions") response.once("close", () => {
+      if (!response.writableFinished) console.log("MOCK_STREAM_CANCELLED");
+    });
+  });
+})' &
 exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --port 3000 \
   --session-preference nearAi.autoInstallGsd=false --session-preference nearAi.agent.saveTranscripts=true`
   ]);
@@ -55,6 +63,7 @@ exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --por
   }
   browser = await puppeteer.launch({
     executablePath: browserPath,
+    userDataDir: browserData,
     args: [
       '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-networking', '--no-proxy-server',
       `--host-resolver-rules=MAP ${host} ${containerAddress}, MAP *.webview.${host} ${containerAddress}, MAP * ~NOTFOUND`
@@ -116,9 +125,12 @@ exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --por
     await page.keyboard.up('Shift');
     await page.keyboard.up('Control');
     const input = await page.waitForSelector('.quick-input-widget input', { visible: true, timeout: 8_000 });
-    await input.focus();
-    await page.keyboard.type(title);
+    await input.evaluate((element, command) => {
+      element.value = `>${command}`;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    }, title);
     await page.waitForFunction((name) => document.querySelector('.quick-input-list')?.textContent.includes(name), { timeout: 8_000 }, title.split(': ').at(-1));
+    await input.focus();
     await page.keyboard.press('Enter');
   };
   page.on('pageerror', (error) => console.error('Browser error:', error.message));
@@ -137,12 +149,16 @@ exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --por
   await chat.waitForFunction(() => document.querySelector('#profile')?.dataset.state === 'ready' && document.querySelector('#model')?.value === 'fake-coder', { timeout: 15_000 });
   console.log('PASS  Setup listed the mock model without a key');
   // Activate the form within its own frame so the automation focuses the composer, not the outer dock.
-  await chat.$eval('#input', (element, text) => {
-    element.value = text;
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-  }, prompt);
-  await chat.$eval('#send', element => element.click());
-  const waitForReply = (text) => chat.waitForFunction((part) => [...document.querySelectorAll('.turn.assistant')].some((turn) => turn.textContent.trim().startsWith(part) && (part !== 'Hi from the' || !turn.textContent.includes('fake model.'))), { timeout: 12_000 }, text).catch(async (error) => {
+  const send = async (message) => {
+    await chat.$eval('#input', (element, text) => {
+      element.value = text;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    }, message);
+    await chat.$eval('#send', (element) => element.click());
+  };
+  const waitForReply = (text) => chat.waitForFunction((part) =>
+    [...document.querySelectorAll('.turn.assistant')].at(-1)?.firstElementChild?.textContent.trim() === part,
+  { timeout: 12_000 }, text).catch(async (error) => {
     console.error('Chat DOM:', await chat.evaluate(() => ({
       input: document.querySelector('#input')?.value,
       send: document.querySelector('#send')?.disabled,
@@ -152,9 +168,29 @@ exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --por
     })));
     throw error;
   });
-  await waitForReply(partial.trim());
+  await send(prompt);
+  await waitForReply(partial);
   await waitForReply(reply);
   console.log('PASS  Chat sent the message and rendered both stream chunks');
+
+  await chat.waitForSelector('#stop[hidden]');
+  await chat.$eval('#new-conversation', (element) => element.click());
+  await chat.waitForFunction(() => !document.querySelector('.turn.user'));
+  await send('Synthetic reply to stop');
+  await waitForReply(partial);
+  await chat.$eval('#stop:not([hidden])', (element) => element.click());
+  await chat.waitForFunction(() => document.querySelector('#stop').hidden &&
+    [...document.querySelectorAll('.turn.assistant')].at(-1)?.querySelector('.meta')?.textContent === 'Stopped',
+  { timeout: 8_000 });
+  // The mock would have produced its second chunk again by now if the stream were still running.
+  await new Promise((resolve) => setTimeout(resolve, replyGapMs + 200));
+  const stoppedReply = await chat.evaluate(() =>
+    [...document.querySelectorAll('.turn.assistant')].at(-1)?.firstElementChild?.textContent.trim());
+  assert.equal(stoppedReply, partial, 'The stopped reply kept its partial text without the delayed chunk');
+  const providerLog = await docker('docker', ['logs', container]);
+  assert.match(providerLog.stdout, /^MOCK_STREAM_CANCELLED$/m, 'The mock detected the HTTP response close before it finished');
+  console.log('PASS  Chat Stop cancelled the stream and kept the partial reply');
+
   await page.reload({ waitUntil: 'domcontentloaded' });
   chat = await openChat();
   await command('SovAI: Show Chat History');
@@ -175,7 +211,9 @@ exec node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --por
   try {
     await browser?.close();
   } finally {
-    await docker('docker', ['stop', '--timeout', '2', container]).catch(() => {});
-    await docker('docker', ['network', 'rm', network]).catch(() => {});
+    await docker('docker', ['stop', '--timeout', '2', container]).catch((error) => {
+      console.error(`Could not stop ${container}: ${error.message}`);
+    });
+    console.log(`Retained test resources\nContainer ${container}\nNetwork ${network}\nBrowser profile ${browserData}`);
   }
 }
