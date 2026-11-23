@@ -10,7 +10,7 @@ import { CLEARANCE_SELF_ASSERTED_TEXT } from '../domain/gate/labels';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicySectionId } from '../domain/gate/proposal';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DRAFT_TEXT, gateDir, parsePolicyDraft } from '../gate/bundleStore';
+import { BundleStoreError, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, PersonalAuthorityError, STALE_DRAFT_TEXT, gateDir, parsePolicyDraft } from '../gate/bundleStore';
 import type { GateHost } from '../gate/host';
 import { loadDeviceIdentity } from '../team/identity';
 import type { SecretStorageLike } from './auth';
@@ -80,14 +80,15 @@ export function policyEditorDeps(host: GateHost, hooks: PolicyEditorHooks): { re
     state: () => editorStateOf(host, identity?.publicKey),
     // One key path for the narrowing table: the section, then the key, any [id] read as [] (41-02).
     directionOf: (section, key, before, after) => narrowingOf(`${section}.${key}`.replace(/\[[^\]]*\]/g, '[]'), before, after, host.policyLayers().effective?.labels.scales),
-    applyPersonal: async (next, baseHash) => {
+    applyPersonal: async (next, baseHash, requiresPersonalAuthority) => {
       const personal = host.policyLayers().personal;
       if (personal === undefined) return { ok: false, text: UNTRUSTED_TEXT };
       if (personal.hash !== baseHash) return { ok: false, text: `Nothing was changed. ${STALE_DRAFT_TEXT}` };
       try {
-        const result = await host.applyPolicyDraft(`${JSON.stringify(next, null, 2)}\n`, baseHash);
+        const result = await host.applyPolicyDraft(`${JSON.stringify(next, null, 2)}\n`, baseHash, requiresPersonalAuthority);
         return result.state.state === 'valid' ? { ok: true } : { ok: false, text: result.state.sentence };
       } catch (error) {
+        if (error instanceof PersonalAuthorityError) return { ok: false, text: error.message, authorityUnavailable: true };
         return { ok: false, text: error instanceof BundleStoreError ? error.message : APPLY_FAILED_TEXT };
       }
     },

@@ -9,7 +9,7 @@ import type { PolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyContact } from '../domain/gate/sections';
 import { PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { STALE_DRAFT_TEXT } from '../gate/bundleStore';
+import { PERSONAL_AUTHORITY_TEXT, STALE_DRAFT_TEXT } from '../gate/bundleStore';
 import { openPanel } from './webview/openPanel';
 
 // The policy editor (FND-09, Phase 41 D-44, D-47, D-23): one page, "Your organization's rules" (or "Your rules" without an organization), that shows the
@@ -60,7 +60,7 @@ export interface PolicyEditorState {
   readonly effective: PolicyDocument;
 }
 
-export type PolicyApplyAnswer = { readonly ok: true } | { readonly ok: false; readonly text: string };
+export type PolicyApplyAnswer = { readonly ok: true } | { readonly ok: false; readonly text: string; readonly authorityUnavailable?: true };
 
 export type ProposalEventId = 'policy.proposal-applied' | 'policy.proposal-exported';
 
@@ -68,7 +68,7 @@ export interface PolicyEditorDeps {
   state(): PolicyEditorState | undefined;
   directionOf: DirectionOf;
   /** Signs `next` as the personal layer through the host, refusing when the stored layer's hash is no longer `baseHash` (STALE_DRAFT_TEXT). */
-  applyPersonal(next: PolicyDocument, baseHash: string): Promise<PolicyApplyAnswer>;
+  applyPersonal(next: PolicyDocument, baseHash: string, requiresPersonalAuthority?: true): Promise<PolicyApplyAnswer>;
   /** This device's signer, or undefined when it has none. */
   signer(): PayloadSigner | undefined;
   /** Today's Reset flow; what it touches is the host's (D-21). */
@@ -96,6 +96,8 @@ export interface PolicyChange {
   readonly reason?: string;
   /** Your own rules, or your organization's; by default your organization's when it has rules here, otherwise your own. */
   readonly target?: 'personal' | 'organization';
+  /** A self-declared clearance may only be proposed and stored without an organization policy. */
+  readonly requiresPersonalAuthority?: true;
   next(current: PolicyDocument): PolicyDocument;
 }
 
@@ -107,6 +109,7 @@ interface Pending {
   readonly from: string;
   readonly reason?: string;
   readonly target: Target;
+  readonly requiresPersonalAuthority?: true;
   readonly base: PolicyDocument;
   readonly baseHash: string;
   readonly next: PolicyDocument;
@@ -170,7 +173,10 @@ function hashOf(state: PolicyEditorState, target: Target): string | undefined {
 function checkStale(shown: Pending): boolean {
   if (shown.stale) return true;
   const state = host?.deps.state();
-  if (state === undefined || hashOf(state, shown.target) !== shown.baseHash) {
+  if (shown.requiresPersonalAuthority && state?.organization !== undefined) {
+    shown.stale = true;
+    notice = PERSONAL_AUTHORITY_TEXT;
+  } else if (state === undefined || hashOf(state, shown.target) !== shown.baseHash) {
     shown.stale = true;
     notice = STALE_DRAFT_TEXT;
   }
@@ -333,8 +339,9 @@ function payloadOf(shown: Pending, target: { layer: 'personal' | 'organization';
 
 async function applyProposal(deps: PolicyEditorDeps, shown: Pending): Promise<void> {
   const proposalHash = bundleHash(payloadOf(shown, { layer: 'personal', hash: shown.baseHash, issuer: shown.base.issuer.fingerprint }));
-  const answer = await deps.applyPersonal(shown.next, shown.baseHash);
+  const answer = await deps.applyPersonal(shown.next, shown.baseHash, shown.requiresPersonalAuthority);
   if (!answer.ok) {
+    if (answer.authorityUnavailable) shown.stale = true;
     notice = cut(answer.text, MAX_TEXT);
     return;
   }
@@ -413,6 +420,9 @@ export function openPolicyProposal(change: PolicyChange): Promise<ProposalOutcom
   const state = host.deps.state();
   if (state === undefined) return Promise.reject(new Error(`${UNREADABLE_TEXT} Nothing was proposed.`));
   const target: Target = change.target ?? (state.organization === undefined ? 'personal' : 'organization');
+  if (change.requiresPersonalAuthority && (target !== 'personal' || state.organization !== undefined)) {
+    return Promise.reject(new Error(PERSONAL_AUTHORITY_TEXT));
+  }
   const base = target === 'organization' ? state.organization : state.personal;
   const baseHash = hashOf(state, target);
   if (base === undefined || baseHash === undefined) {
@@ -433,7 +443,11 @@ export function openPolicyProposal(change: PolicyChange): Promise<ProposalOutcom
   const reason = typeof change.reason === 'string' ? cut(change.reason, MAX_REASON) : undefined;
   return new Promise<ProposalOutcome>((resolve) => {
     const replaced = pending;
-    pending = { id, from, ...(reason === undefined ? {} : { reason }), target, base, baseHash, next, changes, resolve, busy: false, stale: false, closed: false };
+    pending = {
+      id, from, ...(reason === undefined ? {} : { reason }), target,
+      ...(change.requiresPersonalAuthority ? { requiresPersonalAuthority: true } : {}),
+      base, baseHash, next, changes, resolve, busy: false, stale: false, closed: false
+    };
     if (replaced !== undefined) replaced.resolve('replaced');
     notice = undefined;
     at = undefined;

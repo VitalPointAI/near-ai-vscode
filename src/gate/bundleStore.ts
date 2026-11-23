@@ -51,6 +51,7 @@ export const POLICY_DRAFT_BASE_FILE = 'policy-draft.base';
 
 /** Said when a draft was made from a policy that is no longer the one in force (D-53). */
 export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open NEAR AI: Policy and choose Edit my rules again to start from the policy in force.';
+export const PERSONAL_AUTHORITY_TEXT = "Get Started could not confirm that this computer can set its own clearance. Review your rules or ask your organization's security contact.";
 /** A draft that is not one JSON object. */
 export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in NEAR AI: Policy wrote it.';
 
@@ -64,6 +65,13 @@ export class BundleStoreError extends Error {
   public constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = 'BundleStoreError';
+  }
+}
+
+export class PersonalAuthorityError extends BundleStoreError {
+  public constructor() {
+    super(PERSONAL_AUTHORITY_TEXT);
+    this.name = 'PersonalAuthorityError';
   }
 }
 
@@ -527,6 +535,8 @@ export interface ApplyPolicyDraftInput {
   readonly baseHash: string;
   /** Your organization's layer in force, when there is one: a draft that widens past it is refused before signing (D-20). */
   readonly organization?: ApplyOrganizationLayer;
+  /** Recheck self-declared clearance authority while the writer holds the enrollment lock. */
+  readonly checkPersonalAuthority?: () => Promise<boolean>;
 }
 
 /**
@@ -554,6 +564,7 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
     const stored = disk.state;
     if (stored.state !== 'valid') throw new BundleStoreError(`Nothing was changed: your policy cannot be trusted right now, so it cannot be edited. ${stored.sentence}`);
     if (stored.hash !== input.baseHash) throw new BundleStoreError(`Nothing was changed. ${STALE_DRAFT_TEXT}`);
+    if (input.checkPersonalAuthority !== undefined && !await input.checkPersonalAuthority()) throw new PersonalAuthorityError();
     let identity: DeviceIdentity;
     try {
       identity = await identityFor(globalStorageDir, secrets, options);

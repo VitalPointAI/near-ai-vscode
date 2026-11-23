@@ -56,7 +56,7 @@ export function autoApplyPolicyEditor(): FakePolicyEditor {
   return fakeEditor(async (change, deps, fake) => {
     const state = deps.state();
     if (state === undefined) return 'discarded';
-    const answer = await deps.applyPersonal(change.next(state.personal), state.personalHash);
+    const answer = await deps.applyPersonal(change.next(state.personal), state.personalHash, change.requiresPersonalAuthority);
     if (answer.ok) return 'applied';
     fake.refusals.push(answer.text);
     return 'discarded';

@@ -9,7 +9,8 @@ import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { POLICY_SECTION_IDS, PROPOSAL_FILE_EXTENSION, policySections, proposalOf } from '../domain/gate/proposal';
 import { verifyPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { STALE_DRAFT_TEXT } from '../gate/bundleStore';
+import { PERSONAL_AUTHORITY_TEXT, STALE_DRAFT_TEXT } from '../gate/bundleStore';
+import type { PolicyApplyAnswer } from '../services/policyEditor';
 import { activeKeys, deviceKey, fullDocumentFor, issuerKey, policyDocumentFor } from './helpers/policyFixtures';
 
 // The policy editor's host controller (FND-09, Phase 41 D-44, D-47), driven as VS Code drives it: a stand-in panel and save dialog, and fake host
@@ -31,7 +32,7 @@ interface EditorState {
 }
 
 interface Calls {
-  applyPersonal: Array<{ next: PolicyDocument; baseHash: string }>;
+  applyPersonal: Array<{ next: PolicyDocument; baseHash: string; requiresPersonalAuthority?: true }>;
   record: Array<{ id: string; detail: Record<string, unknown> }>;
   reset: number;
   showStored: number;
@@ -42,7 +43,7 @@ interface Calls {
 
 interface HarnessOptions {
   state: EditorState | undefined;
-  applyAnswer?: { ok: true } | { ok: false; text: string };
+  applyAnswer?: PolicyApplyAnswer;
   signer?: PayloadSigner;
   /** The host offers Edit my rules and Apply my draft (41-15); `draft` says whether a draft waits. */
   ownRules?: { draft: { on: boolean } };
@@ -134,7 +135,11 @@ function harness(options: HarnessOptions): Harness {
   editor.registerPolicyEditor(context as never, {
     state: () => state,
     directionOf: () => undefined,
-    applyPersonal: async (next, baseHash) => { calls.applyPersonal.push({ next, baseHash }); await options.applyGate; return options.applyAnswer ?? { ok: true }; },
+    applyPersonal: async (next, baseHash, requiresPersonalAuthority) => {
+      calls.applyPersonal.push({ next, baseHash, ...(requiresPersonalAuthority ? { requiresPersonalAuthority } : {}) });
+      await options.applyGate;
+      return options.applyAnswer ?? { ok: true };
+    },
     signer: () => { calls.signer += 1; return options.signer; },
     reset: async () => { calls.reset += 1; },
     showStored: async () => { calls.showStored += 1; },
@@ -174,6 +179,46 @@ function ownState(): EditorState {
   const personal = policyDocumentFor({ key: deviceKey() });
   return { personal, personalHash: bundleHash(personal), organizationSignedHere: false, effective: personal };
 }
+
+test('a personal-authority proposal forwards the guard and stays stale when the writer refuses it', async () => {
+  const h = harness({
+    state: ownState(), signer: deviceKey(),
+    applyAnswer: { ok: false, text: PERSONAL_AUTHORITY_TEXT, authorityUnavailable: true }
+  });
+  const outcome = h.editor.openPolicyProposal({ ...widenInternal, target: 'personal', requiresPersonalAuthority: true });
+  await settle();
+  const id = h.lastState().proposal.id;
+  await h.send({ type: 'apply', id });
+  assert.equal(h.calls.applyPersonal[0]?.requiresPersonalAuthority, true);
+  assert.deepEqual(h.lastState().actions, ['discard']);
+  assert.equal(h.lastState().notice, PERSONAL_AUTHORITY_TEXT);
+  assert.equal(h.calls.record.length, 0);
+  await h.send({ type: 'apply', id });
+  assert.equal(h.calls.applyPersonal.length, 1);
+  await h.send({ type: 'discard', id });
+  assert.equal(await outcome, 'discarded');
+});
+
+test('a personal-authority proposal cannot open or apply with organization rules visible to the editor', async () => {
+  const own = ownState();
+  const org = organizationState();
+  const organizationAfterReview = { ...own, organization: org.organization, organizationHash: org.organizationHash };
+  const proposal = { ...widenInternal, target: 'personal', requiresPersonalAuthority: true } as const;
+  const enrolled = harness({ state: organizationAfterReview, signer: deviceKey() });
+  await assert.rejects(enrolled.editor.openPolicyProposal(proposal), { message: PERSONAL_AUTHORITY_TEXT });
+  assert.equal(enrolled.created.length, 0);
+
+  const open = harness({ state: own, signer: deviceKey() });
+  const outcome = open.editor.openPolicyProposal(proposal);
+  await settle();
+  const id = open.lastState().proposal.id;
+  open.swap(organizationAfterReview);
+  await open.send({ type: 'apply', id });
+  assert.equal(open.calls.applyPersonal.length, 0);
+  assert.equal(open.lastState().notice, PERSONAL_AUTHORITY_TEXT);
+  await open.send({ type: 'discard', id });
+  assert.equal(await outcome, 'discarded');
+});
 
 function editedDoc(base: PolicyDocument, edit: (doc: Record<string, any>) => void): PolicyDocument {
   const copy = JSON.parse(JSON.stringify(base)) as Record<string, any>;

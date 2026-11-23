@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -7,11 +7,15 @@ import { CLEARANCE_SELF_ASSERTED_TEXT, type Label } from '../domain/gate/labels'
 import { clearanceKey } from '../domain/gate/bundle';
 import { parsePeopleSection } from '../domain/org/peopleSection';
 import { remainingAfter, type ChangeItem } from '../domain/setup/changes';
+import { gateDir, POLICY_BUNDLE_FILE } from '../gate/bundleStore';
+import { GateHost } from '../gate/host';
 import type { PolicyChange } from '../services/policyEditor';
 import { planApply, runApply, type ApplyDeps } from '../services/setup/apply';
 import { singleMachineSink } from '../services/setup/projectLayerSink';
 import { clearanceProposalFor, proposalStep, type PendingProposal } from '../services/setup/proposals';
+import { enrolmentTextFor } from './helpers/enrolmentFixtures';
 import { autoApplyPolicyEditor, recordingPolicyEditor, type FakePolicyEditor } from './helpers/policyEditorFake';
+import { issuerKey } from './helpers/policyFixtures';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
@@ -44,7 +48,8 @@ function endpointApproval(target: PolicyChange['target'] = 'personal'): PendingP
 async function fixture(editor: FakePolicyEditor) {
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-proposals-project-'));
   const storage = await mkdtemp(path.join(tmpdir(), 'near-ai-setup-proposals-storage-'));
-  const host = registerGate(createFakeContext(storage, new MemorySecrets()) as never, { policyEditor: editor, notify: () => undefined });
+  const secrets = new MemorySecrets();
+  const host = registerGate(createFakeContext(storage, secrets) as never, { policyEditor: editor, notify: () => undefined, now: () => new Date(now) });
   await host.start();
   const audit: { event: string; body: unknown }[] = [];
   const deps: ApplyDeps = {
@@ -55,7 +60,7 @@ async function fixture(editor: FakePolicyEditor) {
       options: [], recommendation: { reasonId: 'fixture' }, choice: [], hostKind: 'desktop' },
     preflight: async () => true, clock: () => now
   };
-  return { host, audit, deps };
+  return { host, audit, deps, storage, secrets };
 }
 
 test('a discarded endpoint proposal stays pending and changes no policy or effective endpoints', async () => {
@@ -100,6 +105,7 @@ test('the clearance proposal is self-declared, additive and idempotent', async (
   const change = clearanceProposalFor(protectedB, false);
   assert.ok(change);
   assert.equal(change.target, 'personal');
+  assert.equal(change.requiresPersonalAuthority, true);
   assert.ok(change.reason?.endsWith(CLEARANCE_SELF_ASSERTED_TEXT));
   const snapshot = JSON.stringify(original);
   const next = change.next(original);
@@ -115,6 +121,35 @@ test('the clearance proposal is self-declared, additive and idempotent', async (
 
 test('the guide does not propose a personal clearance under an organization policy', () => {
   assert.equal(clearanceProposalFor(protectedB, true), undefined);
+});
+
+test('the existing editor can save a self-declared clearance while the device is unenrolled', async () => {
+  const editor = autoApplyPolicyEditor();
+  const { host } = await fixture(editor);
+  const change = clearanceProposalFor(protectedB, false);
+  assert.ok(change);
+  assert.equal(await editor.propose(change), 'applied', JSON.stringify(editor.refusals));
+  assert.ok(host.policyLayers().personal?.document.people?.clearances?.some(
+    ({ scale, level }) => scale === protectedB.scale && level === protectedB.level
+  ));
+});
+
+test('the saved clearance is refused when another window enrolls after the proposal is shown', async () => {
+  const editor = recordingPolicyEditor();
+  const { host, storage, secrets } = await fixture(editor);
+  const before = editor.deps().state();
+  const change = clearanceProposalFor(protectedB, false);
+  assert.ok(before && change);
+  const bundle = path.join(gateDir(storage), POLICY_BUNDLE_FILE);
+  const original = await readFile(bundle);
+  const otherWindow = new GateHost({ globalStorageDir: storage, secrets, productVersion: '0.4.36', now: () => new Date(now) });
+  const enrolled = await otherWindow.acceptOrganizationFile(enrolmentTextFor(issuerKey(), { now }), { wordsConfirmed: true });
+  assert.equal(enrolled.state, 'valid');
+  assert.equal(host.policyLayers().organization.state, 'none', 'the first window still has its own cached state');
+
+  const answer = await editor.deps().applyPersonal(change.next(before.personal), before.personalHash, change.requiresPersonalAuthority);
+  assert.ok(!answer.ok && answer.authorityUnavailable);
+  assert.deepEqual(await readFile(bundle), original);
 });
 
 test('an exported organization proposal preserves its target without changing the local policy', async () => {

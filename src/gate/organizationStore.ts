@@ -508,6 +508,17 @@ export class OrganizationStore {
     return path.join(this.folder, ENROLMENT_RECORD_FILE);
   }
 
+  /** Read without recovering or updating the pin. The caller holds bundle.lock through its personal policy write. */
+  public async hasPersonalAuthority(): Promise<boolean> {
+    try {
+      const pin = await readOrganizationPin(this.secrets);
+      // An interrupted first enrollment did not establish authority. Other pin or file evidence must be resolved first.
+      return pin.state === 'pending-enrol' || (pin.state === 'absent' && !(await this.folderHoldsFiles()));
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * The organization layer at the effective time (the later of the clock and the clock marker, so a clock set back never revives an expired layer).
    * Never throws: a store that cannot be read fails closed.

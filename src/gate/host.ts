@@ -654,7 +654,7 @@ export class GateHost {
    * and the status bar read the new policy from the next decision on, the listeners are told, and policy.edit is recorded with the old and new hashes. A
    * refused draft throws a plain BundleStoreError and changes nothing.
    */
-  public async applyPolicyDraft(draftText: string, baseHash: string): Promise<PolicyEditResult> {
+  public async applyPolicyDraft(draftText: string, baseHash: string, requiresPersonalAuthority?: true): Promise<PolicyEditResult> {
     await this.start();
     // The draft is checked against your organization's layer in force (D-20); while that layer fails, nothing can be edited (D-21). A draft made from the
     // composed policy names the composed hash, which stands for the personal layer it was composed from.
@@ -665,7 +665,12 @@ export class GateHost {
     const input = organization.state === 'valid'
       ? { baseHash: base, organization: { document: organization.document, hash: organization.hash, issuerFingerprint: organization.document.issuer.fingerprint } }
       : { baseHash: base };
-    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, input, this.storeOptions());
+    const result = await applyPolicyDraft(this.options.globalStorageDir, this.options.secrets, draftText, {
+      ...input,
+      ...(requiresPersonalAuthority ? {
+        checkPersonalAuthority: () => new OrganizationStore(this.options.globalStorageDir, this.options.secrets).hasPersonalAuthority()
+      } : {})
+    }, this.storeOptions());
     await this.seedFromMarker();
     const layered = await recompose(this.options.globalStorageDir, this.options.secrets, result, this.storeOptions());
     this.settle(layered, [], { event: result.event ?? 'policy.edit', detail: `The policy changed from ${result.oldHash} to ${result.newHash}.` });

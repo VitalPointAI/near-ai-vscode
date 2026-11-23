@@ -30,6 +30,7 @@ export function clearanceProposalFor(label: Label, organization: boolean): Polic
   return {
     from: 'Get Started',
     target: 'personal',
+    requiresPersonalAuthority: true,
     reason: `Get Started can raise this project's label only when your clearance covers it. ${CLEARANCE_SELF_ASSERTED_TEXT}`,
     next(current) {
       const parsed = parseClearance({ scale, level, compartments: [], releasability: [] }, current.labels.scales);
