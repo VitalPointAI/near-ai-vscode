@@ -9,9 +9,9 @@
 // other session of this process holds, so a crash between writing an update and recording it can never make two sessions reuse clocks. The fold's
 // verdict on the registration is read before the first update is written: a client-collision (the id registered first under another actor, such as
 // an agent run on this device) or any other refusal stops the session with its PRODUCT_EDIT_REFUSALS sentence, the change kept queued. The editor
-// binding (33-04) drives this class; batching of a typing burst and chunking of a large paste are its part, not this file's.
+// binding (33-04) schedules typing batches. This class coalesces new edits without changing the bytes already submitted for append.
 import { deviceAt } from '../../domain/replica/rosterMembers';
-import { openBoundText } from '../../domain/replica/doc';
+import { mergeBoundUpdates, openBoundText } from '../../domain/replica/doc';
 import type { BoundText, BoundTextEdit, TextOp } from '../../domain/replica/doc';
 import { nextClientId } from '../../domain/replica/clientIds';
 import type { Actor } from '../../domain/replica/entry';
@@ -52,6 +52,8 @@ const heldKey = (project: EditorProject, target: EditTarget): string => `${proje
 
 export class ProductEditor {
   private readonly queue: Uint8Array[] = [];
+  // Retry submitted bytes before appending another batch of newly captured updates.
+  private sealedCount = 0;
   private readonly appliedUpdates = new Set<string>();
   private registered = false;
   private closedNow = false;
@@ -167,7 +169,15 @@ export class ProductEditor {
    * update and the ones after it stay queued for the next flush. Flushes run one after another.
    */
   public flush(): Promise<{ appended: number; queued: number }> {
-    const run = this.running.then(() => this.flushNow());
+    return this.queueFlush(false);
+  }
+
+  public flushBatch(): Promise<{ appended: number; queued: number }> {
+    return this.queueFlush(true);
+  }
+
+  private queueFlush(batched: boolean): Promise<{ appended: number; queued: number }> {
+    const run = this.running.then(() => this.flushNow(batched));
     this.running = run.catch(() => undefined);
     return run;
   }
@@ -195,9 +205,14 @@ export class ProductEditor {
     return refused.reason === 'client-collision' ? 'client-collision' : 'registration-refused';
   }
 
-  private async flushNow(): Promise<{ appended: number; queued: number }> {
+  private async flushNow(batched: boolean): Promise<{ appended: number; queued: number }> {
     let appended = 0;
     if (this.queue.length === 0 || this.stoppedBy !== undefined || this.closedNow) return { appended, queued: this.queue.length };
+    if (batched) {
+      const merged = mergeBoundUpdates(this.queue.slice(this.sealedCount));
+      if (merged) this.queue.splice(this.sealedCount, this.queue.length - this.sealedCount, merged);
+      this.sealedCount = this.queue.length;
+    }
     const { stream, product, actor } = this.target;
     if (!this.registered) {
       const registration = await this.project.appendOwn('doc.client', { product, clientId: this.clientId, actor }, { stream, actor });
@@ -211,11 +226,13 @@ export class ProductEditor {
       }
       this.registered = true;
     }
-    while (this.queue.length > 0) {
+    while (this.queue.length > 0 && (!batched || this.sealedCount > 0)) {
+      this.sealedCount = Math.max(this.sealedCount, 1);
       const update = this.queue[0] as Uint8Array;
       const written = await this.project.appendOwn('doc.update', { product, update: Buffer.from(update).toString('base64url') }, { stream, actor });
       if (!('ok' in written)) break;
       this.queue.shift();
+      this.sealedCount -= 1;
       appended += 1;
     }
     if (appended > 0) this.hooks.onAppended?.();

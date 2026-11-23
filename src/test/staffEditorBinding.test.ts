@@ -17,7 +17,7 @@ async function withEditors(run: (world: {
   exchange(from: 0 | 1): Promise<void>;
   body(at: 0 | 1): Promise<string | undefined>;
   updates(at: 0 | 1): Promise<number>;
-}) => Promise<void>): Promise<void> {
+}) => Promise<void>, onLeftAppended?: () => void): Promise<void> {
   const world = await createLiveWorld({ people: [{ label: 'ana', name: 'Avery Lead' }, { label: 'ben', name: 'Blake Rivers' }] });
   const stream = world.lead.project.projectId;
   const targets = world.devices.map(({ project }) => ({ project, stream, product: PRODUCT, actor: ACTOR, header: () => HEADER }));
@@ -33,7 +33,7 @@ async function withEditors(run: (world: {
     await carryThroughFake(world.devices[0], world.devices[1], stream);
     const documents: [FakeBoundDocument, FakeBoundDocument] = [new FakeBoundDocument(HEADER + 'Alpha Bravo'), new FakeBoundDocument(HEADER + 'Alpha Bravo')];
     const notices: string[] = [];
-    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text) }));
+    bindings.push(await EditorBinding.open(documents[0], targets[0], { notice: (text) => notices.push(text), onAppended: onLeftAppended }));
     bindings.push(await EditorBinding.open(documents[1], targets[1]));
     await run({
       documents,
@@ -82,6 +82,22 @@ test('a multi-range editor transaction maps body offsets right to left and write
     assert.equal(await body(1), 'A B');
     assert.equal(b.getText(), HEADER + 'A B');
   });
+});
+
+test('a typing burst is saved on the batch timer as one shared update', { timeout: 10000 }, async () => {
+  let onSaved!: () => void;
+  const saved = new Promise<void>((resolve) => { onSaved = resolve; });
+  await withEditors(async ({ documents: [a, b], exchange, body, updates }) => {
+    for (let count = 0; count < 40; count += 1) {
+      a.type({ offset: a.getText().length, length: 0, text: '!' });
+    }
+    await saved;
+    assert.equal(await updates(0), 2, 'the seed and the whole burst are two updates');
+    assert.equal(await body(0), 'Alpha Bravo' + '!'.repeat(40));
+    await exchange(0);
+    assert.equal(b.getText(), a.getText());
+    assert.equal(await updates(1), 0);
+  }, onSaved);
 });
 
 test('a late notification of the applied remote edit stays ignored after local typing', async () => {

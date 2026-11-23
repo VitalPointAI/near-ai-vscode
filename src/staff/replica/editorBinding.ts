@@ -37,6 +37,7 @@ export const HEADER_KEPT_TEXT = 'The header is kept by the project. Change it fr
 export const UNDO_OWN_TEXT = 'Undo in a shared product removes only your own changes.';
 const MISMATCH_TEXT = 'The editor no longer matches the shared product. Close the product and open it again.';
 const HEADER_NOTICE_INTERVAL_MS = 500;
+const BATCH_MS = 500;
 
 /** Consecutive delete and insert operations form one replacement against the old document. */
 function editsOf(operations: readonly TextOp[], start: number): DocumentEdit[] {
@@ -77,6 +78,7 @@ export class EditorBinding {
   private pending: Promise<void> = Promise.resolve();
   private failure: Error | undefined;
   private closing: Promise<void> | undefined;
+  private batchTimer: ReturnType<typeof setTimeout> | undefined;
   private lastHeaderNotice = -Infinity;
   private showedUndoNotice = false;
 
@@ -116,7 +118,10 @@ export class EditorBinding {
 
   /** Writes captured local transactions through the roster-bound editor. */
   public flush(): Promise<{ appended: number; queued: number }> {
-    return this.enqueue(() => this.editor.flush());
+    return this.enqueue(() => {
+      this.cancelBatchTimer();
+      return this.editor.flushBatch();
+    });
   }
 
   /** Reads accepted updates this editor has yet to apply, including those placed earlier by a refold. */
@@ -145,10 +150,24 @@ export class EditorBinding {
   /** Call flush before closing to save queued updates. */
   public close(): Promise<void> {
     if (!this.closing) {
+      this.cancelBatchTimer();
       this.disconnect();
       this.closing = this.pending.then(() => this.editor.close());
     }
     return this.closing;
+  }
+
+  private cancelBatchTimer(): void {
+    clearTimeout(this.batchTimer);
+    this.batchTimer = undefined;
+  }
+
+  private scheduleBatch(): void {
+    if (this.batchTimer !== undefined || this.closing || this.editor.queued === 0) return;
+    this.batchTimer = setTimeout(() => {
+      this.batchTimer = undefined;
+      void this.flush().catch(() => undefined);
+    }, BATCH_MS);
   }
 
   private enqueue<T>(task: () => T | Promise<T>): Promise<T> {
@@ -198,6 +217,7 @@ export class EditorBinding {
     if (this.header + next !== change.text) throw new Error(MISMATCH_TEXT);
     this.editor.edit(edits);
     this.version = change.version;
+    this.scheduleBatch();
   }
 
   private checkDocument(text: string, version: number): void {
@@ -213,6 +233,7 @@ export class EditorBinding {
     // Native editor history may include a programmatic remote edit. Discard its delta and publish only the local Yjs history transaction.
     const changed = this.editor[direction]();
     await this.restoreCanonicalText(before, version);
+    if (changed) this.scheduleBatch();
     return changed;
   }
 

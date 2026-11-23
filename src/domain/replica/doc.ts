@@ -122,6 +122,13 @@ export function applyRemote(doc: CrdtDoc, bytes: Uint8Array): boolean {
 export interface BoundTextEdit { offset: number; length: number; text: string }
 export type TextOp = { retain: number } | { insert: string } | { delete: number };
 
+/** Coalesce captured local edits when the resulting record fits the wire format. */
+export function mergeBoundUpdates(updates: readonly Uint8Array[]): Uint8Array | undefined {
+  if (updates.length < 2 || updates.reduce((bytes, update) => bytes + update.length, 0) > MAX_UPDATE_BYTES) return undefined;
+  const merged = loadYjs().mergeUpdates([...updates]);
+  return merged.length <= MAX_UPDATE_BYTES && skimUpdate(merged).ok ? merged : undefined;
+}
+
 /** A local editing document with one origin and a guarded, plain-data update boundary. */
 export interface BoundText {
   text(): string;

@@ -179,6 +179,33 @@ test('a refusal in the middle keeps the order: the first update is written, the 
   });
 });
 
+test('a refused batch stays ahead of new edits on retry without leaving a clock gap', async () => {
+  await withWorld(1, async ([a]) => {
+    const stream = a.project.projectId;
+    const editor = await ProductEditor.open(refusingOnce(a.project, new Set([1, 3])), { stream, product: PRODUCT, actor: PERSON });
+    try {
+      editor.insert(0, 'Alpha');
+      editor.insert(5, ' Bravo');
+      assert.deepEqual(await editor.flushBatch(), { appended: 0, queued: 1 });
+      editor.insert(11, ' Charlie');
+      editor.insert(19, ' Delta');
+
+      assert.deepEqual(await editor.flushBatch(), { appended: 1, queued: 1 });
+      const persisted = async () => productOutput((await a.project.state()).fold, stream, PRODUCT);
+      assert.equal((await persisted())?.text, 'Alpha Bravo');
+
+      assert.deepEqual(await editor.flushBatch(), { appended: 1, queued: 0 });
+      const output = await persisted();
+      assert.equal(output?.text, 'Alpha Bravo Charlie Delta');
+      assert.equal(output?.accepted.length, 2);
+      assert.equal(output?.incomplete, false);
+      assert.equal((await a.project.findOwnAll('doc.client', () => true)).length, 1);
+    } finally {
+      editor.close();
+    }
+  });
+});
+
 test('client ids: two sessions on one device take two ids, and a session never takes an id the fold has registered', async () => {
   await withWorld(1, async ([a]) => {
     const stream = a.project.projectId;
