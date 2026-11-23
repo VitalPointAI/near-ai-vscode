@@ -110,6 +110,8 @@ test('the cursor: after a hash gives only what follows it, the newest gives noth
     assert.equal(all.last, h3);
     assert.deepEqual((await acceptedUpdates(a.project, stream, PRODUCT, h1)).updates.map((item) => item.hash), [h2, h3]);
     assert.deepEqual(await acceptedUpdates(a.project, stream, PRODUCT, h3), { updates: [], last: h3 });
+    const afterRefold = await acceptedUpdates(a.project, stream, PRODUCT, new Set([h2, h3]));
+    assert.deepEqual(afterRefold.updates.map((item) => item.hash), [h1], 'a newly accepted update may sort before an already applied update');
     const unknown = await acceptedUpdates(a.project, stream, PRODUCT, '0'.repeat(64));
     assert.deepEqual(unknown.updates.map((item) => item.hash), [h1, h2, h3]);
     assert.equal(unknown.last, h3);

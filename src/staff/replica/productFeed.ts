@@ -26,14 +26,15 @@ export function productOutput(fold: { families: Record<string, unknown> }, strea
 
 /**
  * The accepted update bytes of one product, in fold order, after `after` (an accepted hash). An `after` the fold does not list as accepted gives
- * every accepted update, so a reader whose cursor fell out (a refold that changed the order) starts again from the whole text.
+ * every accepted update. A live editor can instead pass the hashes it has applied. A refold can place a newly accepted update before its last hash.
  */
-export async function acceptedUpdates(project: FeedProject, stream: string, product: string, after?: string): Promise<AcceptedFeed> {
+export async function acceptedUpdates(project: FeedProject, stream: string, product: string, after?: string | ReadonlySet<string>): Promise<AcceptedFeed> {
   const { fold } = await project.state();
   const accepted = productOutput(fold, stream, product)?.accepted ?? [];
   if (accepted.length === 0) return { updates: [] };
-  const from = after === undefined ? 0 : accepted.indexOf(after) + 1;
-  const wanted = accepted.slice(from);
+  const wanted = typeof after === 'object'
+    ? accepted.filter((hash) => !after.has(hash))
+    : accepted.slice(after === undefined ? 0 : accepted.indexOf(after) + 1);
   if (wanted.length === 0) return { updates: [], last: accepted[accepted.length - 1] };
 
   const want = new Set(wanted);
@@ -53,7 +54,7 @@ export async function acceptedUpdates(project: FeedProject, stream: string, prod
     const data = entry?.data as { product?: unknown; update?: unknown } | undefined;
     if (entry === undefined || entry.hash !== hash || entry.body.kind !== 'doc.update' || entry.header.stream !== stream || data?.product !== product || typeof data.update !== 'string') {
       // Fail closed and in order: nothing after a hole is handed out, and the cursor stays before it.
-      const previous = from + updates.length - 1;
+      const previous = accepted.indexOf(hash) - 1;
       return previous >= 0 ? { updates, last: accepted[previous] } : { updates };
     }
     updates.push({ hash, writer: entry.header.writer, bytes: new Uint8Array(Buffer.from(data.update, 'base64url')) });

@@ -11,12 +11,12 @@
 // an agent run on this device) or any other refusal stops the session with its PRODUCT_EDIT_REFUSALS sentence, the change kept queued. The editor
 // binding (33-04) drives this class; batching of a typing burst and chunking of a large paste are its part, not this file's.
 import { deviceAt } from '../../domain/replica/rosterMembers';
-import { applyRemote, createLocalDoc, docText, localDelete, localInsert } from '../../domain/replica/doc';
-import type { CrdtDoc } from '../../domain/replica/doc';
+import { openBoundText } from '../../domain/replica/doc';
+import type { BoundText, BoundTextEdit, TextOp } from '../../domain/replica/doc';
 import { nextClientId } from '../../domain/replica/clientIds';
 import type { Actor } from '../../domain/replica/entry';
 import { acceptedUpdates, productOutput } from './productFeed';
-import type { AcceptedUpdate, FeedProject } from './productFeed';
+import type { AcceptedFeed, AcceptedUpdate, FeedProject } from './productFeed';
 import type { ReplicaProject } from './replicaProject';
 
 /** Why an editing session cannot go on, each with one sentence in the person's words (no "client id", "fold" or "entry" on main screens). */
@@ -52,6 +52,7 @@ const heldKey = (project: EditorProject, target: EditTarget): string => `${proje
 
 export class ProductEditor {
   private readonly queue: Uint8Array[] = [];
+  private readonly appliedUpdates = new Set<string>();
   private registered = false;
   private closedNow = false;
   private stoppedBy: ProductEditRefusal | undefined;
@@ -61,10 +62,12 @@ export class ProductEditor {
     private readonly project: EditorProject,
     private readonly target: EditTarget,
     private readonly hooks: EditorHooks,
-    private readonly doc: CrdtDoc,
+    private readonly doc: BoundText,
     public readonly clientId: number,
     private cursor: string | undefined
-  ) {}
+  ) {
+    doc.onLocalUpdate((update) => this.queue.push(update));
+  }
 
   /**
    * Opens a session: this device's slot from the roster at head, the lowest free client id of it, and a local document holding the accepted text.
@@ -82,16 +85,20 @@ export class ProductEditor {
     if (clientId === undefined) throw new ProductEditError('no-room');
     held.add(clientId);
     HELD.set(key, held);
-    const doc = createLocalDoc(clientId);
-    const feed = await acceptedUpdates(project, target.stream, target.product);
-    const editor = new ProductEditor(project, target, hooks, doc, clientId, feed.last);
-    editor.applyRemote(feed.updates);
-    return editor;
+    const editor = new ProductEditor(project, target, hooks, openBoundText(clientId), clientId, undefined);
+    try {
+      const feed = await acceptedUpdates(project, target.stream, target.product);
+      editor.applyRemote(feed.updates);
+      return editor;
+    } catch (error) {
+      editor.close();
+      throw error;
+    }
   }
 
   /** The text of the local document. */
   public text(): string {
-    return docText(this.doc);
+    return this.doc.text();
   }
 
   /** The hash of the newest accepted update this session has applied, as a cursor for acceptedUpdates. */
@@ -111,22 +118,37 @@ export class ProductEditor {
 
   public insert(index: number, text: string): void {
     this.usable();
-    this.capture(localInsert(this.doc, index, text));
+    this.doc.insert(index, text);
   }
 
   public remove(index: number, length: number): void {
     this.usable();
-    this.capture(localDelete(this.doc, index, length));
+    this.doc.remove(index, length);
+  }
+
+  public edit(edits: readonly BoundTextEdit[]): void {
+    this.usable();
+    this.doc.edit(edits);
+  }
+
+  public onRemoteChange(listener: (operations: readonly TextOp[]) => void): () => void {
+    return this.doc.onChange(listener);
+  }
+
+  public unappliedUpdates(): Promise<AcceptedFeed> {
+    this.usable();
+    return acceptedUpdates(this.project, this.target.stream, this.target.product, this.appliedUpdates);
   }
 
   /** Applies accepted updates from the feed (this device's own included: Yjs takes a known update as a no-op). */
   public applyRemote(updates: readonly AcceptedUpdate[]): void {
     for (const update of updates) {
-      if (!applyRemote(this.doc, update.bytes)) {
+      if (!this.doc.applyRemote(update.bytes)) {
         this.stoppedBy = 'remote-unreadable';
         return;
       }
       this.cursor = update.hash;
+      this.appliedUpdates.add(update.hash);
     }
   }
 
@@ -153,10 +175,6 @@ export class ProductEditor {
   private usable(): void {
     if (this.closedNow) throw new ProductEditError('closed');
     if (this.stoppedBy !== undefined) throw new ProductEditError(this.stoppedBy);
-  }
-
-  private capture(update: Uint8Array): void {
-    if (update.length > 0) this.queue.push(update);
   }
 
   /** Why the fold refused this session's registration, or undefined when it took it. */

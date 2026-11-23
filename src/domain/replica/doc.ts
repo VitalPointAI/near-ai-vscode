@@ -119,6 +119,75 @@ export function applyRemote(doc: CrdtDoc, bytes: Uint8Array): boolean {
   return applyWithin(doc, bytes, MAX_STATE_BYTES);
 }
 
+export interface BoundTextEdit { offset: number; length: number; text: string }
+export type TextOp = { retain: number } | { insert: string } | { delete: number };
+
+/** A local editing document with one origin and a guarded, plain-data update boundary. */
+export interface BoundText {
+  text(): string;
+  edit(edits: readonly BoundTextEdit[]): void;
+  insert(index: number, text: string): void;
+  remove(index: number, length: number): void;
+  applyRemote(bytes: Uint8Array): boolean;
+  onLocalUpdate(listener: (bytes: Uint8Array) => void): () => void;
+  onChange(listener: (operations: readonly TextOp[], source: 'remote') => void): () => void;
+  destroy(): void;
+}
+
+export function openBoundText(clientId: number, seeds: readonly Uint8Array[] = []): BoundText {
+  const doc = createLocalDoc(clientId);
+  for (const bytes of seeds) {
+    if (applyRemote(doc, bytes)) continue;
+    doc.destroy();
+    throw new Error('The initial shared text could not be read.');
+  }
+  const body = doc.getText(TEXT_NAME);
+  const localOrigin = {};
+  const edit = (edits: readonly BoundTextEdit[]): void => {
+    const ordered = [...edits].sort((a, b) => b.offset - a.offset);
+    let end = body.length;
+    for (const { offset, length } of ordered) {
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > end) {
+        throw new RangeError('The changes do not match the shared text.');
+      }
+      end = offset;
+    }
+    doc.transact(() => {
+      for (const { offset, length, text } of ordered) {
+        if (length > 0) body.delete(offset, length);
+        if (text.length > 0) body.insert(offset, text);
+      }
+    }, localOrigin);
+  };
+  return {
+    text: () => body.toString(),
+    edit,
+    insert: (offset, text) => edit([{ offset, length: 0, text }]),
+    remove: (offset, length) => edit([{ offset, length, text: '' }]),
+    applyRemote: (bytes) => applyRemote(doc, bytes),
+    onLocalUpdate(listener) {
+      const capture = (bytes: Uint8Array, origin: unknown): void => { if (origin === localOrigin) listener(bytes); };
+      doc.on('update', capture);
+      return () => doc.off('update', capture);
+    },
+    onChange(listener) {
+      const notify = (event: YTypes.YTextEvent, transaction: YTypes.Transaction): void => {
+        if (transaction.origin !== REMOTE) return;
+        const operations: TextOp[] = [];
+        for (const operation of event.delta) {
+          if (typeof operation.insert === 'string') operations.push({ insert: operation.insert });
+          else if (operation.retain !== undefined) operations.push({ retain: operation.retain });
+          else if (operation.delete !== undefined) operations.push({ delete: operation.delete });
+        }
+        if (operations.length > 0) listener(operations, 'remote');
+      };
+      body.observe(notify);
+      return () => body.unobserve(notify);
+    },
+    destroy: () => doc.destroy()
+  };
+}
+
 // A new fold-style document (garbage collection off, client id 0) holding the same state.
 export function cloneDoc(doc: CrdtDoc): CrdtDoc {
   const Y = loadYjs();
