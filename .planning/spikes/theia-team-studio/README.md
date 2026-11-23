@@ -1,6 +1,6 @@
-# Team Studio in Eclipse Theia
+# Sterling in Eclipse Theia
 
-Can a native Theia view reuse the existing Team Studio data model in a browser container? This preview uses a native Theia widget and RPC service with the extension's existing team parser. It reads four packaged sample projects.
+The local workbench opens to Sterling Sovereign AI Canadian Defence Edition. Get Started shows the Sterling logo for the active theme and offers a native Team Studio sample with four packaged projects.
 
 ## Run locally
 
@@ -12,7 +12,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Team Studio](http://127.0.0.1:18771/). If you close the tab inside the workbench, run **NEAR AI: Open Team Studio Preview** from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/) and select **Explore a sample team**. Reopen the page with the home icon at the top of the right sidebar or **SovAI: Get Started** in the command palette. **SovAI: Open Team Studio Preview** also opens the sample. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 

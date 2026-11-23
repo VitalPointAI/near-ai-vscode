@@ -1,7 +1,6 @@
 import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Command, CommandRegistry } from '@theia/core/lib/common/command.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
-import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { ServiceConnectionProvider } from '@theia/core/lib/browser/messaging/service-connection-provider.js';
@@ -9,7 +8,7 @@ import { TEAM_PREVIEW_PATH, TeamPreviewService, type TeamPreviewResult } from '.
 import './team-preview.css';
 
 const widgetId = 'near-ai-team-studio-preview';
-const openTeamStudio: Command = { id: 'near-ai.team-studio.preview', label: 'Open Team Studio Preview', category: 'NEAR AI' };
+const openTeamStudio: Command = { id: 'near-ai.team-studio.preview', label: 'Open Team Studio Preview', category: 'SovAI' };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -32,7 +31,7 @@ class TeamPreviewWidget extends BaseWidget {
     this.id = widgetId;
     this.node.tabIndex = -1;
     this.title.label = 'Team Studio';
-    this.title.caption = 'NEAR AI Team Studio Preview';
+    this.title.caption = 'Team Studio Preview';
     this.title.closable = true;
     this.addClass('near-team-preview');
     const shell = element('main', 'near-team-shell');
@@ -125,13 +124,9 @@ class TeamPreviewWidget extends BaseWidget {
 }
 
 @injectable()
-class TeamPreviewContribution extends AbstractViewContribution<TeamPreviewWidget> implements FrontendApplicationContribution {
+class TeamPreviewContribution extends AbstractViewContribution<TeamPreviewWidget> {
   constructor() {
     super({ widgetId, widgetName: 'Team Studio', defaultWidgetOptions: { area: 'main' } });
-  }
-
-  async initializeLayout(): Promise<void> {
-    await this.openView({ activate: true });
   }
 
   override registerCommands(commands: CommandRegistry): void {
@@ -144,5 +139,4 @@ export default new ContainerModule(bind => {
   bind(TeamPreviewWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(context => ({ id: widgetId, createWidget: () => context.container.get(TeamPreviewWidget) })).inSingletonScope();
   bindViewContribution(bind, TeamPreviewContribution);
-  bind(FrontendApplicationContribution).toService(TeamPreviewContribution);
 });
