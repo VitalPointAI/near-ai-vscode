@@ -1,0 +1,16 @@
+{
+  "gap": "G306",
+  "id": "g306",
+  "controls": [
+    "itsp171-03.14.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary malicious code protection needs deployment and response evidence",
+  "remediation": "The sponsor endpoint protection and gateway owners identify assessed entry, exit and endpoint coverage and approve update and scan settings. Verify scheduled scans and real-time inspection of external files at an applicable download, open or execution event. Use an authorized benign test or sanitized record to confirm block, quarantine or documented mitigation and the mechanism update history.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the protection coverage map, reviewed update and scan settings, and a representative detection and response receipt"
+    }
+  ]
+}
