@@ -1,0 +1,17 @@
+{
+  "gap": "G182",
+  "id": "g182",
+  "controls": [
+    "pm-05",
+    "pm-05.01"
+  ],
+  "ownerRole": "owner",
+  "title": "System and personal information inventories need approved coverage",
+  "remediation": "The enterprise inventory and privacy leads reconcile in-scope systems and programs with the applications, projects and systems processing personal information. Record each custodian, update cadence, change trigger and an affected inventory entry. Retain only approved references to personal information.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect reviewed system and personal-information inventory coverage and a sampled change and review record"
+    }
+  ]
+}

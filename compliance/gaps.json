@@ -1359,6 +1359,169 @@
     },
     {
       "controls": [
+        "pm-01",
+        "pm-02",
+        "pm-03"
+      ],
+      "id": "G180",
+      "ownerRole": "owner",
+      "poam": "g180",
+      "remediation": "The sponsor security executive and investment authority approve the organization-wide security program plan and its distribution. Document appointment, responsibilities, resources and authority, and trace required security and privacy funding or approved exceptions to planning and investment records.",
+      "title": "Security program leadership and authorized investment need records"
+    },
+    {
+      "controls": [
+        "pm-04",
+        "pm-06",
+        "pm-14",
+        "pm-31"
+      ],
+      "id": "G181",
+      "ownerRole": "owner",
+      "poam": "g181",
+      "remediation": "The sponsor program assurance lead approves POA&M reporting and prioritization, performance measures, and the testing, training and continuous monitoring plans. Sample coordinated results, program-level reporting to designated recipients, approved remediation or escalation and later review of effectiveness.",
+      "title": "Program remediation and monitoring need verified review records"
+    },
+    {
+      "controls": [
+        "pm-05",
+        "pm-05.01"
+      ],
+      "id": "G182",
+      "ownerRole": "owner",
+      "poam": "g182",
+      "remediation": "The enterprise inventory and privacy leads reconcile in-scope systems and programs with the applications, projects and systems processing personal information. Record each custodian, update cadence, change trigger and an affected inventory entry. Retain only approved references to personal information.",
+      "title": "System and personal information inventories need approved coverage"
+    },
+    {
+      "controls": [
+        "pm-07",
+        "pm-07.01",
+        "pm-11",
+        "pm-32"
+      ],
+      "id": "G183",
+      "ownerRole": "owner",
+      "poam": "g183",
+      "remediation": "The enterprise architect and business owners map essential processes and authorized uses to systems, data flows and safeguards. Identify nonessential functions selected for offloading, record destination responsibilities and risks, and sample operating use against approved purposes. Record treatment or signed scope determination for omissions.",
+      "title": "Enterprise architecture and mission use need traceability to approved purpose"
+    },
+    {
+      "controls": [
+        "pm-08"
+      ],
+      "id": "G184",
+      "ownerRole": "owner",
+      "poam": "g184",
+      "remediation": "The sponsor critical infrastructure authority approves the protection plan and identifies key resources, dependencies, security and privacy safeguards, coordination arrangements and update triggers. Retain applicable approval, review and exercise records or an authorized scope decision.",
+      "title": "Critical infrastructure protection plan needs approved security and privacy scope"
+    },
+    {
+      "controls": [
+        "pm-09",
+        "pm-10",
+        "pm-28",
+        "pm-29"
+      ],
+      "id": "G185",
+      "ownerRole": "owner",
+      "poam": "g185",
+      "remediation": "The sponsor risk executive documents authorized assumptions, constraints, tolerances and trade-offs, with named risk and authorization roles. Approve the strategy and processes across assessed environments, and sample an actual authorization or risk treatment that records decision grounds, review triggers and authority.",
+      "title": "Enterprise risk framing and authorization governance need accountable decisions"
+    },
+    {
+      "controls": [
+        "pm-12",
+        "pm-13"
+      ],
+      "id": "G186",
+      "ownerRole": "owner",
+      "poam": "g186",
+      "remediation": "The sponsor security, privacy and personnel leads approve the cross-disciplinary insider handling team and applicable referral, privacy and escalation procedures. Approve workforce competency and development planning and collect redacted training, exercise or staffing records with follow-up.",
+      "title": "Insider response team and workforce development need role and operating evidence"
+    },
+    {
+      "controls": [
+        "pm-15",
+        "pm-16",
+        "pm-16.01"
+      ],
+      "id": "G187",
+      "ownerRole": "owner",
+      "poam": "g187",
+      "remediation": "The sponsor threat, privacy and external liaison leads approve participating associations, authorized recipients and sharing rules. Exercise a sanitized threat awareness handoff and the approved automated route, verify restrictions and receipt, and document subsequent review or response.",
+      "title": "Threat awareness and external community participation need approved sharing evidence"
+    },
+    {
+      "controls": [
+        "pm-17"
+      ],
+      "id": "G188",
+      "ownerRole": "owner",
+      "poam": "g188",
+      "remediation": "The sponsor procurement, information and contracting authorities identify outsourced services that handle controlled information. Record approved protection terms, processor boundaries and responsibilities, evidence review and any signed applicable authorization. Sample a reviewed supplier arrangement and retained safeguard evidence.",
+      "title": "Outsourced controlled information needs verified protection authority"
+    },
+    {
+      "controls": [
+        "pm-18",
+        "pm-19",
+        "pm-27"
+      ],
+      "id": "G189",
+      "ownerRole": "owner",
+      "poam": "g189",
+      "remediation": "The sponsor privacy executive approves and distributes the organizational program plan, records delegated authority and resources, and approves reporting content, recipients and cadence. Retain a dated privacy accountability report, its review and approved delivery evidence.",
+      "title": "Privacy program ownership and reporting need approved governance evidence"
+    },
+    {
+      "controls": [
+        "pm-20",
+        "pm-20.01",
+        "pm-26"
+      ],
+      "id": "G190",
+      "ownerRole": "owner",
+      "poam": "g190",
+      "remediation": "The sponsor privacy communications and complaints leads maintain public resource and notice inventory for applicable digital services, approve current notices and accessible contact paths, and test a harmless enquiry through intake, tracking and response with restricted case records.",
+      "title": "Public privacy information and the complaints route need operating evidence"
+    },
+    {
+      "controls": [
+        "pm-21",
+        "pm-22"
+      ],
+      "id": "G191",
+      "ownerRole": "owner",
+      "poam": "g191",
+      "remediation": "The sponsor disclosure and information quality authorities approve rules for required disclosures and authorized corrections. Use protected records to demonstrate dates, required recipients and reasons for disclosure, and sample a quality review or correction with approved outcome. Retain only redacted references for assessment.",
+      "title": "Privacy disclosure and information quality procedures need reviewed records"
+    },
+    {
+      "controls": [
+        "pm-23",
+        "pm-24",
+        "pm-25"
+      ],
+      "id": "G192",
+      "ownerRole": "owner",
+      "poam": "g192",
+      "remediation": "The sponsor data and privacy leads document committee membership, authority and reviewed decisions. Where matching is in scope, obtain the authorized board review and periodic assessment. Show minimization for testing, training and research through approved synthetic or de-identified dataset controls and exception records. Record authorized applicability decisions.",
+      "title": "Data governance, matching review and personal information minimization need scope evidence"
+    },
+    {
+      "controls": [
+        "pm-30",
+        "pm-30.01"
+      ],
+      "id": "G193",
+      "ownerRole": "owner",
+      "poam": "g193",
+      "remediation": "The sponsor supply chain executive and procurement lead approve enterprise strategy through acquisition, operation, maintenance and disposal. Identify critical suppliers and dependencies, prioritize by mission impact, and sample due diligence, residual risk, assigned treatment and recurring review.",
+      "title": "Program supply-chain strategy and critical supplier review need authorized records"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
