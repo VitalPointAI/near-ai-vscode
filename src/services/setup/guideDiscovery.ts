@@ -381,8 +381,8 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
             if (!permitted()) throw new Error('Discovery authority changed before listening');
             return guardedDatagram(deps.createSocket(), permitted);
           }, clock: deps.clock, signal }),
-          lookupAnnouncedSrv({ ways, networks: scope.networks, resolver: { resolveSrv(name) {
-            return permitted() ? deps.resolver.resolveSrv(name) : Promise.resolve([]);
+          lookupAnnouncedSrv({ ways, networks: scope.networks, resolver: { resolveSrv(name, request) {
+            return permitted() ? deps.resolver.resolveSrv(name, request) : Promise.resolve([]);
           } }, clock: deps.clock, signal })
         ]) : [];
         if (!permitted()) return;

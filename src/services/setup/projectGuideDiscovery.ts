@@ -5,10 +5,11 @@ import type { GateHost } from '../../gate/host';
 import type { GuideControllerDeps, GuideRouteSnapshot } from './guideController';
 import { createGuideDiscovery, type GuideDiscoveryDeps } from './guideDiscovery';
 import { readHostNetworkFacts } from './networkFacts';
+import { hostSrvResolver } from './srv';
 
 export type ProjectDiscoveryTransports =
-  Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind' | 'networkFacts' | 'createSocket'> &
-  Partial<Pick<GuideDiscoveryDeps, 'networkFacts' | 'createSocket'>>;
+  Omit<GuideDiscoveryDeps, 'policy' | 'endpoints' | 'organization' | 'audit' | 'editor' | 'hostKind' | 'networkFacts' | 'createSocket' | 'resolver'> &
+  Partial<Pick<GuideDiscoveryDeps, 'networkFacts' | 'createSocket' | 'resolver'>>;
 
 interface DiscoveryAttempt {
   readonly controller: AbortController;
@@ -43,6 +44,7 @@ export function createProjectGuideDiscovery(deps: {
     ...deps.transports, audit: deps.audit, editor: deps.editor, hostKind: deps.hostKind,
     networkFacts: deps.transports.networkFacts ?? readHostNetworkFacts,
     createSocket: deps.transports.createSocket ?? (() => createSocket('udp4')),
+    resolver: deps.transports.resolver ?? hostSrvResolver,
     policy: () => authority()?.policy ?? unavailable,
     endpoints: () => authority()?.snapshot.route.endpoints ?? [],
     get organization() {

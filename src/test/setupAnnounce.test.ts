@@ -267,17 +267,20 @@ test('SRV handles resolver rejection', async () => {
 test('SRV stops waiting at three seconds and ignores late answers', async () => {
   const clock = new VirtualClock();
   let finish!: (answers: ReturnType<typeof srvAnswer>[]) => void;
+  let request: AbortSignal | undefined;
   const lookup = lookupAnnouncedSrv({
     ways, networks: [network], clock,
-    resolver: { resolveSrv: () => new Promise(resolve => { finish = resolve; }) },
+    resolver: { resolveSrv: (_query, signal) => new Promise(resolve => { request = signal; finish = resolve; }) },
   });
   let settled = false;
   void lookup.then(() => { settled = true; });
   clock.advance(2999);
   await Promise.resolve();
   assert.equal(settled, false);
+  assert.equal(request?.aborted, false);
   clock.advance(1);
   assert.deepEqual(await lookup, []);
+  assert.equal(request?.aborted, true);
   finish([srvAnswer('late.example.org')]);
 });
 

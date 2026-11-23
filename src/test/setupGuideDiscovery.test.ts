@@ -170,7 +170,7 @@ test('project discovery transports use current signed Gate authority and the cap
   run.abort();
 });
 
-test('project discovery reads local network configuration and opens local multicast only after signed scope permits it', async (t) => {
+test('project discovery opens the host announcement transports only within signed scope', async (t) => {
   const { host, root, deps, audit } = await setup();
   const fake = fixture({}, FOUND);
   const reads: string[] = [];
@@ -200,7 +200,32 @@ test('project discovery reads local network configuration and opens local multic
       close() { socketCalls.push('close'); socket.close(); },
     };
   });
-  const { networkFacts: _fixtureReader, createSocket: _fixtureSocket, ...transports } = fake.deps;
+  const dns = require('node:dns/promises') as typeof import('node:dns/promises');
+  const dnsCalls: string[] = [];
+  let pending = false;
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  class FixtureResolver {
+    private reject?: (error: Error) => void;
+    constructor() { dnsCalls.push('open'); }
+    async resolveSrv(query: string) {
+      dnsCalls.push(query);
+      if (!pending) return [];
+      return new Promise<never>((_resolve, reject) => {
+        this.reject = reject;
+        notifyStarted();
+      });
+    }
+    cancel() {
+      dnsCalls.push('cancel');
+      this.reject?.(new Error('fake resolver cancelled'));
+    }
+  }
+  const resolverProperty = Object.getOwnPropertyDescriptor(dns, 'Resolver');
+  assert.ok(resolverProperty);
+  Object.defineProperty(dns, 'Resolver', { ...resolverProperty, value: FixtureResolver });
+  t.after(() => Object.defineProperty(dns, 'Resolver', resolverProperty));
+  const { networkFacts: _fixtureReader, createSocket: _fixtureSocket, resolver: _fixtureResolver, ...transports } = fake.deps;
   const guide = createProjectGuideDiscovery({
     gate: host, root, currentRoot: () => root, readPolicy: deps.readPolicy, clock: () => at, audit,
     transports,
@@ -211,6 +236,7 @@ test('project discovery reads local network configuration and opens local multic
   assert.deepEqual(reads, []);
   assert.deepEqual(fake.calls, []);
   assert.deepEqual(socketCalls, []);
+  assert.deepEqual(dnsCalls, []);
 
   const personal = host.policyLayers().personal;
   assert.ok(personal);
@@ -221,7 +247,17 @@ test('project discovery reads local network configuration and opens local multic
   await guide.refresh(run.signal);
   assert.deepEqual(reads, ['/proc/net/route', '/etc/resolv.conf']);
   assert.deepEqual(socketCalls, ['open', 'ttl:1', 'send', 'close']);
+  const serviceQuery = '_near-ai-models._tcp.corp.example.org';
+  assert.deepEqual(dnsCalls, ['open', serviceQuery]);
   assert.equal(guide.rows()[0]?.host, FOUND);
+
+  pending = true;
+  const refreshing = guide.refresh(run.signal);
+  await Promise.race([started, refreshing.then(() => assert.fail('the fake resolver did not start'))]);
+  run.abort();
+  await refreshing;
+  assert.deepEqual(dnsCalls, ['open', serviceQuery, 'open', serviceQuery, 'cancel']);
+  assert.deepEqual(guide.rows(), []);
 });
 
 test('listed announcements yield an unapproved Ollama row after just one pinned signature check', async () => {

@@ -1,3 +1,4 @@
+import { Resolver } from 'node:dns/promises';
 import type { DiscoveryNetwork } from '../../domain/gate/sections';
 import { ANNOUNCED_SERVICE } from '../../domain/setup/network';
 import type { DiscoveryWays } from '../../domain/setup/network';
@@ -13,8 +14,23 @@ interface SrvRecord {
 }
 
 export interface SrvResolverLike {
-  resolveSrv(name: string): Promise<readonly SrvRecord[]>;
+  resolveSrv(name: string, signal?: AbortSignal): Promise<readonly SrvRecord[]>;
 }
+
+/** Use the host resolver without keeping DNS work alive beyond this discovery attempt. */
+export const hostSrvResolver: SrvResolverLike = {
+  async resolveSrv(name, signal) {
+    signal?.throwIfAborted();
+    const resolver = new Resolver();
+    const cancel = () => resolver.cancel();
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      return await resolver.resolveSrv(name);
+    } finally {
+      signal?.removeEventListener('abort', cancel);
+    }
+  },
+};
 
 interface LookupInput {
   readonly ways: DiscoveryWays;
@@ -45,7 +61,11 @@ function resolveBeforeDeadline(input: LookupInput, query: string): Promise<reado
   const deadline = clock.now() + SRV_TIMEOUT_MS;
   return new Promise(resolve => {
     let finished = false;
-    const stop = (): void => finish([]);
+    const request = new AbortController();
+    const stop = (): void => {
+      finish([]);
+      request.abort();
+    };
     const finish = (records: readonly SrvRecord[]): void => {
       if (finished) return;
       finished = true;
@@ -57,7 +77,7 @@ function resolveBeforeDeadline(input: LookupInput, query: string): Promise<reado
     signal?.addEventListener('abort', stop, { once: true });
     if (signal?.aborted) return stop();
     try {
-      void resolver.resolveSrv(query).then(
+      void resolver.resolveSrv(query, request.signal).then(
         records => finish(clock.now() < deadline ? records : []),
         stop,
       );
