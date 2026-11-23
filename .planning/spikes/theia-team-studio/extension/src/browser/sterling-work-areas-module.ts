@@ -7,8 +7,10 @@ import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { FileService } from '@theia/filesystem/lib/browser/file-service.js';
 import type { FileStat } from '@theia/filesystem/lib/common/files.js';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
-import { workAreaKind, type WorkAreaKind } from '../common/sterling-work-areas.js';
+import { WorkspaceTrustService } from '@theia/workspace/lib/browser/workspace-trust-service.js';
+import { workAreaKind, type WorkAreaKind, type WorkAreaResourceRef } from '../common/sterling-work-areas.js';
 import { listWorkAreas, verifyWorkArea, type LocalWorkArea } from './sterling-work-area-files.js';
+import { linkWorkAreaResource } from './sterling-work-area-resource-links.js';
 import './sterling-work-areas.css';
 
 const factoryId = 'sterling-work-areas';
@@ -19,6 +21,7 @@ const inventory = { label: 'Open resource inventory', command: 'sterling.resourc
 interface Shortcut {
   readonly label: string;
   readonly command: string;
+  readonly currentProject?: true;
 }
 
 interface AreaPage {
@@ -36,7 +39,7 @@ const pages: Record<WorkAreaKind, AreaPage> = {
     image: 'sterling-area-capability.webp',
     create: 'Create capability',
     shortcuts: [
-      { label: 'Project Setup', command: 'nearAi.projectSetup' },
+      { label: 'Current project setup', command: 'nearAi.projectSetup', currentProject: true },
       { label: 'Open Portfolio Room', command: 'sterling.portfolio.open' }
     ]
   },
@@ -47,7 +50,7 @@ const pages: Record<WorkAreaKind, AreaPage> = {
     create: 'Create training work area',
     shortcuts: [
       { label: 'Set up a staff team', command: 'nearAi.setUpStaffTeam' },
-      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom' }
+      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom', currentProject: true }
     ]
   },
   operations: {
@@ -56,8 +59,8 @@ const pages: Record<WorkAreaKind, AreaPage> = {
     image: 'sterling-area-operations.webp',
     create: 'Create operations work area',
     shortcuts: [
-      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom' },
-      { label: 'Open Agent Activity', command: 'nearAi.openAgentActivity' }
+      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom', currentProject: true },
+      { label: 'Open Agent Activity', command: 'nearAi.openAgentActivity', currentProject: true }
     ]
   },
   resources: {
@@ -93,6 +96,9 @@ class WorkAreaLanding extends BaseWidget {
 
   @inject(FileService)
   protected readonly files!: FileService;
+
+  @inject(WorkspaceTrustService)
+  protected readonly trust!: WorkspaceTrustService;
 
   private kind!: WorkAreaKind;
   private readonly source = element('select');
@@ -136,7 +142,7 @@ class WorkAreaLanding extends BaseWidget {
     const shortcuts = element('nav', undefined, 'sterling-area-shortcuts');
     shortcuts.setAttribute('aria-label', 'Work area tools');
     for (const action of config.shortcuts) {
-      shortcuts.append(button(action.label, 'sterling-area-action', () => void this.run(action.command)));
+      shortcuts.append(button(action.label, 'sterling-area-action', () => void this.runShortcut(action)));
     }
     this.feedback.setAttribute('role', 'status');
     this.feedback.hidden = true;
@@ -147,7 +153,7 @@ class WorkAreaLanding extends BaseWidget {
     title.id = `${this.id}-local`;
     local.setAttribute('aria-labelledby', title.id);
     const tools = element('div', undefined, 'sterling-area-tools');
-    const label = element('label', 'Workspace folder');
+    const label = element('label', 'Work-area folder');
     label.append(this.source);
     tools.append(label, button('Refresh', 'sterling-area-action', () => void this.load()));
     header.append(title, tools);
@@ -185,7 +191,7 @@ class WorkAreaLanding extends BaseWidget {
     const root = this.roots.find(item => item.resource.toString() === value)?.resource;
     this.records.replaceChildren();
     if (!root) {
-      this.status.textContent = 'Open a local workspace folder to see its work areas.';
+      this.status.textContent = 'Open a local folder to see its work areas.';
       return;
     }
     this.status.textContent = 'Looking for local work areas…';
@@ -198,29 +204,71 @@ class WorkAreaLanding extends BaseWidget {
       this.status.textContent = (entries.length ? '' : empty) + (limited ? limit : '');
       this.records.replaceChildren(...entries.map(area => this.item(root, area)));
     } catch {
-      if (current()) this.status.textContent = 'The selected workspace folder could not be read.';
+      if (current()) this.status.textContent = 'The selected folder could not be read.';
     }
   }
 
   private item(root: URI, area: LocalWorkArea): HTMLElement {
-    const item = element('li');
+    const item = element('li', undefined, 'sterling-area-record-item');
     const current = root.isEqual(area.uri);
     const open = button('', 'sterling-area-record', control => void this.openExisting(root, area, control));
     open.disabled = current;
     const title = element('strong', area.title);
-    const indicator = element('span', current ? 'Current workspace' : 'Open', 'sterling-area-record-open');
+    const indicator = element('span', current ? 'Open work area' : 'Open', 'sterling-area-record-open');
     open.append(title, indicator);
     if (area.detail) open.append(element('span', area.detail, 'sterling-area-record-detail'));
-    item.append(open);
+    const link = button('Link a resource', 'sterling-area-action sterling-area-link', control => void this.pickResource(root, area, control));
+    link.setAttribute('aria-label', `Link a resource to ${area.title}`);
+    item.append(open, link);
+    if (area.resourceRefs?.length) {
+      const references = element('ul', undefined, 'sterling-area-references');
+      references.setAttribute('aria-label', 'Linked resource references');
+      for (const { sourceId, resourceId } of area.resourceRefs) {
+        const reference = element('li');
+        reference.append(element('code', `resource:${sourceId}/${resourceId}`));
+        references.append(reference);
+      }
+      item.append(references);
+    }
     return item;
+  }
+
+  private isSelected(root: URI): boolean {
+    return !this.isDisposed && this.source.value === root.toString() &&
+      this.workspaces.tryGetRoots().some(item => item.resource.isEqual(root));
+  }
+
+  private async pickResource(root: URI, area: LocalWorkArea, control: HTMLButtonElement): Promise<void> {
+    control.disabled = true;
+    this.feedback.hidden = true;
+    try {
+      if (!await this.trust.getWorkspaceTrust() || !this.isSelected(root)) {
+        this.showFeedback('Open a trusted work-area folder to link resources.');
+        return;
+      }
+      await this.commands.executeCommand(inventory.command, {
+        rootUri: root.toString(),
+        onSelect: async (ref: WorkAreaResourceRef) => {
+          if (!this.isSelected(root) || !await verifyWorkArea(this.files, root, area) ||
+            !await this.trust.getWorkspaceTrust() || !this.isSelected(root)) {
+            throw new Error('The selected folder or work area changed. Open the resource picker again.');
+          }
+          await linkWorkAreaResource(this.files, root, area.uri, ref);
+          if (this.isSelected(root)) void this.load();
+        }
+      });
+    } catch {
+      this.showFeedback('Sterling could not open the resource picker.');
+    } finally {
+      control.disabled = false;
+    }
   }
 
   private async openExisting(root: URI, area: LocalWorkArea, control: HTMLButtonElement): Promise<void> {
     control.disabled = true;
     this.feedback.hidden = true;
     try {
-      if (!await verifyWorkArea(this.files, root, area) || this.source.value !== root.toString()
-        || !this.roots.some(item => item.resource.isEqual(root))) {
+      if (!await verifyWorkArea(this.files, root, area) || !this.isSelected(root)) {
         this.showFeedback('That work area changed. Refresh the list and try again.');
         return;
       }
@@ -247,6 +295,14 @@ class WorkAreaLanding extends BaseWidget {
     } finally {
       control.disabled = false;
     }
+  }
+
+  private async runShortcut(shortcut: Shortcut): Promise<void> {
+    if (shortcut.currentProject && this.workspaces.tryGetRoots()[0]?.resource.toString() !== this.source.value) {
+      this.showFeedback('Open the intended work area before using this tool.');
+      return;
+    }
+    await this.run(shortcut.command);
   }
 
   private async run(command: string): Promise<void> {
