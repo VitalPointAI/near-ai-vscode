@@ -32,7 +32,8 @@ export const OBSERVATION_WINDOWS: Readonly<Record<string, WindowKind>> = Object.
 });
 
 /** The window for a collector id; unknown collectors are judged against the head commit. */
-export function windowForCollector(collector: string): WindowKind {
+export function windowForCollector(collector: string, subject?: string): WindowKind {
+  if (collector === 'settings' && subject === 'codeowners-valid') return 'head';
   return Object.hasOwn(OBSERVATION_WINDOWS, collector) ? OBSERVATION_WINDOWS[collector] : 'head';
 }
 
@@ -135,11 +136,11 @@ export function evaluateTestRule(rule: EvidenceRule, rows: readonly TestReportRo
 
 /**
  * Evaluates an observation rule: the newest observation with the rule's collector and subject decides. None gives missing-result (dated at the
- * context's collection time); one that did not pass gives observation-failed. The window comes from the collector kind (OBSERVATION_WINDOWS).
+ * context's collection time); one that did not pass gives observation-failed. Settings evidence for the CODEOWNERS file follows the assessed commit.
  */
 export function evaluateObservationRule(rule: EvidenceRule, observations: readonly Observation[], context: RuleContext): RuleResult {
   const target = rule.kind === 'observation' ? rule.observation : undefined;
-  const window = windowForCollector(target?.collector ?? '');
+  const window = windowForCollector(target?.collector ?? '', target?.subject);
   let newest: Observation | undefined;
   let newestAt = -Infinity;
   if (target) {
