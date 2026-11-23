@@ -1,7 +1,7 @@
 import type { PolicyContact } from '../gate/sections';
 import { fillSlots, KIND_OF_WORK_ANSWERS, MAX_OTHER_KIND_CHARS, type KindOfWorkAnswer } from './answers';
 import { choiceNeedsReason, type OptionCard } from './cards';
-import { CHANGE_TEXT, type ApplyStepReport, type ChangeItem } from './changes';
+import { applyStepPending, CHANGE_TEXT, type ApplyStepReport, type ChangeItem } from './changes';
 import type { GuideAnswerEvent, QuestionScreen } from './guideMessages';
 import type { Landing } from './landing';
 import { MODE_SET_BY_ORGANIZATION_TEXT, SET_BY_PROJECT_TEXT, type ModeRow } from './modes';
@@ -290,9 +290,9 @@ function selectedText(field: QuestionField): readonly string[] {
   return field.choices.filter(({ value }) => field.selected.includes(value)).map(({ text }) => text);
 }
 
-function reportRows(session: GuideSession, matches: (outcome: ApplyStepReport['outcome']) => boolean): readonly DoneRow[] {
+function reportRows(session: GuideSession, matches: (step: ApplyStepReport) => boolean): readonly DoneRow[] {
   const textById = new Map(session.changes.map(({ id, text }) => [id, text]));
-  return session.report?.steps.filter(({ outcome }) => matches(outcome)).flatMap(({ id, message }) => {
+  return session.report?.steps.filter(matches).flatMap(({ id, message }) => {
     const text = textById.get(id) ?? message;
     return text === undefined ? [] : [{ id, text, message: text === message ? undefined : message }];
   }) ?? [];
@@ -394,8 +394,8 @@ export function screenFor(session: GuideSession, inputs: ScreenInputs): GuideScr
       heading: partial ? SCREEN_TEXT.partial : completed ? SCREEN_TEXT.done
         : session.state === 'paused' ? SCREEN_TEXT.paused : SCREEN_TEXT.abandoned,
       landing: completed || partial ? inputs.landing : undefined,
-      done: reportRows(session, (outcome) => outcome === 'done' || outcome === 'already-done'),
-      notDone: reportRows(session, (outcome) => outcome === 'failed' || outcome === 'waiting'),
+      done: reportRows(session, (step) => !applyStepPending(step)),
+      notDone: reportRows(session, applyStepPending),
       doneHeading: SCREEN_TEXT.finished, notDoneHeading: SCREEN_TEXT.unfinished,
       restartText: partial ? SCREEN_TEXT.retry : completed ? SCREEN_TEXT.changeAnswers : undefined,
     };

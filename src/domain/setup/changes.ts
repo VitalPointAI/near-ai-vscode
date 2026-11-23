@@ -24,7 +24,8 @@ export interface ChangeItem {
 }
 
 export interface ApplyStepReport extends Omit<RecordedApplyStep, 'outcome'> {
-  readonly outcome: RecordedApplyStep['outcome'] | 'already-done';
+  readonly outcome: RecordedApplyStep['outcome'] | 'already-done' | 'proposal-opened';
+  readonly proposalOutcome?: 'applied' | 'exported' | 'discarded' | 'replaced';
 }
 
 export interface ApplyReport extends Omit<RecordedApplyReport, 'steps'> {
@@ -199,6 +200,10 @@ export function rerunDiff(previous: SetupGuideEntry | undefined, items: readonly
 }
 
 export function remainingAfter(report: ApplyReport, items: readonly ChangeItem[]): readonly ChangeItem[] {
-  const pending = new Set(report.steps.filter(({ outcome }) => outcome === 'failed' || outcome === 'waiting').map(({ id }) => id));
+  const pending = new Set(report.steps.filter(applyStepPending).map(({ id }) => id));
   return items.filter(({ id }) => pending.has(id));
+}
+
+export function applyStepPending({ outcome, proposalOutcome }: ApplyStepReport): boolean {
+  return outcome === 'failed' || outcome === 'waiting' || (outcome === 'proposal-opened' && proposalOutcome !== 'applied');
 }

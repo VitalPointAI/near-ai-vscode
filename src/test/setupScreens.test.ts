@@ -91,13 +91,22 @@ test('partly applied lists completed and pending work with landing details', () 
     changes: [
       { id: 'label', area: 'label', group: 'changed', effect: 'apply', text: 'Changed the project label.' },
       { id: 'answers', area: 'answers', group: 'changed', effect: 'apply', text: 'Save your answers.' },
+      { id: 'your-rules:clearance', area: 'your-rules', group: 'added', effect: 'proposal', text: 'Clearance proposal.' },
+      { id: 'your-rules:server', area: 'your-rules', group: 'added', effect: 'proposal', text: 'Server proposal.' },
     ],
-    report: { state: 'partly-applied', steps: [{ id: 'label', outcome: 'done' }, { id: 'answers', outcome: 'waiting', message: 'Try again later.' }] },
+    report: { state: 'partly-applied', steps: [
+      { id: 'label', outcome: 'done' },
+      { id: 'answers', outcome: 'waiting', message: 'Try again later.' },
+      { id: 'your-rules:clearance', outcome: 'proposal-opened', proposalOutcome: 'applied' },
+      { id: 'your-rules:server', outcome: 'proposal-opened', proposalOutcome: 'exported' },
+    ] },
   }, { ...inputs, landing: { target: 'chat', checklist: [] } });
   assert.equal(String(model.kind), 'done');
   assert.ok('done' in model && 'notDone' in model && 'landing' in model);
   assert.match(JSON.stringify(model.done), /Changed the project label/);
   assert.match(JSON.stringify(model.notDone), /Try again later/);
+  assert.deepEqual(model.done.map(({ id }) => id), ['label', 'your-rules:clearance']);
+  assert.deepEqual(model.notDone.map(({ id }) => id), ['answers', 'your-rules:server']);
   assert.deepEqual(model.landing, { target: 'chat', checklist: [] });
 });
 

@@ -1,11 +1,13 @@
-import { sameGuideAnswers, type ApplyReport, type ApplyStepReport, type ChangeItem, type LabelProposal } from '../../domain/setup/changes';
+import { applyStepPending, sameGuideAnswers, type ApplyReport, type ApplyStepReport, type ChangeItem, type LabelProposal } from '../../domain/setup/changes';
 import { buildGuideRecord, type GuideRecordInput } from '../../domain/setup/guideRecord';
 import { parseSetupGuideEntry } from '../../domain/setup/answers';
 import type { SetupAuditLog } from '../../gate/setupAuditLog';
+import type { PolicyEditorPort } from '../policyEditorWiring';
 import { labelStep, type LabelHost } from './applyLabel';
 import { answersStep, projectStep } from './applyProject';
 import type { ProjectLayerChange, ProjectLayerSink } from './projectLayerSink';
 import { isSharedProject, updateProjectJson } from './projectStore';
+import { proposalStep, type PendingProposal } from './proposals';
 
 export const APPLY_TEXT = Object.freeze({
   checkAgain: 'Nothing was changed. Check which AI services are available and allowed, then try again.',
@@ -36,12 +38,14 @@ export interface ApplyDeps extends ApplyRunDeps {
   readonly labelHost: LabelHost;
   /** A supplied step uses the existing connection flow. */
   readonly connection?: ApplyStep;
+  readonly policyEditor?: Pick<PolicyEditorPort, 'propose'>;
   rememberKind?(kind: GuideRecordInput['answers']['kindOfWork'], otherKind?: string): Promise<void>;
 }
 
 export interface ApplyContext {
   readonly label: LabelProposal;
   readonly project: ProjectLayerChange;
+  readonly proposals?: readonly PendingProposal[];
 }
 
 function fixedStep(item: ChangeItem, outcome: ApplyStepReport['outcome']): ApplyStep {
@@ -97,6 +101,11 @@ export function planApply(items: readonly ChangeItem[], context: ApplyContext, d
         const target = projectStep({ root: deps.root, sink: deps.sink, change, scales: () => deps.labelHost.labelPolicy().scales });
         steps.push({ ...target, changeId: item.id, additionalIds: project.slice(1).map(({ id }) => id) });
       }
+    } else if (item.area === 'your-rules' && item.effect === 'proposal' && deps.policyEditor) {
+      const proposal = context.proposals?.find(({ id }) => item.id === `your-rules:${id}`);
+      steps.push(proposal
+        ? proposalStep({ port: deps.policyEditor, proposal, audit: deps.audit })
+        : fixedStep(item, 'waiting'));
     } else {
       steps.push(fixedStep(item, 'waiting'));
     }
@@ -111,9 +120,9 @@ export interface ApplyResult extends ApplyReport {
 
 async function recordReference(deps: ApplyRunDeps, reports: readonly ApplyStepReport[], recordId: string): Promise<boolean> {
   if (deps.sink.kind === 'shared' || await isSharedProject(deps.root)) return true;
-  if (reports.some(({ id, outcome }) => id === 'answers' && (outcome === 'failed' || outcome === 'waiting'))) return true;
+  if (reports.some((step) => step.id === 'answers' && applyStepPending(step))) return true;
   const processed = new Set(reports.map(({ id }) => id));
-  const pending = reports.filter(({ outcome }) => outcome === 'failed' || outcome === 'waiting').map(({ id }) => id);
+  const pending = reports.filter(applyStepPending).map(({ id }) => id);
   const result = await updateProjectJson(deps.root, (current) => {
     const guide = parseSetupGuideEntry(current.setupGuide);
     if (!guide || !sameGuideAnswers(guide.answers, deps.record.answers) ||
@@ -151,7 +160,7 @@ export async function runApply(steps: readonly ApplyStep[], deps: ApplyRunDeps):
   try {
     const saved = await deps.audit.append('setup.guide.applied', buildGuideRecord({
       ...deps.record,
-      changes: reports.map(({ id, outcome }) => ({ id, outcome })),
+      changes: reports.map(({ id, outcome, proposalOutcome }) => ({ id, outcome, proposalOutcome })),
       nothingChanged: reports.every(({ outcome }) => outcome === 'already-done')
     }));
     if (saved.ok) recordId = saved.id;
@@ -163,7 +172,7 @@ export async function runApply(steps: readonly ApplyStep[], deps: ApplyRunDeps):
   } catch {
     return { state: 'partly-applied', steps: reports, recordId, message: APPLY_TEXT.referenceFailed };
   }
-  return reports.some(({ outcome }) => outcome === 'failed' || outcome === 'waiting')
+  return reports.some(applyStepPending)
     ? { state: 'partly-applied', steps: reports, recordId, message: APPLY_TEXT.partlyApplied }
     : { state: 'applied', steps: reports, recordId };
 }

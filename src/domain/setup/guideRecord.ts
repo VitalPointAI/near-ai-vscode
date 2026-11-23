@@ -3,6 +3,7 @@ import { labelKey, type Label } from '../gate/labels';
 import type { UseTier } from '../gate/models';
 import { cleanFreeText, MAX_CHOICE_REASON_CHARS, MAX_OTHER_KIND_CHARS, type GuideAnswers } from './answers';
 import type { HostKind } from './device';
+import type { ApplyStepReport } from './changes';
 import type { GuideScreenId } from './ids';
 import type { ViabilitySnapshotEntry } from './records';
 import type { ServerKind } from './servers';
@@ -34,7 +35,7 @@ export interface GuideRecordInput {
   readonly recommendation: { readonly optionId?: string; readonly reasonId: string };
   readonly choice: readonly string[];
   readonly choiceReason?: string;
-  readonly changes: readonly { readonly id: string; readonly outcome: string }[];
+  readonly changes: readonly { readonly id: string; readonly outcome: string; readonly proposalOutcome?: ApplyStepReport['proposalOutcome'] }[];
   readonly hostKind: HostKind;
   readonly proposals?: readonly string[];
   readonly authorizations?: readonly string[];
@@ -106,7 +107,9 @@ export function buildGuideRecord(input: GuideRecordInput) {
     options: input.options.map(({ optionId, outcome }) => ({ optionId, outcome })),
     recommendation: { optionId: recommendation.optionId ?? null, reasonId: recommendation.reasonId },
     choice: [...input.choice],
-    changes: nothingChanged ? [] : input.changes.map(({ id, outcome }) => ({ id, outcome })),
+    changes: nothingChanged ? [] : input.changes.map(({ id, outcome, proposalOutcome }) => ({
+      id, outcome, ...(proposalOutcome === undefined ? {} : { proposalOutcome })
+    })),
     hostKind: input.hostKind,
     ...(answers.kindOfWork === 'something-else' && answers.otherKind !== undefined ? { kindOfWorkText: cleanAuditText(answers.otherKind, MAX_OTHER_KIND_CHARS) } : {}),
     ...(choiceReason === undefined ? {} : { choiceReason: cleanAuditText(choiceReason, MAX_CHOICE_REASON_CHARS) }),
