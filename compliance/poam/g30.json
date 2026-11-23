@@ -1,0 +1,16 @@
+{
+  "gap": "G30",
+  "id": "g30",
+  "controls": [
+    "ia-05.14"
+  ],
+  "ownerRole": "shared",
+  "title": "Public key trust stores need deployment governance evidence",
+  "remediation": "The deployment sponsor determines where public key infrastructure is used for authentication. The deployment public key infrastructure owner approves a common method to provision, update and remove trust anchors across in-scope network, operating system, browser and application platforms. Collect the redacted trust-store inventory and sampled configuration and change records. Verify that an authorized trust anchor works and that an unapproved or removed anchor is refused. Record gaps and sponsor-approved applicability decisions per platform.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Confirm public key authentication scope and collect approved trust-store procedures, sampled platforms and trust-anchor acceptance and refusal receipts"
+    }
+  ]
+}

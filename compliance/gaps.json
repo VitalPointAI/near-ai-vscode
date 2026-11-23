@@ -305,6 +305,55 @@
     },
     {
       "controls": [
+        "ia-02",
+        "ia-02.01",
+        "ia-02.02",
+        "ia-02.08",
+        "ia-02.10",
+        "ia-11"
+      ],
+      "id": "G27",
+      "ownerRole": "shared",
+      "poam": "g27",
+      "remediation": "The deployment sponsor approves the in-scope sign-in paths, account classes, accounts and services assigned to single sign-on, replay resistance selections and reauthentication triggers. Identity and component operators trace unique user identities to processes acting for them. Collect redacted policy exports and results showing strong multi-factor authentication for privileged accounts, multi-factor authentication for non-privileged accounts, replay refusal, single sign-on to assigned services and a fresh challenge at each applicable trigger. Use G3 relay ingress and Phase 76 requester binding only for that part of the deployment. Assign implementation or inheritance verification where a path lacks evidence.",
+      "title": "Organizational sign-in needs deployment authentication evidence"
+    },
+    {
+      "controls": [
+        "ia-05.08"
+      ],
+      "id": "G28",
+      "ownerRole": "owner",
+      "poam": "g28",
+      "remediation": "The deployment identity risk owner identifies where the same individuals hold accounts on multiple assessed systems and obtains sponsor approval of measures to limit cross-system compromise. Collect a redacted account and service inventory, approved authenticator reuse controls and operating evidence for the selected mechanism. Sample that independent credentials, centrally managed sign-in or another approved mechanism operates as designed. Record inherited coverage and route unmitigated reuse to its operator.",
+      "title": "Authenticator reuse across systems needs a deployment risk review"
+    },
+    {
+      "controls": [
+        "ia-05.09",
+        "ia-08",
+        "ia-08.01",
+        "ia-08.02",
+        "ia-08.04"
+      ],
+      "id": "G29",
+      "ownerRole": "shared",
+      "poam": "g29",
+      "remediation": "The deployment sponsor records whether external users or processes and federated credentials are in scope and approves participating organizations, external authenticators, required assurance levels and profiles. Verify that each in-scope external user is uniquely authenticated and bound to any process acting for them. Where required, demonstrate electronic verification of public key credentials from approved Government of Canada departments and agencies. Collect a redacted issuer and authenticator inventory, conformance evidence, accepted and denied sign-in receipts for approved and unapproved credentials, and the sponsor decision for each excluded path.",
+      "title": "External authentication and federation need sponsor-approved scope"
+    },
+    {
+      "controls": [
+        "ia-05.14"
+      ],
+      "id": "G30",
+      "ownerRole": "shared",
+      "poam": "g30",
+      "remediation": "The deployment sponsor determines where public key infrastructure is used for authentication. The deployment public key infrastructure owner approves a common method to provision, update and remove trust anchors across in-scope network, operating system, browser and application platforms. Collect the redacted trust-store inventory and sampled configuration and change records. Verify that an authorized trust anchor works and that an unapproved or removed anchor is refused. Record gaps and sponsor-approved applicability decisions per platform.",
+      "title": "Public key trust stores need deployment governance evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
