@@ -6,7 +6,7 @@ import { projectTeamFile } from './setupSteps';
 import { createExclusive } from './stateHome';
 
 export const CREATE_WORK_AREA_COMMAND = 'sterling.workAreas.create';
-const WORK_AREA_KINDS = ['projects', 'training', 'operations', 'resources'] as const;
+const WORK_AREA_KINDS = ['capability-development', 'projects', 'training', 'operations', 'resources'] as const;
 type WorkAreaKind = (typeof WORK_AREA_KINDS)[number];
 
 const PROJECT_CATEGORIES = [
@@ -15,6 +15,19 @@ const PROJECT_CATEGORIES = [
   { id: 'initiative', label: 'Initiative' },
   { id: 'product', label: 'Product' }
 ] as const;
+
+const CAPABILITY_COMPONENT_KINDS = [{ id: 'program', label: 'Program' }, ...PROJECT_CATEGORIES] as const;
+const CAPABILITY_COMPONENT_CHOICES = [
+  ...CAPABILITY_COMPONENT_KINDS,
+  { id: 'finish', label: 'Finish adding components' }
+] as const;
+
+type CapabilityComponent = {
+  readonly kind: (typeof CAPABILITY_COMPONENT_KINDS)[number]['id'];
+  readonly title: string;
+};
+
+const MAX_CAPABILITY_COMPONENTS = 50;
 
 interface WorkAreaParent {
   readonly folder: vscode.Uri;
@@ -54,6 +67,29 @@ function titleProblem(value: string): string | undefined {
   return undefined;
 }
 
+async function askTitle(title: string, prompt: string): Promise<string | undefined> {
+  const value = (await vscode.window.showInputBox({
+    title, prompt, ignoreFocusOut: true, validateInput: titleProblem
+  }))?.trim();
+  return value === undefined || titleProblem(value) ? undefined : value;
+}
+
+async function chooseCapabilityComponents(): Promise<CapabilityComponent[] | undefined> {
+  const components: CapabilityComponent[] = [];
+  while (components.length < MAX_CAPABILITY_COMPONENTS) {
+    const selected = await vscode.window.showQuickPick(CAPABILITY_COMPONENT_CHOICES, {
+      title: 'Add a capability component', ignoreFocusOut: true,
+      placeHolder: `Choose a component type or finish. ${components.length} of ${MAX_CAPABILITY_COMPONENTS} added.`
+    });
+    if (selected === undefined) return undefined;
+    if (selected.id === 'finish') return components;
+    const title = await askTitle(selected.label, 'Component title');
+    if (title === undefined) return undefined;
+    components.push({ kind: selected.id, title });
+  }
+  return components;
+}
+
 async function resolveParent(folder: vscode.Uri): Promise<{ directory: string; device: number; inode: number } | undefined> {
   try {
     const selected = await lstat(folder.fsPath);
@@ -71,10 +107,14 @@ export async function createWorkArea(kind: unknown): Promise<{ uri: string; titl
   if (!isWorkAreaKind(kind)) return undefined;
   const parent = await chooseParent();
   if (!parent) return undefined;
-  const title = (await vscode.window.showInputBox({
-    title: 'New defence work area', prompt: 'Work area title', ignoreFocusOut: true, validateInput: titleProblem
-  }))?.trim();
-  if (title === undefined || titleProblem(title)) return undefined;
+  const capabilityDevelopment = kind === 'capability-development';
+  const title = await askTitle(
+    capabilityDevelopment ? 'New Capability Development work area' : 'New defence work area',
+    capabilityDevelopment ? 'Capability title' : 'Work area title'
+  );
+  if (title === undefined) return undefined;
+  const components = capabilityDevelopment ? await chooseCapabilityComponents() : undefined;
+  if (capabilityDevelopment && components === undefined) return undefined;
   const category = kind === 'projects'
     ? (await vscode.window.showQuickPick([...PROJECT_CATEGORIES], { title: 'Choose a project category', ignoreFocusOut: true }))?.id
     : undefined;
@@ -86,9 +126,10 @@ export async function createWorkArea(kind: unknown): Promise<{ uri: string; titl
     return undefined;
   }
   const destination = path.join(root.directory, `work-area-${randomBytes(8).toString('hex')}`);
+  const componentCount = components ? ` Components to add: ${components.length}.` : '';
   const answer = await vscode.window.showWarningMessage(`Create “${title}”?`, {
     modal: true,
-    detail: `Sterling will create and open this work area at ${destination}.`
+    detail: `Sterling will create and open this work area at ${destination}.${componentCount}`
   }, CREATE, CANCEL);
   if (answer !== CREATE) return undefined;
   const observedRoot = await resolveParent(parent.folder);
@@ -117,7 +158,11 @@ export async function createWorkArea(kind: unknown): Promise<{ uri: string; titl
     await mkdir(projectDir, { mode: 0o700 });
     const ignore = await createExclusive(path.join(projectDir, '.gitignore'), '/work-area.json\n');
     if (ignore === 'created') {
-      const workArea = { version: 1, kind, title, ...(category ? { category } : {}) };
+      const workArea = {
+        version: 1, kind, title,
+        ...(category ? { category } : {}),
+        ...(components ? { components } : {})
+      };
       const saved = await createExclusive(path.join(projectDir, 'work-area.json'), `${JSON.stringify(workArea, null, 2)}\n`);
       if (saved === 'created') return { uri: vscode.Uri.file(destination).toString(), title };
     }
