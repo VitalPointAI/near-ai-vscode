@@ -595,6 +595,107 @@
     },
     {
       "controls": [
+        "cm-01",
+        "cm-09"
+      ],
+      "id": "G50",
+      "ownerRole": "owner",
+      "poam": "g50",
+      "remediation": "The deployment configuration manager obtains sponsor approval for the policy and management plan. Record accountable roles, approved items under configuration control, management and change procedures, protections for the plan, and distribution and review records. Collect a sampled application of the approved workflow.",
+      "title": "Configuration policy and management plan need deployment approval"
+    },
+    {
+      "controls": [
+        "cm-02",
+        "cm-02.02",
+        "cm-02.03",
+        "cm-02.06"
+      ],
+      "id": "G51",
+      "ownerRole": "shared",
+      "poam": "g51",
+      "remediation": "Release maintainers and deployment configuration operators identify assessed hardware, firmware and software versions and settings. Separate production from development and test, record review triggers and retained prior versions, and demonstrate automated reconciliation, detected drift and rollback to a known configuration. Use exact-release installer inventory as an input and retain environment-specific settings separately.",
+      "title": "Configuration baselines need automated reconciliation, retained versions and separated environments"
+    },
+    {
+      "controls": [
+        "cm-02.07"
+      ],
+      "id": "G52",
+      "ownerRole": "owner",
+      "poam": "g52",
+      "remediation": "The sponsor and endpoint security owner identify approved high-risk travel conditions and devices. Verify provisioning from the restricted baseline, authorized assignment and required measures on return. Retain an approved baseline and redacted provisioning and return sample, or the authorized scope decision.",
+      "title": "High-risk travel device configuration and return evidence need approved scope"
+    },
+    {
+      "controls": [
+        "cm-03",
+        "cm-03.02",
+        "cm-03.04",
+        "cm-04",
+        "cm-04.01",
+        "cm-04.02",
+        "cm-05"
+      ],
+      "id": "G53",
+      "ownerRole": "shared",
+      "poam": "g53",
+      "remediation": "Release maintainers and deployment change authority sample a configuration-controlled change. Record security and privacy impact review with named representatives, approval or refusal, effective access restrictions, isolated test validation, monitored change deployment and post-change verification of each affected control. Include review records and applicable authorized-access decisions. Use G7 and G12 only for their scoped repository evidence.",
+      "title": "Deployment change decisions, impacts and authorized access need a verified change trace"
+    },
+    {
+      "controls": [
+        "cm-06",
+        "cm-07",
+        "cm-07.01",
+        "cm-07.02",
+        "cm-07.05"
+      ],
+      "id": "G54",
+      "ownerRole": "shared",
+      "poam": "g54",
+      "remediation": "Component maintainers and deployment security operators approve the applicable restrictive baseline and essential functions, ports, protocols, services and software. Compare applied settings to the approved baseline, record authorized exceptions and monitoring, review unused functions, and test permitted and denied program execution under the approved allow-by-exception policy. Record gaps in deployed host or application enforcement and retest.",
+      "title": "Secure settings, least-functionality review and approved execution need evidence"
+    },
+    {
+      "controls": [
+        "cm-08",
+        "cm-08.01",
+        "cm-08.03",
+        "cm-08.04",
+        "cm-08.06"
+      ],
+      "id": "G55",
+      "ownerRole": "shared",
+      "poam": "g55",
+      "remediation": "Deployment asset and component owners reconcile scoped assets, responsible administrators, assessed configurations and approved deviations with installation, removal and update records. Demonstrate approved automated detection using a synthetic unauthorized component and record the configured response. Use release inventories as evidence for supplier artifacts and verify actual deployments independently.",
+      "title": "Installed components need accountable inventory and automated unauthorized component response"
+    },
+    {
+      "controls": [
+        "cm-10",
+        "cm-11",
+        "cm-11.02"
+      ],
+      "id": "G56",
+      "ownerRole": "owner",
+      "poam": "g56",
+      "remediation": "Deployment software asset and endpoint administration owners approve installation and peer-to-peer use rules. Record applicable licence entitlements and reconcile constrained quantities. Demonstrate allowed privileged installation, denied ordinary-user installation and monitoring. Collect software exception and peer-to-peer restrictions where applicable and track implementation gaps.",
+      "title": "Software use, licences and privileged user installations need operating evidence"
+    },
+    {
+      "controls": [
+        "cm-12",
+        "cm-12.01"
+      ],
+      "id": "G57",
+      "ownerRole": "shared",
+      "poam": "g57",
+      "remediation": "The deployment data steward and component maintainers inventory approved information types, processing and storage locations, and users with access. Include approved provider, relay, hub and local scope as applicable. Sample authorized location changes and test the approved automated discovery tool against seeded benign data in each assessed component. Record scope or sensing gaps for follow-up and preserve only sanitized references.",
+      "title": "Information locations, access and automated discovery need scoped deployment evidence"
+    },
+    {
+      "controls": [
         "ac-01"
       ],
       "id": "G58",

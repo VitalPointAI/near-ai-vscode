@@ -1,0 +1,16 @@
+{
+  "gap": "G52",
+  "id": "g52",
+  "controls": [
+    "cm-02.07"
+  ],
+  "ownerRole": "owner",
+  "title": "High-risk travel device configuration and return evidence need approved scope",
+  "remediation": "The sponsor and endpoint security owner identify approved high-risk travel conditions and devices. Verify provisioning from the restricted baseline, authorized assignment and required measures on return. Retain an approved baseline and redacted provisioning and return sample, or the authorized scope decision.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved travel rules, device baseline and issued-and-returned device evidence or approved scope disposition"
+    }
+  ]
+}

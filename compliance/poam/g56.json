@@ -1,0 +1,18 @@
+{
+  "gap": "G56",
+  "id": "g56",
+  "controls": [
+    "cm-10",
+    "cm-11",
+    "cm-11.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Software use, licences and privileged user installations need operating evidence",
+  "remediation": "Deployment software asset and endpoint administration owners approve installation and peer-to-peer use rules. Record applicable licence entitlements and reconcile constrained quantities. Demonstrate allowed privileged installation, denied ordinary-user installation and monitoring. Collect software exception and peer-to-peer restrictions where applicable and track implementation gaps.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect entitlement and installation policy records, an approved and refused installation, monitoring receipts and any applicable sharing restrictions"
+    }
+  ]
+}
