@@ -20,7 +20,7 @@ import { attachTeamStudio, buildStudioContext, CLONE_ICON_NOTE, cloneNameFor, cl
 import type { DirectoryInput } from '../services/toolsDirectory';
 import { JPEG, jpegOfSize, png, SVG, WEBP, webpOfSize } from './iconFixtures';
 import { iconVariation, ICON_VARIATIONS, teamIconPrompt, withIconReference } from '../agent/teamIcon';
-import { buildDashboard, type DashboardTeam } from '../domain/teamDashboard';
+import { buildDashboard, projectIdentity, type DashboardTeam } from '../domain/teamDashboard';
 import type { ActivitySessionSummary } from '../domain/activity';
 import { withTeamRating } from '../agent/teamFrontMatter';
 
@@ -2362,6 +2362,38 @@ test('message parsing: use-team and the builder path take exact keys and known v
     { type: 'use-team', id: 'lib:web', discard: false }, { type: 'use-team', id: 'recommend', goal: 'x'.repeat(401) },
     { type: 'save-draft', draft: draft(), step: 0, target: 'user', path: 'somewhere' }
   ]) assert.equal(parseStudioMessage(message), undefined, JSON.stringify(message));
+});
+
+test('host: replacing a project team clears only that project’s kept state after a folder switch', async () => {
+  const h = await harness();
+  const otherRoot = path.join(path.dirname(h.root), 'other-project');
+  const firstFile = TeamLibrary.projectTeamFile(h.root);
+  const otherFile = TeamLibrary.projectTeamFile(otherRoot);
+  await mkdir(path.dirname(firstFile), { recursive: true });
+  await mkdir(path.dirname(otherFile), { recursive: true });
+  await writeFile(firstFile, teamMarkdown(draft({ name: 'First project' })));
+  const otherTeam = teamMarkdown(draft({ name: 'Other project' }));
+  await writeFile(otherFile, otherTeam);
+  const replacement = await h.library.create('Web team', HANDWRITTEN);
+  const firstKey = 'project:' + await projectIdentity(h.root);
+  const otherKey = 'project:' + await projectIdentity(otherRoot);
+  const at = '2026-11-21T12:00:00.000Z';
+  const otherRating = { at, rating: 5 };
+  const otherRoleTest = { at, members: 1, tested: 1, score: 80 };
+  let ratings: unknown = { [firstKey]: { at, rating: 2 }, [otherKey]: otherRating };
+  let roleTests: unknown = { [firstKey]: { at, members: 1, tested: 1, score: 40 }, [otherKey]: otherRoleTest };
+  h.deps.ratings = { get: () => ratings, set: async (value) => { ratings = value; } };
+  h.deps.roleTests = { get: () => roleTests, set: async (value) => { roleTests = value; } };
+  h.deps.choose = async () => {
+    h.setRoot(otherRoot, false);
+    return 'Use as is';
+  };
+  await h.send({ type: 'ready' });
+  await h.send({ type: 'use-team', id: 'lib:web-team', discard: true });
+  assert.equal(await readFile(firstFile, 'utf8'), await readFile(replacement, 'utf8'));
+  assert.equal(await readFile(otherFile, 'utf8'), otherTeam);
+  assert.deepEqual(ratings, { [otherKey]: otherRating });
+  assert.deepEqual(roleTests, { [otherKey]: otherRoleTest });
 });
 
 test('host: Use as is with a project open makes the team this project\'s team with no name asked, and replacing one asks first and keeps the old one in the history', async () => {
