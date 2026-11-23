@@ -17,7 +17,7 @@ import { screenFor } from '../../domain/setup/screens';
 import { nextSession, startSession, type GuideEffect, type GuideEvent, type GuideSession } from '../../domain/setup/session';
 import { isChoosable, type ViabilityResult } from '../../domain/setup/viability';
 import { planApply, runApply, type ApplyContext, type ApplyDeps, type ApplyStep } from './apply';
-import { proposedRoutePolicy, routeFactsOf } from './guideFacts';
+import { approvedDeviceName, proposedRoutePolicy, routeFactsOf } from './guideFacts';
 import { isSharedProject, readProjectLayer, readSetupGuide } from './projectStore';
 import { clearanceProposalFor } from './proposals';
 import type { ViabilityRun } from './viabilityRunner';
@@ -99,6 +99,9 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     const current = session;
     const verified = snapshot;
     const route = verified && policy.state === 'ready' ? labelFor(current, policy, verified) : undefined;
+    const stop = route?.outcome.stop;
+    const approvedDevice = current.screen === 'stopped' && verified && route && (stop === 'classified' || stop === 'protected-c')
+      ? approvedDeviceName(verified.route, route.outcome.proposed, useFor(current.answers), now()) : undefined;
     const cards = verified && route ? current.results.flatMap((viability) => {
       const outcome = current.recommendation?.options.find(({ optionId }) => optionId === viability.optionId);
       if (!outcome) return [];
@@ -108,7 +111,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     const kind = deps.hostKind;
     const checkedOn = deps.machine + (kind === 'container' ? ', a container' : kind === 'remote' ? ', a remote computer' : '');
     deps.post({ type: 'screen', screen: screenFor(current, {
-      cards, candidates: [], scan, checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing
+      cards, candidates: [], scan, checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice
     }) });
   }
 
@@ -130,8 +133,8 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
 
   async function runCheck(checkId: number): Promise<void> {
     const opened = snapshot;
-    if (!opened || !session) return;
-    const canada = session.answers.canada;
+    const current = session;
+    if (!opened || !current) return;
     stopChecking();
     const signal = new AbortController();
     checking = signal;
@@ -145,8 +148,12 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
       if (latest.snapshot.hash !== opened.hash) return failClosed(checkAgainText);
       snapshot = latest.snapshot;
       policy = latest.policy;
+      if (labelFor(current, policy, snapshot).outcome.stop !== undefined) {
+        await dispatch({ type: 'viability-done', results: [], checkId });
+        return;
+      }
       const result = await deps.check({
-        ...snapshot, route: proposedRoutePolicy(snapshot.route, canada)
+        ...snapshot, route: proposedRoutePolicy(snapshot.route, current.answers.canada)
       }, progress, signal.signal);
       try {
         if (signal.signal.aborted) return;
