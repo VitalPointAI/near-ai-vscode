@@ -61,17 +61,14 @@ A PR can merge only when all of these hold:
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
 | `relay` | CI: the messaging relay in `relay/` on Node 26.13.1: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests and the container hardening tests |
 | `hub` | CI: your organization's sync hub in `hub/` on Node 26.13.1, built like `relay`: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests, the image build and the container and Compose hardening tests |
-| `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor. Runs on every PR; not a required check until the owner adds it to the branch protection (section 8) |
+| `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor |
 | `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
 | One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
 | Up to date | Branch protection ("require branches to be up to date"): rebase onto `main` and re-run |
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
 
-These nine check names are the required status checks in the branch protection (section 8).
-`hub` becomes required when the owner adds it to `main`'s branch protection after Phase 32 merges
-(section 8); until then the merge and tag scripts already wait for it, because it is in `CI_CHECKS`.
-`docs` runs on every PR too, and becomes required once the owner adds it there.
+These ten check names are the required status checks in the branch protection (section 8).
 Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
 this page in the same PR.
 
@@ -216,7 +213,7 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 
 - refuses unless the PR is open, not a draft, targets `main`, and its branch follows the naming
   rules;
-- refuses unless every required check (the eight CI jobs, `agent-review`, and anything else branch
+- refuses unless every required check (the nine CI jobs, `agent-review`, and anything else branch
   protection requires) is green on the current head, and no other check failed. The CI jobs
   count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
   one, and `agent-review` counts only as a commit status set by `near-ai-reviewer`
@@ -598,10 +595,7 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - `main` protection: a PR is required with one approving review (the owner cannot approve their
   own PRs, so the approval comes from `near-ai-reviewer`, posted by the agent review workflow),
   required checks `lint`, `test`, `e2e`,
-  `release-content`, `audit`, `secret-scan`, `relay` and `hub` from GitHub Actions, plus `agent-review`
-  (the owner adds `hub` after Phase 32 merges; CI also runs `docs`, which is not in this list yet: to
-  require it, add `{"context": "docs", "app_id": 15368}` to the checks below, and `docs` to `CI_CHECKS` in
-  `scripts/lib/workflow.mjs` in a PR merged at the same time);
+  `release-content`, `audit`, `secret-scan`, `relay`, `hub` and `docs` from GitHub Actions, plus `agent-review`;
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
@@ -619,7 +613,7 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
   owners can create one. A tag push runs the `release.yml` of the tagged commit, so this is what
   keeps an unreviewed commit from carrying its own release workflow.
 
-`main` protection (the eight CI checks are pinned to GitHub Actions, app id 15368, so another app
+`main` protection (the nine CI checks are pinned to GitHub Actions, app id 15368, so another app
 cannot report them):
 
 ```bash
@@ -630,7 +624,7 @@ gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
    {"context": "e2e", "app_id": 15368}, {"context": "release-content", "app_id": 15368},
    {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
    {"context": "relay", "app_id": 15368}, {"context": "hub", "app_id": 15368},
-   {"context": "agent-review"}]},
+   {"context": "docs", "app_id": 15368}, {"context": "agent-review"}]},
  "enforce_admins": true,
  "required_pull_request_reviews": {"required_approving_review_count": 1, "dismiss_stale_reviews": true},
  "restrictions": null,

@@ -23,8 +23,8 @@ function needsOf(value: unknown): Readonly<Record<string, NeedsEntry>> {
   return needs;
 }
 
-/** The required CI jobs plus docs, which runs for every pull request but is not protected yet. */
-export const CI_OBSERVATION_JOBS: readonly string[] = Object.freeze([...CI_CHECKS, 'docs']);
+/** The required CI jobs (docs among them). */
+export const CI_OBSERVATION_JOBS: readonly string[] = Object.freeze([...CI_CHECKS]);
 
 /** One observation per available CI job. Only exactly `success` is passing evidence. */
 export const ciCollector: Collector<CiInput> = Object.freeze({

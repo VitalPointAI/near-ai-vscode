@@ -2,7 +2,7 @@
 // these scripts enforce are unit tested (scripts/test/workflow.test.mjs).
 
 /** CI job names. They are the required status checks on `main`; keep them stable. */
-export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub']);
+export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', 'docs']);
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
 /**
@@ -588,7 +588,9 @@ export function fitComment(review, footer = '', limit = 65_000) {
  * them out, and the automatic review approves them only after the owner approves the `agent-review-gates`
  * environment (.github/workflows/agent-review.yml, job owner-approval). Phase 44 adds the compliance trust roots: compliance/tailoring/ decides
  * which controls are Not applicable, compliance/catalogs/ and compliance/sources.json carry the official control text and its licence evidence,
- * and compliance/attestations/ holds who may sign a risk acceptance (a PR that could add a signer could accept its own risk).
+ * and compliance/attestations/ holds who may sign a risk acceptance (a PR that could add a signer could accept its own risk). Everything else that
+ * decides a published state is a trust root too: the engine (compliance/src/), the component statements and evidence rules that make a control
+ * Met, the responsibility table that makes one your organization's, and the levels and profiles that put a component or control in scope.
  */
 export const GATE_PATHS = Object.freeze([
   /^\.github\//,
@@ -604,7 +606,13 @@ export const GATE_PATHS = Object.freeze([
   /^compliance\/tailoring\//,
   /^compliance\/sources\.json$/,
   /^compliance\/catalogs\//,
-  /^compliance\/attestations\//
+  /^compliance\/attestations\//,
+  /^compliance\/src\//,
+  /^compliance\/components\//,
+  /^compliance\/evidence-rules\//,
+  /^compliance\/responsibility\//,
+  /^compliance\/profiles\//,
+  /^compliance\/levels\.json$/
 ]);
 
 export function gateFileChanges(paths) {

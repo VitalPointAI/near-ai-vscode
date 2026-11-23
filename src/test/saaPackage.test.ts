@@ -171,7 +171,7 @@ test('distinguishes missing, stale and failed evidence and counts unresolved in-
   assert.match(rules, /"expired","Stale","met"/);
   assert.match(rules, /"failed","Failed","test-failed"/);
   const triage = result.get('evidence/gap-and-action-register.csv')!().toString();
-  assert.match(triage, /"TRIAGE-protected-a-au-2","Control implementation or evidence review","Unassigned","au-2","","No closure path assigned\. In Phase 44\.1,[^\n]+?decision\.","",/);
+  assert.match(triage, /"TRIAGE-protected-a-au-2","Control implementation or evidence review","Unassigned","au-2","","No closure path assigned yet\. Record the accountable role,[^\n]+?decision\.","",/);
   const coverage = result.get('evidence/coverage-summary.csv')!().toString();
   assert.match(coverage, /"Deployment assessment","Unassigned product gaps"/);
   assert.match(coverage, /"protected-a",[^\n]+,"Not assessed","1","0"/);

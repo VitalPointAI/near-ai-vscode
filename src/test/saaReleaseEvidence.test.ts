@@ -60,28 +60,39 @@ function marketplaceResponses(overrides: Readonly<Record<string, unknown>> = {})
   return { calls, fetcher };
 }
 
-function tarEntry(name: string, bytes: Buffer, directory = false): Buffer[] {
+function tarEntry(name: string, bytes: Buffer, directory = false, type = directory ? 53 : 48): Buffer[] {
+  // GNU tar writes a path over 100 bytes as a '././@LongLink' entry (type 'L') holding the name, then the entry with the name truncated.
+  if (name.length > 100 && type !== 76) return [...tarEntry('././@LongLink', Buffer.from(`${name}\0`, 'ascii'), false, 76), ...tarEntry(name.slice(0, 100), bytes, directory)];
   const header = Buffer.alloc(512);
   header.write(name, 0, 100, 'ascii');
   header.write(bytes.length.toString(8).padStart(11, '0'), 124, 'ascii');
   header.fill(32, 148, 156);
-  header[156] = directory ? 53 : 48;
+  header[156] = type;
   header.write('ustar  \0', 257, 'ascii');
   const checksum = header.reduce((sum, byte) => sum + byte, 0);
   header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
   return [header, bytes, Buffer.alloc((512 - (bytes.length % 512)) % 512)];
 }
 
-function fixture(options: { manifestCommit?: string; corruptLedger?: boolean } = {}): Buffer {
+const longPath = `evidence/bundle/dashboard/text/${'controlled-goods-regulations-'.repeat(3)}long/cgp.json`;
+
+function fixture(options: { manifestCommit?: string; corruptLedger?: boolean; longName?: boolean } = {}): Buffer {
   const root = `compliance-package-${tag}/`;
   const snapshot = Buffer.from(JSON.stringify({ schemaVersion: 1, commit, rows: [], levels: [], source: { ref: commit } }));
   const manifest = Buffer.from(JSON.stringify({ schemaVersion: 1, commit: options.manifestCommit ?? commit }));
-  const checksums = Buffer.from(`${options.corruptLedger ? 'b'.repeat(64) : hash(snapshot)}  ${dashboardPath}\n${hash(manifest)}  ${manifestPath}\n`);
+  const long = Buffer.from('{}');
+  const checksums = Buffer.from(`${options.corruptLedger ? 'b'.repeat(64) : hash(snapshot)}  ${dashboardPath}\n${hash(manifest)}  ${manifestPath}\n` +
+    (options.longName ? `${hash(long)}  ${longPath}\n` : ''));
   const directories = ['', 'evidence/', 'evidence/bundle/', 'evidence/bundle/dashboard/'].flatMap(path => tarEntry(root + path, Buffer.alloc(0), true));
   return gzipSync(Buffer.concat([
     ...directories,
     ...tarEntry(root + dashboardPath, snapshot),
     ...tarEntry(root + manifestPath, manifest),
+    ...(options.longName ? [
+      ...tarEntry(root + 'evidence/bundle/dashboard/text/', Buffer.alloc(0), true),
+      ...tarEntry(root + longPath.slice(0, longPath.lastIndexOf('/') + 1), Buffer.alloc(0), true),
+      ...tarEntry(root + longPath, long)
+    ] : []),
     ...tarEntry(root + 'SHA256SUMS', checksums),
     Buffer.alloc(1024)
   ]));
@@ -124,6 +135,19 @@ test('loads the selected release archive and validates the digest and its file l
   assert.equal(result.sourceUrl, `https://github.com/${repository}/releases/tag/${tag}`);
   assert.deepEqual(result.archive, archive);
   assert.deepEqual([...result.files.keys()], [dashboardPath, manifestPath, 'SHA256SUMS']);
+});
+
+test('reads member paths over 100 bytes from GNU long-name entries', async () => {
+  assert.ok(`compliance-package-${tag}/${longPath}`.length > 100);
+  const archive = fixture({ longName: true });
+  const result = await loadSaaReleaseEvidence(version, new AbortController().signal, mockGithub(archive).fetcher);
+  assert.deepEqual(result.files.get(longPath), Buffer.from('{}'));
+});
+
+test('rejects a long-name entry that is not followed by a member', async () => {
+  const root = `compliance-package-${tag}/`;
+  const archive = gzipSync(Buffer.concat([...tarEntry('././@LongLink', Buffer.from(`${root}${longPath}\0`), false, 76), Buffer.alloc(1024)]));
+  await assert.rejects(loadSaaReleaseEvidence(version, new AbortController().signal, mockGithub(archive).fetcher), /truncated or has unexpected trailing data/);
 });
 
 test('rejects missing and ambiguous release assets before download', async () => {
