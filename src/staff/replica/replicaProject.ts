@@ -502,18 +502,45 @@ export class ReplicaProject {
    * Refused no-key when this device does not hold that key; when another window of this install wrote first, it is built again on the new head.
    */
   public appendOwn(kind: string, data: unknown, options: AppendOwnOptions = {}): Promise<AppendOwnResult> {
+    return this.appendPlanned<never>(() => ({ kind, data, options }));
+  }
+
+  /** Plans and checks a signed write against the current fold, then rechecks it if the store changed. */
+  public appendChecked<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
+    kind: string; data: unknown; options: AppendOwnOptions; check: (fold: FoldResult, hash: string) => R | undefined
+  }): Promise<AppendOwnResult | R> {
+    return this.appendPlanned(prepare, true);
+  }
+
+  private appendPlanned<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
+    kind: string; data: unknown; options: AppendOwnOptions; check?: (fold: FoldResult, hash: string) => R | undefined
+  }, checked = false): Promise<AppendOwnResult | R> {
     return this.exclusive(async () => {
+      let race: StoreRefused | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const { roster } = await this.foldNow();
-        const built = this.buildOwn(roster, kind, data, options);
+        const expected = checked ? this.store.appendSnapshot() : undefined;
+        const state = await this.foldNow();
+        if (checked && expected !== this.store.appendSnapshot()) continue;
+        const write = prepare(state);
+        if ('ok' in write) return write;
+        const built = this.buildOwn(state.roster, write.kind, write.data, write.options);
         if (!('entry' in built)) return built;
-        const result = await this.store.appendOwn([built]);
+        if (write.check !== undefined) {
+          const prior = this.foldState;
+          if (prior === undefined) throw new Error('A checked write requires a current fold.');
+          const ctx = built.blobs.length === 0 ? prior.ctx : { ...prior.ctx, blobs: (hash: string) => built.blobs.find((blob) => blob.hash === hash) ?? prior.ctx.blobs(hash) };
+          const refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
+          if (refused !== undefined) return refused;
+        }
+        const result = await this.store.appendOwn([built], expected);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
         }
-        if (result.refused !== 'out-of-order') return storeRefused(result);
+        if (result.refused !== 'out-of-order' && result.refused !== 'snapshot-changed') return storeRefused(result);
+        race = result;
       }
+      if (checked) return storeRefused(race ?? { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
       return storeRefused({ refused: 'out-of-order', message: 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.' });
     });
   }
@@ -1115,7 +1142,6 @@ export class ReplicaProject {
       signer: this.device.identity, key, stream, seq: head === undefined ? 0 : head.seq + 1, prev: head?.hash ?? GENESIS_PREV, epoch,
       body: { deps, roster: cited, lamport, at: options.at ?? this.now().toISOString(), actor: options.actor ?? { kind: 'person' }, kind, data: body }
     });
-    this.lamports.set(built.hash, lamport);
     return built;
   }
 }
