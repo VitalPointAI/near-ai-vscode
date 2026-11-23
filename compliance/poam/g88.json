@@ -1,0 +1,17 @@
+{
+  "gap": "G88",
+  "id": "g88",
+  "controls": [
+    "ir-01",
+    "ir-08"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment incident response policy and plan need approved scope and review evidence",
+  "remediation": "The sponsor incident response authority approves and distributes the deployment policy, reporting and coordination procedures, named roles and plan. Record the review and update cadence, protected contact route, measurable service objectives and an exercise that checks delivery. Use the supplier policy and published plan as component inputs under G1.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and plan, role and notification coverage, review records and a scoped exercise result"
+    }
+  ]
+}

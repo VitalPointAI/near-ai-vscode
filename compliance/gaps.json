@@ -981,6 +981,76 @@
     },
     {
       "controls": [
+        "ir-02",
+        "ir-03",
+        "ir-03.02"
+      ],
+      "id": "G83",
+      "ownerRole": "owner",
+      "poam": "g83",
+      "remediation": "The deployment incident response lead assigns role-specific training and exercise cadence, then coordinates a representative drill with continuity, privacy and other applicable plan owners. Retain attendance, scope, scenario, measured performance, corrective actions and follow-up retest. Use supplier drills only for the exercised component and event.",
+      "title": "Response training and coordinated exercises need dated deployment evidence"
+    },
+    {
+      "controls": [
+        "ir-04",
+        "ir-04.03",
+        "ir-04.09"
+      ],
+      "id": "G84",
+      "ownerRole": "shared",
+      "poam": "g84",
+      "remediation": "The deployment response and continuity leads and component maintainers identify incident classes, required mission continuity actions and approved dynamic response mechanisms. Exercise a benign declared event through detection, analysis, containment, recovery and a continuity decision. Record the authorized roles, measured transitions, tool readiness and follow-up.",
+      "title": "Incident handling and continuity actions need a tested response trace"
+    },
+    {
+      "controls": [
+        "ir-04.08"
+      ],
+      "id": "G85",
+      "ownerRole": "owner",
+      "poam": "g85",
+      "remediation": "The sponsor response lead, privacy authority and approved external partners agree the incident information categories, purpose, recipient, handling and coordination procedure. Demonstrate an authorized sanitized exchange and correlation in a drill. Keep an approved agreement or equivalent record, its scope and evidence reference.",
+      "title": "External incident correlation and information sharing need authorized evidence"
+    },
+    {
+      "controls": [
+        "ir-05",
+        "ir-06",
+        "ir-06.01",
+        "ir-06.02",
+        "ir-06.03"
+      ],
+      "id": "G86",
+      "ownerRole": "shared",
+      "poam": "g86",
+      "remediation": "The deployment incident operations, vulnerability and supplier coordination owners define tracking fields, reporting times, approved recipients and mechanisms. Exercise a synthetic incident through tracking, authorized automated notification, related flaw disclosure and applicable supplier handoff. Retain delivery and acknowledgement timestamps, recorded disposition and evidence of restricted recipients.",
+      "title": "Incident tracking and automated reporting need demonstrated handoffs"
+    },
+    {
+      "controls": [
+        "ir-07",
+        "ir-07.01"
+      ],
+      "id": "G87",
+      "ownerRole": "owner",
+      "poam": "g87",
+      "remediation": "The deployment incident support owner publishes the approved assistance route to users and reviews automated information delivery and access. Exercise a benign request from an allowed user, verify timely assistance and assigned escalation, and retain sanitized evidence that support guidance and intake were reachable under normal and degraded conditions.",
+      "title": "Incident reporting assistance and automated availability need an exercised user path"
+    },
+    {
+      "controls": [
+        "ir-01",
+        "ir-08"
+      ],
+      "id": "G88",
+      "ownerRole": "owner",
+      "poam": "g88",
+      "remediation": "The sponsor incident response authority approves and distributes the deployment policy, reporting and coordination procedures, named roles and plan. Record the review and update cadence, protected contact route, measurable service objectives and an exercise that checks delivery. Use the supplier policy and published plan as component inputs under G1.",
+      "title": "Deployment incident response policy and plan need approved scope and review evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
