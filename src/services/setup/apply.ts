@@ -141,7 +141,11 @@ async function recordReference(deps: ApplyRunDeps, reports: readonly ApplyStepRe
 export async function runApply(steps: readonly ApplyStep[], deps: ApplyRunDeps): Promise<ApplyResult> {
   let ready = false;
   try { ready = await deps.preflight(); } catch { /* A failed check must leave the project untouched. */ }
-  if (!ready) return { state: 'partly-applied', steps: [], message: APPLY_TEXT.checkAgain };
+  if (!ready) {
+    const waiting = steps.flatMap(({ changeId, additionalIds }) => [changeId, ...(additionalIds ?? [])]
+      .map((id) => ({ id, outcome: 'waiting' as const, message: APPLY_TEXT.checkAgain })));
+    return { state: 'partly-applied', steps: waiting, message: APPLY_TEXT.checkAgain };
+  }
 
   const reports: ApplyStepReport[] = [];
   for (const step of steps) {
