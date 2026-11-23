@@ -24,6 +24,19 @@ export const VERSION_ACT_WORDS = {
 
 type VersionTarget = { product: string; hash: string };
 type SubmitInput = VersionTarget & { decisionFor: string };
+type DecideInput = VersionTarget & { outcome: 'approve' | 'reject'; reasons: readonly string[] };
+
+const REQUIRED_STATE = {
+  'version.verdict': undefined,
+  'version.submit': 'guard-checked',
+  'version.decide': 'awaiting-decision'
+} as const;
+type VersionAction = keyof typeof REQUIRED_STATE;
+const OBSERVED_ACTIONS: Record<VersionAction, readonly string[]> = {
+  'version.verdict': ['version.verdict'],
+  'version.submit': ['version.verdict', 'version.submit'],
+  'version.decide': ['version.verdict', 'version.submit']
+};
 type VerdictInput = VersionTarget & { reasons: readonly string[] } &
   ({ gate: 'guard'; verdict: GuardVerdict } | { gate: 'tradecraft'; verdict: TradecraftVerdict });
 
@@ -62,9 +75,17 @@ export class VersionActs {
     return this.write('version.submit', data);
   }
 
-  private async write(kind: 'version.verdict' | 'version.submit', data: VersionTarget & Record<string, unknown>): Promise<Written | Refused> {
+  public async decide(input: DecideInput): Promise<Written | Refused> {
+    if (this.actor.kind !== 'person') return refuse('agent-cannot-decide');
+    if (input.outcome !== 'approve' && input.outcome !== 'reject') return refuse('bad-input');
+    const data = { product: input.product, hash: input.hash, outcome: input.outcome, reasons: input.reasons, decisionsSeen: [] };
+    if (validateVersionsData('version.decide', data, 'decision') !== undefined) return refuse('bad-input');
+    return this.write('version.decide', { ...data, reasons: [...data.reasons] });
+  }
+
+  private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>): Promise<Written | Refused> {
     const actor = { ...this.actor };
-    const observed = kind === 'version.submit' ? ['version.verdict', 'version.submit'] : ['version.verdict'];
+    const observed = OBSERVED_ACTIONS[kind];
     try {
       const written = await this.project.appendChecked<Refused>(({ fold }) => {
         const candidates = products(fold).filter((item) => item.product === data.product && item.stream !== this.project.projectId);
@@ -73,11 +94,16 @@ export class VersionActs {
         const [product] = candidates;
         const version = product.records.find((item) => item.hash === data.hash);
         if (version === undefined) return refuse('stale-version');
-        if (kind === 'version.submit' && version.release.state !== 'guard-checked') {
-          const { state } = version.release;
-          // A fresh local submission must not replace the routing of a decision someone can already make or has made.
+        const { state } = version.release;
+        const required = REQUIRED_STATE[kind];
+        if (required !== undefined && state !== required) {
           if (TERMINAL_RELEASE_STATES.includes(state)) return refuse('terminal');
-          return refuse(LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
+          return refuse(kind === 'version.submit' && LOCKED_RELEASE_STATES.includes(state) ? 'locked' : 'wrong-state');
+        }
+        if (kind === 'version.decide') {
+          const decision = product.versions.find((item) => item.hash === data.hash)?.decision;
+          // Ordinary approval and rejection require an undecided request. Confirming or settling requires a separate action.
+          if (decision?.status !== 'none' || decision.pending.length > 0 || decision.held.length > 0) return refuse('wrong-state');
         }
         const refused = new Set(product.refusals.map((item) => item.entry));
         // Observe the prior actions this step depends on. This writer's stream head already cites its own actions.

@@ -15,6 +15,8 @@ import type { Seat } from './helpers/labelCellWorld';
 const PRODUCT = 'logistics-estimate';
 const LABEL = 'org/Internal';
 const ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuard: 'j4-guard' };
+const PERSON: Actor = { kind: 'person' };
+const LEAD_DECISION_ROLES = ['member', 'section_lead:j4', 'decision_for:commander'];
 const OWNER: Actor = { kind: 'agent', member: ROLES.owner, run: 'owner-run' };
 const GUARD: Actor = { kind: 'agent', member: ROLES.releaseGuard, run: 'guard-run' };
 
@@ -42,8 +44,8 @@ async function versionFold(seat: Seat, stream: string) {
   return { product, fold };
 }
 
-test('a guard verdict and owner agent submission sign the exact version and converge on both replicas', async () => {
-  const lead = await leadWith();
+test('a guard verdict, owner submission and person approval sign the exact version and converge across replicas', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
   const guard = await bringIn(lead, 'guard', 'Guard Reviewer', orgClearance('Internal'));
   ok(await updateMember(lead.host, { member: guard.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
   const { stream, version } = await versionOn(lead);
@@ -65,9 +67,18 @@ test('a guard verdict and owner agent submission sign the exact version and conv
   assert.equal(submission.stream, stream);
   assert.equal(submission.hash, submitted.hash);
   await syncTo(lead, guard, [stream]);
+  assert.equal((await versionFold(guard, stream)).product.versions[0]?.state, 'awaiting-decision');
+  const decision = { product: PRODUCT, hash: version, outcome: 'approve', reasons: ['Ready to proceed.'] } as const;
+  const approved = await new VersionActs(lead.p, PERSON).decide(decision);
+  assert.ok(approved.ok, approved.ok ? undefined : approved.message);
+  const [written] = await lead.p.findOwnAll('version.decide', () => true);
+  assert.deepEqual(written?.data, { ...decision, decisionsSeen: [] });
+  assert.equal(written.stream, stream);
+  assert.equal(written.hash, approved.hash);
+  await syncTo(lead, guard, [stream]);
   const a = await versionFold(lead, stream);
   const b = await versionFold(guard, stream);
-  assert.equal(a.product.versions[0]?.state, 'awaiting-decision');
+  assert.equal(a.product.versions[0]?.state, 'approved');
   assert.equal(a.product.versions[0]?.decisionFor, 'commander');
   assert.deepEqual(a.product.versions, b.product.versions);
   assert.equal(a.fold.digests[stream], b.fold.digests[stream]);
@@ -169,4 +180,78 @@ test('a submit from a second window cannot reroute a version already awaiting a 
   const { product } = await versionFold(lead, stream);
   assert.equal(product.versions[0]?.decisionFor, 'commander');
   assert.equal((await lead.p.findOwnAll('version.submit', () => true)).length, 1);
+});
+
+async function awaitingVersion(lead: Seat) {
+  ok(await updateMember(lead.host, { member: lead.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
+  const proposed = await versionOn(lead);
+  const target = { product: PRODUCT, hash: proposed.version };
+  assert.ok((await new VersionActs(lead.p, GUARD).verdict({ ...target, gate: 'guard', verdict: 'CLEARED', reasons: [] })).ok);
+  assert.ok((await new VersionActs(lead.p, OWNER).submit({ ...target, decisionFor: 'commander' })).ok);
+  return { stream: proposed.stream, target };
+}
+
+test('an agent, a person without the decision role and a rejection without reasons write no decision', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const member = await bringIn(lead, 'member', 'Staff Member', orgClearance('Internal'));
+  const { stream, target } = await awaitingVersion(lead);
+  await syncTo(lead, member, [stream]);
+  const beforeLead = streamEntries(lead.at, stream);
+  const beforeMember = streamEntries(member.at, stream);
+  const approve = { ...target, outcome: 'approve', reasons: [] } as const;
+  const agent = await new VersionActs(lead.p, OWNER).decide(approve);
+  assert.equal(agent.ok ? undefined : agent.reason, 'agent-cannot-decide');
+  const otherPerson = await new VersionActs(member.p, PERSON).decide(approve);
+  assert.equal(otherPerson.ok ? undefined : otherPerson.reason, 'not-decision-holder');
+  const holder = new VersionActs(lead.p, PERSON);
+  const missingReason = await holder.decide({ ...approve, outcome: 'reject' });
+  assert.equal(missingReason.ok ? undefined : missingReason.reason, 'reasons-required');
+  assert.deepEqual(streamEntries(lead.at, stream), beforeLead);
+  assert.deepEqual(streamEntries(member.at, stream), beforeMember);
+  const rejected = await holder.decide({ ...target, outcome: 'reject', reasons: ['Missing the allocation.'] });
+  assert.ok(rejected.ok, rejected.ok ? undefined : rejected.message);
+  assert.equal((await versionFold(lead, stream)).product.versions[0]?.state, 'rejected');
+});
+
+test('a signed roster change in a second window removes decision authority before append', async (t) => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const { stream, target } = await awaitingVersion(lead);
+  const other = hostOf(project(await ReplicaProject.open(lead.at.root, lead.at.deps)), lead.at);
+  const before = streamEntries(lead.at, stream);
+  let raced = false;
+  const append = ReplicaStore.prototype.appendOwn;
+  t.mock.method(ReplicaStore.prototype, 'appendOwn', async function (this: ReplicaStore, built: readonly BuiltEntry[], expectedSnapshot?: string) {
+    if (expectedSnapshot !== undefined && !raced) {
+      raced = true;
+      ok(await updateMember(other, { member: lead.member, roles: ['member', 'section_lead:j4'] }), 'remove decision role');
+    }
+    return append.call(this, built, expectedSnapshot);
+  });
+  const result = await new VersionActs(lead.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] });
+  assert.ok(raced);
+  assert.equal(result.ok ? undefined : result.reason, 'not-decision-holder');
+  assert.deepEqual(streamEntries(lead.at, stream), before);
+});
+
+test('ordinary decisions made offline can contest, and a known contest requires settlement', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  const alternate = await bringIn(lead, 'alternate', 'Alternate Commander', orgClearance('Internal'));
+  ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
+  const { stream, target } = await awaitingVersion(lead);
+  await syncTo(lead, alternate, [stream]);
+  const first = new VersionActs(lead.p, PERSON);
+  const second = new VersionActs(alternate.p, PERSON);
+  assert.ok((await first.decide({ ...target, outcome: 'approve', reasons: [] })).ok);
+  assert.ok((await second.decide({ ...target, outcome: 'reject', reasons: ['A new condition applies.'] })).ok);
+  await syncTo(alternate, lead, [stream]);
+  await syncTo(lead, alternate, [stream]);
+  const a = await versionFold(lead, stream);
+  const b = await versionFold(alternate, stream);
+  assert.deepEqual(a.product.versions, b.product.versions);
+  assert.equal(a.product.versions[0]?.overlay, 'contested');
+  assert.equal(a.product.versions[0]?.decision.contested.length, 2);
+  const before = streamEntries(lead.at, stream);
+  const retry = await first.decide({ ...target, outcome: 'approve', reasons: [] });
+  assert.equal(retry.ok ? undefined : retry.reason, 'wrong-state');
+  assert.deepEqual(streamEntries(lead.at, stream), before);
 });
