@@ -1,17 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { isDeepStrictEqual } from 'node:util';
-import { findEndpoint, type PolicyEndpoint } from '../../domain/gate/endpoints';
+import { findEndpoint, isLoopbackEndpointHost, type PolicyEndpoint } from '../../domain/gate/endpoints';
 import type { DiscoverySection } from '../../domain/gate/sections';
 import { cleanFreeText } from '../../domain/setup/answers';
 import { discoveryWays, type NetworkFactsReader } from '../../domain/setup/network';
 import type { GuidePolicy } from '../../domain/setup/policy';
 import type { FoundServerRow, GuideDiscoveryPort, ScanOffer } from '../../domain/setup/screens';
-import type { Identification, ServerCandidate } from '../../domain/setup/servers';
-import { foundEndpointId } from './approval';
+import type { Identification, ServerCandidate, ServerIdentity } from '../../domain/setup/servers';
+import type { SetupAuditLog } from '../../gate/setupAuditLog';
+import type { PolicyEditorPort } from '../policyEditorWiring';
+import { endpointProposalFor, foundEndpointId } from './approval';
 import { readSpkiPin, type TlsConnectLike } from './certPin';
 import { createIdentify } from './identify';
 import { browseAnnounced, MAX_ANNOUNCED, type DatagramLike, type DiscoveryClock } from './mdns';
 import { probeOrigin } from './probe';
+import { proposalStep } from './proposals';
 import { lookupAnnouncedSrv, type SrvResolverLike } from './srv';
 
 export interface GuideDiscoveryDeps {
@@ -24,6 +28,21 @@ export interface GuideDiscoveryDeps {
   readonly tlsConnect: TlsConnectLike;
   fetchForPin(pin: string): typeof fetch;
   readonly clock: DiscoveryClock;
+  readonly editor?: Pick<PolicyEditorPort, 'propose'>;
+  readonly audit?: Pick<SetupAuditLog, 'append'>;
+}
+
+export const FOUND_DEFAULT_REGION = 'unstated';
+export const FOUND_DEFAULT_MAX_LABEL = ['org/Internal'] as const;
+
+interface DiscoveredRow {
+  readonly row: FoundServerRow;
+  readonly proof?: { readonly candidate: ServerCandidate; readonly identity: ServerIdentity; readonly pin: string };
+}
+
+interface PublishedScope {
+  readonly discovery: DiscoverySection;
+  readonly networkId: string;
 }
 
 const scanOff: ScanOffer = Object.freeze({ offered: false, ranges: Object.freeze([]), running: false });
@@ -69,8 +88,9 @@ function guardedDatagram(socket: DatagramLike, permitted: () => boolean): Datagr
 export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPort {
   const listeners = new Set<() => void>();
   let active: AbortController | undefined;
-  let publishedRows: readonly FoundServerRow[] = [];
-  let publishedScope: DiscoverySection | undefined;
+  let approval: AbortController | undefined;
+  let publishedRows: readonly DiscoveredRow[] = [];
+  let publishedScope: PublishedScope | undefined;
 
   function authorizedDiscovery(): DiscoverySection | undefined {
     try {
@@ -91,24 +111,28 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
     return !present || issuedHere || scope.personalApprovals ? 'approve' : 'ask';
   }
 
-  function publish(rows: readonly FoundServerRow[], scope?: DiscoverySection): void {
-    const changed = !isDeepStrictEqual(publishedRows, rows);
+  function publish(rows: readonly DiscoveredRow[], scope?: PublishedScope): void {
+    const changed = !isDeepStrictEqual(publishedRows.map(({ row }) => row), rows.map(({ row }) => row));
     publishedRows = rows;
     publishedScope = scope;
     if (changed) for (const listener of listeners) listener();
   }
 
-  async function inspect(candidate: ServerCandidate, scope: DiscoverySection, permitted: () => boolean, signal: AbortSignal): Promise<FoundServerRow | undefined> {
+  function candidatePin(candidate: ServerCandidate, permitted: () => boolean, signal: AbortSignal) {
+    return readSpkiPin(candidate.target, { signal, connect(options) {
+      if (!permitted()) throw new Error('Discovery authority changed before connecting');
+      return deps.tlsConnect(options);
+    } });
+  }
+
+  async function inspect(candidate: ServerCandidate, scope: DiscoverySection, permitted: () => boolean, signal: AbortSignal): Promise<DiscoveredRow | undefined> {
     const { target } = candidate;
     const { host, port } = target;
     if (!permitted()) return undefined;
     const row = { id: foundEndpointId(host, port), host, port, name: cleanFreeText(candidate.name ?? '', 63).trim() || host };
-    const pinned = await readSpkiPin(target, { signal, connect(options) {
-      if (!permitted()) throw new Error('Discovery authority changed before connecting');
-      return deps.tlsConnect(options);
-    } });
+    const pinned = await candidatePin(candidate, permitted, signal);
     if (!permitted()) return undefined;
-    if (!pinned.ok) return { ...row, state: 'no-tls', action: 'none' };
+    if (!pinned.ok) return { row: { ...row, state: 'no-tls', action: 'none' } };
 
     const identify = createIdentify({
       fetch: cannotRequest,
@@ -125,19 +149,78 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
       identity = { state: 'unknown-server' };
     }
     if (!permitted()) return undefined;
-    if (identity.state !== 'identified') return { ...row, state: 'unknown-server', action: 'none' };
-    return { ...row, state: 'found', kind: identity.kind, version: identity.version && cleanFreeText(identity.version, 40), action: action(scope) };
+    if (identity.state !== 'identified') return { row: { ...row, state: 'unknown-server', action: 'none' } };
+    const found = { kind: identity.kind, version: identity.version && cleanFreeText(identity.version, 40) };
+    return {
+      row: { ...row, ...found, state: 'found', action: action(scope) },
+      proof: { candidate, identity: found, pin: pinned.pin }
+    };
+  }
+
+  async function approve(id: string): ReturnType<GuideDiscoveryPort['approve']> {
+    const scope = publishedScope;
+    const entry = publishedRows.find(({ row }) => row.id === id && row.state === 'found');
+    const proof = entry?.proof;
+    if (approval || !scope || !entry || !proof || isLoopbackEndpointHost(entry.row.host)) return 'not-allowed';
+
+    const role = { ...deps.organization };
+    const run = new AbortController();
+    const samePublication = () => publishedScope === scope && publishedRows.includes(entry);
+    const permitted = () => !run.signal.aborted && samePublication() && isDeepStrictEqual(role, deps.organization) &&
+      isDeepStrictEqual(authorizedDiscovery(), scope.discovery) && action(scope.discovery) === 'approve' && !listed(entry.row);
+
+    try {
+      if (!permitted()) return 'not-allowed';
+      const { editor, audit } = deps;
+      if (!editor || !audit) return 'failed';
+      approval = run;
+      const facts = await deps.networkFacts(run.signal);
+      if (!permitted() || facts.source === 'unknown' || discoveryWays(scope.discovery, facts).network?.id !== scope.networkId) return 'not-allowed';
+      const pin = await candidatePin(proof.candidate, permitted, run.signal);
+      if (!permitted() || !pin.ok || pin.pin !== proof.pin) return 'not-allowed';
+      const personalApprovals = scope.discovery.personalApprovals;
+      const proposal = endpointProposalFor({
+        ...proof, region: FOUND_DEFAULT_REGION, organization: role.present, personalApprovals,
+        maxLabel: role.present && !personalApprovals ? FOUND_DEFAULT_MAX_LABEL : ['org/Public']
+      });
+      // A first personal endpoint list narrows the inherited list. Keep the effective entries
+      // so adding the discovered host alone does not remove existing organization services.
+      const inherited = proposal.target === 'personal' && role.present ? [...deps.endpoints()] : undefined;
+      const change = inherited === undefined ? proposal : {
+        ...proposal,
+        next(current: Parameters<typeof proposal.next>[0]) {
+          return proposal.next(current.endpoints === undefined ? { ...current, endpoints: inherited } : current);
+        }
+      };
+      if (!permitted()) return 'not-allowed';
+      const result = await proposalStep({
+        port: editor, audit,
+        proposal: { id: randomUUID(), kind: 'endpoint-approval', change,
+          detail: { endpointId: id, serverKind: proof.identity.kind, pin: proof.pin } }
+      }).run();
+      if (result.outcome !== 'proposal-opened') return 'failed';
+      if (!run.signal.aborted && samePublication()) {
+        publish(publishedRows.map((existing) => existing === entry
+          ? { row: { ...entry.row, state: 'proposed', action: 'none' } } : existing), scope);
+      }
+      return 'opened';
+    } catch {
+      return 'failed';
+    } finally {
+      if (approval === run) approval = undefined;
+    }
   }
 
   return {
     rows() {
       const current = authorizedDiscovery();
-      if (!publishedScope || !current || !isDeepStrictEqual(current, publishedScope)) return [];
-      return publishedRows.filter((row) => !listed(row)).map((row) =>
+      if (!publishedScope || !current || !isDeepStrictEqual(current, publishedScope.discovery)) return [];
+      return publishedRows.map(({ row }) => row).filter((row) => !listed(row)).map((row) =>
         row.state === 'found' ? { ...row, action: action(current) } : row);
     },
     async refresh(parent) {
       active?.abort();
+      approval?.abort();
       const run = new AbortController();
       active = run;
       const signal = AbortSignal.any([parent, run.signal]);
@@ -161,14 +244,14 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
           } }, clock: deps.clock, signal })
         ]);
         if (!permitted()) return;
-        const rows: FoundServerRow[] = [];
+        const rows: DiscoveredRow[] = [];
         for (const candidate of announcedCandidates(groups, ({ target }) => !listed(target))) {
           if (!permitted()) return;
           const stillCandidate = () => permitted() && !listed(candidate.target);
           const row = await inspect(candidate, scope, stillCandidate, signal);
           if (row) rows.push(row);
         }
-        if (permitted()) publish(rows, scope);
+        if (permitted()) publish(rows, { discovery: scope, networkId: ways.network.id });
       } catch {
         // A failed source must never leave a row from an unchecked or cancelled refresh.
       } finally {
@@ -179,10 +262,10 @@ export function createGuideDiscovery(deps: GuideDiscoveryDeps): GuideDiscoveryPo
       listeners.add(listener);
       return { dispose: () => { listeners.delete(listener); } };
     },
-    // Scan execution and proposal effects are composed in the next tasks.
+    // Scan execution is composed in the next task.
     scanOffer: () => scanOff,
     async startScan() {},
     stopScan() {},
-    async approve() { return 'not-allowed'; }
+    approve
   };
 }
