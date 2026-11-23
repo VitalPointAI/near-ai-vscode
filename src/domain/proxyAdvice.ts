@@ -1,5 +1,5 @@
-// In code-server (VS Code in a browser tab) and remote windows, VS Code's proxy support
-// (http.proxySupport, "override" by default) asks the window which proxy each new network
+// In browser and remote workbenches, extension proxy support
+// (http.proxySupport, "override" by default) can ask the window which proxy a new network
 // connection should use. A browser tab in the background can be paused by the browser, and then
 // nothing answers: every new connection the extension host makes waits, so agent runs stall until
 // the tab is shown again. With no proxy in use, turning proxy support off avoids that. The
@@ -17,7 +17,7 @@ export const RELOAD_WINDOW = 'Reload Window';
 /** The advice, worded for a browser tab (code-server) or a remote window. */
 export function proxyAdviceText(web: boolean): string {
   const where = web ? 'this browser tab' : 'this window';
-  return `NEAR AI: agent runs can pause while ${where} is in the background. VS Code asks ${where} which proxy to use for each new connection, and in the background it may not answer until you come back. You have no proxy set, so turning off VS Code's proxy support (http.proxySupport: off) avoids this.`;
+  return `Agent runs can pause while ${where} is in the background. The workbench handles proxy lookups for new connections and may wait until you come back. No proxy is configured, so turning off extension proxy support (http.proxySupport: off) can avoid those waits.`;
 }
 export const PROXY_SUPPORT_OFF_TEXT = 'Proxy support is off (http.proxySupport: off in your user settings). Reload the window for it to take effect, when no agent run is going.';
 
