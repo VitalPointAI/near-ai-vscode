@@ -1,0 +1,18 @@
+{
+  "gap": "G18",
+  "id": "g18",
+  "controls": [
+    "au-05",
+    "au-05.01",
+    "au-08"
+  ],
+  "ownerRole": "shared",
+  "title": "Deployment audit failure alerts and clock settings need evidence",
+  "remediation": "Component maintainers and the deployment monitoring operator exercise audit write and capacity failures on each in-scope component. Verify operator notification delivery, timing and response. Record approved timestamp granularity and synchronization, then compare representative records from the assessed components. Track missing alerts or clock controls for implementation and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect designated alert recipients, observed failure and capacity alerts, clock configuration and a correlated event sample"
+    }
+  ]
+}

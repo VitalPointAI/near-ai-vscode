@@ -123,6 +123,7 @@
     },
     {
       "controls": [
+        "au-02",
         "au-06",
         "au-11",
         "si-04"
@@ -130,8 +131,8 @@
       "id": "G11",
       "ownerRole": "shared",
       "poam": "g11",
-      "remediation": "Document what each component logs, where and for how long, and give your organization an option to forward logs to its own monitoring; keeping and reviewing them is shared.",
-      "title": "No central log forwarding or retention guidance"
+      "remediation": "Extension, relay and hub maintainers publish the event inventory, map tested event generation and provide a supported forwarding option for required logs. The deployment operator approves the required event list and verifies representative events arrive at the configured log destination, are retained for the approved period, and can be retrieved for review.",
+      "title": "Deployment audit event coverage, forwarding and retention need evidence"
     },
     {
       "controls": [
@@ -153,6 +154,78 @@
       "poam": "g13",
       "remediation": "Check the platform's TCB status, certificate revocation and the enclave's measurements against the provider's published build; until then the security policy says so and points to the provider's full verifier.",
       "title": "The attestation checks do not check TCB status, certificate revocation or enclave measurements"
+    },
+    {
+      "controls": [
+        "ac-02"
+      ],
+      "id": "G14",
+      "ownerRole": "shared",
+      "poam": "g14",
+      "remediation": "Staff maintainers verify invitation approval, signed role changes and removal through the production staff and hub flow. The deployment identity owner approves eligible accounts and roles, samples an account review and offboarding, and records the approved roster and revocation results.",
+      "title": "Staff account lifecycle needs release and deployment evidence"
+    },
+    {
+      "controls": [
+        "si-03"
+      ],
+      "id": "G15",
+      "ownerRole": "shared",
+      "poam": "g15",
+      "remediation": "The deployment sponsor and endpoint operator identify the approved malware protection provider for each in-scope workstation and hosted component. Obtain the policy and current coverage record, then record the result of an approved benign detection exercise. If a component lacks coverage, assign its deployment owner to implement the missing protection and retest.",
+      "title": "Deployment malware protection needs implementation or inheritance evidence"
+    },
+    {
+      "controls": [
+        "ac-16.02",
+        "ac-16.05"
+      ],
+      "id": "G16",
+      "ownerRole": "shared",
+      "poam": "g16",
+      "remediation": "Extension policy and label maintainers verify signed attribute changes, including absent, revoked or wrong-purpose authority. The deployment information owner lists each in-scope output and its marking rule. Collect the signed test configuration, allow and refusal records, and labelled output samples. Implement and retest missing markings or document an approved scope exclusion.",
+      "title": "Release evidence for authorized label changes and output markings"
+    },
+    {
+      "controls": [
+        "ac-05",
+        "ac-06.01",
+        "ac-06.02",
+        "ac-06.05",
+        "ac-06.07",
+        "ac-06.09",
+        "ac-06.10"
+      ],
+      "id": "G17",
+      "ownerRole": "shared",
+      "poam": "g17",
+      "remediation": "Staff and gate maintainers demonstrate that role restrictions apply during approval, routine work and privileged actions, including a denial when a person holds incompatible roles. The deployment identity and security owners approve the role matrix and sample privilege reviews, separate privileged accounts, and the allowed and denied action audit records.",
+      "title": "Operational separation of duties and privileges need evidence"
+    },
+    {
+      "controls": [
+        "au-05",
+        "au-05.01",
+        "au-08"
+      ],
+      "id": "G18",
+      "ownerRole": "shared",
+      "poam": "g18",
+      "remediation": "Component maintainers and the deployment monitoring operator exercise audit write and capacity failures on each in-scope component. Verify operator notification delivery, timing and response. Record approved timestamp granularity and synchronization, then compare representative records from the assessed components. Track missing alerts or clock controls for implementation and retest.",
+      "title": "Deployment audit failure alerts and clock settings need evidence"
+    },
+    {
+      "controls": [
+        "ia-05",
+        "ia-05.02",
+        "ia-05.06",
+        "ia-05.13"
+      ],
+      "id": "G19",
+      "ownerRole": "shared",
+      "poam": "g19",
+      "remediation": "The deployment identity owner and component maintainers inventory the authenticators in scope. Record approved issuance and recovery, strength and storage requirements, rotation and revocation. Exercise revocation and stale cached credential denial where applicable. Identify missing controls and retest them before closure.",
+      "title": "Deployment authenticator lifecycle needs verified evidence"
     },
     {
       "controls": [
