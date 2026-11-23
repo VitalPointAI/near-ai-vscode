@@ -11,10 +11,18 @@ const componentLabels = {
 
 type ComponentKind = keyof typeof componentLabels;
 
+export interface WorkAreaResourceRef {
+  readonly sourceId: string;
+  readonly resourceId: string;
+}
+
+const resourceId = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+
 export interface WorkAreaRecord {
   readonly kind: WorkAreaKind;
   readonly title: string;
   readonly detail?: string;
+  readonly resourceRefs?: readonly WorkAreaResourceRef[];
 }
 
 export function workAreaKind(value: unknown): WorkAreaKind | undefined {
@@ -36,6 +44,11 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function resourceReference(value: unknown): value is WorkAreaResourceRef {
+  return record(value) && typeof value.sourceId === 'string' && resourceId.test(value.sourceId) &&
+    typeof value.resourceId === 'string' && resourceId.test(value.resourceId);
+}
+
 export function parseWorkArea(text: string): WorkAreaRecord | undefined {
   let data: unknown;
   try { data = JSON.parse(text); } catch { return undefined; }
@@ -43,15 +56,18 @@ export function parseWorkArea(text: string): WorkAreaRecord | undefined {
   const title = titleOf(data.title);
   const kind = workAreaKind(data.kind);
   if (!title || !kind) return undefined;
+  const refs = data.resourceRefs;
+  if (refs !== undefined && (!Array.isArray(refs) || refs.length > 50 || !refs.every(resourceReference))) return undefined;
+  const metadata = { kind, title, ...(refs ? { resourceRefs: refs.map(({ sourceId, resourceId }) => ({ sourceId, resourceId })) } : {}) };
   if (data.kind === 'projects') {
     if (!componentKind(data.category) || data.category === 'program') return undefined;
-    return { kind, title, detail: componentLabels[data.category] };
+    return { ...metadata, detail: componentLabels[data.category] };
   }
   if (kind === 'capability-development') {
     const components = data.components;
     if (!Array.isArray(components) || components.length > 50 || !components.every(item =>
       record(item) && componentKind(item.kind) && Boolean(titleOf(item.title)))) return undefined;
-    return { kind, title, detail: `${components.length} ${components.length === 1 ? 'component' : 'components'}` };
+    return { ...metadata, detail: `${components.length} ${components.length === 1 ? 'component' : 'components'}` };
   }
-  return { kind, title };
+  return metadata;
 }
