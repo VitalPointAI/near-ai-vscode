@@ -185,6 +185,31 @@ test('a stale partial retry checks again and still offers only the remaining cha
   assert.deepEqual(nextSession(requested, { type: 'changes-ready', changes: [label, connection] }, now).session.changes, [label]);
 });
 
+test('an Apply recheck discards a selection ruled out by the new recommendation', () => {
+  const applying: GuideSession = {
+    ...stateAt('applying', 'applying'), chosen: viable.optionId, choiceReason: 'Capacity',
+    results: [viable], recommendation, checkId: 3, retryIds: ['label']
+  };
+  const recheck: GuideEvent = { type: 'apply-recheck' };
+  const transition = nextSession(applying, recheck, 10);
+  const checking = transition.session;
+  assert.equal(checking.state, 'checking');
+  assert.deepEqual(checking.retryIds, ['label']);
+  assert.deepEqual(transition.effects.map(({ type }) => type), ['run-viability', 'start-ceiling']);
+  assert.equal(nextSession(checking, recheck, 10).session, checking);
+  assert.equal(nextSession(checking, { type: 'viability-done', results: [viable], checkId: 3 }, 10).session, checking);
+  const done = nextSession(checking, { type: 'viability-done', results: [viable], checkId: 4 }, 10).session;
+  const nowRuledOut: Recommendation = {
+    state: 'none', reasonId: 'no-option', reason: 'Choose another option.',
+    options: [{ optionId: viable.optionId, kind: viable.kind, outcome: 'ruled-out' }]
+  };
+  const options = nextSession(done, { type: 'recommendation', recommendation: nowRuledOut, checkId: 4 }, 10).session;
+  assert.equal(options.state, 'choosing');
+  assert.equal(options.chosen, undefined);
+  assert.equal(options.choiceReason, undefined);
+  assert.equal(nextSession(options, { type: 'review' }, 10).session, options);
+});
+
 test('the page parser refuses malformed arrays, IDs and actions', () => {
   for (const raw of [
     { type: 'answer', key: 'data', value: ['personal', 'personal'] },
@@ -195,6 +220,7 @@ test('the page parser refuses malformed arrays, IDs and actions', () => {
     { type: 'scan-confirm', ranges: ['192.0.2.2/15'] },
     { type: 'scan-confirm', ranges: Array(1) },
     { type: 'apply', confirmRemoval: 'true' },
+    { type: 'apply-recheck' },
   ]) assert.equal(parseGuideInbound(raw), undefined);
   assert.deepEqual(parseGuideInbound({ type: 'scan-confirm', ranges: ['192.0.2.0/24'] }),
     { type: 'scan-confirm', ranges: ['192.0.2.0/24'] });

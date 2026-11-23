@@ -35,6 +35,7 @@ export interface GuideRouteSnapshot {
 }
 
 type PolicySnapshot = GuideRouteSnapshot | { readonly view: GuidePolicyInput };
+type PreflightResult = 'ready' | 'blocked' | 'route-changed';
 type ApplyPorts = Omit<ApplyDeps, 'root' | 'record' | 'preflight' | 'connection'> & {
   connection(result: ViabilityResult): ApplyStep | undefined;
 };
@@ -230,29 +231,31 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     await dispatch({ type: 'changes-ready', changes: items });
   }
 
-  async function preflight(current: GuideSession, reviewed: GuideRouteSnapshot, selected: ViabilityResult | undefined): Promise<boolean> {
+  async function preflight(current: GuideSession, reviewed: GuideRouteSnapshot, selected: ViabilityResult | undefined): Promise<PreflightResult> {
     const next = await readPolicy();
     const sameAuthority = (current: GuideRouteSnapshot) => current.hash === reviewed.hash && current.floor === reviewed.floor &&
       isDeepStrictEqual(current.projectLabel, reviewed.projectLabel) && isDeepStrictEqual(current.route.residency, reviewed.route.residency);
-    if (!next || !sameAuthority(next.snapshot) || lifetime.signal.aborted) return false;
-    if (!selected) return !current.chosen && current.recommendation?.state === 'stopped';
+    if (!next || !sameAuthority(next.snapshot) || lifetime.signal.aborted) return 'blocked';
+    if (!selected) return !current.chosen && current.recommendation?.state === 'stopped' ? 'ready' : 'blocked';
     const checked = await deps.check({
       ...next.snapshot, route: proposedRoutePolicy(next.snapshot.route, current.answers.canada)
     }, () => {}, lifetime.signal);
     try {
       const latest = await readPolicy();
-      if (!latest || !sameAuthority(latest.snapshot) || lifetime.signal.aborted) return false;
+      if (!latest || !sameAuthority(latest.snapshot) || lifetime.signal.aborted) return 'blocked';
       const result = checked.results.find(({ optionId }) => optionId === selected.optionId);
       const at = now();
-      if (!result || !isChoosable(result, at)) return false;
+      if (!result || !isChoosable(result, at)) return 'blocked';
       const facts = factsFor(result, latest.snapshot, at);
       const planned = selected.routeFacts;
-      if (!facts || !planned || facts.clientRoute !== planned.clientRoute || facts.host !== planned.host || !isDeepStrictEqual(facts.model, planned.model)) return false;
+      if (!facts || !planned) return 'blocked';
+      if (facts.clientRoute !== planned.clientRoute || facts.host !== planned.host || !isDeepStrictEqual(facts.model, planned.model)) return 'route-changed';
       const { label, outcome } = labelFor(current, latest.policy, latest.snapshot);
-      if (outcome.stop !== undefined) return false;
+      if (outcome.stop !== undefined) return 'blocked';
       const { route, routing, defaultLabel, floor } = latest.snapshot;
-      return decideRoute([label.proposed], routing, { ...facts, use: useFor(current.answers) }, defaultLabel, floor,
-        proposedRoutePolicy(route, current.answers.canada)).allowed;
+      const decision = decideRoute([label.proposed], routing, { ...facts, use: useFor(current.answers) }, defaultLabel, floor,
+        proposedRoutePolicy(route, current.answers.canada));
+      return decision.allowed ? 'ready' : 'blocked';
     } finally {
       checked.dispose();
     }
@@ -262,9 +265,14 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     const reviewed = snapshot;
     if (!reviewed || !applyContext || !current.recommendation) return;
     const selected = current.results.find(({ optionId }) => optionId === current.chosen);
+    let routeChanged = false;
     const inputs: ApplyDeps = {
       ...deps.apply, root: deps.root, clock: now,
-      preflight: () => preflight(current, reviewed, selected),
+      preflight: async () => {
+        const result = await preflight(current, reviewed, selected);
+        routeChanged = result === 'route-changed';
+        return result === 'ready';
+      },
       connection: selected && deps.apply.connection(selected),
       record: {
         answers: current.answers, proposedLabel: applyContext.label.proposed, use: useFor(current.answers),
@@ -275,7 +283,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
       }
     };
     const report = await runApply(planApply(current.changes, applyContext, inputs), inputs);
-    await dispatch({ type: 'apply-done', report, previous: readSetupGuide(deps.root) });
+    await dispatch(routeChanged ? { type: 'apply-recheck' } : { type: 'apply-done', report, previous: readSetupGuide(deps.root) });
   }
 
   async function effect(item: GuideEffect, current: GuideSession): Promise<void> {

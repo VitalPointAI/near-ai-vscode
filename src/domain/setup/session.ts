@@ -48,7 +48,7 @@ type PageEvent = Extract<GuideInbound, { type:
 }>;
 
 export type GuideEvent = PageEvent
-  | { readonly type: 'start' | 'resume' | 'restart' }
+  | { readonly type: 'start' | 'resume' | 'restart' | 'apply-recheck' }
   | { readonly type: 'ceiling'; readonly checkId?: number }
   | { readonly type: 'viability-progress'; readonly result: ViabilityResult; readonly checkId?: number }
   | { readonly type: 'viability-done'; readonly results: readonly ViabilityResult[]; readonly checkId?: number }
@@ -170,12 +170,13 @@ export function nextSession(session: GuideSession, event: GuideEvent, now: numbe
   const update = (patch: Partial<GuideSession>, ...effects: GuideEffect[]): Transition => ({
     session: Object.freeze({ ...session, ...patch, updatedAt: now }), effects,
   });
-  const check = (answers = session.answers, retryIds?: readonly string[]): Transition => {
+  const check = (answers = session.answers, retryIds?: readonly string[], preserveChoice = false): Transition => {
     const checkId = (session.checkId ?? 0) + 1;
     return update({
       state: 'checking', screen: 'checking', answers, checkingStartedAt: now, checkId, results: Object.freeze([]),
       ceilingReached: false, recommendationRequested: false, stillChecking: Object.freeze([]),
-      recommendation: undefined, chosen: undefined, choiceReason: undefined,
+      recommendation: undefined, chosen: preserveChoice ? session.chosen : undefined,
+      choiceReason: preserveChoice ? session.choiceReason : undefined,
       changes: Object.freeze([]), changesRequested: false, report: undefined, nothingChanged: false, retryIds, resumeState: undefined,
     }, { type: 'run-viability', checkId }, { type: 'start-ceiling', ms: CHECKING_CEILING_MS, checkId });
   };
@@ -203,7 +204,7 @@ export function nextSession(session: GuideSession, event: GuideEvent, now: numbe
     return update({ state: 'abandoned', resumeState: undefined }, { type: 'record-abandoned', screen: session.screen });
   }
   if (session.state === 'paused' && event.type === 'resume' && session.resumeState) {
-    if (session.resumeState === 'checking') return check(session.answers, session.retryIds);
+    if (session.resumeState === 'checking') return check(session.answers, session.retryIds, true);
     if (session.resumeState === 'reviewing' && session.retryIds) {
       return update({ state: 'reviewing', resumeState: undefined, changesRequested: true }, { type: 'compute-changes' });
     }
@@ -253,8 +254,12 @@ export function nextSession(session: GuideSession, event: GuideEvent, now: numbe
           { type: 'compute-recommendation', checkId: session.checkId ?? 0 });
       }
       if (event.type === 'recommendation' && session.recommendationRequested) {
-        return update({ state: 'choosing', screen: event.recommendation.state === 'stopped' ? 'stopped' : 'options',
-          recommendation: event.recommendation });
+        const { recommendation } = event;
+        const chosen = session.chosen && choiceIsCurrent({ ...session, recommendation }, session.chosen, now) ? session.chosen : undefined;
+        return update({
+          state: 'choosing', screen: recommendation.state === 'stopped' ? 'stopped' : 'options', recommendation, chosen,
+          choiceReason: choiceNeedsReason(chosen, recommendation.recommendedId) ? session.choiceReason : undefined
+        });
       }
       break;
     case 'choosing':
@@ -302,6 +307,7 @@ export function nextSession(session: GuideSession, event: GuideEvent, now: numbe
       }
       break;
     case 'applying':
+      if (event.type === 'apply-recheck') return check(session.answers, session.retryIds, true);
       if (event.type === 'apply-done') {
         const { report } = event;
         const previous = event.previous ?? (report.state === 'applied'

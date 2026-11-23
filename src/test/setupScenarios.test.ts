@@ -293,3 +293,67 @@ test('Apply restarts checking when the reviewed result is eleven minutes old', a
   const snapshot = await snapshotFor(run.deps);
   assert.equal(snapshot.projectLabel?.level, 'Public');
 });
+
+test('a still-fresh route change restarts checking, keeps an allowed choice, and requires a new review', async (t) => {
+  const available = [...results];
+  const run = await setup({ results: available });
+  const connected: string[] = [];
+  const guide = guideFor(t, run, { ...run.deps, apply: { ...run.deps.apply, connection(result) {
+    return {
+      changeId: 'connection', alreadyDone: async () => false, async run() {
+        assert.ok(result.routeFacts?.host);
+        connected.push(result.routeFacts.host);
+        return { id: 'connection', outcome: 'done' };
+      }
+    };
+  } } });
+  await sendAnswers(guide, internal);
+  await guide.receive({ type: 'choose', optionId: 'near-private' });
+  await guide.receive({ type: 'reason', text: 'Capacity for analysis' });
+  await guide.receive({ type: 'review' });
+  screen(run, 'check');
+
+  const previousEndpoint = near.routeFacts;
+  assert.ok(previousEndpoint?.binding);
+  const host = 'https://cloud-api.near.ai';
+  available[1] = { ...near, routeFacts: { ...previousEndpoint, host, binding: { ...previousEndpoint.binding, host } } };
+  const before = run.posted.length;
+  await guide.receive({ type: 'apply' });
+
+  assert.ok(run.posted.slice(before).some((entry) => entry.type === 'screen' && entry.screen.kind === 'checking'));
+  const options = screen(run, 'options');
+  assert.equal(options.chosen, 'near-private');
+  assert.equal(options.choiceReason, 'Capacity for analysis');
+  await guide.receive({ type: 'apply' });
+  assert.equal(run.calls.checks, 3);
+  assert.equal(run.calls.lands, 0);
+  assert.deepEqual(connected, []);
+  assert.equal(readSetupGuide(run.root), undefined);
+  assert.equal((await snapshotFor(run.deps)).projectLabel?.level, 'Public');
+  const log = await run.audit.verify();
+  assert.ok(log.ok);
+  assert.equal(log.head, undefined);
+
+  await guide.receive({ type: 'review' });
+  await guide.receive({ type: 'apply' });
+  screen(run, 'done');
+  assert.deepEqual(readSetupGuide(run.root)?.chosen, ['near-private']);
+  assert.deepEqual(connected, [host]);
+  assert.equal(run.calls.checks, 4);
+  assert.equal(run.calls.lands, 1);
+});
+
+test('a failed Apply preflight check still leaves changes pending without checking again', async (t) => {
+  const run = await setup({ results });
+  const guide = guideFor(t, run, { ...run.deps, check(snapshot, progress, signal) {
+    if (run.calls.checks === 1) throw new Error('Fixture preflight failed');
+    return run.deps.check(snapshot, progress, signal);
+  } });
+  await sendAnswers(guide, internal);
+  await reviewLocal(guide);
+  const before = run.posted.length;
+  await guide.receive({ type: 'apply' });
+  screen(run, 'done');
+  assert.ok(!run.posted.slice(before).some((entry) => entry.type === 'screen' && entry.screen.kind === 'checking'));
+  assert.equal(readSetupGuide(run.root), undefined);
+});
