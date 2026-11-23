@@ -22,9 +22,9 @@ import { isProjectRefused, ReplicaProject } from '../staff/replica/replicaProjec
 import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { STORE_REFUSALS } from '../staff/replica/store';
 import { markKey } from '../staff/replica/marks';
-import { cellOrderHook } from '../staff/replica/membership';
+import { cellOrderHook, removeFromProject } from '../staff/replica/membership';
 import { cellLabelTexts } from '../staff/replica/labelCells';
-import { bringIn, orgClearance, syncTo } from './helpers/labelCellWorld';
+import { bringIn, leadWith, orgClearance, syncTo } from './helpers/labelCellWorld';
 import type { Seat as CellSeat } from './helpers/labelCellWorld';
 import { memberAt } from '../domain/replica/rosterMembers';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
@@ -416,6 +416,7 @@ test('a shared project this window cannot open shows no product and says so plai
   assert.deepEqual(staffTree(env.root), files);
   // Storage that holds no pin for this project (another install's folder copied here): the project refuses to open, and the reason is shown.
   const elsewhere = new StaffHost({ root: env.root, signer: async () => env.signer, keyStatus: async () => trusting(env.signer), headStore: memorySecrets(), replica: { globalStorageDir: mkdtempSync(path.join(tmpdir(), 'near-ai-hostmode-noglobal-')) } });
+  assert.equal(await elsewhere.sharedReplica(), undefined, 'an unpinned installation has no replica handle');
   const refused = await elsewhere.snapshot();
   assert.equal(refused.registry.length, 0);
   assert.match(refused.ledgerProblem ?? '', /^This project is shared, and its shared history cannot be opened here, so its staff products are not shown\. This project folder holds a shared staff project that this computer has not joined/);
@@ -437,6 +438,7 @@ test('a replica project file that cannot be checked (a stat error other than its
   // Fails closed: the writes are refused, but with the stat failure, not the claim that the project is shared.
   assert.equal(await host.isSharedProject(), true);
   assert.equal(await host.sharedProjectRefusal(), expected);
+  assert.equal(await host.sharedReplica(), undefined);
   // The tree outside the replica folder: walking into it would meet the looping link itself.
   const outside = (): Array<[string, string]> => [...staffTree(env.root, 'replica')].sort();
   const files = outside();
@@ -499,8 +501,11 @@ test('Start Again while the host holds a cached project: after another window se
     const first = await host.replay();
     assert.equal(first.broken, undefined, first.broken?.reason);
     assert.deepEqual([...first.products.keys()].sort(), [...PRODUCTS].sort());
+    const previous = await host.sharedReplica();
+    assert.ok(previous);
     // This device's base stream file loses its last line: the store is refused rolled-back, and the host says so.
     cutLastLine(await ownBaseFile(env));
+    assert.equal(await host.sharedReplica(), undefined, 'a rollback supplies no usable handle');
     const refused = await host.replay();
     assert.ok(refused.broken, 'a rolled-back store reads as broken');
     assert.ok(refused.broken.reason.includes(STORE_REFUSALS['rolled-back']), refused.broken.reason);
@@ -511,6 +516,9 @@ test('Start Again while the host holds a cached project: after another window se
     const again = await host.replay();
     assert.equal(again.broken, undefined, again.broken?.reason);
     assert.deepEqual(again.products, first.products, 'the products read again, as before the rollback');
+    const recovered = await host.sharedReplica();
+    assert.ok(recovered);
+    assert.notEqual(recovered.project, previous.project);
   } finally {
     await host.close();
   }
@@ -555,7 +563,10 @@ test('five replays with nothing changed outside open the shared project once', a
   try {
     const first = await host.replay();
     assert.equal(first.broken, undefined, first.broken?.reason);
-    for (let read = 0; read < 4; read += 1) assert.deepEqual((await host.replay()).products, first.products);
+    for (let read = 0; read < 4; read += 1) {
+      assert.equal((await host.sharedReplica())?.project, opens.opened[0]);
+      assert.deepEqual((await host.replay()).products, first.products);
+    }
     assert.equal(opens.count(), 1, 'one open for five reads');
   } finally {
     opens.restore();
@@ -804,5 +815,52 @@ test('a member cleared for org/Internal holding both label cells but not the leg
     await leadHost.close();
     await memberHost.close();
     await lead.p.close();
+  }
+});
+
+test('the shared host accessor stops handing out its replica after a signed local admission revocation', async () => {
+  const lead = await leadWith();
+  const member = await bringIn(lead, 'host-access-member', 'Avery Analyst', orgClearance('Internal'));
+  const host = await seatHost(member);
+  try {
+    const joined = await host.sharedReplica();
+    assert.ok(joined);
+    assert.equal(joined.project.deviceWriter, member.writer);
+
+    const removed = await removeFromProject(lead.host, { member: member.member });
+    assert.equal(removed.ok, true, removed.message);
+    await syncTo(lead, member, [lead.p.projectId]);
+    assert.equal(await host.sharedReplica(), undefined);
+  } finally {
+    await host.close();
+  }
+});
+
+test('a store replaced during the accessor fold is retried on the new identity on the next call', async () => {
+  const env = await cloneOf(await full(), 'public-handle-race');
+  await migrate(env);
+  const host = worldOf(env, true).host;
+  try {
+    const previous = await host.sharedReplica();
+    assert.ok(previous);
+    const dir = storeDirOf(env.root);
+    const state = previous.project.state.bind(previous.project);
+    const spy = mock.method(previous.project, 'state', async () => {
+      const checked = await state();
+      cpSync(dir, `${dir}.copy`, { recursive: true });
+      renameSync(dir, `${dir}.old`);
+      renameSync(`${dir}.copy`, dir);
+      return checked;
+    }, { times: 1 });
+    try {
+      assert.equal(await host.sharedReplica(), undefined, 'the old handle is never returned across the replacement');
+    } finally {
+      spy.mock.restore();
+    }
+    const current = await host.sharedReplica();
+    assert.ok(current);
+    assert.notEqual(current.project, previous.project);
+  } finally {
+    await host.close();
   }
 });
