@@ -1,0 +1,24 @@
+{
+  "gap": "G23",
+  "id": "g23",
+  "controls": [
+    "ia-03"
+  ],
+  "ownerRole": "shared",
+  "title": "Device authentication needs connection-specific evidence",
+  "remediation": "The deployment identity and network owners approve which device classes and connection boundaries require authentication before access. Component maintainers and the deployment operators document the device identity, enrollment, trust settings and revocation at each boundary. Collect redacted results showing an enrolled device is admitted and an unknown or revoked device is refused before the connection is established. Record inherited controls and assign fixes for applicable boundaries without a verified mechanism.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the device and connection inventory and retain enrollment and pre-connection acceptance and refusal evidence"
+    },
+    {
+      "phase": "32",
+      "title": "Where the staff hub is in scope, verify the released device authentication and trust configuration at its connection boundaries"
+    },
+    {
+      "phase": "91",
+      "title": "Where endpoint collectors are in scope, verify the deployed device binding and refusal after revocation"
+    }
+  ]
+}
