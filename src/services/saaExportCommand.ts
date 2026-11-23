@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 import { redactSecrets } from '../domain/redaction';
 import { createExclusive } from './stateHome';
 import { buildSaaPackage } from './saaPackage';
-import { loadSaaOfficialPrivacyForms, loadSaaReleaseEvidence, SAA_RELEASE_VERSION } from './saaReleaseEvidence';
+import { loadSaaMarketplaceApproval, loadSaaOfficialPrivacyForms, loadSaaReleaseEvidence, SAA_RELEASE_VERSION } from './saaReleaseEvidence';
 
 export const GENERATE_SAA_PACKAGE_COMMAND = 'nearAi.generateSaaPackage';
 
@@ -44,12 +44,16 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
       try {
         if (token.isCancellationRequested) abort.abort();
         progress.report({ message: 'Downloading and verifying the public release evidence and official forms' });
-        const [evidence, privacyForms] = await Promise.all([
-          loadSaaReleaseEvidence(version, abort.signal), loadSaaOfficialPrivacyForms(abort.signal)
+        const [release, privacyForms] = await Promise.all([
+          loadSaaReleaseEvidence(version, abort.signal).then(async (evidence) => {
+            progress.report({ message: 'Checking the published release’s Marketplace approval' });
+            return { evidence, approval: await loadSaaMarketplaceApproval(evidence, abort.signal) };
+          }),
+          loadSaaOfficialPrivacyForms(abort.signal)
         ]);
         abort.signal.throwIfAborted();
         progress.report({ message: 'Building the control matrix and administrative forms' });
-        const archive = await buildSaaPackage(evidence, context.asAbsolutePath('resources/saa'), privacyForms);
+        const archive = await buildSaaPackage(release.evidence, context.asAbsolutePath('resources/saa'), privacyForms, release.approval);
         abort.signal.throwIfAborted();
         const result = await createExclusive(destination, archive);
         if (result === 'exists') throw new Error('A file already exists at that location. Choose a different name.');

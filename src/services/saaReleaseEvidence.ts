@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
 const REPOSITORY = 'VitalPointAI/near-ai-vscode';
+export const SAA_RELEASE_RUN_URL = `https://github.com/${REPOSITORY}/actions/runs/`;
 export const SAA_RELEASE_VERSION = /^(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})\.(?:0|[1-9][0-9]{0,8})$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
@@ -13,6 +14,10 @@ const MAX_ENTRIES = 2048;
 const TAR_BLOCK_SIZE = 512;
 const DASHBOARD_PATH = 'evidence/bundle/dashboard/dashboard.json';
 const MANIFEST_PATH = 'evidence/bundle/manifest.json';
+const MARKETPLACE_ENVIRONMENT = 'marketplace';
+const RELEASE_WORKFLOW = '.github/workflows/release.yml';
+const ACTIONS_RESULT_LIMIT = 10;
+const GITHUB_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const PRIVACY_FORMS_URL = 'https://www.canada.ca/content/dam/tbs-sct/documents/forms/';
 const PRIVACY_FORMS = [
   ['personal-information-bank-submission-form-en.docx', '3b6bc698249b5218f92da2847fd6bdccb848f5caf80591ecf21a82e9844f3510'],
@@ -31,6 +36,14 @@ export interface SaaReleaseEvidence {
   readonly archive: Buffer;
   readonly dashboard: unknown;
   readonly files: ReadonlyMap<string, Buffer>;
+}
+
+export interface SaaMarketplaceApproval {
+  readonly tag: string;
+  readonly commit: string;
+  readonly runUrl: string;
+  readonly publishCompletedAt: string;
+  readonly checkedAt: string;
 }
 
 /** Retrieve the known blank Treasury Board forms directly from their issuing site. */
@@ -243,4 +256,116 @@ export async function loadSaaReleaseEvidence(version: string, signal: AbortSigna
     throw new Error('The release evidence does not identify one matching source commit.');
   }
   return { version, commit, sourceUrl, fileName, sha256: digest, archive, dashboard, files };
+}
+
+function githubId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function githubTime(value: unknown): value is string {
+  return typeof value === 'string' && GITHUB_TIME.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function completeActionsList(body: unknown, key: 'workflow_runs' | 'jobs'): Record<string, unknown>[] {
+  const result = record(body);
+  const rows = result?.[key];
+  if (!Array.isArray(rows) || rows.length > ACTIONS_RESULT_LIMIT || result?.total_count !== rows.length) {
+    throw new Error('Incomplete GitHub Actions results.');
+  }
+  return rows.map((row) => {
+    const entry = record(row);
+    if (!entry) throw new Error('Invalid GitHub Actions results.');
+    return entry;
+  });
+}
+
+function canonicalReleaseRun(run: Record<string, unknown>, tag: string, commit: string): boolean {
+  const repository = record(run.repository);
+  const head = record(run.head_repository);
+  return githubId(repository?.id) && head?.id === repository.id && repository.full_name === REPOSITORY && head.full_name === REPOSITORY &&
+    (run.path === RELEASE_WORKFLOW || run.path === `${RELEASE_WORKFLOW}@${tag}` || run.path === `${RELEASE_WORKFLOW}@refs/tags/${tag}`) &&
+    run.head_branch === tag && run.head_sha === commit && run.event === 'push' &&
+    run.status === 'completed' && run.conclusion === 'success' && run.run_attempt === 1;
+}
+
+function configuredMarketplaceReviewer(body: unknown): { environmentId: number; reviewerId: number } | undefined {
+  const environment = record(body);
+  if (environment?.name !== MARKETPLACE_ENVIRONMENT || environment.can_admins_bypass !== false ||
+      !githubId(environment.id) || !Array.isArray(environment.protection_rules)) return;
+  const rules = environment.protection_rules.map(record).filter((rule) => rule?.type === 'required_reviewers');
+  const reviewers = rules.length === 1 ? rules[0]?.reviewers : undefined;
+  if (!Array.isArray(reviewers) || reviewers.length !== 1) return;
+  const user = record(reviewers[0]);
+  const reviewerId = record(user?.reviewer)?.id;
+  if (user?.type === 'User' && githubId(reviewerId)) return { environmentId: environment.id, reviewerId };
+}
+
+function approvedMarketplaceHistory(body: unknown, environmentId: number, reviewerId: number): boolean {
+  if (!Array.isArray(body) || body.length > ACTIONS_RESULT_LIMIT) return false;
+  const matches: Record<string, unknown>[] = [];
+  for (const row of body) {
+    const approval = record(row);
+    if (!approval || !Array.isArray(approval.environments)) return false;
+    for (const row of approval.environments) {
+      const environment = record(row);
+      if (!githubId(environment?.id) || typeof environment.name !== 'string') return false;
+      if (environment.id !== environmentId && environment.name !== MARKETPLACE_ENVIRONMENT) continue;
+      if (environment.id !== environmentId || environment.name !== MARKETPLACE_ENVIRONMENT) return false;
+      matches.push(approval);
+    }
+  }
+  return matches.length === 1 && matches[0].state === 'approved' && record(matches[0].user)?.id === reviewerId;
+}
+
+/** Collect an optional approval receipt after the verified release's Marketplace publication. */
+export async function loadSaaMarketplaceApproval(
+  evidence: Pick<SaaReleaseEvidence, 'version' | 'commit'>, signal: AbortSignal, fetcher: typeof fetch = fetch
+): Promise<SaaMarketplaceApproval | undefined> {
+  signal.throwIfAborted();
+  if (!SAA_RELEASE_VERSION.test(evidence.version) || !COMMIT.test(evidence.commit)) return;
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(12_000)]);
+  const tag = `v${evidence.version}`;
+  const query = new URLSearchParams({ event: 'push', head_sha: evidence.commit, per_page: String(ACTIONS_RESULT_LIMIT) });
+  async function read(endpoint: string): Promise<unknown> {
+    bounded.throwIfAborted();
+    const response = await fetcher(`https://api.github.com/repos/${REPOSITORY}/${endpoint}`, {
+      headers: { Accept: 'application/vnd.github+json' }, redirect: 'error', credentials: 'omit', signal: bounded
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error('GitHub approval evidence is unavailable.');
+    }
+    return JSON.parse((await readBounded(response, METADATA_LIMIT, bounded)).toString('utf8'));
+  }
+
+  try {
+    const runs = completeActionsList(await read(`actions/workflows/release.yml/runs?${query}`), 'workflow_runs');
+    const tagged = runs.filter((run) => run.head_branch === tag);
+    if (tagged.length !== 1 || !canonicalReleaseRun(tagged[0], tag, evidence.commit)) return;
+    const runId = tagged[0].id;
+    if (!githubId(runId)) return;
+    const runPath = `actions/runs/${runId}`;
+    const jobs = completeActionsList(await read(`${runPath}/attempts/1/jobs?per_page=${ACTIONS_RESULT_LIMIT}`), 'jobs');
+    if (jobs.some((job) => typeof job.name !== 'string' || job.run_id !== runId)) return;
+    const publishes = jobs.filter((job) => job.name === 'publish');
+    const job = publishes[0];
+    if (publishes.length !== 1 || job.head_sha !== evidence.commit || job.status !== 'completed' ||
+        job.conclusion !== 'success' || !githubTime(job.completed_at)) return;
+    if (!githubTime(tagged[0].created_at) || Date.parse(job.completed_at) < Date.parse(tagged[0].created_at) ||
+        Date.parse(job.completed_at) > Date.now()) return;
+    // Match against the sole configured reviewer at observation time. Review history is run-wide.
+    const configured = configuredMarketplaceReviewer(await read(`environments/${MARKETPLACE_ENVIRONMENT}`));
+    if (!configured ||
+        !approvedMarketplaceHistory(await read(`${runPath}/approvals`), configured.environmentId, configured.reviewerId)) return;
+    const current = record(await read(runPath));
+    if (!current || current.id !== runId || !canonicalReleaseRun(current, tag, evidence.commit)) return;
+    return {
+      tag, commit: evidence.commit, runUrl: `${SAA_RELEASE_RUN_URL}${runId}`,
+      publishCompletedAt: job.completed_at, checkedAt: new Date().toISOString()
+    };
+  } catch {
+    signal.throwIfAborted();
+    // Receipt collection is optional. Ignoring provider diagnostics also keeps raw identities and comments out of the export.
+    return;
+  }
 }

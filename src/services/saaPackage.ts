@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { writeZip } from '../agent/zip';
-import type { SaaReleaseEvidence } from './saaReleaseEvidence';
+import { SAA_RELEASE_RUN_URL, type SaaMarketplaceApproval, type SaaReleaseEvidence } from './saaReleaseEvidence';
 import { buildSaaSponsorReport, type SaaSponsorReportInput } from './saaSponsorReport';
 
 const STATES = ['met', 'partly-met', 'not-met', 'stale', 'your-organizations-responsibility', 'not-applicable'] as const;
@@ -379,7 +379,9 @@ function workbook(tables: Table[]): Buffer {
 }
 
 /** Combine a verified public release with blank forms. All generated content stays in this archive. */
-export async function buildSaaPackage(evidence: SaaReleaseEvidence, formsDir: string, privacyForms: ReadonlyMap<string, Buffer>): Promise<Buffer> {
+export async function buildSaaPackage(
+  evidence: SaaReleaseEvidence, formsDir: string, privacyForms: ReadonlyMap<string, Buffer>, marketplaceApproval?: SaaMarketplaceApproval
+): Promise<Buffer> {
   const dashboard = parseDashboard(evidence.dashboard, evidence.commit);
   const { tables, profiles } = traceabilityTables(dashboard, evidence);
   const entries: ArchiveEntry[] = await readForms(formsDir);
@@ -388,6 +390,15 @@ export async function buildSaaPackage(evidence: SaaReleaseEvidence, formsDir: st
     if (!safePath(name)) throw new Error('The release package contains an unsafe file name.');
     entries.push([name, value]);
   };
+  const approval = marketplaceApproval?.tag === `v${evidence.version}` && marketplaceApproval.commit === evidence.commit &&
+    marketplaceApproval.runUrl.startsWith(SAA_RELEASE_RUN_URL) && /^[1-9]\d*$/.test(marketplaceApproval.runUrl.slice(SAA_RELEASE_RUN_URL.length))
+    ? marketplaceApproval : undefined;
+  if (approval) {
+    append('evidence/marketplace-approval.json', `${JSON.stringify({
+      schemaVersion: 1, kind: 'marketplace-publish-approval', tag: approval.tag, commit: approval.commit,
+      runUrl: approval.runUrl, runAttempt: 1, publishCompletedAt: approval.publishCompletedAt, checkedAt: approval.checkedAt
+    }, null, 2)}\n`);
+  }
   for (const [name, bytes] of privacyForms) addSource(`forms/official/${name}`, bytes);
   const sponsorReport = 'SA-and-A-sponsor-draft.docx';
   entries.push([sponsorReport, buildSaaSponsorReport({
@@ -417,6 +428,9 @@ The actual deployment and its control conclusions remain open. Published product
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
 - The product gaps tab lists original published gaps and separate Phase 44.1 triage entries for unresolved rows without a related gap. Triage identifies where a reviewer still needs to determine whether to implement a control, collect evidence or obtain a tailoring decision.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
+- ${approval
+    ? `The [Marketplace approval receipt](marketplace-approval.json) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`
+    : 'Marketplace approval evidence is pending verification. This export includes the published product findings.'}
 - Evidence references for the deployment should identify the assessed component, build and configuration, assessment objective, method, collection date, approved location and reviewer.
 `);
   addSource(`evidence/${evidence.fileName}`, evidence.archive);

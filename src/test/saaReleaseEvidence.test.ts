@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { gzipSync } from 'node:zlib';
-import { loadSaaReleaseEvidence } from '../services/saaReleaseEvidence';
+import { loadSaaMarketplaceApproval, loadSaaReleaseEvidence } from '../services/saaReleaseEvidence';
 
 const version = '0.4.36';
 const commit = 'a'.repeat(40);
@@ -15,6 +15,50 @@ const cdnUrl = 'https://release-assets.githubusercontent.com/release/test';
 const dashboardPath = 'evidence/bundle/dashboard/dashboard.json';
 const manifestPath = 'evidence/bundle/manifest.json';
 const hash = (value: Buffer) => createHash('sha256').update(value).digest('hex');
+const runPath = '/actions/runs/42';
+const runsPath = '/actions/workflows/release.yml/runs';
+const jobsPath = `${runPath}/attempts/1/jobs`;
+const approvalsPath = `${runPath}/approvals`;
+const environmentPath = '/environments/marketplace';
+const publishCompletedAt = '2024-01-02T00:00:00Z';
+const releaseRun = {
+  id: 42, path: '.github/workflows/release.yml', head_branch: tag, head_sha: commit, event: 'push',
+  status: 'completed', conclusion: 'success', run_attempt: 1, created_at: '2024-01-01T00:00:00Z',
+  repository: { id: 7, full_name: repository }, head_repository: { id: 7, full_name: repository },
+  html_url: 'https://example.org/untrusted-run-link'
+};
+const publishJob = { name: 'publish', run_id: 42, head_sha: commit, status: 'completed', conclusion: 'success', completed_at: publishCompletedAt };
+const marketplace = { id: 711, name: 'marketplace' };
+const user = { id: 874, login: 'configured-reviewer-secret' };
+const reviewer = { type: 'User', reviewer: user };
+const environment = { ...marketplace, can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', reviewers: [reviewer] }] };
+const decision = { state: 'approved', environments: [marketplace], user, comment: 'approval-comment-secret' };
+
+function marketplaceResponses(overrides: Readonly<Record<string, unknown>> = {}) {
+  const calls: string[] = [];
+  const responses: Readonly<Record<string, unknown>> = {
+    [runsPath]: { total_count: 1, workflow_runs: [releaseRun] },
+    [runPath]: releaseRun,
+    [jobsPath]: { total_count: 1, jobs: [publishJob] },
+    [approvalsPath]: [decision], [environmentPath]: environment, ...overrides
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin, 'https://api.github.com');
+    assert.ok(url.pathname.startsWith(`/repos/${repository}/`));
+    assert.equal(init?.credentials, 'omit');
+    assert.equal(init?.redirect, 'error');
+    assert.ok(init?.signal instanceof AbortSignal);
+    const path = url.pathname.slice(`/repos/${repository}`.length);
+    calls.push(path);
+    if (path === runsPath) assert.deepEqual(Object.fromEntries(url.searchParams), { event: 'push', head_sha: commit, per_page: '10' });
+    if (path === jobsPath) assert.equal(url.searchParams.get('per_page'), '10');
+    assert.ok(path in responses);
+    const value = responses[path];
+    return value instanceof Response ? value : Response.json(value);
+  };
+  return { calls, fetcher };
+}
 
 function tarEntry(name: string, bytes: Buffer, directory = false): Buffer[] {
   const header = Buffer.alloc(512);
@@ -143,4 +187,59 @@ test('honors cancellation before contacting GitHub and during the download', asy
   await assert.rejects(loadSaaReleaseEvidence(version, during.signal, fetcher), reason);
   assert.deepEqual(mock.calls, [metadataUrl, assetUrl, cdnUrl]);
   assert.equal(streamCanceled, true);
+});
+
+test('returns only the minimal Marketplace approval tied to the exact release build', async () => {
+  const { calls, fetcher } = marketplaceResponses();
+  const received = await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, fetcher);
+  assert.deepEqual(calls, [runsPath, jobsPath, environmentPath, approvalsPath, runPath]);
+  assert.ok(received);
+  assert.deepEqual(received, { tag, commit, runUrl: `https://github.com/${repository}/actions/runs/42`, publishCompletedAt, checkedAt: received.checkedAt });
+  assert.ok(Date.parse(received.checkedAt) >= Date.parse(publishCompletedAt));
+  assert.doesNotMatch(JSON.stringify(received), /approval-comment-secret|configured-reviewer-secret|untrusted-run-link/);
+});
+
+test('untrusted or ambiguous release jobs, environment settings and decisions leave the receipt unavailable', async () => {
+  for (const overrides of [
+    { [runsPath]: { total_count: 2, workflow_runs: [releaseRun] } },
+    { [runsPath]: { total_count: 2, workflow_runs: [releaseRun, { ...releaseRun, id: 43, run_attempt: 2 }] } },
+    ...[
+      { ...releaseRun, head_branch: 'v0.4.35' },
+      { ...releaseRun, head_sha: 'b'.repeat(40) },
+      { ...releaseRun, head_repository: { id: 9, full_name: 'fork/demo' } },
+      { ...releaseRun, path: '.github/workflows/other.yml' },
+      { ...releaseRun, event: 'workflow_dispatch' },
+      { ...releaseRun, run_attempt: 2 }
+    ].map((run) => ({ [runsPath]: { total_count: 1, workflow_runs: [run] } })),
+    { [jobsPath]: { total_count: 2, jobs: [publishJob, publishJob] } },
+    { [jobsPath]: { total_count: 1, jobs: [{ ...publishJob, head_sha: 'b'.repeat(40) }] } },
+    { [jobsPath]: { total_count: 1, jobs: [{ ...publishJob, conclusion: 'failure' }] } },
+    { [jobsPath]: { total_count: 1, jobs: [{ ...publishJob, completed_at: 'invalid' }] } },
+    { [environmentPath]: { ...environment, can_admins_bypass: true } },
+    { [environmentPath]: { ...environment, can_admins_bypass: undefined } },
+    ...[[reviewer, reviewer], [{ ...reviewer, type: 'Team' }]].map((reviewers) => ({
+      [environmentPath]: { ...environment, protection_rules: [{ type: 'required_reviewers', reviewers }] }
+    })),
+    { [approvalsPath]: [decision, decision] },
+    { [approvalsPath]: [{ ...decision, user: { id: 99 } }] },
+    { [approvalsPath]: [{ ...decision, environments: [{ ...marketplace, id: 99 }] }] },
+    { [approvalsPath]: [{ ...decision, state: 'rejected' }] },
+    { [runPath]: { ...releaseRun, run_attempt: 2 } }
+  ]) {
+    assert.equal(await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, marketplaceResponses(overrides).fetcher), undefined);
+  }
+});
+
+test('missing, rate-limited and malformed optional responses remain unavailable and cancellation is preserved', async () => {
+  for (const response of [new Response(null, { status: 404 }), new Response('private rate limit data', { status: 429 }), new Response('malformed')]) {
+    const { fetcher } = marketplaceResponses({ [runsPath]: response });
+    assert.equal(await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, fetcher), undefined);
+  }
+  const controller = new AbortController();
+  const reason = new Error('Export canceled');
+  const during: typeof fetch = async () => {
+    controller.abort(reason);
+    return Response.json({ total_count: 0, workflow_runs: [] });
+  };
+  await assert.rejects(loadSaaMarketplaceApproval({ version, commit }, controller.signal, during), reason);
 });

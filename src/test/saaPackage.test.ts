@@ -84,6 +84,8 @@ test('exports the original release, editable forms and traceability with deploym
   assert.ok(result.has('forms/editable/01-01-submission-cover-and-routing.docx'));
   assert.ok([...result.keys()].some((name) => name.startsWith('forms/official/') && name.endsWith('.pdf')));
   assert.match(result.get('README.md')?.().toString() ?? '', /v0\.4\.36/);
+  assert.match(result.get('evidence/README.md')!().toString(), /Marketplace approval evidence is pending verification/);
+  assert.equal(result.has('evidence/marketplace-approval.json'), false);
   assert.match(result.get('evidence/evidence-index.csv')!().toString(), /EV-REL-07","CI installer software inventory","release-package\/evidence\/bundle\/vsix-sbom\.cdx\.json/);
   assert.match(result.get('evidence/coverage-summary.csv')?.().toString() ?? '', /"protected-a","Protected A","1","1"/);
   const traceability = result.get('evidence/control-traceability.csv')?.().toString() ?? '';
@@ -111,6 +113,35 @@ test('exports the original release, editable forms and traceability with deploym
   for (const [name, bytes] of result) {
     if (name === 'SHA256SUMS') continue;
     assert.ok(result.get('SHA256SUMS')?.().toString().includes(`${digest(bytes())}  ${name}\n`), name);
+  }
+});
+
+test('a verified receipt is supplemental, checksummed and tied to the selected release', async () => {
+  const evidence = release();
+  const approval = {
+    tag: 'v0.4.36', commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/42',
+    publishCompletedAt: '2026-11-20T18:00:00Z', checkedAt: date
+  };
+  const without = readZip(await buildSaaPackage(evidence, formsDir, new Map()), 'original evidence');
+  const withReceipt = readZip(await buildSaaPackage(evidence, formsDir, new Map(), approval), 'supplemented evidence');
+  const receiptPath = 'evidence/marketplace-approval.json';
+  const receipt = withReceipt.get(receiptPath)!();
+  assert.deepEqual(JSON.parse(receipt.toString()), {
+    schemaVersion: 1, kind: 'marketplace-publish-approval', ...approval, runAttempt: 1
+  });
+  assert.ok(withReceipt.get('SHA256SUMS')!().toString().includes(`${digest(receipt)}  ${receiptPath}\n`));
+  const notes = withReceipt.get('evidence/README.md')!().toString();
+  assert.match(notes, /\[Marketplace approval receipt\]\(marketplace-approval\.json\)/);
+  assert.ok(notes.includes(approval.runUrl));
+  assert.match(notes, /confers no deployment authorization/);
+  assert.deepEqual(withReceipt.get(`evidence/release-package/${dashboardPath}`)?.(), without.get(`evidence/release-package/${dashboardPath}`)?.());
+  for (const name of ['evidence/control-traceability.csv', 'evidence/component-evidence.csv', 'evidence/gap-and-action-register.csv']) {
+    assert.deepEqual(withReceipt.get(name)?.(), without.get(name)?.(), name);
+  }
+  for (const untrusted of [{ ...approval, commit: 'b'.repeat(40) }, { ...approval, runUrl: `${approval.runUrl}?redirect=https://example.org` }]) {
+    const unverified = readZip(await buildSaaPackage(evidence, formsDir, new Map(), untrusted), 'unverified Marketplace receipt');
+    assert.equal(unverified.has(receiptPath), false);
+    assert.match(unverified.get('evidence/README.md')!().toString(), /pending verification/);
   }
 });
 
