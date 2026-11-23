@@ -191,7 +191,10 @@ test('flags deployment evidence without a path and preserves linked and referenc
   const reference = { ...inherited, level: 'classified' };
   const action = { id: 'CG-3', title: 'Deployment review', ownerRole: 'Assessment lead', state: 'planned',
     controls: ['ca-2'], remediation: 'Verify assigned assessor', phase: '44.1' };
-  const data = { ...dashboard, rows: [dashboard.rows[0], inherited, linked, reference], gaps: [action] };
+  const overlay = { id: 'other-profile', title: 'Other profile', kind: 'overlay', claim: true };
+  const other = { ...linked, level: overlay.id };
+  const data = { ...dashboard, levels: [...dashboard.levels, overlay],
+    rows: [dashboard.rows[0], inherited, linked, reference, other], gaps: [{ ...action, profiles: ['protected-a'] }] };
   const result = readZip(await buildSaaPackage({ ...evidence, dashboard: data }, formsDir, new Map()), 'SA&A package');
   const coverage = result.get('evidence/coverage-summary.csv')!().toString();
   assert.match(coverage, /"Unassigned product gaps","Unassigned deployment evidence paths"/);
@@ -200,6 +203,7 @@ test('flags deployment evidence without a path and preserves linked and referenc
   const actions = result.get('evidence/gap-and-action-register.csv')!().toString();
   assert.match(actions, /"TRIAGE-protected-a-ca-1","Deployment or inherited evidence review","Unassigned deployment"/);
   assert.doesNotMatch(actions, /TRIAGE-(?:classified|protected-a-ca-2)/);
+  assert.match(actions, /"TRIAGE-other-profile-ca-2","Deployment or inherited evidence review","Unassigned deployment"/);
   const traceability = result.get('evidence/control-traceability.csv')!().toString();
   assert.match(traceability, /"ca-1",[^\n]+No deployment evidence path assigned/);
   assert.match(traceability, /"ca-2",[^\n]+Review related gaps CG-3/);

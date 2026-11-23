@@ -52,6 +52,7 @@ interface Gap {
   controls: string[];
   remediation: string;
   phase?: string;
+  profiles?: string[];
 }
 
 interface Profile {
@@ -106,6 +107,7 @@ function isResponsibility(value: unknown): value is Responsibility {
 function isGap(value: unknown): value is Gap {
   return isObject(value) && isText(value.id) && isText(value.title) && isText(value.ownerRole) &&
     isText(value.state) && isText(value.remediation) && optionalText(value.phase) &&
+    (value.profiles === undefined || (Array.isArray(value.profiles) && value.profiles.length > 0 && value.profiles.every(isText))) &&
     Array.isArray(value.controls) && value.controls.every(isText);
 }
 
@@ -280,7 +282,8 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
       const evidenceStatus = resultCounts.size
         ? [...resultCounts].map(([outcome, count]) => `${count} ${outcome.toLowerCase()}`).join(', ')
         : 'No release rule results';
-      const related = dashboard.gaps.filter((gap) => gap.id === row.gap || gap.controls.includes(row.control));
+      const related = dashboard.gaps.filter((gap) =>
+        (gap.id === row.gap || gap.controls.includes(row.control)) && (!gap.profiles || gap.profiles.includes(profile.id)));
       const owners = [...new Set(related.map(({ ownerRole }) => ownerRole))].join(', ');
       const duties = [...new Set(dashboard.matrix.filter((item) => item.control === row.control &&
         row.components.some((component) => component.component === item.component)).map(({ youDo }) => youDo).filter(Boolean))];
@@ -330,7 +333,7 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
   }
   for (const gap of dashboard.gaps) {
     actions.push([gap.id, gap.title, gap.state, gap.controls.join('; '), gap.ownerRole, gap.remediation, gap.phase,
-      '', '', '', '', '', '', '', '']);
+      '', '', '', '', '', '', '', gap.profiles?.join('; ')]);
   }
   const tables: Table[] = [
     { title: 'Coverage', file: 'coverage-summary.csv', rows: coverage },

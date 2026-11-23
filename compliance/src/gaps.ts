@@ -6,7 +6,7 @@ import type { State, VerifiedRiskAcceptance } from './model.ts';
 
 export const GAP_STATES = Object.freeze(['open', 'planned', 'in-progress', 'closed', 'risk-accepted'] as const);
 export type GapState = typeof GAP_STATES[number];
-export interface Gap { readonly id: string; readonly title?: string; readonly controls: readonly string[]; readonly remediation: string; readonly ownerRole: string; readonly closesInPhase?: string; readonly poam?: string }
+export interface Gap { readonly id: string; readonly title?: string; readonly controls: readonly string[]; readonly remediation: string; readonly ownerRole: string; readonly profiles?: readonly string[]; readonly closesInPhase?: string; readonly poam?: string }
 export interface PoamMilestone { readonly phase?: string; readonly targetDate?: string; readonly title: string }
 export interface Poam { readonly id: string; readonly gap: string; readonly controls: readonly string[]; readonly milestones: readonly PoamMilestone[] }
 export interface GapRow { readonly level: string; readonly control: string; readonly state: State }
@@ -25,7 +25,7 @@ export function loadGaps(file: string): Gap[] {
     const id = entry.id as string;
     if (ids.has(id)) throw new Error(`${file}: duplicate gap ${id}`);
     ids.add(id);
-    return { id, title: entry.title as string, controls: entry.controls as string[], remediation: entry.remediation as string, ownerRole: entry.ownerRole as string, ...(typeof entry.closesInPhase === 'string' ? { closesInPhase: entry.closesInPhase } : {}), ...(typeof entry.poam === 'string' ? { poam: entry.poam } : {}) };
+    return { id, title: entry.title as string, controls: entry.controls as string[], remediation: entry.remediation as string, ownerRole: entry.ownerRole as string, ...(Array.isArray(entry.profiles) ? { profiles: entry.profiles as string[] } : {}), ...(typeof entry.closesInPhase === 'string' ? { closesInPhase: entry.closesInPhase } : {}), ...(typeof entry.poam === 'string' ? { poam: entry.poam } : {}) };
   });
 }
 
@@ -46,13 +46,20 @@ export function loadPoam(dir: string): Poam[] {
 }
 
 function acceptanceFor(gap: Gap, acceptances: readonly VerifiedRiskAcceptance[], now: Date): VerifiedRiskAcceptance | undefined {
-  return acceptances.find((acceptance) => acceptance.gap === gap.id && Date.parse(acceptance.expiresAt) > now.getTime() && gap.controls.every((control) => acceptance.controls.includes(control)));
+  return acceptances.find((acceptance) => acceptance.gap === gap.id && Date.parse(acceptance.expiresAt) > now.getTime() &&
+    gap.controls.every((control) => acceptance.controls.includes(control)) &&
+    (!gap.profiles || !acceptance.levels || gap.profiles.every((profile) => acceptance.levels?.includes(profile))));
+}
+
+export function gapCoversRow(gap: Gap, row: Pick<GapRow, 'level' | 'control'>): boolean {
+  return gap.controls.includes(row.control) && (gap.profiles === undefined || gap.profiles.includes(row.level));
 }
 
 function evidenceProgress(gap: Gap, rows: readonly GapRow[]): 'closed' | 'in-progress' | 'none' {
   let anyCovered = false;
+  const scoped = rows.filter((row) => gapCoversRow(gap, row));
   for (const control of gap.controls) {
-    const controlRows = rows.filter((row) => row.control === control);
+    const controlRows = scoped.filter((row) => row.control === control);
     if (controlRows.length === 0) return anyCovered ? 'in-progress' : 'none';
     const covered = controlRows.every((row) => row.state === 'met' || row.state === 'not-applicable');
     if (!covered) {

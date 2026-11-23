@@ -2,7 +2,7 @@
 // arranges rows. 44-04 adds the multi-component aggregate and 44-05 adds fields (never renames these).
 import { aggregateControl, computeStatus, summarizeLevel } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
-import { gapStates, type Gap, type Poam } from './gaps.ts';
+import { gapCoversRow, gapStates, type Gap, type Poam } from './gaps.ts';
 import { loadRiskAcceptances } from './riskAcceptance.ts';
 import { resolveResponsibility, type ResponsibilityTable } from './responsibility.ts';
 import { notApplicableFor, removalsFor, type Tailoring } from './tailoring.ts';
@@ -169,7 +169,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const register = input.gapRegister;
   const gaps = [];
   const refusedAcceptances = [];
-  const gapByControl = new Map<string, string>();
+  const gapByRow = new Map<DashboardOutputRow, string>();
   if (register) {
     const { verified, refused } = loadRiskAcceptances(register.attestationsDir, input.now);
     for (const refusal of refused) refusedAcceptances.push({ file: refusal.file, reason: refusal.message });
@@ -177,16 +177,17 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
     for (const [index, gap] of register.gaps.entries()) {
       const state = states[index];
       const { id, controls, remediation, ownerRole, poam } = gap;
-      for (const control of controls) if (!gapByControl.has(control)) gapByControl.set(control, id);
-      const unresolved = rows.filter((row) => controls.includes(row.control) && row.state !== 'met' && row.state !== 'not-applicable');
+      const affected = rows.filter((row) => gapCoversRow(gap, row));
+      for (const row of affected) if (!gapByRow.has(row)) gapByRow.set(row, id);
+      const unresolved = affected.filter((row) => row.state !== 'met' && row.state !== 'not-applicable');
       const milestones = register.poam.find((item) => item.id === poam)?.milestones;
       gaps.push({ ...state, title: gap.title ?? id, controls, remediation, ownerRole, levelsBlocked: new Set(unresolved.map((row) => row.level)).size,
         ...(state.acceptedUntil ? { acceptedUntil: state.acceptedUntil.slice(0, 10) } : {}),
-        ...(poam ? { poam } : {}), ...(milestones ? { milestones } : {}) });
+        ...(poam ? { poam } : {}), ...(milestones ? { milestones } : {}), ...(gap.profiles ? { profiles: gap.profiles } : {}) });
     }
   }
   const linkedRows = rows.map((row) => {
-    const gap = gapByControl.get(row.control);
+    const gap = gapByRow.get(row);
     return gap ? { ...row, gap } : row;
   });
   return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows: linkedRows, gaps, collectors: [], matrix: [...matrix.values()], textIndex: [], refusedAcceptances };
