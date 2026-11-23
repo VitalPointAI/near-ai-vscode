@@ -217,6 +217,11 @@ test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-tr
   assert.match(daily, /if: github\.ref == 'refs\/heads\/main' && \(/);
   assert.match(daily, /mkdir -p compliance\/out\n[\s\S]*> compliance\/out\/audit-root\.json/);
   assert.match(daily, /environment:\s*compliance-settings/);
+  const scheduledCheckout = steps(daily).find((step) => step.includes('uses: actions/checkout@'));
+  const scheduledPrior = steps(daily).find((step) => step.includes('name: Download CI evidence for the assessed commit'));
+  assert.ok(scheduledCheckout.includes('ref: ${{ github.sha }}'));
+  assert.ok(scheduledPrior.includes('COMMIT: ${{ github.sha }}'));
+  assert.ok(scheduledPrior.includes('--branch main --event push --status success --commit "$COMMIT"'));
   const scheduledInputs = steps(daily).find((step) => /name: Write scheduled collector inputs/.test(step));
   assert.match(scheduledInputs, /documents: \{ repoRoot: "\." \}, crypto: \{ repoRoot: "\." \}/);
   assert.equal((scheduled.match(/COMPLIANCE_SETTINGS_TOKEN/g) ?? []).length, 1);
