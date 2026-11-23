@@ -70,13 +70,12 @@ function worstCase(runs: Array<{ task: { timeoutMs: number } }>): string {
   return `${hours} hour${hours === 1 ? '' : 's'}${minutes ? ` ${minutes} minutes` : ''}`;
 }
 
-async function optimisationSetup(auth: AuthService, context: vscode.ExtensionContext): Promise<{ active: ActiveProvider; candidates: string[] } | undefined> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-  const active = await activeProvider(root, auth).catch(() => undefined);
-  if (!active) return undefined;
+async function optimisationSetup(auth: AuthService, context: vscode.ExtensionContext, root: string | undefined): Promise<{ active: ActiveProvider; candidates: string[] } | undefined> {
   const tiers = readModelTiers();
+  const active = await activeProvider(root ?? '', auth).catch(() => undefined);
+  if (!active) return undefined;
   const tasks = await loadBenchmarkTasks();
-  const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).list();
+  const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, root).list();
   const board = leaderboardRows(runs, tasks, active.models, [], Date.now());
   // 0.4.19 review: the three tier models were listed FIRST and the list then sliced to three, so the two best measured models were never tested, while the
   // comment claimed they were. The measured models now come first, and the tier models fill the remaining places.
@@ -198,7 +197,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     optimiseTeam: async (members, teamName, options = {}) => {
       // The folder open when the tests start: the team file and the runs' decision log both follow it for this whole run.
       const root = rootNow();
-      const setup = await optimisationSetup(auth, context);
+      const setup = await optimisationSetup(auth, context, root);
       if (!setup) return undefined;
       const { active, candidates } = setup;
       const plan = planRoleSuite(members, candidates);
@@ -274,15 +273,16 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
       };
     },
     // The models a role test would try, so testing every team shows the whole cost once before it starts.
-    optimiseCandidates: async () => (await optimisationSetup(auth, context))?.candidates ?? [],
+    optimiseCandidates: async () => (await optimisationSetup(auth, context, rootNow()))?.candidates ?? [],
     // Emergency stop cancels a run in progress, the same way Compare Models does.
     onStop: (listener) => onDidChangeEmergencyStop((engaged) => { if (engaged) listener(); }),
     suggestModels: async (members) => {
+      const root = rootNow();
       const tasks = await loadBenchmarkTasks();
-      const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath).list();
+      const runs = await comparisonStoreFor(context.globalStorageUri.fsPath, root).list();
       if (!runs.length) return [];
       // The catalogue is only needed for prices and privacy, and a failure there must not block the suggestion.
-      const active = await activeProvider(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '', auth).catch(() => undefined);
+      const active = await activeProvider(root ?? '', auth).catch(() => undefined);
       const rows = leaderboardRows(runs, tasks, active?.models ?? [], [], Date.now());
       return suggestForTeam(rows, members);
     },

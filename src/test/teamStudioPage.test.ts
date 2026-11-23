@@ -1998,7 +1998,7 @@ test('host: a folder change while the studio is open lists the new folder\'s pro
   assert.equal(parseTeam(await readFile(TeamLibrary.projectTeamFile(h.root), 'utf8'), 'x.md').name, 'First project', 'the first folder is untouched');
 });
 
-test('host path: the real panel follows a folder change: its project team watcher moves to the new folder and the page is listed again', async () => {
+test('host path: the real panel follows a folder change: its project team watcher moves to the new folder and the page is listed again', async (t) => {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-folders-'));
   const storage = path.join(base, '.global');
   const first = path.join(base, 'first');
@@ -2071,6 +2071,27 @@ test('host path: the real panel follows a folder change: its project team watche
     assert.equal(projectName(), 'Second project', 'listed again for the new folder');
     assert.equal(projectWatch(first)?.disposed, true, 'the old folder is no longer watched');
     assert.equal(projectWatch(second)?.disposed, false, 'the new folder\'s team file is watched');
+
+    const provider = require('../services/providerCache') as typeof import('../services/providerCache');
+    const store = require('../benchmark/store') as typeof import('../benchmark/store');
+    const settings = require('../services/settings') as typeof import('../services/settings');
+    const roots: Array<[string, string | undefined]> = [];
+    t.mock.method(provider, 'activeProvider', async (root: string) => {
+      roots.push(['profile', root]);
+      workspace.workspaceFolders = [{ uri: { fsPath: first }, name: 'first' }];
+      return { models: [] };
+    });
+    t.mock.method(store, 'comparisonStoreFor', (_storage: string, root?: string) => {
+      roots.push(['comparison history', root]);
+      return { list: async () => [] };
+    });
+    t.mock.method(settings, 'readModelTiers', () => {
+      roots.push(['model tiers', workspace.workspaceFolders[0]?.uri.fsPath]);
+      return { fast: 'fixture-fast', standard: 'fixture-standard', deep: 'fixture-deep' };
+    });
+    await receive!({ type: 'optimise-all' });
+    assert.deepEqual(roots, [['model tiers', second], ['profile', second], ['comparison history', second]]);
+    assert.equal(workspace.workspaceFolders[0]?.uri.fsPath, first);
   } finally {
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;
