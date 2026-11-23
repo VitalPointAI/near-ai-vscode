@@ -30,8 +30,7 @@
 // - One ReplicaProject is kept per host while its store keeps the same identity (the store folder's device and inode numbers and the roster head
 //   this device's mark names), so its fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
 //   change another window recorded closes the old project and opens it again; a refused fold drops it too; invalidateShared() forgets it (D-09).
-// - every step that would write today's single-machine ledgers or staff files is refused with SHARED_PROJECT_REFUSAL before any file is touched: a
-//   method with a StaffResult returns it, a method without one throws SharedProjectError. Live multi-user writes arrive in Phase 33.
+// - single-machine writes are refused with SHARED_PROJECT_REFUSAL before any file is touched; methods without a result throw SharedProjectError.
 // - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back at their usual
 //   paths, unchanged.
 import { decidePir as decidePirEntry, parseRegisterText, pirRegisterProductBody, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
@@ -471,19 +470,20 @@ export class StaffHost {
     if (this.sharedOpen === pending) await this.invalidateShared();
   }
 
-  /** Acquires this host's project only after checking the current store and the device's signed roster admission. */
-  public async sharedReplica(): Promise<{ readonly project: SharedProject } | undefined> {
+  /** Acquires the admitted project and a read-only decision stamp lookup bound to its verified fold. */
+  public async sharedReplica(): Promise<{ readonly project: SharedProject; decisionStamp(target: { product: string; hash: string }): Promise<string | undefined> } | undefined> {
     if (await this.sharedProjectRefusal() !== SHARED_PROJECT_REFUSAL) return undefined;
     const { pending, opened } = await this.currentShared();
     if ('problem' in opened || this.sharedOpen !== pending) return undefined;
     const folder = opened.identity[0];
     try {
-      const { roster } = await opened.project.state();
+      const { roster, fold } = await opened.project.state();
       const head = roster.positions[roster.positions.length - 1];
       const identity = await this.storeIdentity();
       if (this.sharedOpen === pending && identity[0] === folder && folder !== 'missing' && folder !== 'unreadable' && identity[1] === (roster.positions.length > 1 ? head : null)) {
         opened.identity = identity;
-        return opened.project.context().roster.isAdmitted(opened.project.deviceWriter, head) ? { project: opened.project } : undefined;
+        return !opened.project.context().roster.isAdmitted(opened.project.deviceWriter, head) ? undefined : { project: opened.project,
+          decisionStamp: async (target) => (await import('./replica/versionActs')).decisionStampAt(fold, opened.project.projectId, target) };
       }
     } catch {
       // A refused fold must never hand out its previous project.

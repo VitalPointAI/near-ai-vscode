@@ -27,6 +27,8 @@ import { cellLabelTexts } from '../staff/replica/labelCells';
 import { bringIn, leadWith, orgClearance, syncTo } from './helpers/labelCellWorld';
 import type { Seat as CellSeat } from './helpers/labelCellWorld';
 import { memberAt } from '../domain/replica/rosterMembers';
+import type { ProductVersions } from '../domain/replica/versions';
+import { VersionActs } from '../staff/replica/versionActs';
 import { registerSchema, renderRegisterBody } from '../domain/staff/registers';
 import type { StaffEvent } from '../domain/staff/events';
 import type { FeedEvent } from '../domain/staff/obs/events';
@@ -784,6 +786,26 @@ test('not cleared: on the lead the shared read lists both products with their ow
     const memberReplay = await memberHost.replay();
     assert.equal(memberReplay.broken, undefined, memberReplay.broken?.reason);
     assert.deepEqual([...memberReplay.products.keys()], [CONOPS]);
+
+    // A target includes the shared version hash, and shows the same verified decision state on both devices.
+    const leadReplica = await leadHost.sharedReplica();
+    const memberReplica = await memberHost.sharedReplica();
+    assert.ok(leadReplica);
+    assert.ok(memberReplica);
+    const versions = (await lead.p.state()).fold.families.versions as ProductVersions[];
+    const publicVersion = versions.find((item) => item.product === CONOPS)?.versions[0];
+    const internalVersion = versions.find((item) => item.product === ESTIMATE)?.versions[0];
+    assert.ok(publicVersion);
+    assert.ok(internalVersion);
+    const publicTarget = { product: CONOPS, hash: publicVersion.hash };
+    const internalTarget = { product: ESTIMATE, hash: internalVersion.hash };
+    const publicStamp = await leadReplica.decisionStamp(publicTarget);
+    assert.match(publicStamp ?? '', /^[a-f0-9]{64}$/);
+    assert.equal(await memberReplica.decisionStamp(publicTarget), publicStamp);
+    assert.equal(await new VersionActs(leadReplica.project, { kind: 'person' }).decisionStamp(publicTarget), publicStamp);
+    assert.match(await leadReplica.decisionStamp(internalTarget) ?? '', /^[a-f0-9]{64}$/);
+    assert.equal(await memberReplica.decisionStamp(internalTarget), undefined);
+    assert.equal(await leadReplica.decisionStamp({ ...publicTarget, hash: '0'.repeat(64) }), undefined);
     assert.deepEqual(withoutImported(memberReplay.products.get(CONOPS)), withoutImported(leadReplay.products.get(CONOPS)), 'the lead\'s state and history of the concept of operations');
     const memberStatus = await memberHost.status(caller(m.at.root), CONOPS);
     assert.ok(memberStatus.ok && textOf(memberStatus).includes('Label: org/Public.'), textOf(memberStatus));
