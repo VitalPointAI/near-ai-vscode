@@ -2085,8 +2085,8 @@ test('host path: the real panel follows a folder change: its project team watche
       roots.push(['comparison history', root]);
       return { list: async () => [] };
     });
-    t.mock.method(settings, 'readModelTiers', () => {
-      roots.push(['model tiers', workspace.workspaceFolders[0]?.uri.fsPath]);
+    t.mock.method(settings, 'readModelTiers', (root?: string) => {
+      roots.push(['model tiers', root]);
       return { fast: 'fixture-fast', standard: 'fixture-standard', deep: 'fixture-deep' };
     });
     await receive!({ type: 'optimise-all' });

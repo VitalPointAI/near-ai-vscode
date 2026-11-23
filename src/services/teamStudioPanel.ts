@@ -71,7 +71,7 @@ function worstCase(runs: Array<{ task: { timeoutMs: number } }>): string {
 }
 
 async function optimisationSetup(auth: AuthService, context: vscode.ExtensionContext, root: string | undefined): Promise<{ active: ActiveProvider; candidates: string[] } | undefined> {
-  const tiers = readModelTiers();
+  const tiers = readModelTiers(root);
   const active = await activeProvider(root ?? '', auth).catch(() => undefined);
   if (!active) return undefined;
   const tasks = await loadBenchmarkTasks();
@@ -88,12 +88,13 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
  * What a Team Studio model call needs from the active profile: the catalogue, the tier models in order of preference, each model's route (for the
  * private check), the settings the outbound check reads, and today's spend from the key's ledger. Throws when the project has no profile.
  */
-async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promise<GateRuntime | undefined>): Promise<TeamAiDeps> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-  const active = await activeProvider(root, auth).catch(() => undefined);
+async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promise<GateRuntime | undefined>, root: string | undefined): Promise<TeamAiDeps> {
+  const tiers = readModelTiers(root);
+  const settings = readSettings(root);
+  const { imageModel } = readAgentModels(root);
+  const profileRoot = root ?? '';
+  const active = await activeProvider(profileRoot, auth).catch(() => undefined);
   if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
-  const tiers = readModelTiers();
-  const settings = readSettings();
   return {
     models: active.models,
     preferred: [tiers.deep, tiers.standard, settings.defaultModel],
@@ -111,17 +112,17 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
     complete: async (model, messages, options) => {
       const send = () => clientFor(active, model).client.completeOnce(model, messages, options);
       // The panel's runtime for this folder, asked of the host once when the panel first needed it, so no call waits on the host's start again.
-      const runtime = await runtimeOf(root);
+      const runtime = await runtimeOf(profileRoot);
       return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), send);
     },
     // 0.4.30, team icons: the image model the settings name, and one image made the way GenerateImage makes it (the client records its cost, tagged as
     // generation like every other image), routed and recorded as the person's like the requests above.
-    imageModel: readAgentModels().imageModel,
+    imageModel,
     generateImage: async (model, prompt, signal) => {
       // Its own name: the route check reads the work handed to withSessionRoute by name, so the two in this file must differ.
       const sendImage = () => withSpendTag({ kind: 'generation' }, () => clientFor(active, model).client.generateImage(model, prompt, { count: 1 }, signal));
       // The same per-panel runtime as the text requests above (PR #81 review): the host is asked once per folder, not before each image.
-      const runtime = await runtimeOf(root);
+      const runtime = await runtimeOf(profileRoot);
       return withSessionRoute(runtime ? sessionRouteFrom(runtime) : defaultSessionRoute(), sendImage);
     }
   };
@@ -191,7 +192,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     // The tested model for each role, from the comparisons this machine has run, so a saved team is checked against evidence rather than defaults.
     // The studio's only way to a model (0.4.27): drafting a team and Improve with AI both go through teamModelCall with these, and the host decides
     // which model may be used.
-    teamAi: () => teamAiDeps(auth, studioRuntime),
+    teamAi: () => teamAiDeps(auth, studioRuntime, rootNow()),
     // The final step of adding a team: measure each member's role on a few candidate models, then write the winner into the team file. The person is
     // asked first, because this spends real time and tokens, and skipping it leaves exactly the team they wrote.
     optimiseTeam: async (members, teamName, options = {}) => {
@@ -223,7 +224,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         if (answer !== 'Run the tests') return undefined;
       }
       const outcomes = await runRoleSuite(plan, {
-        clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(), signal: options.signal ?? new AbortController().signal,
+        clientFor: (model) => clientFor(active, model).client, rules: readAgentRules(root), signal: options.signal ?? new AbortController().signal,
         // Nobody watches a role run: it is decided with presence none in an unattended context, and its decisions reach the project's log (GATE-07, D-43).
         ...(gateHost ? { gateFor: (run: { member: string; model: string }) => unattendedRuntimeFor(gateHost, root, `team-roles-${teamName}`, `${run.member} on ${run.model}`) } : {})
       });

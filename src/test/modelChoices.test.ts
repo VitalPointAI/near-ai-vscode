@@ -137,6 +137,7 @@ test('a damaged choices.json, an unknown setting and an empty value are ignored,
 
 test('the settings readers use the project choice unless the workspace sets the value explicitly', async () => {
   const root = await tempProject();
+  const other = await tempProject();
   const values: Record<string, { globalValue?: unknown; workspaceValue?: unknown }> = {
     'agent.fastModel': { globalValue: 'user-fast' },
     'agent.deepModel': { globalValue: 'user-deep', workspaceValue: 'ws-deep' },
@@ -146,11 +147,18 @@ test('the settings readers use the project choice unless the workspace sets the 
     'agent.visionModel': { globalValue: 'user-vision' }
   };
   const stub = {
+    Uri: { file: (fsPath: string) => ({ fsPath }) },
     workspace: {
       workspaceFolders: [{ uri: { fsPath: root } }],
-      getConfiguration: () => ({
-        get: (key: string, fallback?: unknown) => values[key]?.workspaceValue ?? values[key]?.globalValue ?? fallback,
-        inspect: (key: string) => values[key] ?? {}
+      getConfiguration: (_section: string, scope?: { fsPath: string }) => ({
+        get: (key: string, fallback?: unknown) => {
+          if (scope?.fsPath === other && key === 'privacyMode') return 'tee-only';
+          if (scope?.fsPath === other && key === 'agent.allowCommands') return ['npm test'];
+          return values[key]?.workspaceValue ?? values[key]?.globalValue ?? fallback;
+        },
+        inspect: (key: string) => scope?.fsPath === other && key === 'agent.deepModel'
+          ? { ...values[key], workspaceFolderValue: 'other-folder-deep' }
+          : values[key] ?? {}
       })
     }
   };
@@ -175,6 +183,15 @@ test('the settings readers use the project choice unless the workspace sets the 
     assert.equal(settings.readAgentModels().visionModel, 'project-vision');
     assert.equal(settings.readAgentModels().imageModel, 'black-forest-labs/FLUX.2-klein-4B', 'nothing set anywhere: the default');
     assert.deepEqual(settings.readRoleModels(), { ...DEFAULT_ROLE_MODELS, 'gsd-planner': 'project-planner' }, 'role by role: the project names one role, the rest keep the defaults');
+    await writeProjectChoice(other, 'nearAi.agent.fastModel', 'other-fast', 'edA.1');
+    await writeProjectChoice(other, 'nearAi.defaultModel', 'other-main', 'edA.1');
+    await writeProjectChoice(other, 'nearAi.agent.imageModel', 'other-image', 'edA.1');
+    assert.deepEqual(settings.readModelTiers(other), { fast: 'other-fast', deep: 'other-folder-deep', standard: 'user-standard' });
+    assert.equal(settings.readSettings(other).defaultModel, 'other-main');
+    assert.equal(settings.readSettings(other).privacyMode, 'tee-only');
+    assert.equal(settings.readAgentModels(other).imageModel, 'other-image');
+    assert.deepEqual(settings.readAgentRules(other).allowCommands, ['npm test']);
+    assert.equal(settings.readSettings().defaultModel, 'project-main');
   } finally {
     nodeModule._load = originalLoad;
   }
