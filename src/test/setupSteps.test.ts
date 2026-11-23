@@ -205,7 +205,10 @@ const vscodeStub = {
   workspace: {
     workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
     name: 'Demo',
-    getConfiguration: () => ({ get: <T>(key: string, fallback?: T) => (key in settings ? settings[key] : fallback) as T, inspect: () => undefined, update: async () => undefined }),
+    getConfiguration: (_section?: string, _resource?: { fsPath: string }) => ({
+      get: <T>(key: string, fallback?: T) => (key in settings ? settings[key] : fallback) as T,
+      inspect: () => undefined, update: async () => undefined
+    }),
     onDidChangeConfiguration: () => ({ dispose() {} })
   },
   window: {
@@ -388,6 +391,87 @@ test('a caller with its own next steps (offerNextStep: false) gets only the read
   assert.equal(picks.length, 1);
   assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Pick a model and start chatting.', items: [] }]);
   assert.deepEqual(executed, []);
+});
+
+test('connection setup keeps the explicitly selected project through a failed attempt and workspace reorder', async () => {
+  reset();
+  const root = await emptyProject();
+  const otherRoot = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }, { uri: { fsPath: otherRoot } }];
+  const { configureApiKey } = load<typeof import('../extension')>('../extension');
+  const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
+  const { ProfileStore } = load<typeof import('../services/profileStore')>('../services/profileStore');
+  const auth = new AuthService(new MemorySecrets());
+  inputBoxes = ['Scoped project', '', 'http://127.0.0.1:11434/v1', 'fixture-local-key',
+    'Scoped project', '', 'http://127.0.0.1:11434/v1', 'fixture-local-key'];
+  quickPick = (items) => items.find((item) => item.provider === 'local');
+  const originalFetch = globalThis.fetch;
+  const originalError = vscodeStub.window.showErrorMessage;
+  let attempts = 0;
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), 'http://127.0.0.1:11434/v1/models');
+    return ++attempts === 1 ? new Response('{}', { status: 400 }) : Response.json({ data: [{ id: 'fixture' }] });
+  };
+  vscodeStub.window.showErrorMessage = async () => {
+    vscodeStub.workspace.workspaceFolders.reverse();
+    return 'Try again' as never;
+  };
+  let refreshed = 0;
+  try {
+    await configureApiKey({ ...context, secrets: new MemorySecrets() } as never, auth,
+      { refresh: async () => { refreshed++; } } as never, { projectRoot: root, offerNextStep: false });
+  } finally {
+    globalThis.fetch = originalFetch;
+    vscodeStub.window.showErrorMessage = originalError;
+  }
+  assert.equal(attempts, 2);
+  const own = new ProfileStore(root, auth);
+  const saved = await own.getActiveProfile();
+  assert.ok(saved);
+  assert.equal(saved.validation.status, 'valid');
+  assert.equal(await auth.getScopedApiKeyFor(own.getScope(saved.profileId), 'http://127.0.0.1:11434/v1'), 'fixture-local-key');
+  assert.deepEqual(await new ProfileStore(otherRoot, auth).list(), []);
+  assert.equal(refreshed, 0);
+  assert.deepEqual(executed, []);
+  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Scoped project (local)”.', items: [] }]);
+});
+
+test('explicit connection setup refuses mismatched cloud and named local endpoints before accepting a key', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: await emptyProject() } }, { uri: { fsPath: root } }];
+  const { configureApiKey } = load<typeof import('../extension')>('../extension');
+  const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
+  const { ProfileStore } = load<typeof import('../services/profileStore')>('../services/profileStore');
+  const storage = new MemorySecrets();
+  const auth = new AuthService(storage);
+  const app = { ...context, secrets: storage } as never;
+  const sidebar = { refresh: async () => assert.fail('refused profiles do not refresh the sidebar') } as never;
+  const originalFetch = globalThis.fetch;
+  const originalConfiguration = vscodeStub.workspace.getConfiguration;
+  let configurationRoot: string | undefined;
+  globalThis.fetch = async () => assert.fail('refused endpoints must not receive requests');
+  vscodeStub.workspace.getConfiguration = (section, resource) => {
+    configurationRoot = resource?.fsPath;
+    return originalConfiguration(section, resource);
+  };
+  try {
+    quickPick = (items) => items.find((item) => item.provider === 'near-ai');
+    settings.baseUrl = 'https://custom.example/v1';
+    inputBoxes = ['Profile name', '', 'fixture-cloud-key'];
+    await configureApiKey(app, auth, sidebar, { projectRoot: root });
+    assert.equal(configurationRoot, root);
+    assert.equal(inputBoxes.length, 3);
+    quickPick = (items) => items.find((item) => item.provider === 'local');
+    inputBoxes = ['Profile name', '', 'https://named.example/v1', 'fixture-local-key'];
+    await configureApiKey(app, auth, sidebar, { projectRoot: root });
+    assert.deepEqual(inputBoxes, ['fixture-local-key']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    vscodeStub.workspace.getConfiguration = originalConfiguration;
+  }
+  assert.deepEqual(await new ProfileStore(root, auth).list(), []);
+  assert.equal(storage.values.size, 0);
 });
 
 test('NEAR AI: Set Up a New Profile runs the key setup straight away, then points to the chat', async () => {

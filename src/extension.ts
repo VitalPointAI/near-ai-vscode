@@ -53,7 +53,8 @@ import { chooseGsdCommand } from './services/gsdCommands';
 import { NearAiPanelViewProvider } from './services/panelView';
 import { openConversationIds } from './services/chat';
 import { deriveProfileId } from './domain/auth';
-import { isSecureEndpoint } from './domain/config';
+import { DEFAULT_BASE_URL, isNearCloudEndpoint, isSecureEndpoint } from './domain/config';
+import { isLoopbackEndpointHost } from './domain/gate/endpoints';
 import { registerChatParticipant } from './services/chatParticipant';
 import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
@@ -287,8 +288,11 @@ async function saveCheckpoint(): Promise<void> {
 }
 
 /** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
-export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider,
+  options: { offerNextStep?: boolean; projectRoot?: string } = {}): Promise<void> {
+  const getLegacyRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const scoped = options.projectRoot !== undefined;
+  const root = options.projectRoot ?? getLegacyRoot();
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
   const kind = await vscode.window.showQuickPick([
     { label: 'NEAR AI Cloud', description: 'Private TEE models and others NEAR forwards; needs an API key', provider: 'near-ai' as const },
@@ -298,11 +302,21 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   if (!kind) return;
   const usesLocal = kind.provider !== 'near-ai';
   const usesCloud = kind.provider !== 'local';
+  const scopedCloudEndpoint = scoped && usesCloud
+    ? vscode.workspace.getConfiguration('nearAi', vscode.Uri.file(root)).get<string>('baseUrl', DEFAULT_BASE_URL)
+    : undefined;
+  if (scopedCloudEndpoint !== undefined && (!scopedCloudEndpoint.trim() || !isNearCloudEndpoint(scopedCloudEndpoint))) {
+    void vscode.window.showWarningMessage('Get Started requires the NEAR AI Cloud endpoint for a cloud connection.');
+    return;
+  }
   const steps = 2 + (usesLocal ? 2 : 0) + (usesCloud ? 1 : 0);
   let step = 0;
   const title = () => `NEAR AI Set Up (${++step}/${steps})`;
+  const projectName = scoped
+    ? vscode.workspace.workspaceFolders?.find(({ uri }) => uri.fsPath === root)?.name ?? path.basename(root)
+    : vscode.workspace.name;
   const displayName = (await vscode.window.showInputBox({
-    title: title(), prompt: 'Project name', value: vscode.workspace.name ?? 'My project', ignoreFocusOut: true,
+    title: title(), prompt: 'Project name', value: projectName ?? 'My project', ignoreFocusOut: true,
     validateInput: (value) => value.trim() ? undefined : 'Enter a name for this project.'
   }))?.trim();
   if (!displayName) return;
@@ -311,11 +325,22 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   let localBaseUrl: string | undefined;
   let localApiKey = '';
   if (usesLocal) {
+    const loopback = (value: string) => {
+      if (!isSecureEndpoint(value)) return false;
+      const url = new URL(value);
+      return isLoopbackEndpointHost(url.hostname) && !url.username && !url.password && !url.search && !url.hash;
+    };
+    const validEndpoint = scoped ? loopback : isSecureEndpoint;
+    const invalidEndpoint = scoped ? 'Use a local runtime address on this computer.' : 'Use http://localhost, http://127.0.0.1, or an https:// URL.';
+    const prompt = scoped
+      ? 'Local runtime URL on this computer (OpenAI-compatible, ending in /v1).'
+      : 'Local runtime URL (OpenAI-compatible, ending in /v1). Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.';
     const entered = (await vscode.window.showInputBox({
-      title: title(), prompt: 'Local runtime URL (OpenAI-compatible, ending in /v1). Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
-      validateInput: (value) => isSecureEndpoint(value.trim()) ? undefined : 'Use http://localhost, http://127.0.0.1, or an https:// URL.'
+      title: title(), prompt, value: 'http://localhost:11434/v1', ignoreFocusOut: true,
+      validateInput: (value) => validEndpoint(value.trim()) ? undefined : invalidEndpoint
     }))?.trim();
     if (!entered) return;
+    if (scoped && !loopback(entered)) return;
     localBaseUrl = entered.replace(/\/$/, '');
     const key = await vscode.window.showInputBox({ title: title(), prompt: 'API key for the local runtime (leave empty if it needs none)', password: true, ignoreFocusOut: true });
     if (key === undefined) return;
@@ -333,12 +358,16 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   const suffix = kind.provider === 'local' ? ' (local)' : kind.provider === 'hybrid' ? ' (cloud + local)' : '';
   const input = kind.provider === 'local'
     ? { baseUrl: localBaseUrl!, apiKey: localApiKey, localApiKey: '' }
-    : { baseUrl: readSettings().baseUrl, apiKey: cloudApiKey, localApiKey, ...(kind.provider === 'hybrid' ? { localBaseUrl } : {}) };
+    : { baseUrl: scopedCloudEndpoint ?? readSettings().baseUrl, apiKey: cloudApiKey, localApiKey, ...(kind.provider === 'hybrid' ? { localBaseUrl } : {}) };
   try {
     const profile = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: usesCloud ? 'Checking your NEAR AI key…' : 'Connecting to the local runtime…' }, () =>
       new ProfileStore(root, auth).configure({ profileId: deriveProfileId(root, `${displayName}${suffix}`), displayName: `${displayName}${suffix}`, organization: organization.trim() || displayName, baseUrl: input.baseUrl, authMode: 'apiKey', provider: kind.provider, ...('localBaseUrl' in input && input.localBaseUrl ? { localBaseUrl: input.localBaseUrl } : {}) }, input.apiKey, input.localApiKey));
     clearProviderCache();
     if (profile.validation.status === 'valid') {
+      if (scoped && root !== getLegacyRoot()) {
+        void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”.`);
+        return;
+      }
       // The chat reloads and comes into view; its welcome shows the next steps (the "no team yet" card).
       await sidebar.refresh();
       // A caller with its own next steps (turning on Team Mode) gets only the ready message.
