@@ -16,6 +16,12 @@ const stateWords = {
 } as const;
 type State = keyof typeof stateWords;
 const states = Object.keys(stateWords) as State[];
+const attentionStates = ['not-met', 'partly-met', 'stale'] as const;
+const attentionLabels = { 'not-met': 'Not met', 'partly-met': 'Partly met', stale: 'Stale evidence' };
+const priority: Record<State, number> = {
+  'not-met': 0, 'partly-met': 1, stale: 2, met: 3, 'your-organizations-responsibility': 4, 'not-applicable': 5
+};
+const pageSize = 24;
 
 type Evidence = { rule: string; collectedAt?: string; commit?: string; passed?: boolean; runUrl?: string };
 type Component = { component: string; responsibility: string; state: State; statement?: string; reasonText?: string; evidence?: Evidence[] };
@@ -88,6 +94,30 @@ function badge(state: State): HTMLElement {
   return label;
 }
 
+function countStates(rows: Control[]): Record<State, number> {
+  const counts: Record<State, number> = {met: 0, 'partly-met': 0, 'not-met': 0, stale: 0, 'not-applicable': 0, 'your-organizations-responsibility': 0};
+  for (const row of rows) counts[row.state]++;
+  return counts;
+}
+
+function chartSummary(total: number, counts: Record<State, number>): string {
+  const statuses = states.filter(state => counts[state]).map(state => `${counts[state]} ${stateWords[state]}`);
+  return [`${total} control entries`, ...statuses].join(', ');
+}
+
+function chartFill(total: number, counts: Record<State, number>): string {
+  if (!total) return 'var(--sterling-chart-track)';
+  const segments = states.filter(state => counts[state]);
+  if (segments.length === 1) return `var(--sterling-state-${segments[0]})`;
+  let start = 0;
+  return `conic-gradient(${segments.map(state => {
+    const end = start + counts[state];
+    const segment = `var(--sterling-state-${state}) ${start / total * 100}% ${end / total * 100}%`;
+    start = end;
+    return segment;
+  }).join(', ')})`;
+}
+
 function externalLink(text: string, value: string | undefined, githubOnly = false): HTMLAnchorElement | undefined {
   if (!value) return undefined;
   let url: URL;
@@ -111,6 +141,7 @@ class SterlingComplianceWidget extends BaseWidget {
   private readonly body = element('div');
   private refreshRequest?: AbortController;
   private textRequest?: AbortController;
+  private filters = { level: '', state: '', query: '' };
 
   @postConstruct()
   protected init(): void {
@@ -123,7 +154,7 @@ class SterlingComplianceWidget extends BaseWidget {
     const page = element('main', undefined, 'sterling-compliance-page');
     const header = element('header', undefined, 'sterling-compliance-heading');
     const title = element('div');
-    title.append(element('h1', 'Compliance'), element('p', 'Review coverage, gaps, and the evidence supporting each control. Your organization determines whether the evidence is sufficient for authorization.'));
+    title.append(element('h1', 'Compliance'), element('p', 'Published evidence. Authorization is your organization’s decision.'));
     const refresh = element('button', 'Refresh evidence', 'sterling-evidence-action');
     refresh.type = 'button';
     refresh.addEventListener('click', () => void this.load());
@@ -179,20 +210,90 @@ class SterlingComplianceWidget extends BaseWidget {
 
     const filters = element('div', undefined, 'sterling-evidence-filters');
     const levelSelect = element('select');
+    levelSelect.append(chooseOption('All coverage levels', ''));
     for (const level of dashboard.levels) levelSelect.append(chooseOption(level.title, level.id));
-    if (!dashboard.levels.length) levelSelect.append(chooseOption('No coverage levels', ''));
+    levelSelect.value = dashboard.levels.some(level => level.id === this.filters.level) ? this.filters.level : '';
     const stateSelect = element('select');
     stateSelect.append(chooseOption('All states', ''), ...states.map(state => chooseOption(stateWords[state], state)));
+    stateSelect.value = this.filters.state;
     const search = element('input');
     search.type = 'search';
     search.placeholder = 'ID or control name';
+    search.value = this.filters.query;
     for (const [label, input] of [['Coverage level', levelSelect], ['Evidence state', stateSelect], ['Search controls', search]] as const) {
       const field = element('label', label);
       field.append(input);
       filters.append(field);
     }
+    const clear = element('button', 'Clear filters', 'sterling-evidence-action');
+    clear.type = 'button';
+    filters.append(clear);
 
-    const coverage = element('div');
+    const attention = element('section', undefined, 'sterling-evidence-attention');
+    attention.setAttribute('aria-label', 'Needs attention');
+    const warningGrid = element('div', undefined, 'sterling-evidence-warning-grid');
+    attention.append(element('h2', 'Needs attention'), warningGrid);
+    const warningButtons = attentionStates.map(state => {
+      const button = element('button', undefined, 'sterling-evidence-warning');
+      button.type = 'button';
+      button.dataset.state = state;
+      const icon = element('i', undefined, `codicon codicon-${state === 'stale' ? 'history' : 'warning'}`);
+      icon.setAttribute('aria-hidden', 'true');
+      const count = element('strong');
+      button.append(icon, element('span', attentionLabels[state]), count);
+      button.addEventListener('click', () => toggleState(state));
+      warningGrid.append(button);
+      return { state, button, count };
+    });
+
+    const visuals = element('div', undefined, 'sterling-evidence-visuals');
+    const statusChart = element('section', undefined, 'sterling-evidence-chart');
+    const statusBody = element('div', undefined, 'sterling-evidence-status-body');
+    const donut = element('div', undefined, 'sterling-evidence-donut');
+    donut.setAttribute('role', 'img');
+    const center = element('div', undefined, 'sterling-evidence-donut-center');
+    center.setAttribute('aria-hidden', 'true');
+    const centerCount = element('strong');
+    center.append(centerCount, element('span', 'Control entries'));
+    donut.append(center);
+    const legend = element('div', undefined, 'sterling-evidence-legend');
+    const legendButtons = states.map(state => {
+      const button = element('button', undefined, 'sterling-evidence-legend-item');
+      button.type = 'button';
+      const swatch = element('span', undefined, 'sterling-evidence-swatch');
+      swatch.dataset.state = state;
+      swatch.setAttribute('aria-hidden', 'true');
+      const count = element('strong');
+      button.append(swatch, element('span', stateWords[state]), count);
+      button.addEventListener('click', () => toggleState(state));
+      legend.append(button);
+      return { state, button, count };
+    });
+    statusBody.append(donut, legend);
+    statusChart.append(element('h2', 'Control status'), element('p', 'Select a status to filter', 'sterling-evidence-chart-label'), statusBody);
+    const levelsChart = element('section', undefined, 'sterling-evidence-chart');
+    const levelChart = element('ul', undefined, 'sterling-evidence-level-chart');
+    levelsChart.append(element('h2', 'Coverage by level'), element('p', 'Select a level to filter', 'sterling-evidence-chart-label'), levelChart);
+    const levelButtons = dashboard.levels.map(level => {
+      const item = element('li');
+      const button = element('button', undefined, 'sterling-evidence-level-row');
+      button.type = 'button';
+      const name = element('span', level.title, 'sterling-evidence-level-label');
+      if (!level.claim) name.append(element('small', 'No coverage claim'));
+      const bar = element('span', undefined, 'sterling-evidence-level-bar');
+      bar.setAttribute('aria-hidden', 'true');
+      const total = element('strong', undefined, 'sterling-evidence-level-total');
+      button.append(name, bar, total);
+      button.addEventListener('click', () => {
+        levelSelect.value = levelSelect.value === level.id ? '' : level.id;
+        render();
+      });
+      item.append(button);
+      levelChart.append(item);
+      return { level, button, bar, total };
+    });
+    visuals.append(statusChart, levelsChart);
+
     const results = element('section', undefined, 'sterling-evidence-results');
     const detail = element('aside', undefined, 'sterling-evidence-detail');
     detail.id = `${widgetId}-detail`;
@@ -200,51 +301,106 @@ class SterlingComplianceWidget extends BaseWidget {
     detail.hidden = true;
     const columns = element('div', undefined, 'sterling-evidence-columns');
     columns.append(results, detail);
+
+    const toggleState = (state: State): void => {
+      stateSelect.value = stateSelect.value === state ? '' : state;
+      render();
+    };
+
     const render = (): void => {
+      this.filters = { level: levelSelect.value, state: stateSelect.value, query: search.value };
+      clear.disabled = !this.filters.level && !this.filters.state && !this.filters.query;
       this.textRequest?.abort();
       detail.hidden = true;
       detail.replaceChildren();
-      const level = dashboard.levels.find(item => item.id === levelSelect.value);
-      const levelRows = dashboard.rows.filter(row => row.level === level?.id);
-      const query = search.value.trim().toLowerCase();
-      const matching = levelRows.filter(row => (!stateSelect.value || row.state === stateSelect.value)
-        && (!query || `${row.label} ${row.title}`.toLowerCase().includes(query)));
-      const metrics = element('ul', undefined, 'sterling-evidence-metrics');
-      const counts: Record<State, number> = {met: 0, 'partly-met': 0, 'not-met': 0, stale: 0, 'not-applicable': 0, 'your-organizations-responsibility': 0};
-      levelRows.forEach(row => counts[row.state]++);
-      for (const state of states) {
-        const metric = element('li');
-        metric.append(element('strong', String(counts[state])), badge(state));
-        metrics.append(metric);
+      const level = dashboard.levels.find(item => item.id === this.filters.level);
+      const levelRows = level ? dashboard.rows.filter(row => row.level === level.id) : dashboard.rows;
+      const query = this.filters.query.trim().toLowerCase();
+      const searched = dashboard.rows.filter(row => `${row.label} ${row.title}`.toLowerCase().includes(query));
+      const scoped = level ? searched.filter(row => row.level === level.id) : searched;
+      const state = this.filters.state;
+      const matching = scoped.filter(row => !state || row.state === state)
+        .sort((left, right) => priority[left.state] - priority[right.state]);
+      const available = countStates(scoped);
+      const statusCounts = countStates(matching);
+      let hasWarnings = false;
+      for (const warning of warningButtons) {
+        const count = available[warning.state];
+        warning.button.hidden = count === 0;
+        warning.button.setAttribute('aria-pressed', String(state === warning.state));
+        warning.count.textContent = String(count);
+        hasWarnings ||= count > 0;
       }
-      coverage.replaceChildren(metrics);
-      if (level && !level.claim) coverage.append(element('p', `The bundle records no coverage claim for ${level.title}.`, 'sterling-evidence-message'));
-      const count = element('p', `${matching.length} of ${levelRows.length} controls`, 'sterling-evidence-meta');
+      attention.hidden = !hasWarnings;
+      donut.style.background = chartFill(matching.length, statusCounts);
+      donut.setAttribute('aria-label', chartSummary(matching.length, statusCounts));
+      centerCount.textContent = String(matching.length);
+      for (const entry of legendButtons) {
+        entry.count.textContent = String(available[entry.state]);
+        entry.button.setAttribute('aria-pressed', String(state === entry.state));
+      }
+      for (const entry of levelButtons) {
+        const rows = searched.filter(row => row.level === entry.level.id && (!state || row.state === state));
+        const counts = countStates(rows);
+        entry.total.textContent = String(rows.length);
+        entry.button.setAttribute('aria-pressed', String(level?.id === entry.level.id));
+        entry.button.setAttribute('aria-label', `${entry.level.title}${entry.level.claim ? '' : ', no coverage claim'}, ${chartSummary(rows.length, counts)}`);
+        entry.bar.replaceChildren();
+        for (const item of states) {
+          if (!counts[item]) continue;
+          const segment = element('span', undefined, 'sterling-evidence-segment');
+          segment.dataset.state = item;
+          segment.style.flexGrow = String(counts[item]);
+          segment.title = `${stateWords[item]}: ${counts[item]}`;
+          entry.bar.append(segment);
+        }
+      }
+      const count = element('p', `${matching.length} of ${levelRows.length} control entries`, 'sterling-evidence-meta');
       count.setAttribute('role', 'status');
-      results.replaceChildren(element('h2', level?.title ?? 'Controls'), count);
+      const title = element('div', undefined, 'sterling-evidence-results-title');
+      title.append(element('h2', 'Controls'), count);
+      if (level && !level.claim) title.append(element('span', 'No coverage claim', 'sterling-evidence-no-claim'));
+      results.replaceChildren(title);
       if (!matching.length) {
         results.append(element('p', 'No controls match these filters.', 'sterling-evidence-message'));
         return;
       }
       const list = element('ul', undefined, 'sterling-evidence-controls');
-      for (const control of matching) {
-        const item = element('li');
-        const button = element('button');
-        button.type = 'button';
-        button.setAttribute('aria-expanded', 'false');
-        button.setAttribute('aria-controls', detail.id);
-        button.append(element('strong', `${control.label} · ${control.title}`), badge(control.state), element('span', control.reasonText, 'sterling-evidence-reason'));
-        button.addEventListener('click', () => this.showControl(dashboard, control, detail, button));
-        item.append(button);
-        list.append(item);
-      }
-      results.append(list);
+      const more = element('button', 'Show more controls', 'sterling-evidence-action');
+      more.type = 'button';
+      const appendPage = (focus: boolean): void => {
+        const offset = list.children.length;
+        for (const control of matching.slice(offset, offset + pageSize)) {
+          const item = element('li');
+          const button = element('button');
+          button.type = 'button';
+          button.dataset.state = control.state;
+          button.setAttribute('aria-expanded', 'false');
+          button.setAttribute('aria-controls', detail.id);
+          button.append(element('strong', `${control.label} · ${control.title}`), badge(control.state));
+          button.addEventListener('click', () => this.showControl(dashboard, control, detail, button));
+          item.append(button);
+          list.append(item);
+        }
+        more.hidden = list.children.length >= matching.length;
+        if (focus) list.children[offset]?.querySelector('button')?.focus();
+      };
+      more.addEventListener('click', () => appendPage(true));
+      results.append(list, more);
+      appendPage(false);
     };
 
     levelSelect.addEventListener('change', render);
     stateSelect.addEventListener('change', render);
     search.addEventListener('input', render);
-    this.body.replaceChildren(metadata, notice, filters, coverage, columns);
+    clear.addEventListener('click', () => {
+      levelSelect.value = '';
+      stateSelect.value = '';
+      search.value = '';
+      render();
+      search.focus();
+    });
+    this.body.replaceChildren(metadata, notice, attention, filters, visuals, columns);
     render();
   }
 
