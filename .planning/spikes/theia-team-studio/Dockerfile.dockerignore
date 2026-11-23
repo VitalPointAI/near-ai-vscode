@@ -15,3 +15,5 @@
 !.planning/spikes/theia-team-studio/extension/fixtures/**
 !.planning/spikes/theia-team-studio/tools/
 !.planning/spikes/theia-team-studio/tools/**
+!.planning/spikes/theia-team-studio/extension/assets/
+!.planning/spikes/theia-team-studio/extension/assets/**
