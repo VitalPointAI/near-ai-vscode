@@ -1998,7 +1998,7 @@ test('host: a folder change while the studio is open lists the new folder\'s pro
   assert.equal(parseTeam(await readFile(TeamLibrary.projectTeamFile(h.root), 'utf8'), 'x.md').name, 'First project', 'the first folder is untouched');
 });
 
-test('host path: the real panel follows a folder change: its project team watcher moves to the new folder and the page is listed again', async (t) => {
+test('host path: the general panel follows the workspace while project panels retain independent listings and drafts', async (t) => {
   const base = await mkdtemp(path.join(tmpdir(), 'near-ai-studio-folders-'));
   const storage = path.join(base, '.global');
   const first = path.join(base, 'first');
@@ -2015,12 +2015,29 @@ test('host path: the real panel follows a folder change: its project team watche
   const posted: Array<Record<string, any>> = [];
   const watchers: Array<{ at: string; disposed: boolean }> = [];
   const folderListeners = new Set<() => void>();
-  let receive: ((message: unknown) => Promise<void>) | undefined;
+  const commands: string[] = [];
   const disposable = { dispose() {} };
-  const panel = {
-    webview: { html: '', cspSource: 'vscode-webview://test', asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => uri.fsPath }), postMessage: async (message: Record<string, any>) => { posted.push(message); return true; }, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return disposable; } },
-    onDidDispose: () => disposable, reveal: () => undefined, iconPath: undefined as unknown
-  };
+  const panels: ReturnType<typeof createPanel>[] = [];
+  function createPanel(messages: Array<Record<string, any>>) {
+    let receive: ((message: unknown) => Promise<void>) | undefined;
+    const closeListeners = new Set<() => void>();
+    return {
+      messages,
+      reveals: 0,
+      closed: false,
+      async receive(message: unknown) { await receive!(message); },
+      webview: {
+        html: '', cspSource: 'vscode-webview://test',
+        asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => uri.fsPath }),
+        postMessage: async (message: Record<string, any>) => { messages.push(message); return true; },
+        onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return disposable; }
+      },
+      onDidDispose(listener: () => void) { closeListeners.add(listener); return disposable; },
+      dispose() { this.closed = true; for (const listener of closeListeners) listener(); },
+      reveal() { this.reveals++; },
+      iconPath: undefined as unknown
+    };
+  }
   const workspace = {
     workspaceFolders: [{ uri: { fsPath: first }, name: 'first' }] as Array<{ uri: { fsPath: string }; name: string }>,
     getConfiguration: () => ({ get: (_key: string, fallback?: unknown) => fallback, inspect: () => undefined }),
@@ -2034,8 +2051,8 @@ test('host path: the real panel follows a folder change: its project team watche
   };
   const vscodeStub = {
     workspace,
-    window: { createWebviewPanel: () => panel, createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: () => undefined },
-    commands: { executeCommand: async () => undefined, registerCommand: () => disposable },
+    window: { createWebviewPanel: () => { const panel = createPanel(panels.length ? [] : posted); panels.push(panel); return panel; }, createStatusBarItem: () => ({ show() {}, hide() {} }), showInformationMessage: () => undefined, showWarningMessage: () => undefined },
+    commands: { executeCommand: async (command: string) => { commands.push(command); }, registerCommand: () => disposable },
     RelativePattern: class { constructor(public base: { fsPath: string } | string, public pattern: string) { this.base = typeof base === 'string' ? base : base.fsPath; } },
     ThemeColor: class {}, StatusBarAlignment: { Left: 1, Right: 2 }, ViewColumn: { Active: -1, Beside: -2 },
     Uri: { joinPath: (root: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(root.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
@@ -2053,7 +2070,8 @@ test('host path: the real panel follows a folder change: its project team watche
     const context = { subscriptions: [] as unknown[], globalStorageUri: { fsPath: storage }, extensionUri: { fsPath: base }, secrets, globalState: memento(), workspaceState: memento() };
     initEmergencyStop(context as never);
     await openTeamStudio(context as never, new AuthService(secrets), { prefill: async () => undefined });
-    await receive!({ type: 'ready' });
+    const general = panels[0]!;
+    await general.receive({ type: 'ready' });
     const projectName = () => [...posted].reverse().find((message) => message.type === 'state')!.library.teams.find((team: any) => team.id === 'project')?.name;
     const projectWatch = (folder: string) => watchers.find((entry) => entry.at === `${path.dirname(TeamLibrary.projectTeamFile(folder))}|team.md`);
     assert.equal(projectName(), 'First project');
@@ -2089,9 +2107,61 @@ test('host path: the real panel follows a folder change: its project team watche
       roots.push(['model tiers', root]);
       return { fast: 'fixture-fast', standard: 'fixture-standard', deep: 'fixture-deep' };
     });
-    await receive!({ type: 'optimise-all' });
+    await general.receive({ type: 'optimise-all' });
     assert.deepEqual(roots, [['model tiers', second], ['profile', second], ['comparison history', second]]);
     assert.equal(workspace.workspaceFolders[0]?.uri.fsPath, first);
+
+    t.mock.restoreAll();
+    workspace.workspaceFolders = [{ uri: { fsPath: first }, name: 'first' }, { uri: { fsPath: second }, name: 'second' }];
+    const auth = new AuthService(secrets);
+    const sidebar = { prefill: async () => undefined };
+    const openProject = (projectRoot: string) => openTeamStudio(context as never, auth, sidebar, { wizard: 'project', projectRoot });
+    await general.receive({ type: 'save-draft', draft: draft({ name: 'General draft' }), step: 1, target: 'project' });
+    await Promise.all([openProject(first), openProject(second)]);
+    assert.equal(panels.length, 3, 'the general panel and each project own separate panels');
+    for (const panel of panels.slice(1)) await panel.receive({ type: 'ready' });
+
+    const latestState = (panel: ReturnType<typeof createPanel>) => [...panel.messages].reverse().find((message) => message.type === 'state')!;
+    const displayedProject = (panel: ReturnType<typeof createPanel>) => latestState(panel).library.teams.find((team: any) => team.id === 'project')?.name;
+    const firstPanel = panels.slice(1).find((panel) => displayedProject(panel) === 'First project');
+    const secondPanel = panels.slice(1).find((panel) => displayedProject(panel) === 'Second project');
+    assert.ok(firstPanel && secondPanel, 'each panel lists its own project');
+    assert.equal(latestState(firstPanel).savedDraft, undefined, 'the unscoped draft does not appear in a project');
+    assert.equal(latestState(secondPanel).savedDraft, undefined);
+    await firstPanel.receive({ type: 'save-draft', draft: draft({ name: 'First project draft' }), step: 1, target: 'project' });
+    await secondPanel.receive({ type: 'save-draft', draft: draft({ name: 'Second project draft' }), step: 1, target: 'project' });
+    workspace.workspaceFolders.reverse();
+    for (const listener of [...folderListeners]) listener();
+
+    await openProject(first);
+    assert.equal(panels.length, 3, 'reopening the first project reuses its own panel');
+    assert.equal(firstPanel.reveals, 1);
+    assert.equal(secondPanel.reveals, 0);
+    await firstPanel.receive({ type: 'refresh' });
+    await secondPanel.receive({ type: 'refresh' });
+    assert.equal(displayedProject(firstPanel), 'First project');
+    assert.equal(displayedProject(secondPanel), 'Second project');
+    assert.equal(latestState(firstPanel).savedDraft.draft.name, 'First project draft');
+    assert.equal(latestState(secondPanel).savedDraft.draft.name, 'Second project draft');
+
+    await firstPanel.receive({ type: 'staff-room' });
+    assert.equal(commands.includes('nearAi.openStaffRoom'), false, 'a legacy command cannot land in the other workspace project');
+    await secondPanel.receive({ type: 'staff-room' });
+    assert.deepEqual(commands.filter((command) => command === 'nearAi.openStaffRoom'), ['nearAi.openStaffRoom']);
+
+    workspace.workspaceFolders.shift();
+    for (const listener of [...folderListeners]) listener();
+    assert.equal(secondPanel.closed, true, 'the scoped panel closes when its project leaves the workspace');
+    assert.equal(firstPanel.closed, false);
+    await general.receive({ type: 'refresh' });
+    assert.equal(latestState(general).savedDraft.draft.name, 'General draft');
+
+    workspace.workspaceFolders.push({ uri: { fsPath: second }, name: 'second' });
+    await Promise.all([openProject(second), openProject(second)]);
+    assert.equal(panels.length, 4, 'concurrent requests reuse one replacement panel');
+    const reopened = panels[3]!;
+    await reopened.receive({ type: 'ready' });
+    assert.equal(latestState(reopened).savedDraft.draft.name, 'Second project draft', 'the scoped draft survives reopening');
   } finally {
     nodeModule._load = originalLoad;
     globalThis.fetch = originalFetch;

@@ -30,8 +30,8 @@ import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '.
 import { ActivityStore } from './activityStore';
 import { keptRoleTests, projectIdentity, teamKey } from '../domain/teamDashboard';
 
-// The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
-// team setup, starts the guided builder).
+// The general Team Studio follows the workspace selection. Guided Setup can
+// open a separate Team Studio pinned to its own project.
 
 const DRAFT_KEY = 'nearAi.teamStudio.draft';
 /** Unsaved work kept when the tab was closed (VS Code cannot ask before a webview panel closes). */
@@ -51,7 +51,7 @@ const VIEW_KEY = 'nearAi.teamStudio.view';
 const RATINGS_KEY = 'nearAi.teamStudio.ratings';
 /** A team the AI drafted and the person has not used or discarded yet (PR 86 review, round 2), so it outlives the tab. This computer only. */
 const PROPOSAL_KEY = 'nearAi.teamStudio.proposal';
-let current: { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> } | undefined;
+const openPanels = new Map<string | undefined, { panel: vscode.WebviewPanel; startWizard(target: StudioTarget): Promise<void> }>();
 
 /**
  * The provider and the candidate models a role test would use: the three tiers (the models in use now) and the two best any comparison has measured,
@@ -132,60 +132,83 @@ async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promis
  * Opens Team Studio, after the one-time move of older teams has finished (0.4.18 review), so the studio never opens on a half-copied library. It
  * returns a promise so a caller (and a test) can await the panel; VS Code ignores a command handler's promise.
  */
-export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget } = {}, gateHost?: GateHost): Promise<void> {
+export async function openTeamStudio(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill, options: { wizard?: StudioTarget; projectRoot?: string } = {}, gateHost?: GateHost): Promise<void> {
   // Only an actual move is waited for: with nothing to move this opens in the same tick, as it always did.
   if (teamsMoveInFlight() !== undefined) await whenTeamsMoved();
-  if (current) {
-    current.panel.reveal();
-    if (options.wizard) void current.startWizard(options.wizard);
+  const { projectRoot } = options;
+  const identity = projectRoot ? await projectIdentity(projectRoot) : undefined;
+  const projectIsOpen = () => !projectRoot || vscode.workspace.workspaceFolders?.some(({ uri }) => path.relative(uri.fsPath, projectRoot) === '');
+  if (!projectIsOpen()) {
+    void vscode.window.showWarningMessage('Open this project folder before setting up its agents.');
     return;
   }
-  // The folder open now, asked each time it is used: a folder opened, closed or changed while the tab is open is followed (PR #70 review carry-over).
-  const rootNow = (): string | undefined => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const current = openPanels.get(identity);
+  if (current) {
+    current.panel.reveal();
+    if (options.wizard) await current.startWizard(options.wizard);
+    return;
+  }
+  const activeRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const rootNow = () => projectRoot ?? activeRoot();
+  // Legacy commands act on the first workspace folder. Do not send actions
+  // there from a different project's panel.
+  const inActiveProject = async <T>(run: () => Promise<T>): Promise<T | undefined> => {
+    const active = activeRoot();
+    if (projectRoot && (!active || path.relative(active, projectRoot) !== '')) {
+      void vscode.window.showWarningMessage('Activate this project in the workspace to use that action.');
+      return undefined;
+    }
+    return run();
+  };
+  const scopedKey = (key: string) => identity ? `${key}.project.${identity}` : key;
+  const studioRuns = () => {
+    const feed = sharedActivityFeed();
+    const projectFile = projectRoot ? TeamLibrary.projectTeamFile(projectRoot) : undefined;
+    return feed.teamRuns().flatMap((run) => {
+      const file = feed.runTeam(run.runId)?.file;
+      if (projectFile && (!file || path.relative(projectFile, file) !== '')) return [];
+      return [{ ...run, file }];
+    });
+  };
   // One runtime per folder for this panel's model calls (PR #81 review): the host is asked once, not before each call.
   const studioRuntime = runtimePerRoot(gateHost, (root) => ({ root, actor: { kind: 'person', sessionId: 'team-studio' }, presence: 'person', context: 'interactive' }));
   const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
   const shared = sharedMedia(context.extensionUri);
-  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
+  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', projectRoot ? `Agent Team Studio · ${path.basename(projectRoot)}` : 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   panel.webview.html = teamStudioHtml({ cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('teams.js'), style: asset('teams.css'), network: asset('network.css'), base: panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(panel.webview, shared) });
   registerLayoutProbe('teams', panel.webview);
   const studio = attachTeamStudio(panel, {
     library, root: rootNow,
-    onDidChangeFolder: (listener) => vscode.workspace.onDidChangeWorkspaceFolders(() => listener()),
-    gather: () => gatherDirectoryInput(context, auth),
+    ...(projectRoot ? {} : { onDidChangeFolder: (listener: () => void) => vscode.workspace.onDidChangeWorkspaceFolders(listener) }),
+    gather: () => gatherDirectoryInput(context, auth, projectRoot),
     knowledgeBase: async () => { const root = rootNow(); return Boolean(root && await stat(path.join(root, '.near-kb')).catch(() => undefined)); },
-    sidebar,
+    sidebar: projectRoot ? { async prefill(text) { await inActiveProject(() => sidebar.prefill(text)); } } : sidebar,
     openFile: async (file) => vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false, viewColumn: vscode.ViewColumn.Beside }),
     openSetting: (key) => Promise.resolve(vscode.commands.executeCommand('workbench.action.openSettings', key)),
-    updateTeam: (file) => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file)),
-    setUpStaffTeam: () => Promise.resolve(vscode.commands.executeCommand('nearAi.setUpStaffTeam')),
-    openStaffRoom: () => Promise.resolve(vscode.commands.executeCommand('nearAi.openStaffRoom')),
-    liveRun: (slug) => sharedActivityFeed().teamRunning(slug),
-    watchLive: (runId) => Promise.resolve(runId ? vscode.commands.executeCommand('nearAi.openTeamLive', runId) : vscode.commands.executeCommand('nearAi.openTeamLive')),
+    updateTeam: (file) => inActiveProject(() => Promise.resolve(vscode.commands.executeCommand('nearAi.updateTeam', file))),
+    setUpStaffTeam: () => inActiveProject(() => Promise.resolve(vscode.commands.executeCommand('nearAi.setUpStaffTeam'))),
+    openStaffRoom: () => inActiveProject(() => Promise.resolve(vscode.commands.executeCommand('nearAi.openStaffRoom'))),
+    liveRun: (slug) => projectRoot ? studioRuns().some((run) => run.status === 'running' && run.team === slug) : sharedActivityFeed().teamRunning(slug),
+    watchLive: (runId) => inActiveProject(() => Promise.resolve(vscode.commands.executeCommand('nearAi.openTeamLive', ...(runId ? [runId] : [])))),
     // The dashboard (0.4.31): the open project's run history, the team runs going now, and a notification when one starts or ends.
     history: async () => { const root = rootNow(); return root ? new ActivityStore(root).list() : []; },
-    runningTeams: () => {
-      const feed = sharedActivityFeed();
-      return feed.teamRuns().filter((run) => run.status === 'running').map((run) => {
-        const file = feed.runTeam(run.runId)?.file;
-        return { runId: run.runId, slug: run.team, ...(file ? { file } : {}) };
-      });
-    },
+    runningTeams: () => studioRuns().filter((run) => run.status === 'running')
+      .map(({ runId, team, file }) => ({ runId, slug: team, ...(file ? { file } : {}) })),
     onDidChangeRuns: (listener) => {
       // Only a team run starting, ending, or having its end saved to the history (its counters persisted) is news here; tokens and tools are not.
       const feed = sharedActivityFeed();
       // Asked on every feed change, so it reads the feed's team runs without copying every agent's counters.
-      const runs = () => feed.teamRuns().map((run) => `${run.runId}:${run.status}:${run.persisted ? 1 : 0}`).sort().join(',');
+      const runs = () => studioRuns().map((run) => `${run.runId}:${run.status}:${run.persisted ? 1 : 0}`).sort().join(',');
       let seen = runs();
       const subscription = feed.subscribe(() => { const now = runs(); if (now !== seen) { seen = now; listener(); } });
       return { dispose: () => subscription.dispose() };
     },
     roleTests: { get: () => context.globalState.get(ROLE_TESTS_KEY), set: (value) => Promise.resolve(context.globalState.update(ROLE_TESTS_KEY, value)) },
     ratings: { get: () => context.globalState.get(RATINGS_KEY), set: (value) => Promise.resolve(context.globalState.update(RATINGS_KEY, value)) },
-    proposal: { get: () => context.globalState.get(PROPOSAL_KEY), set: (value) => Promise.resolve(context.globalState.update(PROPOSAL_KEY, value)) },
+    proposal: { get: () => context.globalState.get(scopedKey(PROPOSAL_KEY)), set: (value) => Promise.resolve(context.globalState.update(scopedKey(PROPOSAL_KEY), value)) },
     view: { get: () => context.globalState.get(VIEW_KEY), set: (value) => Promise.resolve(context.globalState.update(VIEW_KEY, value)) },
     confirm: async (message, action) => (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action,
     choose: async (message, ...actions) => vscode.window.showWarningMessage(message, { modal: true }, ...actions),
@@ -259,9 +282,13 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
           await writeFile(file, teamMarkdown(draft, text), 'utf8');
           await library.snapshot(file);
           // The studio's open editor holds the hash from before the write, so it is told the file changed rather than left to conflict on its next save.
-          if (current) {
+          const showingTeam = () => openPanels.get(identity)?.panel === panel && (!teamEntry?.project || rootNow() === root);
+          if (showingTeam()) {
             const changed = await readFile(file, 'utf8');
-            void current.panel.webview.postMessage({ type: 'external-change', id: teamEntry?.project ? 'project' : `user:${slugify(path.basename(file, '.md'))}`, reason: 'edited', draft: draftFromMarkdown(changed, file), base: createHash('sha256').update(changed).digest('hex'), versions: (await library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) })) });
+            const versions = (await library.versions(file)).map((version) => ({ ref: path.basename(version), label: versionLabel(path.basename(version)) }));
+            if (showingTeam()) {
+              void panel.webview.postMessage({ type: 'external-change', id: teamEntry?.project ? 'project' : `user:${slugify(path.basename(file, '.md'))}`, reason: 'edited', draft: draftFromMarkdown(changed, file), base: createHash('sha256').update(changed).digest('hex'), versions });
+            }
           }
         }
       }
@@ -297,11 +324,11 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     applyProjectType: async (projectRoot, type, goal) => {
       const applied = await applyProjectType(projectRoot, type, goal);
       // PERF-06: research and writing projects also get the research GSD profile and its verifier scripts (nearAi.gsd.researchProfile).
-      if (usesResearchProfile(type.id) && vscode.workspace.getConfiguration('nearAi').get<boolean>('gsd.researchProfile', true) !== false) await applyResearchProfile(projectRoot);
+      if (usesResearchProfile(type.id) && vscode.workspace.getConfiguration('nearAi', projectRoot ? vscode.Uri.file(projectRoot) : undefined).get<boolean>('gsd.researchProfile', true) !== false) await applyResearchProfile(projectRoot);
       return applied;
     },
-    drafts: { get: () => context.globalState.get(DRAFT_KEY), set: (value) => Promise.resolve(context.globalState.update(DRAFT_KEY, value)) },
-    kept: { get: () => context.globalState.get(KEPT_KEY), set: (value) => Promise.resolve(context.globalState.update(KEPT_KEY, value)) },
+    drafts: { get: () => context.globalState.get(scopedKey(DRAFT_KEY)), set: (value) => Promise.resolve(context.globalState.update(scopedKey(DRAFT_KEY), value)) },
+    kept: { get: () => context.globalState.get(scopedKey(KEPT_KEY)), set: (value) => Promise.resolve(context.globalState.update(scopedKey(KEPT_KEY), value)) },
     watch: (listener) => {
       const watching = (pattern: vscode.RelativePattern): vscode.Disposable[] => {
         const watcher = vscode.workspace.createFileSystemWatcher(pattern);
@@ -316,15 +343,21 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
         projectWatch = root ? watching(new vscode.RelativePattern(vscode.Uri.file(path.dirname(TeamLibrary.projectTeamFile(root))), 'team.md')) : [];
       };
       watchProject();
-      const folders = vscode.workspace.onDidChangeWorkspaceFolders(() => watchProject());
-      return { dispose: () => { [...libraryWatch, ...projectWatch, folders].forEach((subscription) => subscription.dispose()); } };
+      const folders = projectRoot ? [] : [vscode.workspace.onDidChangeWorkspaceFolders(watchProject)];
+      return { dispose: () => { [...libraryWatch, ...projectWatch, ...folders].forEach((subscription) => subscription.dispose()); } };
     },
     onDidChangeSettings: (listener) => {
       const subscriptions = [vscode.workspace.onDidChangeConfiguration((event) => { if (event.affectsConfiguration('nearAi')) listener(); }), onDidChangeEmergencyStop(() => listener())];
       return { dispose: () => subscriptions.forEach((subscription) => subscription.dispose()) };
     }
   });
-  current = { panel, startWizard: (target) => studio.startWizard(target) };
-  if (options.wizard) void studio.startWizard(options.wizard);
-  panel.onDidDispose(() => { current = undefined; }, undefined, context.subscriptions);
+  openPanels.set(identity, { panel, startWizard: studio.startWizard });
+  const folderChanges = projectRoot ? vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    if (!projectIsOpen()) panel.dispose();
+  }) : undefined;
+  panel.onDidDispose(() => {
+    openPanels.delete(identity);
+    folderChanges?.dispose();
+  }, undefined, context.subscriptions);
+  if (options.wizard) await studio.startWizard(options.wizard);
 }

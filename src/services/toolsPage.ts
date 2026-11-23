@@ -100,19 +100,21 @@ export function attachToolsPage(host: PageHost, deps: ToolsPageDeps): { refresh(
 }
 
 /** Everything the directory shows, read from the same settings, files, and registries a run uses. */
-export async function gatherDirectoryInput(context: vscode.ExtensionContext, auth: AuthService): Promise<DirectoryInput> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const settings = readSettings();
-  const tiers = readModelTiers();
-  const agentModels = readAgentModels();
+export async function gatherDirectoryInput(context: vscode.ExtensionContext, auth: AuthService, projectRoot?: string): Promise<DirectoryInput> {
+  const root = projectRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const settings = readSettings(projectRoot);
+  const tiers = readModelTiers(projectRoot);
+  const agentModels = readAgentModels(projectRoot);
+  const configuration = vscode.workspace.getConfiguration('nearAi', projectRoot ? vscode.Uri.file(projectRoot) : undefined);
   const host = gsdHostFor(context);
-  const mcp = mcpRegistry(context);
+  // The legacy MCP registry and security consent belong to the current window.
+  const mcp = projectRoot ? undefined : mcpRegistry(context);
   const [gsd, version, teams, searchProvider, servers, catalog, reportingToken] = await Promise.all([
     host.context().catch(() => undefined),
     host.runtime.installedVersion().catch(() => null),
     new TeamLibrary(teamLibraryDir(homeFolder())).list(root).catch(() => []),
     webSearchProvider(context.secrets).catch(() => undefined),
-    mcp.status().catch(() => []),
+    mcp?.status().catch(() => []) ?? [],
     // The catalog list (cached per profile); no completion is requested.
     (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, host: active?.provider.client.baseHost, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, host: undefined, problem: providerErrorMessage(error) })),
     currentReportingTokenHint().catch(() => undefined)
@@ -121,15 +123,15 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
     ...(gsd ? { gsd: { skills: gsd.skills, agents: gsd.agents, ...(version ? { version } : {}) } } : {}),
     teams,
     policy: { ...settings.actionPolicy, emergencyStop: isEmergencyStopped() },
-    rules: readAgentRules(),
+    rules: readAgentRules(projectRoot),
     webSearch: Boolean(searchProvider),
     ...(searchProvider?.host ? { webSearchHost: searchProvider.host } : {}),
     ...(catalog.host ? { modelHost: catalog.host } : {}),
-    securityConsented: root ? securityConsented(context) : false,
+    securityConsented: root !== undefined && projectRoot === undefined && securityConsented(context),
     mcp: servers,
     ...(catalog.models ? { models: catalog.models } : {}),
     ...(catalog.problem ? { modelsProblem: catalog.problem } : {}),
-    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers), fromProject: choicesInEffect(root, (setting) => { const configuration = vscode.workspace.getConfiguration('nearAi'); return typeof configuration.inspect === 'function' ? configuration.inspect(setting) : undefined; }) },
+    settings: { mainModel: settings.defaultModel, tiers, roleModels: readRoleModels(projectRoot), visionModel: agentModels.visionModel, transcriptionModel: agentModels.transcriptionModel, imageModel: agentModels.imageModel, safetyModel: readSafetyModel(tiers, projectRoot), fromProject: choicesInEffect(root, (setting) => typeof configuration.inspect === 'function' ? configuration.inspect(setting) : undefined) },
     ...(reportingToken ? { reportingToken } : {})
   };
 }

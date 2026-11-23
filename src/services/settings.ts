@@ -62,9 +62,9 @@ export function readAgentRules(root?: string): PermissionRules {
 
 /** NEAR models for Open-GSD's model tiers (opus → deep, sonnet → standard, haiku → fast). */
 /** Model or tier per agent role, defaulting research and mapping roles to the fast tier. Resolved role by role: default, user, the project's choice, workspace, folder. */
-export function readRoleModels(): Record<string, string> {
-  const configuration = vscode.workspace.getConfiguration('nearAi');
-  return resolveRoleModels(inspectedSetting(configuration, 'agent.roleModels'), projectChoiceFor(projectRoot(), 'agent.roleModels'), DEFAULT_ROLE_MODELS);
+export function readRoleModels(root?: string): Record<string, string> {
+  const configuration = projectConfiguration(root);
+  return resolveRoleModels(inspectedSetting(configuration, 'agent.roleModels'), projectChoiceFor(root ?? projectRoot(), 'agent.roleModels'), DEFAULT_ROLE_MODELS);
 }
 
 export function readModelTiers(root?: string): { deep: string; standard: string; fast: string } {
@@ -77,9 +77,9 @@ export function readModelTiers(root?: string): { deep: string; standard: string;
 }
 
 /** The auto mode's safety model (nearAi.agent.safetyModel); empty means the fast tier's model. */
-export function readSafetyModel(tiers: { fast: string } = readModelTiers()): string {
-  const configuration = vscode.workspace.getConfiguration('nearAi');
-  const value = resolveSetting(inspectedSetting(configuration, 'agent.safetyModel'), projectString('agent.safetyModel'), configuration.get<unknown>('agent.safetyModel', ''));
+export function readSafetyModel(tiers: { fast: string } = readModelTiers(), root?: string): string {
+  const configuration = projectConfiguration(root);
+  const value = resolveSetting(inspectedSetting(configuration, 'agent.safetyModel'), projectString('agent.safetyModel', root), configuration.get<unknown>('agent.safetyModel', ''));
   return typeof value === 'string' && value.trim() ? value.trim() : tiers.fast;
 }
 
