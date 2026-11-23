@@ -1,0 +1,17 @@
+{
+  "gap": "G73",
+  "id": "g73",
+  "controls": [
+    "si-10",
+    "si-11"
+  ],
+  "ownerRole": "shared",
+  "title": "Component input validation and role-scoped errors need traceable tests",
+  "remediation": "Component maintainers and deployment security owners inventory approved input surfaces and error audiences for the extension, relay and hub as assessed. Run benign invalid input, malformed message and out-of-scope data tests and verify safe refusal and permitted diagnostic detail. Capture redacted user and operator error samples and verify sensitive values remain absent. Assign and retest uncovered interfaces.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a scoped interface and error-audience matrix and exact test receipts for invalid input, safe responses and redacted diagnostics"
+    }
+  ]
+}

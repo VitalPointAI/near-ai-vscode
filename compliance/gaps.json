@@ -795,6 +795,103 @@
     },
     {
       "controls": [
+        "si-01"
+      ],
+      "id": "G67",
+      "ownerRole": "owner",
+      "poam": "g67",
+      "remediation": "The sponsor system integrity lead approves the policy and procedures, identifies component and operations responsibilities, and records coordination, distribution and review. Verify a representative flaw, protection or monitoring work item followed the approved procedure.",
+      "title": "System integrity policy and procedures need approved operating evidence"
+    },
+    {
+      "controls": [
+        "si-02",
+        "si-02.02"
+      ],
+      "id": "G68",
+      "ownerRole": "shared",
+      "poam": "g68",
+      "remediation": "Release maintainers and deployment patch operators map scoped supported component and firmware versions to security updates. Validate applicable fixes in a representative test environment and prove an automated deployment inventory distinguishes applied, overdue and excepted updates. Keep release dependency observations and approved deployment exceptions with their dated remediation result.",
+      "title": "Automated installed-update inventory and patch closure need deployment evidence"
+    },
+    {
+      "controls": [
+        "si-03.04"
+      ],
+      "id": "G69",
+      "ownerRole": "owner",
+      "poam": "g69",
+      "remediation": "Deployment endpoint and hosted security owners identify each malware protection update mechanism and its privileged approving role. Verify a permitted update and denial for an ordinary role or unauthorized configuration change. Capture redacted policy and audit receipts from each assessed protection mechanism and track uncovered assets through G15.",
+      "title": "Malware protection updates need privileged authorization and activity evidence"
+    },
+    {
+      "controls": [
+        "si-04",
+        "si-04.02",
+        "si-04.04",
+        "si-04.05",
+        "si-04.10",
+        "si-04.11",
+        "si-04.12",
+        "si-04.13",
+        "si-04.14",
+        "si-04.15"
+      ],
+      "id": "G70",
+      "ownerRole": "shared",
+      "poam": "g70",
+      "remediation": "The deployment monitoring and network owners approve monitored interfaces, ingress and egress anomaly criteria, alert recipients and collection boundary, including separately approved visibility for encrypted traffic. Use benign synthetic events to verify timely analysis, deployed event baselines and anomaly recognition, automated operator alerts and response. Where assessed, verify wireless protection and monitoring at the wired boundary. Record approved limits, configuration and observed results per mechanism.",
+      "title": "Monitoring and alerts need verified coverage, privacy scope and operating evidence"
+    },
+    {
+      "controls": [
+        "si-07",
+        "si-07.01",
+        "si-07.02",
+        "si-07.03",
+        "si-07.07"
+      ],
+      "id": "G71",
+      "ownerRole": "shared",
+      "poam": "g71",
+      "remediation": "Component maintainers and deployment integrity and incident response owners approve the software, firmware and information to verify, checking schedule and recipients. Demonstrate centrally managed settings and notifications by detecting a harmless changed test artifact, then record incident intake and corrective action. Use G4 attestations as supplier provenance and verify deployed monitoring and response separately.",
+      "title": "Deployed integrity checks and violation response need tested coverage"
+    },
+    {
+      "controls": [
+        "si-08",
+        "si-08.02"
+      ],
+      "id": "G72",
+      "ownerRole": "owner",
+      "poam": "g72",
+      "remediation": "The deployment messaging and endpoint owners identify applicable message ingress and egress and the protection mechanism supplied by each assessed provider. Verify approved automatic update cadence and detection and action for harmless simulated unsolicited messages on each applicable boundary. Obtain authorized scope treatment for unused messaging surfaces.",
+      "title": "Message boundary spam protection and automatic updates need verified applicability"
+    },
+    {
+      "controls": [
+        "si-10",
+        "si-11"
+      ],
+      "id": "G73",
+      "ownerRole": "shared",
+      "poam": "g73",
+      "remediation": "Component maintainers and deployment security owners inventory approved input surfaces and error audiences for the extension, relay and hub as assessed. Run benign invalid input, malformed message and out-of-scope data tests and verify safe refusal and permitted diagnostic detail. Capture redacted user and operator error samples and verify sensitive values remain absent. Assign and retest uncovered interfaces.",
+      "title": "Component input validation and role-scoped errors need traceable tests"
+    },
+    {
+      "controls": [
+        "si-16",
+        "si-400"
+      ],
+      "id": "G74",
+      "ownerRole": "owner",
+      "poam": "g74",
+      "remediation": "The deployment endpoint and privileged access owners identify assessed processes and the approved host memory-execution protections. Verify those settings on sampled assessed hosts. Separately inventory dedicated physical administration workstations and allowed task and network boundaries, show their isolation and verify privileged actions are restricted to the approved workstations. Record approved scope decisions and gaps.",
+      "title": "Managed memory protections and dedicated administration workstations need deployment evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
