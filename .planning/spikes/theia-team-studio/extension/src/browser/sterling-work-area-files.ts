@@ -33,6 +33,15 @@ async function readWorkArea(files: FileService, provider: FileSystemProvider, fo
   }
 }
 
+export async function readActiveWorkArea(files: FileService, root: URI): Promise<LocalWorkArea | undefined> {
+  if (root.scheme !== 'file' || root.authority || !generatedFolder.test(root.path.base)) return undefined;
+  try {
+    return await readWorkArea(files, await files.activateProvider('file'), root);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function listWorkAreas(files: FileService, root: URI, kind: WorkAreaKind, isCurrent: () => boolean): Promise<{
   entries: LocalWorkArea[];
   limited: boolean;

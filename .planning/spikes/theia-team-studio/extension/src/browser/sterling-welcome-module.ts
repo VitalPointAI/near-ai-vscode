@@ -8,6 +8,7 @@ import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/
 import { ThemeService } from '@theia/core/lib/browser/theming.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget, Panel } from '@theia/core/lib/browser/widgets/widget.js';
+import { readActiveWorkArea } from './sterling-work-area-files.js';
 import './sterling-welcome.css';
 
 const welcomeId = 'sterling-get-started';
@@ -258,7 +259,21 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     }
   }
 
+  @inject(WorkspaceService)
+  protected readonly workspaceService!: WorkspaceService;
+
+  @inject(FileService)
+  protected readonly fileService!: FileService;
+
   async initializeLayout(): Promise<void> {
+    const [root, ...otherRoots] = await this.workspaceService.roots;
+    if (root && !otherRoots.length) {
+      const area = await readActiveWorkArea(this.fileService, root.resource);
+      if (area) {
+        await this.commandRegistry.executeCommand('sterling.workAreas.open', area.kind);
+        return;
+      }
+    }
     await this.openView({ activate: true });
   }
 
