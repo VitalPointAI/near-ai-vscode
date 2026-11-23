@@ -13,7 +13,7 @@ import { proposeLabel, raiseOnly, useFor } from '../../domain/setup/map';
 import { modeRowOf, suggestMode, type ModeRow } from '../../domain/setup/modes';
 import { GENERIC_CONTACT_TEXT, readGuidePolicy, type GuidePolicy, type GuidePolicyInput } from '../../domain/setup/policy';
 import { recommend, type OptionInput } from '../../domain/setup/recommend';
-import { screenFor } from '../../domain/setup/screens';
+import { screenFor, type FoundServerRow, type GuideDiscoveryPort, type ScanOffer } from '../../domain/setup/screens';
 import { nextSession, startSession, type GuideEffect, type GuideEvent, type GuideSession } from '../../domain/setup/session';
 import { isChoosable, type ViabilityResult } from '../../domain/setup/viability';
 import { planApply, runApply, type ApplyContext, type ApplyDeps, type ApplyStep } from './apply';
@@ -47,6 +47,7 @@ export interface GuideControllerDeps {
   readonly hostKind: HostKind;
   readonly clock?: () => number;
   readonly progress?: GuideProgressStore;
+  readonly discovery?: GuideDiscoveryPort;
   readonly kindStore?: {
     get(): Pick<GuideAnswers, 'kindOfWork' | 'otherKind'> | undefined;
     set(kind: KindOfWorkAnswer, otherKind?: string): PromiseLike<void>;
@@ -65,8 +66,18 @@ export interface GuideController {
   dispose(): Promise<void>;
 }
 
-const scan = { offered: false, ranges: [], running: false } as const;
+const scanOff = { offered: false, ranges: [], running: false } as const;
 const checkAgainText = 'The rules or connection changed during checking. Close Get Started and open it again to recheck your options.';
+
+interface DiscoveryVisit {
+  readonly scope: AbortController;
+  readonly listener: { dispose(): void };
+  ready: boolean;
+  rows: readonly FoundServerRow[];
+  offer: ScanOffer;
+  confirmation?: object;
+  confirmed: boolean;
+}
 
 function factsFor(result: ViabilityResult, snapshot: GuideRouteSnapshot, now: number) {
   return result.policyHash === snapshot.hash ? routeFactsOf(result, now) : undefined;
@@ -100,6 +111,8 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
   let progressWrite = Promise.resolve();
   let kindWrite = Promise.resolve();
   let projectName: string | undefined;
+  const discovery = deps.discovery;
+  let discoveryVisit: DiscoveryVisit | undefined;
 
   function storeProgress(current?: GuideSession): Promise<void> {
     const store = deps.progress;
@@ -115,6 +128,42 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     checking = undefined;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+  }
+
+  function discoveryAllowed(): boolean {
+    const configured = policy?.state === 'ready' ? policy.discovery : undefined;
+    return !lifetime.signal.aborted && session?.state === 'choosing' && session.screen === 'options' &&
+      !session.changesRequested && !!configured && configured.networks.length > 0 &&
+      (configured.announce || configured.scanRanges.length > 0);
+  }
+
+  function stopDiscovery(): void {
+    const visit = discoveryVisit;
+    if (!visit) return;
+    discoveryVisit = undefined;
+    visit.listener.dispose();
+    visit.scope.abort();
+    discovery?.stopScan();
+  }
+
+  function updateDiscovery(): void {
+    if (!discoveryAllowed()) return stopDiscovery();
+    if (!discovery || discoveryVisit) return;
+    const scope = new AbortController();
+    const listener = discovery.onDidChange(() => {
+      if (discoveryVisit?.scope === scope && discoveryVisit.ready) postScreen();
+    });
+    const visit: DiscoveryVisit = { scope, listener, ready: false, rows: [], offer: scanOff, confirmed: false };
+    discoveryVisit = visit;
+    void verifyDiscovery(visit).then(async (allowed) => {
+      if (!allowed || discoveryVisit !== visit) return;
+      await discovery.refresh(scope.signal);
+      if (discoveryVisit !== visit) return;
+      visit.ready = true;
+      postScreen();
+    }).catch(() => {
+      if (discoveryVisit === visit) stopDiscovery();
+    });
   }
 
   function postScreen(): void {
@@ -133,8 +182,18 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     }) : [];
     const kind = deps.hostKind;
     const checkedOn = deps.machine + (kind === 'container' ? ', a container' : kind === 'remote' ? ', a remote computer' : '');
+    const visit = discoveryVisit;
+    if (discovery && visit?.ready && discoveryAllowed()) {
+      const offer = discovery.scanOffer();
+      const configured = policy.state === 'ready' ? policy.discovery?.scanRanges ?? [] : [];
+      const canOffer = !visit.confirmed && offer.ranges.length > 0 &&
+        offer.ranges.every((range) => configured.some(({ cidr }) => cidr === range));
+      visit.offer = offer.offered && !canOffer ? scanOff : { ...offer, ranges: [...offer.ranges] };
+      visit.rows = discovery.rows().map((row) => ({ ...row }));
+    }
     const screen = screenFor(current, {
-      cards, candidates: [], scan, checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice
+      cards, candidates: visit?.rows ?? [], scan: visit?.offer ?? scanOff,
+      checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice
     });
     deps.post({ type: 'screen', screen: projectName && screen.kind !== 'fix'
       ? { ...screen, heading: `${screen.heading} · ${projectName}` } : screen });
@@ -142,18 +201,73 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
 
   function failClosed(text: string, contacts: GuidePolicy['contacts'] = policy?.contacts ?? []): void {
     stopChecking();
+    stopDiscovery();
     policy = { state: 'failed-closed', sentence: text, contacts };
     postScreen();
   }
 
-  async function readPolicy(): Promise<{ snapshot: GuideRouteSnapshot; policy: ReadyPolicy } | undefined> {
+  async function readPolicy(isCurrent: () => boolean = () => true): Promise<{ snapshot: GuideRouteSnapshot; policy: ReadyPolicy } | undefined> {
     const current = await deps.readPolicy(now());
+    if (!isCurrent()) return undefined;
     const view = readGuidePolicy(current.view);
     if (view.state === 'failed-closed' || !('route' in current)) {
       failClosed(view.state === 'failed-closed' ? view.sentence : checkAgainText, view.contacts);
       return undefined;
     }
     return { snapshot: current, policy: view };
+  }
+
+  async function verifyDiscovery(visit: DiscoveryVisit): Promise<boolean> {
+    const isCurrent = () => discoveryVisit === visit && discoveryAllowed();
+    try {
+      const latest = await readPolicy(isCurrent);
+      if (!latest || !isCurrent()) return false;
+      if (latest.snapshot.hash === snapshot?.hash && isDeepStrictEqual(latest.snapshot.projectLabel, snapshot.projectLabel) &&
+          policy?.state === 'ready' && isDeepStrictEqual(latest.policy.discovery, policy.discovery)) return true;
+    } catch {
+      if (!isCurrent()) return false;
+    }
+    failClosed(checkAgainText);
+    return false;
+  }
+
+  async function confirmScan(ranges: readonly string[]): Promise<void> {
+    const visit = discoveryVisit;
+    if (!discovery || !visit?.ready || visit.confirmed || visit.confirmation) return;
+    const reviewed = visit.offer;
+    const sameOffer = (offer: ScanOffer) => offer.offered && !offer.running &&
+      isDeepStrictEqual(offer.ranges, ranges) && offer.confirmText === reviewed.confirmText;
+    if (!sameOffer(reviewed) || !reviewed.confirmText) return;
+    const confirmation = {};
+    visit.confirmation = confirmation;
+    try {
+      if (!await verifyDiscovery(visit) || visit.confirmation !== confirmation ||
+          !sameOffer(visit.offer) || !sameOffer(discovery.scanOffer())) return;
+      visit.confirmed = true;
+      await discovery.startScan(ranges);
+    } finally {
+      if (visit.confirmation === confirmation) visit.confirmation = undefined;
+      if (discoveryVisit === visit) postScreen();
+    }
+  }
+
+  function cancelScan(): void {
+    const visit = discoveryVisit;
+    if (!visit) return;
+    visit.confirmation = undefined;
+    if (visit.confirmed) discovery?.stopScan();
+  }
+
+  async function approveCandidate(id: string): Promise<void> {
+    const visit = discoveryVisit;
+    if (!discovery || !visit?.ready) return;
+    const reviewed = visit.rows.find((row) => row.id === id && row.state === 'found' && row.action === 'approve');
+    if (!reviewed || !await verifyDiscovery(visit) ||
+        !discovery.rows().some((row) => isDeepStrictEqual(row, reviewed))) return;
+    const result = await discovery.approve(id).catch(() => 'failed');
+    if (discoveryVisit !== visit) return;
+    if (result === 'failed') deps.post({ type: 'announce', text: 'The server proposal could not be opened.' });
+    if (result === 'not-allowed') deps.post({ type: 'announce', text: 'This server can no longer be proposed.' });
   }
 
   async function runCheck(checkId: number): Promise<void> {
@@ -348,6 +462,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     session = result.session;
     if (session === previous) return;
     if (previous.state === 'checking' && (session.state !== 'checking' || session.recommendationRequested)) stopChecking();
+    updateDiscovery();
     postScreen();
     if (event.type === 'viability-progress') {
       deps.post({ type: 'progress', text: `Checked ${session.results.filter((row) => row.state !== 'checking' && row.state !== 'unknown').length} of ${session.results.length}` });
@@ -405,9 +520,12 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     async receive(message) {
       switch (message.type) {
         case 'ready': postScreen(); return;
-        case 'close': deps.close?.(); return;
+        case 'close': stopDiscovery(); deps.close?.(); return;
         case 'change-answers': return dispatch({ type: 'restart' });
-        case 'fix': case 'scan-confirm': case 'scan-stop': case 'approve-candidate': return;
+        case 'scan-confirm': return confirmScan(message.ranges);
+        case 'scan-stop': return cancelScan();
+        case 'approve-candidate': return approveCandidate(message.candidateId);
+        case 'fix': return;
         default: return dispatch(message);
       }
     },
@@ -417,6 +535,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
         const paused = current && policy?.state === 'ready' && nextSession(current, { type: 'pause' }, now()).session;
         lifetime.abort();
         stopChecking();
+        stopDiscovery();
         if (paused && paused !== current) storeProgress(paused);
       }
       await Promise.all([progressWrite, kindWrite]);
