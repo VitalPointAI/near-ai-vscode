@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { OpenGetStarted } from '../domain/setup/answers';
 import { redactSecrets } from '../domain/redaction';
 import { buildSetupMenu, collectSetupContext, projectHasTeam, registerSetupFacts, SETUP_STEPS, START_CHATTING } from './setupSteps';
 import { webSearchProvider } from './webSearchSetup';
@@ -60,10 +61,11 @@ export async function offerNextStep(_host: SetupMenuHost, profileName: string): 
 }
 
 /** Registers NEAR AI: Project Setup, and the web search fact its step reads. */
-export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'subscriptions'>, host: SetupMenuHost): void {
+export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'subscriptions'>, host: SetupMenuHost, openGetStarted?: OpenGetStarted): void {
   context.subscriptions.push(
     registerSetupFacts('webSearchReady', async () => Boolean(await webSearchProvider(host.secrets as vscode.SecretStorage))),
-    vscode.commands.registerCommand(PROJECT_SETUP_COMMAND, () => showSetupMenu(host))
+    vscode.commands.registerCommand(PROJECT_SETUP_COMMAND, () =>
+      openGetStarted ? openGetStarted({ step: 'checklist' }) : showSetupMenu(host))
   );
 }
 

@@ -317,7 +317,7 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
     ? vscode.workspace.getConfiguration('nearAi', vscode.Uri.file(root)).get<string>('baseUrl', DEFAULT_BASE_URL)
     : undefined);
   if (scopedCloudEndpoint !== undefined && (!scopedCloudEndpoint.trim() || !isNearCloudEndpoint(scopedCloudEndpoint))) {
-    void vscode.window.showWarningMessage('Get Started requires the NEAR AI Cloud endpoint for a cloud connection.');
+    void vscode.window.showWarningMessage('Get Started requires the NEAR AI Cloud address for a cloud connection.');
     return;
   }
   const localSteps = usesLocal ? (fixedLocal === undefined ? 2 : 1) : 0;

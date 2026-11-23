@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { matchingFacts, projectMemoryScope } from '../agent/extraTools';
 import { parseTeam, TeamLibrary } from '../agent/teams';
+import type { OpenGetStarted } from '../domain/setup/answers';
 import type { MemoryScope } from '../domain/contextGraph';
 import { ContextGraphMemory } from './contextGraphMemory';
 import { MemoryApprovalRegistry } from './memoryApproval';
@@ -12,7 +13,7 @@ import { registerTeamUpdates } from './teamUpdateCommands';
 
 // Team commands (which open Team Studio), the team-file save hook, and the memory flow.
 
-export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void | Promise<void>): void {
+export function registerWorkspaceCommands(context: vscode.ExtensionContext, openStudio: (options: { wizard?: 'project' }) => void | Promise<void>, openGetStarted?: OpenGetStarted): void {
   const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   registerTeamUpdates(context, library);
   context.subscriptions.push(
@@ -20,6 +21,7 @@ export function registerWorkspaceCommands(context: vscode.ExtensionContext, open
     // Awaited, not fired and forgotten, so whoever runs the command (a person is not waiting, but a test is) sees the panel open.
     vscode.commands.registerCommand('nearAi.manageTeams', async () => { await openStudio({}); }),
     vscode.commands.registerCommand('nearAi.setupProjectTeam', () => {
+      if (openGetStarted) return openGetStarted({ step: 'software-team' });
       if (!vscode.workspace.workspaceFolders?.length) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
       openStudio({ wizard: 'project' });
     }),

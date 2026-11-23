@@ -6,7 +6,7 @@ import { STAFF_PRIVATE_MODELS_TEXT } from '../domain/staff/products';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
-import { derivedLocality, parseSetupGuideEntry } from '../domain/setup/answers';
+import { derivedLocality, parseSetupGuideEntry, type OpenGetStarted } from '../domain/setup/answers';
 import { TeamLibrary } from '../agent/teams';
 import { STAFF_TEMPLATES } from '../agent/staff/templates';
 import type { StaffTemplateOptions } from '../agent/staff/templates';
@@ -155,6 +155,20 @@ export const OPEN_STAFF_ROOM_ACTION = 'Open the Staff Room';
 /** The action on the "team is ready" message that puts `/team:<name> ` in the chat's message box. */
 export const TASK_NOW_ACTION = 'Task it now';
 
+let staffSetupFrontDoor: OpenGetStarted | undefined;
+
+/** Lets the staff setup command open the guide when it is available in this extension host. */
+export function useStaffSetupFrontDoor(open: OpenGetStarted): { dispose(): void } {
+  staffSetupFrontDoor = open;
+  return { dispose: () => { if (staffSetupFrontDoor === open) staffSetupFrontDoor = undefined; } };
+}
+
 export function registerStaffSetup(context: vscode.ExtensionContext, chat?: StaffSetupChat): void {
-  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) => setUpStaffTeam(undefined, requestedSection(arg), chat)));
+  context.subscriptions.push(vscode.commands.registerCommand(SET_UP_STAFF_TEAM_COMMAND, (arg?: unknown) => {
+    const section = requestedSection(arg);
+    if (staffSetupFrontDoor) {
+      return staffSetupFrontDoor(section ? { step: 'staff-team', prefill: { section, fixed: [] } } : { step: 'staff-team' });
+    }
+    return setUpStaffTeam(undefined, section, chat);
+  }));
 }

@@ -1,5 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { setupRegistries } from '../domain/setup/registries';
+import { fromLegacyStep } from '../domain/setup/steps';
 import { parseStaffSettings, STAFF_TEAM_SECTIONS } from '../domain/staff/profiles';
 
 // The one-time setup steps offered after NEAR AI is connected, and again from "NEAR AI: Project
@@ -106,11 +108,32 @@ export const WEB_SEARCH_STEP: SetupStep = {
  */
 export const SETUP_STEPS: SetupStep[] = [PROJECT_TEAM_STEP, SPENDING_LIMIT_STEP, WEB_SEARCH_STEP];
 
-/** Puts `step` into SETUP_STEPS right after `after` (at the end when not given or not found). Dispose to take it out. */
+let legacyStepRunner: ((command: string) => Promise<unknown>) | undefined;
+
+/** Installs the command runner used when Get Started opens a step from the earlier setup menu. */
+export function useLegacyStepRunner(run: (command: string) => Promise<unknown>): { dispose(): void } {
+  legacyStepRunner = run;
+  return { dispose: () => { if (legacyStepRunner === run) legacyStepRunner = undefined; } };
+}
+
+/** Puts a step into the setup menu and forwards it to the guide when the guide accepts its ID. */
 export function registerSetupStep(step: SetupStep, after?: string): { dispose(): void } {
   const next = withSetupStep(SETUP_STEPS, step, after ?? '');
   SETUP_STEPS.splice(0, SETUP_STEPS.length, ...next);
-  return { dispose: () => { const index = SETUP_STEPS.indexOf(step); if (index !== -1) SETUP_STEPS.splice(index, 1); } };
+  const guide = setupRegistries().steps;
+  const replaces = guide.isReplaceable(step.id);
+  const forwarded = !guide.get(step.id) || replaces
+    ? guide.register(fromLegacyStep(step, async (command) => { await legacyStepRunner?.(command); }), {
+      after, replaces, replaceable: true
+    })
+    : undefined;
+  return {
+    dispose() {
+      const index = SETUP_STEPS.indexOf(step);
+      if (index >= 0) SETUP_STEPS.splice(index, 1);
+      forwarded?.dispose();
+    }
+  };
 }
 
 const FACT_PROVIDERS = new Map<string, SetupFactProvider>();

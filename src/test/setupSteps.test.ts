@@ -7,9 +7,11 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import type { OpenGetStartedRequest } from '../domain/setup/answers';
+import { setupRegistries } from '../domain/setup/registries';
 import { SecretStorageLike } from '../services/auth';
 import {
-  buildSetupMenu, collectSetupContext, latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, projectTeamFile, registerSetupFacts, registerSetupStep, SETUP_NUDGE_DISMISSED_KEY, SETUP_STEPS, SetupContext, SetupStep, shouldShowSetupNudge, START_CHATTING, withSetupStep
+  buildSetupMenu, collectSetupContext, latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, projectTeamFile, registerSetupFacts, registerSetupStep, SETUP_NUDGE_DISMISSED_KEY, SETUP_STEPS, SetupContext, SetupStep, shouldShowSetupNudge, START_CHATTING, useLegacyStepRunner, withSetupStep
 } from '../services/setupSteps';
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -120,6 +122,69 @@ test('registered steps go into the one registry, in place, and come out again', 
   try { assert.equal(SETUP_STEPS.at(-1)?.id, 'last', 'no anchor: at the end'); } finally { last.dispose(); }
 });
 
+test('a legacy step appears in the guide with its facts and leaves both registries on disposal', async () => {
+  const steps = setupRegistries().steps;
+  const registration = registerSetupStep({
+    id: 'repository', label: 'Choose where to store the project', detail: 'Pick where the project lives.',
+    icon: 'repo', command: 'nearAi.chooseRepository',
+    isDone: (ctx) => ctx.facts.repositoryChosen === true,
+    isAvailable: (ctx) => Boolean(ctx.root)
+  }, 'project-team');
+  try {
+    const forwarded = steps.get('repository');
+    assert.ok(forwarded);
+    assert.deepEqual([forwarded.title, await forwarded.state({ ...facts('/project'), facts: { repositoryChosen: true } })],
+      ['Choose where to store the project', 'done']);
+    assert.equal((await forwarded.viability(facts('/project'))).available, true);
+  } finally { registration.dispose(); }
+  assert.equal(steps.get('repository'), undefined);
+  assert.equal(SETUP_STEPS.some(({ id }) => id === 'repository'), false);
+});
+
+test('a legacy step can replace the guide default but cannot override a protected step', () => {
+  const steps = setupRegistries().steps;
+  const defaultStep = {
+    id: 'share-with-people', title: 'Guide default', detail: '',
+    state: () => 'to-do' as const, viability: () => ({ available: true }), run: async () => ({ outcome: 'opened' as const })
+  };
+  const replaceable = steps.register(defaultStep, { replaceable: true });
+  const protectedStep = { ...defaultStep, id: 'protected' };
+  const protectedRegistration = steps.register(protectedStep);
+  const legacy: SetupStep = {
+    id: 'share-with-people', label: 'Invite people', detail: 'Ask others to join.',
+    icon: 'person-add', command: 'nearAi.invitePeople', isDone: () => false
+  };
+  const owner = registerSetupStep(legacy);
+  const collision = registerSetupStep({ ...legacy, id: 'protected', label: 'Legacy only' });
+  try {
+    assert.equal(steps.get('share-with-people')?.title, 'Invite people');
+    assert.equal(steps.get('protected'), protectedStep);
+    assert.equal(SETUP_STEPS.find(({ id }) => id === 'protected')?.label, 'Legacy only');
+  } finally {
+    collision.dispose();
+    owner.dispose();
+    protectedRegistration.dispose();
+    replaceable.dispose();
+  }
+});
+
+test('forwarded guide steps use the current legacy runner only while it is registered', async () => {
+  const registration = registerSetupStep({ ...SETUP_STEPS[0], id: 'runner-test', command: 'nearAi.fixture' });
+  const calls: string[] = [];
+  const runner = useLegacyStepRunner(async (command) => { calls.push(command); });
+  try {
+    const step = setupRegistries().steps.get('runner-test');
+    assert.ok(step);
+    assert.deepEqual(await step.run(facts('/project')), { outcome: 'opened' });
+    runner.dispose();
+    await step.run(facts('/project'));
+    assert.deepEqual(calls, ['nearAi.fixture']);
+  } finally {
+    runner.dispose();
+    registration.dispose();
+  }
+});
+
 test('registered facts grow the context; a failing provider leaves its fact out', async () => {
   const one = registerSetupFacts('people', () => 3);
   const broken = registerSetupFacts('broken', () => { throw new Error('offline'); });
@@ -209,7 +274,8 @@ const vscodeStub = {
       get: <T>(key: string, fallback?: T) => (key in settings ? settings[key] : fallback) as T,
       inspect: () => undefined, update: async () => undefined
     }),
-    onDidChangeConfiguration: () => ({ dispose() {} })
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidSaveTextDocument: () => ({ dispose() {} })
   },
   window: {
     showWarningMessage: async () => undefined,
@@ -269,6 +335,37 @@ test('NEAR AI: Project Setup opens the menu at any time, and runs the step picke
     assert.deepEqual(executed, [['nearAi.openChat']]);
   } finally {
     chatOnScreen = false;
+  }
+});
+
+test('setup commands opt in to the matching guide entry points and retain validated staff prefill', async () => {
+  reset();
+  vscodeStub.workspace.workspaceFolders = [];
+  const requests: Array<OpenGetStartedRequest | undefined> = [];
+  const openGuide = async (request?: OpenGetStartedRequest) => { requests.push(request); };
+  const owner = { subscriptions: [] as Array<{ dispose(): void }> };
+  const staff = load<typeof import('../services/staffSetupCommand')>('../services/staffSetupCommand');
+  const workspace = load<typeof import('../services/workspaceCommands')>('../services/workspaceCommands');
+  const staffOpener = staff.useStaffSetupFrontDoor(openGuide);
+  menu.registerProjectSetup(owner as never, host, openGuide);
+  workspace.registerWorkspaceCommands(owner as never, () => assert.fail('the legacy studio must stay closed'), openGuide);
+  staff.registerStaffSetup(owner as never);
+  try {
+    await commands.get('nearAi.projectSetup')!();
+    await commands.get('nearAi.setupProjectTeam')!();
+    await commands.get('nearAi.setUpStaffTeam')!({ section: 'j2' });
+    await commands.get('nearAi.setUpStaffTeam')!({ section: 'j2', extra: true });
+    assert.deepEqual(requests, [
+      { step: 'checklist' }, { step: 'software-team' },
+      { step: 'staff-team', prefill: { section: 'j2', fixed: [] } }, { step: 'staff-team' }
+    ]);
+    staffOpener.dispose();
+    await commands.get('nearAi.setUpStaffTeam')!({ section: 'j2' });
+    assert.equal(requests.length, 4);
+    assert.match(infos.at(-1)?.text ?? '', /Open a project folder first/);
+  } finally {
+    staffOpener.dispose();
+    for (const subscription of owner.subscriptions) subscription.dispose();
   }
 });
 
