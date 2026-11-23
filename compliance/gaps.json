@@ -354,6 +354,93 @@
     },
     {
       "controls": [
+        "cp-01",
+        "cp-02",
+        "cp-02.01",
+        "cp-02.02",
+        "cp-02.03",
+        "cp-02.08"
+      ],
+      "id": "G31",
+      "ownerRole": "owner",
+      "poam": "g31",
+      "remediation": "The sponsor continuity lead approves the policy and deployment contingency plan and records who receives and reviews them. Retain the critical asset and dependency inventory, named escalation roles, coordination records for related plans, degraded processing/telecommunications/environment capacity analysis, and approved resumption objectives for essential functions.",
+      "title": "Approved contingency policy, critical assets and recovery priorities need evidence"
+    },
+    {
+      "controls": [
+        "cp-03",
+        "cp-04",
+        "cp-04.01"
+      ],
+      "id": "G32",
+      "ownerRole": "owner",
+      "poam": "g32",
+      "remediation": "The deployment continuity exercise lead identifies the required trainees and role-specific training schedule, reviews training when roles or systems change, and coordinates a test with the owners of related plans. Record the dated training and exercise results, approved scenarios, corrective actions and retests. Use the hub restore drill as a component input when the hub is in scope.",
+      "title": "Contingency role training and coordinated exercises need dated records"
+    },
+    {
+      "controls": [
+        "cp-06",
+        "cp-06.01",
+        "cp-06.03",
+        "cp-07",
+        "cp-07.01",
+        "cp-07.02",
+        "cp-07.03",
+        "cp-07.04",
+        "cp-07.06"
+      ],
+      "id": "G33",
+      "ownerRole": "owner",
+      "poam": "g33",
+      "remediation": "The deployment hosting and continuity owners identify the alternate sites required by the approved recovery plan. For storage, verify retrieval agreements, equivalent controls, separation from common threats and mitigations for regional access loss. For processing, verify resumption agreements and priority provisions, equipment and approved settings, access and shared-risk analysis, tested readiness and a plan for permanent loss of the primary site. Obtain an authorized applicability decision for any exclusions.",
+      "title": "Alternate storage and processing sites need approved scope and readiness evidence"
+    },
+    {
+      "controls": [
+        "cp-08",
+        "cp-08.01",
+        "cp-08.02",
+        "cp-08.03",
+        "cp-08.05"
+      ],
+      "id": "G34",
+      "ownerRole": "owner",
+      "poam": "g34",
+      "remediation": "The deployment network and service-contract owners document primary and alternate paths for in-scope processing and storage sites. Verify recovery time and service-priority provisions, provider and physical route independence, and shared points of failure. Record priority access requests when the approved scope requires them, perform scheduled failover tests, and retain the dated results and remediation.",
+      "title": "Alternate telecommunications agreements and exercises need evidence"
+    },
+    {
+      "controls": [
+        "cp-09",
+        "cp-09.01",
+        "cp-09.03",
+        "cp-09.05",
+        "cp-09.07",
+        "cp-09.08"
+      ],
+      "id": "G35",
+      "ownerRole": "shared",
+      "poam": "g35",
+      "remediation": "Backup operators and component maintainers inventory backups, owners and critical assets. Verify scheduled integrity and retrieval tests, separate storage and protected transfer within approved recovery targets, dual authorization for protected backup deletion, and cryptographic protection and key access. Link component restore and relay runbook evidence where applicable and assign deficiencies for implementation and retest.",
+      "title": "Backup reliability, transfer, removal authority and cryptographic protections need evidence"
+    },
+    {
+      "controls": [
+        "cp-10",
+        "cp-10.02",
+        "cp-10.04",
+        "cp-10.06"
+      ],
+      "id": "G36",
+      "ownerRole": "shared",
+      "poam": "g36",
+      "remediation": "Deployment recovery operators and component maintainers identify transaction-based stores, critical components and protected recovery tools. Exercise rollback or journal recovery on each applicable transaction store and restore components from approved integrity-checked baselines. Measure time to known operational state, verify protection and access limits on recovery components, and record sponsor decisions for inapplicable objectives.",
+      "title": "Transaction and component recovery need scoped drills and protected inputs"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
