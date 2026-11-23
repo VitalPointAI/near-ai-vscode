@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { isNearCloudEndpoint, type PrivacyModeSetting } from '../../domain/config';
 import { authorizationCovers, SELF_SIGNED_TEXT } from '../../domain/gate/authorizations';
 import { isDefaultBundle } from '../../domain/gate/bundle';
@@ -7,13 +8,19 @@ import { narrowResidency } from '../../domain/gate/residency';
 import type { RouteFacts, RoutePolicy, RoutingTier } from '../../domain/gate/routing';
 import { parseGuidePrefill, type OpenGetStartedRequest } from '../../domain/setup/answers';
 import type { YesNoUnsure } from '../../domain/setup/changes';
+import type { HostKind } from '../../domain/setup/device';
 import { isGetStartedTarget } from '../../domain/setup/ids';
+import type { SetupRegistries } from '../../domain/setup/registries';
+import type { IdentifyServer } from '../../domain/setup/servers';
 import type { StartSessionInput } from '../../domain/setup/session';
-import type { ViabilityResult } from '../../domain/setup/viability';
+import { CHECKING_CEILING_MS, type ViabilityResult } from '../../domain/setup/viability';
 import type { GateHost } from '../../gate/host';
 import { floorFor } from '../privateRoute';
+import { memoryOnlyDeviceProvider } from './deviceFacts';
 import type { GuideControllerDeps } from './guideController';
 import { readProjectLayer } from './projectStore';
+import { withCheckTimeout } from './probe';
+import { runViability } from './viabilityRunner';
 
 export function routeFactsOf(result: ViabilityResult, now: number): RouteFacts | undefined {
   const observed = result.routeFacts;
@@ -88,5 +95,40 @@ export function gateGuidePolicy(gate: GateHost, root: string, privacy: () => Pri
       routing: state.bundle.routing, defaultLabel: state.bundle.defaultLabel,
       projectLabel: resolved.mark[0], floor: floorTierOf(privacy())
     };
+  };
+}
+
+/** Supply the policy and check adapters for one project's Get Started run. */
+export function createGateGuideChecks(deps: {
+  readonly gate: GateHost;
+  readonly root: string;
+  readonly privacy: () => PrivacyModeSetting;
+  readonly hostKind: HostKind;
+  readonly registries: Pick<SetupRegistries, 'devices' | 'options'>;
+  readonly identify: IdentifyServer;
+  readonly clock?: () => number;
+}): Pick<GuideControllerDeps, 'readPolicy' | 'check'> {
+  const { gate, root, privacy, hostKind, registries, identify, clock = Date.now } = deps;
+  const readPolicy = gateGuidePolicy(gate, root, privacy);
+  const fallback = memoryOnlyDeviceProvider({ hostKind });
+  return {
+    readPolicy,
+    async check(snapshot, progress, signal) {
+      const provider = registries.devices.best() ?? fallback;
+      const device = await withCheckTimeout(signal, CHECKING_CEILING_MS, (checkSignal) => provider.read(checkSignal));
+      const current = await readPolicy(clock());
+      signal.throwIfAborted();
+      if (!('route' in current) || current.hash !== snapshot.hash || current.floor !== snapshot.floor ||
+          !isDeepStrictEqual(current.projectLabel, snapshot.projectLabel)) {
+        throw new Error('The project rules changed before checking connections.');
+      }
+      return runViability({
+        sources: registries.options.active(), signal, onProgress: progress,
+        input: {
+          now: clock, hostKind, device, identify, candidates: [], endpoints: current.route.endpoints,
+          policyHash: current.hash, floorOn: current.floor !== undefined,
+        },
+      });
+    },
   };
 }

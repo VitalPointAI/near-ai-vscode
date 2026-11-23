@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import Module from 'node:module';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { test } from 'node:test';
+import type { PrivacyModeSetting } from '../domain/config';
 import type { GuideInbound, GuideOutbound } from '../domain/setup/guideMessages';
 import { KIND_OF_WORK_STATE_KEY } from '../domain/setup/ids';
 import { createSetupRegistries } from '../domain/setup/registries';
+import type { OptionCheckInput } from '../domain/setup/viability';
 import { memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
 import { createGuideController } from '../services/setup/guideController';
-import { routeFactsOf } from '../services/setup/guideFacts';
+import { createGateGuideChecks, routeFactsOf } from '../services/setup/guideFacts';
 import { readSetupGuide } from '../services/setup/projectStore';
 
 import { at, local, near, setup } from './helpers/getStartedHostFixture';
@@ -27,6 +30,65 @@ const answers: GuideInbound[] = [
   { type: 'answer', key: 'data', value: ['internal'] }, { type: 'next' },
   { type: 'answer', key: 'canada', value: 'no' }, { type: 'next' }
 ];
+
+test('Gate-backed checks use the current signed snapshot and cancel the registered sources', async () => {
+  const { host, root } = await setup();
+  const registries = createSetupRegistries();
+  let privacy: PrivacyModeSetting = 'tee-only';
+  const device = await memoryOnlyDeviceProvider({ hostKind: 'container', totalmem: () => 16e9 }).read();
+  registries.devices.register({ id: 'fixture-device', rank: 1, async read(signal) {
+    assert.equal(signal?.aborted, false);
+    return device;
+  } });
+  const identify = () => assert.fail('the fake source must not probe');
+  const checks = createGateGuideChecks({
+    gate: host, root, privacy: () => privacy, hostKind: 'container', registries, identify, clock: () => at
+  });
+  const snapshot = await checks.readPolicy(at);
+  assert.ok('route' in snapshot);
+  assert.equal(snapshot.floor, 'attested-cloud');
+  let sourceCalls = 0;
+  let abandonSource!: () => void;
+  let sourceStarted!: () => void;
+  const stalled = new Promise<void>((resolve) => { abandonSource = resolve; });
+  const started = new Promise<void>((resolve) => { sourceStarted = resolve; });
+  let sourceSignal: AbortSignal | undefined;
+  let sourceInput: OptionCheckInput | undefined;
+  registries.options.register({ id: 'fixture', kinds: ['this-computer'], async check(input, signal) {
+    sourceCalls++;
+    sourceInput = input;
+    sourceSignal = signal;
+    sourceStarted();
+    await stalled;
+    input.progress(local);
+    return local;
+  } });
+
+  privacy = 'standard';
+  await assert.rejects(checks.check(snapshot, () => assert.fail('stale snapshot published progress'),
+    new AbortController().signal), /project rules changed/);
+  assert.equal(sourceCalls, 0);
+  privacy = 'tee-only';
+  const controller = new AbortController();
+  const progress: string[] = [];
+  const running = checks.check(snapshot, (result) => progress.push(result.optionId), controller.signal);
+  await Promise.race([started, running.then(() => assert.fail('the blocked source finished'))]);
+  controller.abort();
+  await assert.rejects(running, { name: 'AbortError' });
+  assert.equal(sourceSignal?.aborted, true);
+  abandonSource();
+  await nextTurn();
+  assert.ok(sourceInput);
+  assert.equal(sourceInput.hostKind, 'container');
+  assert.equal(sourceInput.device, device);
+  assert.equal(sourceInput.identify, identify);
+  assert.equal(sourceInput.policyHash, snapshot.hash);
+  assert.equal(sourceInput.floorOn, true);
+  assert.deepEqual(sourceInput.endpoints, snapshot.route.endpoints);
+  assert.deepEqual(sourceInput.candidates, []);
+  assert.deepEqual(progress, []);
+  assert.equal(sourceCalls, 1);
+});
 
 test('the guide reviews and applies a viable private route through the real label writer and audit', async (t) => {
   const { root, host, audit, deps, posted, calls } = await setup();
