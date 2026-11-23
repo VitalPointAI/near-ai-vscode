@@ -2426,6 +2426,7 @@ health check connects only to itself; and no hub source file names a client netw
 
 | Limitation | Plan |
 | --- | --- |
+| This evidence covers encrypted project state stored by the optional Git sync feature. Other local and hosted information stores need separate evidence. | Verify at-rest protections for the local and hosted stores and backups in the assessed deployment. |
 | The approval test verifies the extension's preflight and preview audit event types. Required audit fields and coverage across assessed components need separate evidence. | Deployment and component owners verify approved audit fields from each assessed source under G45. |
 | Approval attribution is verified for extension decisions. The deployment still needs evidence of authenticator issuance, protection, recovery, rotation and revocation. | The deployment identity owner documents credential lifecycle controls and samples issuance, recovery and denied use after revocation. |
 | Branch protection and an agent review do not establish the owner's approval for a protected environment or verify release-tag bypass authority. | Record each required protected deployment approval and authoritatively review the release-tag ruleset's bypass settings. |
