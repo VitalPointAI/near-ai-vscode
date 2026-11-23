@@ -132,6 +132,8 @@ test('the agent review workflow posts and approves only as near-ai-reviewer, fro
     assert.match(job, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/, `${id} runs the scripts from main`);
   }
   const review = all.get('review');
+  assert.match(review, /^      pr: \$\{\{ steps\.target\.outputs\.pr \}\}$/m);
+  assert.match(review, /^      sha: \$\{\{ steps\.review\.outputs\.sha \}\}$/m);
   assert.match(review, /REVIEW_MODEL_API_KEY: \$\{\{ secrets\.REVIEW_MODEL_API_KEY \}\}/);
   assert.match(review, /REVIEW_MODEL: \$\{\{ vars\.REVIEW_MODEL \}\}/);
   assert.match(review, /REVIEW_MODEL_BASE_URL: \$\{\{ vars\.REVIEW_MODEL_BASE_URL \}\}/);
@@ -139,6 +141,7 @@ test('the agent review workflow posts and approves only as near-ai-reviewer, fro
   assert.match(review, /--expected-head "\$EXPECTED_HEAD"/, 'a PR whose head moved after CI is skipped');
   // The gate holds no secrets and is the owner's click.
   const gate = all.get('owner-approval');
+  assert.match(gate, /^    name: 'owner approval \(gate change\) PR #\$\{\{ needs\.review\.outputs\.pr \}\} @ \$\{\{ needs\.review\.outputs\.sha \}\}'$/m);
   assert.match(gate, /environment: agent-review-gates/);
   assert.match(gate, /needs\.review\.outputs\.gate == 'true'/);
   assert.doesNotMatch(gate, /secrets\./, 'agent-review-gates holds no secrets');
