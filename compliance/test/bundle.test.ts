@@ -130,7 +130,16 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   const out = path.join(dir, 'bundle');
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
   const sbom = path.join(repoRoot, 'compliance/test/fixtures/collectors/sbom/vsix.cdx.json');
-  const collectors = { sbom: { sboms: [{ subject: 'vsix', file: sbom }], retainVsix: true } };
+  const audit = path.join(repoRoot, 'compliance/test/fixtures/collectors/audit/root.json');
+  const testReport = path.join(dir, 'root.ndjson');
+  const rules = JSON.parse(readFileSync(path.join(repoRoot, 'compliance/evidence-rules/release-pipeline.json'), 'utf8'));
+  const regression = rules.rules.find(({ id }: { id: string }) => id === 'release.si-02.policy-feature-regression').test;
+  writeFileSync(testReport, JSON.stringify({ ...regression, status: 'passed', skip: null, ms: 1 }));
+  const collectors = {
+    sbom: { sboms: [{ subject: 'vsix', file: sbom }], retainVsix: true },
+    audit: { audits: [{ package: 'root', file: audit }] },
+    tests: { reports: [{ package: 'root', file: testReport }] }
+  };
   writeFileSync(input, JSON.stringify({ repository: 'owner/repo', commit, kind: 'main', repoRoot, collectors }));
   assert.equal(await main(['bundle', '--inputs', input, '--out', out]), 0);
   const dashboard = JSON.parse(readFileSync(path.join(out, 'dashboard', 'dashboard.json'), 'utf8'));
@@ -171,6 +180,13 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   const observed = report.observations.find(({ subject }: { subject: string }) => subject === 'vsix');
   assert.equal(observed.commit, commit);
   assert.equal(record.sha256, observed.hash);
+  const remediation = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'si-02');
+  assert.equal(remediation.state, 'partly-met');
+  assert.equal(remediation.reason, 'limitation');
+  assert.deepEqual(remediation.components[0].evidence.map(({ rule, passed }: { rule: string; passed: boolean }) => [rule, passed]), [
+    ['release.si-02.root-audit', true],
+    ['release.si-02.policy-feature-regression', true]
+  ]);
   assert.equal(verifyManifest(out).ok, true);
 });
 
