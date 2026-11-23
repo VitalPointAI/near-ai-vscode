@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 38);
-  assert.equal(poam.length, 30);
+  assert.equal(gaps.length, 42);
+  assert.equal(poam.length, 34);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('new account, label, privilege, audit and identity gaps have named open paths', () => {
@@ -24,7 +24,12 @@ test('new account, label, privilege, audit and identity gaps have named open pat
     ['ia-12', 'G22', '44.1'], ['ia-12.02', 'G22', '44.1'], ['ia-12.03', 'G22', '44.1'],
     ['ia-12.04', 'G22', '44.1'], ['ia-12.05', 'G22', '44.1'],
     ['ia-03', 'G23', '44.1'], ['ia-05.01', 'G24', '44.1'], ['ia-06', 'G24', '44.1'],
-    ['ia-05.07', 'G25', '44.1'], ['ia-07', 'G26', '44.1']
+    ['ia-05.07', 'G25', '44.1'], ['ia-07', 'G26', '44.1'],
+    ['ia-02', 'G27', '44.1'], ['ia-02.01', 'G27', '44.1'], ['ia-02.02', 'G27', '44.1'],
+    ['ia-02.08', 'G27', '44.1'], ['ia-02.10', 'G27', '44.1'], ['ia-11', 'G27', '44.1'],
+    ['ia-05.08', 'G28', '44.1'],
+    ['ia-05.09', 'G29', '44.1'], ['ia-08', 'G29', '44.1'], ['ia-08.01', 'G29', '44.1'],
+    ['ia-08.02', 'G29', '44.1'], ['ia-08.04', 'G29', '44.1'], ['ia-05.14', 'G30', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);
