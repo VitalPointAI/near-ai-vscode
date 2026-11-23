@@ -1,0 +1,18 @@
+{
+  "gap": "G205",
+  "id": "g205",
+  "controls": [
+    "itar-120.55",
+    "itar-120.56-a",
+    "itar-120.56-b"
+  ],
+  "ownerRole": "owner",
+  "title": "ITAR release and access-information controls need a protected scope and access review",
+  "remediation": "The sponsor empowered official, trade counsel and credential custodian review the assessed access-information boundary and existing authorization decisions. Assess whether current credential governance and access reviews respect the approved limits, using synthetic or redacted verification evidence only. Retain signed findings and references for open conditions. Keep credentials and controlled information outside the assessor export.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the signed release and access-information scope review, protected authorization references, and a sanitized access-control verification"
+    }
+  ]
+}

@@ -2186,6 +2186,179 @@
     },
     {
       "controls": [
+        "cgp-9"
+      ],
+      "id": "G194",
+      "ownerRole": "owner",
+      "poam": "g194",
+      "remediation": "The sponsor registration owner and designated official approve the assessed legal entity and site scope. Review the change register for application and ownership information, assigned review and notification duties, and any notice already submitted. Retain a dated decision and protected receipt reference for an applicable change or a signed pending-scope record.",
+      "title": "Controlled Goods registration changes need an accountable evidence record"
+    },
+    {
+      "controls": [
+        "cgp-10-b",
+        "cgp-10-c"
+      ],
+      "id": "G195",
+      "ownerRole": "owner",
+      "poam": "g195",
+      "remediation": "The designated official and privacy records steward review the assessment and eligibility evidence sets separately. Document the approved record custody, access roles, retention triggers and retention verification. Use opaque case references and sanitized review results in the assessor package. Keep personal assessment and eligibility documents in their approved repositories.",
+      "title": "Controlled Goods assessment and eligibility records need protected retention evidence"
+    },
+    {
+      "controls": [
+        "cgp-10-f",
+        "cgp-10-g"
+      ],
+      "id": "G196",
+      "ownerRole": "owner",
+      "poam": "g196",
+      "remediation": "The designated official and training owner identify the assessed workforce and visitor populations after approving scope. Review approved training and separate visitor briefing material. Verify sampled completion records using protected references, dates, role categories and exceptions. Keep identities and all training material containing controlled details in the approved repository.",
+      "title": "Controlled Goods role training and visitor briefings need completion evidence"
+    },
+    {
+      "controls": [
+        "cgp-10-i"
+      ],
+      "id": "G197",
+      "ownerRole": "owner",
+      "poam": "g197",
+      "remediation": "The designated official and records custodian approve the scoped inventory of controlled goods accountability, assessment and eligibility records. Verify an authorized custodian can locate and account for the records through a synthetic or redacted preparation exercise. Record the handling approval and protected references, with regulator disclosure decisions reserved to the responsible official.",
+      "title": "Controlled Goods records availability needs an authorized evidence review"
+    },
+    {
+      "controls": [
+        "cgp-10-j"
+      ],
+      "id": "G198",
+      "ownerRole": "owner",
+      "poam": "g198",
+      "remediation": "The sponsor registration owner and designated official determine reporting applicability and approve custody, review and reconciliation responsibilities. Verify a sampled reporting period against a protected assessment register, review approval and any existing submission receipt. Record missing evidence as pending. Exclude personal fields and report contents from the general assessor export.",
+      "title": "Controlled Goods assessment reporting needs a protected review and receipt trail"
+    },
+    {
+      "controls": [
+        "cgp-11",
+        "cgp-12"
+      ],
+      "id": "G199",
+      "ownerRole": "owner",
+      "poam": "g199",
+      "remediation": "The sponsor registration owner and privacy officer review the proposed designated official role, applicable qualification records, assessment and acceptance. Verify an approved appointment and its current review status with evidence references controlled by the responsible custodian. Record pending applicability or missing authority before making an assessment finding.",
+      "title": "Controlled Goods designated official authority needs verified appointment evidence"
+    },
+    {
+      "controls": [
+        "cgp-13",
+        "cgp-14",
+        "cgp-15"
+      ],
+      "id": "G200",
+      "ownerRole": "owner",
+      "poam": "g200",
+      "remediation": "The designated official, registration owner and privacy authority review the approved assessment scope and decision authority. Verify a protected case reference for completed assessment review, official decision, the assessed duties and limits, and how the organization documents reliance on that decision. Keep personal case files and controlled information outside the general export.",
+      "title": "Controlled Goods assessment and scope decisions need protected authority evidence"
+    },
+    {
+      "controls": [
+        "cgp-16"
+      ],
+      "id": "G201",
+      "ownerRole": "owner",
+      "poam": "g201",
+      "remediation": "The sponsor designated official and counsel record whether this provision was considered for the defined deployment and, if already relied on, retain the existing authority decision and supporting reference under restricted custody. Record a dated pending decision if applicability is unresolved. The assessor export carries a scope summary and reference only.",
+      "title": "Controlled Goods class exemption applicability needs a protected authority decision"
+    },
+    {
+      "controls": [
+        "cgp-17",
+        "cgp-18",
+        "cgp-19",
+        "cgp-23"
+      ],
+      "id": "G202",
+      "ownerRole": "owner",
+      "poam": "g202",
+      "remediation": "The sponsor designated official and privacy authority assess the applicability of individual exemption records to the deployment. Where an existing case is in scope, separately verify protected references for the eligibility review, application record, ministerial assessment status and validity determination. Keep identity documents and application contents in restricted custody. Record pending scope and review ownership.",
+      "title": "Controlled Goods individual exemption records need independent evidence review"
+    },
+    {
+      "controls": [
+        "cgp-37-1",
+        "cgp-37-2"
+      ],
+      "id": "G203",
+      "ownerRole": "owner",
+      "poam": "g203",
+      "remediation": "The designated official and counsel review the assessed legal entity and boundaries against the recorded statutory objectives. Verify the applicable registration or approved authority record and examine whether the deployment evidence matches the documented access boundary. Preserve open scope and missing records. Link X1 through X4 and X10 as separate technical paths.",
+      "title": "Controlled Goods statutory scope needs a recorded sponsor authority review"
+    },
+    {
+      "controls": [
+        "itar-120.50"
+      ],
+      "id": "G204",
+      "ownerRole": "owner",
+      "poam": "g204",
+      "remediation": "The sponsor empowered official and trade counsel review which assessed deployment activities and information categories require an ITAR scope decision. Retain a signed applicability record that identifies the affected systems, evidence custody and unresolved questions. Keep any supporting controlled information in restricted custody and use approved references in the assessor package.",
+      "title": "ITAR export-scope applicability needs an authoritative deployment determination"
+    },
+    {
+      "controls": [
+        "itar-120.55",
+        "itar-120.56-a",
+        "itar-120.56-b"
+      ],
+      "id": "G205",
+      "ownerRole": "owner",
+      "poam": "g205",
+      "remediation": "The sponsor empowered official, trade counsel and credential custodian review the assessed access-information boundary and existing authorization decisions. Assess whether current credential governance and access reviews respect the approved limits, using synthetic or redacted verification evidence only. Retain signed findings and references for open conditions. Keep credentials and controlled information outside the assessor export.",
+      "title": "ITAR release and access-information controls need a protected scope and access review"
+    },
+    {
+      "controls": [
+        "itar-122.1"
+      ],
+      "id": "G206",
+      "ownerRole": "owner",
+      "poam": "g206",
+      "remediation": "The sponsor empowered official and trade counsel review registration applicability for the assessed legal entity and approved operating scope. Verify an existing official registration record and its current review status where applicable. Record a dated pending determination when the scope or supporting record remains unresolved.",
+      "title": "ITAR registration applicability needs a scoped authority record"
+    },
+    {
+      "controls": [
+        "itar-126.1"
+      ],
+      "id": "G207",
+      "ownerRole": "owner",
+      "poam": "g207",
+      "remediation": "The sponsor empowered official and trade counsel review the assessed operating boundary against the provision and the current authoritative restrictions. Verify dated review ownership, the applicable source reference, approved boundary evidence and unresolved findings. Copy only the approved summary and reference into the assessor package.",
+      "title": "ITAR restricted-scope review needs a signed applicability record"
+    },
+    {
+      "controls": [
+        "itar-126.18"
+      ],
+      "id": "G208",
+      "ownerRole": "owner",
+      "poam": "g208",
+      "remediation": "The sponsor empowered official, counsel and personnel security owner review whether the provision is relevant to the assessed personnel boundary. Where the organization already relies on a decision, verify signed scope and review records and separately confirm custody of the existing supporting evidence. Keep personal and controlled information restricted. Record unresolved applicability.",
+      "title": "ITAR personnel-scope determinations need protected evidence references"
+    },
+    {
+      "controls": [
+        "ear-734.13",
+        "ear-734.15",
+        "ear-734.18-a5"
+      ],
+      "id": "G209",
+      "ownerRole": "owner",
+      "poam": "g209",
+      "remediation": "The sponsor trade counsel and authorized EAR owner review the three objectives individually for the assessed operating boundary. Record export, release and encrypted activity scope decisions with separate dated evidence references where relevant. Where the organization already relies on a decision, verify the approved supporting review. Leave unresolved scope pending and keep controlled and key material outside the assessor export.",
+      "title": "EAR export, release and encrypted activity reviews need separate scoped decisions"
+    },
+    {
+      "controls": [
         "itsp171-03.01.01"
       ],
       "id": "G210",

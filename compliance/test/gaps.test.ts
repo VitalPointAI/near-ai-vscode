@@ -12,8 +12,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 238);
-  assert.equal(poam.length, 230);
+  assert.equal(gaps.length, 254);
+  assert.equal(poam.length, 246);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -125,7 +125,17 @@ test('release assessment gaps have named open paths', () => {
     ['itsp171-03.03.07', 'G242', '44.1'], ['itsp171-03.03.08', 'G243', '44.1'], ['itsp171-03.01.13', 'G244', '44.1'],
     ['itsp171-03.01.14', 'G244', '44.1'], ['itsp171-03.01.15', 'G244', '44.1'], ['itsp171-03.01.17', 'G244', '44.1'],
     ['itsp171-03.01.19', 'G244', '44.1'], ['itsp171-03.01.21', 'G244', '44.1'], ['itsp171-03.02.03', 'G244', '44.1'],
-    ['itsp171-03.03.09', 'G244', '44.1']
+    ['itsp171-03.03.09', 'G244', '44.1'],
+    ['cgp-9', 'G194', '44.1'], ['cgp-10-b', 'G195', '44.1'], ['cgp-10-c', 'G195', '44.1'],
+    ['cgp-10-f', 'G196', '44.1'], ['cgp-10-g', 'G196', '44.1'], ['cgp-10-i', 'G197', '44.1'],
+    ['cgp-10-j', 'G198', '44.1'], ['cgp-11', 'G199', '44.1'], ['cgp-12', 'G199', '44.1'],
+    ['cgp-13', 'G200', '44.1'], ['cgp-14', 'G200', '44.1'], ['cgp-15', 'G200', '44.1'],
+    ['cgp-16', 'G201', '44.1'], ['cgp-17', 'G202', '44.1'], ['cgp-18', 'G202', '44.1'],
+    ['cgp-19', 'G202', '44.1'], ['cgp-23', 'G202', '44.1'], ['cgp-37-1', 'G203', '44.1'],
+    ['cgp-37-2', 'G203', '44.1'], ['itar-120.50', 'G204', '44.1'], ['itar-120.55', 'G205', '44.1'],
+    ['itar-120.56-a', 'G205', '44.1'], ['itar-120.56-b', 'G205', '44.1'], ['itar-122.1', 'G206', '44.1'],
+    ['itar-126.1', 'G207', '44.1'], ['itar-126.18', 'G208', '44.1'], ['ear-734.13', 'G209', '44.1'],
+    ['ear-734.15', 'G209', '44.1'], ['ear-734.18-a5', 'G209', '44.1']
   ]) {
     const gap = gaps.find((item) => item.id === id);
     const item = poam.find((candidate) => candidate.id === gap?.poam);

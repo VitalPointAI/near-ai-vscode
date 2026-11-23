@@ -1,0 +1,16 @@
+{
+  "gap": "G204",
+  "id": "g204",
+  "controls": [
+    "itar-120.50"
+  ],
+  "ownerRole": "owner",
+  "title": "ITAR export-scope applicability needs an authoritative deployment determination",
+  "remediation": "The sponsor empowered official and trade counsel review which assessed deployment activities and information categories require an ITAR scope decision. Retain a signed applicability record that identifies the affected systems, evidence custody and unresolved questions. Keep any supporting controlled information in restricted custody and use approved references in the assessor package.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a signed applicability review or pending-scope decision and protected references for the reviewed deployment boundary"
+    }
+  ]
+}
