@@ -22,16 +22,23 @@ export interface SetupMenuHost {
  * screen, so a menu replaced by another prompt (the Command Palette) never pulls focus away.
  */
 export async function showSetupMenu(host: SetupMenuHost, options: { title?: string } = {}): Promise<string | undefined> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return undefined; }
-  const ctx = await collectSetupContext({ root, setting: (key) => vscode.workspace.getConfiguration('nearAi').get(key) });
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!folder?.fsPath) { void vscode.window.showWarningMessage('Open a project folder first.'); return undefined; }
+  const projectStillSelected = () => {
+    if (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath === folder.fsPath) return true;
+    void vscode.window.showWarningMessage('The selected project changed. Open Project Setup again to continue.');
+    return false;
+  };
+  const configuration = vscode.workspace.getConfiguration('nearAi', folder);
+  const ctx = await collectSetupContext({ root: folder.fsPath, setting: (key) => configuration.get(key) });
   const items = await buildSetupMenu(SETUP_STEPS, ctx);
+  if (!projectStillSelected()) return undefined;
   const picked = await vscode.window.showQuickPick(items.map((item) => ({ label: item.label, detail: item.detail, command: item.command })), {
     title: options.title ?? 'Project Setup',
     placeHolder: 'Pick a step. You can come back to these with SovAI: Project Setup.',
     ignoreFocusOut: true
   });
-  if (!picked && host.chatVisible?.()) return undefined;
+  if ((!picked && host.chatVisible?.()) || !projectStillSelected()) return undefined;
   const command = picked?.command ?? START_CHATTING.command;
   await vscode.commands.executeCommand(command);
   return command;
