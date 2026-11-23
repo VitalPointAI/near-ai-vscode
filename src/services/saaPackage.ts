@@ -211,7 +211,9 @@ function sponsorResponse(control: Control, profile: Profile, duties: readonly st
     draft: (inherited.length
       ? `We will confirm whether ${inherited.join(', ')} supplies this control for the proposed deployment.`
       : 'We will identify the organization responsible for this control and document its deployment implementation.') + responsibility,
-    followUp: 'Confirm the responsible owner and record applicable implementation, operating records and assessor evidence.'
+    followUp: gaps.length
+      ? `Review related gaps ${gaps.map(({ id }) => id).join(', ')}. Verify the deployment or inherited evidence with the accountable owner.`
+      : 'No deployment evidence path assigned. Record the accountable owner, assessment action, and required evidence or approved tailoring decision.'
   };
   if (control.state === 'met' && passingEvidence) return {
     draft: 'We propose the cited release evidence for assessor review against the approved deployment boundary and configuration.' + responsibility,
@@ -226,7 +228,7 @@ function sponsorResponse(control: Control, profile: Profile, duties: readonly st
 }
 
 function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): { tables: Table[]; profiles: SaaSponsorReportInput['profiles'] } {
-  const coverage: CsvRow[] = [['Profile ID', 'Profile name', 'Product rows', ...STATES, 'Deployment assessment', 'Unassigned product gaps']];
+  const coverage: CsvRow[] = [['Profile ID', 'Profile name', 'Product rows', ...STATES, 'Deployment assessment', 'Unassigned product gaps', 'Unassigned deployment evidence paths']];
   const controls: CsvRow[] = [[
     'Profile ID', 'Profile kind', 'OSCAL control ID', 'Control label', 'Control title', 'Product state', 'Product reason',
     'Product snapshot (UTC)', 'Product commit', 'Mapped components and responsibilities', 'Product rule IDs', 'Related published gap IDs',
@@ -264,6 +266,7 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
     const rows = dashboard.rows.filter((row) => row.level === profile.id);
     const counts = new Map<ProductState, number>();
     let unassigned = 0;
+    let unassignedDeployment = 0;
     const drafts: SaaSponsorReportInput['profiles'][number]['rows'][number][] = [];
     for (const row of rows) {
       counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
@@ -289,11 +292,16 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
         : row.reasonText;
       drafts.push({ label: row.label, title: row.title, publishedState: row.state, evidenceStatus,
         publishedReason: reasonText, sponsorDraft: response.draft, followUp: response.followUp });
-      if (profile.claim && !related.length && (['not-met', 'partly-met', 'stale'].includes(row.state) ||
-          (row.state === 'met' && !passingEvidence))) {
-        unassigned++;
-        actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Control implementation or evidence review', 'Unassigned', row.control,
-          '', response.followUp, '', '', '', '', '', '', '', '', profile.id]);
+      if (profile.claim && !related.length) {
+        if (row.state === 'your-organizations-responsibility') {
+          unassignedDeployment++;
+          actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Deployment or inherited evidence review', 'Unassigned deployment', row.control,
+            '', response.followUp, '', '', '', '', '', '', '', '', profile.id]);
+        } else if (['not-met', 'partly-met', 'stale'].includes(row.state) || (row.state === 'met' && !passingEvidence)) {
+          unassigned++;
+          actions.push([`TRIAGE-${profile.id}-${row.control}`, 'Control implementation or evidence review', 'Unassigned', row.control,
+            '', response.followUp, '', '', '', '', '', '', '', '', profile.id]);
+        }
       }
       const textFile = row.textFile ? `evidence/bundle/dashboard/${row.textFile}` : '';
       const official = textFile && safePath(textFile) && release.files.has(textFile) ? `release-package/${textFile}` : '';
@@ -317,7 +325,7 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
       }
     }
     coverage.push([profile.id, profile.title, rows.length, ...STATES.map((state) => counts.get(state) ?? 0),
-      profile.claim ? 'Not assessed' : 'Reference only', profile.claim ? unassigned : '']);
+      profile.claim ? 'Not assessed' : 'Reference only', profile.claim ? unassigned : '', profile.claim ? unassignedDeployment : '']);
     profiles.push({ id: profile.id, title: profile.title, referenceOnly: !profile.claim, rows: drafts });
   }
   for (const gap of dashboard.gaps) {
@@ -428,7 +436,7 @@ This export uses the product evidence published for NEAR AI for VS Code v${evide
 The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
 - The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
-- The coverage tab counts unresolved product rows with no assigned closure path. The product gaps tab labels these rows Unassigned. Before release, Phase 44.1 records a role, milestone, and closure evidence or approved tailoring decision for each applicable row.
+- The coverage tab counts missing product and deployment evidence paths. The product gaps tab labels these actions Unassigned or Unassigned deployment. Phase 44.1 records a role, milestone, and closure evidence or approved tailoring decision for each applicable row.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - ${approval
     ? `The [Marketplace approval receipt](marketplace-approval.json) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`

@@ -173,9 +173,36 @@ test('distinguishes missing, stale and failed evidence and counts unresolved in-
   assert.match(triage, /"TRIAGE-protected-a-au-2","Control implementation or evidence review","Unassigned","au-2","","No closure path assigned\. In Phase 44\.1,[^\n]+?decision\.","",/);
   const coverage = result.get('evidence/coverage-summary.csv')!().toString();
   assert.match(coverage, /"Deployment assessment","Unassigned product gaps"/);
-  assert.match(coverage, /"protected-a",[^\n]+,"Not assessed","1"/);
-  assert.match(coverage, /"classified",[^\n]+,"Reference only",""/);
+  assert.match(coverage, /"protected-a",[^\n]+,"Not assessed","1","0"/);
+  assert.match(coverage, /"classified",[^\n]+,"Reference only","",""/);
   assert.doesNotMatch(triage, /TRIAGE-classified/);
+});
+
+test('flags deployment evidence without a path and preserves linked and reference controls', async () => {
+  const evidence = release();
+  const ownership = 'your-organizations-responsibility';
+  const inherited = {
+    level: 'protected-a', control: 'ca-1', label: 'CA-1', title: 'Assessment policy',
+    state: ownership, reason: 'inherited',
+    components: [{ component: 'Deployment', responsibility: 'inherited', state: ownership,
+      inheritedFrom: 'Shared service', evidence: [] }]
+  };
+  const linked = { ...inherited, control: 'ca-2', label: 'CA-2', gap: 'CG-3' };
+  const reference = { ...inherited, level: 'classified' };
+  const action = { id: 'CG-3', title: 'Deployment review', ownerRole: 'Assessment lead', state: 'planned',
+    controls: ['ca-2'], remediation: 'Verify assigned assessor', phase: '44.1' };
+  const data = { ...dashboard, rows: [dashboard.rows[0], inherited, linked, reference], gaps: [action] };
+  const result = readZip(await buildSaaPackage({ ...evidence, dashboard: data }, formsDir, new Map()), 'SA&A package');
+  const coverage = result.get('evidence/coverage-summary.csv')!().toString();
+  assert.match(coverage, /"Unassigned product gaps","Unassigned deployment evidence paths"/);
+  assert.match(coverage, /"protected-a",[^\n]+,"Not assessed","0","1"/);
+  assert.match(coverage, /"classified",[^\n]+,"Reference only","",""/);
+  const actions = result.get('evidence/gap-and-action-register.csv')!().toString();
+  assert.match(actions, /"TRIAGE-protected-a-ca-1","Deployment or inherited evidence review","Unassigned deployment"/);
+  assert.doesNotMatch(actions, /TRIAGE-(?:classified|protected-a-ca-2)/);
+  const traceability = result.get('evidence/control-traceability.csv')!().toString();
+  assert.match(traceability, /"ca-1",[^\n]+No deployment evidence path assigned/);
+  assert.match(traceability, /"ca-2",[^\n]+Review related gaps CG-3/);
 });
 
 test('reports missing, inconsistent or malformed package inputs before producing a draft', async () => {
