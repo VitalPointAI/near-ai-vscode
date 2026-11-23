@@ -50,6 +50,7 @@ export interface VscodeStub {
   fireDocumentOpen(path: string, text: string): StubTextDocument;
   fireDocumentChange(document: StubTextDocument, edits: readonly DocumentEdit[], reason?: number): void;
   fireDocumentClose(document: StubTextDocument): void;
+  setActiveDocument(document: StubTextDocument | undefined): void;
   documentChangeListeners(): number;
   beforeNextWorkspaceEdit(action: () => void): void;
   workspaceEdits: Array<{ uri: string; version: number; applied: boolean; edits: readonly StubTextEdit[] }>;
@@ -135,6 +136,14 @@ export function createVscodeStub(): VscodeStub {
   };
 
   const documents = new Set<StubTextDocument>();
+  type StubTextEditor = { document: StubTextDocument };
+  let activeTextEditor: StubTextEditor | undefined;
+  const activeEditorListeners = new Set<(editor: StubTextEditor | undefined) => void>();
+  const setActiveDocument = (document: StubTextDocument | undefined): void => {
+    if (activeTextEditor?.document === document) return;
+    activeTextEditor = document === undefined ? undefined : { document };
+    for (const listener of [...activeEditorListeners]) listener(activeTextEditor);
+  };
   const openDocumentListeners = new Set<(document: StubTextDocument) => void>();
   const closeDocumentListeners = new Set<(document: StubTextDocument) => void>();
   const changeDocumentListeners = new Set<(event: { document: StubTextDocument; contentChanges: readonly DocumentEdit[]; reason?: number }) => void>();
@@ -187,6 +196,8 @@ export function createVscodeStub(): VscodeStub {
       public dispose(): void { this.listeners.clear(); }
     },
     window: {
+      get activeTextEditor(): StubTextEditor | undefined { return activeTextEditor; },
+      onDidChangeActiveTextEditor: (listener: (editor: StubTextEditor | undefined) => void) => listen(activeEditorListeners, listener),
       get state(): { focused: boolean; active: boolean } { return { focused: windowState.focused, active: windowState.active }; },
       onDidChangeWindowState: (listener: (state: { focused: boolean; active: boolean }) => void) => {
         windowListeners.add(listener);
@@ -346,10 +357,12 @@ export function createVscodeStub(): VscodeStub {
       return document;
     },
     fireDocumentChange: changeDocument,
+    setActiveDocument,
     fireDocumentClose(document) {
       document.isClosed = true;
       documents.delete(document);
       for (const listener of [...closeDocumentListeners]) listener(document);
+      if (activeTextEditor?.document === document) setActiveDocument(undefined);
     },
     async fireRename(files: Array<{ from: string; to: string }>): Promise<void> {
       const event = { files: files.map((file) => ({ oldUri: { fsPath: file.from }, newUri: { fsPath: file.to } })) };

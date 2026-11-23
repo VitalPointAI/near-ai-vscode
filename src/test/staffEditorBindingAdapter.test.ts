@@ -11,6 +11,10 @@ const PRODUCT = 'bridge-status';
 const HEADER = '---\nproduct: bridge-status\n---\n\n';
 const FILE = '/virtual/products/bridge-status.md';
 const servicePath = '../services/staffEditorBinding';
+const CONTEXT = 'nearAi.staffBoundEditor';
+const UNDO = 'nearAi.staff.undoMyChange';
+const REDO = 'nearAi.staff.redoMyChange';
+const OWN_HISTORY_NOTICE = 'Undo in a shared product removes only your own changes.';
 
 async function until(check: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 8000;
@@ -23,6 +27,7 @@ async function until(check: () => boolean | Promise<boolean>): Promise<void> {
 async function withAdapter(run: (fixture: {
   stub: ReturnType<typeof createVscodeStub>;
   notify(): void;
+  dispose(): void;
   body(): Promise<string | undefined>;
   updateCount(): Promise<number>;
   remoteEdit(edits: Array<{ offset: number; length: number; text: string }>): Promise<void>;
@@ -35,6 +40,7 @@ async function withAdapter(run: (fixture: {
   const context = createFakeContext(a.at.global, a.at.secrets);
   const restore = installVscodeStub(stub);
   const listeners = new Set<() => void>();
+  const dispose = (): void => { for (const subscription of context.subscriptions.splice(0)) subscription.dispose(); };
   try {
     const seed = await ProductEditor.open(a.project, target);
     try {
@@ -52,9 +58,13 @@ async function withAdapter(run: (fixture: {
       }
     };
     const { registerStaffEditorBindings } = require(servicePath) as typeof import('../services/staffEditorBinding');
-    registerStaffEditorBindings(context, () => assert.fail('the tracer registers no commands'), source);
+    registerStaffEditorBindings(context, (id, handler) => {
+      stub.commands.set(id, handler);
+      context.subscriptions.push({ dispose: () => { stub.commands.delete(id); } });
+    }, source);
     await run({
       stub,
+      dispose,
       notify() { for (const listener of listeners) listener(); },
       async body() { return productOutput((await a.project.state()).fold, stream, PRODUCT)?.text; },
       async updateCount() { return (await a.project.findOwnAll('doc.update', () => true)).length; },
@@ -72,7 +82,7 @@ async function withAdapter(run: (fixture: {
       }
     });
   } finally {
-    for (const subscription of context.subscriptions) subscription.dispose();
+    dispose();
     await until(() => stub.documentChangeListeners() === 0);
     delete require.cache[require.resolve(servicePath)];
     restore();
@@ -113,7 +123,7 @@ test('an unlisted document stays unbound without loading replica modules', async
   };
   try {
     const { registerStaffEditorBindings } = require(servicePath) as typeof import('../services/staffEditorBinding');
-    registerStaffEditorBindings(context, () => assert.fail('the tracer registers no commands'), {
+    registerStaffEditorBindings(context, () => undefined, {
       productFor: () => undefined, onProductChanged: () => ({ dispose() {} })
     });
     const document = stub.fireDocumentOpen('/virtual/other.md', 'Private notes');
@@ -162,5 +172,91 @@ test('opening a CRLF editor normalizes line endings in one WorkspaceEdit', async
     assert.equal(stub.workspaceEdits.length, 1);
     assert.equal(stub.workspaceEdits[0].edits.length, 1);
     assert.equal(await updateCount(), 1);
+  });
+});
+
+test('the bound context follows the active editor and clears on close', async () => {
+  await withAdapter(async ({ stub }) => {
+    const other = stub.fireDocumentOpen('/virtual/other.md', 'Notes');
+    const shared = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    assert.equal(stub.contextKeys.get(CONTEXT), false);
+    stub.setActiveDocument(shared);
+    assert.equal(stub.contextKeys.get(CONTEXT), false, 'an opening binding has no shortcuts yet');
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+
+    stub.setActiveDocument(other);
+    assert.equal(stub.contextKeys.get(CONTEXT), false);
+    stub.setActiveDocument(shared);
+    assert.equal(stub.contextKeys.get(CONTEXT), true);
+    stub.fireDocumentClose(shared);
+    assert.equal(stub.contextKeys.get(CONTEXT), false);
+  });
+});
+
+test('disposing an active binding clears the context and unregisters history commands', async () => {
+  await withAdapter(async ({ stub, dispose }) => {
+    const document = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    stub.setActiveDocument(document);
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+    dispose();
+
+    assert.equal(stub.contextKeys.get(CONTEXT), false);
+    assert.equal(stub.commands.has(UNDO), false);
+    assert.equal(stub.commands.has(REDO), false);
+    stub.setActiveDocument(undefined);
+    stub.setActiveDocument(document);
+    assert.equal(stub.contextKeys.get(CONTEXT), false);
+  });
+});
+
+test('shared undo and redo commands target only the active bound editor and preserve peer edits', async () => {
+  await withAdapter(async ({ stub, body, remoteEdit }) => {
+    const shared = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    stub.setActiveDocument(shared);
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+    stub.fireDocumentChange(shared, [{ rangeOffset: shared.getText().length, rangeLength: 0, text: '!' }]);
+    await until(async () => await body() === 'Alpha Bravo!');
+    await remoteEdit([{ offset: 'Alpha Bravo!'.length, length: 0, text: '?' }]);
+    await until(() => shared.getText() === HEADER + 'Alpha Bravo!?');
+
+    const undo = stub.commands.get(UNDO);
+    const redo = stub.commands.get(REDO);
+    assert.ok(undo && redo);
+    const other = stub.fireDocumentOpen('/virtual/other.md', 'Notes');
+    stub.setActiveDocument(other);
+    await undo();
+    await redo();
+    assert.equal(other.getText(), 'Notes');
+    assert.equal(shared.getText(), HEADER + 'Alpha Bravo!?');
+
+    stub.setActiveDocument(shared);
+    await undo();
+    assert.equal(shared.getText(), HEADER + 'Alpha Bravo?');
+    await until(async () => await body() === 'Alpha Bravo?');
+    await redo();
+    assert.equal(shared.getText(), HEADER + 'Alpha Bravo!?');
+    await until(async () => await body() === 'Alpha Bravo!?');
+  });
+});
+
+test('native undo and redo events use the shared history and show its notice once', async () => {
+  await withAdapter(async ({ stub, body, remoteEdit }) => {
+    const document = stub.fireDocumentOpen(FILE, HEADER + 'Alpha Bravo');
+    stub.setActiveDocument(document);
+    await until(() => stub.contextKeys.get(CONTEXT) === true);
+    stub.fireDocumentChange(document, [{ rangeOffset: document.getText().length, rangeLength: 0, text: '!' }]);
+    await until(async () => await body() === 'Alpha Bravo!');
+    await remoteEdit([{ offset: 'Alpha Bravo!'.length, length: 0, text: '?' }]);
+    await until(() => document.getText() === HEADER + 'Alpha Bravo!?');
+
+    const removeLast = () => [{ rangeOffset: document.getText().length - 1, rangeLength: 1, text: '' }];
+    stub.fireDocumentChange(document, removeLast(), 1);
+    await until(async () => await body() === 'Alpha Bravo?');
+    assert.equal(document.getText(), HEADER + 'Alpha Bravo?');
+
+    stub.fireDocumentChange(document, removeLast(), 2);
+    await until(async () => await body() === 'Alpha Bravo!?');
+    assert.equal(document.getText(), HEADER + 'Alpha Bravo!?');
+    assert.deepEqual(stub.notifications.map(({ message }) => message), [OWN_HISTORY_NOTICE]);
   });
 });
