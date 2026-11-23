@@ -122,6 +122,7 @@ export const STORE_REFUSALS = {
   unreadable: 'Part of the shared history in this project folder could not be read, so it was not opened. Nothing was changed. Check that the folder and its files can be read by your user account.',
   'not-a-store': 'The shared history folder in this project is not a folder this extension made, so it was not opened. Nothing was changed.',
   'out-of-order': 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.',
+  'snapshot-changed': 'The shared history changed before this update was saved, so nothing was written.',
   'start-again-unfinished': 'Starting this computer\'s shared history again did not finish, so the shared history was not opened. Nothing was deleted. Open the project again to finish it. If this message comes back, check that the folders in .planning/staff can be read and written by your user account.',
   'nothing-to-carry': 'There is no copy of this project\'s shared history on this computer to start again from, so nothing was changed. Ask your staff lead for a new welcome file and open it with Staff: Join Staff Project.'
 } as const;
@@ -944,12 +945,13 @@ export class ReplicaStore {
     }
   }
 
-  /**
-   * Appends this device's own built entries, in order, with their blobs. An entry already stored is skipped (a retry after a crash). Each new entry
-   * must carry this device's valid signature and follow the last one in its file (seq one higher, prev naming it), or nothing is written. Blobs go
-   * first, then the lines, then the mark.
-   */
-  public async appendOwn(built: readonly BuiltEntry[]): Promise<AppendResult> {
+  /** Identifies the loaded history, decode membership, and remembered roster head. */
+  public appendSnapshot(): string {
+    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null,
+      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort()]));
+  }
+  /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
+  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string): Promise<AppendResult> {
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
       if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
@@ -968,7 +970,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        // Plan the batch against the files as they are now, before anything is written.
+        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
         const planned = new Set<string>();
@@ -1592,8 +1594,7 @@ export class ReplicaStore {
   /**
    * Reads this device's mark and, when it changed since this store last read or wrote it, checks the files against it (refused rolled-back or damaged
    * when they are behind it) and takes its verdicts: an entry it holds stays held; an entry it covers is waiting when it lists it, and passed when it
-   * does not. Refused mark-unverified when a mark is there and does not verify (its lists file included), and rolled-back when it verifies but the
-   * lists file it names is not in the folder (an older copy of the folder, or part of it deleted).
+   * does not. An invalid mark is refused as mark-unverified; an otherwise valid mark with missing lists is refused as rolled-back.
    */
   private async syncMark(): Promise<void> {
     try {
