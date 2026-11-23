@@ -5,6 +5,7 @@ import { narrowResidency } from '../../domain/gate/residency';
 import type { OpenGetStarted, OpenGetStartedRequest } from '../../domain/setup/answers';
 import { parseGuideInbound, type GuideInbound, type GuideOutbound } from '../../domain/setup/guideMessages';
 import { GET_STARTED_BODY, GET_STARTED_PAGE } from '../../domain/setup/screens';
+import { projectLogKey } from '../../gate/decisionLog';
 import type { GateHost } from '../../gate/host';
 import { openPanel } from '../webview/openPanel';
 import { definePage, listenTo, postTo } from '../webview/protocol';
@@ -13,6 +14,7 @@ import { floorTierOf } from './guideFacts';
 import { readProjectLayer } from './projectStore';
 
 const page = definePage<GuideInbound, GuideOutbound>(parseGuideInbound);
+const progressKeyPrefix = 'nearAi.setup.progress.';
 
 export interface GetStartedDeps {
   /** Capture the current project and its trusted service adapters when the panel opens. */
@@ -56,19 +58,26 @@ export function gateGuidePolicy(gate: GateHost, root: string, privacy: () => Pri
   };
 }
 
-export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'extensionUri'>, deps: GetStartedDeps): {
+export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'extensionUri' | 'workspaceState'>, deps: GetStartedDeps): {
   openGetStarted: OpenGetStarted; dispose(): void;
 } {
   let view: vscode.WebviewPanel | undefined;
   let controller: GuideController | undefined;
+  let closing: Promise<void> | undefined;
   let disposed = false;
 
   const openGetStarted: OpenGetStarted = async (request) => {
+    while (closing) await closing;
     if (disposed) return;
     if (view) { view.reveal(); await controller?.receive({ type: 'ready' }); return; }
     const run = deps.createRun(request);
     const panel = openPanel(context, { ...GET_STARTED_PAGE, body: GET_STARTED_BODY });
-    const active = createGuideController({ ...run, post: (message) => postTo(panel.webview, message), close: () => panel.dispose() });
+    const key = progressKeyPrefix + projectLogKey(run.root);
+    const progress: NonNullable<GuideControllerDeps['progress']> = {
+      read: () => context.workspaceState.get(key),
+      write: (value) => context.workspaceState.update(key, value)
+    };
+    const active = createGuideController({ ...run, progress, post: (message) => postTo(panel.webview, message), close: () => panel.dispose() });
     view = panel;
     controller = active;
     const messages = listenTo(panel.webview, page, (message) => active.receive(message));
@@ -78,7 +87,9 @@ export function registerGetStarted(context: Pick<vscode.ExtensionContext, 'exten
     panel.onDidDispose(() => {
       messages.dispose();
       visibility.dispose();
-      active.dispose();
+      const save = active.dispose().catch(() => undefined);
+      closing = save;
+      void save.then(() => { if (closing === save) closing = undefined; });
       if (view === panel) { view = undefined; controller = undefined; }
     });
     await active.open(request);

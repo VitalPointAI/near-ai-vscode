@@ -53,8 +53,8 @@ test('the guide reviews and applies a viable private route through the real labe
   assert.equal(chain.head?.seq, 1);
 });
 
-test('Get Started opens one kit panel, rejects malformed messages, and reads the live gate', async () => {
-  const { deps, host, root } = await setup();
+test('Get Started opens one kit panel, validates messages, and resumes a closed panel from workspace state', async () => {
+  const { deps, host, root, audit } = await setup();
   const posted: GuideOutbound[] = [];
   const handlers: { receive?: (message: unknown) => Promise<void>; close?: () => void } = {};
   let views = 0;
@@ -100,8 +100,23 @@ test('Get Started opens one kit panel, rejects malformed messages, and reads the
       else delete require.cache[name];
     });
   }
-  const readPolicy = registrar.gateGuidePolicy(host, root, () => 'standard');
-  const run = registrar.registerGetStarted({ extensionUri: uri('/extension') as never }, { createRun: () => ({ ...deps, readPolicy }) });
+  const workspace = new Map<string, unknown>();
+  let waitToSave = Promise.resolve();
+  const context = { extensionUri: uri('/extension') as never, workspaceState: {
+    get<T>(key: string): T | undefined { return workspace.get(key) as T | undefined; },
+    async update(key: string, value: unknown) {
+      await waitToSave;
+      if (value === undefined) workspace.delete(key);
+      else workspace.set(key, JSON.parse(JSON.stringify(value)));
+    },
+    keys: () => [...workspace.keys()]
+  } };
+  const originalPolicy = registrar.gateGuidePolicy(host, root, () => 'standard');
+  let denied = false;
+  const readPolicy: typeof originalPolicy = (now) => denied
+    ? Promise.resolve({ view: { organization: 'failed', startingRules: false, issuedHere: false } })
+    : originalPolicy(now);
+  const run = registrar.registerGetStarted(context, { createRun: () => ({ ...deps, readPolicy }) });
   try {
     await run.openGetStarted();
     const first = posted[0];
@@ -116,6 +131,47 @@ test('Get Started opens one kit panel, rejects malformed messages, and reads the
     await run.openGetStarted();
     assert.equal(views, 1);
     assert.equal(reveals, 1);
+
+    const token = `sk-${'f'.repeat(24)}`; // secret-scan: allow (fictional fixture)
+    await handlers.receive?.({ type: 'answer', key: 'kindOfWork', value: 'something-else' });
+    await handlers.receive?.({ type: 'answer', key: 'otherKind', value: `Research ${token}` });
+    await handlers.receive?.({ type: 'next' });
+    let finishSave!: () => void;
+    waitToSave = new Promise<void>((resolve) => { finishSave = resolve; });
+    panel.dispose();
+    const reopened = run.openGetStarted();
+    assert.equal(views, 1);
+    denied = true;
+    finishSave();
+    await reopened;
+    const fix = posted.at(-1);
+    assert.ok(fix?.type === 'screen' && fix.screen.kind === 'fix');
+    assert.equal(workspace.size, 1);
+    const saved = JSON.stringify([...workspace]);
+    assert.ok(saved.includes('Research [REDACTED]'));
+    assert.ok(!saved.includes(token) && !saved.includes(root));
+    panel.dispose();
+
+    denied = false;
+    await run.openGetStarted();
+    const resumed = posted.at(-1);
+    assert.ok(resumed?.type === 'screen' && resumed.screen.kind === 'question');
+    assert.equal(resumed.screen.screen, 'data');
+    await handlers.receive?.({ type: 'back' });
+    const kind = posted.at(-1);
+    assert.ok(kind?.type === 'screen' && kind.screen.kind === 'question');
+    assert.deepEqual(kind.screen.fields.find(({ key }) => key === 'otherKind')?.selected, ['Research [REDACTED]']);
+    await handlers.receive?.({ type: 'abandon' });
+    await handlers.receive?.({ type: 'abandon' });
+    const chain = await audit.verify();
+    assert.ok(chain.ok);
+    assert.equal(chain.head?.seq, 1);
+    panel.dispose();
+    await run.openGetStarted();
+    const restarted = posted.at(-1);
+    assert.ok(restarted?.type === 'screen' && restarted.screen.kind === 'question');
+    assert.equal(restarted.screen.screen, 'kind-of-work');
+    assert.equal(workspace.size, 0);
   } finally { run.dispose(); }
 });
 

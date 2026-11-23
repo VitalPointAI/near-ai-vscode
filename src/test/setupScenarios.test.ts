@@ -18,6 +18,7 @@ import { projectLogKey } from '../gate/decisionLog';
 import { SETUP_AUDIT_DIR } from '../gate/setupAuditLog';
 import { createGuideController, type GuideControllerDeps } from '../services/setup/guideController';
 import { routeFactsOf } from '../services/setup/guideFacts';
+import type { GuideProgressStore } from '../services/setup/guideProgress';
 import { readSetupGuide } from '../services/setup/projectStore';
 import { at, local, near, setup } from './helpers/getStartedHostFixture';
 import { authorizationFor, DAY_MS, issuerKey, NAMED_PERSON, signAuthorization, type AuthorizationOptions } from './helpers/policyFixtures';
@@ -356,4 +357,44 @@ test('a failed Apply preflight check still leaves changes pending without checki
   screen(run, 'done');
   assert.ok(!run.posted.slice(before).some((entry) => entry.type === 'screen' && entry.screen.kind === 'checking'));
   assert.equal(readSetupGuide(run.root), undefined);
+});
+
+test('resuming a paused review rebuilds current choices before letting the user Apply', async (t) => {
+  const available = [...results];
+  const run = await setup({ results: available });
+  let saved: unknown;
+  let closed = 0;
+  const progress: GuideProgressStore = {
+    read: () => saved,
+    async write(value) { saved = value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
+  };
+  const deps = { ...run.deps, progress, close: () => { closed++; } };
+  const original = guideFor(t, run, deps);
+  await sendAnswers(original, internal);
+  await original.receive({ type: 'choose', optionId: 'near-private' });
+  await original.receive({ type: 'reason', text: 'Capacity for analysis' });
+  await original.receive({ type: 'review' });
+  screen(run, 'check');
+  await original.receive({ type: 'pause' });
+  assert.equal(closed, 1);
+  assert.deepEqual(Object.keys(saved as object).sort(), ['answers', 'choiceReason', 'chosen', 'screen', 'v']);
+  assert.ok(!JSON.stringify(saved).includes('cloud-api.near.ai'));
+  await original.dispose();
+
+  const personalPolicy = run.host.policyLayers().personal;
+  assert.ok(personalPolicy);
+  const requires = [...new Set([...personalPolicy.document.requires, 'residency@1'])].sort();
+  await run.host.applyPolicyDraft(JSON.stringify({
+    ...personalPolicy.document, requires, residency: { v: 1, required: ['CA'] }
+  }), personalPolicy.hash);
+  const resumed = guideFor(t, run, deps);
+  await resumed.open();
+  const options = screen(run, 'options');
+  assert.equal(options.ruledOut[0]?.reason, ROUTE_REFUSALS['route.residency']);
+  assert.equal(options.chosen, undefined);
+  assert.equal(options.choiceReason, undefined);
+  assert.equal(run.calls.checks, 2);
+  await resumed.receive({ type: 'apply' });
+  assert.equal(readSetupGuide(run.root), undefined);
+  assert.equal((await snapshotFor(run.deps)).projectLabel?.level, 'Public');
 });

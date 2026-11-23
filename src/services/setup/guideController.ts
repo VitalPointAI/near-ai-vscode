@@ -18,6 +18,7 @@ import { nextSession, startSession, type GuideEffect, type GuideEvent, type Guid
 import { isChoosable, type ViabilityResult } from '../../domain/setup/viability';
 import { planApply, runApply, type ApplyContext, type ApplyDeps, type ApplyStep } from './apply';
 import { approvedDeviceName, proposedRoutePolicy, routeFactsOf } from './guideFacts';
+import { progressOf, restoreProgress, type GuideProgressStore } from './guideProgress';
 import { isSharedProject, readProjectLayer, readSetupGuide } from './projectStore';
 import { clearanceProposalFor } from './proposals';
 import type { ViabilityRun } from './viabilityRunner';
@@ -45,6 +46,7 @@ export interface GuideControllerDeps {
   readonly machine: string;
   readonly hostKind: HostKind;
   readonly clock?: () => number;
+  readonly progress?: GuideProgressStore;
   readPolicy(now: number): Promise<PolicySnapshot>;
   check(snapshot: GuideRouteSnapshot, progress: (result: ViabilityResult) => void, signal: AbortSignal): Promise<ViabilityRun>;
   readonly apply: ApplyPorts;
@@ -56,7 +58,7 @@ export interface GuideControllerDeps {
 export interface GuideController {
   open(request?: OpenGetStartedRequest): Promise<void>;
   receive(message: GuideInbound): Promise<void>;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 const scan = { offered: false, ranges: [], running: false } as const;
@@ -87,6 +89,16 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
   let checking: AbortController | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let openInFlight: Promise<void> | undefined;
+  let progressWrite = Promise.resolve();
+
+  function storeProgress(current?: GuideSession): Promise<void> {
+    const store = deps.progress;
+    if (!store) return progressWrite;
+    const progress = current && progressOf(current);
+    if (current && !progress) return progressWrite;
+    progressWrite = progressWrite.catch(() => undefined).then(() => store.write(progress));
+    return progressWrite;
+  }
 
   function stopChecking(): void {
     checking?.abort();
@@ -296,7 +308,10 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
       case 'compute-changes': return changes(current);
       case 'apply': return apply(current);
       case 'record-abandoned':
-        await deps.apply.audit.append('setup.guide.abandoned', buildAbandonedRecord({ answers: current.answers, screen: item.screen, hostKind: deps.hostKind }));
+        await Promise.all([
+          storeProgress(),
+          deps.apply.audit.append('setup.guide.abandoned', buildAbandonedRecord({ answers: current.answers, screen: item.screen, hostKind: deps.hostKind }))
+        ]);
         break;
       case 'land':
         landing = resolveLanding({
@@ -306,8 +321,10 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
         postScreen();
         await deps.landing.land(landing);
         break;
-      // Persistent pause/resume and invitation routing are the later host cases.
-      case 'save-progress': break;
+      case 'save-progress':
+        await storeProgress(current);
+        if (deps.progress && session === current && !lifetime.signal.aborted) deps.close?.();
+        break;
     }
   }
 
@@ -341,8 +358,13 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
           if (lifetime.signal.aborted || !next) return;
           snapshot = next.snapshot;
           policy = next.policy;
-          session = startSession({ now: now(), previous: readSetupGuide(deps.root), locked: { canada: policy.locked.canada === true } });
-          if (session.state === 'not-started') await dispatch({ type: 'start' });
+          const input = { now: now(), previous: readSetupGuide(deps.root), locked: { canada: policy.locked.canada === true } };
+          const restored = restoreProgress(deps.progress?.read(), input);
+          session = restored ?? startSession(input);
+          if (restored) await storeProgress();
+          if (lifetime.signal.aborted) return;
+          if (session.state === 'paused') await dispatch({ type: 'resume' });
+          else if (session.state === 'not-started') await dispatch({ type: 'start' });
           else postScreen();
         } catch {
           failClosed(checkAgainText);
@@ -359,9 +381,14 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
         default: return dispatch(message);
       }
     },
-    dispose() {
+    async dispose() {
+      if (lifetime.signal.aborted) return progressWrite;
+      const current = session;
+      const paused = current && policy?.state === 'ready' && nextSession(current, { type: 'pause' }, now()).session;
       lifetime.abort();
       stopChecking();
+      if (paused && paused !== current) await storeProgress(paused);
+      else await progressWrite;
     }
   };
 }
