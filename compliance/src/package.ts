@@ -238,7 +238,7 @@ export function buildPackage(options: PackageOptions): PackageResult {
   const gaps: readonly PoamGap[] = dashboard.gaps.length ? (dashboard.gaps as readonly PoamGap[]).map(gap => ({
     ...gap, milestones: gap.milestones ?? milestones.get(gap.id)
   })) : loadGaps(path.join(root, 'gaps.json')).map(gap => ({
-    id: gap.id, title: gap.title ?? gap.id, remediation: gap.remediation, milestones: milestones.get(gap.id)
+    ...gap, title: gap.title ?? gap.id, milestones: milestones.get(gap.id)
   }));
   const poam = buildPoam({ gaps, generatedAt });
   validateDocument('poam.json', poam, 'plan-of-action-and-milestones');

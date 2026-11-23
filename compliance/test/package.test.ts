@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeManifest } from '../src/manifest.ts';
+import { NS } from '../src/model.ts';
 import { buildPackage as buildPackageFromSource, stageAssessorItsg33Profile, type PackageOptions } from '../src/package.ts';
 import { validateOscal } from '../src/validate.ts';
 import { options, run } from '../src/commands/package.ts';
@@ -157,11 +158,53 @@ test('package writes assessor-readable gaps', () => {
   assert.match(readFileSync(path.join(result.directory, 'readable/gaps.md'), 'utf8'), /Your organization decides/);
   const poam = JSON.parse(readFileSync(path.join(result.directory, 'oscal/poam.json'), 'utf8'))['plan-of-action-and-milestones'];
   const item = poam['poam-items'].find((entry: { title: string }) => entry.title.startsWith('G2:'));
+  assert.deepEqual(item.props, [
+    ...['au-04', 'au-06', 'au-09', 'au-10'].map(value => ({ name: 'control-id', ns: NS, value })),
+    { name: 'owner-role', ns: NS, value: 'maintainers' }
+  ]);
+  const scoped = poam['poam-items'].find((entry: { title: string }) => entry.title.startsWith('G218:'));
+  assert.deepEqual(scoped.props, [
+    { name: 'assessment-profile', ns: NS, value: 'cpcsc-level-1' },
+    { name: 'control-id', ns: NS, value: 'itsp171-03.10.01' },
+    { name: 'owner-role', ns: NS, value: 'owner' }
+  ]);
   const risk = poam.risks.find((entry: { uuid: string }) => entry.uuid === item['related-risks'][0]['risk-uuid']);
   const [phase, date] = risk.remediations[0].tasks;
   assert.equal(phase.type, 'milestone');
   assert.equal(phase.props[0].value, '32.1');
   assert.equal(date.timing['on-date'].date, '2027-05-31T00:00:00Z');
+});
+
+test('package preserves separate POA&M scopes for the same control across snapshot profiles', () => {
+  const bundle = output();
+  cpSync(fixture, bundle, { recursive: true });
+  const dashboardFile = path.join(bundle, 'dashboard', 'dashboard.json');
+  const dashboard = JSON.parse(readFileSync(dashboardFile, 'utf8'));
+  dashboard.gaps = ['protected-a', 'protected-b'].map((profile, index) => ({
+    id: `G${index + 1}`, title: `Evidence for ${profile}`, state: 'planned', overdue: false,
+    controls: ['ac-01'], profiles: [profile], ownerRole: index ? 'shared' : 'owner',
+    remediation: 'Verify deployment evidence.', levelsBlocked: 1, phase: '44.1',
+    milestones: [{ phase: '44.1', title: 'Review evidence' }]
+  }));
+  writeFileSync(dashboardFile, JSON.stringify(dashboard));
+  writeManifest(bundle, { createdAt: dashboard.generatedAt, commit: dashboard.commit });
+
+  const { directory } = buildPackage({ release: 'v0.4.99', bundle, out: output() });
+  const poam = JSON.parse(readFileSync(path.join(directory, 'oscal/poam.json'), 'utf8'));
+  assert.equal(validateOscal(poam, 'plan-of-action-and-milestones', { ours: true }).ok, true);
+  const items = poam['plan-of-action-and-milestones']['poam-items'];
+  assert.deepEqual(items.map((item: { props: unknown }) => item.props), [
+    [
+      { name: 'assessment-profile', ns: NS, value: 'protected-a' },
+      { name: 'control-id', ns: NS, value: 'ac-01' },
+      { name: 'owner-role', ns: NS, value: 'owner' }
+    ],
+    [
+      { name: 'assessment-profile', ns: NS, value: 'protected-b' },
+      { name: 'control-id', ns: NS, value: 'ac-01' },
+      { name: 'owner-role', ns: NS, value: 'shared' }
+    ]
+  ]);
 });
 
 test('package retains the redacted evidence bundle', () => {
