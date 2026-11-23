@@ -1,0 +1,16 @@
+{
+  "gap": "G287",
+  "id": "g287",
+  "controls": [
+    "itsp171-03.12.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary continuous monitoring needs operating strategy evidence",
+  "remediation": "The sponsor monitoring lead approves a system-level strategy with assessed boundaries, owners, collection and review cadence and recurring security assessments. Verify at least a representative monitored period and assessment follow-up record. Retain dated metric results, evidence of review, escalation and decisions for missing coverage.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved monitoring and assessment strategy, dated operating records, and a traced review and corrective action"
+    }
+  ]
+}

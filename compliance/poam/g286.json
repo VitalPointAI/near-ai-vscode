@@ -1,0 +1,16 @@
+{
+  "gap": "G286",
+  "id": "g286",
+  "controls": [
+    "itsp171-03.12.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary remediation plan needs an operating revision trail",
+  "remediation": "The sponsor remediation owner and assessor reconcile the deployment plan of action and milestones to findings from security assessments, audits or reviews, and continuous monitoring. Verify sampled ownership, dates, evidence expectations and updates when findings change. Record independent review or closure evidence where available, with unresolved entries retained.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved remediation plan and a sampled revision linked to assigned actions and originating findings"
+    }
+  ]
+}

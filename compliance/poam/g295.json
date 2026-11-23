@@ -1,0 +1,16 @@
+{
+  "gap": "G295",
+  "id": "g295",
+  "controls": [
+    "itsp171-03.13.10"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary key lifecycle governance needs protected operating evidence",
+  "remediation": "The deployment cryptographic key custodian and independent reviewer approve requirements for key generation, distribution, storage, access and end of use. Verify protected references for representative lifecycle events and custody decisions, including retirement or destruction where applicable. Include only redacted metadata and authorized audit references, with no key material in the assessor export.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved key management and custody plan and redacted evidence references spanning applicable lifecycle stages"
+    }
+  ]
+}

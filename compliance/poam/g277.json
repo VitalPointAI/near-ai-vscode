@@ -1,0 +1,16 @@
+{
+  "gap": "G277",
+  "id": "g277",
+  "controls": [
+    "itsp171-03.10.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary facility monitoring and access log review need operating evidence",
+  "remediation": "The facility security operations owner identifies assessed locations and defines log review schedules and incident triggers. Verify a redacted review of physical access logs and an approved benign exercise or actual incident reference showing escalation and response. Link verified provider reports for inherited facilities and record collection or review gaps.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect boundaries and log review parameters, sampled log review and a dated incident or exercise response record"
+    }
+  ]
+}

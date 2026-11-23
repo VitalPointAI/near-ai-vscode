@@ -1,0 +1,16 @@
+{
+  "gap": "G298",
+  "id": "g298",
+  "controls": [
+    "itsp171-03.13.13"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary mobile code governance needs reviewed authorization and monitoring evidence",
+  "remediation": "The deployment application security owner defines mobile code technologies and approved uses within the assessed boundary. Verify authorization, monitoring and enforcement through a sampled approval and benign permitted and denied tests in an authorized environment. Retain reviewed configuration and oversight records without recording live code or content.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved technology and use register, redacted effective controls and a sampled authorization and monitoring result"
+    }
+  ]
+}

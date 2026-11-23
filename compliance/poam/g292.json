@@ -1,0 +1,16 @@
+{
+  "gap": "G292",
+  "id": "g292",
+  "controls": [
+    "itsp171-03.13.06"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary network deny-by-default settings need observed rule evidence",
+  "remediation": "The deployment network security owner approves the assessed ingress and egress boundaries, default policy and exception review. Verify effective settings and expiry or disposition for sampled exceptions. Use benign authorized fixtures to document one permitted flow and one denied unapproved flow without collecting live traffic or payloads.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved default policy and exception register, sanitized effective settings and permitted and denied boundary results"
+    }
+  ]
+}
