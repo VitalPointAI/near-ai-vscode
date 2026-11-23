@@ -1,0 +1,17 @@
+{
+  "gap": "G154",
+  "id": "g154",
+  "controls": [
+    "mp-02",
+    "mp-07"
+  ],
+  "ownerRole": "owner",
+  "title": "Media access and portable media restrictions need verified enforcement",
+  "remediation": "The deployment media custodian and endpoint access owner approve scope, authorized roles and access restrictions for assessed media, including Unclassified media where selected. Verify controlled access to physical and digital media and permitted or refused portable device use with redacted evidence. Demonstrate that devices without an identifiable owner are denied under the approved controls.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved media and role matrix, sample authorized and denied access and use, and a benign unknown-owner device refusal"
+    }
+  ]
+}

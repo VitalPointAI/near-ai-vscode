@@ -1598,6 +1598,217 @@
     },
     {
       "controls": [
+        "at-01"
+      ],
+      "id": "G140",
+      "ownerRole": "owner",
+      "poam": "g140",
+      "remediation": "The sponsor training policy official approves the awareness and training scope, procedures, coordination, and accountable security and privacy roles. Verify distribution to required audiences and review at the approved schedule and after applicable changes. Record a dated policy or procedure revision and the resulting operating action.",
+      "title": "Awareness and training policy and procedures need approved operating records"
+    },
+    {
+      "controls": [
+        "at-02",
+        "at-02.02",
+        "at-02.03"
+      ],
+      "id": "G141",
+      "ownerRole": "owner",
+      "poam": "g141",
+      "remediation": "The deployment training lead and security and privacy awareness owners approve onboarding, renewal and change-triggered literacy training for staff, managers and contractors. Verify the content teaches recognition and authorized reporting of insider concerns, social engineering and social mining. Retain versioned awareness material, redacted delivery and completion records, and a content revision addressing a reviewed incident lesson.",
+      "title": "Literacy training and reporting awareness need representative delivery evidence"
+    },
+    {
+      "controls": [
+        "at-03"
+      ],
+      "id": "G142",
+      "ownerRole": "owner",
+      "poam": "g142",
+      "remediation": "The sponsor workforce assurance and access owners identify roles and training required before access or assigned duties. Compare sampled eligibility and access approvals with completion dates. Retain the approved refresher schedule, a role-specific exercise and a content update triggered by a system change or applicable incident lesson.",
+      "title": "Role-based training needs a verified link to authorized duties and access"
+    },
+    {
+      "controls": [
+        "at-04"
+      ],
+      "id": "G143",
+      "ownerRole": "owner",
+      "poam": "g143",
+      "remediation": "The training records steward establishes monitoring and retention rules for literacy and role-based training. Verify a redacted completion and overdue-training sample against the records repository. Retain evidence of authorized review, follow-up and the configured retention period, and restrict personal training data to approved holders.",
+      "title": "Training record monitoring and retention need operating evidence"
+    },
+    {
+      "controls": [
+        "ma-01"
+      ],
+      "id": "G144",
+      "ownerRole": "owner",
+      "poam": "g144",
+      "remediation": "The sponsor maintenance policy official approves procedures for onsite, offsite and non-local maintenance, assigned roles and coordination with security and privacy authorities. Record assigned ownership, distribution and scheduled or event-triggered review. Sample implementation through an approved maintenance record.",
+      "title": "Maintenance policy and procedures need approved scope and operating records"
+    },
+    {
+      "controls": [
+        "ma-02"
+      ],
+      "id": "G145",
+      "ownerRole": "owner",
+      "poam": "g145",
+      "remediation": "The deployment maintenance manager and component custodian identify assessed items and approved maintenance, repair and replacement rules. Trace a sampled job through scheduling, approval, monitoring and service history. For offsite service, verify the named authority approved removal and required information was sanitized. Verify potentially affected controls after the job and document return or replacement disposition.",
+      "title": "Controlled maintenance needs approval, media handling and post-service verification"
+    },
+    {
+      "controls": [
+        "ma-03",
+        "ma-03.01",
+        "ma-03.02"
+      ],
+      "id": "G146",
+      "ownerRole": "owner",
+      "poam": "g146",
+      "remediation": "The deployment maintenance tool custodian and endpoint security lead identify tools and diagnostic media approved for assessed systems. Verify periodic review and observed authorized use, checks for unauthorized changes to tools, and malicious-code screening before use of diagnostic media. Record a sampled approved or refused item with its disposition and link to incident handling when applicable.",
+      "title": "Maintenance tools and diagnostic media need authorized inventory and inspection evidence"
+    },
+    {
+      "controls": [
+        "ma-03.03"
+      ],
+      "id": "G147",
+      "ownerRole": "owner",
+      "poam": "g147",
+      "remediation": "The maintenance facility authority and equipment custodian approve removal rules for assessed equipment. Verify a sampled exit decision using evidence that protected information is absent, the equipment was sanitized or destroyed, or the equipment was retained. If the approved process allows an exception, retain the expressly authorized exemption and custody record.",
+      "title": "Maintenance equipment removal needs verified information and custody safeguards"
+    },
+    {
+      "controls": [
+        "ma-04",
+        "ma-04.01"
+      ],
+      "id": "G148",
+      "ownerRole": "owner",
+      "poam": "g148",
+      "remediation": "The deployment remote maintenance owner and security monitoring lead identify approved tools and diagnostic access in the system plan. Verify approval and strong authentication for a sampled session, retained activity and required audit events, review for anomalous behavior, and termination of the session and its network connections at completion.",
+      "title": "Non-local maintenance needs monitored authorization and session closure evidence"
+    },
+    {
+      "controls": [
+        "ma-04.03"
+      ],
+      "id": "G149",
+      "ownerRole": "owner",
+      "poam": "g149",
+      "remediation": "The deployment system security owner and service custodian compare the non-local maintenance environment and tools with the assessed system safeguards. Verify a sampled component was removed and sanitized before service, inspected and sanitized for potentially malicious software afterward, and checked before reconnecting under approved custody and release rules.",
+      "title": "Non-local service needs comparable safeguards and controlled reconnection evidence"
+    },
+    {
+      "controls": [
+        "ma-04.04",
+        "ma-04.06"
+      ],
+      "id": "G150",
+      "ownerRole": "owner",
+      "poam": "g150",
+      "remediation": "The deployment access and network security owners approve replay-resistant authenticators, physical or logical separation, and protections for communication confidentiality and integrity. Verify configuration and a permitted maintenance-only session in an approved test environment. Check refusal of invalid or replayed authorization with synthetic data and retain redacted records, with evidence that general sessions cannot use the maintenance path.",
+      "title": "Non-local maintenance session isolation and cryptographic protection need verified configuration"
+    },
+    {
+      "controls": [
+        "ma-05",
+        "ma-05.01"
+      ],
+      "id": "G151",
+      "ownerRole": "owner",
+      "poam": "g151",
+      "remediation": "The maintenance authority and personnel security lead maintain approved personnel and organizations and verify authorization before unescorted service. For a sampled supervised job, record the qualified escort and approval, sanitization of volatile storage and removal or disconnection and custody of non-volatile media. Verify approved alternate controls and their implementation if equipment cannot be sanitized, removed or disconnected.",
+      "title": "Maintenance personnel authorization and escorted service need verified records"
+    },
+    {
+      "controls": [
+        "ma-06"
+      ],
+      "id": "G152",
+      "ownerRole": "owner",
+      "poam": "g152",
+      "remediation": "The deployment service owner identifies critical components, approved support and replacement times, designated providers and spare locations. Reconcile a dated support agreement and spare inventory with the requirements. Sample a completed event or approved exercise and verify elapsed time and escalation for any miss.",
+      "title": "Maintenance support and spares need verified response commitments"
+    },
+    {
+      "controls": [
+        "mp-01"
+      ],
+      "id": "G153",
+      "ownerRole": "owner",
+      "poam": "g153",
+      "remediation": "The sponsor media protection official approves assessed media scope, accountable custodian roles and procedures for access, marking, storage, movement, use and disposition. Record approval, distribution, review triggers and a sampled operating action that followed the procedures.",
+      "title": "Media protection policy and procedures need approved operating evidence"
+    },
+    {
+      "controls": [
+        "mp-02",
+        "mp-07"
+      ],
+      "id": "G154",
+      "ownerRole": "owner",
+      "poam": "g154",
+      "remediation": "The deployment media custodian and endpoint access owner approve scope, authorized roles and access restrictions for assessed media, including Unclassified media where selected. Verify controlled access to physical and digital media and permitted or refused portable device use with redacted evidence. Demonstrate that devices without an identifiable owner are denied under the approved controls.",
+      "title": "Media access and portable media restrictions need verified enforcement"
+    },
+    {
+      "controls": [
+        "mp-03",
+        "mp-04"
+      ],
+      "id": "G155",
+      "ownerRole": "owner",
+      "poam": "g155",
+      "remediation": "The information owner and media custodian approve marking and controlled storage rules by media type and sensitivity. Verify sampled markings for distribution limits and handling caveats, applicable approved exemption boundaries, and secure physical storage and custody until authorized sanitization or destruction.",
+      "title": "Media marking and secure storage need inventory and facility evidence"
+    },
+    {
+      "controls": [
+        "mp-05"
+      ],
+      "id": "G156",
+      "ownerRole": "owner",
+      "poam": "g156",
+      "remediation": "The deployment transport authority and media custodian approve routes, protection requirements and personnel for assessed media leaving controlled areas. Sample a shipment or approved exercise through dispatch, custody handoffs, delivery and disposition, with authorization and evidence of the required protection at each handoff.",
+      "title": "Media transport outside controlled areas needs verified custody evidence"
+    },
+    {
+      "controls": [
+        "mp-06",
+        "mp-06.03"
+      ],
+      "id": "G157",
+      "ownerRole": "owner",
+      "poam": "g157",
+      "remediation": "The deployment media sanitization authority approves methods and verification appropriate to media type and information categorization. Sample sanitized media before disposal, transfer or reuse and trace the authorization, method and successful verification. Verify required non-destructive preparation of portable media before connection on approved non-production specimens, with refusal when preparation is missing.",
+      "title": "Media sanitization and portable media preparation need verified outcomes"
+    },
+    {
+      "controls": [
+        "mp-06.08"
+      ],
+      "id": "G158",
+      "ownerRole": "owner",
+      "poam": "g158",
+      "remediation": "The deployment endpoint management authority documents assessed devices, triggering conditions, authorized roles and strong authentication for purge or wipe. Exercise the procedure on a disposable non-production device containing only synthetic data. Record scoped authorization, denial for an unauthorized role, execution status and independent confirmation of the expected result.",
+      "title": "Remote media purge or wipe needs approved scope and authorized test evidence"
+    },
+    {
+      "controls": [
+        "mp-08",
+        "mp-08.03"
+      ],
+      "id": "G159",
+      "ownerRole": "owner",
+      "poam": "g159",
+      "remediation": "The sponsor information release authority approves assessed media scope, approved downgrading mechanisms and verification matched to sensitivity and recipient authorization. Sample a public-release exercise using synthetic protected markers. Verify that protected information is removed before release, that the authorized recipient or publication scope is recorded, and that failed verification blocks release.",
+      "title": "Media downgrading and public release need reviewed sanitization evidence"
+    },
+    {
+      "controls": [
         "pm-01",
         "pm-02",
         "pm-03"
