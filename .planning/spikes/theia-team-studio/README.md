@@ -18,11 +18,31 @@ Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-tea
 
 The container runs as the unprivileged Node user and binds to localhost on the host. The examples are synthetic. This preview has no host workspace mounts, provider credentials, or agent run controls.
 
+## Run the existing extension in Theia
+
+Build the same image as above. Unpack a trusted release VSIX into the ignored local plugin directory, then start a separate container with that directory mounted read-only. The VSIX runs with a new container-side workspace and no host home or provider credentials. The local session disables automatic GSD installation.
+
+```sh
+mkdir -p .planning/spikes/theia-team-studio/local-plugins
+unzip -q /path/to/near-ai-vscode-0.4.36.vsix 'extension/*' \
+  -d .planning/spikes/theia-team-studio/local-plugins
+
+docker run --detach --name near-ai-theia-vsix \
+  --publish 127.0.0.1:18874:3000 \
+  --mount "type=bind,source=$PWD/.planning/spikes/theia-team-studio/local-plugins,target=/plugins,readonly" \
+  --env THEIA_DEFAULT_PLUGINS=local-dir:///plugins \
+  near-ai-theia-preview:local \
+  node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --port 3000 \
+  --session-preference nearAi.autoInstallGsd=false
+```
+
+Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. From the command palette choose **NEAR AI: Set Up**, **NEAR AI: Team Studio**, or **NEAR AI: Open Chat**. The compatibility container is for synthetic projects and has an in-memory credential store.
+
 ## Research
 
 Theia provides both a VS Code extension host and native application extensions. The native widget uses the Theia workbench and calls the backend through Theia JSON-RPC. See [Theia native extensions](https://theia-ide.org/docs/authoring_extensions/), [Theia JSON-RPC](https://theia-ide.org/docs/json_rpc/), and [VS Code extension support](https://theia-ide.org/docs/authoring_vscode_extensions/).
 
-The parser carries over directly. The current VS Code extension declares VS Code 1.101 or later and also uses webview panels and the chat participant API. Full extension compatibility needs a separate VSIX smoke test in a Theia build with the VS Code extension host enabled. Native ports also need to wire real project selection, workspace file access, and writes through the new host.
+The parser carries over directly. The current VS Code extension declares VS Code 1.101 or later and also uses webview panels and the chat participant API. The container includes the pinned Theia VS Code extension host for running the VSIX alongside the native widget. Native ports also need to wire real project selection, workspace file access, and writes through the new host.
 
 ## Results
 

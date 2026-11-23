@@ -7,3 +7,5 @@
 /extension/lib/
 /esbuild.mjs
 /gen-esbuild.*.mjs
+
+/local-plugins/

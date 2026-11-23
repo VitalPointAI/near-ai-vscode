@@ -16,11 +16,13 @@ COPY .planning/spikes/theia-team-studio/extension/fixtures ./extension/fixtures
 RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 
 FROM node:24.22.1-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git procps
 WORKDIR /repo/.planning/spikes/theia-team-studio
 
 COPY --from=build /repo/.planning/spikes/theia-team-studio ./
 COPY --from=build /repo/dist/agent/teams.js /repo/dist/agent/teams.js
 
 USER node
+RUN mkdir /home/node/workspace
 EXPOSE 3000
 CMD ["node_modules/.bin/theia", "start", "--hostname", "0.0.0.0", "--port", "3000"]

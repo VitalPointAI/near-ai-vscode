@@ -20,3 +20,9 @@ Run each group against the actual browser container. Installed and registered co
 
 - Theia 1.77 returns a stub from `vscode.chat.createChatParticipant`. Preserve the NEAR AI chat behavior through a working Theia command and chat view. Verify the existing sidebar path independently. [Plugin API implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/plugin/plugin-context.ts)
 - Theia 1.77 forwards VSIX `SecretStorage` calls to its workbench credentials service. Its default server falls back to an in-memory provider when the OS credential store is unavailable. A browser container must demonstrate an available durable store and successful secret retrieval after restart before accounts and sync pass parity. [SecretStorage bridge](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/main/browser/secrets-main.ts) · [Key store implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/core/src/node/key-store-server.ts)
+
+## First browser checks
+
+The released 0.4.36 VSIX started under Theia 1.77. Chromium rendered the Setup, Team Studio, Chat, and Compare Models webviews, and opened the New Team wizard. Setup and Compare Models returned live webview objects from their command handlers, which caused an RPC encoding error. Controlled reruns with each handler returning no value opened the same view without that error.
+
+Team save and reopen, configured-provider behavior, restart persistence, and the rest of the workflow matrix still require verification.
