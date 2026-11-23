@@ -154,7 +154,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerModelComparison(context, auth, gate);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
+    vscode.commands.registerCommand('nearAi.setup', () => void openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(context, auth, sidebar),
       showProgress: () => showStatus(auth)
