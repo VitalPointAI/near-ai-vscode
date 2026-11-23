@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { readZip } from '../agent/zip';
 import { buildSaaPackage } from '../services/saaPackage';
 import { loadSaaOfficialPrivacyForms, type SaaReleaseEvidence } from '../services/saaReleaseEvidence';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 const commit = 'a'.repeat(40);
 const date = '2026-11-22T18:00:00.000Z';
@@ -223,4 +224,39 @@ test('reports missing, inconsistent or malformed package inputs before producing
 test('rejects a changed Treasury Board form before including it in an export', async () => {
   await assert.rejects(loadSaaOfficialPrivacyForms(new AbortController().signal, async () => new Response('changed')),
     /differs from the version this extension verifies/);
+});
+
+
+test('the export command writes a browser-selected ZIP through its original client file handle', async (t) => {
+  const stub = createVscodeStub();
+  const restore = installVscodeStub(stub);
+  t.after(restore);
+  const vscode = stub.vscode as typeof import('vscode');
+  const target = vscode.Uri.from({ scheme: 'vscode-local', path: '/chosen-name' });
+  const files = require('../services/saaReleaseEvidence') as typeof import('../services/saaReleaseEvidence');
+  t.mock.method(files, 'loadSaaReleaseEvidence', async () => release());
+  t.mock.method(files, 'loadSaaOfficialPrivacyForms', async () => new Map());
+  t.mock.method(files, 'loadSaaMarketplaceApproval', async () => undefined);
+  Object.assign(vscode.window, {
+    showSaveDialog: async () => target,
+    withProgress: async (_options: unknown, task: Parameters<typeof vscode.window.withProgress>[1]) =>
+      task({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) })
+  });
+  const writes: Array<{ uri: typeof target; content: Uint8Array }> = [];
+  Object.assign(vscode.workspace, {
+    fs: { writeFile: async (uri: typeof target, content: Uint8Array) => { writes.push({ uri, content }); } }
+  });
+  const { registerSaaExport, GENERATE_SAA_PACKAGE_COMMAND } =
+    require('../services/saaExportCommand') as typeof import('../services/saaExportCommand');
+  registerSaaExport({
+    extension: { packageJSON: { version: '0.4.36' } },
+    subscriptions: [],
+    asAbsolutePath: () => formsDir
+  } as unknown as import('vscode').ExtensionContext);
+  stub.inputAnswers.push('0.4.36');
+  await stub.commands.get(GENERATE_SAA_PACKAGE_COMMAND)?.();
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].uri, target);
+  assert.ok(readZip(Buffer.from(writes[0].content), 'client export').has('SA-and-A-sponsor-draft.docx'));
+  assert.match(stub.notifications.at(-1)?.message ?? '', /^Saved chosen-name\./);
 });

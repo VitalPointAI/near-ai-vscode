@@ -27,11 +27,14 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
     filters: { 'ZIP archive': ['zip'] }
   });
   if (!target) return;
-  if (target.scheme !== 'file') {
+  // VS Code sends a browser-selected file to a remote extension host as vscode-local.
+  const clientFile = target.scheme === 'vscode-local';
+  if (target.scheme !== 'file' && !clientFile) {
     void vscode.window.showErrorMessage('Choose a local file for the SA&A package.');
     return;
   }
-  const destination = target.fsPath.toLowerCase().endsWith('.zip') ? target.fsPath : `${target.fsPath}.zip`;
+  const chosenPath = clientFile ? target.path : target.fsPath;
+  const destination = clientFile || chosenPath.toLowerCase().endsWith('.zip') ? chosenPath : `${chosenPath}.zip`;
 
   const abort = new AbortController();
   try {
@@ -55,8 +58,13 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
         progress.report({ message: 'Building the control matrix and administrative forms' });
         const archive = await buildSaaPackage(release.evidence, context.asAbsolutePath('resources/saa'), privacyForms, release.approval);
         abort.signal.throwIfAborted();
-        const result = await createExclusive(destination, archive);
-        if (result === 'exists') throw new Error('A file already exists at that location. Choose a different name.');
+        if (clientFile) {
+          // The picker creates the file and authorizes this handle. Write through its provider without changing the URI.
+          await vscode.workspace.fs.writeFile(target, archive);
+        } else {
+          const result = await createExclusive(destination, archive);
+          if (result === 'exists') throw new Error('A file already exists at that location. Choose a different name.');
+        }
       } finally {
         cancelled.dispose();
       }
