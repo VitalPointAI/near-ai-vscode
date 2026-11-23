@@ -139,13 +139,17 @@ function validateMemberPath(path: string): void {
   }
 }
 
-/** Read the published GNU TAR into memory. Only regular files and directories are accepted. */
+/** Longest member path a GNU long-name entry may give. */
+const MAX_LONG_NAME = 1024;
+
+/** Read the published GNU TAR into memory. Only regular files and directories are accepted, with GNU long names for paths over 100 bytes. */
 function archiveFiles(archive: Buffer, version: string): Map<string, Buffer> {
   const bytes = gunzipSync(archive, { maxOutputLength: UNPACKED_LIMIT });
   const root = `compliance-package-v${version}`;
   const files = new Map<string, Buffer>();
   const entries = new Map<string, { path: string; directory: boolean }>();
   let offset = 0;
+  let longName: Buffer | undefined;
   while (offset + TAR_BLOCK_SIZE <= bytes.length) {
     const header = bytes.subarray(offset, offset + TAR_BLOCK_SIZE);
     if (header.every(byte => byte === 0)) break;
@@ -156,11 +160,23 @@ function archiveFiles(archive: Buffer, version: string): Map<string, Buffer> {
     const checksum = header.reduce((sum, byte, index) => sum + (index >= 148 && index < 156 ? 32 : byte), 0);
     if (tarOctal(header.subarray(148, 156)) !== checksum) throw new Error('The assessor archive has a damaged TAR header.');
     const type = header[156];
+    if (type === 76) { // TAR type 'L': GNU tar's long name for the entry that follows.
+      const size = tarOctal(header.subarray(124, 136));
+      const start = offset + TAR_BLOCK_SIZE;
+      const next = start + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+      if (longName || tarText(header.subarray(0, 100)) !== '././@LongLink' || size < 2 || size > MAX_LONG_NAME || next > bytes.length) {
+        throw new Error('The assessor archive has an invalid long member name.');
+      }
+      longName = bytes.subarray(start, start + size);
+      offset = next;
+      continue;
+    }
     const directory = type === 53; // TAR type '5'.
     if (!(directory || type === 48 || type === 0)) {
       throw new Error('The assessor archive contains a link or another unsupported TAR entry.');
     }
-    const name = header.subarray(0, 100);
+    const name = longName ?? header.subarray(0, 100);
+    longName = undefined;
     if (name.some(byte => byte > 127)) throw new Error('The assessor archive contains an unsupported member name.');
     const text = tarText(name);
     if (name.subarray(text.length).some(byte => byte !== 0)) throw new Error('The assessor archive contains an ambiguous member name.');
@@ -179,7 +195,7 @@ function archiveFiles(archive: Buffer, version: string): Map<string, Buffer> {
     if (!directory) files.set(path.slice(root.length + 1), bytes.subarray(start, start + size));
     offset = next;
   }
-  if (bytes.length % TAR_BLOCK_SIZE !== 0 || bytes.length - offset < TAR_BLOCK_SIZE * 2 ||
+  if (longName || bytes.length % TAR_BLOCK_SIZE !== 0 || bytes.length - offset < TAR_BLOCK_SIZE * 2 ||
       bytes.subarray(offset).some(byte => byte !== 0)) {
     throw new Error('The assessor archive is truncated or has unexpected trailing data.');
   }
