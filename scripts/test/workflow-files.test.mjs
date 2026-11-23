@@ -71,6 +71,12 @@ test('release jobs that hold a write token or VSCE_PAT run no npm install script
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
+test('root lint installs its pinned tools without running dependency lifecycle scripts', () => {
+  const lint = jobs(read('ci.yml')).get('lint');
+  assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
+  assert.match(lint, /^\s*- run: npm run lint$/m);
+});
+
 test('publish checks the VSIX checksum from the build job before it does anything else', () => {
   const publish = jobs(read('release.yml')).get('publish');
   const list = steps(publish);
