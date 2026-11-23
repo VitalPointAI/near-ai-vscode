@@ -9,7 +9,8 @@ import { loadComponents } from '../src/components.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { checkRuleTargets } from '../src/rules.ts';
 import { buildDashboard } from '../src/dashboard.ts';
-import type { Observation } from '../src/model.ts';
+import type { Observation, TestReportRow } from '../src/model.ts';
+import { selectedIds } from '../src/profiles.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const COMPONENTS = path.join(ROOT, 'compliance', 'components');
@@ -67,6 +68,26 @@ test('provider responsibilities identify a provider class, not a company', () =>
 test('the release rule keeps docs-required visible as a settings observation', () => {
   const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
   assert.ok(rules.some((rule) => rule.id === 'release.cm-03.docs-required' && rule.kind === 'observation' && rule.observation?.subject === 'docs-required'));
+});
+
+test('Protected A credits only the scoped audit timestamp evidence from a passing mapped test', () => {
+  const now = new Date('2026-11-23T12:00:00Z');
+  const commit = 'a'.repeat(40);
+  const { components } = loadComponents(COMPONENTS);
+  const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
+  const controls = selectedIds(path.join(ROOT, 'compliance', 'profiles', 'protected-a.json'));
+  const result = (testRows: TestReportRow[]) => buildDashboard({
+    head: commit, commit, generatedAt: now.toISOString(), now, components, rules, observations: [], testRows,
+    levels: [{ id: 'protected-a', title: 'Protected A', controls, components: ['extension'] }]
+  }).rows.find((row) => row.control === 'au-08');
+  const receipt: TestReportRow = {
+    file: 'src/test/gateHostLogs.test.ts', path: [],
+    name: 'gate decision logs preserve runtime timestamps as epoch milliseconds', status: 'passed', skip: null, ms: 1
+  };
+  assert.equal(result([receipt])?.state, 'partly-met');
+  assert.equal(result([receipt])?.reason, 'limitation');
+  assert.equal(result([{ ...receipt, status: 'failed' }])?.state, 'not-met');
+  assert.equal(result([])?.state, 'not-met');
 });
 
 test('CM-03 needs the assessed commit review and verified main protection, and credits only partial support', () => {

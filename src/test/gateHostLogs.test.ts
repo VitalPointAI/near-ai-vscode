@@ -6,6 +6,7 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { gateStep } from '../agent/gateAdapter';
 import type { GateRuntime } from '../domain/gate/decide';
 import { buildDecisionRecord } from '../domain/gate/record';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
@@ -42,6 +43,29 @@ async function newHost(extra: Partial<ConstructorParameters<typeof GateHost>[0]>
   await host.start();
   return { host, storage };
 }
+
+test('gate decision logs preserve runtime timestamps as epoch milliseconds', async () => {
+  const first = Date.UTC(2026, 10, 23, 10, 0, 0, 123);
+  let now = first;
+  const { host, storage } = await newHost({ now: () => new Date(now) });
+  const root = path.join(storage, 'timestamp-project');
+  const runtime = await runtimeIn(host, root);
+  for (const callId of ['first-decision', 'second-decision']) {
+    await gateStep(runtime, {
+      tool: 'plan', callId, effects: [{ verb: 'plan' }],
+      policy: { mode: 'fully-autonomous', emergencyStop: false },
+      settings: { decision: 'allow', rule: 'settings.read-plan' }
+    });
+    now += 17;
+  }
+  await host.flush();
+
+  const file = path.join(storage, GATE_DIR_NAME, DECISIONS_DIR, `${projectLogKey(root)}.jsonl`);
+  const records = (await readFile(file, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(records.map((record) => [record.api.request.uid, record.time]), [
+    ['first-decision', first], ['second-decision', first + 17]
+  ]);
+});
 
 test('the host holds at most MAX_PROJECT_LOGS project logs, lets go of the one used longest ago, and loses no record', async () => {
   const { host, storage } = await newHost();
