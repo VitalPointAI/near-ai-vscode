@@ -1,0 +1,16 @@
+{
+  "gap": "G284",
+  "id": "g284",
+  "controls": [
+    "itsp171-03.11.04"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary risk response needs reviewed treatment and follow-up records",
+  "remediation": "The sponsor risk response authority and deployment governance owner identify the decision route for findings from assessment, monitoring and audit. Reconcile sample findings to assigned treatments, approvals, dated action records and review or closure evidence. Retain open status where verification or authority is absent.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted findings-to-decisions trace spanning the three input sources, with assigned treatment dates and review outcome"
+    }
+  ]
+}

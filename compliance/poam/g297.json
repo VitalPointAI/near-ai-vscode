@@ -1,0 +1,16 @@
+{
+  "gap": "G297",
+  "id": "g297",
+  "controls": [
+    "itsp171-03.13.12"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary collaboration remote activation and indicator settings need observed evidence",
+  "remediation": "The deployment collaboration and endpoint owners inventory assessed devices and applications, document prohibition rules and approved exceptions, and verify effective activation controls. Observe blocked remote activation and a visible or audible in-use indication on synthetic test sessions. Record authorized exceptions and the tested device or application scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved device and exception register, effective settings, and redacted remote-activation refusal and local indication results"
+    }
+  ]
+}

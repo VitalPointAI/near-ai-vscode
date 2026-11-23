@@ -3194,6 +3194,377 @@
     },
     {
       "controls": [
+        "itsp171-03.09.01"
+      ],
+      "id": "G275",
+      "ownerRole": "owner",
+      "poam": "g275",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment personnel security authority and access sponsor approve screening criteria, case custody and rescreening triggers for the assessed roles. Verify a redacted timeline from an authorized screening disposition to initial access approval and select a rescreening case or exercise. Retain role and date evidence and protected case references in place of personal screening contents.",
+      "title": "Supplementary personnel screening needs dated authorization evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.09.02"
+      ],
+      "id": "G276",
+      "ownerRole": "owner",
+      "poam": "g276",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The workforce separation owner, identity services lead and facility custodian approve termination and transfer duties and timing. Sample termination and reassignment records to verify credentials, authenticators, logical and physical access, and security property were recovered, revoked or adjusted as required. Compare actual completion times and retain redacted decisions and exceptions.",
+      "title": "Supplementary personnel separation and transfer need access and property records"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.02"
+      ],
+      "id": "G277",
+      "ownerRole": "owner",
+      "poam": "g277",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The facility security operations owner identifies assessed locations and defines log review schedules and incident triggers. Verify a redacted review of physical access logs and an approved benign exercise or actual incident reference showing escalation and response. Link verified provider reports for inherited facilities and record collection or review gaps.",
+      "title": "Supplementary facility monitoring and access log review need operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.03",
+        "itsp171-03.10.04",
+        "itsp171-03.10.05"
+      ],
+      "id": "G278",
+      "ownerRole": "owner",
+      "poam": "g278",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The contracting sponsor assessment authority and assessor reconcile each of the three identifiers to the approved source edition and contract selection. The source records them as not allocated following NIST withdrawal. Log a dated disposition and citation per ID, including an approved alternate objective only where the contracting authority identifies one. Retain pending status until the decision is reviewed.",
+      "title": "Unallocated supplementary physical rows need individual sponsor dispositions"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.06"
+      ],
+      "id": "G279",
+      "ownerRole": "owner",
+      "poam": "g279",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor workplace security lead and system owner identify assessed alternate work sites or approved site classes and the safeguards selected for them. Inspect a redacted site approval and verify applicable safeguards or a documented restriction of work activities. Record the owner, review date and any unapproved site disposition.",
+      "title": "Supplementary alternate work sites need approved boundaries and verified safeguards"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.08"
+      ],
+      "id": "G280",
+      "ownerRole": "owner",
+      "poam": "g280",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The facility engineering and network security owners identify assessed distribution and transmission lines on restricted drawings. Review controls over physical access at applicable rooms, enclosures and exposed access points. Verify a dated inspection and sampled owner approval or inherited facility assurance, and retain sanitized references in the package.",
+      "title": "Supplementary distribution and transmission lines need scoped physical protection evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.11.01"
+      ],
+      "id": "G281",
+      "ownerRole": "owner",
+      "poam": "g281",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment risk authority and supply chain lead assess unauthorized disclosure over the lifecycle of assessed specified information. Verify the review accounts for relevant suppliers and dependencies, data boundaries, threat and impact findings, assigned actions and approved update timing. Keep sensitive details in the assessment repository with redacted outcome references.",
+      "title": "Supplementary disclosure risk assessment needs approved scope and review evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.11.02"
+      ],
+      "id": "G282",
+      "ownerRole": "owner",
+      "poam": "g282",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment vulnerability management and patch owners define scoped monitoring and scan frequencies, new finding triggers, detection-content update rules and remediation time targets. Review redacted reports from already authorized assessments, scope and content update records, and a sampled finding through remediation verification. Retain approved disposition for scope or timing gaps.",
+      "title": "Supplementary vulnerability monitoring needs authorized schedule and remediation records"
+    },
+    {
+      "controls": [
+        "itsp171-03.11.03"
+      ],
+      "id": "G283",
+      "ownerRole": "owner",
+      "poam": "g283",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The contracting sponsor risk authority and assessor reconcile this displayed identifier to the approved source edition and contract selection. The source records it as not allocated following NIST withdrawal. Record the authoritative citation, dated disposition and any successor identified by the contracting authority. Preserve pending status during review.",
+      "title": "Unallocated supplementary risk row needs a sponsor source decision"
+    },
+    {
+      "controls": [
+        "itsp171-03.11.04"
+      ],
+      "id": "G284",
+      "ownerRole": "owner",
+      "poam": "g284",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor risk response authority and deployment governance owner identify the decision route for findings from assessment, monitoring and audit. Reconcile sample findings to assigned treatments, approvals, dated action records and review or closure evidence. Retain open status where verification or authority is absent.",
+      "title": "Supplementary risk response needs reviewed treatment and follow-up records"
+    },
+    {
+      "controls": [
+        "itsp171-03.12.01"
+      ],
+      "id": "G285",
+      "ownerRole": "owner",
+      "poam": "g285",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor assessment lead and authorized assessor define the system and operating environment, requirements, methods, evidence access and review frequency. Verify the approved assessment plan is traceable to a completed dated scope sample and documented findings or remains pending with a named owner. Retain signed report references and redacted evidence indexes.",
+      "title": "Supplementary security assessment needs authorized scope and results"
+    },
+    {
+      "controls": [
+        "itsp171-03.12.02"
+      ],
+      "id": "G286",
+      "ownerRole": "owner",
+      "poam": "g286",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor remediation owner and assessor reconcile the deployment plan of action and milestones to findings from security assessments, audits or reviews, and continuous monitoring. Verify sampled ownership, dates, evidence expectations and updates when findings change. Record independent review or closure evidence where available, with unresolved entries retained.",
+      "title": "Supplementary remediation plan needs an operating revision trail"
+    },
+    {
+      "controls": [
+        "itsp171-03.12.03"
+      ],
+      "id": "G287",
+      "ownerRole": "owner",
+      "poam": "g287",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor monitoring lead approves a system-level strategy with assessed boundaries, owners, collection and review cadence and recurring security assessments. Verify at least a representative monitored period and assessment follow-up record. Retain dated metric results, evidence of review, escalation and decisions for missing coverage.",
+      "title": "Supplementary continuous monitoring needs operating strategy evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.12.04"
+      ],
+      "id": "G288",
+      "ownerRole": "owner",
+      "poam": "g288",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The contracting sponsor assessment lead and authorized assessor reconcile the displayed identifier and contract selection to the authoritative edition, which identifies the row as not allocated after NIST withdrawal. Retain the dated source citation and signed scope decision or record the unresolved decision and responsible official.",
+      "title": "Unallocated supplementary assessment row needs a sponsor scope decision"
+    },
+    {
+      "controls": [
+        "itsp171-03.12.05"
+      ],
+      "id": "G289",
+      "ownerRole": "owner",
+      "poam": "g289",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor interconnection owner and information custodians inventory assessed exchanges and approved agreement types. Review a scoped agreement for interfaces, privacy and security expectations, assigned responsibilities and review cadence. Match the approved agreement to a redacted deployed connection record and record a dated renewal, closure or gap.",
+      "title": "Supplementary information exchanges need approved agreements and review records"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.04"
+      ],
+      "id": "G290",
+      "ownerRole": "owner",
+      "poam": "g290",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment platform security owner identifies assessed shared resources, tenant boundaries and applicable data isolation controls. Review effective scope and security settings and verify isolation across representative authorized and unauthorized identities using synthetic records only. Retain redacted allowed and refused outcomes and observed configuration.",
+      "title": "Supplementary shared-resource safeguards need verified isolation evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.02",
+        "itsp171-03.13.03",
+        "itsp171-03.13.05",
+        "itsp171-03.13.07",
+        "itsp171-03.13.14",
+        "itsp171-03.13.16"
+      ],
+      "id": "G291",
+      "ownerRole": "owner",
+      "poam": "g291",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The contracting sponsor network assurance lead and assessor reconcile each displayed identifier to the contract selection and authoritative edition, which records these references as not allocated after NIST withdrawal. Keep a separate cited disposition for every identifier and record any approved successor only if designated by the contracting authority. Retain unresolved rows pending review.",
+      "title": "Unallocated supplementary communications rows need per-objective sponsor decisions"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.06"
+      ],
+      "id": "G292",
+      "ownerRole": "owner",
+      "poam": "g292",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment network security owner approves the assessed ingress and egress boundaries, default policy and exception review. Verify effective settings and expiry or disposition for sampled exceptions. Use benign authorized fixtures to document one permitted flow and one denied unapproved flow without collecting live traffic or payloads.",
+      "title": "Supplementary network deny-by-default settings need observed rule evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.08"
+      ],
+      "id": "G293",
+      "ownerRole": "owner",
+      "poam": "g293",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment data protection and network owners confirm assessed storage, backups, replicas and transmissions for specified information. Review effective encryption settings and authorized exceptions for each scoped boundary. Verify a redacted configuration and benign synthetic observation for storage and transmission, with separate provider evidence for inherited controls.",
+      "title": "Supplementary confidentiality in transit and storage needs scoped protection evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.09"
+      ],
+      "id": "G294",
+      "ownerRole": "owner",
+      "poam": "g294",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment network operations owner identifies assessed connection types and approves inactivity thresholds and termination rules. Verify expected disconnect after inactivity and completion for representative synthetic sessions. Retain timestamps and redacted settings with approved exceptions and inconclusive results tracked for review.",
+      "title": "Supplementary network session disconnect needs timed verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.10"
+      ],
+      "id": "G295",
+      "ownerRole": "owner",
+      "poam": "g295",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment cryptographic key custodian and independent reviewer approve requirements for key generation, distribution, storage, access and end of use. Verify protected references for representative lifecycle events and custody decisions, including retirement or destruction where applicable. Include only redacted metadata and authorized audit references, with no key material in the assessor export.",
+      "title": "Supplementary key lifecycle governance needs protected operating evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.11"
+      ],
+      "id": "G296",
+      "ownerRole": "owner",
+      "poam": "g296",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor cryptographic authority and deployment security engineer verify the contract-selected cryptography and effective settings for each assessed protection use. Retain approved type, module and version references, permitted mode where relevant and a redacted comparison to deployment observations. Leave nonmatching or unresolved scope pending authorized disposition.",
+      "title": "Supplementary cryptography approval needs exact deployment configuration evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.12"
+      ],
+      "id": "G297",
+      "ownerRole": "owner",
+      "poam": "g297",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment collaboration and endpoint owners inventory assessed devices and applications, document prohibition rules and approved exceptions, and verify effective activation controls. Observe blocked remote activation and a visible or audible in-use indication on synthetic test sessions. Record authorized exceptions and the tested device or application scope.",
+      "title": "Supplementary collaboration remote activation and indicator settings need observed evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.13"
+      ],
+      "id": "G298",
+      "ownerRole": "owner",
+      "poam": "g298",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment application security owner defines mobile code technologies and approved uses within the assessed boundary. Verify authorization, monitoring and enforcement through a sampled approval and benign permitted and denied tests in an authorized environment. Retain reviewed configuration and oversight records without recording live code or content.",
+      "title": "Supplementary mobile code governance needs reviewed authorization and monitoring evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.15"
+      ],
+      "id": "G299",
+      "ownerRole": "owner",
+      "poam": "g299",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The network security and application owners approve the authenticity requirements for assessed session types and identify the validating controls. Verify bounded representative sessions follow the approved identity validation and reject an invalid test identity. Retain redacted effective configuration and sanitized observed results.",
+      "title": "Supplementary communications session authenticity needs scoped validation evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.01"
+      ],
+      "id": "G300",
+      "ownerRole": "owner",
+      "poam": "g300",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor physical access authority and facility credential custodian define facilities in the assessed ITSP.10.171 contract boundary. Review approved access lists, credential issuance, periodic review and timely removal through redacted samples and provider evidence for inherited facilities. Record applicable parameters, review authority and unresolved settings separately for this assessment.",
+      "title": "Supplementary physical access authorization needs verified identity and removal records"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.07"
+      ],
+      "id": "G301",
+      "ownerRole": "owner",
+      "poam": "g301",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The deployment facility security owner identifies assessed facility ingress, egress and output locations. Verify physical permission before entry, monitoring logs, visitor escorts, physical device and key custody and protection of output devices. Retain reviewed samples and verified provider references for inherited controls in this contract boundary.",
+      "title": "Supplementary facility access controls need tested boundary and visitor evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.01"
+      ],
+      "id": "G302",
+      "ownerRole": "owner",
+      "poam": "g302",
+      "profiles": [
+        "itsp-10-171"
+      ],
+      "remediation": "The sponsor network security authority and system owner map the assessed external and key internal interfaces, public components and approved external connections. Review public-to-internal subnet separation, boundary devices and monitoring settings, and verify representative approved and denied connections using benign synthetic observations. Record inherited protection and findings at the scope of this contract.",
+      "title": "Supplementary managed interfaces and public subnet separation need deployment verification"
+    },
+    {
+      "controls": [
         "itsp171-03.14.01"
       ],
       "id": "G305",

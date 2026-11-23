@@ -1,0 +1,16 @@
+{
+  "gap": "G300",
+  "id": "g300",
+  "controls": [
+    "itsp171-03.10.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary physical access authorization needs verified identity and removal records",
+  "remediation": "The sponsor physical access authority and facility credential custodian define facilities in the assessed ITSP.10.171 contract boundary. Review approved access lists, credential issuance, periodic review and timely removal through redacted samples and provider evidence for inherited facilities. Record applicable parameters, review authority and unresolved settings separately for this assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved facility scope, a redacted physical access list review and witnessed credential issuance and removal records for this contract"
+    }
+  ]
+}

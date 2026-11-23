@@ -1,0 +1,16 @@
+{
+  "gap": "G285",
+  "id": "g285",
+  "controls": [
+    "itsp171-03.12.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary security assessment needs authorized scope and results",
+  "remediation": "The sponsor assessment lead and authorized assessor define the system and operating environment, requirements, methods, evidence access and review frequency. Verify the approved assessment plan is traceable to a completed dated scope sample and documented findings or remains pending with a named owner. Retain signed report references and redacted evidence indexes.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved assessment plan and scope, evidence references and a dated report showing the assigned objective dispositions"
+    }
+  ]
+}

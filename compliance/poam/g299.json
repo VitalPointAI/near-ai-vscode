@@ -1,0 +1,16 @@
+{
+  "gap": "G299",
+  "id": "g299",
+  "controls": [
+    "itsp171-03.13.15"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary communications session authenticity needs scoped validation evidence",
+  "remediation": "The network security and application owners approve the authenticity requirements for assessed session types and identify the validating controls. Verify bounded representative sessions follow the approved identity validation and reject an invalid test identity. Retain redacted effective configuration and sanitized observed results.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the scoped session and identity requirements, reviewed settings and redacted accepted and rejected synthetic session checks"
+    }
+  ]
+}
