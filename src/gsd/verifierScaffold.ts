@@ -168,7 +168,7 @@ them without asking. Run them from the project root:
 
 Each takes report folders or files as arguments; by default it reads \`report/\` (or \`docs/\`). NEAR AI never overwrites them. You may edit
 them, but an edited verifier no longer matches the hash recorded when it was scaffolded, so agents ask before running it until you run
-**NEAR AI: Trust Research Verifiers**, which shows what changed and asks before recording the new versions.
+**SovAI: Trust Research Verifiers**, which shows what changed and asks before recording the new versions.
 `;
 
 /** The scaffold's files, relative to the project root. */
@@ -202,7 +202,7 @@ export async function changedVerifiers(root: string): Promise<string[]> {
 }
 
 /**
- * Records the current contents of the given scaffolded verifiers as trusted (review of PR 34). Only the command "NEAR AI: Trust Research Verifiers"
+ * Records the current contents of the given scaffolded verifiers as trusted (review of PR 34). Only the command "SovAI: Trust Research Verifiers"
  * calls it, after the person confirmed the list; an agent cannot, because the manifest sits where agent writes always ask. Returns what was recorded.
  */
 export async function trustVerifiers(root: string, files: string[]): Promise<string[]> {

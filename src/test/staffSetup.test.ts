@@ -19,7 +19,7 @@ import { TeamUpdater } from '../services/teamUpdates';
 import { buildToolsDirectory, type DirectoryInput } from '../services/toolsDirectory';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
-// Drop 1 integration: the staff servers on the Tools page and in the Team Studio picker, NEAR AI: Set Up a Staff Team, and Update Team for staff teams.
+// Drop 1 integration: the staff servers on the Tools page and in the Team Studio picker, SovAI: Set Up a Staff Team, and Update Team for staff teams.
 
 const input: DirectoryInput = {
   gsd: { version: '1.40.0', skills: [], agents: [] }, teams: [], policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, webSearch: false, securityConsented: true, mcp: [],

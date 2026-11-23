@@ -1,4 +1,4 @@
-// NEAR AI: Load Staff Exercise Scenario (design 10, section 8; WP-DEMO). Puts the starter scenario, or a scenario file of your own, into
+// SovAI: Load Staff Exercise Scenario (design 10, section 8; WP-DEMO). Puts the starter scenario, or a scenario file of your own, into
 // `.planning/staff/scenario/` for a staff team to read, with the J2 and J5 demo scripts beside it. The reading, checking and writing live in
 // staffScenarioLoader.ts; this file only asks the questions.
 import * as path from 'node:path';

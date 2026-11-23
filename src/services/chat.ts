@@ -463,7 +463,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const pick = typeof vscode.window.showQuickPick === 'function'
       ? await vscode.window.showQuickPick(tabs.map((tab) => ({ label: tab.title || 'New conversation', description: STATUS_WORDS[conversationStatus({ running: isRunning(tab), waiting: waitingCount(tab), outcome: tab.outcome })], id: tab.id })), { placeHolder: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Choose one to close (its transcript stays in history).` })
       : undefined;
-    if (!pick) { onScreen().post({ type: 'notice', text: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Close one (×) to start another; its transcript stays in NEAR AI: Show Chat History.` }); return false; }
+    if (!pick) { onScreen().post({ type: 'notice', text: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Close one (×) to start another; its transcript stays in SovAI: Show Chat History.` }); return false; }
     await closeConversation(pick.id);
     return tabs.length < MAX_OPEN_CONVERSATIONS;
   };
@@ -480,7 +480,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const tab = tabs.find((candidate) => candidate.id === id);
     if (!tab) return;
     if (isRunning(tab) || waitingCount(tab)) {
-      const choice = await vscode.window.showWarningMessage(`"${tab.title || 'This conversation'}" is still running. Stop it and close the conversation? Its transcript stays in NEAR AI: Show Chat History.`, { modal: true }, STOP_AND_CLOSE);
+      const choice = await vscode.window.showWarningMessage(`"${tab.title || 'This conversation'}" is still running. Stop it and close the conversation? Its transcript stays in SovAI: Show Chat History.`, { modal: true }, STOP_AND_CLOSE);
       if (choice !== STOP_AND_CLOSE) return;
     }
     const index = tabs.indexOf(tab);
@@ -599,7 +599,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // SYNC-07 / D-03: only a run this editor itself lost (a reload) resumes by itself. A cut-off run another editor left keeps its Resume button.
     const own = new Set(ownEditorMarkers(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), editorWriter(context.globalState as MementoLike | undefined)));
     const chosen = new Set(autoResumeChoice([...own], { enabled, emergencyStopped }));
-    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "SovAI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
     const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
     for (const tab of due) {
       if (isEmergencyStopped()) break;
@@ -828,7 +828,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (!tab.title) tab.title = conversationTitle(typed) ?? '';
     sendSummary();
-    if (isEmergencyStopped()) { tab.post({ type: 'outbound-blocked', text: '', model: '', reason: 'Emergency stop is on. Run "NEAR AI: Resume" to continue.', confirm: false }); return; }
+    if (isEmergencyStopped()) { tab.post({ type: 'outbound-blocked', text: '', model: '', reason: 'Emergency stop is on. Run "SovAI: Resume" to continue.', confirm: false }); return; }
     const root = workspaceRoot();
     let active;
     try {
@@ -859,7 +859,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         await whenTeamsMoved();
         const library = new TeamLibrary(teamLibraryDir(homeFolder()));
         team = await library.find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
-        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
+        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with SovAI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
         // 0.4.26: a team added with Import team runs only once the person approves it.
         if (!await allowLibraryTeam(team, library)) { tab.post({ type: 'assistant-error', text: `The imported team "${team.name}" was not approved, so it did not run. Run /team:${team.slug} again to be asked.` }); return; }
@@ -1028,7 +1028,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (!root) { blocked('No project folder is open, so it was not sent to the running agent. Open the project folder, then send it again.'); return; }
     const staged = ids.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
     // It goes to the provider like any message, so it passes the same outbound check, with what is attached to it.
-    if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "NEAR AI: Resume" to continue.'); return; }
+    if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "SovAI: Resume" to continue.'); return; }
     const guard = state.guard ?? new OutboundGuard(readSettings());
     const attachedText = attachedTextOf(staged);
     const verdict = guard.check({ model: tab.model ?? '', modelInfo: tab.modelInfo, text: attachedText ? `${message.text}\n${attachedText}` : message.text }, state.spend?.spentTodayUsd().usd ?? 0);

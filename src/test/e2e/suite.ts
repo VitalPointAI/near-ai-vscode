@@ -787,7 +787,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
 
       // Preview off (the default): Enable is not offered, so accepting for 5 s starts nothing.
       assert.equal(vscode.workspace.getConfiguration('nearAi').get('team.preview'), false);
-      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
+      await runFromPalette('SovAI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
       await pause(1_000);
       assert.equal(existsSync(teamFilePath), false, PREVIEW_OFF_SIGNAL);
       await vscode.commands.executeCommand('notifications.clearAll');
@@ -802,7 +802,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       const { ENABLE_COMMIT_MESSAGE } = require(path.join(extension.extensionPath, 'dist/team/enable')) as typeof import('../../team/enable');
       const { DEFAULT_COORDINATION_REF } = require(path.join(extension.extensionPath, 'dist/team/gitTransport')) as typeof import('../../team/gitTransport');
       const enabled = () => existsSync(teamFilePath) && commitSubject() === ENABLE_COMMIT_MESSAGE && getApi().team.session() !== undefined;
-      await runFromPalette('NEAR AI: Enable Team Mode', enabled, 60_000);
+      await runFromPalette('SovAI: Enable Team Mode', enabled, 60_000);
       if (!enabled()) {
         // The commit and the session follow team.json by a moment, so wait for them before judging.
         await waitUntil(enabled, 10_000);

@@ -159,7 +159,7 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
 }
 
 /**
- * "NEAR AI: Put This Project's Code Online": the checked code push on the person's own command, for a project that already has an online home (G-27-6b).
+ * "SovAI: Put This Project's Code Online": the checked code push on the person's own command, for a project that already has an online home (G-27-6b).
  * The offer question is not asked, running the command is the choice; every other question of the checked step is.
  */
 export function registerCodePushCommand(context: vscode.ExtensionContext): void {

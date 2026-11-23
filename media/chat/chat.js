@@ -398,8 +398,7 @@
     if (send) postFor({ type: 'continue-run' });
   }
   // Lower This Chat's Label, as a button wherever a message names it (owner, after the 0.4.31 check: people looked at the chat, not the Command Palette).
-  const LOWER_NAME = 'NEAR AI: Lower This Chat\u2019s Label';
-  function namesLower(text) { return typeof text === 'string' && (text.includes(LOWER_NAME) || text.includes("NEAR AI: Lower This Chat's Label")); }
+  function namesLower(text) { return typeof text === 'string' && /(?:SovAI|NEAR AI): Lower This Chat['\u2019]s Label/.test(text); }
   function lowerButton() { return textButton('Lower This Chat\u2019s Label', () => postFor({ type: 'lower-chat-label' })); }
   function notice(text, actions, isError) {
     const node = el('div', isError ? 'turn notice error' : 'turn notice');
@@ -1095,7 +1094,7 @@
       policy.dataset.state = 'stopped';
       policy.dataset.risky = 'false';
       policy.setAttribute('aria-label', 'Approval policy: stopped');
-      policy.title = 'Emergency stop is on: NEAR AI sends and runs nothing. Run "NEAR AI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
+      policy.title = 'Emergency stop is on: NEAR AI sends and runs nothing. Run "SovAI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
       policyMenu.replaceChildren();
       return;
     }

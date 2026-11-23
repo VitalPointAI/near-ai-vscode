@@ -127,7 +127,7 @@ test('each multi-user command is contributed under NEAR AI with its "Staff: " ti
   assert.deepEqual([...IDS].sort(), Object.keys(TITLES).sort());
   for (const id of IDS) {
     const entries = manifest.contributes.commands.filter((entry) => entry.command === id);
-    assert.deepEqual(entries, [{ command: id, title: TITLES[id], category: 'NEAR AI' }], id);
+    assert.deepEqual(entries, [{ command: id, title: TITLES[id], category: 'SovAI' }], id);
     plain(TITLES[id], id);
   }
 });

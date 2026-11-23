@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { parseStaffSettings, STAFF_TEAM_SECTIONS } from '../domain/staff/profiles';
 
-// The one-time setup steps offered after NEAR AI is connected, and again from "NEAR AI: Project
+// The one-time setup steps offered after NEAR AI is connected, and again from "SovAI: Project
 // Setup…". Pure: no VS Code import, so the order and wording are tested in plain Node. The host
 // (setupMenu.ts) builds a SetupContext, collects the registered facts, and runs the chosen step.
 //
@@ -134,7 +134,7 @@ export async function collectSetupContext(base: Omit<SetupContext, 'facts'>): Pr
 export const START_CHATTING = {
   id: 'start-chatting',
   label: 'Start chatting',
-  detail: 'Ask NEAR AI anything about this project. You can come back to these steps with NEAR AI: Project Setup.',
+  detail: 'Ask NEAR AI anything about this project. You can come back to these steps with SovAI: Project Setup.',
   icon: 'comment-discussion',
   command: 'nearAi.openChat'
 } as const;

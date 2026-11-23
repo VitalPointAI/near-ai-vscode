@@ -18,7 +18,7 @@ import { openPolicyEditor, openPolicyProposal, registerPolicyEditor } from './po
 import type { PolicyChange, PolicyEditorDeps, PolicyEditorState, ProposalOutcome } from './policyEditor';
 
 export const POLICY_APPLIED_TEXT = `Your policy was changed, signed with this computer's key and recorded. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
-export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Open NEAR AI: Policy and choose Edit my rules first.';
+export const NO_DRAFT_TEXT = 'There is no policy draft to apply. Open SovAI: Policy and choose Edit my rules first.';
 export const OPEN_FAILED_TEXT = 'NEAR AI could not open your policy.';
 const APPLY_FAILED_TEXT = 'Nothing was changed: NEAR AI could not apply your policy draft.';
 const UNTRUSTED_TEXT = 'Nothing was changed: your policy cannot be trusted right now, so it cannot be edited.';
@@ -124,7 +124,7 @@ function warn(message: string): void {
 }
 
 /**
- * NEAR AI: Apply Policy Draft (D-41, D-44, D-53). Reads the draft and the hash it was made from; a draft made from another personal layer is stale and an
+ * SovAI: Apply Policy Draft (D-41, D-44, D-53). Reads the draft and the hash it was made from; a draft made from another personal layer is stale and an
  * invalid one is refused with its plain reason, both before anything is proposed. A good draft is shown on the policy page as a proposal against the
  * personal layer, and is applied only from there. Applied: the draft files are removed. Any other ending keeps the draft. Returns true when applied.
  */

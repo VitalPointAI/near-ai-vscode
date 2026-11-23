@@ -3,6 +3,7 @@ import { CommandRegistry } from '@theia/core/lib/common/command.js';
 import type { FrontendApplication } from '@theia/core/lib/browser/frontend-application.js';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
+import { ThemeService } from '@theia/core/lib/browser/theming.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import './sterling-welcome.css';
@@ -21,6 +22,9 @@ class SterlingWelcomeWidget extends BaseWidget {
   @inject(CommandRegistry)
   protected readonly commands!: CommandRegistry;
 
+  @inject(ThemeService)
+  protected readonly themes!: ThemeService;
+
   @postConstruct()
   protected initialize(): void {
     this.id = welcomeId;
@@ -31,10 +35,13 @@ class SterlingWelcomeWidget extends BaseWidget {
     this.addClass('sterling-welcome');
     this.node.innerHTML = `
       <main class="sterling-page">
-        <header class="sterling-wordmark"><span aria-hidden="true">S</span> Sterling</header>
+        <header class="sterling-wordmark"><img width="1600" height="595" alt="Sterling"></header>
         <section class="sterling-hero" aria-labelledby="sterling-title">
           <img class="sterling-hero-image" src="sterling-hero.webp" alt="" decoding="async">
           <div class="sterling-hero-glow" aria-hidden="true"></div>
+          <button type="button" class="sterling-motion" aria-label="Pause hero animation" title="Pause hero animation">
+            <i class="codicon codicon-debug-pause" aria-hidden="true"></i>
+          </button>
           <div class="sterling-hero-copy">
             <h1 id="sterling-title">Sovereign AI<br>for real work.</h1>
             <p>Choose where your models run, build agent teams, and govern what they can do.</p>
@@ -61,6 +68,24 @@ class SterlingWelcomeWidget extends BaseWidget {
           </div>
         </section>
       </main>`;
+    const logo = this.node.querySelector<HTMLImageElement>('.sterling-wordmark img')!;
+    const updateLogo = (): void => {
+      const theme = this.themes.getCurrentTheme().type;
+      logo.src = theme === 'dark' || theme === 'hc' ? 'sterling_logo_reverse.png' : 'sterling_logo_color.png';
+    };
+    updateLogo();
+    this.toDispose.push(this.themes.onDidColorThemeChange(updateLogo));
+
+    const hero = this.node.querySelector<HTMLElement>('.sterling-hero')!;
+    const motionButton = hero.querySelector<HTMLButtonElement>('.sterling-motion')!;
+    motionButton.addEventListener('click', () => {
+      const paused = hero.toggleAttribute('data-motion-paused');
+      const action = paused ? 'Play hero animation' : 'Pause hero animation';
+      motionButton.setAttribute('aria-label', action);
+      motionButton.title = action;
+      motionButton.firstElementChild!.className = paused ? 'codicon codicon-play' : 'codicon codicon-debug-pause';
+    });
+
     const status = this.node.querySelector<HTMLElement>('.sterling-status')!;
     this.node.querySelectorAll<HTMLButtonElement>('button[data-command]').forEach(button => {
       button.addEventListener('click', async () => {
@@ -119,7 +144,7 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   }
 
   override registerCommands(commands: CommandRegistry): void {
-    commands.registerCommand({ id: 'sterling.getStarted', category: 'Sterling', label: 'Get Started' }, {
+    commands.registerCommand({ id: 'sterling.getStarted', category: 'SovAI', label: 'Get Started' }, {
       execute: () => this.openView({ activate: true })
     });
   }

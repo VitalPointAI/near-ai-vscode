@@ -1,4 +1,4 @@
-// NEAR AI: Staff: Import Feed File... (research note 11, 9.2 item 3; WP-IMP). A person picks a GeoJSON, KML, CoT, RSS, Atom or AIS file; the file is
+// SovAI: Staff: Import Feed File... (research note 11, 9.2 item 3; WP-IMP). A person picks a GeoJSON, KML, CoT, RSS, Atom or AIS file; the file is
 // parsed in a separate process; the person sees what would be imported (how many observations, the format, the label, the time span, and what is held
 // outside the exercise frame or skipped) and confirms in a modal dialog before anything is written. Agents cannot run it: no agent tool runs a VS Code
 // command, and approving a new import feed needs a named person.

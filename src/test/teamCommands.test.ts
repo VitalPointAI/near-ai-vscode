@@ -304,12 +304,12 @@ test('Enable refuses with the preview off: it asks nothing and creates no team.j
   }, { preview: false });
 });
 
-test('a folder that is not set up for NEAR AI gets an error that names NEAR AI: Set Up', async () => {
+test('a folder that is not set up for NEAR AI gets an error that names SovAI: Set Up', async () => {
   await withProject(async (p) => {
     await p.enable([]);
     assert.equal(stub.notifications.length, 1);
     assert.equal(stub.notifications[0]?.level, 'error');
-    assert.ok(stub.notifications[0]?.message.includes('NEAR AI: Set Up'));
+    assert.ok(stub.notifications[0]?.message.includes('SovAI: Set Up'));
     assert.ok(outputLines().includes(stub.notifications[0]?.message as string));
     assert.equal(stub.inputRequests.length, 0);
   }, { initialised: false });
@@ -318,7 +318,7 @@ test('a folder that is not set up for NEAR AI gets an error that names NEAR AI: 
 test('with no folder open Enable asks the user to open the project folder', async () => {
   await withProject(async (p) => {
     await p.enable([]);
-    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.']]);
+    assert.deepEqual(stub.notifications.map((entry) => [entry.level, entry.message]), [['error', 'Open your project folder first, then run "SovAI: Enable Team Mode" again.']]);
     assert.equal(stub.inputRequests.length, 0);
   }, { folderOpen: false });
 });

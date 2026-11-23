@@ -144,7 +144,7 @@ async function engagementForRun(engagements: CyberEngagementStore, runId: string
 export function openCyberPanel(context: vscode.ExtensionContext, service: CyberPanelServiceDeps): void {
   if (current) { current.reveal(); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'cyber');
-  const view = vscode.window.createWebviewPanel('nearAiCyber', 'NEAR AI: Cybersecurity', vscode.ViewColumn.Active, {
+  const view = vscode.window.createWebviewPanel('nearAiCyber', 'SovAI: Cybersecurity', vscode.ViewColumn.Active, {
     enableScripts: true,
     retainContextWhenHidden: true,
     localResourceRoots: [media]

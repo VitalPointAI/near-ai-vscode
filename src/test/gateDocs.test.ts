@@ -68,11 +68,11 @@ test('the commands the docs name are the ones package.json contributes, and the 
   const reset = commandName('nearAi.policy.reset');
   const show = commandName('nearAi.policy.show');
   const policy = commandName('nearAi.policy.open');
-  assert.equal(reset, 'NEAR AI: Reset Policy to Defaults');
-  assert.equal(show, 'NEAR AI: Show Policy');
-  assert.equal(policy, 'NEAR AI: Policy');
+  assert.equal(reset, 'SovAI: Reset Policy to Defaults');
+  assert.equal(show, 'SovAI: Show Policy');
+  assert.equal(policy, 'SovAI: Policy');
   for (const text of [policySection, readmePolicy]) {
-    assert.ok(flat(text).includes(`**${policy}**`), 'NEAR AI: Policy');
+    assert.ok(flat(text).includes(`**${policy}**`), 'SovAI: Policy');
     assert.ok(flat(text).includes('**Reset my rules**'), 'the page\'s reset');
     assert.ok(flat(text).includes('**Show as stored**'), 'the page\'s stored view');
   }
@@ -371,7 +371,7 @@ test('SECURITY.md\'s labels bullet says what 4b makes live, carries both texts w
   const setLabel = commandName('nearAi.label.set');
   const edit = commandName('nearAi.policy.edit');
   const applyDraft = commandName('nearAi.policy.applyDraft');
-  assert.deepEqual([setLabel, edit, applyDraft], ['NEAR AI: Set Label', 'NEAR AI: Edit Policy', 'NEAR AI: Apply Policy Draft']);
+  assert.deepEqual([setLabel, edit, applyDraft], ['SovAI: Set Label', 'SovAI: Edit Policy', 'SovAI: Apply Policy Draft']);
   // D-44: Edit Policy and Apply Policy Draft left the palette; the docs name the page and its two buttons that run them.
   const words = flat(policySection);
   for (const phrase of [setLabel, `open **${commandName('nearAi.policy.open')}** and use **Edit my rules**, then **Apply my draft**`, '`.planning/.near-ai/labels.json`, signed with your device key, and travel with the project',
@@ -444,7 +444,7 @@ test('SECURITY.md\'s labels and routing section carries the scales caveat, the c
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'in order');
   assert.ok(at[at.length - 1]! < block);
   for (const phrase of ['`.planning/.near-ai/labels.json`', 'anyone who can read the project can read its labels', 'A sync never lowers a chat\'s label',
-    'Only you lower it, with **NEAR AI: Lower This Chat\'s Label** and a reason that is recorded', 'declassification signed with your device key that they can check',
+    'Only you lower it, with **SovAI: Lower This Chat\'s Label** and a reason that is recorded', 'declassification signed with your device key that they can check',
     'only when it undoes no raise made there', 'In this version your other computers cannot check another computer\'s key yet, in or outside Team Mode', 'a lowering made on one computer is not applied on the others', 'takes the chat\'s label in the label file, never a lower one',
     'Protected B stays on this computer because no CCCS Medium assessment of NEAR AI Cloud was found, unless your organization changes its policy',
     'unless your organization names another host', 'is refused, whatever the mode']) {
@@ -493,7 +493,7 @@ test('README carries the first sentence of LABELS_NOT_ACCREDITATION_TEXT and the
 test('PR #87 review: SECURITY.md says how a reopened chat treats its earlier results, and the refusal for them says so truly, with the way out', () => {
   assert.ok(flat(sectionOf(SECURITY, '### Classification labels and routing')).includes(flat(OUTBOUND_REOPENED_DOCS_TEXT)));
   assert.match(OUTBOUND_EARLIER_TEXT, /cannot tell which of its earlier results came from labelled files/);
-  assert.match(OUTBOUND_EARLIER_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.match(OUTBOUND_EARLIER_TEXT, /SovAI: Lower This Chat's Label/);
   for (const text of [OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_EARLIER_TEXT]) {
     assert.ok(!text.includes(EM_DASH));
     assert.doesNotMatch(text, /NEAR organization|Phase \d/);
@@ -502,7 +502,7 @@ test('PR #87 review: SECURITY.md says how a reopened chat treats its earlier res
 
 test('PR #87 review round 2: the refusal of a run whose reading could not be checked says so, names the way out, and never claims labelled content was read', () => {
   assert.match(OUTBOUND_UNCHECKED_TEXT, /could not be checked for labelled text/);
-  assert.match(OUTBOUND_UNCHECKED_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.match(OUTBOUND_UNCHECKED_TEXT, /SovAI: Lower This Chat's Label/);
   assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /has read labelled content/);
   assert.ok(!OUTBOUND_UNCHECKED_TEXT.includes(EM_DASH));
   assert.doesNotMatch(OUTBOUND_UNCHECKED_TEXT, /NEAR organization|Phase \d/);
@@ -668,7 +668,7 @@ test('PR #143 review: SECURITY.md says classified levels stay here whatever tier
   const security = flat(SECURITY);
   assert.match(security, /This holds whatever tier the policy gives those levels: no cloud and no other host is accredited for them today/);
   assert.match(security, /A model on a host your organization names as local counts only when the policy names that exact host and it is reached over https; a `\*\.` pattern or plain http does not\./);
-  assert.match(security, /only for a policy signed by this computer's own key, \*\*NEAR AI: Policy\*\* offers \*\*Reset my rules\*\*/);
+  assert.match(security, /only for a policy signed by this computer's own key, \*\*SovAI: Policy\*\* offers \*\*Reset my rules\*\*/);
   assert.match(flat(README), /a host your organization names exactly and reaches over https/);
 });
 
@@ -694,15 +694,15 @@ test("Phase 41: the policy section says how your organization's rules reach this
     `**${ISSUER_WORDS_MATCH}**`,
     organizationEndedText('2027-01-31', contact)
   ]) assert.ok(words.includes(flat(phrase)), phrase);
-  assert.equal(commandName('nearAi.organization.addRules'), "NEAR AI: Add Your Organization's Rules");
+  assert.equal(commandName('nearAi.organization.addRules'), "SovAI: Add Your Organization's Rules");
   assert.ok(!block.includes(EM_DASH));
   assert.doesNotMatch(block, /NEAR (AI )?organization/i);
 });
 
-// ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to NEAR AI: Policy ----
+// ---- D-44 (41-14 took Show, Edit, Apply Policy Draft, Reset and Show Policy as Stored off the palette): every user sentence points to SovAI: Policy ----
 
 /** A command that left the palette, with or without the brand prefix. */
-const LEFT_THE_PALETTE = /(?:NEAR AI:\s*)?(?:Show Policy|Edit Policy|Apply Policy Draft|Reset Policy to Defaults)/;
+const LEFT_THE_PALETTE = /(?:SovAI:\s*)?(?:Show Policy|Edit Policy|Apply Policy Draft|Reset Policy to Defaults)/;
 /** The page's own button words (media/policy/policy.js), read from the page so the docs and sentences use the page's words. */
 const POLICY_PAGE = readFileSync(path.join(ROOT, 'media', 'policy', 'policy.js'), 'utf8');
 
@@ -716,13 +716,13 @@ test('D-44: no user sentence names a command that left the palette', async () =>
   }
   assert.deepEqual(found, []);
   // The check has teeth: the extractor finds a planted sentence in a source and in a page script.
-  assert.ok(extractCopy("export const PLANTED_TEXT = 'Run NEAR AI: Edit Policy first.';", 'src/x.ts').some(({ text }) => LEFT_THE_PALETTE.test(text)));
+  assert.ok(extractCopy("export const PLANTED_TEXT = 'Run SovAI: Edit Policy first.';", 'src/x.ts').some(({ text }) => LEFT_THE_PALETTE.test(text)));
   assert.ok(extractCopy("node.textContent = 'Use Reset Policy to Defaults';", 'media/x.js').some(({ text }) => LEFT_THE_PALETTE.test(text)));
 });
 
 test('D-44, D-21: every swept sentence names the policy page by its contributed name, and every reset offer resets your own rules only', async () => {
   const policy = commandName('nearAi.policy.open');
-  assert.equal(policy, 'NEAR AI: Policy');
+  assert.equal(policy, 'SovAI: Policy');
   for (const button of ['Edit my rules', 'Apply my draft', 'Reset my rules', 'Show as stored']) assert.ok(POLICY_PAGE.includes(`'${button}'`), `the page's ${button} button`);
   const uninstall = installVscodeStub(createVscodeStub());
   let commands: typeof import('../services/gateCommands');
@@ -1016,7 +1016,11 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
   for (const phrase of [
     'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.',
     `**${commandName('nearAi.organization.addRules')}**`, `**${commandName('nearAi.policy.open')}**`, `"${titles.organization}"`, '**Reset my rules**'
-  ]) assert.ok(entry.includes(phrase), phrase);
+  ]) {
+    // A shipped release uses the command prefix in effect at the time.
+    const releasedPhrase = phrase.replace('SovAI:', 'NEAR AI:');
+    assert.ok(entry.includes(releasedPhrase), releasedPhrase);
+  }
   const exportBullets = changelogOrganization.split('\n- ').filter((bullet) => bullet.includes('Controlled goods (Canada)'));
   assert.equal(exportBullets.length, 1, 'one export bullet');
   assert.match(flat(exportBullets[0] ?? ''), /stays on this computer under the starting rules[^]*later release/);

@@ -123,7 +123,7 @@ async function decideCommand(context: StaffCommandContext, identity: () => Promi
   const choices = snapshot.registry.filter((view) => eligible(action, view));
   let view = args?.product ? choices.find((candidate) => candidate.product === args.product) : undefined;
   if (args?.product && !view) {
-    void vscode.window.showWarningMessage(`${args.product} cannot be ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'release' ? 'released' : 'withdrawn'} now. Check its state with NEAR AI: Staff: Show Products.`);
+    void vscode.window.showWarningMessage(`${args.product} cannot be ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'release' ? 'released' : 'withdrawn'} now. Check its state with SovAI: Staff: Show Products.`);
     return;
   }
   if (!view) {

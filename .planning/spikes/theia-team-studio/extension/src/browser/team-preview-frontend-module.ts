@@ -8,7 +8,7 @@ import { TEAM_PREVIEW_PATH, TeamPreviewService, type TeamPreviewResult } from '.
 import './team-preview.css';
 
 const widgetId = 'near-ai-team-studio-preview';
-const openTeamStudio: Command = { id: 'near-ai.team-studio.preview', label: 'Open Team Studio Preview', category: 'Sterling' };
+const openTeamStudio: Command = { id: 'near-ai.team-studio.preview', label: 'Open Team Studio Preview', category: 'SovAI' };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);

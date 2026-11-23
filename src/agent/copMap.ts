@@ -153,7 +153,7 @@ async function writeNew(file: string, text: string): Promise<void> {
 /** The loaded scenario's exercise frame: every position on the map is inside it. */
 async function frameOf(root: string): Promise<ExerciseFrame> {
   const text = await readSmall(path.join(root, SCENARIO_FILE));
-  if (text === undefined) throw new ToolError(`No scenario is loaded (${SCENARIO_FILE}). Load one with NEAR AI: Load Staff Exercise Scenario; the map needs its exercise frame.`);
+  if (text === undefined) throw new ToolError(`No scenario is loaded (${SCENARIO_FILE}). Load one with SovAI: Load Staff Exercise Scenario; the map needs its exercise frame.`);
   const parsed = parseScenarioText(text);
   if (!parsed.ok) throw new ToolError(`The loaded scenario cannot be read: ${parsed.message}`);
   if (!parsed.value.region.frame) throw new ToolError('The loaded scenario has no exercise frame (scenario version 2), so nothing can be placed on the map.');

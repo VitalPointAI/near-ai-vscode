@@ -49,7 +49,7 @@ export function toolChangesNotice(serverName: string, changes: McpToolChanges): 
     ...(changes.removed.length ? [`no longer listed: ${changes.removed.join(', ')}`] : [])
   ];
   const held = changes.added.length + changes.changed.length > 0 ? ' New and changed tools are not offered to agents until you approve them.' : '';
-  return `MCP server ${serverName} changed its tools since you approved them (${parts.join('; ')}).${held} Review them with NEAR AI: Manage MCP Connections and choose Approve tool changes.`;
+  return `MCP server ${serverName} changed its tools since you approved them (${parts.join('; ')}).${held} Review them with SovAI: Manage MCP Connections and choose Approve tool changes.`;
 }
 
 /** The notice for a tool whose description looks like it tries to instruct the assistant (WP-GATE): it is fenced as untrusted, and the person is told. */

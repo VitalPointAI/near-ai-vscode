@@ -5,7 +5,7 @@ import path from 'node:path';
 // Execution tasks for the model benchmark: build or fix something in a small multi-file project
 // from a plan, an issue report, or a spec, as GSD executors do. Each is scored by acceptance tests
 // the model never sees, copied in only after it finishes, so partial work earns partial credit.
-// Shared by the live eval (src/test/live.test.ts) and NEAR AI: Compare Models; the fixtures ship
+// Shared by the live eval (src/test/live.test.ts) and SovAI: Compare Models; the fixtures ship
 // with the extension under resources/benchmark/execution.
 
 export const EXECUTION_FIXTURES = path.join(__dirname, '..', '..', 'resources', 'benchmark', 'execution');

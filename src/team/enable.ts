@@ -25,7 +25,7 @@ export type EnableFailureCode =
   | 'invalid-input' | 'preview-off' | 'secret' | 'push-failed' | 'push-unconfirmed' | 'commit-failed';
 
 // The same words the command shows when the setting is off, kept here so the core refuses in its own voice.
-export const ENABLE_PREVIEW_OFF_MESSAGE = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "NEAR AI: Enable Team Mode" again.';
+export const ENABLE_PREVIEW_OFF_MESSAGE = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "SovAI: Enable Team Mode" again.';
 
 export interface EnableInput {
   // The preview gate holds in the core, not only in the command: Enable refuses unless the caller says the preview setting is on. The VS Code
@@ -102,7 +102,7 @@ export async function checkEnablePreconditions(projectRoot: string, remote: stri
     throw error;
   }
   if (!(await isDirectory(path.join(projectRoot, '.planning', '.near-ai')))) {
-    return fail('not-initialised', 'This project is not set up for NEAR AI yet. Run "NEAR AI: Set Up" first, then enable Team Mode.');
+    return fail('not-initialised', 'This project is not set up for NEAR AI yet. Run "SovAI: Set Up" first, then enable Team Mode.');
   }
   const inside = await run(['rev-parse', '--is-inside-work-tree']);
   if (inside.code !== 0 || gitText(inside) !== 'true') {

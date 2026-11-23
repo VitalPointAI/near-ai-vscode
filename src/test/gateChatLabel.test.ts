@@ -121,7 +121,7 @@ test('an unreadable stored label opens the chat at org/Restricted with the sente
   const readable = meta(ID, '2026-11-12T00:00:00.000Z', { mark: [PUBLIC] });
   assert.equal(chatLabelOf(unreadable).kind, 'unreadable');
   for (const merged of both(unreadable, readable)) assert.deepEqual(merged.label, unreadable.label);
-  assert.match(UNREADABLE_CHAT_LABEL_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.match(UNREADABLE_CHAT_LABEL_TEXT, /SovAI: Lower This Chat's Label/);
   const root = labelledProject();
   const store = storeFor(root);
   const chat = await chatIn(root, store);
@@ -281,7 +281,7 @@ test('no agent tool can lower a chat\'s label: lowerByPerson is called only from
   const callers = files.filter((file) => /\.lowerByPerson\(/.test(readFileSync(file, 'utf8'))).map((file) => path.relative(src, file).split(path.sep).join('/'));
   assert.deepEqual(callers, ['services/gateCommands.ts']);
   const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
-  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.label.lowerChat'), { command: 'nearAi.label.lowerChat', title: "Lower This Chat's Label", category: 'NEAR AI' });
+  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.label.lowerChat'), { command: 'nearAi.label.lowerChat', title: "Lower This Chat's Label", category: 'SovAI' });
 });
 
 // ---- Task 3: a lowering reaches another copy only as a signed declassification that copy can check, and never undoes a raise ----
@@ -416,7 +416,7 @@ test('the gate host records an applied lowering once as label.declassify, a reje
   assert.equal(rejected.length, 1, 'rejected, recorded once');
   assert.match(JSON.stringify(rejected[0]), /unknown to this computer/);
   assert.equal(told.length, 1);
-  assert.match(told[0]![1], /NEAR AI: Lower This Chat's Label/);
+  assert.match(told[0]![1], /SovAI: Lower This Chat's Label/);
   assert.deepEqual(takeChatNotices(CHAT), [told[0]![1]], 'the chat shows it once when it is open or next opened');
   assert.deepEqual(takeChatNotices(CHAT), []);
 });
@@ -637,7 +637,7 @@ test('review 89.6: a refusal that names Lower This Chat\'s Label shows a button 
   assert.equal(lowerButtons(transcript).length, 2, 'one more, under the refused call only');
   // Every route.* and label.* refusal text that names the command gets the button through the same check.
   for (const text of [...Object.values(ROUTE_REFUSALS), NETWORK_AT_MARK_TEXT]) {
-    if (!text.includes("NEAR AI: Lower This Chat's Label")) continue;
+    if (!text.includes("SovAI: Lower This Chat's Label")) continue;
     const fresh = chatPage();
     fresh.send({ type: 'assistant-error', text });
     assert.equal(lowerButtons(fresh.nodes.get('transcript')).length, 1, text.slice(0, 60));

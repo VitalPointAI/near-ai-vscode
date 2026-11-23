@@ -355,7 +355,7 @@ export async function repairDefaultBranch(input: {
   return await remoteDefaultBranch(input.root, input.remote, input.git) === STATE_BRANCH ? settingsSentence(input.branch) : undefined;
 }
 
-const CODE_LATER = 'Your code stays on this computer. The online repository holds only NEAR AI\'s encrypted sync branch until you put your code online, which "NEAR AI: Put This Project\'s Code Online" does whenever you choose.';
+const CODE_LATER = 'Your code stays on this computer. The online repository holds only NEAR AI\'s encrypted sync branch until you put your code online, which "SovAI: Put This Project\'s Code Online" does whenever you choose.';
 const ALREADY_HOME = 'This project already has an online home.';
 const HOME_HAS_CODE = 'This project\'s online home has its code.';
 const REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;

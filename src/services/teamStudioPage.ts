@@ -769,7 +769,7 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
-  /** NEAR AI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
+  /** SovAI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
   setUpStaffTeam?(): Promise<unknown>;
   /** Opens the Staff Room for this project's staff run. */
   openStaffRoom?(): Promise<unknown>;

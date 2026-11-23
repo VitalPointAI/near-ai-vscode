@@ -240,7 +240,7 @@ let chatOnScreen = false;
 const host = { secrets, chatVisible: () => chatOnScreen };
 const menu = load<typeof import('../services/setupMenu')>('../services/setupMenu');
 
-test('NEAR AI: Project Setup opens the menu at any time, and runs the step picked', async () => {
+test('SovAI: Project Setup opens the menu at any time, and runs the step picked', async () => {
   reset();
   vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: await emptyProject() } }];
   menu.registerProjectSetup(context as never, host);
@@ -310,7 +310,7 @@ test('the menu marks web search done once a provider is set up', async () => {
   }
 });
 
-// The real NEAR AI: Set Up flow, from "Where should models run?" to what comes after the key is checked.
+// The real SovAI: Set Up flow, from "Where should models run?" to what comes after the key is checked.
 async function runSetUp(root: string, options?: { offerNextStep?: boolean }): Promise<void> {
   const { configureApiKey } = load<typeof import('../extension')>('../extension');
   const { AuthService } = load<typeof import('../services/auth')>('../services/auth');
@@ -390,7 +390,7 @@ test('a caller with its own next steps (offerNextStep: false) gets only the read
   assert.deepEqual(executed, []);
 });
 
-test('NEAR AI: Set Up a New Profile runs the key setup straight away, then points to the chat', async () => {
+test('SovAI: Set Up a New Profile runs the key setup straight away, then points to the chat', async () => {
   reset();
   const root = await emptyProject();
   const { configureApiKey } = load<typeof import('../extension')>('../extension');
@@ -411,14 +411,14 @@ test('NEAR AI: Set Up a New Profile runs the key setup straight away, then point
   assert.deepEqual(infos.map((info) => info.text), ['Models are ready for “Demo (local)”. Open Chat for your next steps.']);
   assert.deepEqual(executed, []);
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
-  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.newProfile'), { command: 'nearAi.newProfile', title: 'Set Up a New Profile…', category: 'NEAR AI' });
+  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.newProfile'), { command: 'nearAi.newProfile', title: 'Set Up a New Profile…', category: 'SovAI' });
   const { PAGE_COMMANDS } = load<typeof import('../services/toolsDirectory')>('../services/toolsDirectory');
   assert.ok((PAGE_COMMANDS as readonly string[]).includes('nearAi.newProfile'));
 });
 
 test('Project Setup is a contributed command and a Tools tab command', () => {
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
-  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.projectSetup'), { command: 'nearAi.projectSetup', title: 'Project Setup…', category: 'NEAR AI' });
+  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.projectSetup'), { command: 'nearAi.projectSetup', title: 'Project Setup…', category: 'SovAI' });
   const { PAGE_COMMANDS, parseToolsPageMessage } = load<typeof import('../services/toolsDirectory')>('../services/toolsDirectory');
   assert.ok((PAGE_COMMANDS as readonly string[]).includes('nearAi.projectSetup'));
   assert.deepEqual(parseToolsPageMessage({ type: 'run-command', command: 'nearAi.projectSetup' }), { type: 'run-command', command: 'nearAi.projectSetup' });

@@ -3,7 +3,7 @@ import { redactSecrets } from '../domain/redaction';
 import { buildSetupMenu, collectSetupContext, projectHasTeam, registerSetupFacts, SETUP_STEPS, START_CHATTING } from './setupSteps';
 import { webSearchProvider } from './webSearchSetup';
 
-// The setup menu shown after NEAR AI is connected, and by "NEAR AI: Project Setup…" at any time.
+// The setup menu shown after NEAR AI is connected, and by "SovAI: Project Setup…" at any time.
 // The steps, their order and the facts they read live in setupSteps.ts; this file only asks VS Code.
 
 export const PROJECT_SETUP_COMMAND = 'nearAi.projectSetup';
@@ -28,7 +28,7 @@ export async function showSetupMenu(host: SetupMenuHost, options: { title?: stri
   const items = await buildSetupMenu(SETUP_STEPS, ctx);
   const picked = await vscode.window.showQuickPick(items.map((item) => ({ label: item.label, detail: item.detail, command: item.command })), {
     title: options.title ?? 'Project Setup',
-    placeHolder: 'Pick a step. You can come back to these with NEAR AI: Project Setup.',
+    placeHolder: 'Pick a step. You can come back to these with SovAI: Project Setup.',
     ignoreFocusOut: true
   });
   if (!picked && host.chatVisible?.()) return undefined;
@@ -59,7 +59,7 @@ export async function offerNextStep(_host: SetupMenuHost, profileName: string): 
   });
 }
 
-/** Registers NEAR AI: Project Setup, and the web search fact its step reads. */
+/** Registers SovAI: Project Setup, and the web search fact its step reads. */
 export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'subscriptions'>, host: SetupMenuHost): void {
   context.subscriptions.push(
     registerSetupFacts('webSearchReady', async () => Boolean(await webSearchProvider(host.secrets as vscode.SecretStorage))),
@@ -69,7 +69,7 @@ export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'sub
 
 export const NEW_PROFILE_COMMAND = 'nearAi.newProfile';
 
-/** NEAR AI: Set Up a New Profile… (the chat welcome's button): straight to the key setup, without the welcome page. */
+/** SovAI: Set Up a New Profile… (the chat welcome's button): straight to the key setup, without the welcome page. */
 export function registerNewProfile(context: Pick<vscode.ExtensionContext, 'subscriptions'>, configure: () => Promise<void>): void {
   context.subscriptions.push(vscode.commands.registerCommand(NEW_PROFILE_COMMAND, () => configure()));
 }

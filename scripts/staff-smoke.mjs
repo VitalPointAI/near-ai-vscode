@@ -43,7 +43,7 @@ function check(condition, what) {
 const read = (relative) => readFileSync(path.join(project, relative), 'utf8');
 const has = (relative) => existsSync(path.join(project, relative));
 
-// 1. Set up the J2 team, as NEAR AI: Set Up a Staff Team does after the person checks the roster.
+// 1. Set up the J2 team, as SovAI: Set Up a Staff Team does after the person checks the roster.
 const settings = { ...defaultStaffSettings(), profile: 'us-joint', level: 'operational', planningType: 'contingency' };
 const plan = planStaffSetup({ templateId: 'j2-intelligence', options: { settings, locality: 'cloud' } });
 check(plan.roster.members.length === 12, `the operational J2 roster has 12 members (${plan.roster.members.length})`);
@@ -89,7 +89,7 @@ for (const beat of DEMO_SCRIPTS.j2.beats) {
 }
 check(!/products\/j2\/[a-z-]+\.md/.test(script.replace(/\.planning\/staff\/products\/j2\//g, '')), 'no product path outside .planning/staff/');
 
-// 5. Start the exercise feed simulation (loopback only), as NEAR AI: Staff: Start the Exercise Feed Simulation does with this project open: its reports
+// 5. Start the exercise feed simulation (loopback only), as SovAI: Staff: Start the Exercise Feed Simulation does with this project open: its reports
 // land in the observation store, its feed changes reach the event hook, and the J2 workspace read model shows them. A virtual clock plays it quickly.
 const { loadSimTimeline, SimSession } = load('staff/sim/simSession.js');
 const { SimFeedRuntime } = load('staff/sim/feedRuntime.js');

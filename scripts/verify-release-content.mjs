@@ -90,7 +90,7 @@ const required = [
   'extension/resources/benchmark/execution/execute-plan/task.json',
   'extension/resources/benchmark/execution/issue-fix/hidden/report.test.js',
   'extension/resources/benchmark/execution/spec-implement/start/SPEC.md',
-  // The staff teams' starter scenario, read at run time by NEAR AI: Load Staff Exercise Scenario and the staff setup.
+  // The staff teams' starter scenario, read at run time by SovAI: Load Staff Exercise Scenario and the staff setup.
   'extension/resources/staff/scenarios/iron-lantern.json',
   // The starter scenario's synthetic terrain and weather pack, read by the COP map (src/staff/envPack.ts).
   'extension/resources/staff/env/iron-lantern/manifest.json',

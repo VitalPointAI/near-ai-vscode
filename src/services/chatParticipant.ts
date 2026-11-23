@@ -48,7 +48,7 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
     const isCommand = Boolean(request.command && GSD_COMMANDS.some((definition) => definition.command === request.command));
     if (isCommand) {
       // Workflows need approvals, questions, and diffs, which the NEAR AI view provides.
-      if (isEmergencyStopped()) response.markdown('Emergency stop is on. Run **NEAR AI: Resume** first.');
+      if (isEmergencyStopped()) response.markdown('Emergency stop is on. Run **SovAI: Resume** first.');
       else if (!root) response.markdown('Open a folder first. Open-GSD workflows run inside a workspace.');
       else {
         await runInSidebar(`gsd-${request.command}`, request.prompt.trim());

@@ -308,7 +308,7 @@ test('activation sets up the saved-profile list first, and Select Profile and Us
   assert.match(extension, /Use a profile from another project/, 'Select Profile offers the choice');
   const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const contributed = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.useSavedProfile');
-  assert.deepEqual(contributed && { title: contributed.title, category: contributed.category }, { title: 'Use a Saved Profile', category: 'NEAR AI' });
+  assert.deepEqual(contributed && { title: contributed.title, category: contributed.category }, { title: 'Use a Saved Profile', category: 'SovAI' });
   const source = readFileSync(path.join(root, 'src', 'services', 'profileIndex.ts'), 'utf8');
   assert.doesNotMatch(source, /from 'vscode'/, 'the list module needs no VS Code at run time');
   assert.doesNotMatch(source + extension.slice(extension.indexOf('async function useSavedProfile')), /[\u2013\u2014]/, 'no em or en dash in the new texts');

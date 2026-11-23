@@ -227,7 +227,7 @@ export function spendView(totals: SpendTotals, window: SpendWindow, near?: NearU
     : nearProblem ? ` NEAR's own total is unavailable: ${nearProblem}`
     : token.unavailable ? ' A usage reporting token is set, but NEAR AI Cloud does not offer its usage summary yet, so this is this computer\'s figure. NEAR is asked again every hour.'
     : token.tokenSet ? ' A usage reporting token is set; NEAR\'s own total for this key shows here once NEAR answers.'
-    : ' Set a usage reporting token (NEAR AI: Set Usage Reporting Token) to show NEAR\'s own total for this key, including other computers.';
+    : ' Set a usage reporting token (SovAI: Set Usage Reporting Token) to show NEAR\'s own total for this key, including other computers.';
   return { totals, usd: local, source, text: localText, tooltip: `${thisComputer} ${explain}${tokenNote}` };
 }
 

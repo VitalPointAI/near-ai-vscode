@@ -24,10 +24,10 @@ import { MAX_COMMAND_LENGTH, MAX_COMMAND_WORDS } from './commandSafety';
 
 /** A broken policy holds no clearances (D-53): anything above the shipped default label is refused with this sentence. */
 export const FAILED_CLOSED_LABEL_TEXT =
-  'Your policy file cannot be trusted right now, so NEAR AI cannot check your clearance, and labelled files cannot be read. Open NEAR AI: Policy to see why and what fixes it.';
+  'Your policy file cannot be trusted right now, so NEAR AI cannot check your clearance, and labelled files cannot be read. Open SovAI: Policy to see why and what fixes it.';
 
 /** Added to every refusal for a clearance, so the person knows the one way to declare one. */
-export const ADD_CLEARANCE_HINT = 'If you hold a clearance for it, add it in NEAR AI: Policy with Edit my rules.';
+export const ADD_CLEARANCE_HINT = 'If you hold a clearance for it, add it in SovAI: Policy with Edit my rules.';
 
 /** How many words of a command are followed through links when looking for what it reads (the credential-read check uses the same bound). */
 export const COMMAND_LINK_CHECKS = 64;

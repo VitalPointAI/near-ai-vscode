@@ -1,4 +1,4 @@
-// NEAR AI: Staff Simulation commands (research note 11, 8; WP-SIM). Start replays Exercise IRON LANTERN as live feeds on loopback only (CoT, AIS, RSS
+// SovAI: Staff Simulation commands (research note 11, 8; WP-SIM). Start replays Exercise IRON LANTERN as live feeds on loopback only (CoT, AIS, RSS
 // and the mock partner server), Controls pauses, resumes, steps and sets the speed (0.5x, 1x, 2x, 4x), and Stop closes every server. A status bar item
 // shows the SIM badge, the speed and the scenario clock; the output channel lists the endpoints and the feed picture, every source badged SIM.
 import * as vscode from 'vscode';

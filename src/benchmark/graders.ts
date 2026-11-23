@@ -1,4 +1,4 @@
-// Tasks and automatic graders for the model benchmark: the live eval (live.test.ts) and NEAR AI:
+// Tasks and automatic graders for the model benchmark: the live eval (live.test.ts) and SovAI:
 // Compare Models. Kept separate so the graders themselves are tested (evalGraders.test.ts)
 // before anyone trusts a comparison.
 

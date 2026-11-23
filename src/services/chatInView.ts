@@ -1,4 +1,4 @@
-// The chat in view (D-33): which conversation the chat view shows now, for the status bar's label and for NEAR AI: Lower This Chat's Label. The chat sets
+// The chat in view (D-33): which conversation the chat view shows now, for the status bar's label and for SovAI: Lower This Chat's Label. The chat sets
 // it when it shows a conversation and clears it when the view goes away; it says when that chat's label changes. No vscode import.
 import type { SessionMark } from '../domain/gate/dominance';
 import type { Label } from '../domain/gate/labels';

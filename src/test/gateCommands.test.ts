@@ -168,7 +168,7 @@ test('policyDocumentText for a policy that failed is exactly the title, the note
   const expected = [
     'Your NEAR AI policy',
     '',
-    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open NEAR AI: Policy and choose Reset my rules, which resets your own rules only.',
+    'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open SovAI: Policy and choose Reset my rules, which resets your own rules only.',
     '',
     'State: not usable, so only reading and planning are allowed',
     sentence
@@ -193,7 +193,7 @@ test('S6: Show Policy for a policy written for a newer version says to update an
 test('S6 (PR #143 review): an unknown setting in the person\'s own policy names both ways on, update or Reset with what it discards; another signer\'s never offers Reset', () => {
   const own = gateCommands.policyDocumentText({ ...failedClosed('unknown-field'), ownPolicy: true }, 0);
   assert.match(own, /If a newer version of NEAR AI wrote it, update the extension/);
-  assert.match(own, /Reset my rules in NEAR AI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded/);
+  assert.match(own, /Reset my rules in SovAI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded/);
   const other = gateCommands.policyDocumentText(failedClosed('unknown-field'), 0);
   assert.match(other, /update the extension/);
   assert.ok(!/Reset my rules/.test(other));
@@ -225,10 +225,10 @@ test('policyDocumentText is pure: the same state gives the same text, and a chec
   assert.match(gateCommands.policyDocumentText(undefined, 0), /checking your policy file/);
 });
 
-test('the commands are contributed in package.json with the NEAR AI category', async () => {
+test('the commands are contributed in package.json with the SovAI category', async () => {
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const show = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.show');
-  assert.deepEqual([show?.title, show?.category], ['Show Policy', 'NEAR AI']);
+  assert.deepEqual([show?.title, show?.category], ['Show Policy', 'SovAI']);
   assert.equal(existsSync(path.join(__dirname, '..', '..', 'package.json')), true);
 });
 
@@ -409,10 +409,10 @@ test('SETUP_STEPS itself is not edited: the policy step is in the registry only 
   assert.ok(!text.includes("'policy'"));
 });
 
-test('the reset command is contributed in package.json with the NEAR AI category and no em-dash in either title', async () => {
+test('the reset command is contributed in package.json with the SovAI category and no em-dash in either title', async () => {
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const reset = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.policy.reset');
-  assert.deepEqual([reset?.title, reset?.category], ['Reset Policy to Defaults', 'NEAR AI']);
+  assert.deepEqual([reset?.title, reset?.category], ['Reset Policy to Defaults', 'SovAI']);
   for (const entry of manifest.contributes.commands.filter((item) => item.command.startsWith('nearAi.policy.'))) assert.ok(!entry.title.includes(EM_DASH));
 });
 

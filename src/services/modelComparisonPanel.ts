@@ -24,7 +24,7 @@ import { nanoToUsd, totalNanoUsd } from './spendLedger';
 import { editorWriter } from './stateHome';
 import { ensureMigrated } from './stateMigration';
 
-// NEAR AI: Compare Models. A tab that ranks every model tested on this computer, runs new
+// SovAI: Compare Models. A tab that ranks every model tested on this computer, runs new
 // comparisons (only what has no saved result, or everything again), saves each one as it goes,
 // and puts a model into a role with one click. Runs use the extension's agent loop and permission
 // rules in temporary folders outside the workspace, and are billed to the key's spend ledger as `eval`.
@@ -90,7 +90,7 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   let problem: string | undefined;
   const active = root ? await activeProvider(root, auth).catch((error: unknown) => { problem = providerErrorMessage(error); return undefined; }) : undefined;
   if (!root) problem = 'Open a folder with a NEAR AI profile to test models. Results saved earlier are shown below.';
-  else if (!active && !problem) problem = 'Set up a NEAR AI profile for this project (NEAR AI: Set Up) to test models.';
+  else if (!active && !problem) problem = 'Set up a NEAR AI profile for this project (SovAI: Set Up) to test models.';
   const models = active?.models ?? [];
   const roles = roleOptions({ mainModel: settings.defaultModel, tiers: readModelTiers(), roleModels: readRoleModels() }, models);
   const teeOnly = settings.privacyMode === 'tee-only';

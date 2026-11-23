@@ -120,7 +120,7 @@ const MAX_EVENTS_READ = 20_000;
 export const J2_LINT_INPUTS = { pirs: 'pir-register', hvts: 'hvt-list', adversaryCoas: 'adversary-coa-set' } as const;
 /** The J2 PIR register product: generated from the workbench's JSON register, the one source of PIRs (review round 4). */
 export const PIR_REGISTER_PRODUCT = 'pir-register';
-const PIR_REGISTER_ELSEWHERE = 'The PIR register is kept by the intel workbench (pir_add, pir_update; a person decides with NEAR AI: Staff: Decide a PIR), and its product is generated with pir_publish. It is not written through this tool.';
+const PIR_REGISTER_ELSEWHERE = 'The PIR register is kept by the intel workbench (pir_add, pir_update; a person decides with SovAI: Staff: Decide a PIR), and its product is generated with pir_publish. It is not written through this tool.';
 
 export function productPath(section: StaffSectionId, product: string): string {
   return staffProductPath(section, product);
@@ -217,9 +217,9 @@ export function unreadableText(file: string, reason: string, wayOut: string): st
   return `${file} cannot be read: ${reason}. Nothing was changed. ${wayOut}`;
 }
 
-const SET_ASIDE_WAY_OUT = 'A person can set it aside with NEAR AI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
+const SET_ASIDE_WAY_OUT = 'A person can set it aside with SovAI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
 /** The way out of a ledger that reads as tampered only because it is not the copy this computer recorded (another git branch's, for example). */
-export const USE_BRANCH_LEDGER_WAY_OUT = 'If you switched to another git branch, a person can use NEAR AI: Staff: Use This Branch\'s Ledger, which checks this ledger\'s own signatures and chain and then makes it the one this computer checks against.';
+export const USE_BRANCH_LEDGER_WAY_OUT = 'If you switched to another git branch, a person can use SovAI: Staff: Use This Branch\'s Ledger, which checks this ledger\'s own signatures and chain and then makes it the one this computer checks against.';
 
 /** The reasons a ledger reads as tampered that Use This Branch's Ledger answers: shorter than, or different from, the head this computer recorded. */
 function otherCopyReason(reason: string | undefined): 'truncated' | 'replaced' | undefined {
@@ -702,7 +702,7 @@ export class StaffHost {
   }
 
   /**
-   * A named person approves or rejects a PIR (the NEAR AI: Staff: Decide a PIR command; no tool calls this). Under the register's lock, the register is
+   * A named person approves or rejects a PIR (the SovAI: Staff: Decide a PIR command; no tool calls this). Under the register's lock, the register is
    * read again and checked against the log; the register is written first, only over the exact bytes read (a member's write in between refuses the
    * decision, to be taken again on what is there now); then the decision is signed with this device's key and appended to the log. Either failure
    * leaves the PIR reading as awaiting a decision: a written decision counts only with its signed entry, so neither order can make one count.
@@ -1080,7 +1080,7 @@ export class StaffHost {
         return [{ run: caller.run, product: input.product, section, roles, event: { type: 'propose', hash }, actor: { kind: 'agent', member }, meta }];
       }
       if (state.record.roles.owner !== member && handedOverInPlace(input.product)) {
-        return refuse(`${input.product} version ${state.record.version} is still open (${state.record.state}) under ${state.record.roles.owner}, who wrote it before the transition. A person withdraws that version with NEAR AI: Staff: Withdraw a Product (or ${state.record.roles.owner} withdraws it), then you write the next version.`);
+        return refuse(`${input.product} version ${state.record.version} is still open (${state.record.state}) under ${state.record.roles.owner}, who wrote it before the transition. A person withdraws that version with SovAI: Staff: Withdraw a Product (or ${state.record.roles.owner} withdraws it), then you write the next version.`);
       }
       if (state.record.roles.owner !== member) return refuse(`${input.product} is owned by ${state.record.roles.owner}. Only the owner writes it; propose your change in ${proposalFolder(input.product)}.`);
       if (hash === state.record.hash) return refuse('The product has not changed since its current version.');

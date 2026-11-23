@@ -12,7 +12,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Get Started](http://127.0.0.1:18771/) and choose **Explore a sample team**. Use **Sterling: Get Started** or **Sterling: Open Team Studio Preview** to reopen either tab from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/) and choose **Explore a sample team**. Use **SovAI: Get Started** or **SovAI: Open Team Studio Preview** to reopen either tab from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 

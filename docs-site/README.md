@@ -62,8 +62,8 @@ At every build `scripts/sync-docs.mjs` renders these into the site:
 
 | Repository file | Site section |
 | --- | --- |
-| `README.md` | Using NEAR AI: Features and settings |
-| `docs/*.md` (other than those below) | Using NEAR AI: Reference |
+| `README.md` | Using SovAI: Features and settings |
+| `docs/*.md` (other than those below) | Using SovAI: Reference |
 | `SECURITY.md` | Security: Security policy |
 | `.planning/codebase/*.md`, `.planning/research/**/*.md` | Architecture |
 | `docs/decisions/*.md` (when there are any) | Architecture: Decision records |

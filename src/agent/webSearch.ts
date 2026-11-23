@@ -18,7 +18,7 @@ export interface SearchProvider {
 const TIMEOUT_MS = 20_000;
 
 async function json(response: Response, label: string): Promise<unknown> {
-  if (response.status === 401 || response.status === 403) throw new ToolError(`${label} rejected the API key (HTTP ${response.status}). Ask the user to check it with "NEAR AI: Set Up Web Search".`);
+  if (response.status === 401 || response.status === 403) throw new ToolError(`${label} rejected the API key (HTTP ${response.status}). Ask the user to check it with "SovAI: Set Up Web Search".`);
   if (response.status === 429) throw new ToolError(`${label} rate limit reached (HTTP 429); wait before searching again.`);
   if (!response.ok) throw new ToolError(`${label} returned HTTP ${response.status}.`);
   return response.json();

@@ -211,7 +211,7 @@ export const OUTBOUND_MATCH_TEXT =
  * call that could send data off this computer is refused (fail closed), and the person is told why and what to do.
  */
 export const OUTBOUND_FULL_TEXT =
-  "This chat has read more labelled content than NEAR AI can keep track of, so it can no longer check what a call would send, and calls that could send data off this computer are refused in this chat. Start a new chat for this work, or, if what this chat read allows it, use NEAR AI: Lower This Chat's Label with a reason.";
+  "This chat has read more labelled content than NEAR AI can keep track of, so it can no longer check what a call would send, and calls that could send data off this computer are refused in this chat. Start a new chat for this work, or, if what this chat read allows it, use SovAI: Lower This Chat's Label with a reason.";
 
 /** What SECURITY.md says of a reopened chat's earlier results (gateDocs pins it). */
 export const OUTBOUND_REOPENED_DOCS_TEXT =
@@ -222,21 +222,21 @@ export const OUTBOUND_REOPENED_DOCS_TEXT =
  * results were labelled is not stored. It names the way out.
  */
 export const OUTBOUND_EARLIER_TEXT =
-  "This chat was reopened, and NEAR AI cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled. This call would send text from one of them off this computer, so it is refused. If that text is public, start a new chat for this, or, if what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
+  "This chat was reopened, and NEAR AI cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled. This call would send text from one of them off this computer, so it is refused. If that text is public, start a new chat for this, or, if what this chat read allows it, use SovAI: Lower This Chat's Label.";
 
 /**
  * The sentence when a run has no fingerprint set at a label that may not go to any cloud (PR #87 review round 2): nothing says it read labelled content,
  * only that its reading could not be checked, so a call that could send data off this computer is refused at this label (fail closed).
  */
 export const OUTBOUND_UNCHECKED_TEXT =
-  "What this chat's agents read could not be checked for labelled text, so at this chat's label a call that could send data off this computer is refused. If what this chat read allows it, use NEAR AI: Lower This Chat's Label.";
+  "What this chat's agents read could not be checked for labelled text, so at this chat's label a call that could send data off this computer is refused. If what this chat read allows it, use SovAI: Lower This Chat's Label.";
 
 /**
  * The sentence when one call reads content whose label may not go to any cloud and may send data off this computer in the same step (PR #87 review round
  * 6): what it reads cannot be checked before it leaves, so it is refused.
  */
 export const OUTBOUND_READS_AND_SENDS_TEXT =
-  "This call reads labelled content and may send data off this computer in the same step, so what it would send cannot be checked, and it is refused. Read the content in one step and keep it on this computer, or, if the content allows it, use NEAR AI: Lower This Chat's Label.";
+  "This call reads labelled content and may send data off this computer in the same step, so what it would send cannot be checked, and it is refused. Read the content in one step and keep it on this computer, or, if the content allows it, use SovAI: Lower This Chat's Label.";
 
 /** The sentence when the payload could not be read for checking (fail closed). */
 export const OUTBOUND_UNREADABLE_TEXT =

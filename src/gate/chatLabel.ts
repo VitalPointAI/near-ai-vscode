@@ -109,5 +109,5 @@ export function judgeChatLowering(envelope: unknown, context: LoweringContext, k
 /** The sentence a chat shows once when a lowering made on another copy was not applied (it names the Lower command). */
 export function loweringRejectedText(cause: string): string {
   const why = (LOWERING_REJECTION_CAUSES as Record<string, string>)[cause] ?? LOWERING_REJECTION_CAUSES['does-not-verify'];
-  return `A lowering of this chat's label made on another computer was not applied here, because ${why}. The chat keeps the higher label. To lower it on this computer, use NEAR AI: Lower This Chat's Label.`;
+  return `A lowering of this chat's label made on another computer was not applied here, because ${why}. The chat keeps the higher label. To lower it on this computer, use SovAI: Lower This Chat's Label.`;
 }

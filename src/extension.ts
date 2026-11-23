@@ -286,7 +286,7 @@ async function saveCheckpoint(): Promise<void> {
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
 }
 
-/** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
+/** SovAI: Set Up. Exported for the host tests of what follows a successful setup. */
 export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. AI provider profiles are scoped to a project.'); return; }
@@ -434,7 +434,7 @@ async function useSavedProfile(context: vscode.ExtensionContext, auth: AuthServi
 
 async function openApiKeyPortal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse('https://cloud.near.ai/'));
-  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run NEAR AI: Set Up again and choose “I already have a key”.');
+  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run SovAI: Set Up and choose “Choose a provider”.');
 }
 
 async function showStatus(auth: AuthService): Promise<void> {

@@ -9,7 +9,7 @@ import { nanoToUsd } from './spendLedger';
 import { readDayBoundary } from './spendTracking';
 import { buildUsageReport, customRange, usageCsv, usageJson, usageOrganizations, UsageProject, usageRange, UsageRange } from './usageReport';
 
-// NEAR AI: Export Usage and Activity. Filters by organization, project, and dates, and saves a
+// SovAI: Export Usage and Activity. Filters by organization, project, and dates, and saves a
 // CSV or JSON of runs and models (no prompt content) where the user chooses, by default outside
 // every workspace, with a warning before saving into a git work tree.
 

@@ -99,7 +99,7 @@ test('tracer: a fresh install creates the identity, signs, writes, reads back an
 // Helpers
 
 const DAY = 24 * 60 * 60 * 1000;
-const RESET_SENTENCE = 'Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
+const RESET_SENTENCE = 'Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
 
 function bundleFileOf(storage: string): string {
   return path.join(gateDir(storage), POLICY_BUNDLE_FILE);
@@ -202,7 +202,7 @@ test('one changed byte: failed-closed bad-signature with the exact sentence, and
     const result = await ensurePolicyBundle(storage, secrets, { now: at(T0 + DAY) });
     assertFailedClosed(result, 'bad-signature');
     if (result.state.state === 'failed-closed') {
-      assert.equal(result.state.sentence, 'Your policy file was changed outside NEAR AI. Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.');
+      assert.equal(result.state.sentence, 'Your policy file was changed outside NEAR AI. Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.');
     }
     assert.equal(await readFile(bundleFileOf(storage), 'utf8'), changed);
   });

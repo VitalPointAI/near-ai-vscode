@@ -58,7 +58,7 @@ export const ENROLMENT_RECORD_FILE = 'enrolment.json';
 export const ORGANIZATION_ISSUER_SECRET = 'nearAi.gate.organizationIssuer';
 
 /** The command a person runs to give this computer a file from your organization (41-14 registers it). */
-const ADD_RULES_COMMAND = 'NEAR AI: Add Your Organization\'s Rules';
+const ADD_RULES_COMMAND = 'SovAI: Add Your Organization\'s Rules';
 const MAX_ASIDE_ATTEMPTS = 50;
 const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;

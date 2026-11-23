@@ -4,7 +4,7 @@ import { changedVerifiers, trustVerifiers } from '../gsd/verifierScaffold';
 
 /** PERF-06: registers the research profile's command on its own, beside the profile, independent of the run report. */
 export function registerResearchVerifiers(context: vscode.ExtensionContext): void {
-  // PERF-06: "NEAR AI: Set Up Research Verifiers" applies the research GSD profile to an existing project and scaffolds its verifier scripts.
+  // PERF-06: "SovAI: Set Up Research Verifiers" applies the research GSD profile to an existing project and scaffolds its verifier scripts.
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.setupResearchVerifiers', async () => {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) { void vscode.window.showInformationMessage('Open a project folder first.'); return; }

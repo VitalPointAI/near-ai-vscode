@@ -50,9 +50,9 @@ export const POLICY_DRAFT_FILE = 'policy-draft.json';
 export const POLICY_DRAFT_BASE_FILE = 'policy-draft.base';
 
 /** Said when a draft was made from a policy that is no longer the one in force (D-53). */
-export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open NEAR AI: Policy and choose Edit my rules again to start from the policy in force.';
+export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open SovAI: Policy and choose Edit my rules again to start from the policy in force.';
 /** A draft that is not one JSON object. */
-export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in NEAR AI: Policy wrote it.';
+export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in SovAI: Policy wrote it.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A file larger than this is not read at all; the verifier's own limit applies to what is signed, this one protects memory. */
@@ -389,7 +389,7 @@ async function asideName(file: string, nowMs: number): Promise<string> {
 }
 
 /**
- * The person's own command (NEAR AI: Reset Policy to Defaults): signs a fresh default bundle and keeps the old file beside it as
+ * The person's own command (SovAI: Reset Policy to Defaults): signs a fresh default bundle and keeps the old file beside it as
  * policy-bundle.json.replaced-<epoch ms>, never deleted. Returns the event policy.reset for the caller to record. Throws BundleStoreError with a plain
  * message, with the old file still in place, when the identity or the disk fails.
  */
@@ -530,7 +530,7 @@ export interface ApplyPolicyDraftInput {
 }
 
 /**
- * NEAR AI: Apply Policy Draft (D-41, D-53, FND-02). Under bundle.lock: the personal layer stored now must be valid and its hash must equal `baseHash` (the
+ * SovAI: Apply Policy Draft (D-41, D-53, FND-02). Under bundle.lock: the personal layer stored now must be valid and its hash must equal `baseHash` (the
  * hash of the layer the draft was made from), so an old draft never undoes another window's edit or a reset; the draft is read by parsePolicyDraft, with
  * this extension setting the issuer (this install's key) and the dates itself, so a draft cannot sign a policy in another device's name or with a past or
  * far-future date (D-12). Under your organization's layer, an edit that widens past it is refused with the key named (D-20), and a value already clamped

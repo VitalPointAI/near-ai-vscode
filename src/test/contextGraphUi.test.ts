@@ -4,7 +4,7 @@ import { toolsPageHtml } from '../services/toolsDirectory';
 
 // The memory explorer that lived on the old Tools tab (graph canvas, filters, approval-gated
 // corrections) was hidden in 0.4.x and is now removed with that page; project memory is reached
-// through the agent's Remember/Recall tools and NEAR AI: Manage Memory. The chat host no longer
+// through the agent's Remember/Recall tools and SovAI: Manage Memory. The chat host no longer
 // accepts memory explorer messages at all (see chatBridge.test.ts).
 
 test('the Tools tab no longer carries the retired memory explorer', () => {

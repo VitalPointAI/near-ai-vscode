@@ -1,4 +1,4 @@
-// NEAR AI: Add Your Organization's Rules (FND-01, D-11 to D-14, D-20, D-23, D-27, D-44): every enrolment transition through the command a person runs,
+// SovAI: Add Your Organization's Rules (FND-01, D-11 to D-14, D-20, D-23, D-27, D-44): every enrolment transition through the command a person runs,
 // the one-time notices at start, who set the rules on the status bar and in the stored view, and the policy editor as the front door. Real files in
 // temporary folders, an in-memory secret store, an in-memory memento and the recording vscode stub. Fictional names only (Example Organization).
 import assert from 'node:assert/strict';
@@ -180,12 +180,12 @@ test('a dismissed file picker changes nothing', async () => {
   void window;
 });
 
-test('the command is contributed in the NEAR AI category and shown in the palette', async () => {
+test('the command is contributed in the SovAI category and shown in the palette', async () => {
   const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')) as {
     contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette?: Array<{ command: string; when?: string }> } };
   };
   const entry = manifest.contributes.commands.find((item) => item.command === ADD_RULES);
-  assert.deepEqual([entry?.title, entry?.category], ["Add Your Organization's Rules", 'NEAR AI']);
+  assert.deepEqual([entry?.title, entry?.category], ["Add Your Organization's Rules", 'SovAI']);
   assert.equal((manifest.contributes.menus.commandPalette ?? []).some((item) => item.command === ADD_RULES), false, 'no palette entry hides it');
   void ORGANIZATION_RULES_FILE_EXTENSION;
 });
@@ -449,7 +449,7 @@ function holdsProtectedB(host: GateHost): boolean {
   return host.labelPolicy().clearances.some((clearance) => clearance.scale === 'ca-protected' && clearance.level === 'Protected B');
 }
 
-test('D-44: NEAR AI: Policy and Show Policy open the editor, whose deps read both layers from the host and judge direction with narrowingOf', async () => {
+test('D-44: SovAI: Policy and Show Policy open the editor, whose deps read both layers from the host and judge direction with narrowingOf', async () => {
   const pc = await computer();
   const fake = recordingPolicyEditor();
   const window = await windowOf(pc, { policyEditor: fake });
@@ -616,20 +616,20 @@ test('D-44: deps.reset runs the confirmed Reset modal, deps.showStored opens the
   assert.equal(window.host.policyLayers().organization.state, 'valid', 'declining changed nothing');
 });
 
-test('D-44, owner Q9: the palette offers NEAR AI: Policy; Show, Edit, Apply, Reset and Show as Stored keep their ids but leave the palette', async () => {
+test('D-44, owner Q9: the palette offers SovAI: Policy; Show, Edit, Apply, Reset and Show as Stored keep their ids but leave the palette', async () => {
   const manifest = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')) as {
     contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: { commandPalette?: Array<{ command: string; when?: string }> } };
   };
   const find = (id: string) => manifest.contributes.commands.find((entry) => entry.command === id);
-  assert.deepEqual([find('nearAi.policy.open')?.title, find('nearAi.policy.open')?.category], ['Policy', 'NEAR AI']);
-  assert.deepEqual([find('nearAi.policy.showAsStored')?.title, find('nearAi.policy.showAsStored')?.category], ['Show Policy as Stored', 'NEAR AI']);
+  assert.deepEqual([find('nearAi.policy.open')?.title, find('nearAi.policy.open')?.category], ['Policy', 'SovAI']);
+  assert.deepEqual([find('nearAi.policy.showAsStored')?.title, find('nearAi.policy.showAsStored')?.category], ['Show Policy as Stored', 'SovAI']);
   const hidden = ['nearAi.policy.show', 'nearAi.policy.edit', 'nearAi.policy.applyDraft', 'nearAi.policy.reset', 'nearAi.policy.showAsStored'];
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const id of hidden) {
     assert.ok(find(id) !== undefined, `${id} is still contributed`);
     assert.deepEqual(palette.filter((entry) => entry.command === id), [{ command: id, when: 'false' }], id);
   }
-  assert.equal(palette.some((entry) => entry.command === 'nearAi.policy.open'), false, 'NEAR AI: Policy stays in the palette');
+  assert.equal(palette.some((entry) => entry.command === 'nearAi.policy.open'), false, 'SovAI: Policy stays in the palette');
   const pc = await computer();
   await windowOf(pc, { policyEditor: recordingPolicyEditor() });
   for (const id of [...hidden, 'nearAi.policy.open', ADD_RULES]) assert.ok(stub.commands.has(id), `${id} is registered`);

@@ -146,7 +146,7 @@ export function registerWatchCommands(context: StaffCommandContext, identity: ()
     const who = await person(watch.alert.role);
     if (!who) return;
     const drafts = (watch.drafts ?? []).map((ref) => `${ref.product} v${ref.version}`).join(', ') || 'none';
-    if (!(await confirm(`Acknowledge ${watch.id}'s drafts as ${who.name} (${who.role})?`, `Drafts: ${drafts}.\n\nAcknowledging arms the watch again. It does not approve or release any draft: each follows its own release path, decided with NEAR AI: Staff: Approve.`, 'Acknowledge'))) return;
+    if (!(await confirm(`Acknowledge ${watch.id}'s drafts as ${who.name} (${who.role})?`, `Drafts: ${drafts}.\n\nAcknowledging arms the watch again. It does not approve or release any draft: each follows its own release path, decided with SovAI: Staff: Approve.`, 'Acknowledge'))) return;
     show(await host.acknowledge(who, watch.id));
   });
 
