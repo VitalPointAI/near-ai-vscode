@@ -633,7 +633,7 @@ Plans:
 
 **Plans:** 4 planned waves, starting with the evidence pipeline and the existing supplier control mappings.
 
-- [ ] 44.1-01-PLAN.md: Verify evidence reaches the release bundle, then map existing audit and incident practices with their documented limits.
+- [x] 44.1-01-PLAN.md: Verify evidence reaches the local assessor package and map existing audit and incident practices with their documented limits. Check the published bundle after the reviewed release.
 - [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner.
 - [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions.
 - [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
@@ -1800,7 +1800,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
-| 44.1. Accreditation control implementation and evidence closure | 0/4 | First evidence wave underway | - |
+| 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
