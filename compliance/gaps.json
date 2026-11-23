@@ -2186,6 +2186,136 @@
     },
     {
       "controls": [
+        "itsp171-03.01.01"
+      ],
+      "id": "G210",
+      "ownerRole": "owner",
+      "poam": "g210",
+      "remediation": "The sponsor account management owner confirms the CPCSC Level 1 contract boundary and approves which accounts, users, roles and privileges apply there. Collect redacted authorization, creation or change, usage monitoring and removal samples. Include approved inactivity and expiration rules, a documented disablement and notification, and proof the assigned logout rule applies. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 account lifecycle and use need assessed records"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.02"
+      ],
+      "id": "G211",
+      "ownerRole": "owner",
+      "poam": "g211",
+      "remediation": "The sponsor access control owner maps logical access rules to specified contract information and assessed resources. Review effective permissions and record a permitted role accessing its assigned resource and a refused request by a role without that authorization. Document inherited access control with the accountable service owner. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 logical access enforcement needs authorization and decisions"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.20"
+      ],
+      "id": "G212",
+      "ownerRole": "owner",
+      "poam": "g212",
+      "remediation": "The sponsor external-service owner inventories systems used for the contract to access, process, store or transmit specified information. Record the default prohibition, authorization criteria, security verification, approved connection or processing agreements, and restrictions for organization-controlled portable storage. Retain approved and refused cases from the effective boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 external system use needs approvals and enforcement evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.01.22"
+      ],
+      "id": "G213",
+      "ownerRole": "owner",
+      "poam": "g213",
+      "remediation": "The sponsor public information owner identifies assessed public systems and authorized publishers. Verify training that keeps specified contract information out of publicly accessible content. Retain a periodic review sample and a redacted correction or safe exercise showing removal and escalation of improperly posted material. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 public posting review and removal need operating records"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.01"
+      ],
+      "id": "G214",
+      "ownerRole": "owner",
+      "poam": "g214",
+      "remediation": "The sponsor identity owner maps in-scope user identities to accounts and processes acting on their behalf, with approved re-authentication triggers. Review the effective identity configuration and retain a dated test of unique identification, process attribution and re-authentication when an approved trigger occurs. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 user identity and re-authentication need scoped verification"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.02"
+      ],
+      "id": "G215",
+      "ownerRole": "owner",
+      "poam": "g215",
+      "remediation": "The sponsor endpoint identity owner defines the contract-scope devices that must identify and authenticate before connecting. Review enrolment, unique identity and connection policy records. Verify an authorized synthetic device can connect and an unrecognized or de-authorized one is refused before session establishment. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 device identification and authentication need connection evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.05.03"
+      ],
+      "id": "G216",
+      "ownerRole": "owner",
+      "poam": "g216",
+      "remediation": "The sponsor identity owner approves strong factor policy for the assessed privileged and non-privileged user accounts. Inventory applicable sign-in paths, review the enforced factor settings and record a successful authorized sign-in plus a refusal when the required factor is missing for each account category. Record any documented exception with its authority and scope for assessor review. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 strong multi-factor authentication needs role coverage evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.08.03"
+      ],
+      "id": "G217",
+      "ownerRole": "owner",
+      "poam": "g217",
+      "remediation": "The sponsor information custodian and media disposal owner identify assessed media and approved sanitization methods for reuse, disposal and transfer outside organizational control. Sample a controlled case showing custody, authorization, the sanitization result and verification before release. Store evidence under controlled identifiers without exposing contract information. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 media sanitization needs controlled disposition receipts"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.01"
+      ],
+      "id": "G218",
+      "ownerRole": "owner",
+      "poam": "g218",
+      "remediation": "The sponsor physical security owner inventories assessed facilities and maintains approved lists of people with physical access, credential issuance records and the approved review cadence. Retain a redacted review and a credential removal sample showing access ended when no longer required. Cite hosting provider evidence for any inherited facility. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 physical access authorization needs dated approval and removal records"
+    },
+    {
+      "controls": [
+        "itsp171-03.10.07"
+      ],
+      "id": "G219",
+      "ownerRole": "owner",
+      "poam": "g219",
+      "remediation": "The sponsor site security owner confirms assessed entrances, exits and output locations. Review verification before entry, ingress and egress controls, access logs, visitor escort and activity controls, protection of keys or equivalent devices and controls for physical output. Collect a redacted operating sample or authorized hosting receipt for each applicable boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 physical access control needs operating records for facilities and output"
+    },
+    {
+      "controls": [
+        "itsp171-03.13.01"
+      ],
+      "id": "G220",
+      "ownerRole": "owner",
+      "poam": "g220",
+      "remediation": "The sponsor network security owner maps assessed external and key internal interfaces, public and private segments, and approved external connections. Review the effective monitored interface and boundary settings and verify with benign authorized fixtures that an approved route is observed and an unapproved route is refused. Scope evidence to the contract environment and record inherited control ownership. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 managed interface and subnet controls need deployment evidence"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.01"
+      ],
+      "id": "G221",
+      "ownerRole": "owner",
+      "poam": "g221",
+      "remediation": "The sponsor vulnerability and update owner inventories assessed software and firmware and approves the remediation window. Follow a sampled flaw from identification and reporting through correction. Retain release and installation timestamps, relevant post-update verification, and authorized treatment for any outstanding update. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 flaw handling and timely updates need sampled receipts"
+    },
+    {
+      "controls": [
+        "itsp171-03.14.02"
+      ],
+      "id": "G222",
+      "ownerRole": "owner",
+      "poam": "g222",
+      "remediation": "The sponsor endpoint protection owner inventories assessed entry and exit points. Verify configured protection and update cadence, scheduled system scans, real-time scanning for external files, and mitigation behavior. Use a harmless approved test artifact to record an observed block, quarantine or approved alternate protection with its dated response record. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+      "title": "CPCSC Level 1 malicious code protection needs deployed coverage and response evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"

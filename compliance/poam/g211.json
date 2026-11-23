@@ -1,0 +1,16 @@
+{
+  "gap": "G211",
+  "id": "g211",
+  "controls": [
+    "itsp171-03.01.02"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 logical access enforcement needs authorization and decisions",
+  "remediation": "The sponsor access control owner maps logical access rules to specified contract information and assessed resources. Review effective permissions and record a permitted role accessing its assigned resource and a refused request by a role without that authorization. Document inherited access control with the accountable service owner. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect approved resource and role mappings, effective permissions and dated allowed and refused access evidence"
+    }
+  ]
+}

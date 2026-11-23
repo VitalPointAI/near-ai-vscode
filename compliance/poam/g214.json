@@ -1,0 +1,16 @@
+{
+  "gap": "G214",
+  "id": "g214",
+  "controls": [
+    "itsp171-03.05.01"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 user identity and re-authentication need scoped verification",
+  "remediation": "The sponsor identity owner maps in-scope user identities to accounts and processes acting on their behalf, with approved re-authentication triggers. Review the effective identity configuration and retain a dated test of unique identification, process attribution and re-authentication when an approved trigger occurs. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect the approved identity and process mapping, authentication settings and redacted identification and re-authentication results"
+    }
+  ]
+}
