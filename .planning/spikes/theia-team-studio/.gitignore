@@ -1,0 +1,9 @@
+/node_modules/
+/lib/
+/src-gen/
+/webpack.config.js
+/webpack.gen.config.js
+/gen-webpack.tmp/
+/extension/lib/
+/esbuild.mjs
+/gen-esbuild.*.mjs
