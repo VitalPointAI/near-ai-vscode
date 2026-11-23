@@ -1,0 +1,16 @@
+{
+  "gap": "G228",
+  "id": "g228",
+  "controls": [
+    "itsp171-03.01.04"
+  ],
+  "ownerRole": "owner",
+  "title": "Separation of duties needs authorized role and access evidence",
+  "remediation": "The sponsor access governance and business process owners identify duties that must be separated and assign corresponding access authorization. Sample assigned users and a conflicting role request or workflow exercise to verify that access supports the separation. Record any approved exception and its scope for assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved incompatible duties and role matrix, plus reviewed role assignments or a conflicting request outcome"
+    }
+  ]
+}

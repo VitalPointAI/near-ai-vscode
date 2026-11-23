@@ -1,0 +1,16 @@
+{
+  "gap": "G243",
+  "id": "g243",
+  "controls": [
+    "itsp171-03.03.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Audit information and logging management need access protection evidence",
+  "remediation": "The sponsor logging platform and privileged access owners protect audit records and tooling against unauthorized reading, modification and removal. Limit management to a named subset of privileged roles. Review representative access assignments and use controlled checks or dated evidence of protected operations, including a non-management role refusal.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect logging and record access policy, authorized privileged management scope and protected read, modification or removal evidence"
+    }
+  ]
+}

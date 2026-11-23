@@ -1,0 +1,16 @@
+{
+  "gap": "G236",
+  "id": "g236",
+  "controls": [
+    "itsp171-03.01.22"
+  ],
+  "ownerRole": "owner",
+  "title": "Public publishing training, review and removal need sponsor evidence",
+  "remediation": "The sponsor public communications and information owners identify authorized publishers and train them to keep specified information out of public content. Sample a periodic review and a removal or controlled exercise if information is discovered. Record deployment scope for ITSP.10.171 and submit any no-public-content boundary for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a publisher training record, recent public content review and a documented removal procedure with case or exercise evidence"
+    }
+  ]
+}

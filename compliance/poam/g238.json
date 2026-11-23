@@ -1,0 +1,18 @@
+{
+  "gap": "G238",
+  "id": "g238",
+  "controls": [
+    "itsp171-03.03.01",
+    "itsp171-03.03.02",
+    "itsp171-03.03.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Selected audit events, record content and retention need verification",
+  "remediation": "The sponsor logging and records owners select and periodically review logged event types. Verify generation with event type, time, place, source, outcome and affected identities or entities, plus any approved additional data. Sample retention settings and available logs against the approved records schedule. Document any product-only or provider-only scope limits.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the reviewed event list, representative generated records covering required fields and evidence of retention against the approved schedule"
+    }
+  ]
+}

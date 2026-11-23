@@ -1,0 +1,16 @@
+{
+  "gap": "G233",
+  "id": "g233",
+  "controls": [
+    "itsp171-03.01.12"
+  ],
+  "ownerRole": "owner",
+  "title": "Remote access routes and privileged remote actions need authorization evidence",
+  "remediation": "The sponsor remote access and security operations leads inventory each remote access type, approve connection and configuration requirements, and route connections through managed control points. Separately verify permissions for remote privileged commands and security-relevant information. Sample a permitted and denied route or action and document inherited control points for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect remote access type approvals, an assessed routing and control-point record, and privileged remote action authorization or refusal evidence"
+    }
+  ]
+}
