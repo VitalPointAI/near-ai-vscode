@@ -129,7 +129,9 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   const input = path.join(dir, 'inputs.json');
   const out = path.join(dir, 'bundle');
   const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-  writeFileSync(input, JSON.stringify({ repository: 'owner/repo', commit, kind: 'main', repoRoot, collectors: {} }));
+  const sbom = path.join(repoRoot, 'compliance/test/fixtures/collectors/sbom/vsix.cdx.json');
+  const collectors = { sbom: { sboms: [{ subject: 'vsix', file: sbom }], retainVsix: true } };
+  writeFileSync(input, JSON.stringify({ repository: 'owner/repo', commit, kind: 'main', repoRoot, collectors }));
   assert.equal(await main(['bundle', '--inputs', input, '--out', out]), 0);
   const dashboard = JSON.parse(readFileSync(path.join(out, 'dashboard', 'dashboard.json'), 'utf8'));
   const level = dashboard.levels.find(({ id }: { id: string }) => id === 'protected-b');
@@ -159,5 +161,29 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   assert.equal(gap.state, 'planned');
   assert.ok(gap.milestones.length > 0);
   assert.ok(dashboard.rows.some(({ gap }: { gap?: string }) => gap === 'G2'));
+  const baseline = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'cm-02');
+  assert.equal(baseline.state, 'partly-met');
+  assert.equal(baseline.reason, 'limitation');
+  assert.deepEqual(readFileSync(path.join(out, 'vsix-sbom.cdx.json')), readFileSync(sbom));
+  const manifest = JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8'));
+  const record = manifest.files.find(({ path }: { path: string }) => path === 'vsix-sbom.cdx.json');
+  const report = JSON.parse(readFileSync(path.join(out, 'observations.json'), 'utf8'));
+  const observed = report.observations.find(({ subject }: { subject: string }) => subject === 'vsix');
+  assert.equal(observed.commit, commit);
+  assert.equal(record.sha256, observed.hash);
   assert.equal(verifyManifest(out).ok, true);
+});
+
+test('bundle omits an installer inventory that changes after observation', async () => {
+  const dir = folder();
+  const collectors = { sbom: { sboms: [{ subject: 'vsix', file: 'installer' }], retainVsix: true } };
+  const first = JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'original' }] });
+  const versions = [first, first + '\n'];
+  const result = await runBundle({ repository: 'owner/repo', commit, kind: 'main', repoRoot: process.cwd(), collectors }, dir, {
+    readFile: async () => versions.shift()!
+  });
+  assert.equal(result.collectors.find(({ id }) => id === 'sbom')?.ok, false);
+  assert.equal(result.observations.length, 0);
+  assert.equal(existsSync(path.join(dir, 'vsix-sbom.cdx.json')), false);
+  assert.equal(verifyManifest(dir).ok, true);
 });

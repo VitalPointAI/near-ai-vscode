@@ -176,6 +176,7 @@ async function readForms(root: string): Promise<ArchiveEntry[]> {
 }
 
 const dashboardFile = 'release-package/evidence/bundle/dashboard/dashboard.json';
+const installerSbomFile = 'evidence/bundle/vsix-sbom.cdx.json';
 
 // Mirror the published snapshot's Phase 44 windows when labeling individual rule results.
 const day = 24 * 60 * 60 * 1000;
@@ -250,9 +251,13 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
     ['EV-REL-03', 'Release dashboard', dashboardFile, release.commit, 'Source of the product traceability rows.'],
     ['EV-REL-04', 'Original package checksums', 'release-package/SHA256SUMS', release.commit, 'Integrity of the extracted release files.'],
     ['EV-REL-05', 'OSCAL models', 'release-package/oscal/', release.commit, 'Release models for tailoring and assessment.'],
-    ['EV-REL-06', 'Readable release records', 'release-package/readable/', release.commit, 'Release security plans and responsibilities.'],
-    ['EV-DEP-___', 'Deployment evidence reference', '', '', 'Record permitted IDs and repository links after assessment.']
+    ['EV-REL-06', 'Readable release records', 'release-package/readable/', release.commit, 'Release security plans and responsibilities.']
   ];
+  if (release.files.has(installerSbomFile)) {
+    index.push(['EV-REL-07', 'CI installer software inventory', `release-package/${installerSbomFile}`, release.commit,
+      'Software shipped in the installer built for this commit. Confirm the deployed configuration separately.']);
+  }
+  index.push(['EV-DEP-___', 'Deployment evidence reference', '', '', 'Record permitted IDs and repository links after assessment.']);
   const snapshot = Date.parse(dashboard.generatedAt);
   const profiles: SaaSponsorReportInput['profiles'][number][] = [];
   for (const profile of dashboard.levels) {

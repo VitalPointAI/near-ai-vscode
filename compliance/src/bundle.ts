@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { testsCollector, readReports } from './collectors/tests.ts';
@@ -6,7 +7,7 @@ import { secretScanCollector } from './collectors/secretScan.ts';
 import { documentsCollector } from './collectors/documents.ts';
 import { cryptoCollector } from './collectors/crypto.ts';
 import { auditCollector } from './collectors/audit.ts';
-import { sbomCollector } from './collectors/sbom.ts';
+import { sbomCollector, type SbomInput } from './collectors/sbom.ts';
 import { releaseCollector } from './collectors/release.ts';
 import { attestationsCollector } from './collectors/attestations.ts';
 import { settingsCollector } from './collectors/settings.ts';
@@ -73,7 +74,20 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
       let result: Observation[];
       if (collector.id === 'tests') { const report = await readReports(inputs.collectors.tests as any, context); result = report.observations; testRows.push(...report.rows); }
       else result = await collector.collect(inputs.collectors[collector.id], context);
-      const redacted = result.map(redactObservation); observations.push(...redacted);
+      const redacted = result.map(redactObservation);
+      if (collector.id === 'sbom') {
+        const input = inputs.collectors.sbom as SbomInput;
+        if (input.retainVsix === true) {
+          const sources = input.sboms.filter(({ subject }) => subject === 'vsix');
+          const [source] = sources;
+          const observed = redacted.find((row) => row.collector === 'sbom' && row.subject === 'vsix' && row.passed);
+          if (sources.length !== 1 || !source || !observed) throw new Error('Expected one verified installer SBOM');
+          const text = await context.readFile(source.file);
+          if (createHash('sha256').update(text).digest('hex') !== observed.hash) throw new Error('The installer SBOM changed during collection');
+          writeFileSync(path.join(output, 'vsix-sbom.cdx.json'), text, { flag: 'wx' });
+        }
+      }
+      observations.push(...redacted);
       collectorRows.push({ id: collector.id, ran: true, ok: true, ...(redacted[0] ? { lastCollectedAt: redacted.map((row) => row.collectedAt).sort().at(-1) } : {}) });
     } catch (error) { collectorRows.push({ id: collector.id, ran: true, ok: false, error: codeOf(error) }); }
   }

@@ -473,9 +473,9 @@ jobs:
           path: compliance/out/reports
           merge-multiple: true
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: steps.has_compliance.outputs.present == 'true'
+        if: steps.has_compliance.outputs.present == 'true' && needs.release-content.result == 'success'
         with:
-          pattern: vsix-*
+          name: vsix-${{ github.sha }}
           path: compliance/out/vsix
       - name: Download the newest successful main evidence bundle when one exists
         if: steps.has_compliance.outputs.present == 'true' && (github.event_name == 'pull_request' || steps.has_compliance.outputs.publish_as == 'main')
@@ -493,17 +493,29 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           COMMIT: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          VSIX_RESULT: ${{ needs.release-content.result }}
         run: |
           mkdir -p compliance/out
           printf '%s\n' "$NEEDS_JSON" > compliance/out/needs.json
           if [ "$EVENT" = "pull_request" ]; then git diff --name-only "$PR_BASE...$COMMIT" > compliance/out/changed.txt; else git diff-tree --no-commit-id --name-only -r "$COMMIT" > compliance/out/changed.txt; fi
           node --input-type=module -e '
-            import { writeFileSync } from "node:fs";
+            import { readdirSync, statSync, writeFileSync } from "node:fs";
+            import { openZip } from "./scripts/lib/zip.mjs";
             const reports = ["root", "relay", "hub"].map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
             const collectors = {
               tests: { reports }, ci: { needsFile: "compliance/out/needs.json" },
               documents: { repoRoot: "." }, crypto: { repoRoot: "." }
             };
+            if (process.env.VSIX_RESULT === "success") {
+              const directory = "compliance/out/vsix";
+              const installers = readdirSync(directory, { withFileTypes: true }).filter(item => item.isFile() && item.name.endsWith(".vsix"));
+              if (installers.length !== 1) throw new Error("Expected one installer from the successful build for this commit");
+              const installer = `${directory}/${installers[0].name}`;
+              if (statSync(installer).size > 14 * 1024 * 1024) throw new Error("The installer exceeds the release size budget");
+              const file = "compliance/out/vsix-sbom.cdx.json";
+              writeFileSync(file, openZip(installer, { maxEntryBytes: 1_048_576 }).read("extension/sbom.cdx.json"));
+              collectors.sbom = { sboms: [{ subject: "vsix", file }], retainVsix: true };
+            }
             if (process.env.PUBLISH_AS) Object.assign(collectors, { audit: { audits: [{ package: "root", file: "compliance/out/audit-root.json" }] }, "secret-scan": { jsonFile: "compliance/out/secret-scan.json" } });
             const value = { repository: process.env.REPOSITORY, commit: process.env.COMMIT, kind: process.env.PUBLISH_AS || "pr", repoRoot: ".", collectors };
             writeFileSync("compliance/out/inputs.json", JSON.stringify(value, null, 2));

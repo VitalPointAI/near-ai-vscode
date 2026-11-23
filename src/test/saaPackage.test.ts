@@ -64,7 +64,9 @@ function release(): SaaReleaseEvidence {
 }
 
 test('exports the original release, editable forms and traceability with deployment conclusions left open', async () => {
-  const evidence = release();
+  const original = release();
+  const sbomFile = 'evidence/bundle/vsix-sbom.cdx.json';
+  const evidence = { ...original, files: new Map(original.files).set(sbomFile, Buffer.from('installer inventory')) };
   const privacyForms = await loadSaaOfficialPrivacyForms(new AbortController().signal, async (input) => {
     const url = new URL(String(input));
     assert.equal(url.origin, 'https://www.canada.ca');
@@ -82,6 +84,7 @@ test('exports the original release, editable forms and traceability with deploym
   assert.ok(result.has('forms/editable/01-01-submission-cover-and-routing.docx'));
   assert.ok([...result.keys()].some((name) => name.startsWith('forms/official/') && name.endsWith('.pdf')));
   assert.match(result.get('README.md')?.().toString() ?? '', /v0\.4\.36/);
+  assert.match(result.get('evidence/evidence-index.csv')!().toString(), /EV-REL-07","CI installer software inventory","release-package\/evidence\/bundle\/vsix-sbom\.cdx\.json/);
   assert.match(result.get('evidence/coverage-summary.csv')?.().toString() ?? '', /"protected-a","Protected A","1","1"/);
   const traceability = result.get('evidence/control-traceability.csv')?.().toString() ?? '';
   assert.match(traceability, /"Product rule passed".*"release-package\/evidence\/bundle\/dashboard\/text\/itsp-10-033\/au\.json".*"Not assessed"/);

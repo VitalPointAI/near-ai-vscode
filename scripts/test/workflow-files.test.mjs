@@ -170,6 +170,12 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   assert.match(job, /if:\s*always\(\)/);
   assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
   assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  const installer = steps(job).find((step) => /path: compliance\/out\/vsix/.test(step));
+  assert.match(installer, /name: vsix-\$\{\{ github\.sha \}\}/);
+  assert.match(installer, /needs\.release-content\.result == 'success'/);
+  const inputs = steps(job).find((step) => /name: Write collector inputs and changed paths/.test(step));
+  assert.match(inputs, /VSIX_RESULT: \$\{\{ needs\.release-content\.result \}\}/);
+  assert.match(inputs, /if \(process\.env\.VSIX_RESULT === "success"\)[\s\S]*read\("extension\/sbom\.cdx\.json"\)[\s\S]*retainVsix: true/);
   const scan = steps(job).find((step) => /secret-scan\.mjs --dir/.test(step));
   const upload = steps(job).find((step) => /name: compliance-bundle/.test(step));
   assert.match(scan, /id: bundle_scan/);

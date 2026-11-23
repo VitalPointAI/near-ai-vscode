@@ -54,6 +54,8 @@ Component and rule source files never carry a state. The generated dashboard com
 
 The `test`, `relay`, and `hub` jobs write per-test reports. The `compliance` job validates the compliance package, rebuilds those reports into a redacted evidence bundle, and shows control-state changes in the pull-request job summary. On `main` it secret-scans and stores the bundle for 30 days. `relay-image-scan` separately records the relay image SBOM and known fixed vulnerabilities. These reporting jobs do not turn a finding into a failed required check; a tool that cannot run still fails its step.
 
+When the installer build succeeds, the evidence job reads its SBOM from the current run's commit-named VSIX artifact. The evidence bundle retains the exact installer SBOM and records its component count and digest. The assessor package carries that same file under `evidence/bundle/`. Its observation describes the software shipped in that installer. Record the actual installed configuration and its approval when assessing a deployment.
+
 The pull-request summary is report-only by default. After the owner has seen stable results and made `compliance` a required check, set its `FAIL_ON_DROP` environment value to `--fail-on-drop` and remove any masking behavior from that summary step to make an unexplained evidence drop blocking.
 
 ## Release package

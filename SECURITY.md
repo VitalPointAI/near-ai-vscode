@@ -2426,6 +2426,7 @@ health check connects only to itself; and no hub source file names a client netw
 
 | Limitation | Plan |
 | --- | --- |
+| The installer inventory identifies shipped components. It does not establish the approved deployment configuration or operational configuration management. | Record the assessed installation, settings, approved baseline and change history for each operational environment. |
 | The published incident response plan and supported versions policy document the supplier procedure. They do not establish response exercises, advisory delivery, or deployment response effectiveness. | Record a product response exercise and evidence of advisory and notification procedures. Your organization owns its deployment response plan and exercises. |
 | Local gate decision records cover only extension decisions. They do not establish deployment-wide event selection, retention, or monitoring. | Your organization selects events and components to log, and defines retention, forwarding and review. |
 | The crypto inventory documents the AES-256-GCM entry. It does not establish key management practices or approved cryptographic configurations for a deployment. | Record the reviewed key lifecycle and verify approved cryptographic configurations for the assessed deployment. |
