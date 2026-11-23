@@ -15,7 +15,7 @@
 
 ## 0.4.x line
 
-Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the full unit, e2e and release checks, then the Marketplace and GitHub release once the owner approves that version.
+Keep GitHub branches, pull requests, CI checks, reviews, and owner release approval. Sterling releases publish a versioned Theia container image in place of Marketplace publication. Record the exact image digest on the GitHub release.
 
 | Release | Date | Highlights |
 |---------|------|------------|
@@ -1717,6 +1717,8 @@ Outlines, not plans: each gets a version number, requirements and phases (number
 **Split (owner, 2026-11-18, data platform decision 1):** L1 is split in two. L1a, the always-on host and local inference, moved into v0.6.0 Data platform, which needs the host before the relay exists: the Compose stack on amd64 with the Strix Halo machine first, ROCm and Vulkan passthrough, the local inference service exposed through the hybrid provider as `local` models, and an offline start from a signed bundle (Phase 85, and the host parts of Phase 88). It needs no Theia, relay or OpenShell. Of the L1 draft requirements, L1a meets the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03, through SPIKE-01 and SPIKE-02; the rest stays in L1b. L1b builds on L1a's stack rather than a second one.
 
 ### L1b: Theia appliance on one machine
+**Release gate**: Verify Theia workflow parity using the local development build and the [workflow matrix](spikes/theia-team-studio/MIGRATION.md). Build and test the versioned image in GitHub CI. Publish an approved image by digest and link it from the GitHub release. The VSIX is bundled for compatibility inside the image. Production Theia integration stays on the L1b stack and consumes Phase 88 and 100 services when available.
+
 
 **Development target (owner, 2026-11-23).** Start the [browser migration and extension parity checks](spikes/theia-team-studio/MIGRATION.md) now. Use the existing VSIX bridge and native ports to bring current workflows into Theia. Make Theia the sole development target once current workflows pass parity.
 
