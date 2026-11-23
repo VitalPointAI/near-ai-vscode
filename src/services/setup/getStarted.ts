@@ -11,7 +11,7 @@ import { definePage, listenTo, postTo } from '../webview/protocol';
 import { memoryOnlyDeviceProvider } from './deviceFacts';
 import { createGuideController, type GuideController, type GuideControllerDeps } from './guideController';
 import { createLocalServersSource, type LocalServersDeps } from './localServersOption';
-import { createNearAiSource, type NearAiOptionDeps } from './nearAiOption';
+import { createNearAiSource, createScopedNearAiSource, type NearAiOptionDeps, type ScopedNearAiOptionDeps } from './nearAiOption';
 
 export { gateGuidePolicy } from './guideFacts';
 
@@ -22,7 +22,7 @@ export interface GetStartedDeps {
   readonly registries?: SetupRegistries;
   readonly sources?: {
     readonly local: LocalServersDeps;
-    readonly near: NearAiOptionDeps;
+    readonly near: NearAiOptionDeps | ScopedNearAiOptionDeps;
     readonly device?: Parameters<typeof memoryOnlyDeviceProvider>[0];
   };
   /** Capture the current project and its trusted service adapters when the panel opens. */
@@ -34,7 +34,8 @@ function registerSources(registries: SetupRegistries, deps: NonNullable<GetStart
   const dispose = () => registrations.reverse().forEach((registration) => registration.dispose());
   try {
     registrations.push(registries.options.register(createLocalServersSource(deps.local)));
-    registrations.push(registries.options.register(createNearAiSource(deps.near)));
+    const near = 'profiles' in deps.near ? createScopedNearAiSource(deps.near) : createNearAiSource(deps.near);
+    registrations.push(registries.options.register(near));
     registrations.push(registries.devices.register(memoryOnlyDeviceProvider(deps.device)));
     return { dispose };
   } catch (error) {

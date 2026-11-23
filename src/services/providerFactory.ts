@@ -6,18 +6,18 @@ import { NearAiClient } from './nearAiClient';
 import { spendAccountFor } from './spendAccount';
 
 export interface CreateNearAiProviderOptions {
-  auth: AuthService;
+  auth: Pick<AuthService, 'getScopedApiKeyFor'>;
   profile: OrganizationProfile;
   scope: ProjectCredentialScope;
   fetchFn?: typeof fetch;
 }
 
-/** Builds the clients for a profile: NEAR AI Cloud, a local runtime, or both (hybrid). */
-async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ client: NearAiClient; localClient?: NearAiClient }> {
+/** Construct the scoped primary client. The caller decides whether and when to check its connection. */
+export async function createProfilePrimaryClient(options: CreateNearAiProviderOptions): Promise<NearAiClient | undefined> {
   const { auth, profile, scope, fetchFn } = options;
   if (!isProjectCredentialScope(scope) || scope.profileId !== profile.profileId) throw new Error('The provider scope does not match the selected profile.');
   const apiKey = await auth.getScopedApiKeyFor(scope, profile.baseUrl) ?? '';
-  if (!apiKey && profile.provider !== 'local') throw new Error('The selected profile has no configured credential.');
+  if (!apiKey && profile.provider !== 'local') return undefined;
   // Every billable response of a NEAR AI Cloud key goes to that key's spend ledger; a local runtime bills nothing.
   const spend = profile.provider === 'local' ? undefined : spendAccountFor(profile.baseUrl, apiKey);
   // CLAS-06: each client says which route it is, so the route check judges the client a request really uses. A hybrid profile's NEAR client knows a local
@@ -31,9 +31,17 @@ async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ clien
     ? new NearConnectionBinding({ get: (path, signal) => client!.getJson(path, signal), teeModel: () => client?.cachedTeeModel() })
     : undefined;
   client = new NearAiClient({ baseUrl: profile.baseUrl, apiKey, fetchFn, route: kind, ...(binding ? { binding } : {}), ...(hybrid ? { localModelAvailable: true } : {}), ...(spend ? { spend, spendTag: { projectId: scope.projectId } } : {}) });
+  return client;
+}
+
+/** Builds the clients for a profile: NEAR AI Cloud, a local runtime, or both (hybrid). */
+async function clientsFor(options: CreateNearAiProviderOptions): Promise<{ client: NearAiClient; localClient?: NearAiClient }> {
+  const { auth, profile, scope, fetchFn } = options;
+  const client = await createProfilePrimaryClient(options);
+  if (!client) throw new Error('The selected profile has no configured credential.');
   // The first check starts now, in the background, so a labelled chat rarely meets a connection nobody has checked yet. Nothing waits for it.
-  if (binding) client.refreshBinding();
-  if (!hybrid || !profile.localBaseUrl) return { client };
+  if (client.connectionBinding) client.refreshBinding();
+  if (profile.provider !== 'hybrid' || !profile.localBaseUrl) return { client };
   const localApiKey = await auth.getScopedApiKeyFor(localKeyScope(scope), profile.localBaseUrl) ?? '';
   return { client, localClient: new NearAiClient({ baseUrl: profile.localBaseUrl, apiKey: localApiKey, fetchFn, route: 'local' }) };
 }

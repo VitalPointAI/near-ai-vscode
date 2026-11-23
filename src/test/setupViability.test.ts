@@ -1,5 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createProjectCredentialScope, type OrganizationProfile, type ProjectCredentialScope } from '../domain/auth';
+import { DEFAULT_BASE_URL } from '../domain/config';
 import type { PolicyEndpoint } from '../domain/gate/endpoints';
 import type { ConnectionBindingFact } from '../domain/gate/routing';
 import type { ModelEndpoint } from '../domain/provider/endpoint';
@@ -12,7 +14,7 @@ import { pinnedFetch } from '../services/connectionBinding';
 import { hostKindOf, memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
 import { createIdentify, listServerModels } from '../services/setup/identify';
 import { createLocalServersSource } from '../services/setup/localServersOption';
-import { createNearAiSource } from '../services/setup/nearAiOption';
+import { createNearAiSource, createScopedNearAiSource } from '../services/setup/nearAiOption';
 import { runTestRequest } from '../services/setup/testRequest';
 import { runViability } from '../services/setup/viabilityRunner';
 import { currentSpendTag } from '../services/spendLedger';
@@ -27,6 +29,61 @@ const input: OptionCheckInput = {
   },
   floorOn: false, identify: async () => ({ state: 'no-answer' }), progress: () => {},
 };
+
+test('NEAR setup checks use only the selected project profile and its endpoint-bound key', async () => {
+  const profile: OrganizationProfile = {
+    version: 1, profileId: 'profile-first', displayName: 'First', organization: 'Fixture',
+    provider: 'near-ai', baseUrl: DEFAULT_BASE_URL, authMode: 'apiKey', createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z', validation: { status: 'valid' },
+  };
+  const first = createProjectCredentialScope('/fixture/project', profile.profileId);
+  const second = createProjectCredentialScope('/fixture/project', 'profile-second');
+  let selected: OrganizationProfile | undefined = profile;
+  let credentials = first;
+  let keyAvailable = true;
+  let profileReads = 0;
+  const lookups: { scope: ProjectCredentialScope; endpoint: string }[] = [];
+  const requests: { endpoint: string; authorization: string | null }[] = [];
+  const source = createScopedNearAiSource({
+    profiles: () => ({
+      async getActiveProfile() { profileReads++; return selected; },
+      getScope(profileId) { assert.equal(profileId, selected?.profileId); return credentials; },
+    }),
+    auth: { async getScopedApiKeyFor(scope, endpoint) {
+      lookups.push({ scope, endpoint });
+      return keyAvailable ? `fixture-for-${scope.profileId}` : undefined;
+    } },
+    fetchFn: async (endpoint, init) => {
+      requests.push({ endpoint: String(endpoint), authorization: new Headers(init?.headers).get('authorization') });
+      return Response.json({ data: [] });
+    },
+  });
+  const check = () => source.check(input, new AbortController().signal);
+  assert.equal(profileReads, 0);
+  assert.deepEqual(lookups, []);
+  assert.deepEqual(requests, []);
+  for (const invalid of [undefined, { ...profile, provider: 'local' } as const, { ...profile, baseUrl: 'https://other.example/v1' },
+    { ...profile, validation: { status: 'stale' } } as const]) {
+    selected = invalid;
+    assert.equal((await check()).state, 'not-configured');
+  }
+  selected = profile;
+  credentials = second;
+  assert.equal((await check()).state, 'not-configured');
+  assert.deepEqual(lookups, []);
+
+  credentials = first;
+  assert.equal((await check()).state, 'test-failed', 'an empty fake catalogue proves no private route');
+  credentials = second;
+  selected = { ...profile, profileId: second.profileId, provider: 'hybrid', localBaseUrl: 'http://127.0.0.1:11434/v1' };
+  assert.equal((await check()).state, 'test-failed');
+  keyAvailable = false;
+  assert.equal((await check()).state, 'not-configured');
+  assert.deepEqual(lookups, [first, second, second].map((scope) => ({ scope, endpoint: DEFAULT_BASE_URL })));
+  assert.deepEqual(requests, [first, second].flatMap(({ profileId }) => ['/models', '/model/list'].map((path) => ({
+    endpoint: DEFAULT_BASE_URL + path, authorization: `Bearer fixture-for-${profileId}`,
+  }))));
+});
 
 async function checkLocal(fake = createFakeModelServer('ollama'), overrides: Partial<OptionCheckInput> = {}, pinFetch?: (pin: string) => typeof fetch) {
   const deps = { fetch: fake.fetch, rows: [fake.row], fetchForPin: pinFetch };

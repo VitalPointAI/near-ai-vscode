@@ -10,6 +10,8 @@ import {
 import type { OptionSource, ViabilityEvent } from '../../domain/setup/viability';
 import type { ConnectionBindingSource } from '../connectionBinding';
 import type { NearAiClient } from '../nearAiClient';
+import type { ProfileStore } from '../profileStore';
+import { createProfilePrimaryClient, type CreateNearAiProviderOptions } from '../providerFactory';
 import { withCheckTimeout } from './probe';
 import { runTestRequest } from './testRequest';
 
@@ -27,6 +29,46 @@ export interface NearAiOptionDeps {
   readonly client: () => Promise<NearClientLike | undefined>;
   readonly binding: () => ConnectionBindingSource | undefined;
   readonly baseUrl: () => string;
+}
+
+export interface ScopedNearAiOptionDeps {
+  readonly profiles: () => Pick<ProfileStore, 'getActiveProfile' | 'getScope'> | undefined;
+  readonly auth: CreateNearAiProviderOptions['auth'];
+  readonly fetchFn?: typeof fetch;
+}
+
+/** Bind each check to one active profile, endpoint and client from this project's store. */
+export function createScopedNearAiSource(deps: ScopedNearAiOptionDeps): OptionSource {
+  return {
+    id: 'near-ai',
+    kinds: NEAR_KINDS,
+    check(input, signal) {
+      let client: NearAiClient | undefined;
+      let endpoint: string | undefined;
+      return createNearAiSource({
+        async hasKey() {
+          if (signal.aborted) return false;
+          try {
+            const profiles = deps.profiles();
+            const profile = await profiles?.getActiveProfile();
+            if (signal.aborted || !profiles || !profile || profile.provider === 'local' ||
+                profile.validation.status !== 'valid' || !profile.baseUrl.trim() || !isNearCloudEndpoint(profile.baseUrl)) return false;
+            const scope = profiles.getScope(profile.profileId);
+            const scoped = await createProfilePrimaryClient({ auth: deps.auth, profile, scope, fetchFn: deps.fetchFn });
+            if (signal.aborted || !scoped?.connectionBinding) return false;
+            client = scoped;
+            endpoint = profile.baseUrl;
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        client: async () => client,
+        binding: () => client?.connectionBinding,
+        baseUrl: () => endpoint ?? '',
+      }).check(input, signal);
+    },
+  };
 }
 
 function boundTo(fact: ConnectionBindingFact | undefined, host: string, now: number): fact is ConnectionBindingFact {
