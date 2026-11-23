@@ -1,0 +1,16 @@
+{
+  "gap": "G217",
+  "id": "g217",
+  "controls": [
+    "itsp171-03.08.03"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 media sanitization needs controlled disposition receipts",
+  "remediation": "The sponsor information custodian and media disposal owner identify assessed media and approved sanitization methods for reuse, disposal and transfer outside organizational control. Sample a controlled case showing custody, authorization, the sanitization result and verification before release. Store evidence under controlled identifiers without exposing contract information. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect approved sanitization methods and a traceable media record showing custody, verification and disposition authorization"
+    }
+  ]
+}

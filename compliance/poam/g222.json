@@ -1,0 +1,16 @@
+{
+  "gap": "G222",
+  "id": "g222",
+  "controls": [
+    "itsp171-03.14.02"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 malicious code protection needs deployed coverage and response evidence",
+  "remediation": "The sponsor endpoint protection owner inventories assessed entry and exit points. Verify configured protection and update cadence, scheduled system scans, real-time scanning for external files, and mitigation behavior. Use a harmless approved test artifact to record an observed block, quarantine or approved alternate protection with its dated response record. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect assessed protection coverage, effective update and scan settings and a safe detection and mitigation exercise record"
+    }
+  ]
+}
