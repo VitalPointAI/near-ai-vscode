@@ -436,7 +436,8 @@ printf 'partial or complete combined manifest\\n' > "$6/manifest.json"
 
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {
   const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
-  for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/']) {
+  for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/',
+    '/compliance/src/', '/compliance/components/', '/compliance/evidence-rules/', '/compliance/responsibility/', '/compliance/profiles/', '/compliance/levels.json']) {
     assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
   }
 });

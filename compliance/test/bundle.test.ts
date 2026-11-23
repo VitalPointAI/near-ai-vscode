@@ -248,7 +248,9 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   assert.ok(dashboard.rows.some(({ gap }: { gap?: string }) => gap === 'G2'));
   const baseline = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'cm-02');
   assert.equal(baseline.state, 'partly-met');
-  assert.equal(baseline.reason, 'limitation');
+  // The release pipeline's own row keeps its limitation; the in-scope components with no statement are assessed too, never skipped.
+  assert.equal(baseline.components.find(({ component }: { component: string }) => component === 'release-pipeline').reason, 'limitation');
+  assert.ok(baseline.components.some(({ reason }: { reason: string }) => reason === 'no-statement'));
   assert.deepEqual(readFileSync(path.join(out, 'vsix-sbom.cdx.json')), readFileSync(sbom));
   const manifest = JSON.parse(readFileSync(path.join(out, 'manifest.json'), 'utf8'));
   const record = manifest.files.find(({ path }: { path: string }) => path === 'vsix-sbom.cdx.json');
@@ -258,8 +260,9 @@ test('CI-shaped bundle CLI inputs load the shipped profiles, components and evid
   assert.equal(record.sha256, observed.hash);
   const remediation = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'unclassified' && control === 'si-02');
   assert.equal(remediation.state, 'partly-met');
-  assert.equal(remediation.reason, 'limitation');
-  assert.deepEqual(remediation.components[0].evidence.map(({ rule, passed }: { rule: string; passed: boolean }) => [rule, passed]), [
+  const pipeline = remediation.components.find(({ component }: { component: string }) => component === 'release-pipeline');
+  assert.equal(pipeline.reason, 'limitation');
+  assert.deepEqual(pipeline.evidence.map(({ rule, passed }: { rule: string; passed: boolean }) => [rule, passed]), [
     ['release.si-02.root-audit', true],
     ['release.si-02.policy-feature-regression', true]
   ]);

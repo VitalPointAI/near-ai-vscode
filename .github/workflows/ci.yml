@@ -1,8 +1,7 @@
 # Required checks for every PR into main. The job names (lint, test, e2e, release-content, audit,
-# secret-scan, relay, hub) are the branch protection's required status checks: do not rename them without
-# updating branch protection, CI_CHECKS in scripts/lib/workflow.mjs and
-# docs/development-workflow.md in the same PR. The docs job runs on every PR too but is not yet
-# required; making it required is the owner's change to the branch protection (and CI_CHECKS).
+# secret-scan, relay, hub, docs) are the branch protection's required status checks: do not rename them
+# without updating branch protection, CI_CHECKS in scripts/lib/workflow.mjs and
+# docs/development-workflow.md in the same PR.
 name: CI
 
 on:
