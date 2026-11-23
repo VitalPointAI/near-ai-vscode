@@ -229,6 +229,41 @@
     },
     {
       "controls": [
+        "ia-01"
+      ],
+      "id": "G20",
+      "ownerRole": "owner",
+      "poam": "g20",
+      "remediation": "The deployment sponsor designates the identity policy owner and approves the policy and procedures for the assessed systems. The identity policy owner specifies responsible roles and review intervals, documents dissemination and review, and provides the signed policy and versioned approval, distribution and review records.",
+      "title": "Deployment identification and authentication policy needs approval and evidence"
+    },
+    {
+      "controls": [
+        "ia-04",
+        "ia-04.04"
+      ],
+      "id": "G21",
+      "ownerRole": "shared",
+      "poam": "g21",
+      "remediation": "The deployment identity owner approves how individual, group, role, service and device identifiers are authorized, assigned and protected from reuse, and defines which user statuses must be recorded. Component maintainers trace these rules through the relevant staff or device workflows in the assessed release. Collect the identifier policy, status rules and redacted assignment, change and offboarding records. Document inheritance or missing controls for each applicable component.",
+      "title": "Identifier assignment and user status need deployment evidence"
+    },
+    {
+      "controls": [
+        "ia-12",
+        "ia-12.02",
+        "ia-12.03",
+        "ia-12.04",
+        "ia-12.05"
+      ],
+      "id": "G22",
+      "ownerRole": "owner",
+      "poam": "g22",
+      "remediation": "The deployment sponsor establishes the required identity assurance levels and names the registration authority and privacy owner. The registration authority records how it resolves a unique individual, receives identity evidence, validates and verifies it, performs the applicable in-person check and sends out-of-band confirmation to the recorded address. Collect approved procedures and redacted attestations or authorized evidence references. Document sponsor-approved applicability decisions and keep identity documents in the authorized storage location.",
+      "title": "Deployment identity proofing needs sponsor and registration authority evidence"
+    },
+    {
+      "controls": [
         "ac-16",
         "cgp-37-2",
         "itar-120.56-a"
