@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { main } from '../src/cli.ts';
 import { writeManifest, verifyManifest } from '../src/manifest.ts';
 import { runBundle } from '../src/bundle.ts';
+import { buildPackage } from '../src/package.ts';
 
 const commit = 'a'.repeat(40);
 const folder = () => mkdtempSync(path.join(realpathSync(tmpdir()), 'near-ai-bundle-'));
@@ -122,6 +123,81 @@ test('scheduled dashboards carry only same-commit CI tests and preserve their pr
   await assert.rejects(runBundle(scheduled, path.join(dir, 'changed-manifest-file'), { previous: initial }), /previous bundle does not verify/);
   writeManifest(initial, { commit, createdAt: collectedAt.toISOString() });
   await assert.rejects(runBundle(scheduled, path.join(dir, 'conflicting-provenance'), { previous: initial }), /lack consistent collection provenance/);
+});
+
+test('an exact scheduled run supplements the release archive while preserving original CI receipts', async () => {
+  const dir = folder();
+  const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const sourceRoot = path.join(repoRoot, 'compliance');
+  const sbom = path.join(sourceRoot, 'test/fixtures/collectors/sbom/vsix.cdx.json');
+  const previous = path.join(dir, 'ci');
+  const scheduled = path.join(dir, 'scheduled');
+  const combined = path.join(dir, 'combined');
+  const inputFile = path.join(dir, 'inputs.json');
+  const needs = path.join(dir, 'needs.json');
+  const repository = 'owner/repo';
+  const runUrl = `https://github.com/${repository}/actions/runs/123`;
+  const ciRun = `https://github.com/${repository}/actions/runs/122`;
+  const collectedAt = new Date(Date.now() - 60_000).toISOString();
+  const base = { repository, commit, repoRoot };
+  const release = { ...base, kind: 'release' as const, collectors: {} };
+  writeFileSync(needs, JSON.stringify({ test: { result: 'success' } }));
+  await runBundle({
+    ...base, kind: 'main', runUrl: ciRun, collectors: {
+      ci: { needsFile: needs }, sbom: { sboms: [{ subject: 'vsix', file: sbom }], retainVsix: true }
+    },
+  }, previous);
+  await runBundle({ ...base, kind: 'scheduled', runUrl, collectors: {} }, scheduled, { now: new Date(collectedAt) });
+  const recordFile = path.join(scheduled, 'observations.json');
+  const record = JSON.parse(readFileSync(recordFile, 'utf8'));
+  const common = { passed: true, collectedAt, commit, runUrl };
+  record.observations = [
+    { ...common, collector: 'settings', subject: 'docs-required' },
+    { ...common, collector: 'settings', subject: 'main-change-protection' },
+    { ...common, collector: 'review-trail', subject: 'assessed-commit-agent-review' },
+    { ...common, collector: 'ci', subject: 'test', passed: false },
+  ];
+  writeFileSync(recordFile, JSON.stringify(record));
+  writeManifest(scheduled, { commit, createdAt: collectedAt });
+  writeFileSync(inputFile, JSON.stringify(release));
+  assert.equal(await main(['bundle', '--inputs', inputFile, '--out', combined, '--previous', previous,
+    '--scheduled', scheduled, '--scheduled-run', runUrl]), 0);
+  assert.equal(verifyManifest(combined).ok, true);
+  const archive = buildPackage({ release: 'v0.4.99', bundle: combined, out: dir, sourceRoot });
+  const bundled = path.join(archive.directory, 'evidence/bundle');
+  assert.deepEqual(readFileSync(path.join(bundled, 'vsix-sbom.cdx.json')), readFileSync(sbom));
+  const dashboard = JSON.parse(readFileSync(path.join(bundled, 'dashboard/dashboard.json'), 'utf8'));
+  const row = dashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'protected-b' && control === 'cm-03');
+  const pipeline = row.components.find(({ component }: { component: string }) => component === 'release-pipeline');
+  assert.equal(pipeline.state, 'partly-met');
+  assert.equal(pipeline.evidence.find(({ rule }: { rule: string }) => rule === 'release.cm-03.ci').runUrl, ciRun);
+  const results = JSON.parse(readFileSync(path.join(archive.directory, 'oscal/assessment-results.json'), 'utf8'));
+  assert.ok(results['assessment-results'].results[0].observations.some((row: Record<string, { href: string }[]>) =>
+    row['relevant-evidence']?.some(({ href }) => href === runUrl)));
+  archive.verify();
+
+  const options = { previous, scheduled: { directory: scheduled, runUrl } };
+  await assert.rejects(runBundle(release, path.join(dir, 'wrong-run'), {
+    ...options, scheduled: { directory: scheduled, runUrl: `${runUrl}4` },
+  }), /consistent provenance/);
+  const otherCommit = 'b'.repeat(40);
+  writeManifest(scheduled, { commit: otherCommit, createdAt: collectedAt });
+  await assert.rejects(runBundle(release, path.join(dir, 'wrong-commit'), options), /assessed release commit/);
+  writeManifest(scheduled, { commit, createdAt: collectedAt });
+  writeFileSync(recordFile, JSON.stringify({ ...record, tampered: true }));
+  await assert.rejects(runBundle(release, path.join(dir, 'tampered'), options), /manifest does not verify/);
+
+  const expired = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+  record.generatedAt = expired;
+  for (const observation of record.observations) observation.collectedAt = expired;
+  writeFileSync(recordFile, JSON.stringify(record));
+  writeManifest(scheduled, { commit, createdAt: expired });
+  const stale = path.join(dir, 'stale');
+  assert.equal(await main(['bundle', '--inputs', inputFile, '--out', stale, '--previous', previous,
+    '--scheduled', scheduled, '--scheduled-run', runUrl]), 0);
+  const staleDashboard = JSON.parse(readFileSync(path.join(stale, 'dashboard/dashboard.json'), 'utf8'));
+  const staleRow = staleDashboard.rows.find(({ level, control }: { level: string; control: string }) => level === 'protected-b' && control === 'cm-03');
+  assert.equal(staleRow.components.find(({ component }: { component: string }) => component === 'release-pipeline').state, 'stale');
 });
 
 test('CI-shaped bundle CLI inputs load the shipped profiles, components and evidence rules', async () => {

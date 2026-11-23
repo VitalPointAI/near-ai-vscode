@@ -320,6 +320,109 @@ test('releases require GitHub CI evidence on the exact release head when the bas
   assert.match(all.get('release'), /needs\.attest\.result == 'success'/);
 });
 
+test('releases supplement CI only with usable daily evidence from the exact main commit in this repository', (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-release-evidence-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'compliance', 'out');
+  const verifiedCI = path.join(out, 'bundle', 'manifest.json');
+  mkdirSync(path.dirname(verifiedCI), { recursive: true });
+  writeFileSync(verifiedCI, 'original verified CI manifest');
+
+  const pkg = jobs(read('release.yml')).get('package');
+  const scheduled = steps(pkg).find((step) => /id: scheduled/.test(step));
+  const pack = steps(pkg).find((step) => /id: pack/.test(step));
+  assert.match(scheduled, /if: needs\.build\.outputs\.evidence_branch == 'main'/);
+  assert.match(pack, /RELEASE_BUNDLE: \$\{\{ steps\.scheduled\.outputs\.bundle \}\}/);
+  assert.match(pack, /--bundle "\$\{RELEASE_BUNDLE:-compliance\/out\/bundle\}"/);
+  const script = scheduled.split('run: |\n')[1];
+
+  const commit = 'a'.repeat(40);
+  const run = {
+    head_sha: commit, head_branch: 'main', status: 'completed', conclusion: 'success', event: 'schedule',
+    repository: { id: 321 }, head_repository: { id: 321 },
+  };
+  const runs = path.join(dir, 'runs.json');
+  writeFileSync(runs, JSON.stringify({ workflow_runs: [
+    { ...run, id: 110 },
+    { ...run, id: 109, head_sha: 'b'.repeat(40) },
+    { ...run, id: 108, head_repository: { id: 999 } },
+    { ...run, id: 107, event: 'pull_request' },
+    { ...run, id: 106, head_branch: 'feature' },
+    { ...run, id: 105 },
+    { ...run, id: 104 },
+    { ...run, id: 103 },
+    { ...run, id: 102 },
+    { ...run, id: 101, event: 'workflow_dispatch' },
+  ] }));
+  writeFileSync(path.join(dir, 'gh'), `#!/bin/bash -e
+case "$4" in
+  repos/acme/demo/actions/workflows/compliance-scheduled.yml/runs)
+    [[ "$*" == *"-f branch=main -f head_sha=$COMMIT -f status=success -F per_page=10" ]]
+    cat runs.json
+    ;;
+  repos/acme/demo/actions/runs/*/jobs)
+    [[ "$*" == *"-f filter=latest" ]]
+    conclusion=success
+    upload=success
+    if [[ "$4" == */105/jobs ]]; then conclusion=skipped; fi
+    if [[ "$4" == */110/jobs ]]; then upload=skipped; fi
+    printf '{"jobs":[{"name":"daily evidence","head_sha":"%s","status":"completed","conclusion":"%s","steps":[{"name":"Run actions/upload-artifact@hash","conclusion":"%s"}]}]}\\n' "$COMMIT" "$conclusion" "$upload"
+    ;;
+  repos/acme/demo/actions/runs/*/artifacts)
+    [[ "$*" == *"-f name=compliance-bundle" ]]
+    expired=false
+    if [[ "$4" == */104/artifacts ]]; then expired=true; fi
+    printf '{"artifacts":[{"name":"compliance-bundle","expired":%s}]}\\n' "$expired"
+    ;;
+  --repo)
+    [[ "$1 $2 $5 $6 $7 $8" == "run download acme/demo --name compliance-bundle --dir" ]]
+    printf '%s\\n' "$3" >> downloads
+    mkdir -p "$9"
+    printf '%s\\n' "$3" > "$9/manifest.json"
+    [[ "$3" != 103 ]]
+    ;;
+  *) exit 1 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(path.join(dir, 'node'), `#!/bin/bash -e
+[[ "$1 $2 $3 $5 $7 $8 $9 \${11}" == "compliance/src/cli.ts bundle --inputs --out --previous compliance/out/bundle --scheduled --scheduled-run" ]]
+run_id="$(cat "\${10}/manifest.json")"
+[[ "\${12}" == "https://github.com/acme/demo/actions/runs/$run_id" ]]
+jq -e --arg commit "$COMMIT" '.repository == "acme/demo" and .commit == $commit and .kind == "release" and .repoRoot == "." and .collectors == {}' "$4" >/dev/null
+printf '%s\\n' "$run_id" >> merges
+mkdir -p "$6"
+printf 'partial or complete combined manifest\\n' > "$6/manifest.json"
+[[ "$run_id" != 102 ]]
+`, { mode: 0o755 });
+
+  const summary = path.join(dir, 'summary');
+  const output = path.join(dir, 'output');
+  const env = {
+    ...process.env,
+    PATH: `${dir}:${process.env.PATH}`, COMMIT: commit, REPOSITORY_ID: '321',
+    GITHUB_REPOSITORY: 'acme/demo', GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary,
+  };
+  execFileSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], { cwd: dir, env });
+  assert.equal(readFileSync(path.join(dir, 'downloads'), 'utf8'), '103\n102\n101\n');
+  assert.equal(readFileSync(path.join(dir, 'merges'), 'utf8'), '102\n101\n');
+  assert.match(readFileSync(output, 'utf8'), /^bundle=compliance\/out\/scheduled-release\.[^/]+\/combined\n$/);
+  assert.match(readFileSync(summary, 'utf8'), /https:\/\/github\.com\/acme\/demo\/actions\/runs\/101/);
+  assert.equal(readFileSync(verifiedCI, 'utf8'), 'original verified CI manifest');
+
+  for (const response of [{ workflow_runs: [{ ...run, id: 103 }, { ...run, id: 102 }] }, { workflow_runs: [] }, { message: 'raw unexpected response' }]) {
+    writeFileSync(runs, JSON.stringify(response));
+    writeFileSync(output, '');
+    writeFileSync(summary, '');
+    const log = execFileSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], { cwd: dir, env, encoding: 'utf8' });
+    assert.match(log, /::warning::/);
+    assert.doesNotMatch(log, /raw unexpected response/);
+    assert.equal(readFileSync(output, 'utf8'), '');
+    assert.match(readFileSync(summary, 'utf8'), /unavailable or unverified/);
+    assert.equal(readFileSync(verifiedCI, 'utf8'), 'original verified CI manifest');
+  }
+});
+
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {
   const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
   for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/']) {

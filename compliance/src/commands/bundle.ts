@@ -54,7 +54,8 @@ function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'levels' 
 
 export async function run(args: readonly string[]): Promise<number> {
   const inputFile = option(args, '--inputs'); const out = option(args, '--out'); const previous = option(args, '--previous');
-  if (!inputFile || !out) return 2;
+  const scheduledDir = option(args, '--scheduled'); const scheduledRun = option(args, '--scheduled-run');
+  if (!inputFile || !out || Boolean(scheduledDir) !== Boolean(scheduledRun)) return 2;
   try {
     const inputs = JSON.parse(readFileSync(inputFile, 'utf8')) as BundleInputs;
     const runUrl = inputs.runUrl ?? (process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined);
@@ -62,7 +63,11 @@ export async function run(args: readonly string[]): Promise<number> {
     const repoRoot = path.resolve(inputs.repoRoot || '.');
     const sourceRoot = path.join(repoRoot, 'compliance');
     const dashboard = loadDashboardSources(sourceRoot);
-    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot, dashboard }, out, { fetchJson, controlTextSource: sourceRoot, ...(previous ? { previous: path.resolve(previous) } : {}) });
+    await runBundle({ ...inputs, ...(runUrl ? { runUrl } : {}), repoRoot, dashboard }, out, {
+      fetchJson, controlTextSource: sourceRoot,
+      ...(previous ? { previous: path.resolve(previous) } : {}),
+      ...(scheduledDir && scheduledRun ? { scheduled: { directory: path.resolve(scheduledDir), runUrl: scheduledRun } } : {}),
+    });
     return 0;
   } catch (error) { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); return 1; }
 }

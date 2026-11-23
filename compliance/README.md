@@ -64,6 +64,8 @@ For CM-03, use the configured protections on main and the agent review attached 
 
 Releases with compliance sources attach `compliance-package-<version>.tar.gz` and its checksum beside the VSIX. An unmerged hotfix based on an older release that predates the compliance sources can still publish an attested VSIX. The release workflow validates the package's OSCAL documents, imports its assessor documents into a throwaway Compliance Trestle workspace, and creates GitHub artifact attestations. Verify the checksum with `sha256sum --check <package>.sha256`. Verify provenance with `gh attestation verify <file> --repo VitalPointAI/near-ai-vscode`.
 
+A main release can include settings and review observations from a verified daily evidence run for the same commit. The package retains the CI test evidence, the installer inventory, and the collection-run links. The release summary records when it uses the CI bundle alone. The package flags expired settings evidence as stale.
+
 ## Owner steps
 
 These settings and outside contacts cannot be changed by this code. They may be completed later; the Evidence and Gaps pages continue to show what remains open.
