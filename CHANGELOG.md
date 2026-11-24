@@ -17,6 +17,16 @@ the same product with that fixed.
   Compliance Trestle unpacked it inside Trestle's own workspace, which Trestle refuses. It now
   unpacks beside it, so the import and validation results appear in each release run.
 
+### Compliance and documentation
+
+- **The hosted compliance views show their first evidence.** For the planned on-premise
+  deployment, three statements now rest on a checked test of the site stack: it renders no k3s
+  and no ingress-nginx, and no certificate issuer uses a public ACME service. Everything else
+  in those views still shows No statement yet or a dated gap, never Met without evidence.
+- **The documentation matches how Sterling ships.** Getting started covers both the extension
+  and the workbench image, and the architecture, release and security pages describe the
+  approved container publication and the planned hosting for your organization's own sites.
+
 ## 0.4.37
 
 This is the first release shipped as a Sterling container image instead of a Marketplace
