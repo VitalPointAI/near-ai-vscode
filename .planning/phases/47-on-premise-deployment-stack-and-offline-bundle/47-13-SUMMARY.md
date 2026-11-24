@@ -195,6 +195,7 @@ retire: sterling-pki re-applied with bootstrapCaCertificate "", Secret site-boot
 | Flag | File | Description |
 |------|------|-------------|
 | threat_flag: header-trust | deploy/values/keycloakx.yaml | With smart cards on, Keycloak reads the client certificate from a header; a pod that reaches Keycloak directly could send one. The site example requires a NetworkPolicy (Keycloak reachable only from HAProxy and its own namespace) before turning smart cards on. Off by default. |
+| threat_flag: forwarded-headers (fixed after this plan, with 47-15) | deploy/values/kubernetes-ingress.yaml, deploy/values/keycloakx.yaml | Phase 46 finding: HAProxy passed a client's X-Forwarded-Uri on, and oauth2-proxy matched its sign-in exemptions against it. HAProxy now sets X-Forwarded-For, -Host, -Proto and -Uri itself on every request (forwarded-for off), and the Keycloak Ingress, whose own request-set-header replaces the controller's, repeats them. render-pki asserts both; the live check is in 47-15-SUMMARY.md. |
 | threat_flag: eku | deploy/openbao/apply.mjs | client_flag on the ingress role puts clientAuth in every site-pki certificate; no service in the stack accepts site-PKI client certificates today. |
 
 ## Known Stubs

@@ -45,8 +45,19 @@ controller:
   # certificate that does not chain to the smart-card CA bundle in Secret smartCards.caSecret (key tls.crt), and the Keycloak Ingress
   # forwards a verified certificate to Keycloak (deploy/values/keycloakx.yaml). HAProxy Kubernetes Ingress 3.4.1 can only set this on the
   # whole HTTPS frontend (client-ca is a ConfigMap setting), not per host; only the Keycloak Ingress forwards the certificate.
+  # Forwarded headers: HAProxy sets X-Forwarded-For, -Host, -Proto and -Uri itself on every request, replacing whatever a client sent, and
+  # does not append to a client's X-Forwarded-For (forwarded-for off). oauth2-proxy in each session trusts these headers only from the pod
+  # network and matches its sign-in exemptions against X-Forwarded-Uri, so a client-supplied value must never reach it (Phase 46 finding,
+  # workbench/README.md "What Phase 47 closes"). An Ingress with its own request-set-header replaces this list and must repeat it
+  # (deploy/values/keycloakx.yaml does).
   config: |
     ssl-redirect: "true"
+    forwarded-for: "false"
+    request-set-header: |
+      X-Forwarded-For %[src]
+      X-Forwarded-Host %[req.hdr(host)]
+      X-Forwarded-Proto %[ssl_fc,iif(https,http)]
+      X-Forwarded-Uri %[url]
     {{- if .Values.smartCards.enabled }}
     client-ca: {{ .Release.Namespace }}/{{ required "smartCards.caSecret (the smart-card CA bundle Secret) is required when smartCards.enabled is true" .Values.smartCards.caSecret }}
     client-crt-optional: "true"

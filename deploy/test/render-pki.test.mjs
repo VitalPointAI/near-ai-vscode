@@ -192,6 +192,14 @@ test('HAProxy is the default ingress class on node ports, and the client-certifi
   assert.doesNotMatch(service.doc, /name: (quic|stat|admin)$/m, 'only HTTP and HTTPS are published');
   const config = ingress.find((item) => item.kind === 'ConfigMap' && item.name === 'kubernetes-ingress').doc;
   assert.match(config, /ssl-redirect: "true"/);
+  // HAProxy replaces every forwarded header a client could send (oauth2-proxy matches its sign-in exemptions against X-Forwarded-Uri) and
+  // does not append to a client's X-Forwarded-For. An Ingress with its own request-set-header list must repeat the four.
+  const forwarded = ['X-Forwarded-For %[src]', 'X-Forwarded-Host %[req.hdr(host)]', 'X-Forwarded-Proto %[ssl_fc,iif(https,http)]', 'X-Forwarded-Uri %[url]'];
+  assert.match(config, /forwarded-for: "false"/);
+  for (const header of forwarded) assert.ok(config.split('\n').includes(`    ${header}`), `the controller sets ${header}`);
+  for (const { namespace, name, doc } of rendered.filter((item) => item.kind === 'Ingress' && /haproxy\.org\/request-set-header/.test(item.doc))) {
+    for (const header of forwarded) assert.ok(doc.includes(header), `${namespace}/${name} replaces the controller's list without ${header.split(' ')[0]}`);
+  }
   assert.doesNotMatch(config, /client-ca|client-crt-optional/, 'smart cards are off by default');
   for (const { doc } of rendered.filter((item) => item.kind === 'Ingress')) assert.match(doc, /ingressClassName: "?haproxy"?$/m, 'every Ingress is served by HAProxy');
   const on = renderWith('kubernetes-ingress', scratchValues('smart-cards.yaml', JSON.stringify({ smartCards: { enabled: true, caSecret: 'smart-card-ca' } })));

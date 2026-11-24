@@ -121,9 +121,14 @@ ingress:
   annotations:
     haproxy.org/server-ssl: "true"
     haproxy.org/server-ca: sterling-identity/sterling-site-ca
+    # This list replaces the controller's (deploy/values/kubernetes-ingress.yaml), so it repeats the four forwarded headers.
     haproxy.org/request-set-header: |
       Client-Cert %[ssl_c_der,base64]
       Client-Cert-Chain %[ssl_c_chain_der,base64]
+      X-Forwarded-For %[src]
+      X-Forwarded-Host %[req.hdr(host)]
+      X-Forwarded-Proto %[ssl_fc,iif(https,http)]
+      X-Forwarded-Uri %[url]
   rules:
     - host: "keycloak.${site.domain}"
       paths:
