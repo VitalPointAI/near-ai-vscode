@@ -56,6 +56,24 @@ Every command runs under the memory cap above. Render checks are split per area 
 | DEP-12 | Air-gapped lab install with zero egress; sign-in once Phase 46's image exists | lab, scripted | `deploy/lab/run.sh` | ❌ W0 |
 | DEP-13 | Guest rules refuse before any write; `guests` carries no role; a guest's entity is `guest-<id>` under the staff policies; end disables both sides and deletes nothing; `guest-expiry` only disables guest entities; the CronJob renders only with guests on, with a sessions-only Role; guests leave a site only when named, with `guests@1` and the target-site check; Keycloak holds lifecycle attributes only, no `security-contacts` group and no attribute or group claims in tokens; the approver passes the `SecurityContactCredential` check; an early end writes one create-only `sterling-revocation-request/1` (reason `guest-ended`, 71 D-22) that 71-12's card shows to the issuing officers; guests turn on only with 71-12 (revised 2026-11-24, owner: credentials) | unit with fakes + render + OpenBao and Keycloak in podman | `deploy/test/guests.test.mjs` (47-19, 47-20), `realm.test.mjs`, `openbao.test.mjs`, `federation.test.mjs` (47-21) | ❌ W0 |
 
+### Compliance follow-ups (added 2026-11-24, `47-COMPLIANCE-CONTEXT.md`)
+
+| Control (decision) | Behaviour | Test Type | Automated Command | Plan |
+|--------------------|-----------|-----------|-------------------|------|
+| AU-8, SC-45 (D-71) | chrony.conf names only site sources; Node and shell clock checks agree on real chronyc fixtures; node install refuses a bad clock; preflight refuses no source and a bad import host clock | unit + lab | `deploy/test/time.test.mjs`, `install.test.mjs` | 47-22, 47-16 |
+| AC-8 (D-76) | Realm carries the notice per language; empty notice refused; theme ConfigMap mounted before Keycloak | unit on JSON + render | `deploy/test/realm.test.mjs` | 47-23 |
+| CP-9, CP-10 (D-73) | Snapshot-only OpenBao policy and CronJob; OpenSearch repository and policy rendered; restore proven in a container | unit + render + container | `deploy/test/openbao.test.mjs`, `render-site.test.mjs` | 47-24 |
+| CP-9 (D-73) | Escrow files 0600 with digest records; stale escrow detected; no value printed or on argv | unit + lab | `deploy/test/escrow.test.mjs` | 47-25 |
+| D-06 (D-77) | Edited register entries pass the checker | checker | `node scripts/resource-check.mjs` | 47-26 |
+| CP-2, CP-10 (D-73) | Recovery order, record validation, exact cron gaps against RPO, scratch-only drivers with cleanup | unit (fake runner) + lab | `deploy/test/drill.test.mjs` | 47-27, 47-18 |
+| MA-2, MA-6 (D-75) | drain-check, upgrade-check, cert-check refusals | unit (fake runner) + lab | `deploy/test/maintenance.test.mjs` | 47-28 |
+| RA-5, RA-5(2), SI-2, CM-4 (D-72) | Bundle carries SBOMs, scans, database, grype, change record; offline rescan; database host and checksum refusals | unit + container | `deploy/test/scan.test.mjs` | 47-29 |
+| MP-4, MP-5, MP-7, SI-3, AC-4 (D-74) | Outbound kinds only, export marking under requires marking@1 with the target-site check (47 D-69), unlisted inbound files refused, transfer records, bundle manifest unchanged (47 D-68) | unit + container | `deploy/test/media.test.mjs`, `bundle-verify.test.mjs` | 47-30 |
+| AC-2(3), AC-2(4), AC-12, IA-4 (D-79) | Disabled or removed people lose OpenBao access and sessions within revocation.checkMinutes; partial reads never revoke; narrow credentials; shared with guest expiry | unit (fakes) + podman + lab | `deploy/test/revoke.test.mjs`, `guests.test.mjs`, `realm.test.mjs` | 47-31 |
+| CP-6, CP-9 (D-81, D-82) | Daily off-site copy locked per source (archive 1,825 days), signed chained manifest, keys never in the set, media mode, required by the preflight, quarterly sample check | unit (fake store, SigV4 vector) + lab store | `deploy/test/offsite.test.mjs`, `install.test.mjs` | 47-33 |
+| SC-12 (D-80) | Production preflight refuses SoftHSM2 as the OpenBao seal (`softhsm-seal-token`); the signing-token rule is 48.1-17's | unit | `deploy/test/install.test.mjs` | 47-16 |
+| CP-9, AU-9 signals (H-08) | `opensearch-snapshot-check` and `sterling-escrow-currency` Jobs fail on a missing snapshot or a stale escrow | unit + render | `deploy/test/render-site.test.mjs`, `escrow.test.mjs` | 47-24, 47-25 |
+
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
 ---
