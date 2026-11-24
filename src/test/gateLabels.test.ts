@@ -193,7 +193,7 @@ test('a mapping names two real levels on two different scales and nothing else',
 
 test('the plain texts are fixed once, say what they must, and never overclaim', () => {
   const research =
-    'Labels and routing are an organizational control that helps prevent mistakes. They check what SovAI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.';
+    'Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.';
   assert.equal(LABELS_NOT_ACCREDITATION_TEXT, research);
   assert.ok(CLEARANCE_SELF_ASSERTED_TEXT.startsWith('Until verified credentials arrive'));
   assert.match(CLEARANCE_SELF_ASSERTED_TEXT, /self-declared/);

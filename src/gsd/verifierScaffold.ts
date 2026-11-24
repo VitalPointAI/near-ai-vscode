@@ -156,9 +156,11 @@ export function run(root, args) {
 if (isMain(import.meta.url)) { const result = run(process.cwd(), process.argv.slice(2)); console.log(result.ok ? 'all research verifiers passed' : 'research verifiers found problems'); if (!result.ok) process.exitCode = 1; }
 `;
 
+// The scaffolded README keeps its first wording (NEAR AI, before the SovAI name of 2026-11-24): it is one of the hashed VERIFIER_FILES, so new words
+// would make every project scaffolded without a manifest report it as edited.
 const README = `# Research verifiers
 
-Deterministic checks for the report, scaffolded by SovAI (PERF-06). They read files only, never reach the network, and write nothing, so agents run
+Deterministic checks for the report, scaffolded by NEAR AI (PERF-06). They read files only, never reach the network, and write nothing, so agents run
 them without asking. Run them from the project root:
 
 - \`node scripts/verify/verify-all.mjs\` runs all three (exit code 1 when any finds a problem);
@@ -166,9 +168,9 @@ them without asking. Run them from the project root:
 - \`node scripts/verify/check-figures.mjs\`: every figure in \`report/figures.json\` recomputes from its inputs and appears in the report;
 - \`node scripts/verify/check-internal-paths.mjs\`: no home-directory paths, file links, planning folders or private addresses in the report.
 
-Each takes report folders or files as arguments; by default it reads \`report/\` (or \`docs/\`). SovAI never overwrites them. You may edit
+Each takes report folders or files as arguments; by default it reads \`report/\` (or \`docs/\`). NEAR AI never overwrites them. You may edit
 them, but an edited verifier no longer matches the hash recorded when it was scaffolded, so agents ask before running it until you run
-**SovAI: Trust Research Verifiers**, which shows what changed and asks before recording the new versions.
+**NEAR AI: Trust Research Verifiers**, which shows what changed and asks before recording the new versions.
 `;
 
 /** The scaffold's files, relative to the project root. */

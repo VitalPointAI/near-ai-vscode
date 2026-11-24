@@ -516,7 +516,7 @@ each MCP server may receive. A call to that server from a chat whose label is
 above it is refused before anything is sent, at every tier, with
 `label.mcp-ceiling`; see "MCP connections" below.
 
-Labels and routing are an organizational control that helps prevent mistakes. They check what SovAI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 - **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 #### Your organization's rules on this computer
@@ -727,7 +727,7 @@ each MCP server may receive. A call to that server from a chat whose label is
 above it is refused before anything is sent, at every tier, with
 `label.mcp-ceiling`; see "MCP connections" below.
 
-Labels and routing are an organizational control that helps prevent mistakes. They check what SovAI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
 
 #### Where AI may run
 
