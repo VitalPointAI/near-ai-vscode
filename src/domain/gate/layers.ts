@@ -179,13 +179,25 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
   'exportControl.suggestRules': rule('tier-stricter', { order: ['off', 'standard', 'automatic'], absent: 'weakest' }),
   'exportControl.agentNetwork': rule('tier-stricter', { order: ['refuse'] }),
   'exportControl.retention.neverAutoPrune': rule('boolean-safe', { safe: true }),
-  'exportControl.incidents.contacts': ONLY
+  'exportControl.incidents.contacts': ONLY,
+  // Phase 71 (D-12): who may issue, the status lists and their keys, and freshness are your organization's alone. What sensitive data asks of a person
+  // may only be added to: a personal or project layer adds a requirement and never drops one (48.1 D-25).
+  'credentials.root': ONLY_TREE,
+  'credentials.issuance': ONLY_TREE,
+  'credentials.suites': ONLY,
+  'credentials.didMethods': ONLY,
+  'credentials.statusLists': ONLY_TREE,
+  'credentials.statusTtl': ONLY,
+  'credentials.maxOfflineAge': ONLY_TREE,
+  'credentials.requiredBySensitivity.*': rule('superset', { absent: 'weakest' }),
+  'credentials.fallbackPersonKeys': ONLY,
+  'agreements.items': ONLY_TREE
 });
 
 /** Keys kept per layer and never compared: the envelope, and each section's own `v`. */
 export const LAYER_ENVELOPE_KEYS: readonly string[] = Object.freeze([
   'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'parent', 'requires', 'minClient',
-  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v'
+  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v'
 ]);
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1043,6 +1055,18 @@ function documentValue(document: PolicyDocument, path: string): unknown {
   return valueAt(document, segmentsOf(path));
 }
 
+/** A superset table entry's concrete paths: itself, or for a `.*` entry (Phase 71's credentials.requiredBySensitivity.*) one per data key any layer holds. */
+function supersetPaths(pattern: string, documents: readonly PolicyDocument[]): string[] {
+  if (!pattern.endsWith('.*')) return [pattern];
+  const parent = pattern.slice(0, -2);
+  const keys = new Set<string>();
+  for (const document of documents) {
+    const value = documentValue(document, parent);
+    if (isRecord(value)) for (const key of Object.keys(value)) keys.add(key);
+  }
+  return [...keys].sort().map((key) => `${parent}.${key}`);
+}
+
 /**
  * The first setting a new edit widens, or undefined: compose the organization layer with `base` and with `next`, and return the first entry of the second
  * (in table order) whose key and whole value (not the shortened display text, IN-02) the first does not list, so a value already clamped at load never
@@ -1059,12 +1083,14 @@ export function wideningOf(organization: PolicyDocument | undefined, base: Polic
       found.push({ order: orderOf(ruleEntryOf(entry.key)?.pattern ?? normalPath(entry.key)), entry });
     }
   }
-  for (const path of Object.keys(NARROWING)) {
-    if ((NARROWING[path] as NarrowingRule).direction !== 'superset') continue;
-    const theirs = stringList(documentValue(organization, path));
-    const kept = stringList(documentValue(next, path));
-    const removed = stringList(documentValue(base, path)).filter((item) => !kept.includes(item) && theirs.includes(item));
-    if (removed.length > 0) found.push({ order: orderOf(path), entry: Object.freeze({ key: path, layer: 'personal', yours: shortText(kept), allowed: shortText(theirs) }) });
+  for (const pattern of Object.keys(NARROWING)) {
+    if ((NARROWING[pattern] as NarrowingRule).direction !== 'superset') continue;
+    for (const path of supersetPaths(pattern, [organization, base, next])) {
+      const theirs = stringList(documentValue(organization, path));
+      const kept = stringList(documentValue(next, path));
+      const removed = stringList(documentValue(base, path)).filter((item) => !kept.includes(item) && theirs.includes(item));
+      if (removed.length > 0) found.push({ order: orderOf(pattern), entry: Object.freeze({ key: path, layer: 'personal', yours: shortText(kept), allowed: shortText(theirs) }) });
+    }
   }
   found.sort((a, b) => a.order - b.order);
   return found[0]?.entry;

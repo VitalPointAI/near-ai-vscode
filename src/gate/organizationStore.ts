@@ -37,6 +37,7 @@ import type { IgnoredSetting } from '../domain/gate/layers';
 import { MAX_ORGANIZATION_LAYER_BYTES, bundleViewOf, parsePolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { parseContacts } from '../domain/gate/sections';
+import { CREDENTIALS_LOOSENED_TEXT, requirementsOnlyTighten } from '../domain/gate/credentialsSection';
 import type { PolicyContact } from '../domain/gate/sections';
 import { migrateLocalHosts } from '../domain/gate/endpoints';
 import type { MigrationChange } from '../domain/gate/endpoints';
@@ -320,6 +321,8 @@ interface FileFacts {
   readonly contacts: readonly PolicyContact[];
   readonly words?: readonly string[];
   readonly fingerprintHex: string;
+  /** The layer's document, so an update can be compared with the rules in force (Phase 71, D-12). */
+  readonly document?: PolicyDocument;
 }
 
 type FileReading = { readonly ok: true; readonly facts: FileFacts } | { readonly ok: false; readonly reason: string; readonly sentence: string };
@@ -372,7 +375,8 @@ function readEnrolmentText(text: string, context: ReadContext): FileReading {
     name: enrolment.organization.name,
     contacts,
     words: read.words,
-    fingerprintHex: read.fingerprintHex
+    fingerprintHex: read.fingerprintHex,
+    document: read.layer.document
   };
   const kind = classifyEnrolment(read, pin === undefined ? undefined : { publicKey: pin.publicKey, serial: pin.serial });
   if (kind === 'older-file' || kind === 'other-organization') return refusedFile(kind, ENROLMENT_REFUSALS[kind]);
@@ -407,7 +411,8 @@ function readLayerValue(value: unknown, context: ReadContext): FileReading {
     serial: pin.serial,
     ...(context.record === undefined ? {} : { name: context.record.name }),
     contacts: contactsOfDocument(read.document) ?? context.record?.contacts ?? [],
-    fingerprintHex: issuerFingerprintHex(pin.publicKey)
+    fingerprintHex: issuerFingerprintHex(pin.publicKey),
+    document: read.document
   };
   if (read.hash === pin.layerHash) return { ok: true, facts: { ...facts, kind: 'same' } };
   // Equal issuedAt with another hash is a different file claiming the same moment: refused like an older one.
@@ -568,6 +573,14 @@ export class OrganizationStore {
     return failedOrganization('older', 'replaced', `${ORGANIZATION_LAYER_REFUSALS.older} ${askFor(contactShown(record?.contacts))}`, true, facts);
   }
 
+  // The document of the layer this computer uses now: the pinned file, signed by the pinned key and in force at `nowMs`. Undefined when there is none.
+  private async documentInForce(pin: OrganizationPin, nowMs: number): Promise<PolicyDocument | undefined> {
+    const raw = await this.readLayer();
+    if (raw.state !== 'ok') return undefined;
+    const layer = verifyOrganizationLayer(raw.value, { issuerPublicKey: pin.publicKey, now: nowMs });
+    return layer.ok && layer.hash === pin.layerHash ? layer.document : undefined;
+  }
+
   private validOf(layer: Extract<OrganizationLayerRead, { ok: true }>, publicKey: string, record: RecordFacts | undefined): OrganizationValid {
     return {
       state: 'valid',
@@ -687,6 +700,13 @@ export class OrganizationStore {
       }
       if ((facts.kind === 'enrol' || facts.kind === 'rotate') && confirmation.wordsConfirmed !== true) {
         throw new OrganizationStoreError(WORDS_NOT_CONFIRMED_TEXT, { reason: 'words-not-confirmed' });
+      }
+      // D-12, 48.1 D-25: a layer that replaces the one in force may raise what sensitive data asks of a person, never lower it; the active layer stays.
+      if ((facts.kind === 'update' || facts.kind === 'rotate') && context.pin.state === 'pinned') {
+        const active = await this.documentInForce(context.pin.pin, nowMs);
+        if (active !== undefined && !requirementsOnlyTighten(active.credentials, facts.document?.credentials)) {
+          throw new OrganizationStoreError(`Nothing was changed. ${CREDENTIALS_LOOSENED_TEXT}`, { reason: 'credentials-loosened', refused: true });
+        }
       }
       // An enrolment over a lost or damaged pin (files of your organization are here, or the stored pin does not read) stores no pending pin, so a crash
       // before its commit still reads as a damaged pin and never as not enrolled (CR-01). A folder that cannot be read counts as holding files.
