@@ -1,0 +1,16 @@
+# Per-site OpenSearch settings, written by the site's operator from this example. The example is sized for an HQ of about 400 people with
+# sign-in bursts of about 200 (three data nodes); a small edge site keeps one node (singleNode true, replicas 1). Provisional until Phase 48.
+singleNode: false
+replicas: 3
+opensearchJavaOpts: "-Xms2g -Xmx2g"
+resources:
+  requests:
+    cpu: "1"
+    memory: 4Gi
+  limits:
+    memory: 4Gi
+persistence:
+  size: 200Gi
+sterling:
+  # How long audit-* and logs-* indices are kept before they are deleted (D-35); your organization's records policy decides.
+  retentionDays: 365

@@ -1,6 +1,6 @@
 {
   "chart": "fluent-bit",
-  "namespace": "sterling-logging",
+  "namespace": "sterling-log-shipper",
   "order": 82,
   "values": ["deploy/values/fluent-bit.yaml"],
   "images": [

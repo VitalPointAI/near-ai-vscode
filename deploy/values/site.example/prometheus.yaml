@@ -1,0 +1,13 @@
+# Per-site Prometheus settings, written by the site's operator from this example (sized for an HQ of about 400 people; provisional until
+# Phase 48).
+server:
+  retention: "30d"
+  retentionSize: "45GB"
+  persistentVolume:
+    size: 50Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 4Gi

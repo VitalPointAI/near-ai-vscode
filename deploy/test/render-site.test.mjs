@@ -33,3 +33,40 @@ test('every rendered StorageClass is a Longhorn class encrypted with the class k
   assert.match(ours[0], /^reclaimPolicy: Retain$/m);
   assert.equal(docsOf('sterling-storage').filter((doc) => kindOf(doc) === 'RecurringJob').length, 2, 'a daily snapshot and a daily backup');
 });
+
+/** The [OUTPUT] sections of a Fluent Bit configuration, each as a map of its keys (read line by line). */
+function fluentOutputs(text) {
+  const outputs = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (/^\[[A-Z]+\]$/.test(trimmed)) { current = trimmed === '[OUTPUT]' ? {} : null; if (current) outputs.push(current); continue; }
+    if (current && trimmed) {
+      const space = trimmed.search(/\s/);
+      if (space > 0) current[trimmed.slice(0, space).toLowerCase()] = trimmed.slice(space).trim();
+    }
+  }
+  return outputs;
+}
+
+test('Fluent Bit ships the API audit log and every container log to the site OpenSearch, and nowhere else', () => {
+  const config = docsOf('fluent-bit').filter((doc) => kindOf(doc) === 'ConfigMap').join('\n');
+  assert.match(config, /Path +\/var\/lib\/rancher\/rke2\/server\/logs\/audit\.log/);
+  assert.match(config, /Path +\/var\/log\/containers\/\*\.log/);
+  const outputs = fluentOutputs(config);
+  assert.equal(outputs.length, 1, 'exactly one output');
+  assert.equal(outputs[0].name, 'opensearch');
+  assert.match(outputs[0].host, /^[a-z0-9-]+\.sterling-logging\.svc$/);
+  assert.equal(outputs[0]['tls.verify'], 'On');
+  assert.ok(rendered.some((release) => release.name === 'fluent-bit' && release.release.namespace === 'sterling-log-shipper'));
+});
+
+test('Prometheus writes and reads nowhere outside the site, and OpenSearch runs with its security plugin', () => {
+  const prometheus = docsOf('prometheus').join('\n');
+  assert.doesNotMatch(prometheus, /remote_write|remote_read/);
+  const opensearch = docsOf('opensearch').join('\n');
+  assert.match(opensearch, /plugins\.security\.ssl\.http\.enabled: true/);
+  assert.doesNotMatch(opensearch, /plugins\.security\.disabled: true|DISABLE_SECURITY_PLUGIN/);
+  assert.match(opensearch, /audit-writer:/);
+  assert.match(opensearch, /"delete": \{\}/, 'the retention policy deletes old indices');
+});
