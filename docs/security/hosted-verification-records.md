@@ -11,6 +11,72 @@ owner role and a target date in its POA&M item, and the compliance dashboard sho
 until evidence replaces it. The dashboard reads this document's review date, so the records go
 stale a year after the last review.
 
+## Section 10 conditions
+
+One row per condition of DESIGN section 10, in its order, with a row split where the design lists
+several conditions for one component. Each row names the hosted component that will carry the
+statement, the kind of evidence that will prove it (a test rule on a Phase 46 or 47 test, an
+observation from the deployment evidence export, or a dated document record) and the controls it
+supports. Its reference is a gap until a statement with an evidence rule replaces it: a gap per
+component for the conditions that wait on statements, which closes in Phase 48, and the gaps of
+the verification register for conditions that wait on the rig, a purchase or an upstream build.
+These are starting points, not results (D-04). Negative conditions name the component whose
+rendered production profile will prove them. A hosted component with no section 10 condition is
+listed too: it stays in scope and reads No statement yet until it has statements.
+
+| # | Component | Condition | Evidence kind | Controls | Reference |
+|---|---|---|---|---|---|
+| 1 | rke2 | FIPS build with Canal and the bundled FIPS components | deployment observation (version, host FIPS mode), document record | sc-13, sc-12 | gap G334 |
+| 2 | rke2 | STIG profile | test rule (rendered RKE2 configuration), deployment observation | cm-06 | gap G334 |
+| 3 | rke2 | Kubernetes audit policy | test rule (policy file), deployment observation (audit stream present) | au-02, au-12 | gap G334 |
+| 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | gap G334 |
+| 5 | keycloak | FIPS strict mode with BC-FIPS on a FIPS host, OpenJDK 21 | deployment observation (strict mode, host FIPS mode), document record (BC-FIPS certificate) | sc-13 | gap G332 |
+| 6 | keycloak | A version with CVE-2026-6856 fixed | deployment observation (version at or above the recorded minimum), document record | si-02 | gap G335 |
+| 7 | keycloak | Password and OTP authenticators disabled | test rule (realm as code), deployment observation (live realm) | ia-02, ia-05 | gap G335 |
+| 8 | keycloak | Events shipped to the audit store | deployment observation (listener enabled, events counted) | au-02, au-12 | gap G335 |
+| 9 | theia-cloud | Rebuilt from source by us on a FIPS-capable JRE (UBI 9) | test rule (build job), deployment observation (image digest) | sc-13, sa-10 | gap G336 |
+| 10 | theia-cloud | Signed, with SBOM and provenance | deployment observation (signature, SBOM and provenance per image digest) | sr-03, sr-11, si-07 | gap G336 |
+| 11 | theia-cloud | oauth2-proxy defaults fixed in the Theia Cloud chart | test rule (rendered manifests) | sc-08, sc-23 | gap G336 |
+| 12 | theia-cloud | Kubernetes audit on Session and Workspace records | test rule (audit policy), deployment observation | au-02, au-12 | gap G336 |
+| 13 | theia-cloud | Pinned to the commit we assessed | test rule (chart lock and image digests) | cm-02 | gap G336 |
+| 14 | oauth2-proxy | Rebuilt by us with the Go FIPS module | test rule (build job with the pinned module version) | sc-13 | gap G337 |
+| 15 | oauth2-proxy | TLS verify on | test rule (rendered manifests) | sc-08 | gap G337 |
+| 16 | oauth2-proxy | Secure cookies | test rule (rendered manifests) | sc-23 | gap G337 |
+| 17 | oauth2-proxy | A real client secret | test rule (rendered manifests: no sample secret) | ia-05 | gap G337 |
+| 18 | oauth2-proxy | Token forwarding | test rule (rendered manifests) | ia-02 | gap G337 |
+| 19 | openbao | Keys held in a CMVP-validated HSM through External Keys, or a self-built FIPS binary with the module certificate checked | deployment observation (seal type, plugin checksum), document record (HSM certificate) | sc-12, sc-13 | gap G324 |
+| 20 | openbao | Audit device to a tamper-evident store | deployment observation (device enabled); tamper evidence waits on the audit sink | au-09 | gap G2 |
+| 21 | openbao | A documented key ceremony | document record with a review date, attestation | sc-12 | gap G338 |
+| 22 | hsm | A model with a FIPS 140-3 Level 3 certificate in approved mode | document record (certificate of the chosen model) | sc-12, sc-13 | gap G324 |
+| 23 | hsm | The `kms-pkcs11` plugin tested before use | rig experiment record | sc-12 | gap G326 |
+| 24 | hsm | Export-controlled hardware handled under your organization's Controlled Goods and ITAR procedures | document record (your organization's procedure) | sr-05 | gap G339 |
+| 25 | ingress | HAProxy is FIPS only when linked against a validated OpenSSL provider on a FIPS host | deployment observation (image base, host FIPS mode) | sc-13, sc-08 | gap G340 |
+| 26 | ingress | RKE2 Traefik: a FIPS build from RKE2 | document record | sc-13 | gap G325 |
+| 27 | ingress | RKE2 Traefik works with Theia Cloud only through explicit annotations (untested) | rig experiment record | sc-08 | gap G325 |
+| 28 | ingress | No ingress-nginx (archived, no further patches) | test rule (rendered production profile) | cm-07 | gap G340 |
+| 29 | image-registry | Harbor: signature-enforced import and admission | deployment observation (admission enforcing, unsigned images admitted counted), test rule | si-07 | gap G341 |
+| 30 | image-registry | Harbor: scanning | deployment observation | ra-05 | gap G341 |
+| 31 | image-registry | Harbor: SBOM storage | deployment observation | cm-08 | gap G341 |
+| 32 | image-registry | Harbor: OIDC to Keycloak | test rule (rendered configuration) | ia-02 | gap G341 |
+| 33 | image-registry | Harbor: audit log | deployment observation | au-12 | gap G341 |
+| 34 | image-registry | Harbor: no FIPS build documented | document record | sc-13 | gap G333 |
+| 35 | image-registry | Zot (small sites): the same import rules | deployment observation, test rule | si-07 | gap G341 |
+| 36 | image-registry | Zot: a FIPS build with `GOFIPS140` | document record, build evidence | sc-13 | gap G333 |
+| 37 | rke2 | UBI 9 base images: the host in FIPS mode | deployment observation (host FIPS mode per node) | sc-13 | gap G334 |
+| 38 | workbench | UBI 9 base images: the RHEL OpenSSL FIPS provider | document record (certificate), deployment observation | sc-13 | gap G342 |
+| 39 | theia-cloud | No Debian or Alpine bases at Protected B | test rule (rendered production profile) | cm-07, sc-13 | gap G336 |
+| 40 | workbench | UBI 9 base | test rule (image build) | cm-02 | gap G342 |
+| 41 | workbench | Node with OpenSSL 3 and the FIPS provider on a FIPS host | test rule (P4 tests), deployment observation (FIPS mode reported by Node) | sc-13 | gap G342 |
+| 42 | workbench | Our signing and unwrapping go through OpenBao or the HSM | test rule (P4 tests) | sc-12 | gap G342 |
+| 43 | cert-manager | Not assessed: the fit check before use; a CA issuer chained to the OpenBao PKI, no ACME | test rule (rendered manifests: no ACME issuer) | sc-12, sc-23 | gap G343 |
+| 44 | hub | Re-assessed for Kubernetes deployment | test rule (hub and Phase 47 manifest tests) | cm-06 | gap G344 |
+| 45 | hub | Several hubs per site, each serving a set of projects | test rule, deployment observation (hub workload settings) | ac-03 | gap G344 |
+| 46 | hub | Session keys with a site-issued certificate | test rule (hub tests) | ia-05.02 | gap G344 |
+| 47 | keycloak | Its Postgres: the fit check before use, TLS to Postgres, encryption at rest | test rule, deployment observation | sc-08, sc-28 | gap G335 |
+| 48 | site-storage | The storage class: the fit check before use, encryption at rest declared | test rule (install check for the storage class) | sc-28 | gap G345 |
+| 49 | site-logging | Logs and metrics: the fit check before use; a log store that is not AGPL (Loki is not chosen) | test rule, deployment observation | au-09 | gap G346 |
+| 50 | offline-bundle | no section 10 condition | none | | none |
+
 ## Verification register
 
 One row per item of DESIGN section 12, in its order, then the three desk items D-24 adds. A row

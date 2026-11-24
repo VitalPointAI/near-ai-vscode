@@ -4135,6 +4135,237 @@
       ],
       "remediation": "Decide between running Harbor and Zot under recorded conditions without a validated module and rebuilding them (Zot with a pinned GOFIPS140 module version; Harbor component by component), then record the decision and, for a rebuild, the build evidence.",
       "title": "Harbor and Zot have no build made with a validated module"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-12",
+        "cm-06",
+        "cm-07",
+        "au-02",
+        "au-12"
+      ],
+      "id": "G334",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy, no k3s in production and hosts in FIPS mode: test rules on the Phase 47 rendered configuration and production profile, and observations from the deployment evidence export.",
+      "title": "RKE2 has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "si-02",
+        "ia-02",
+        "ia-05",
+        "au-02",
+        "au-12",
+        "sc-08",
+        "sc-28"
+      ],
+      "id": "G335",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add keycloak statements with evidence rules for a version at or above the recorded minimum for CVE-2026-6856, password and OTP authenticators disabled, events shipped to the audit store, and its Postgres with TLS and encryption at rest: test rules on the realm as code and Phase 47 manifests, and observations from the deployment evidence export.",
+      "title": "Keycloak has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sa-10",
+        "sr-03",
+        "sr-11",
+        "si-07",
+        "sc-08",
+        "sc-23",
+        "au-02",
+        "au-12",
+        "cm-02",
+        "cm-07"
+      ],
+      "id": "G336",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add theia-cloud statements with evidence rules for the rebuild on a FIPS-capable UBI 9 JRE, signature, SBOM and provenance per image digest, the fixed oauth2-proxy defaults in the chart, the audit policy on Session and Workspace records, the pin to the assessed commit and no Debian or Alpine bases at Protected B.",
+      "title": "Theia Cloud has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-08",
+        "sc-23",
+        "ia-05",
+        "ia-02"
+      ],
+      "id": "G337",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add oauth2-proxy statements with evidence rules for the rebuild with the pinned Go FIPS module version, TLS verify on, secure cookies, a real client secret and token forwarding, as test rules on the Phase 47 build job and rendered manifests.",
+      "title": "oauth2-proxy has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G338",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the openbao statement for the documented key ceremony with a document evidence rule on the reviewed runbook record or attestation.",
+      "title": "The OpenBao key ceremony has no statement"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sr-05"
+      ],
+      "id": "G339",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the hsm statement that export-controlled hardware is handled under your organization's Controlled Goods and ITAR procedures, recorded as your organization's responsibility with a document evidence rule.",
+      "title": "Handling of export-controlled HSM hardware has no statement"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-08",
+        "cm-07"
+      ],
+      "id": "G340",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add ingress statements with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode) and no ingress-nginx (test rule on the rendered production profile).",
+      "title": "The ingress has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "si-07",
+        "ra-05",
+        "cm-08",
+        "ia-02",
+        "au-12"
+      ],
+      "id": "G341",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add image-registry statements with evidence rules for signature-enforced import and admission, scanning, SBOM storage, OIDC to Keycloak and the audit log at Harbor sites, and the same import rules at Zot sites: observations from the deployment evidence export and test rules on the Phase 47 configuration.",
+      "title": "The image registry has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-12",
+        "cm-02"
+      ],
+      "id": "G342",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add workbench statements with evidence rules for the UBI 9 base, Node with OpenSSL 3 and the RHEL FIPS provider on a FIPS host, and signing and unwrapping through OpenBao or the HSM: test rules on the Phase 46 image build and P4 tests, and an observation of the FIPS mode Node reports.",
+      "title": "The workbench image has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-12",
+        "sc-23"
+      ],
+      "id": "G343",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests: a CA issuer chained to the OpenBao PKI and no ACME issuer.",
+      "title": "cert-manager is not assessed"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "cm-06",
+        "ac-03",
+        "ia-05.02"
+      ],
+      "id": "G344",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add hub statements with evidence rules for its Kubernetes deployment, several hubs per site each serving a set of projects, and session keys with a site-issued certificate: test rules on the hub and Phase 47 manifest tests and an observation of the hub workload settings.",
+      "title": "The sync hub is not re-assessed for the hosted deployment"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-28"
+      ],
+      "id": "G345",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the storage class fit check, then add its statement for declared encryption at rest with a test rule on the install check.",
+      "title": "The site storage class is not assessed"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "au-09"
+      ],
+      "id": "G346",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the fit check for the log and metrics stores, a log store that is not AGPL (Loki is not chosen), then add their statements with test rules and deployment observations.",
+      "title": "The site log and metrics stores are not assessed"
     }
   ]
 }
