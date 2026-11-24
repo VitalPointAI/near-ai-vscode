@@ -1,14 +1,16 @@
 import { isDeepStrictEqual } from 'node:util';
 import { CHECKPOINT_VERSION, checkpointHeads, recomputeCheckpoint, verifyCheckpoint, type SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { applyUpdate, createFoldDoc, docText, encodeFullState, pendingState, stateVectorOf, textHashOf } from '../../domain/replica/doc';
-import { sealBlob, type Dep, type SealedBlob, type SealedEntry } from '../../domain/replica/entry';
+import { entryHash, sealBlob, type Dep, type SealedBlob, type SealedEntry } from '../../domain/replica/entry';
 import { foldEntries } from '../../domain/replica/fold';
 import { MAX_COMPACT_COVERS, MAX_STATE_BYTES } from '../../domain/replica/kindSchemas/doc';
+import { epochAt } from '../../domain/replica/rosterCells';
 import type { ReplicaContext, RosterView } from '../../domain/replica/rosterView';
-import { COMPACTION_WINDOW } from '../../domain/replica/textFold';
+import { COMPACTION_WINDOW, type ProductTextOutput } from '../../domain/replica/textFold';
 import { verifyEntry, type VerifiedEntry } from '../../domain/replica/verify';
 import type { HubMemory } from './hubSync';
 import { productOutput } from './productFeed';
+import { isProjectRefused, type ReplicaProject } from './replicaProject';
 
 const MAX_PREPARATION_ENTRIES = 4096;
 const MAX_PREPARATION_BODY_CHARS = 16 * 1024 * 1024;
@@ -151,4 +153,87 @@ export async function prepareCompaction(input: PrepareCompactionInput): Promise<
     checkpoint: witness.hash, rosterHead, stream, epoch, blob,
     payload: { product, covers, stateVector, textHash, stateBlob: blob.hash }
   };
+}
+
+// ---- Publication (33-06 Task 2) -----------------------------------------------------------------------------------------------------------------
+
+export const COMPACTION_REFUSALS = {
+  stale: 'Who may write changed after this summary was prepared, so nothing was written. It is prepared again at the next confirmation.',
+  'not-due': 'This product was summarized a short while ago, so nothing was written.',
+  refused: 'The shared record did not accept this summary, so nothing was written.'
+} as const;
+export type CompactionRefused = { ok: false; reason: keyof typeof COMPACTION_REFUSALS; message: string };
+const refuseCompaction = (reason: keyof typeof COMPACTION_REFUSALS): CompactionRefused => ({ ok: false, reason, message: COMPACTION_REFUSALS[reason] });
+
+/** The part of a ReplicaProject the compactor uses. */
+export type CompactorProject = Pick<ReplicaProject, 'state' | 'context' | 'appendChecked' | 'ingestForeign' | 'entriesAfter' | 'projectId' | 'deviceWriter'>;
+
+/**
+ * Whether a product may be compacted now: at least COMPACTION_WINDOW accepted updates since the newest compaction of it in the fold, by any writer.
+ * The fold's own rule counts per writer; this one is stricter, so a compaction it allows is never refused for the window.
+ */
+export function compactionDue(output: ProductTextOutput | undefined, order: readonly string[]): boolean {
+  if (output === undefined || output.incomplete || output.problem !== undefined) return false;
+  const position = new Map(order.map((hash, index) => [hash, index]));
+  const newest = output.compactions.reduce((best, item) => Math.max(best, position.get(item.entry) ?? Number.POSITIVE_INFINITY), -1);
+  return output.accepted.filter((hash) => (position.get(hash) ?? -1) > newest).length >= COMPACTION_WINDOW;
+}
+
+/**
+ * Appends a prepared compaction. Each attempt of the checked append (a fresh fold every time another window or a received entry moved the store)
+ * checks again, before the entry is signed, that the roster is still the one the compaction cites and that the window still allows it; the signed
+ * entry is then folded in preview and appended only when the fold accepts it.
+ */
+export async function publishCompaction(project: Pick<CompactorProject, 'appendChecked' | 'ingestForeign'>, prepared: PreparedCompaction): Promise<{ ok: true; hash: string } | CompactionRefused> {
+  const stored = await project.ingestForeign([], [prepared.blob]);
+  if (isProjectRefused(stored)) return refuseCompaction('refused');
+  const { stream, payload } = prepared;
+  const written = await project.appendChecked<CompactionRefused>(({ roster, fold }) => {
+    if (roster.positions[roster.positions.length - 1] !== prepared.rosterHead) return refuseCompaction('stale');
+    if (!compactionDue(productOutput(fold, stream, payload.product), fold.order)) return refuseCompaction('not-due');
+    return {
+      kind: 'doc.compact', data: payload, options: { stream, roster: prepared.rosterHead },
+      check: (preview, hash) => (preview.applied.includes(hash) && productOutput(preview, stream, payload.product)?.compactions.some((item) => item.entry === hash && item.verified))
+        ? undefined : refuseCompaction('refused')
+    };
+  });
+  if ('refused' in written || !written.ok) return 'reason' in written && Object.hasOwn(COMPACTION_REFUSALS, written.reason) ? written : refuseCompaction('refused');
+  return { ok: true, hash: written.hash };
+}
+
+/**
+ * The one call the live engine makes when a checkpoint arrives: for each product this device can compact, prepare a sealed compaction from the
+ * checkpointed prefix of the store and publish it, one product at a time. Products that are not due, or cannot be prepared here, are skipped.
+ */
+export async function compactAfterCheckpoint(project: CompactorProject, input: { readonly hub: string; readonly memory: Pick<HubMemory, 'load'> }): Promise<{ compacted: string[] }> {
+  const { roster, fold } = await project.state();
+  const context = project.context();
+  const position = roster.positions.length - 1;
+  const rosterHead = roster.positions[position];
+  const compacted: string[] = [];
+  const witness = await compactionCheckpoint({ project: project.projectId, hub: input.hub, roster: context.roster, rosterHead, memory: input.memory });
+  if (witness === undefined) return { compacted };
+  // The checkpointed prefix: each writer's entries up to the head the checkpoint names, and that head exactly.
+  const entries: SealedEntry[] = [];
+  for (const { stream, heads } of witness.signed.payload.streams) {
+    for (const head of heads) {
+      const own = (await project.entriesAfter(stream, head.writer, -1)).filter((entry) => entry.header.seq <= head.seq);
+      const last = own[own.length - 1];
+      if (last === undefined || last.header.seq !== head.seq || entryHash(last.header) !== head.hash) return { compacted };
+      entries.push(...own);
+    }
+  }
+  for (const output of (fold.families.doc as ProductTextOutput[] | undefined) ?? []) {
+    if (!compactionDue(output, fold.order)) continue;
+    const epoch = epochAt(roster.cells, output.stream, position);
+    if (epoch === undefined) continue;
+    const prepared = await prepareCompaction({
+      project: project.projectId, hub: input.hub, rosterHead, memory: input.memory, context, entries,
+      stream: output.stream, product: output.product, writer: project.deviceWriter, epoch
+    });
+    if (prepared === undefined) continue;
+    const published = await publishCompaction(project, prepared);
+    if (published.ok) compacted.push(output.product);
+  }
+  return { compacted };
 }

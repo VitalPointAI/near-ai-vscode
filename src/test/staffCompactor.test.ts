@@ -3,11 +3,15 @@ import { test } from 'node:test';
 import { checkpointHash, checkpointHeads, orderTipOf, signCheckpoint, type SignedCheckpoint } from '../domain/replica/checkpoint';
 import { buildFromCompaction, docText, textHashOf } from '../domain/replica/doc';
 import { openBlob } from '../domain/replica/entry';
-import { foldEntries } from '../domain/replica/fold';
+import type { SealedBlob } from '../domain/replica/entry';
+import { foldEntries, type FoldResult } from '../domain/replica/fold';
 import { createWitness, witnessCheckpoint } from '../domain/replica/hubWitness';
+import type { RosterState } from '../domain/replica/roster';
 import { staticRosterView } from '../domain/replica/rosterView';
 import { verifyEntry } from '../domain/replica/verify';
-import { compactionCheckpoint, prepareCompaction } from '../staff/replica/compactor';
+import {
+  compactAfterCheckpoint, COMPACTION_REFUSALS, compactionCheckpoint, prepareCompaction, publishCompaction, type CompactorProject
+} from '../staff/replica/compactor';
 import { hubMemoryOf, hubWitnessKey, type HubMemory } from '../staff/replica/hubSync';
 import { productOutput } from '../staff/replica/productFeed';
 import { createWorld, fixedSigner } from './helpers/replicaWorld';
@@ -217,4 +221,106 @@ test('a witnessed signature cannot excuse incorrect coverage or missing local st
   } }), undefined);
   fixture.update(1);
   assert.equal(await prepareCompaction(input), undefined, 'new input must be covered by a fresh checkpoint');
+});
+
+// ---- 33-06 Task 2: publication rechecks the window and the roster on every append attempt -------------------------------------------------------
+
+/**
+ * A project over the fixture world, as the compactor uses one: each checked append folds the world as it is now, signs the entry, folds it in
+ * preview and keeps it only when the check passes. `before` runs at the start of every attempt (another window writing first).
+ */
+function fakeProject(fixture: ReturnType<typeof compactionWorld>, rosterHead = fixture.world.rosterHash) {
+  const { world, context } = fixture;
+  const writer = world.writerOf('test-writer');
+  const roster = { positions: [rosterHead], cells: { cells: new Map([[world.stream, { from: 0, epochs: [{ epoch: 0, from: 0 }] }]]) } } as unknown as RosterState;
+  const appended: string[] = [];
+  let before: (() => void) | undefined;
+  const project = {
+    projectId: world.stream,
+    deviceWriter: writer,
+    context: () => context,
+    state: async () => ({ roster, fold: foldEntries(world.entries, context) }),
+    entriesAfter: async (stream: string, from: string, seq: number) => world.entries.filter((entry) => entry.header.stream === stream && entry.header.writer === from && entry.header.seq > seq),
+    ingestForeign: async (_entries: readonly unknown[], blobs: readonly SealedBlob[]) => {
+      for (const blob of blobs) world.blobs.set(blob.hash, blob);
+      return { added: 0, held: [] };
+    },
+    appendChecked: async (prepare: (state: { roster: RosterState; fold: FoldResult }) => unknown) => {
+      before?.();
+      before = undefined;
+      const write = prepare({ roster, fold: foldEntries(world.entries, context) }) as { ok: false } | { kind: string; data: unknown; check: (fold: FoldResult, hash: string) => unknown };
+      if ('ok' in write) return write;
+      const written = world.write('test-writer', { kind: write.kind, data: write.data });
+      const refused = write.check(foldEntries(world.entries, context), written.hash);
+      if (refused !== undefined) { world.entries.pop(); return refused; }
+      appended.push(written.hash);
+      return { ok: true, hash: written.hash, built: { entry: written.entry, hash: written.hash, blobs: [] } };
+    }
+  } as unknown as CompactorProject;
+  return { project, appended, beforeNextAttempt: (run: () => void) => { before = run; } };
+}
+
+test('a prepared compaction is published once and the fold accepts it as verified', async () => {
+  const fixture = compactionWorld(50);
+  await fixture.witness();
+  const prepared = await prepareCompaction(fixture.input);
+  assert.ok(prepared);
+  const { project, appended } = fakeProject(fixture);
+  const published = await publishCompaction(project, prepared);
+  assert.ok(published.ok, published.ok ? '' : published.message);
+  assert.deepEqual(appended, [published.hash]);
+  const output = productOutput(foldEntries(fixture.world.entries, fixture.context), fixture.input.stream, fixture.input.product);
+  assert.deepEqual(output?.compactions, [{ entry: published.hash, verified: true }]);
+});
+
+test('a compaction another window published first makes the next one not due when the append is rechecked', async () => {
+  const fixture = compactionWorld(50);
+  await fixture.witness();
+  const prepared = await prepareCompaction(fixture.input);
+  assert.ok(prepared);
+  const { project, appended, beforeNextAttempt } = fakeProject(fixture);
+  // The other window's compaction lands after this one was prepared and before its append runs.
+  beforeNextAttempt(() => {
+    fixture.world.blobs.set(prepared.blob.hash, prepared.blob);
+    fixture.world.write('test-writer', { kind: 'doc.compact', data: prepared.payload });
+  });
+  const count = fixture.world.entries.length;
+  const second = await publishCompaction(project, prepared);
+  assert.deepEqual(second, { ok: false, reason: 'not-due', message: COMPACTION_REFUSALS['not-due'] });
+  assert.deepEqual(appended, []);
+  assert.equal(fixture.world.entries.length, count + 1, 'only the other window\'s compaction was written');
+});
+
+test('a moved roster or a compaction the fold refuses writes nothing', async () => {
+  const fixture = compactionWorld(50);
+  await fixture.witness();
+  const prepared = await prepareCompaction(fixture.input);
+  assert.ok(prepared);
+  const count = fixture.world.entries.length;
+  const moved = fakeProject(fixture, 'f'.repeat(64));
+  assert.deepEqual(await publishCompaction(moved.project, prepared), { ok: false, reason: 'stale', message: COMPACTION_REFUSALS.stale });
+  const wrong = { ...prepared, payload: { ...prepared.payload, textHash: '0'.repeat(64) } };
+  const { project, appended } = fakeProject(fixture);
+  assert.deepEqual(await publishCompaction(project, wrong), { ok: false, reason: 'refused', message: COMPACTION_REFUSALS.refused });
+  assert.deepEqual(appended, []);
+  assert.equal(fixture.world.entries.length, count);
+});
+
+test('compactAfterCheckpoint compacts each due product from the checkpointed prefix, and nothing when the window is not reached', async () => {
+  const short = compactionWorld(49);
+  await short.witness();
+  assert.deepEqual(await compactAfterCheckpoint(fakeProject(short).project, { hub: short.input.hub, memory: short.input.memory }), { compacted: [] });
+
+  const fixture = compactionWorld(50);
+  await fixture.witness();
+  const { project, appended } = fakeProject(fixture);
+  const result = await compactAfterCheckpoint(project, { hub: fixture.input.hub, memory: fixture.input.memory });
+  assert.deepEqual(result, { compacted: [fixture.input.product] });
+  assert.equal(appended.length, 1);
+  // Entries written after the checkpoint are outside its prefix: the next call finds the product not due and writes nothing.
+  fixture.update(10);
+  assert.deepEqual(await compactAfterCheckpoint(project, { hub: fixture.input.hub, memory: fixture.input.memory }), { compacted: [] });
+  assert.equal(appended.length, 1);
+  const output = productOutput(foldEntries(fixture.world.entries, fixture.context), fixture.input.stream, fixture.input.product);
+  assert.equal(output?.compactions.length, 1);
 });
