@@ -300,6 +300,25 @@ test('every hosted verification register row resolves to a dated record, a dated
   assert.ok(registerRows(text).length > 0);
   assert.deepEqual(registerProblems(text, realContext), []);
 });
+const DESIGN_FILE = path.resolve(root, '..', '.planning', 'research', 'multiuser-hosting', 'DESIGN.md');
+// D-24 adds three desk items after DESIGN section 12's rows: the UBI 9 OpenSSL FIPS provider, BC-FIPS, and Harbor and Zot FIPS builds.
+const D24_EXTRA_ROWS = 3;
+const HOSTED_LEVELS = ['hosted-protected-a', 'hosted-protected-b', 'hosted-itsp-10-171'];
+test('the register has one row per DESIGN section 12 item, in order, then the three D-24 desk items', () => {
+  const designRows = tableUnder(readFileSync(DESIGN_FILE, 'utf8'), '12. Open risks and what must be verified');
+  assert.ok(designRows.length > 0);
+  const rows = registerRows(recordsText());
+  assert.deepEqual(rows.map((row) => row.number), Array.from({ length: designRows.length + D24_EXTRA_ROWS }, (_, index) => index + 1));
+  // The design already decided sign-in strength, the cross-device caveat and the shared relying-party ID (D-26).
+  assert.deepEqual(rows.filter((row) => row.state === 'decided').map((row) => row.number), [11, 12, 13]);
+});
+test('every gap the hosted records add is scoped to the hosted levels', () => {
+  const text = recordsText();
+  const referenced = new Set([...registerRows(text)].flatMap((row) => row.references.gaps));
+  const added = gaps.filter((gap) => referenced.has(gap.id) && Number(gap.id.slice(1)) > 320);
+  assert.ok(added.length > 0);
+  for (const gap of added) assert.deepEqual(gap.profiles, HOSTED_LEVELS, gap.id);
+});
 test('a closed register row whose record has no Source line fails', () => {
   const text = recordsText();
   const [closed] = registerRows(text).filter((row) => row.state === 'closed');
