@@ -70,3 +70,19 @@ test('Prometheus writes and reads nowhere outside the site, and OpenSearch runs 
   assert.match(opensearch, /audit-writer:/);
   assert.match(opensearch, /"delete": \{\}/, 'the retention policy deletes old indices');
 });
+
+test('Harbor is behind HTTPS on the HAProxy ingress, with no Trivy scanner and none of the chart\'s public default credentials', () => {
+  const harbor = docsOf('harbor');
+  const text = harbor.join('\n');
+  assert.match(text, /https:\/\/registry\.site\.example/);
+  const ingresses = harbor.filter((doc) => kindOf(doc) === 'Ingress');
+  assert.ok(ingresses.length > 0);
+  for (const doc of ingresses) assert.match(doc, /ingressClassName: haproxy/);
+  // No Trivy workload or image (its vulnerability database is an internet download); the core configuration may still name the setting.
+  for (const doc of harbor.filter((entry) => /^kind: (Deployment|StatefulSet|DaemonSet)$/m.test(entry))) assert.doesNotMatch(/^ {2}name: (\S+)$/m.exec(doc)?.[1] ?? '', /trivy/i);
+  assert.doesNotMatch(text, /image: \S*trivy/i);
+  assert.match(text, /WITH_TRIVY: "false"/);
+  for (const sample of ['Harbor12345', 'not-a-secure-key', 'harbor_registry_password', 'changeit']) {
+    assert.ok(!text.includes(sample) && !text.includes(Buffer.from(sample).toString('base64')), `the public default ${sample} is rendered`);
+  }
+});
