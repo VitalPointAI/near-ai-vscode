@@ -1,0 +1,28 @@
+{
+  "images": [
+    {
+      "ref": "registry.fixture-site.example/sterling/sterling-workbench@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "signature": [
+        { "critical": { "identity": { "docker-reference": "registry.fixture-site.example/sterling/sterling-workbench" }, "image": { "docker-manifest-digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111" }, "type": "cosign container image signature" }, "optional": null }
+      ],
+      "sbom": [
+        { "predicateType": "https://spdx.dev/Document", "subject": [{ "name": "registry.fixture-site.example/sterling/sterling-workbench", "digest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111" } }] }
+      ],
+      "provenance": [
+        { "predicateType": "https://slsa.dev/provenance/v1", "subject": [{ "name": "registry.fixture-site.example/sterling/sterling-workbench", "digest": { "sha256": "1111111111111111111111111111111111111111111111111111111111111111" } }] }
+      ]
+    },
+    {
+      "ref": "registry.fixture-site.example/keycloak/keycloak:26.8.2@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "signature": [
+        { "critical": { "identity": { "docker-reference": "registry.fixture-site.example/keycloak/keycloak" }, "image": { "docker-manifest-digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }, "type": "cosign container image signature" }, "optional": null }
+      ],
+      "sbom": [
+        { "predicateType": "https://cyclonedx.org/bom", "subject": [{ "name": "registry.fixture-site.example/keycloak/keycloak", "digest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222" } }] }
+      ],
+      "provenance": [
+        { "predicateType": "https://slsa.dev/provenance/v0.2", "subject": [{ "name": "registry.fixture-site.example/keycloak/keycloak", "digest": { "sha256": "2222222222222222222222222222222222222222222222222222222222222222" } }] }
+      ]
+    }
+  ]
+}

@@ -17,7 +17,7 @@
     "auditEventsLastDay": 2380
   },
   "kubernetes": {
-    "auditPolicySha256": "3f2a9c41d7b8e6f5a0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3",
+    "auditPolicySha256": "73bb9c0ba7bd553ffaa93e4af4c7f736f2d53e45d6621866306e18090002cc9f",
     "sessionsAudited": true,
     "workspacesAudited": true,
     "auditEventsLastDay": 15022,

@@ -1,0 +1,7 @@
+{
+  "nodes": [
+    { "node": "fixture-server-1", "fipsEnabled": "1" },
+    { "node": "fixture-agent-1", "fipsEnabled": "1" },
+    { "node": "fixture-agent-2", "fipsEnabled": "1" }
+  ]
+}

@@ -20,7 +20,7 @@ const NOW = new Date('2026-11-21T12:00:00.000Z');
 const COMMIT = 'c'.repeat(40);
 const HOUR_MS = 60 * 60 * 1000;
 const PUBLIC_TRUST_LIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'attestations', 'site-signers.json');
-const realmFixture = (): any => JSON.parse(readFileSync(path.join(DEPLOYMENT_FIXTURES, 'keycloak-realm.json'), 'utf8'));
+const realmFixture = (): any => JSON.parse(readFileSync(path.join(DEPLOYMENT_FIXTURES, 'site', 'keycloak-realm.json'), 'utf8'));
 const hourAgo = (): string => new Date(NOW.getTime() - HOUR_MS).toISOString();
 
 /** The compliant facts with the Keycloak counts taken from the realm fixture. */
@@ -163,7 +163,7 @@ test('every way an export can be wrong rejects with a reason code and returns no
 test('no observation carries the realm name, the Keycloak version, a client id or an email from the site', async () => {
   const key = freshKey();
   const rows = JSON.stringify(await collect(exportOf(key, factsFromRealm()), [key]));
-  const clients = JSON.parse(readFileSync(path.join(DEPLOYMENT_FIXTURES, 'keycloak-clients.json'), 'utf8')) as { clientId: string }[];
+  const clients = JSON.parse(readFileSync(path.join(DEPLOYMENT_FIXTURES, 'site', 'keycloak-clients.json'), 'utf8')) as { clientId: string }[];
   for (const pattern of [/fixture-sterling-site/, /26\.8\.2/, /operator@fixture-site\.example/, /@fixture/, ...clients.map((client) => new RegExp(client.clientId))]) {
     assert.doesNotMatch(rows, pattern);
   }

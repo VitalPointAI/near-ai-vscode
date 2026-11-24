@@ -1,0 +1,10 @@
+{
+  "windowHours": 24,
+  "registryKind": "zot",
+  "streams": {
+    "keycloak": { "count": 412, "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 } },
+    "openbao": { "count": 2380, "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 } },
+    "kubernetes": { "count": 15022, "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 } },
+    "registry": { "count": 96, "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 } }
+  }
+}
