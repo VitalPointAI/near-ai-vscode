@@ -20,11 +20,13 @@ export const CHART_LOCK = 'deploy/charts/charts.lock.json';
 export const TOOL_PINS = 'compliance/ci/tool-pins.json';
 export const IMAGE_LOCK = 'deploy/bundle/images.lock.json';
 export const CONTAINERFILE_DIR = 'deploy/images';
+// The fixed set of architecture areas every entry's architectureArea names (one place; the component catalogue's area summaries live there too).
+export const AREAS_FILE = 'compliance/architecture-areas.json';
 
 export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored', 'chart', 'tool']);
 export const SCOPES = Object.freeze(['runtime', 'build', 'test']);
 export const FITS = Object.freeze(['pass', 'pass-with-conditions', 'fail']);
-const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt']);
+const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'role', 'architectureArea', 'roleNeedsReview', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt']);
 const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:', chart: 'chart:', tool: 'tool:' });
 const CRYPTO = /^(none|uses-platform|unvalidated|validated:.+)$/;
 const AIR_GAP = /^(ok|no|needs-mirror:.+)$/;
@@ -119,7 +121,19 @@ export function discover(root) {
   return { resources: found, problems };
 }
 
-/** The control ids in the catalogues under compliance/catalogs (any object with an id and a title), and the component ids. */
+/** The ids of the architecture areas in AREAS_FILE; empty when the file is missing or unreadable (main() then fails). */
+export function areaIds(root) {
+  const file = path.join(root, AREAS_FILE);
+  if (!existsSync(file)) return new Set();
+  try {
+    const areas = JSON.parse(readFileSync(file, 'utf8')).areas;
+    return new Set(Array.isArray(areas) ? areas.map((area) => area?.id).filter((id) => typeof id === 'string' && id !== '') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** The control ids in the catalogues under compliance/catalogs (any object with an id and a title), the component ids and the architecture area ids. */
 export function knownIds(root) {
   const controls = new Set();
   const catalogs = path.join(root, 'compliance', 'catalogs');
@@ -135,13 +149,13 @@ export function knownIds(root) {
   }
   const componentsDir = path.join(root, 'compliance', 'components');
   const components = new Set(existsSync(componentsDir) ? readdirSync(componentsDir).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5)) : []);
-  return { controls, components };
+  return { controls, components, areas: areaIds(root) };
 }
 
 const nonEmpty = (value) => typeof value === 'string' && value.trim() !== '';
 const stringList = (value) => Array.isArray(value) && value.length > 0 && value.every(nonEmpty);
 
-/** The field problems of one register entry. `known` holds the valid control and component ids (an empty set skips that check). */
+/** The field problems of one register entry. `known` holds the valid control, component and area ids (an empty or missing set skips that membership check; main() refuses a missing area list). */
 export function entryProblems(entry, known = { controls: new Set(), components: new Set() }) {
   const id = nonEmpty(entry?.id) ? entry.id : '(an entry without an id)';
   const say = (text) => `${REGISTER_FILE} ${id}: ${text}`;
@@ -156,6 +170,12 @@ export function entryProblems(entry, known = { controls: new Set(), components: 
   else if (known.components.size && !known.components.has(entry.component)) out.push(say(`component "${entry.component}" is not one of ${[...known.components].sort().join(', ')}.`));
   if (!SCOPES.includes(entry.scope)) out.push(say(`scope must be one of ${SCOPES.join(', ')}.`));
   for (const field of ['purpose', 'licence', 'evidence', 'cveResponse', 'reviewer']) if (!nonEmpty(entry[field])) out.push(say(`needs ${field}.`));
+  // Why the architecture needs it (what breaks, or what we would build instead, without it), not a second copy of what it does.
+  if (!nonEmpty(entry.role)) out.push(say('needs a role: why the architecture needs it and which part it serves.'));
+  else if (nonEmpty(entry.purpose) && entry.role.trim() === entry.purpose.trim()) out.push(say('role repeats purpose; say why the architecture needs it.'));
+  if (!nonEmpty(entry.architectureArea)) out.push(say(`needs an architectureArea (an id in ${AREAS_FILE}).`));
+  else if (known.areas?.size && !known.areas.has(entry.architectureArea)) out.push(say(`architectureArea "${entry.architectureArea}" is not one of ${[...known.areas].sort().join(', ')}.`));
+  if (entry.roleNeedsReview !== undefined && entry.roleNeedsReview !== true) out.push(say('roleNeedsReview is true when present; remove it once the owner has confirmed the role.'));
   if (!stringList(entry.controls)) out.push(say('controls must list at least one control id.'));
   else if (known.controls.size) for (const control of entry.controls.filter((control) => !known.controls.has(control))) out.push(say(`control "${control}" is not in the catalogues.`));
   if (!CRYPTO.test(entry.crypto ?? '')) out.push(say('crypto must be none, uses-platform, unvalidated or validated:<certificate or mode>.'));
@@ -211,7 +231,8 @@ export function main(argv = process.argv.slice(2), root = path.join(path.dirname
   const register = JSON.parse(read(root, REGISTER_FILE));
   const discovered = discover(root);
   if (argv.includes('--json')) process.stdout.write(`${JSON.stringify({ register: REGISTER_FILE, resources: inventory(register, discovered) }, null, 2)}\n`);
-  const problems = check(register, discovered, knownIds(root));
+  const known = knownIds(root);
+  const problems = known.areas.size ? check(register, discovered, known) : [`${AREAS_FILE} is missing or lists no areas; every entry's architectureArea is checked against it.`, ...check(register, discovered, known)];
   for (const problem of problems) process.stderr.write(`${problem}\n`);
   if (problems.length) {
     process.stderr.write(`\nThe compliance fit check failed (${problems.length} problem${problems.length === 1 ? '' : 's'}). See "Adding a resource" in compliance/README.md.\n`);

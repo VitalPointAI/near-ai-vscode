@@ -3,5 +3,8 @@
   "namespace": "kyverno",
   "order": 25,
   "values": ["deploy/values/sterling-admission.yaml"],
-  "note": "The image signature and site-registry policies, installed right after Kyverno (D-15, D-48)."
+  "images": [
+    { "lock": "ghcr.io/project-zot/zot", "set": { "registryPod.image.name": "name", "registryPod.image.tagAtDigest": "tagAtDigest" } }
+  ],
+  "note": "The image signature and site-registry policies, installed right after Kyverno (D-15, D-48). The Zot image is mapped for the registry pod's exact-digest admission on Zot sites."
 }

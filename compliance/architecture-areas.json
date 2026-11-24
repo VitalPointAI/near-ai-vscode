@@ -1,0 +1,55 @@
+{
+  "note": "The fixed set of architecture areas. Every entry in compliance/resources.json names one of these ids in its architectureArea field, and scripts/resource-check.mjs refuses any other value. The summaries are written by hand: they open each area of the generated component catalogue (scripts/build-component-catalogue.mjs). Plain short sentences; say \"your organization\"; no capacity figures.",
+  "areas": [
+    {
+      "id": "workbench",
+      "title": "Workbench, sessions and extension",
+      "summary": "This is what people use. The extension is the agent team inside the editor: chat, Team Studio, the Staff Room and its map. It ships no node_modules, so the few libraries it needs are copied into the package at fixed versions and reviewed (the vendored entries in this area). The workbench is a browser-based editor built on Eclipse Theia that runs the same extension. At a hosted site, Theia Cloud starts one workbench session for each person after they sign in."
+    },
+    {
+      "id": "sync-and-relay",
+      "title": "Sync hub and relay",
+      "summary": "The sync hub lets several people share staff and project work. Your organization runs it itself, as a container. The relay is a separate small service for chats that arrive from outside the editor; today it is only a foundation and carries no messages yet. Both are built into minimal images with no shell or package manager."
+    },
+    {
+      "id": "site-platform",
+      "title": "Site platform: Kubernetes, registry, ingress and certificates",
+      "summary": "Every hosted site runs the same platform. RKE2 is the Kubernetes the rest runs on. Software arrives as a signed offline bundle and is loaded into the site's own registry (Zot, or Harbor at larger sites), so nothing is pulled from the internet. Kyverno refuses any image that is not signed with your organization's key. HAProxy is the one entry point for people, and cert-manager issues every certificate from the site's own certificate authority."
+    },
+    {
+      "id": "identity",
+      "title": "Identity and sign-in",
+      "summary": "Keycloak signs people in with passkeys or hardware security keys only; there are no passwords. Its settings are applied from the repository as code, and its data sits in a PostgreSQL database we build ourselves. oauth2-proxy sits in front of each workbench session, so a session is reached only after sign-in."
+    },
+    {
+      "id": "secrets-and-keys",
+      "title": "Secrets and keys",
+      "summary": "OpenBao holds each site's secrets and keys, and the site's internal certificate authority that cert-manager issues from. Where the site has a hardware security module (HSM), OpenBao is sealed with a key held in it, through the kms-pkcs11 plugin. SoftHSM2 is a software stand-in used only in the lab and in tests."
+    },
+    {
+      "id": "storage-logging-monitoring",
+      "title": "Storage, logging and monitoring",
+      "summary": "Longhorn gives the site encrypted storage for workspaces, databases and logs. Fluent Bit collects logs and audit records from every node and sends them to OpenSearch at the site; nothing is sent outside. Prometheus collects metrics about the nodes and Kubernetes, which the load tests read."
+    },
+    {
+      "id": "release-and-supply-chain",
+      "title": "Release and supply chain",
+      "summary": "These pieces turn a reviewed commit into a release you can trust. GitHub Actions build and test every change. The release workflow packages the extension, records checksums and signed provenance, and writes a software bill of materials (SBOM) for each image. cosign signs what we build with your organization's key, and hauler packs the signed images and charts into the offline bundle a site imports."
+    },
+    {
+      "id": "compliance-tooling",
+      "title": "Compliance tooling",
+      "summary": "The compliance package turns evidence from CI into control states and the assessor package. These tools read and check its documents: they validate the OSCAL files against the published schema, import the published control catalogues, and confirm that a second OSCAL tool can open the package. None of them runs in the product."
+    },
+    {
+      "id": "documentation-site",
+      "title": "Documentation site",
+      "summary": "This site is built with Docusaurus into static pages, with an offline search index and diagrams drawn from text, so it works on a site with no internet. A small file server serves it on the documentation host."
+    },
+    {
+      "id": "build-and-test",
+      "title": "Build and test only",
+      "summary": "These are used only to compile, type-check, bundle and test the code, or to rebuild bundled map tiles. Nothing from them ships in the product; only what they produce does."
+    }
+  ]
+}

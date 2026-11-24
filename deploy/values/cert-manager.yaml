@@ -18,9 +18,32 @@ image:
 webhook:
   image:
     pullPolicy: IfNotPresent
+  securityContext: &pod
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext: &container
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
 cainjector:
   image:
     pullPolicy: IfNotPresent
+  securityContext: *pod
+  containerSecurityContext: *container
 startupapicheck:
   image:
     pullPolicy: IfNotPresent
+  securityContext: *pod
+  containerSecurityContext: *container
+
+# Pod Security restricted (cert-manager is not exempt), for the controller and, above, every other component.
+securityContext: *pod
+containerSecurityContext: *container
+
+# No default issuer: an Ingress gets a certificate only when it names a site issuer (site-pki) in its own annotation, so nothing is ever
+# issued by an issuer nobody chose. The site's issuers are ClusterIssuers of deploy/charts/sterling-pki-bootstrap and sterling-pki (47-13):
+# site-bootstrap-ca (CA type, OpenBao's first certificate only) and the vault-type site-pki and site-pki-hub on OpenBao's pki_int. No ACME
+# solver is configured (D-16).
+ingressShim: {}

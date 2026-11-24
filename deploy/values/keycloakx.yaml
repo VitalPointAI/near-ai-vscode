@@ -109,3 +109,32 @@ extraVolumeMounts: |
     mountPath: /opt/keycloak/attestation-roots
     readOnly: true
   {{- end }}
+
+# Sign-in at https://keycloak.<domain> through HAProxy (D-07, 47-13), with the certificate Keycloak itself serves (keycloak-tls from
+# site-pki). HAProxy re-encrypts to Keycloak and verifies it against the site CA (Secret sterling-site-ca, key tls.crt, from
+# deploy/charts/sterling-pki). It always overwrites the client-certificate headers with what it verified itself, so a header a browser sends is
+# never passed on; they are empty unless the site turns smart cards on (deploy/values/site.example/kubernetes-ingress.yaml, D-32).
+ingress:
+  enabled: true
+  ingressClassName: haproxy
+  servicePort: https
+  annotations:
+    haproxy.org/server-ssl: "true"
+    haproxy.org/server-ca: sterling-identity/sterling-site-ca
+    # This list replaces the controller's (deploy/values/kubernetes-ingress.yaml), so it repeats the four forwarded headers.
+    haproxy.org/request-set-header: |
+      Client-Cert %[ssl_c_der,base64]
+      Client-Cert-Chain %[ssl_c_chain_der,base64]
+      X-Forwarded-For %[src]
+      X-Forwarded-Host %[req.hdr(host)]
+      X-Forwarded-Proto %[ssl_fc,iif(https,http)]
+      X-Forwarded-Uri %[url]
+  rules:
+    - host: "keycloak.${site.domain}"
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - "keycloak.${site.domain}"
+      secretName: keycloak-tls
