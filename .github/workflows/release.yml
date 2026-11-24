@@ -401,8 +401,10 @@ jobs:
         env:
           PACKAGE: ${{ needs.package.outputs.package }}
         run: |
-          tar -xzf "release/$PACKAGE" -C trestle-work
-          root="$(pwd)/trestle-work/$(tar -tzf "release/$PACKAGE" | head -1 | cut -d/ -f1)"
+          # Trestle refuses to import a file from inside its own workspace, so unpack beside it.
+          mkdir trestle-input
+          tar -xzf "release/$PACKAGE" -C trestle-input
+          root="$(pwd)/trestle-input/$(tar -tzf "release/$PACKAGE" | head -1 | cut -d/ -f1)"
           cd trestle-work
           trestle import -f "$root/oscal/component-definitions/extension.json" -o extension >> "$GITHUB_STEP_SUMMARY" 2>&1
           trestle import -f "$root/oscal/ssp/protected-b.json" -o protected-b >> "$GITHUB_STEP_SUMMARY" 2>&1
@@ -556,8 +558,8 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null' EXIT
           if docker manifest inspect "$ref" > remote-manifest.json 2> registry-error.txt; then
-            # An interrupted run can reuse this tag only for the same tested image.
-            test "$(jq -er '.config.digest' remote-manifest.json)" = "$IMAGE_ID"
+            # An interrupted run can reuse this tag only for the same tested image; the check after
+            # this block refuses any other image before the digest is recorded.
             docker pull "$ref"
             digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$ref")"
           else
@@ -570,7 +572,11 @@ jobs:
             digest="$repository@$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}) .*/\1/p' registry-push.txt | tail -1)"
           fi
           [[ "$digest" == "$repository"@sha256:* && "${digest##*@sha256:}" =~ ^[a-f0-9]{64}$ ]]
-          docker manifest inspect "$digest" | jq -e --arg id "$IMAGE_ID" '.config.digest == $id'
+          # The registry copy must be the tested image. Docker's containerd image store reports the
+          # manifest digest as the image ID; the classic store reports the config digest.
+          if [ "${digest##*@}" != "$IMAGE_ID" ]; then
+            docker manifest inspect "$digest" | jq -e --arg id "$IMAGE_ID" '.config.digest == $id'
+          fi
           echo "image=$digest" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

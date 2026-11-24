@@ -208,6 +208,7 @@ test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation pa
 // POA&M target date; a decided item names a gap that closes in Phase 48 until its evidence rule exists.
 const RECORDS_FILE = path.resolve(root, '..', 'docs', 'security', 'hosted-verification-records.md');
 const ruleIds = new Set(loadEvidenceRules(path.join(root, 'evidence-rules')).map((rule) => rule.id));
+const ruleComponents = new Map(loadEvidenceRules(path.join(root, 'evidence-rules')).map((rule) => [rule.id, rule.component]));
 interface RecordsContext { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly ruleIds: ReadonlySet<string> }
 const realContext: RecordsContext = { gaps, poam, ruleIds };
 
@@ -341,6 +342,7 @@ function sectionTenProblems(text: string, context: RecordsContext): string[] {
     for (const control of row.controls) if (!mediumControls.has(control)) problems.push(`${at}: control ${control} is not in the Medium profile`);
     if (row.controls.length === 0) problems.push(`${at}: names no control`);
     for (const rule of rules) if (!context.ruleIds.has(rule)) problems.push(`${at}: rule ${rule} does not exist`);
+    else if (ruleComponents.get(rule) !== row.component) problems.push(`${at}: rule ${rule} belongs to ${ruleComponents.get(rule)}, not ${row.component}`);
     for (const id of gapIds) {
       const gap = context.gaps.find((item) => item.id === id);
       const item = context.poam.find((candidate) => candidate.id === gap?.poam);
@@ -367,6 +369,8 @@ test('a section 10 row with two references or none fails', () => {
   const missing = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | none |', ''].join('\n');
   assert.deepEqual(sectionTenProblems(twice, realContext), ['section 10 row 1: needs exactly one gap or rule']);
   assert.deepEqual(sectionTenProblems(missing, realContext), ['section 10 row 1: needs exactly one gap or rule']);
+  const otherComponent = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | rule rke2.cm-07.no-k3s |', ''].join('\n');
+  assert.deepEqual(sectionTenProblems(otherComponent, realContext), ['section 10 row 1: rule rke2.cm-07.no-k3s belongs to rke2, not keycloak']);
 });
 test('every gap the hosted records add is scoped to the hosted levels', () => {
   const text = recordsText();

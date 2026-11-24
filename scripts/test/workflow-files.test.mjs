@@ -108,8 +108,10 @@ test('publish waits for protected approval and verifies the tested image before 
   assert.match(list[1], /needs\.image\.outputs\.archive_sha256/);
   assert.match(list[1], /needs\.image\.outputs\.image_id/);
   assert.match(list[1], /sha256sum --check[\s\S]*docker load[\s\S]*docker image inspect[\s\S]*docker login ghcr\.io/);
-  assert.match(list[1], /docker manifest inspect "\$ref"[\s\S]*\.config\.digest[\s\S]*docker push/);
-  assert.match(list[1], /docker manifest inspect "\$digest"[\s\S]*\.config\.digest == \$id[\s\S]*image=\$digest/);
+  assert.match(list[1], /docker manifest inspect "\$ref"[\s\S]*docker pull "\$ref"[\s\S]*docker push/);
+  // The recorded digest is the tested image under either Docker image store: the manifest digest
+  // equals the image ID (containerd store) or the manifest's config digest does (classic store).
+  assert.match(list[1], /if \[ "\$\{digest##\*@\}" != "\$IMAGE_ID" \]; then\s*docker manifest inspect "\$digest" \| jq -e --arg id "\$IMAGE_ID" '\.config\.digest == \$id'\s*fi\s*echo "image=\$digest"/);
   assert.match(publish, /needs:\s*\[build, package, attest, image\]/);
   assert.match(publish, /needs\.image\.result == 'success'/);
   assert.match(publish, /needs\.attest\.result == 'success'/);
@@ -343,6 +345,9 @@ test('release package, attest and Trestle jobs keep privilege separated', () => 
   assert.match(trestle, /--require-hashes --no-deps/);
   assert.match(trestle, /continue-on-error:\s*true/);
   assert.ok(trestle.includes('trestle import -f "$root/oscal/component-definitions/extension.json"'));
+  // Trestle refuses imports from inside its own workspace, so the package is unpacked beside it.
+  assert.match(trestle, /tar -xzf "release\/\$PACKAGE" -C trestle-input/);
+  assert.doesNotMatch(trestle, /-C trestle-work/);
   assert.match(release, /needs:\s*\[build, package, attest, publish\]/);
   assert.match(release, /needs\.publish\.result == 'success'/);
   assert.match(release, /needs\.build\.outputs\.package_required == 'true' && needs\.package\.result == 'success'/);

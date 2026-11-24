@@ -22,6 +22,7 @@ pages says which file it comes from: edit that file, never the copy on this site
 | You want to | Read |
 | --- | --- |
 | Install it and get a first answer | [Getting started](./using/getting-started.md) |
+| Try the Sterling workbench image on your own computer | [Run the Sterling workbench image](./using/getting-started.md#run-the-sterling-workbench-image) |
 | See everything it does and every setting | [Features and settings](./using/features.synced.md) |
 | Know where your data goes and what the agent may do | [The trust model in plain words](./security/trust-model.md) |
 | Understand how it is put together | [Architecture overview](./architecture/overview.md) |

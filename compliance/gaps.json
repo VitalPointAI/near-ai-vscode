@@ -4142,7 +4142,6 @@
         "sc-13",
         "sc-12",
         "cm-06",
-        "cm-07",
         "au-02",
         "au-12"
       ],
@@ -4153,8 +4152,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy, no k3s in production and hosts in FIPS mode: test rules on the Phase 47 rendered configuration and production profile, and observations from the deployment evidence export.",
-      "title": "RKE2 has no statements for its section 10 conditions"
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy and hosts in FIPS mode: test rules on the Phase 47 rendered configuration, and observations from the deployment evidence export.",
+      "title": "RKE2 has no statements for four of its section 10 conditions"
     },
     {
       "closesInPhase": "48",
@@ -4255,8 +4254,7 @@
       "closesInPhase": "48",
       "controls": [
         "sc-13",
-        "sc-08",
-        "cm-07"
+        "sc-08"
       ],
       "id": "G340",
       "ownerRole": "maintainers",
@@ -4265,8 +4263,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add ingress statements with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode) and no ingress-nginx (test rule on the rendered production profile).",
-      "title": "The ingress has no statements for its section 10 conditions"
+      "remediation": "Add the ingress statement with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode).",
+      "title": "The ingress has no statement for its HAProxy FIPS condition"
     },
     {
       "closesInPhase": "48",
@@ -4317,8 +4315,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests: a CA issuer chained to the OpenBao PKI and no ACME issuer.",
-      "title": "cert-manager is not assessed"
+      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests for a CA issuer chained to the OpenBao PKI. The statement that no rendered issuer uses ACME already has its rule (cert-manager.sc-17.no-acme).",
+      "title": "cert-manager is not assessed and has no CA issuer statement"
     },
     {
       "closesInPhase": "48",
