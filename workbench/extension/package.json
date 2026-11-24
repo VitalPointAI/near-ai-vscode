@@ -34,6 +34,10 @@
     },
     {
       "backend": "lib/node/sterling-backend-module"
+    },
+    {
+      "frontend": "lib/browser/session-identity-frontend-module",
+      "backend": "lib/node/session-identity-backend-module"
     }
   ]
 }
