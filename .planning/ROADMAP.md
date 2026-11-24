@@ -779,7 +779,7 @@ Plans:
   4. An AC322 conformance matrix cites a passing test for every claim; control statements and the hosted registers carry evidence; our XML is checked against the texts' own schemas; a development round trip runs against the OpenTDF quickstart's KAS, and an acceptance trial with an ally's or vendor's KAS and its own samples is the acceptance check. (XCHG-08)
 **Research flags**: (1) AC322 is an architecture blueprint, not a ZTDF specification; never cite it for ZTDF. (2) No text, schema or example from an ADatP enters the repository; NATO values appear only in the NATO profile file and its test. (3) Signed bindings follow ADatP-4778.2 but are not yet checked with a partner (G384). (4) Not a cross-domain guard. (5) Partners have no post-quantum key access type (G356). (6) The texts' printed examples contain errata (research section 8). (7) The Canadian label policy is assumed and has no OID (G355).
 **Undo cost**: Medium. The label tables, profiles and partner pins are policy data; the exchange record values are permanent (settled at 45.2-07's checkpoint); the ZTDF profile is swappable by design.
-**Plans:** 12 plans in 9 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-23, owner defaults confirmed 2026-11-24, three new items to confirm, owner actions and a hand-off ledger in `45.2-CONTEXT.md`)
+**Plans:** 12 plans in 9 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-23, all owner defaults confirmed 2026-11-24, owner actions and a hand-off ledger in `45.2-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
