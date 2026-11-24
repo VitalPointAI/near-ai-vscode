@@ -16,10 +16,25 @@ export const MAX_FEATURES = 16;
 /** The features this build folds, sorted. positions@1 is added by the release that folds positions. */
 export const KNOWN_REPLICA_FEATURES: readonly string[] = Object.freeze(['cells@1', 'hub@1', 'replica@2', 'require@1']);
 
-/** What a person sees when a project needs a feature this build does not fold (portfolio DESIGN 3.9, exact words). */
-export const UPDATE_SENTENCE = 'This project needs a newer version of the extension. Update to keep working on it.';
+/**
+ * What a person sees when shared work needs a feature this build does not fold. D-67 replaces portfolio DESIGN 3.9's extension sentence: people do
+ * not update a container image themselves, and Defence-edition text never calls shared work a project (D-69).
+ */
+export const UPDATE_SENTENCE = 'This shared work needs a newer version of Sterling. Ask your administrator to update it.';
 
 /** True only for text of the form name@N. */
 export function isReplicaFeature(value: unknown): value is string {
   return typeof value === 'string' && REPLICA_FEATURE_PATTERN.test(value);
+}
+
+/** The distinct required features this build does not fold, sorted for a stable refusal. */
+export function missingFeatures(required: readonly string[], known: readonly string[] = KNOWN_REPLICA_FEATURES): string[] {
+  const knownIds = new Set(known);
+  return [...new Set(required)].filter((id) => !knownIds.has(id)).sort();
+}
+
+/** A session covers a requirement only when the device announces it and this build knows it. */
+export function coversRequired(announced: readonly string[], required: readonly string[]): boolean {
+  const announcedIds = new Set(announced);
+  return required.every((id) => announcedIds.has(id) && KNOWN_REPLICA_FEATURES.includes(id));
 }
