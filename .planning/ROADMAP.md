@@ -702,7 +702,7 @@ Plans:
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
 - [x] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
-- [ ] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
+- [x] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
 - [ ] 47-04-PLAN.md: Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
 - [ ] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
 - [ ] 47-06-PLAN.md: Wave 4. Signed offline bundle build, check and import; signed-file mechanism
