@@ -1,7 +1,7 @@
 # Sterling design language
 
 **Status:** not adopted: owner chose the original 74.3 theme with lifted cards on 2026-11-24 (74.3-UI-SPEC Q13, "owner reversed"). Kept for the record only; no UI-SPEC cites it as a contract, and aligning the Phase 46 pages to it (section 11) is dropped. Written 2026-11-24 at the owner's direction ("a more original look, from the subject's own world"), briefly accepted the same day, then reversed.
-**Applies to:** every native Sterling workbench surface (Theia widgets, dialogs, status bar text). The extension's webviews follow it when they are next redesigned.
+**Would have applied to:** every native Sterling workbench surface (Theia widgets, dialogs, status bar text). The extension's webviews follow it when they are next redesigned.
 **Fixed constraints:** Theia theme variables only, codicons only, correct in light, dark, high contrast dark, high contrast light and `forced-colors: active`. The contract rules of each UI-SPEC still hold: at most 4 font sizes and 2 weights, spacing in {4, 8, 16, 24, 32, 48, 64}, verb-plus-noun button labels, meaning never by colour alone.
 
 ## 0. The idea
