@@ -84,9 +84,10 @@
   --sterling-diagram-fg: var(--theia-editor-foreground);
   overflow: auto;
 }
+/* Wide diagrams keep their drawn size (13 px labels) and scroll sideways; shrinking them to the column makes the labels unreadable. */
 .sterling-documentation .sterling-doc-diagram svg {
   display: block;
-  max-width: 100%;
+  max-width: none;
   height: auto;
   margin-inline: auto;
 }
