@@ -80,11 +80,14 @@ export function planImages(root, { ciRegistry, omit = [], buildLocal = false }) 
   return { images, omitted, toBuild };
 }
 
-/** Every vendored chart as a file item, after the vendor.mjs --check hash check. A lock entry with `patch.file` carries the patched tarball. */
+/**
+ * Every vendored chart as a file item, after the vendor.mjs --check hash check. A lock entry with `patch` carries its patched tarball
+ * (`patch.output`, the one renders and installs use); `patch.file` is the diff, not a chart.
+ */
 export function planCharts(root) {
   const problems = checkVendored(root);
   if (problems.length) throw new Error(`the vendored charts do not match deploy/charts/charts.lock.json:\n  ${problems.join('\n  ')}`);
-  return readChartsLock(root).charts.map((chart) => ({ kind: 'chart', path: path.join(root, chart.patch?.file ?? chart.file) }));
+  return readChartsLock(root).charts.map((chart) => ({ kind: 'chart', path: path.join(root, chart.patch?.output ?? chart.file) }));
 }
 
 /** The pinned downloads of the site tools as [{ url, sha256, name }]: each tool's own address and its assets. */

@@ -2,6 +2,7 @@
 // lock, the site environment has exactly its ten names and no secret, and the session environment policy refuses everything a launch
 // request could add. Renders with the CI site; needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -73,8 +74,15 @@ test('the policy refuses envFrom other than sterling-site-env, any Secret or Con
   assert.ok(doc.includes('!has(v.valueFrom.secretKeyRef) && !has(v.valueFrom.configMapKeyRef)'));
   assert.ok(doc.includes('v.name in variables.allowedNames'));
   const allowed = JSON.parse(JSON.parse(/name: allowedNames\n\s+expression: (".*")$/m.exec(doc)[1]));
-  assert.equal(allowed.length, 13);
-  assert.ok(allowed.every((name) => name.startsWith('THEIACLOUD_')), 'only the operator template\'s names; the launch request adds none');
+  // Exactly the names our operator template sets on the workbench container (the 13 THEIACLOUD_ names and STERLING_LISTEN_HOST), no more
+  // and no fewer; the launch request adds none.
+  const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
+  const templateNames = [...template.matchAll(/^ {10}- name: ([A-Z][A-Z0-9_]*)$/gm)].map((match) => match[1]);
+  assert.equal(templateNames.length, 14);
+  assert.deepEqual([...allowed].sort(), [...templateNames].sort());
+  assert.equal(allowed.filter((name) => name.startsWith('THEIACLOUD_')).length, 13);
+  // The workbench binds loopback (for the sidecar) and the pod IP (for the operator's activity monitor).
+  assert.match(template, /- name: STERLING_LISTEN_HOST\n\s+value: "0\.0\.0\.0"$/m);
 });
 
 test('the policy allows only the oauth2-proxy-secrets Secret volume, and only in the oauth2-proxy container', () => {

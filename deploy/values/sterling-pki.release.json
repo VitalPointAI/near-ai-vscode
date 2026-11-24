@@ -1,0 +1,8 @@
+{
+  "chart": "path:deploy/charts/sterling-pki",
+  "namespace": "cert-manager",
+  "order": 46,
+  "values": ["deploy/values/sterling-pki.yaml"],
+  "site": "deploy/values/site.example/sterling-pki.yaml",
+  "note": "The site PKI issuers site-pki and site-pki-hub on OpenBao's pki_int, the site CA trust and the re-issued bootstrap certificates (D-16, D-50); after OpenBao is initialised, unsealed and its intermediate imported."
+}

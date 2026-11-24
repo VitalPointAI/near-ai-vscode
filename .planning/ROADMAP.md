@@ -749,7 +749,7 @@ Plans:
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
   7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account. It uses a passkey or hardware key only, is created at the lead's request (with the security contact's approval for allied military and industry), has its own OpenBao entity and keys, and never holds an administrator role. At its end date the account is disabled, its sessions are stopped and its entity is disabled without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
-**Plans:** 12/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
+**Plans:** 15/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -764,9 +764,9 @@ Plans:
 - [x] 47-10-PLAN.md: Wave 4. Encrypted storage class, OpenSearch with Fluent Bit, Prometheus, Harbor values
 - [x] 47-11-PLAN.md: Wave 4. Sync hubs as single-writer StatefulSets; Keycloak's Postgres
 - [x] 47-12-PLAN.md: Wave 4. Workbench AppDefinition, site environment ConfigMap, session environment policy
-- [ ] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
-- [ ] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
-- [ ] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
+- [x] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
+- [x] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
+- [x] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
 - [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
 - [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
 - [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
@@ -1943,7 +1943,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 12/18 | In Progress 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
