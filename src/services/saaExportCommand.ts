@@ -49,7 +49,7 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
         progress.report({ message: 'Downloading and verifying the public release evidence and official forms' });
         const [release, privacyForms] = await Promise.all([
           loadSaaReleaseEvidence(version, abort.signal).then(async (evidence) => {
-            progress.report({ message: 'Checking the published release’s Marketplace approval' });
+            progress.report({ message: 'Checking the published release’s publication approval' });
             return { evidence, approval: await loadSaaMarketplaceApproval(evidence, abort.signal) };
           }),
           loadSaaOfficialPrivacyForms(abort.signal)
