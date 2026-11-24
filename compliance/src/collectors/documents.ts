@@ -21,6 +21,7 @@ export const REQUIRED_DOCUMENTS: readonly RequiredDocument[] = Object.freeze([
   { path: 'docs/security/data-flow.md', reviewRequired: true, headings: ['Extension', 'Messaging relay', 'Sync hub', 'Release pipeline', 'Model endpoints'] },
   { path: 'docs/security/crypto-inventory.md', reviewRequired: true, headings: ['Algorithms', 'Basis'] },
   { path: 'docs/security/controlled-goods-and-itar.md', reviewRequired: true, headings: ['What the product does', 'What it does not do', 'Interim settings'] },
+  { path: 'docs/security/hosted-verification-records.md', reviewRequired: true, headings: ['Verification register', 'Keycloak CVE-2026-6856 fix version'] },
   { path: 'docs/development-workflow.md', reviewRequired: false, headings: ['8. Repository settings (owner only)'] }
 ]);
 
