@@ -1,0 +1,17 @@
+{
+  "gap": "G193",
+  "id": "g193",
+  "controls": [
+    "pm-30",
+    "pm-30.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Program supply-chain strategy and critical supplier review need authorized records",
+  "remediation": "The sponsor supply chain executive and procurement lead approve enterprise strategy through acquisition, operation, maintenance and disposal. Identify critical suppliers and dependencies, prioritize by mission impact, and sample due diligence, residual risk, assigned treatment and recurring review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved strategy, critical supplier priority register and a sampled supplier risk review and treatment"
+    }
+  ]
+}

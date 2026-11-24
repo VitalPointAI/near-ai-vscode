@@ -1,0 +1,17 @@
+{
+  "gap": "G159",
+  "id": "g159",
+  "controls": [
+    "mp-08",
+    "mp-08.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Media downgrading and public release need reviewed sanitization evidence",
+  "remediation": "The sponsor information release authority approves assessed media scope, approved downgrading mechanisms and verification matched to sensitivity and recipient authorization. Sample a public-release exercise using synthetic protected markers. Verify that protected information is removed before release, that the authorized recipient or publication scope is recorded, and that failed verification blocks release.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved downgrade procedure, a redacted verification and release decision, and a documented refusal when protection checks fail"
+    }
+  ]
+}

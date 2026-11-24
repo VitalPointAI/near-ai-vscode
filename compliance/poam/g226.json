@@ -1,0 +1,16 @@
+{
+  "gap": "G226",
+  "id": "g226",
+  "controls": [
+    "itsp171-03.01.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Authorized logical access needs deployment enforcement evidence",
+  "remediation": "The sponsor system and resource owners approve logical access to assessed information and resources, including identities or groups and allowed operations. Demonstrate authorized and denied operations using representative test identities and cite the governing policy and resource boundary. Record applicable scope for ITSP.10.171. Treat mapped base-profile evidence as supporting material until checked against the deployment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved access rules and a redacted permission check showing permitted and refused operations on assessed information and resources"
+    }
+  ]
+}

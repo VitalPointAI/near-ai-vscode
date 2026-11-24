@@ -1,0 +1,16 @@
+{
+  "gap": "G118",
+  "id": "g118",
+  "controls": [
+    "sc-01"
+  ],
+  "ownerRole": "owner",
+  "title": "System and communications protection policy needs assigned ownership and review",
+  "remediation": "The sponsor system-security lead approves policy and operating procedures for the assessed communications and protection boundary. Name the authority for updates, record the review cadence and triggers, document distribution to assigned roles, and sample an operating procedure followed under the approved policy.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and procedures, responsible roles, distribution and one dated operating record"
+    }
+  ]
+}

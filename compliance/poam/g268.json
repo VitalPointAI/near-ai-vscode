@@ -1,0 +1,16 @@
+{
+  "gap": "G268",
+  "id": "g268",
+  "controls": [
+    "itsp171-03.08.09"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 cryptographic protection of backup information needs scoped evidence",
+  "remediation": "The sponsor backup and cryptographic custodians inventory assessed backup stores and specified information, including replicas where applicable. Review effective confidentiality protection and who can use the cryptographic mechanism. Retain sanitized storage and key custody settings and scoped verification that unauthorized roles cannot disclose protected backup information. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the assessed backup storage inventory, effective cryptographic settings and authorized access and refusal verification"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "gap": "G45",
+  "id": "g45",
+  "controls": [
+    "au-03",
+    "au-03.01",
+    "au-12"
+  ],
+  "ownerRole": "shared",
+  "title": "Selected component events and audit record fields need coverage evidence",
+  "remediation": "Extension, relay and hub maintainers map the approved AU-02 event inventory to generation tests for every assessed component. Capture redacted records proving event type, time, component or location, source, outcome and relevant actor or entity, plus each approved additional field. The deployment audit owner approves the list and verifies who can select the events. Document adjustments and retest omissions without exposing secrets or record payloads.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved event and field matrix, authorized event-selection evidence and redacted records from each assessed source"
+    }
+  ]
+}

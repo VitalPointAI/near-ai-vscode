@@ -56,6 +56,9 @@ test('the pinned assessor catalogue contains exactly the compact base controls w
   const base = JSON.parse(readFileSync(path.join(catalogueDir, 'annex-3a.json'), 'utf8'));
   const assessor: ReturnType<typeof buildItsg33AssessorCatalogue> = JSON.parse(readFileSync(path.join(catalogueDir, 'assessor-annex-3a.json'), 'utf8'));
   assert.deepEqual(assessor.catalog.controls.map(({ id }) => id), base.catalog.controls.map(({ id }: { id: string }) => id));
+  for (const control of base.catalog.controls) {
+    assert.deepEqual(Object.keys(control).sort(), ['id', 'title'], `Public reference ${control.id}`);
+  }
   assert.equal(assessor.catalog.controls.find(({ id }) => id === 'sc-13')?.title, 'USE OF CRYPTOGRAPHY');
   for (const { id, parts } of assessor.catalog.controls) {
     assert.equal(parts[0].id, `${id}_smt`);

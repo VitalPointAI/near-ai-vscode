@@ -1,0 +1,18 @@
+{
+  "gap": "G278",
+  "id": "g278",
+  "controls": [
+    "itsp171-03.10.03",
+    "itsp171-03.10.04",
+    "itsp171-03.10.05"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated supplementary physical rows need individual sponsor dispositions",
+  "remediation": "The contracting sponsor assessment authority and assessor reconcile each of the three identifiers to the approved source edition and contract selection. The source records them as not allocated following NIST withdrawal. Log a dated disposition and citation per ID, including an approved alternate objective only where the contracting authority identifies one. Retain pending status until the decision is reviewed.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect reviewed source, edition and contract references and a signed or pending scope decision for each of the three physical identifiers"
+    }
+  ]
+}

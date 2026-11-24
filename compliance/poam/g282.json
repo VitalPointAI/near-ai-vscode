@@ -1,0 +1,16 @@
+{
+  "gap": "G282",
+  "id": "g282",
+  "controls": [
+    "itsp171-03.11.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary vulnerability monitoring needs authorized schedule and remediation records",
+  "remediation": "The deployment vulnerability management and patch owners define scoped monitoring and scan frequencies, new finding triggers, detection-content update rules and remediation time targets. Review redacted reports from already authorized assessments, scope and content update records, and a sampled finding through remediation verification. Retain approved disposition for scope or timing gaps.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an authorized assessment scope and schedule, dated monitoring and content update evidence, and a remediation and verification trace"
+    }
+  ]
+}

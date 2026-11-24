@@ -1,0 +1,17 @@
+{
+  "gap": "G72",
+  "id": "g72",
+  "controls": [
+    "si-08",
+    "si-08.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Message boundary spam protection and automatic updates need verified applicability",
+  "remediation": "The deployment messaging and endpoint owners identify applicable message ingress and egress and the protection mechanism supplied by each assessed provider. Verify approved automatic update cadence and detection and action for harmless simulated unsolicited messages on each applicable boundary. Obtain authorized scope treatment for unused messaging surfaces.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect applicable mail or messaging protection settings, update history and a sanitized detection and response sample"
+    }
+  ]
+}

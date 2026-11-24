@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cp-02.02"
+  ],
+  "gap": "G323",
+  "id": "g323",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-06-30",
+      "title": "Per-hub load recorded in the load-test run file"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Run several hubs per site under the same load-test run and record each hub's load against its per-hub target in the run file.",
+  "title": "Sync hub load at its per-hub target is not measured under the hosted load test"
+}

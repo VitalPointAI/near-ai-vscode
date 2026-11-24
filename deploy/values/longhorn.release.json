@@ -1,0 +1,23 @@
+{
+  "chart": "longhorn",
+  "namespace": "longhorn-system",
+  "order": 38,
+  "values": ["deploy/values/longhorn.yaml"],
+  "enabledWhen": { "storageProvider": "longhorn" },
+  "images": [
+    { "lock": "docker.io/longhornio/longhorn-manager", "set": { "image.longhorn.manager.registry": "registry", "image.longhorn.manager.repository": "repository", "image.longhorn.manager.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/longhorn-engine", "set": { "image.longhorn.engine.registry": "registry", "image.longhorn.engine.repository": "repository", "image.longhorn.engine.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/longhorn-instance-manager", "set": { "image.longhorn.instanceManager.registry": "registry", "image.longhorn.instanceManager.repository": "repository", "image.longhorn.instanceManager.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/longhorn-share-manager", "set": { "image.longhorn.shareManager.registry": "registry", "image.longhorn.shareManager.repository": "repository", "image.longhorn.shareManager.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/backing-image-manager", "set": { "image.longhorn.backingImageManager.registry": "registry", "image.longhorn.backingImageManager.repository": "repository", "image.longhorn.backingImageManager.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/longhorn-ui", "set": { "image.longhorn.ui.registry": "registry", "image.longhorn.ui.repository": "repository", "image.longhorn.ui.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/support-bundle-kit", "set": { "image.longhorn.supportBundleKit.registry": "registry", "image.longhorn.supportBundleKit.repository": "repository", "image.longhorn.supportBundleKit.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/csi-attacher", "set": { "image.csi.attacher.registry": "registry", "image.csi.attacher.repository": "repository", "image.csi.attacher.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/csi-provisioner", "set": { "image.csi.provisioner.registry": "registry", "image.csi.provisioner.repository": "repository", "image.csi.provisioner.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/csi-node-driver-registrar", "set": { "image.csi.nodeDriverRegistrar.registry": "registry", "image.csi.nodeDriverRegistrar.repository": "repository", "image.csi.nodeDriverRegistrar.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/csi-resizer", "set": { "image.csi.resizer.registry": "registry", "image.csi.resizer.repository": "repository", "image.csi.resizer.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/csi-snapshotter", "set": { "image.csi.snapshotter.registry": "registry", "image.csi.snapshotter.repository": "repository", "image.csi.snapshotter.tag": "tagAtDigest" }},
+    { "lock": "docker.io/longhornio/livenessprobe", "set": { "image.csi.livenessProbe.registry": "registry", "image.csi.livenessProbe.repository": "repository", "image.csi.livenessProbe.tag": "tagAtDigest" }}
+  ],
+  "note": "Longhorn 1.13.0, the reference encrypted storage class (D-17, research Decision 3); installed only when the site uses it."
+}

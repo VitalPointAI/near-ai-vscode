@@ -1,0 +1,20 @@
+{
+  "gap": "G22",
+  "id": "g22",
+  "controls": [
+    "ia-12",
+    "ia-12.02",
+    "ia-12.03",
+    "ia-12.04",
+    "ia-12.05"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment identity proofing needs sponsor and registration authority evidence",
+  "remediation": "The deployment sponsor establishes the required identity assurance levels and names the registration authority and privacy owner. The registration authority records how it resolves a unique individual, receives identity evidence, validates and verifies it, performs the applicable in-person check and sends out-of-band confirmation to the recorded address. Collect approved procedures and redacted attestations or authorized evidence references. Document sponsor-approved applicability decisions and keep identity documents in the authorized storage location.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Record sponsor-approved assurance and scope and collect registration authority attestations for evidence receipt, validation and verification, applicable in-person checks and address confirmation"
+    }
+  ]
+}

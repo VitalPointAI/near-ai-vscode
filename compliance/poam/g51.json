@@ -1,0 +1,19 @@
+{
+  "gap": "G51",
+  "id": "g51",
+  "controls": [
+    "cm-02",
+    "cm-02.02",
+    "cm-02.03",
+    "cm-02.06"
+  ],
+  "ownerRole": "shared",
+  "title": "Configuration baselines need automated reconciliation, retained versions and separated environments",
+  "remediation": "Release maintainers and deployment configuration operators identify assessed hardware, firmware and software versions and settings. Separate production from development and test, record review triggers and retained prior versions, and demonstrate automated reconciliation, detected drift and rollback to a known configuration. Use exact-release installer inventory as an input and retain environment-specific settings separately.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved environment baselines and evidence of automated reconciliation, a prior baseline and a rollback exercise"
+    }
+  ]
+}

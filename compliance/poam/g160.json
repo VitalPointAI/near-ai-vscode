@@ -1,0 +1,16 @@
+{
+  "gap": "G160",
+  "id": "g160",
+  "controls": [
+    "pe-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Physical and environmental protection policy requires sponsor approval",
+  "remediation": "The sponsor physical security official and facility leads document the applicable policy and procedures, recipients, roles, coordination and review events. Capture publication and a dated review. Record provider or landlord responsibilities and submit any inheritance or tailoring decision to the sponsor security authority for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect policy approval, distribution and a recent policy or procedure review with named facility responsibilities"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G289",
+  "id": "g289",
+  "controls": [
+    "itsp171-03.12.05"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary information exchanges need approved agreements and review records",
+  "remediation": "The sponsor interconnection owner and information custodians inventory assessed exchanges and approved agreement types. Review a scoped agreement for interfaces, privacy and security expectations, assigned responsibilities and review cadence. Match the approved agreement to a redacted deployed connection record and record a dated renewal, closure or gap.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved exchange scope, the applicable agreement and review cadence, and a sampled operating and review record"
+    }
+  ]
+}

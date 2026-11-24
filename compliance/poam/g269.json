@@ -1,0 +1,26 @@
+{
+  "gap": "G269",
+  "id": "g269",
+  "controls": [
+    "itsp171-03.04.07",
+    "itsp171-03.04.09",
+    "itsp171-03.05.06",
+    "itsp171-03.05.08",
+    "itsp171-03.05.09",
+    "itsp171-03.05.10",
+    "itsp171-03.07.01",
+    "itsp171-03.07.02",
+    "itsp171-03.07.03",
+    "itsp171-03.08.06",
+    "itsp171-03.08.08"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 unallocated configuration, identity, maintenance and media entries need sponsor reconciliation",
+  "remediation": "The sponsor assessment lead and control owners reconcile each identifier with the checked-in ITSP.10.171 catalogue, which labels these entries unallocated and notes NIST withdrawal. Record the source edition and the accountable authority’s separate disposition for every listed identifier, including any successor that applies to the deployment. Leave the assessment rows open pending that authoritative decision. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the official edition references, per-identifier authorized scope decisions and any applicable successor mapping"
+    }
+  ]
+}

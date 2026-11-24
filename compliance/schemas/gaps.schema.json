@@ -12,14 +12,15 @@
       "required": ["id", "title", "controls", "remediation", "ownerRole"],
       "oneOf": [{ "properties": { "closesInPhase": { "type": "string" } }, "required": ["closesInPhase"] }, { "properties": { "poam": { "type": "string" } }, "required": ["poam"] }],
       "properties": {
-        "id": { "type": "string", "pattern": "^[GX][0-9]{1,2}$" },
+        "id": { "type": "string", "pattern": "^[GX][0-9]+$" },
         "title": { "type": "string", "minLength": 1 },
         "controls": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/control" } },
         "remediation": { "type": "string", "minLength": 1 },
         "ownerRole": { "type": "string", "enum": ["maintainers", "release-owner", "owner", "shared"] },
+        "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/control" } },
         "overlay": { "type": "string", "enum": ["both"] },
         "closesInPhase": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
-        "poam": { "type": "string", "pattern": "^[gx][0-9]{2}$" }
+        "poam": { "type": "string", "pattern": "^[gx][0-9]{2,}$" }
       }
     }
   }

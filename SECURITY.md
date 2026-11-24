@@ -2426,6 +2426,15 @@ health check connects only to itself; and no hub source file names a client netw
 
 | Limitation | Plan |
 | --- | --- |
+| This evidence covers encrypted project state stored by the optional Git sync feature. Other local and hosted information stores need separate evidence. | Verify at-rest protections for the local and hosted stores and backups in the assessed deployment. |
+| The approval test verifies the extension's preflight and preview audit event types. Required audit fields and coverage across assessed components need separate evidence. | Deployment and component owners verify approved audit fields from each assessed source under G45. |
+| Approval attribution is verified for extension decisions. The deployment still needs evidence of authenticator issuance, protection, recovery, rotation and revocation. | The deployment identity owner documents credential lifecycle controls and samples issuance, recovery and denied use after revocation. |
+| Branch protection and an agent review do not establish the owner's approval for a protected environment or verify release-tag bypass authority. | Record each required protected deployment approval and authoritatively review the release-tag ruleset's bypass settings. |
+| The dependency audit and one verified policy remediation do not establish complete flaw coverage or that fixes were installed in a particular deployment. | Track findings through reviewed fixes and releases. Deployment operators verify installed versions and record patch deadlines and retest results. |
+| The installer inventory identifies shipped components. It does not establish the approved deployment configuration or operational configuration management. | Record the assessed installation, settings, approved baseline and change history for each operational environment. |
+| The published incident response plan and supported versions policy document the supplier procedure. They do not establish response exercises, advisory delivery, or deployment response effectiveness. | Record a product response exercise and evidence of advisory and notification procedures. Your organization owns its deployment response plan and exercises. |
+| Local gate decision records cover only extension decisions. They do not establish deployment-wide event selection, retention, or monitoring. | Your organization selects events and components to log, and defines retention, forwarding and review. |
+| The crypto inventory documents the AES-256-GCM entry. It does not establish key management practices or approved cryptographic configurations for a deployment. | Record the reviewed key lifecycle and verify approved cryptographic configurations for the assessed deployment. |
 | The trust badge's checks do not check TCB status or revocation, enclave measurements, or NVIDIA's verdict | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Open-GSD's Claude Code hooks (statusline, context monitor) are not run | The runner provides its own context thresholds, compaction, and handoff instead |
 | Open-GSD's `Workflow` tool and MCP servers (for example context7) are not available | Workflows that need them report the tool as unavailable and fall back to their other paths |
@@ -2467,9 +2476,9 @@ release, the reviewed head of its hotfix branch) and attached to a GitHub releas
 checksum. Publishing to the Marketplace waits for an approval in GitHub, which is the owner's
 decision. Every GitHub Action is pinned to a full commit hash.
 
-The checksum shows that the VSIX published is the one the build job made; it does not protect
-the build itself. The build job installs dependencies with their install scripts and runs the
-tests, so a compromised dependency could change the VSIX before its checksum is taken.
+The checksum ties the published VSIX to the build output. The build job disables dependency
+install scripts and runs the lockfile-pinned build tools and tests. A compromised tool can
+still change the VSIX before its checksum is taken.
 
 AI agents do much of this work, and they act through the owner's GitHub account, which is a
 repository and organization admin. The Marketplace approval and the repository settings are

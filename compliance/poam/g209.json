@@ -1,0 +1,18 @@
+{
+  "gap": "G209",
+  "id": "g209",
+  "controls": [
+    "ear-734.13",
+    "ear-734.15",
+    "ear-734.18-a5"
+  ],
+  "ownerRole": "owner",
+  "title": "EAR export, release and encrypted activity reviews need separate scoped decisions",
+  "remediation": "The sponsor trade counsel and authorized EAR owner review the three objectives individually for the assessed operating boundary. Record export, release and encrypted activity scope decisions with separate dated evidence references where relevant. Where the organization already relies on a decision, verify the approved supporting review. Leave unresolved scope pending and keep controlled and key material outside the assessor export.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect distinct signed dispositions for the three objectives, the approved boundary and any protected technical review references"
+    }
+  ]
+}

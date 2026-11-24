@@ -1,0 +1,16 @@
+{
+  "gap": "G172",
+  "id": "g172",
+  "controls": [
+    "pe-400.02"
+  ],
+  "ownerRole": "owner",
+  "title": "International telework exceptions need sponsor decisions",
+  "remediation": "The sponsor international telework authority establishes exceptional access criteria and identifies the applicable departmental approval officials. Where use is permitted, sample a time-limited request with location and personnel risk assessment, security briefing, approvals and end-of-access evidence. Where prohibited or outside scope, submit the policy and deployment boundary to the assessor for review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved restriction and one sanitized exception decision with risk assessment and expiry, or documented prohibited-use scope"
+    }
+  ]
+}

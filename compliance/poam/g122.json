@@ -1,0 +1,17 @@
+{
+  "gap": "G122",
+  "id": "g122",
+  "controls": [
+    "sc-07.05",
+    "sc-07.11"
+  ],
+  "ownerRole": "shared",
+  "title": "Default-deny and allowed incoming communications need effective rule evidence",
+  "remediation": "Deployment gateway operators and component maintainers approve each default-deny boundary, exception and authorized inbound source and destination pair. Review effective network and service rules and record harmless allowed and denied cases from the assessed layers. Keep evidence for application route decisions separate from evidence for the surrounding gateways and host rules.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed traffic policy and exact settings with allowed and denied ingress and default-rule results"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-12"
+  ],
+  "gap": "G326",
+  "id": "g326",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-06-30",
+      "title": "kms-pkcs11 experiment against the chosen HSM recorded"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Test the kms-pkcs11 plugin release in use against the chosen HSM on the rig and record the experiment; until then OpenBao does not rely on it. SoftHSM2 results prove wiring only.",
+  "title": "The OpenBao kms-pkcs11 plugin is not tested against the chosen HSM"
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G156",
+  "id": "g156",
+  "controls": [
+    "mp-05"
+  ],
+  "ownerRole": "owner",
+  "title": "Media transport outside controlled areas needs verified custody evidence",
+  "remediation": "The deployment transport authority and media custodian approve routes, protection requirements and personnel for assessed media leaving controlled areas. Sample a shipment or approved exercise through dispatch, custody handoffs, delivery and disposition, with authorization and evidence of the required protection at each handoff.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved transport and personnel rules, a redacted shipment and custody record, and recipient acknowledgement"
+    }
+  ]
+}

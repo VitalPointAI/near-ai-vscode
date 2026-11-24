@@ -1,0 +1,17 @@
+{
+  "gap": "G195",
+  "id": "g195",
+  "controls": [
+    "cgp-10-b",
+    "cgp-10-c"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods assessment and eligibility records need protected retention evidence",
+  "remediation": "The designated official and privacy records steward review the assessment and eligibility evidence sets separately. Document the approved record custody, access roles, retention triggers and retention verification. Use opaque case references and sanitized review results in the assessor package. Keep personal assessment and eligibility documents in their approved repositories.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved evidence and retention schedule and a redacted retention verification for each applicable record set"
+    }
+  ]
+}

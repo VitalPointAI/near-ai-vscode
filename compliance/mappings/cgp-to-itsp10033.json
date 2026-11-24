@@ -3,8 +3,8 @@
     "uuid": "00000000-0000-4000-8000-000000000013",
     "metadata": {"title": "CGP requirements to ITSP.10.033", "version": "0.1.0", "last-modified": "2026-11-21T00:00:00Z", "oscal-version": "1.2.1"},
     "provenance": {"method": "human", "matching-rationale": "functional", "status": "complete", "mapping-description": "Our product-oriented reading, not legal advice."},
-    "mappings": [{
-      "uuid": "00000000-0000-4000-8000-000000000130", "source-resource": {"type": "catalog", "href": "../catalogs/cgp/catalog.json"}, "target-resource": {"type": "catalog", "href": "../catalogs/itsp10033/catalog.json"},
+    "mappings": {
+      "uuid": "00000000-0000-4000-8000-000000000130", "source-resource": {"type": "catalog", "href": "../catalogs/cgp/catalog.json"}, "target-resource": {"type": "catalog", "href": "../catalogs/itsp-10-033/catalog.json"},
       "maps": [
         {"uuid":"00000000-0000-4000-8000-000000000101","relationship":"intersects-with","sources":[{"type":"control","id-ref":"cgp-37-1"}],"targets":[{"type":"control","id-ref":"ac-03"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"},{"name":"unsettled","ns":"urn:near-ai-vscode:compliance","value":"third-party-encrypted-storage"}]},
         {"uuid":"00000000-0000-4000-8000-000000000102","relationship":"intersects-with","sources":[{"type":"control","id-ref":"cgp-37-2"}],"targets":[{"type":"control","id-ref":"ac-03"},{"type":"control","id-ref":"ac-04"},{"type":"control","id-ref":"ac-16"},{"type":"control","id-ref":"ac-21"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"},{"name":"unsettled","ns":"urn:near-ai-vscode:compliance","value":"tee-question"},{"name":"requires-official-signature","ns":"urn:near-ai-vscode:compliance","value":"true"}]},
@@ -29,6 +29,6 @@
         {"uuid":"00000000-0000-4000-8000-000000000121","relationship":"intersects-with","sources":[{"type":"control","id-ref":"cgp-19"}],"targets":[{"type":"control","id-ref":"ps-03"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"}]},
         {"uuid":"00000000-0000-4000-8000-000000000122","relationship":"intersects-with","sources":[{"type":"control","id-ref":"cgp-23"}],"targets":[{"type":"control","id-ref":"ac-02"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"}]}
       ]
-    }]
+    }
   }
 }

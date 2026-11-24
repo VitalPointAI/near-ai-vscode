@@ -1,0 +1,20 @@
+{
+  "gap": "G54",
+  "id": "g54",
+  "controls": [
+    "cm-06",
+    "cm-07",
+    "cm-07.01",
+    "cm-07.02",
+    "cm-07.05"
+  ],
+  "ownerRole": "shared",
+  "title": "Secure settings, least-functionality review and approved execution need evidence",
+  "remediation": "Component maintainers and deployment security operators approve the applicable restrictive baseline and essential functions, ports, protocols, services and software. Compare applied settings to the approved baseline, record authorized exceptions and monitoring, review unused functions, and test permitted and denied program execution under the approved allow-by-exception policy. Record gaps in deployed host or application enforcement and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed settings and exceptions, reviewed service inventory, change monitoring, and allowed and denied execution receipts"
+    }
+  ]
+}

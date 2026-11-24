@@ -1,0 +1,16 @@
+{
+  "gap": "G103",
+  "id": "g103",
+  "controls": [
+    "sa-02"
+  ],
+  "ownerRole": "owner",
+  "title": "Security and privacy resource commitments need approved budget evidence",
+  "remediation": "The sponsor business owner and financial authority map high-level security and privacy requirements to planned people, services and funds. Retain the dated investment decision and discrete security and privacy budget allocation. Record the authority and follow-up for any shortfall or change.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved requirements, an investment decision, a redacted budget line and the disposition of a sampled allocation change"
+    }
+  ]
+}

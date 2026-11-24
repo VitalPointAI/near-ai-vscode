@@ -1,0 +1,16 @@
+{
+  "gap": "G173",
+  "id": "g173",
+  "controls": [
+    "pe-401"
+  ],
+  "ownerRole": "owner",
+  "title": "Security operations centre coverage needs sponsor validation",
+  "remediation": "The sponsor security operations authority identifies the physical and technical monitoring coverage, operators and escalation responsibility for in-scope services and facilities. Review any shared or provider service claim against its scope and verify an observed exercise or incident handoff. Submit residual coverage decisions for sponsor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved monitoring coverage and responsibility map tied to a representative exercise or incident handoff"
+    }
+  ]
+}

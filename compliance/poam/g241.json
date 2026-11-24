@@ -1,0 +1,16 @@
+{
+  "gap": "G241",
+  "id": "g241",
+  "controls": [
+    "itsp171-03.03.06"
+  ],
+  "ownerRole": "owner",
+  "title": "Audit reduction and reporting need original record preservation evidence",
+  "remediation": "The sponsor security analytics and records leads demonstrate an approved reduction and reporting workflow for review or investigation. Compare a representative report with original events and verify that the original contents and time ordering remain intact. Document provider or tool boundary and access to originals for assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted report and reproducible reconciliation to preserved original event contents and chronological order"
+    }
+  ]
+}

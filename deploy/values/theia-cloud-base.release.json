@@ -1,0 +1,8 @@
+{
+  "chart": "theia-cloud-base",
+  "namespace": "theia-cloud",
+  "order": 61,
+  "values": ["deploy/values/theia-cloud-base.yaml"],
+  "images": [],
+  "note": "Cluster roles and issuers of Theia Cloud; the chart renders no image."
+}

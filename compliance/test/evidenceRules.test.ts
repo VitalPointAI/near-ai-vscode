@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { checkRuleTargets, evaluateTestRule, hasStringLiteral, windowForCollector, type RuleContext } from '../src/rules.ts';
+import { checkRuleTargets, evaluateObservationRule, evaluateTestRule, hasStringLiteral, windowForCollector, type RuleContext } from '../src/rules.ts';
+import { computeStatus, isFresh } from '../src/status.ts';
 import { readReport } from '../src/collectors/tests.ts';
 import type { EvidenceRule, ReasonCode, TestReportRow } from '../src/model.ts';
 
@@ -125,4 +126,26 @@ test('the collector windows: documents and the crypto inventory age as documents
   assert.equal(windowForCollector('documents'), 'document');
   assert.equal(windowForCollector('crypto'), 'document');
   for (const id of ['tests', 'ci', 'secret-scan']) assert.equal(windowForCollector(id), 'head');
+});
+
+test('a carried CODEOWNERS observation is stale at another commit while unrelated settings can still be current', () => {
+  const now = new Date('2026-11-21T12:00:00Z');
+  const observation = { collector: 'settings', subject: 'codeowners-valid', commit: 'a'.repeat(40),
+    passed: true, collectedAt: '2026-11-20T12:00:00Z' };
+  const rule: EvidenceRule = { id: 'release.cm-05.codeowners', component: 'release-pipeline', control: 'cm-05',
+    statement: 'cm-05_smt.codeowners', kind: 'observation', observation: { collector: 'settings', subject: observation.subject } };
+  const context = { commit: COMMIT, collectedAt: now.toISOString() };
+  const result = evaluateObservationRule(rule, [observation], context);
+  assert.equal(result.window, 'head');
+  assert.equal(result.commit, observation.commit);
+  assert.equal(computeStatus({
+    head: COMMIT, now, control: rule.control, component: rule.component, level: 'protected-a', responsibility: 'shared',
+    statements: [{ id: rule.statement, description: 'CODEOWNERS review routing.' }],
+    rulesByStatement: { [rule.statement]: [rule] }, results: { [rule.id]: result }
+  }).state, 'stale');
+  assert.equal(isFresh(evaluateObservationRule(rule, [{ ...observation, commit: COMMIT }], context), COMMIT, now), true);
+  const subject = 'docs-required';
+  const unrelated = evaluateObservationRule({ ...rule, observation: { collector: 'settings', subject } }, [{ ...observation, subject }], context);
+  assert.equal(unrelated.window, 'settings');
+  assert.equal(isFresh(unrelated, COMMIT, now), true);
 });

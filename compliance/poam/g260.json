@@ -1,0 +1,16 @@
+{
+  "gap": "G260",
+  "id": "g260",
+  "controls": [
+    "itsp171-03.06.05"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 the incident response plan needs approval, distribution and protected maintenance",
+  "remediation": "The sponsor incident authority approves a plan for the assessed system that identifies organization structure, response capability, reportable incidents, sharing boundaries and assigned roles. Review controlled distribution and protections against unauthorized disclosure. Sample a revision based on a system change, exercise or tracked issue. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved plan, restricted distribution and access records, and reviewed revision or exercise follow-up"
+    }
+  ]
+}

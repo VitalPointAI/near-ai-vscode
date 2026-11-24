@@ -1,0 +1,19 @@
+{
+  "gap": "G181",
+  "id": "g181",
+  "controls": [
+    "pm-04",
+    "pm-06",
+    "pm-14",
+    "pm-31"
+  ],
+  "ownerRole": "owner",
+  "title": "Program remediation and monitoring need verified review records",
+  "remediation": "The sponsor program assurance lead approves POA&M reporting and prioritization, performance measures, and the testing, training and continuous monitoring plans. Sample coordinated results, program-level reporting to designated recipients, approved remediation or escalation and later review of effectiveness.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved reporting cadence and plans, performance results and a sampled finding through follow-up"
+    }
+  ]
+}

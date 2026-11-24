@@ -1,0 +1,18 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "wgpolicyk8s.io/v1alpha2",
+      "kind": "PolicyReport",
+      "metadata": { "name": "fixture-report-1", "namespace": "fixture-sessions" },
+      "scope": { "apiVersion": "v1", "kind": "Pod", "name": "session-person-one", "namespace": "fixture-sessions" },
+      "summary": { "pass": 1, "fail": 1, "warn": 0, "error": 0, "skip": 1 },
+      "results": [
+        { "policy": "sterling-signed-images", "rule": "", "result": "pass", "source": "KyvernoImageValidatingPolicy", "message": "image registry.fixture-site.example/sterling/workbench verified", "timestamp": { "seconds": 1795086000, "nanos": 0 } },
+        { "policy": "audit-only-image-check", "rule": "check", "result": "skip", "source": "kyverno", "timestamp": { "seconds": 1795086000, "nanos": 0 } },
+        { "policy": "require-labels", "rule": "check-labels", "result": "fail", "source": "kyverno", "message": "label required", "timestamp": { "seconds": 1795086000, "nanos": 0 } }
+      ]
+    }
+  ]
+}

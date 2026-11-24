@@ -1,0 +1,16 @@
+{
+  "gap": "G302",
+  "id": "g302",
+  "controls": [
+    "itsp171-03.13.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary managed interfaces and public subnet separation need deployment verification",
+  "remediation": "The sponsor network security authority and system owner map the assessed external and key internal interfaces, public components and approved external connections. Review public-to-internal subnet separation, boundary devices and monitoring settings, and verify representative approved and denied connections using benign synthetic observations. Record inherited protection and findings at the scope of this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved interface and subnet diagram, effective boundary protection and monitoring settings, and redacted permitted and denied connection results"
+    }
+  ]
+}

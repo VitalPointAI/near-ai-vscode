@@ -1,0 +1,16 @@
+{
+  "gap": "G279",
+  "id": "g279",
+  "controls": [
+    "itsp171-03.10.06"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary alternate work sites need approved boundaries and verified safeguards",
+  "remediation": "The sponsor workplace security lead and system owner identify assessed alternate work sites or approved site classes and the safeguards selected for them. Inspect a redacted site approval and verify applicable safeguards or a documented restriction of work activities. Record the owner, review date and any unapproved site disposition.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved alternate-site classes and safeguards, a masked site assessment and a dated approval or restriction decision"
+    }
+  ]
+}

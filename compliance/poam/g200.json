@@ -1,0 +1,18 @@
+{
+  "gap": "G200",
+  "id": "g200",
+  "controls": [
+    "cgp-13",
+    "cgp-14",
+    "cgp-15"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods assessment and scope decisions need protected authority evidence",
+  "remediation": "The designated official, registration owner and privacy authority review the approved assessment scope and decision authority. Verify a protected case reference for completed assessment review, official decision, the assessed duties and limits, and how the organization documents reliance on that decision. Keep personal case files and controlled information outside the general export.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved authority and role scope, a redacted case decision and protected references for assessment and review"
+    }
+  ]
+}

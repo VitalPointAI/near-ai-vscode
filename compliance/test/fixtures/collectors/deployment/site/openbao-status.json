@@ -1,0 +1,16 @@
+{
+  "type": "pkcs11",
+  "initialized": true,
+  "sealed": false,
+  "t": 1,
+  "n": 1,
+  "progress": 0,
+  "nonce": "",
+  "version": "2.4.1",
+  "build_date": "2026-09-30T12:00:00Z",
+  "migration": false,
+  "cluster_name": "fixture-openbao-cluster",
+  "cluster_id": "7c1e9a52-0f4d-4c55-8d11-2a6f3e9b0c01",
+  "recovery_seal": true,
+  "storage_type": "raft"
+}

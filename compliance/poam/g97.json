@@ -1,0 +1,18 @@
+{
+  "gap": "G97",
+  "id": "g97",
+  "controls": [
+    "ca-01",
+    "ca-02",
+    "ca-02.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Assessment policy and independent assessment need approved records",
+  "remediation": "The sponsor assessment lead obtains approved policy, procedures and a scoped assessment plan with controls, methods, environments, responsibilities and reporting dates. Record the assessor appointment and independence determination. Collect the dated assessment results, evidence references, sponsor distribution and retained findings.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved policy and plan, assessor appointment and independence decision, and reviewed assessment results"
+    }
+  ]
+}

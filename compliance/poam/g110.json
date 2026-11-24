@@ -1,0 +1,18 @@
+{
+  "gap": "G110",
+  "id": "g110",
+  "controls": [
+    "sa-09",
+    "sa-09.01",
+    "sa-09.02"
+  ],
+  "ownerRole": "shared",
+  "title": "External services need approved risk, interface and oversight evidence",
+  "remediation": "The sponsor service owner, privacy lead and acquiring authority approve security outsourcing after a scoped risk assessment. Obtain provider declarations for required functions, ports, protocols and services. Record assigned responsibilities, evidence and review cadence for each assessed provider, and verify a representative oversight review with findings and follow-up. Keep X3 as the separate export-control route path.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved pre-acquisition risk decision, provider interface inventory, assigned responsibilities and a dated monitoring result"
+    }
+  ]
+}

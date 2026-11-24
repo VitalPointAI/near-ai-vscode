@@ -1,0 +1,16 @@
+{
+  "gap": "G28",
+  "id": "g28",
+  "controls": [
+    "ia-05.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Authenticator reuse across systems needs a deployment risk review",
+  "remediation": "The deployment identity risk owner identifies where the same individuals hold accounts on multiple assessed systems and obtains sponsor approval of measures to limit cross-system compromise. Collect a redacted account and service inventory, approved authenticator reuse controls and operating evidence for the selected mechanism. Sample that independent credentials, centrally managed sign-in or another approved mechanism operates as designed. Record inherited coverage and route unmitigated reuse to its operator.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Review multi-system account scope, approve reuse safeguards and retain a redacted account sample and evidence that the chosen safeguards operate"
+    }
+  ]
+}

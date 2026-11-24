@@ -1,0 +1,55 @@
+{
+  "realm": {
+    "id": "0b6c2c55-5a6e-4e3b-9a3f-2d3f1c1d6a10",
+    "realm": "fixture-sterling-site",
+    "displayName": "Fixture Sterling Site",
+    "enabled": true,
+    "eventsEnabled": true,
+    "eventsListeners": ["jboss-logging"],
+    "adminEventsEnabled": true,
+    "adminEventsDetailsEnabled": false,
+    "resetPasswordAllowed": false,
+    "browserFlow": "sterling-browser",
+    "registrationFlow": "registration",
+    "directGrantFlow": "direct grant",
+    "resetCredentialsFlow": "reset credentials",
+    "clientAuthenticationFlow": "clients",
+    "dockerAuthenticationFlow": "docker auth",
+    "firstBrokerLoginFlow": "first broker login",
+    "smtpServer": { "from": "operator@fixture-site.example" }
+  },
+  "flowExecutions": {
+    "sterling-browser": [
+      { "id": "e1", "requirement": "ALTERNATIVE", "displayName": "Cookie", "providerId": "auth-cookie", "level": 0, "index": 0 },
+      { "id": "e2", "requirement": "ALTERNATIVE", "displayName": "sterling-passkey", "authenticationFlow": true, "level": 0, "index": 1 },
+      { "id": "e3", "requirement": "REQUIRED", "displayName": "Passkey", "providerId": "webauthn-authenticator-passwordless", "level": 1, "index": 0 }
+    ],
+    "registration": [
+      { "id": "e4", "requirement": "REQUIRED", "displayName": "registration form", "authenticationFlow": true, "providerId": "registration-page-form", "level": 0, "index": 0 }
+    ],
+    "direct grant": [
+      { "id": "e5", "requirement": "REQUIRED", "displayName": "Username Validation", "providerId": "direct-grant-validate-username", "level": 0, "index": 0 },
+      { "id": "e6", "requirement": "DISABLED", "displayName": "Password", "providerId": "direct-grant-validate-password", "level": 0, "index": 1 },
+      { "id": "e7", "requirement": "DISABLED", "displayName": "OTP", "providerId": "direct-grant-validate-otp", "level": 1, "index": 0 }
+    ],
+    "reset credentials": [
+      { "id": "e8", "requirement": "REQUIRED", "displayName": "Choose User", "providerId": "reset-credentials-choose-user", "level": 0, "index": 0 },
+      { "id": "e9", "requirement": "DISABLED", "displayName": "Reset Password", "providerId": "reset-password", "level": 0, "index": 1 },
+      { "id": "e10", "requirement": "DISABLED", "displayName": "Reset OTP", "providerId": "reset-otp", "level": 1, "index": 0 }
+    ],
+    "clients": [
+      { "id": "e11", "requirement": "ALTERNATIVE", "displayName": "Signed Jwt", "providerId": "client-jwt", "level": 0, "index": 0 }
+    ],
+    "docker auth": [
+      { "id": "e12", "requirement": "DISABLED", "displayName": "Docker Authenticator", "providerId": "docker-http-basic-authenticator", "level": 0, "index": 0 }
+    ],
+    "first broker login": [
+      { "id": "e13", "requirement": "REQUIRED", "displayName": "Review Profile", "providerId": "idp-review-profile", "level": 0, "index": 0 },
+      { "id": "e14", "requirement": "DISABLED", "displayName": "Username Password Form for identity provider reauthentication", "providerId": "idp-username-password-form", "level": 1, "index": 0 },
+      { "id": "e15", "requirement": "DISABLED", "displayName": "OTP Form", "providerId": "auth-otp-form", "level": 2, "index": 0 }
+    ],
+    "browser": [
+      { "id": "e16", "requirement": "REQUIRED", "displayName": "Username Password Form", "providerId": "auth-username-password-form", "level": 1, "index": 0 }
+    ]
+  }
+}

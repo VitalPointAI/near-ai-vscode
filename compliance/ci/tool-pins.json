@@ -23,5 +23,99 @@
     "checksumUrl": "https://github.com/anchore/grype/releases/download/v0.122.1/grype_0.122.1_checksums.txt",
     "archive": "tar.gz",
     "bin": "grype"
+  },
+  "cosign": {
+    "version": "3.1.4",
+    "url": "https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64",
+    "sha256": "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa",
+    "checksumUrl": "https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign_checksums.txt",
+    "archive": "binary",
+    "bin": "cosign"
+  },
+  "hauler": {
+    "version": "2.1.2",
+    "url": "https://github.com/hauler-dev/hauler/releases/download/v2.1.2/hauler_2.1.2_linux_amd64.tar.gz",
+    "sha256": "5c4c5b54a4a249bbafebd069dda3df86622515c93fa6657b045e081d82b7b2ce",
+    "checksumUrl": "https://github.com/hauler-dev/hauler/releases/download/v2.1.2/hauler_2.1.2_checksums.txt",
+    "archive": "tar.gz",
+    "bin": "hauler"
+  },
+  "postgresql": {
+    "version": "18.7",
+    "url": "https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9-x86_64/postgresql18-server-18.7-1PGDG.rhel9.9.x86_64.rpm",
+    "sha256": "67c997e865dee265d5194acafdd64db6a229cbb4bb56f5e6f0a67bc1572e0748",
+    "checksumUrl": "https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9-x86_64/repodata/repomd.xml",
+    "archive": "file",
+    "assets": [
+      {
+        "url": "https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9-x86_64/postgresql18-18.7-1PGDG.rhel9.9.x86_64.rpm",
+        "sha256": "9b1efaf683626a0bdc3beeaed0d8a3e459151ec20b0918afa17c0cd80bbcc2c3"
+      },
+      {
+        "url": "https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9-x86_64/postgresql18-libs-18.7-1PGDG.rhel9.9.x86_64.rpm",
+        "sha256": "d7f708ca18365a2df3c8dc5fb4de146fe902893be78a26cf1ac7401d43557123"
+      },
+      {
+        "url": "https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL",
+        "sha256": "a70c9527426017d00fa4e6f9d2941d515357a27a7be82e155248ece53bbe5453",
+        "fingerprint": "D4BF08AE67A0B4C7A1DBCCD240BCA2B408B40D20"
+      }
+    ]
+  },
+  "helm": {
+    "version": "4.3.2",
+    "url": "https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz",
+    "sha256": "d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983",
+    "checksumUrl": "https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz.sha256sum",
+    "archive": "tar.gz",
+    "bin": "linux-amd64/helm"
+  },
+  "rke2": {
+    "version": "1.37.2+rke2r1",
+    "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2.linux-amd64.tar.gz",
+    "sha256": "0568f48d772c7feff7056062225d5ba82fb3f73ea7acaea63862fe601dae6d92",
+    "checksumUrl": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/sha256sum-amd64.txt",
+    "archive": "tar.gz",
+    "bin": "bin/rke2",
+    "assets": [
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2-images-core.linux-amd64.tar.zst",
+        "sha256": "e517534d66ec29cd67eca8e16b4eb6f9838378e50a55569ecac2c420101aabd6"
+      },
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2-images-canal.linux-amd64.tar.zst",
+        "sha256": "18728448092a4578358910a818ad10f9eb3c1f2e45abd1cdc301633c2d011ee6"
+      },
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/sha256sum-amd64.txt",
+        "sha256": "c924bec113c104ab28f576586e5e49d9004d1e6e3cac9c7efcb8ac45d43492c3"
+      },
+      {
+        "url": "https://github.com/rancher/rke2-selinux/releases/download/v0.24.stable.1/rke2-selinux-0.24-1.el9.noarch.rpm",
+        "sha256": "f220147db3e6ea745ffd68ccfbcd36c8215b546da20363be52386aa510d5a45d",
+        "checksumUrl": "https://github.com/rancher/rke2-selinux/releases/download/v0.24.stable.1/sha256sum-centos9-noarch.txt"
+      }
+    ]
+  },
+  "kms-pkcs11": {
+    "version": "0.3.0",
+    "url": "https://github.com/openbao/openbao-plugins/releases/download/kms-pkcs11-v0.3.0/openbao-plugin-kms-pkcs11_linux_amd64_v1.tar.gz",
+    "sha256": "c112c670e1bcca7a7b7625b13c0ecf1a43a62cd2651d29bf23befb2ad47c49bf",
+    "checksumUrl": "https://github.com/openbao/openbao-plugins/releases/download/kms-pkcs11-v0.3.0/checksums-kms-pkcs11.txt",
+    "archive": "tar.gz",
+    "bin": "openbao-plugin-kms-pkcs11_linux_amd64_v1",
+    "binSha256": "96fefa80e721551725ea01be79b0dae0f3951f15f01291fd87846d5e45475be6"
+  },
+  "softhsm2": {
+    "version": "2.7.0",
+    "scope": "test",
+    "pinKind": "commit",
+    "url": "https://github.com/softhsm/SoftHSMv2/archive/13e6e86b83748fef74046dbf0c91f664b7acc1c3.tar.gz",
+    "sha256": "e7577582ff8a39477aa8ddc31d88dcb85b32ac7a6ebdcfe358595bfc6445bcf0",
+    "archive": "file",
+    "commit": "13e6e86b83748fef74046dbf0c91f664b7acc1c3",
+    "tree": "33f59215337436c21bcf2ec6634282aa599e4744",
+    "tarSha256": "1b349304606d883cf543b564327c6afd89fe7e88f0ef61a564a457b10a89b645",
+    "note": "Test scope only (D-38): the OpenBao SoftHSM2 lab/CI image, never production values. Upstream publishes no release tarball or checksum on GitHub (the 2.7.0 release has no assets; the tag 2.7.0 is a lightweight tag on this commit, whose signature GitHub reports as verified on 2026-11-23), so the pin is the commit, not the tag archive. The url is GitHub's archive of the commit; its gzip bytes (sha256) are GitHub's and could change, the commit and tree cannot. Reproduce the uncompressed tar offline: git fetch --depth 1 https://github.com/softhsm/SoftHSMv2 <commit>; git rev-parse <commit>^{tree} must equal tree; git archive --format=tar --prefix=SoftHSMv2-<commit>/ <commit> | sha256sum must equal tarSha256 (checked 2026-11-23 with git 2.53.0, and gzip -dc of the url gives the same hash). If sha256 ever stops matching, confirm tarSha256 and tree as above before re-hashing; never re-hash from a download alone."
   }
 }

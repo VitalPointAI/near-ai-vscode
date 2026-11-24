@@ -1,0 +1,16 @@
+{
+  "gap": "G317",
+  "id": "g317",
+  "controls": [
+    "itsp171-03.16.03"
+  ],
+  "ownerRole": "owner",
+  "title": "External specified information services need requirements and ongoing oversight evidence",
+  "remediation": "The sponsor service owner, procurement authority and privacy lead identify external providers that process, store or transmit specified information. Define provider security requirements and shared responsibilities, including applicable user roles. Sample an approved agreement or equivalent provider obligation and a dated monitoring result with follow-up. Keep scope and inherited control determinations open for sponsor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the provider boundary and responsibility matrix, agreed security requirements and an ongoing monitoring receipt with tracked exceptions"
+    }
+  ]
+}

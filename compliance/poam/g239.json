@@ -1,0 +1,16 @@
+{
+  "gap": "G239",
+  "id": "g239",
+  "controls": [
+    "itsp171-03.03.04"
+  ],
+  "ownerRole": "owner",
+  "title": "Audit logging failure alerts and response need exercise evidence",
+  "remediation": "The sponsor monitoring and service owners set notification recipients, response time and additional action when logging fails. Use an authorized simulation or a sanitized incident reference to demonstrate detection, timely alert, response and recovery. Confirm which failure modes and components are assessed.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved logging outage response and timestamped detection, recipient notification and response evidence"
+    }
+  ]
+}

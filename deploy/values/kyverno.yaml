@@ -1,0 +1,41 @@
+# Kyverno v1.20.0 (chart deploy/charts/vendored/kyverno-3.10.0.tgz), the settings that decide which images render. The descriptor sets every
+# remaining image's registry, repository and tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-15, D-20). 47-05 adds the policies
+# and the rest of the settings and must keep these.
+
+# Admission controller only (research Decision 1): no background, cleanup or reports controller, so three images and their service accounts
+# are not installed (T-47-08).
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+reportsController:
+  enabled: false
+
+# Hooks that run the kyverno-cli image are off: the pre-install legacy policy check (a new site has no legacy kyverno.io policies; the chart's
+# render-time check stays on) and the post-upgrade CRD migration (nothing to migrate on a first install; turn it back on, with kyverno-cli pinned,
+# for the first Kyverno upgrade that needs a stored-version migration).
+upgrade:
+  legacyPolicyCheck:
+    enabled: false
+crds:
+  migration:
+    enabled: false
+
+# Kept: the pre-delete hook that removes Kyverno's webhooks, so uninstalling a fail-closed admission controller cannot block the cluster. It runs
+# the readiness-checker image, the same image the chart's admission controller test pods use (the chart renders those whenever the admission
+# controller is on).
+webhooksCleanup:
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+test:
+  image:
+    pullPolicy: IfNotPresent
+
+admissionController:
+  initContainer:
+    image:
+      pullPolicy: IfNotPresent
+  container:
+    image:
+      pullPolicy: IfNotPresent

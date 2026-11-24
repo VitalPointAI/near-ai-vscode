@@ -1,0 +1,23 @@
+# OpenSearch 3.10.0 (chart deploy/charts/vendored/opensearch-3.10.0.tgz), the settings that decide which images render. The descriptor sets
+# image.repository and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-19, D-20). Later plans add the rest of the log store
+# settings here and must keep these.
+
+# One node by default (small sites); large sites raise it to three data nodes.
+singleNode: true
+replicas: 1
+
+image:
+  pullPolicy: IfNotPresent
+# The chart reads the major version from image.tag unless it is set; the tag is <tag>@<digest>, which is not a semantic version.
+majorVersion: "3"
+
+# No busybox init containers: no sysctl init (so each node's vm.max_map_count must be at least 262144 on the host; the install preflight,
+# 47-16, checks it) and no chown of the data volume (the chart's pod fsGroup 1000 gives the volume its group).
+sysctlInit:
+  enabled: false
+persistence:
+  enableInitChown: false
+
+# The security plugin stays on: TLS, roles and the audit log of access to the store (research Decision 4).
+securityConfig:
+  enabled: true

@@ -1,0 +1,10 @@
+{
+  "chart": "kubernetes-ingress",
+  "namespace": "haproxy-controller",
+  "order": 35,
+  "values": ["deploy/values/kubernetes-ingress.yaml"],
+  "images": [
+    { "lock": "docker.io/haproxytech/kubernetes-ingress", "set": { "controller.image.repository": "name", "controller.image.tag": "tagAtDigest" } }
+  ],
+  "note": "HAProxy Kubernetes Ingress controller 3.4.1 (D-07). The controller image also runs the chart's CRD job hook."
+}

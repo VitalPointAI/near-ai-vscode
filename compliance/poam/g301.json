@@ -1,0 +1,16 @@
+{
+  "gap": "G301",
+  "id": "g301",
+  "controls": [
+    "itsp171-03.10.07"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary facility access controls need tested boundary and visitor evidence",
+  "remediation": "The deployment facility security owner identifies assessed facility ingress, egress and output locations. Verify physical permission before entry, monitoring logs, visitor escorts, physical device and key custody and protection of output devices. Retain reviewed samples and verified provider references for inherited controls in this contract boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved boundary map and redacted entry, exit, visitor, credential custody and output protection verification records"
+    }
+  ]
+}

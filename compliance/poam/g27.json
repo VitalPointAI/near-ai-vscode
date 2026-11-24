@@ -1,0 +1,21 @@
+{
+  "gap": "G27",
+  "id": "g27",
+  "controls": [
+    "ia-02",
+    "ia-02.01",
+    "ia-02.02",
+    "ia-02.08",
+    "ia-02.10",
+    "ia-11"
+  ],
+  "ownerRole": "shared",
+  "title": "Organizational sign-in needs deployment authentication evidence",
+  "remediation": "The deployment sponsor approves the in-scope sign-in paths, account classes, accounts and services assigned to single sign-on, replay resistance selections and reauthentication triggers. Identity and component operators trace unique user identities to processes acting for them. Collect redacted policy exports and results showing strong multi-factor authentication for privileged accounts, multi-factor authentication for non-privileged accounts, replay refusal, single sign-on to assigned services and a fresh challenge at each applicable trigger. Use G3 relay ingress and Phase 76 requester binding only for that part of the deployment. Assign implementation or inheritance verification where a path lacks evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the organizational sign-in inventory and collect configuration, actor binding, multi-factor, replay denial, single sign-on and reauthentication receipts"
+    }
+  ]
+}

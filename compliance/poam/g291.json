@@ -1,0 +1,21 @@
+{
+  "gap": "G291",
+  "id": "g291",
+  "controls": [
+    "itsp171-03.13.02",
+    "itsp171-03.13.03",
+    "itsp171-03.13.05",
+    "itsp171-03.13.07",
+    "itsp171-03.13.14",
+    "itsp171-03.13.16"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated supplementary communications rows need per-objective sponsor decisions",
+  "remediation": "The contracting sponsor network assurance lead and assessor reconcile each displayed identifier to the contract selection and authoritative edition, which records these references as not allocated after NIST withdrawal. Keep a separate cited disposition for every identifier and record any approved successor only if designated by the contracting authority. Retain unresolved rows pending review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved edition and contract scope references and six signed or pending source reconciliations, one per communications identifier"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "chart": "prometheus",
+  "namespace": "sterling-monitoring",
+  "order": 84,
+  "values": ["deploy/values/prometheus.yaml"],
+  "images": [
+    { "lock": "quay.io/prometheus/prometheus", "set": { "server.image.repository": "name", "server.image.digest": "digest" } },
+    { "lock": "quay.io/prometheus-operator/prometheus-config-reloader", "set": { "configmapReload.prometheus.image.repository": "name", "configmapReload.prometheus.image.digest": "digest" } },
+    { "lock": "registry.k8s.io/kube-state-metrics/kube-state-metrics", "set": { "kube-state-metrics.image.registry": "registry", "kube-state-metrics.image.repository": "repository", "kube-state-metrics.image.sha": "digest" } },
+    { "lock": "quay.io/prometheus/node-exporter", "set": { "prometheus-node-exporter.image.registry": "registry", "prometheus-node-exporter.image.repository": "repository", "prometheus-node-exporter.image.digest": "digest" } }
+  ],
+  "note": "Prometheus v3.16.0 with kube-state-metrics and node-exporter (research Decision 4 metrics); no alertmanager or pushgateway."
+}

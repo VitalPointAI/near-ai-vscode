@@ -1,0 +1,16 @@
+{
+  "gap": "G275",
+  "id": "g275",
+  "controls": [
+    "itsp171-03.09.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary personnel screening needs dated authorization evidence",
+  "remediation": "The deployment personnel security authority and access sponsor approve screening criteria, case custody and rescreening triggers for the assessed roles. Verify a redacted timeline from an authorized screening disposition to initial access approval and select a rescreening case or exercise. Retain role and date evidence and protected case references in place of personal screening contents.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved screening and rescreening criteria, a dated pre-access verification, and a protected rescreening review reference"
+    }
+  ]
+}

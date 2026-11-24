@@ -1,0 +1,20 @@
+{
+  "gap": "G34",
+  "id": "g34",
+  "controls": [
+    "cp-08",
+    "cp-08.01",
+    "cp-08.02",
+    "cp-08.03",
+    "cp-08.05"
+  ],
+  "ownerRole": "owner",
+  "title": "Alternate telecommunications agreements and exercises need evidence",
+  "remediation": "The deployment network and service-contract owners document primary and alternate paths for in-scope processing and storage sites. Verify recovery time and service-priority provisions, provider and physical route independence, and shared points of failure. Record priority access requests when the approved scope requires them, perform scheduled failover tests, and retain the dated results and remediation.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved telecommunications agreements and route dependencies, scope decisions and a timed failover result"
+    }
+  ]
+}

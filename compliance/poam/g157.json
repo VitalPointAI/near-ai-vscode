@@ -1,0 +1,17 @@
+{
+  "gap": "G157",
+  "id": "g157",
+  "controls": [
+    "mp-06",
+    "mp-06.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Media sanitization and portable media preparation need verified outcomes",
+  "remediation": "The deployment media sanitization authority approves methods and verification appropriate to media type and information categorization. Sample sanitized media before disposal, transfer or reuse and trace the authorization, method and successful verification. Verify required non-destructive preparation of portable media before connection on approved non-production specimens, with refusal when preparation is missing.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved method and verification records, a redacted disposition receipt, and a sampled pre-connection preparation and approval result"
+    }
+  ]
+}

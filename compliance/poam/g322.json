@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "cp-02.02",
+    "sc-05"
+  ],
+  "gap": "G322",
+  "id": "g322",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-06-30",
+      "title": "Load-test run file from the rig reaching the target stage, or the stage reached recorded with its reason"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Provide the load-test rig, run the load test to the target stage with start bursts, and commit the hashed run file. A stage the rig does not reach is recorded as not reached with its reason; capacity figures in docs come only from the run file.",
+  "title": "The hosted deployment has no recorded load test at the target session count"
+}

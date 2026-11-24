@@ -1,0 +1,16 @@
+{
+  "gap": "G219",
+  "id": "g219",
+  "controls": [
+    "itsp171-03.10.07"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 physical access control needs operating records for facilities and output",
+  "remediation": "The sponsor site security owner confirms assessed entrances, exits and output locations. Review verification before entry, ingress and egress controls, access logs, visitor escort and activity controls, protection of keys or equivalent devices and controls for physical output. Collect a redacted operating sample or authorized hosting receipt for each applicable boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect approved facility and output boundaries with sampled entry and exit logs, visitor escort, physical credentials and output access records"
+    }
+  ]
+}

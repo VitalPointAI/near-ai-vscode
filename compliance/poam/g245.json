@@ -1,0 +1,17 @@
+{
+  "gap": "G245",
+  "id": "g245",
+  "controls": [
+    "itsp171-03.04.01",
+    "itsp171-03.04.02"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 configuration baselines and restrictive settings need approved evidence",
+  "remediation": "The sponsor configuration owner maintains the approved component baseline under configuration control and records its review cadence and changes triggered by installations or modifications. Compare effective settings with the most restrictive baseline consistent with approved operations. Record each deviation with approved purpose, scope, authority and review. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved baseline, sampled effective settings and dated baseline review and deviation decisions"
+    }
+  ]
+}

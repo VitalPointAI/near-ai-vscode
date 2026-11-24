@@ -1,0 +1,20 @@
+{
+  "gap": "G55",
+  "id": "g55",
+  "controls": [
+    "cm-08",
+    "cm-08.01",
+    "cm-08.03",
+    "cm-08.04",
+    "cm-08.06"
+  ],
+  "ownerRole": "shared",
+  "title": "Installed components need accountable inventory and automated unauthorized component response",
+  "remediation": "Deployment asset and component owners reconcile scoped assets, responsible administrators, assessed configurations and approved deviations with installation, removal and update records. Demonstrate approved automated detection using a synthetic unauthorized component and record the configured response. Use release inventories as evidence for supplier artifacts and verify actual deployments independently.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect signed inventory reconciliation, administrator and deviation records, and a sanitized unauthorized-component detection and response receipt"
+    }
+  ]
+}

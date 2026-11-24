@@ -1,0 +1,16 @@
+{
+  "gap": "G251",
+  "id": "g251",
+  "controls": [
+    "itsp171-03.05.01"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 unique user identity and re-authentication need assessed records",
+  "remediation": "The sponsor identity owner maps unique system users to accounts and processes acting for them. Document the re-authentication triggers and effective policies. Collect sanitized operating or controlled verification evidence that the expected user identity is retained in process attribution and re-authentication occurs on an approved trigger. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved identity mappings and re-authentication settings with redacted verification in the assessed ITSP deployment"
+    }
+  ]
+}

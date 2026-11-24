@@ -1,0 +1,17 @@
+{
+  "gap": "G237",
+  "id": "g237",
+  "controls": [
+    "itsp171-03.02.01",
+    "itsp171-03.02.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Security literacy and role-based training need deployment records",
+  "remediation": "The sponsor security and privacy training leads establish initial and recurring literacy that covers insider threat, social engineering and social mining. Set role-specific training before access or duties and at reviewed intervals. Track refresh after system or event changes and revisions to both training streams. Use de-identified learner evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved curricula and cadence, redacted initial and recurring completion records, and a before-access or before-duty role training sample"
+    }
+  ]
+}

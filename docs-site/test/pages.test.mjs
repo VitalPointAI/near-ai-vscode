@@ -15,6 +15,24 @@ test('classified says the appliance makes no claim', () => assert.match(readFile
 test('pages have no prohibited claim wording', () => readdirSync(pages).filter((name) => name.endsWith('.mdx')).forEach((name) => assert.deepEqual(lintPage(readFileSync(join(pages, name), 'utf8'), name), [], name)));
 test('level pages use the shared data reader', () => expected.slice(0, 7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /AccreditationData/, name)));
 test('supporting pages open with the organization decision', () => expected.slice(7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /Your organization decides/, name)));
+// Phase 48 (D-18, VER-07): the hosted pages read the hosted levels from the same data and page component as the other level pages.
+const hosted = [['hosted-protected-a.mdx', 'hosted-protected-a'], ['hosted-protected-b.mdx', 'hosted-protected-b']];
+const firstParagraph = (source) => source.replace(/^---\n[\s\S]*?\n---\n/, '').split(/\n\s*\n/).map((part) => part.trim()).find((part) => part && !part.startsWith('import '));
+test('hosted level pages open with the organization decision and use the shared level page', () => hosted.forEach(([name, levelId]) => {
+  assert.ok(readdirSync(pages).includes(name), name);
+  const source = readFileSync(join(pages, name), 'utf8');
+  assert.match(firstParagraph(source), /^Your organization decides/, name);
+  assert.match(source, /<AccreditationData>/, name);
+  assert.match(source, /<LevelPage /, name);
+  assert.equal(source.split(`levelId="${levelId}"`).length - 1, 1, name);
+}));
 test('the matrix component uses the safe CSV helper', () => assert.match(readFileSync(new URL('../src/components/accreditation/ResponsibilityMatrix.jsx', import.meta.url), 'utf8'), /toCsv/));
 test('the package page explains release verification', () => assert.match(readFileSync(new URL('../src/components/accreditation/PackageInfo.jsx', import.meta.url), 'utf8'), /gh attestation verify/));
 test('the README describes the local refresh', () => assert.match(readFileSync(new URL('../README.md', import.meta.url), 'utf8'), /compliance:refresh/));
+
+test('every level page asks for a level that exists, so no page silently shows no rows', () => {
+  const levels = new Set(JSON.parse(readFileSync(new URL('../../compliance/levels.json', import.meta.url), 'utf8')).levels.map(({ id }) => id));
+  for (const name of expected) {
+    for (const [, id] of readFileSync(join(pages, name), 'utf8').matchAll(/levelId="([^"]+)"/g)) assert.ok(levels.has(id), `${name} asks for level ${id}, which compliance/levels.json does not define`);
+  }
+});

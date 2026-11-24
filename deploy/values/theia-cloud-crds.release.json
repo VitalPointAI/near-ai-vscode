@@ -1,0 +1,10 @@
+{
+  "chart": "theia-cloud-crds",
+  "namespace": "theia-cloud",
+  "order": 60,
+  "values": ["deploy/values/theia-cloud-crds.yaml"],
+  "images": [
+    { "lock": "sterling/theia-cloud-conversion-webhook", "set": { "conversion.image": "ref" } }
+  ],
+  "note": "Theia Cloud CRDs and the conversion webhook, which we rebuild on UBI 9 (D-23)."
+}

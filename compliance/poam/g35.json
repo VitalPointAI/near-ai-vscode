@@ -1,0 +1,25 @@
+{
+  "gap": "G35",
+  "id": "g35",
+  "controls": [
+    "cp-09",
+    "cp-09.01",
+    "cp-09.03",
+    "cp-09.05",
+    "cp-09.07",
+    "cp-09.08"
+  ],
+  "ownerRole": "shared",
+  "title": "Backup reliability, transfer, removal authority and cryptographic protections need evidence",
+  "remediation": "Backup operators and component maintainers inventory backups, owners and critical assets. Verify scheduled integrity and retrieval tests, separate storage and protected transfer within approved recovery targets, dual authorization for protected backup deletion, and cryptographic protection and key access. Link component restore and relay runbook evidence where applicable and assign deficiencies for implementation and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a timed transfer and verified restore, backup protection settings and a denied single-approver deletion result"
+    },
+    {
+      "phase": "84",
+      "title": "Document and exercise relay backup and recovery when the relay is in scope"
+    }
+  ]
+}

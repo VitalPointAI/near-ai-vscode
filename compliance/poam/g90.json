@@ -1,0 +1,16 @@
+{
+  "gap": "G90",
+  "id": "g90",
+  "controls": [
+    "sr-05"
+  ],
+  "ownerRole": "owner",
+  "title": "Acquisition safeguards need evidence from a reviewed procurement",
+  "remediation": "The contracting authority and deployment procurement lead identify acquisition safeguards for assessed goods and services. Sample an acquisition using documented selection criteria, integrity and provenance requirements, supplier obligations and acceptance decisions. Record any exceptions and their approval.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a redacted acquisition record linking approved risk criteria, contract safeguards and a dated acceptance or refusal"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "gap": "G135",
+  "id": "g135",
+  "controls": [
+    "sc-23",
+    "sc-23.01",
+    "sc-23.03"
+  ],
+  "ownerRole": "shared",
+  "title": "Session authenticity, identifier generation and logout invalidation need evidence",
+  "remediation": "Component maintainers and deployment identity operators inventory assessed communications sessions and identifier issuers. Review authenticity and approved randomness requirements. Use exact-release test results and controlled deployment observations for distinct system-generated identifiers, rejection of unrecognized identifiers, and denial after logout or termination. G3 contributes only its scoped relay ingress evidence.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the assessed session map and release and deployment verification of session authenticity, identifier issuance and invalidation"
+    }
+  ]
+}

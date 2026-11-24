@@ -1,0 +1,18 @@
+{
+  "gap": "G146",
+  "id": "g146",
+  "controls": [
+    "ma-03",
+    "ma-03.01",
+    "ma-03.02"
+  ],
+  "ownerRole": "owner",
+  "title": "Maintenance tools and diagnostic media need authorized inventory and inspection evidence",
+  "remediation": "The deployment maintenance tool custodian and endpoint security lead identify tools and diagnostic media approved for assessed systems. Verify periodic review and observed authorized use, checks for unauthorized changes to tools, and malicious-code screening before use of diagnostic media. Record a sampled approved or refused item with its disposition and link to incident handling when applicable.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the tool approval and review register, sampled tool integrity and diagnostic media checks, and the recorded disposition"
+    }
+  ]
+}

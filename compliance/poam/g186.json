@@ -1,0 +1,17 @@
+{
+  "gap": "G186",
+  "id": "g186",
+  "controls": [
+    "pm-12",
+    "pm-13"
+  ],
+  "ownerRole": "owner",
+  "title": "Insider response team and workforce development need role and operating evidence",
+  "remediation": "The sponsor security, privacy and personnel leads approve the cross-disciplinary insider handling team and applicable referral, privacy and escalation procedures. Approve workforce competency and development planning and collect redacted training, exercise or staffing records with follow-up.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect authorized cross-disciplinary team and referral procedure, an exercise receipt and workforce development review"
+    }
+  ]
+}

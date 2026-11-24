@@ -324,29 +324,39 @@ test('tagging main is not blocked by another PR\'s failed agent review, which la
   assert.match(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'), /"codeql" failed/);
 });
 
-test('a change to the gate tests or the vendor step is a gate change', () => {
-  assert.deepEqual(gateFileChanges(['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'src/extension.ts', 'scripts/compare-models.mjs', 'package.json']),
-    ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs']);
+test('a change to the gate tests, the vendor step or the compliance fit check is a gate change', () => {
+  assert.deepEqual(gateFileChanges(['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'scripts/resource-check.mjs', 'src/extension.ts', 'scripts/compare-models.mjs', 'package.json']),
+    ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'scripts/resource-check.mjs']);
 });
 
 // Phase 44 (DESIGN section 9, pitfall 2): the compliance trust roots wait for the owner. Tailoring decides what is Not applicable, the catalogues
-// and sources.json carry the official text and its licence evidence, and attestations hold who may sign a risk acceptance.
+// and sources.json carry the official text and its licence evidence, and attestations hold who may sign a risk acceptance. The engine, statements,
+// evidence rules, responsibility table, levels and profiles decide every published state, so they are trust roots too.
 const COMPLIANCE_TRUST_ROOTS = [
   'compliance/tailoring/protected-b.json',
   'compliance/sources.json',
   'compliance/catalogs/itsp-10-033/catalog.json',
   'compliance/attestations/signers.json',
+  'compliance/src/status.ts',
+  'compliance/src/collectors/release.ts',
+  'compliance/components/extension.json',
+  'compliance/evidence-rules/extension.json',
+  'compliance/responsibility/families.json',
+  'compliance/profiles/protected-b.json',
+  'compliance/levels.json',
+  'compliance/resources.json',
 ];
 
-test('a change to a compliance trust root (tailoring, sources, catalogues, attestations) is a gate change', () => {
+test('a change to a compliance trust root (tailoring, sources, catalogues, attestations, engine, statements, rules, responsibility, scope) is a gate change', () => {
   for (const file of COMPLIANCE_TRUST_ROOTS) assert.deepEqual(gateFileChanges([file]), [file], file);
 });
 
 test('other compliance files are not gate changes, and the trust-root patterns reach no further than their own folder or file', () => {
   const others = [
-    'compliance/components/extension.json',
-    'compliance/evidence-rules/extension.json',
-    'compliance/src/status.ts',
+    'compliance/gaps.json',
+    'compliance/poam/g12.json',
+    'compliance/test/status.test.ts',
+    'compliance/levels.json.bak',
     'compliance/sources.json.bak',
     'docs/security/threat-model.md',
     'src/compliance/tailoring/x.json',

@@ -1,0 +1,6 @@
+{
+  "samples": [
+    { "pod": "session-person-one-6d9f", "getFips": "1" },
+    { "pod": "session-person-two-7c2a", "getFips": "1" }
+  ]
+}

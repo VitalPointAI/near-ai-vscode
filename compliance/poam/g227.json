@@ -1,0 +1,16 @@
+{
+  "gap": "G227",
+  "id": "g227",
+  "controls": [
+    "itsp171-03.01.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Information flow approvals and enforcement need deployed evidence",
+  "remediation": "The sponsor data owner and network security lead approve internal and intersystem flows for the specified information categories. Trace representative approved and denied flows through assessed enforcement points. Referenced product records may help establish the path, while sponsor confirms the assessed routing boundary and inherited rules.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved flow matrix, boundary diagram and a representative allowed and denied flow with enforcement records"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Development workflow
 
-How a change gets from an idea to the Visual Studio Marketplace. The short rules are in
+How a change gets from an idea to a versioned Sterling Theia container release. The short rules are in
 [CONTRIBUTING.md](../CONTRIBUTING.md); this page explains the whole flow, the gates, the scripts
 and slash commands behind them, and what to do when something goes wrong.
 
@@ -9,7 +9,7 @@ branch + worktree -> commits -> PR -> CI (8 jobs) + agent review -> merge agent 
                                                                         |
                          release/x.y.z PR -> merge -> tag vX.Y.Z -> Release workflow
                                                                         |
-                                    GitHub release (VSIX) -> owner approves -> Marketplace
+                                    owner approves -> GHCR image -> GitHub release
 ```
 
 ## 1. Branches and worktrees
@@ -53,7 +53,7 @@ A PR can merge only when all of these hold:
 
 | Gate | Where it comes from |
 | --- | --- |
-| `lint` | CI: `npm run lint` (TypeScript type check) |
+| `lint` | CI: `npm run lint` (TypeScript type check), then `node scripts/resource-check.mjs` (every npm package, image, action and vendored library has a reviewed compliance fit entry in `compliance/resources.json`) |
 | `test` | CI: `npm test` (unit tests, including the workflow scripts' tests) |
 | `e2e` | CI: the extension in a real VS Code under xvfb, in a NEAR AI project and in a plain folder |
 | `release-content` | CI: `npm run verify:release` (package the VSIX, build the SBOM, check its contents); the VSIX is kept as a build artifact for 7 days |
@@ -61,17 +61,15 @@ A PR can merge only when all of these hold:
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
 | `relay` | CI: the messaging relay in `relay/` on Node 26.13.1: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests and the container hardening tests |
 | `hub` | CI: your organization's sync hub in `hub/` on Node 26.13.1, built like `relay`: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests, the image build and the container and Compose hardening tests |
-| `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor. Runs on every PR; not a required check until the owner adds it to the branch protection (section 8) |
+| `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor |
+| `deploy` | CI: the on-premise deployment stack in `deploy/`: installs the pinned helm and cosign with `compliance/ci/install-tool.sh`, checks the vendored chart tarballs against `deploy/charts/charts.lock.json` offline, renders every chart offline and checks the hardening invariants (`deploy/test`) |
 | `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
 | One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
 | Up to date | Branch protection ("require branches to be up to date"): rebase onto `main` and re-run |
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
 
-These nine check names are the required status checks in the branch protection (section 8).
-`hub` becomes required when the owner adds it to `main`'s branch protection after Phase 32 merges
-(section 8); until then the merge and tag scripts already wait for it, because it is in `CI_CHECKS`.
-`docs` runs on every PR too, and becomes required once the owner adds it there.
+These eleven check names are the required status checks in the branch protection (section 8).
 Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
 this page in the same PR.
 
@@ -81,6 +79,7 @@ this page in the same PR.
 
 - The nine jobs run **in parallel**; the slowest (e2e, relay or hub) takes a few minutes.
 - `npm ci` uses the setup-node npm cache; the VS Code download for e2e is cached weekly.
+- Root lint, root tests and VSIX packaging install the pinned dependencies with `npm ci --ignore-scripts`.
 - A new push to a PR **cancels** the superseded run. Runs on `main` (and runs started by hand)
   each get their own concurrency group, so none is ever cancelled or replaced while queued.
 - `audit` and `secret-scan` do not install anything.
@@ -215,7 +214,7 @@ The merge agent runs `node scripts/merge-pr.mjs <number>` (first with `--dry-run
 
 - refuses unless the PR is open, not a draft, targets `main`, and its branch follows the naming
   rules;
-- refuses unless every required check (the eight CI jobs, `agent-review`, and anything else branch
+- refuses unless every required check (the nine CI jobs, `agent-review`, and anything else branch
   protection requires) is green on the current head, and no other check failed. The CI jobs
   count only from the `CI` workflow, so a job of the same name elsewhere cannot stand in for
   one, and `agent-review` counts only as a commit status set by `near-ai-reviewer`
@@ -262,39 +261,42 @@ release checks and approvals run. Use the existing owner approval for publicatio
 5. `/merge-pr` squash-merges it, waits for CI on the new `main` commit, and tags that commit
    `v<x.y.z>` (`scripts/tag-release.mjs` does the same by hand, and can retry a missed tag).
 6. The tag starts `.github/workflows/release.yml`:
-   - **build** has a read-only token. It checks that the tag matches package.json and points
-     at a commit on `main` (or at the head of `hotfix/<x.y.z>`, see the hotfix section), runs
-     the tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
-     release notes;
-   - **release** creates the GitHub release named `<x.y.z>` with the VSIX, the checksum, and
-     the CHANGELOG section as notes. It is the only job that can write to the repository, so it
-     installs and runs nothing: it downloads the build's files and checks both checksums first;
-   - **publish** runs in the protected `marketplace` environment. It **waits for the owner**:
-     GitHub shows "Review deployments" on the run, and nothing is published until the owner
-     approves. Its first step checks the VSIX against the checksum the build job recorded. It
-     then installs the `vsce` pinned in package-lock.json with `npm ci --ignore-scripts` (no
-     cache, no install scripts) and runs `vsce publish --packagePath <the verified VSIX>` with
-     the `VSCE_PAT` secret, which is stored only in that environment.
+   - **build** verifies the tag and checks that the commit is on `main` or is the head of
+     `hotfix/<x.y.z>`. It runs tests, packages the VSIX for Theia compatibility, and
+     records the checksums for the VSIX and release notes. Dependencies are installed
+     with `npm ci --ignore-scripts`.
+   - The workflow validates the Theia image built with that VSIX. It keeps the existing
+     assessor package and release attestation checks.
+   - **publish** waits for owner approval in the protected GitHub environment named
+     `container-release`. The job publishes the
+     verified image to `ghcr.io/<lowercase-owner>/<lowercase-repo>:vX.Y.Z`
+     using GitHub's workflow token.
+   - **release** creates the GitHub release after publication succeeds. It records the
+     exact `image@sha256:...` reference alongside the compatibility VSIX, its checksum,
+     release notes, and any required assessor package.
 
 The owner approves in the GitHub web UI: Actions, Release, the run, **Review deployments**,
-tick `marketplace`, **Approve and deploy**. `gh run view` only shows the run; it cannot approve
+tick `container-release`, **Approve and deploy**. `gh run view` only shows the run; it cannot approve
 it. Approving from a terminal needs the REST API:
 
 ```bash
 repo=VitalPointAI/near-ai-vscode
-env_id="$(gh api "repos/$repo/environments/marketplace" --jq .id)"
+env_id="$(gh api "repos/$repo/environments/container-release" --jq .id)"
 gh api -X POST "repos/$repo/actions/runs/<run-id>/pending_deployments" \
   -F "environment_ids[]=$env_id" -f state=approved -f comment="Publish <x.y.z>"
 ```
 
-Rejecting it leaves the GitHub release in place and nothing published.
+Rejecting the deployment stops publication of the image and creation of the GitHub release.
 
-What the checksum covers: it shows that the VSIX the release and publish jobs use is the one the
-build job made, so nothing can swap it on the way. It does not protect the build itself. The
-build job runs `npm ci` with dependency install scripts and runs the tests, so a compromised
-dependency could change the VSIX before its checksum is taken. That job has a read-only token
-and no secrets, which limits what such a dependency could reach, but not what it could put in
-the package.
+Use the digest recorded in the GitHub release when you need the exact approved image:
+
+```bash
+docker pull ghcr.io/vitalpointai/near-ai-vscode@sha256:<digest-from-release>
+```
+
+The jobs verify the saved artifacts against the build checksums before using them. The build
+uses a read-only token and disables dependency install scripts. The pinned build tools and
+tests still execute, so a compromised tool can affect the output before it is hashed.
 
 ## 7. Recovery
 
@@ -326,8 +328,8 @@ during the SBOM step), or two PRs that each passed but conflict in behavior.
 
 ### A bad version reached users: hotfix
 
-The Marketplace never lets a version number be reused or overwritten, so a fix always ships as a
-new patch version (for example 0.4.12 replaces a broken 0.4.11).
+Release tags and their published image versions are permanent. A fix ships as a new patch
+version, for example 0.4.12 replaces a broken 0.4.11.
 
 **Usual case: main can be released.** Branch `hotfix/<next-patch>` from `origin/main`, fix it,
 bump the version and CHANGELOG with `scripts/prepare-release.mjs`, and go through PR, review and
@@ -379,7 +381,8 @@ job on every branch, `hotfix/x.y.z` included, because its base commit still has 
 
 The `hub` job follows the same rule, keyed on `hub/package.json`: on a hotfix from a tag older than
 the sync hub it passes with the note "hub checks skipped", and a change that deletes
-`hub/package.json` fails it on every branch.
+`hub/package.json` fails it on every branch. The `deploy` job does the same, keyed on
+`deploy/charts/charts.lock.json`.
 
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM
@@ -396,10 +399,12 @@ gh run list --workflow ci.yml --branch hotfix/<next> --limit 1   # wait until it
 
 When the hotfix has the compliance package, that branch run also produces the
 secret-scanned evidence bundle and the relay SBOM for the exact commit being
-released. The release requires those artifacts and publishes the assessor package
-with the VSIX. A hotfix from a tag that predates the compliance package can still
-release its verified, attested VSIX. The release run records why the assessor
-package was omitted.
+released. The release requires that evidence and attaches the assessor package
+with the compatibility VSIX. For a base tag that predates the compliance
+package, the release run records why the assessor package was omitted.
+The hotfix must still contain the Theia container build inputs required by the
+current release workflow. Start from a container-capable tag or review those
+inputs as part of the hotfix PR.
 
 Then tag the hotfix head. `tag-release.mjs` refuses unless the commit is the head of
 `hotfix/<next>`, the newest CI run on that exact commit (not the PR's run) has finished with
@@ -416,17 +421,12 @@ After the release, bring the fix into `main`: update the PR (`gh pr update-branc
 conflicts in the hotfix worktree, let the gates pass again, and merge it with
 `node scripts/merge-pr.mjs <number> --no-tag`, since the release is already tagged.
 
-### Roll back the Marketplace
+### Roll back a container deployment
 
-There is no "unpublish one version" that users reliably follow. Options, best first:
-
-1. Release a fixed patch (hotfix above). This is the normal answer.
-2. Republish the previous good code as a new patch: revert the bad change on `main`, release the
-   result as the next patch version.
-3. Users who need the old version now can use **Install Another Version...** in the Extensions
-   view, or install the earlier VSIX from its GitHub release.
-4. `vsce unpublish` removes the whole extension; it is for emergencies such as a leaked key in
-   the package, and only the owner decides it.
+Redeploy the previous known-good digest from its GitHub release. Check data compatibility
+before reusing a volume written by a newer version. Fix or revert the change through the
+usual PR checks, then publish a new patch release. Keep existing release tags and digests
+as the record of what shipped.
 
 ### The Release workflow failed
 
@@ -434,13 +434,14 @@ There is no "unpublish one version" that users reliably follow. Options, best fi
   released, do not move the tag (once the tag rulesets in section 8 are applied, GitHub refuses
   that anyway); release the fix as the next patch. If only an outside service failed, re-run
   the job.
-- **release failed:** the workflow never changes an existing GitHub release (no `--clobber`), so
-  a re-run refuses if the failed run already created one. The owner checks the partial release
-  in the web UI, deletes it if it is incomplete, then re-runs the failed jobs.
-- **publish failed** (expired `VSCE_PAT`, Marketplace outage): fix the cause (for a token, the
-  owner updates the secret, see below), then re-run the failed job:
-  `gh run rerun <run-id> --failed`. It publishes the same verified VSIX and needs the owner's
-  approval again.
+- **publish failed:** check the approval, GHCR availability and the repository's package
+  access. Use `gh run rerun <run-id> --failed` after fixing the cause. The publish job still
+  uses the verified image artifact and the protected approval environment. If a registry tag
+  was already written, compare it against the verified build before retrying. A version
+  conflict requires a new patch.
+- **release failed:** use `gh run rerun <run-id> --failed` if publication succeeded and the
+  GitHub release has not been created. The owner inspects an existing release before taking
+  any recovery action. The workflow refuses to overwrite an existing release.
 - **The tag was never created** (merge-pr stopped while waiting for CI): run
   `node scripts/tag-release.mjs <x.y.z>` once CI on `main` is green.
 
@@ -600,10 +601,7 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - `main` protection: a PR is required with one approving review (the owner cannot approve their
   own PRs, so the approval comes from `near-ai-reviewer`, posted by the agent review workflow),
   required checks `lint`, `test`, `e2e`,
-  `release-content`, `audit`, `secret-scan`, `relay` and `hub` from GitHub Actions, plus `agent-review`
-  (the owner adds `hub` after Phase 32 merges; CI also runs `docs`, which is not in this list yet: to
-  require it, add `{"context": "docs", "app_id": 15368}` to the checks below, and `docs` to `CI_CHECKS` in
-  `scripts/lib/workflow.mjs` in a PR merged at the same time);
+  `release-content`, `audit`, `secret-scan`, `relay`, `hub`, `docs` and `deploy` from GitHub Actions, plus `agent-review`;
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR
@@ -614,14 +612,15 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
   and `REVIEW_MODEL_BASE_URL` variables. Environment `agent-review-gates`: the owner as the
   required reviewer (an admin cannot skip it), protected branches only, no secrets. Commands in
   section 7, "The review runs automatically".
-- Environment `marketplace`: the owner as the required reviewer, deployments only from `v*.*.*`
-  tags, admins cannot bypass it (`can_admins_bypass: false`), and the `VSCE_PAT` secret stored
-  in this environment only.
+- Environment `container-release`: the GHCR publication gate. Keep the owner as the
+  required reviewer, allow deployments only from `v*.*.*` tags, and keep admin bypass disabled
+  (`can_admins_bypass: false`). The publish job uses the repository workflow token with
+  `packages: write` to publish to GHCR. This workflow builds a single `linux/amd64` image.
 - Release tags: nobody can move or delete a `v*` tag, admins included, and only organization
   owners can create one. A tag push runs the `release.yml` of the tagged commit, so this is what
   keeps an unreviewed commit from carrying its own release workflow.
 
-`main` protection (the eight CI checks are pinned to GitHub Actions, app id 15368, so another app
+`main` protection (the nine CI checks are pinned to GitHub Actions, app id 15368, so another app
 cannot report them):
 
 ```bash
@@ -632,7 +631,7 @@ gh api -X PUT "repos/$repo/branches/main/protection" --input - <<'JSON'
    {"context": "e2e", "app_id": 15368}, {"context": "release-content", "app_id": 15368},
    {"context": "audit", "app_id": 15368}, {"context": "secret-scan", "app_id": 15368},
    {"context": "relay", "app_id": 15368}, {"context": "hub", "app_id": 15368},
-   {"context": "agent-review"}]},
+   {"context": "docs", "app_id": 15368}, {"context": "agent-review"}]},
  "enforce_admins": true,
  "required_pull_request_reviews": {"required_approving_review_count": 1, "dismiss_stale_reviews": true},
  "restrictions": null,
@@ -672,25 +671,19 @@ gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 JSON
 ```
 
-The `marketplace` environment:
+The `container-release` environment (the `marketplace` environment and its `VSCE_PAT` secret stay in place, unused by this workflow, for a possible future NEAR AI extension on the Marketplace):
 
 ```bash
 repo=VitalPointAI/near-ai-vscode
 owner_id="$(gh api users/ALuhning --jq .id)"
-gh api -X PUT "repos/$repo/environments/marketplace" --input - <<JSON
+gh api -X PUT "repos/$repo/environments/container-release" --input - <<JSON
 {"reviewers": [{"type": "User", "id": $owner_id}], "prevent_self_review": false,
  "can_admins_bypass": false,
  "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}
 JSON
-gh api -X POST "repos/$repo/environments/marketplace/deployment-branch-policies" \
+gh api -X POST "repos/$repo/environments/container-release/deployment-branch-policies" \
   -f name='v*.*.*' -f type=tag
 ```
 
-The `VSCE_PAT` is an Azure DevOps personal access token with the **Marketplace (Manage)** scope
-for the `VitalPoint` publisher. The owner adds or rotates it with:
-
-```bash
-gh secret set VSCE_PAT --env marketplace --repo VitalPointAI/near-ai-vscode
-```
-
-which prompts for the value, so it never lands in shell history or a file.
+GHCR uses GitHub's workflow token. The `container-release` environment needs no secrets. If a package already exists in GHCR, confirm
+that this repository has Actions write access to it.

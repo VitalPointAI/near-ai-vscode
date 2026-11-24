@@ -2,7 +2,7 @@
 // arranges rows. 44-04 adds the multi-component aggregate and 44-05 adds fields (never renames these).
 import { aggregateControl, computeStatus, summarizeLevel } from './status.ts';
 import { evaluateObservationRule, evaluateTestRule, type RuleContext } from './rules.ts';
-import { gapStates, type Gap, type Poam } from './gaps.ts';
+import { gapCoversRow, gapStates, type Gap, type Poam } from './gaps.ts';
 import { loadRiskAcceptances } from './riskAcceptance.ts';
 import { resolveResponsibility, type ResponsibilityTable } from './responsibility.ts';
 import { notApplicableFor, removalsFor, type Tailoring } from './tailoring.ts';
@@ -21,7 +21,7 @@ export interface DashboardBuildInput extends DashboardInput {
 }
 export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
 export type DashboardComponentRow = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
-export type DashboardOutputRow = DashboardRow & Readonly<{ label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
+export type DashboardOutputRow = DashboardRow & Readonly<{ gap?: string; label: string; family: string; title: string; reasonText: string; components: readonly DashboardComponentRow[] }>;
 type MatrixRow = Readonly<{ control: string; component: string; responsibility: Responsibility; weProvide: string; youDo: string }>;
 export interface Dashboard { readonly schemaVersion: 1; readonly generatedAt: string; readonly commit: string; readonly source: { readonly kind: 'main' | 'scheduled' | 'release' | 'local'; readonly ref: string }; readonly levels: readonly { readonly id: string; readonly title: string; readonly kind: 'level' | 'overlay'; readonly profile: string; readonly claim: boolean; readonly components: readonly string[]; readonly overlays: readonly string[]; readonly counts: DashboardCounts; readonly notes?: LevelNotes }[]; readonly rows: readonly DashboardOutputRow[]; readonly gaps: readonly unknown[]; readonly collectors: readonly unknown[]; readonly matrix: readonly MatrixRow[]; readonly textIndex: readonly unknown[]; readonly refusedAcceptances: readonly unknown[]; readonly runUrl?: string; }
 
@@ -82,7 +82,6 @@ function configuredResponsibility(control: string, component: string | undefined
   return 'product';
 }
 
-/** Builds the dashboard: one row per level and control in scope, each with one component row per component that implements the control. */
 /** Count rows by state; Stale is intentionally included in the not-met total. */
 export function countStates(rows: readonly Pick<DashboardRow, 'state'>[]): DashboardCounts {
   const counts = Object.fromEntries(STATES.map((state) => [state, 0])) as Record<State, number>;
@@ -95,6 +94,7 @@ export function fillReason(reason: keyof typeof REASONS, detail?: Readonly<Recor
   return REASONS[reason].replace(/\{(date|reason|text|question|provider)\}/g, (_match, key: string) => detail?.[key] ?? '');
 }
 
+/** Builds the dashboard: one row per level and control in scope, each with one component row per component in that level's scope. */
 export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const results = evaluateRules(input);
   const components = new Map(input.components.map((component) => [component.id, component]));
@@ -111,7 +111,10 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
         const implemented = components.get(componentId)?.implemented.find((requirement) => requirement.control === control);
         const tailoring = input.tailoring && notApplicableFor(input.tailoring, level.id, control, componentId);
         const exception = input.responsibilityTable?.exceptions.some((entry) => entry.control === control && entry.component === componentId);
-        if (!implemented && !tailoring && !exception) continue;
+        // An in-scope component that says nothing about the control is not skipped: it is assessed as "No statement yet" (or its family's
+        // reviewed responsibility), so one component's evidence never makes the whole control Met while another in-scope component is silent.
+        // A component the control does not apply to needs a reviewed tailoring record, as any other Not applicable does.
+        const declared = Boolean(implemented || tailoring || exception);
         const responsibility = configuredResponsibility(control, componentId, input.responsibilityTable, implemented?.responsibility);
         const statements = implemented?.statements ?? [];
         const rulesByStatement = implemented ? rulesFor(input.rules, componentId, control) : {};
@@ -144,7 +147,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
           ...(implemented?.inheritedFrom ? { inheritedFrom: implemented.inheritedFrom } : {})
         };
         componentRows.push(component);
-        if (level.claim !== false && outcome.state !== 'not-applicable' &&
+        if (declared && level.claim !== false && outcome.state !== 'not-applicable' &&
           (responsibility === 'shared' || responsibility === 'your-organization' || responsibility === 'inherited')) {
           matrix.set(`${control}:${componentId}`, {
             control,
@@ -169,7 +172,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
   const register = input.gapRegister;
   const gaps = [];
   const refusedAcceptances = [];
-  const gapByControl = new Map<string, string>();
+  const gapByRow = new Map<DashboardOutputRow, string>();
   if (register) {
     const { verified, refused } = loadRiskAcceptances(register.attestationsDir, input.now);
     for (const refusal of refused) refusedAcceptances.push({ file: refusal.file, reason: refusal.message });
@@ -177,16 +180,17 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
     for (const [index, gap] of register.gaps.entries()) {
       const state = states[index];
       const { id, controls, remediation, ownerRole, poam } = gap;
-      for (const control of controls) if (!gapByControl.has(control)) gapByControl.set(control, id);
-      const unresolved = rows.filter((row) => controls.includes(row.control) && row.state !== 'met' && row.state !== 'not-applicable');
+      const affected = rows.filter((row) => gapCoversRow(gap, row));
+      for (const row of affected) if (!gapByRow.has(row)) gapByRow.set(row, id);
+      const unresolved = affected.filter((row) => row.state !== 'met' && row.state !== 'not-applicable');
       const milestones = register.poam.find((item) => item.id === poam)?.milestones;
       gaps.push({ ...state, title: gap.title ?? id, controls, remediation, ownerRole, levelsBlocked: new Set(unresolved.map((row) => row.level)).size,
         ...(state.acceptedUntil ? { acceptedUntil: state.acceptedUntil.slice(0, 10) } : {}),
-        ...(poam ? { poam } : {}), ...(milestones ? { milestones } : {}) });
+        ...(poam ? { poam } : {}), ...(milestones ? { milestones } : {}), ...(gap.profiles ? { profiles: gap.profiles } : {}) });
     }
   }
   const linkedRows = rows.map((row) => {
-    const gap = gapByControl.get(row.control);
+    const gap = gapByRow.get(row);
     return gap ? { ...row, gap } : row;
   });
   return { schemaVersion: DASHBOARD_SCHEMA_VERSION, generatedAt: input.generatedAt, commit: input.commit, ...(input.runUrl ? { runUrl: input.runUrl } : {}), source: input.source ?? { kind: 'local', ref: input.head }, levels, rows: linkedRows, gaps, collectors: [], matrix: [...matrix.values()], textIndex: [], refusedAcceptances };

@@ -140,8 +140,9 @@ jobs:
 
   # Only for a PR that changes the gates (or was too large to review whole). Holds no secrets; it
   # exists so the owner approves it under Review deployments before the approval is posted.
+  # GitHub's Jobs API exposes the reviewed PR and head in this name for evidence correlation.
   owner-approval:
-    name: owner approval (gate change)
+    name: 'owner approval (gate change) PR #${{ needs.review.outputs.pr }} @ ${{ needs.review.outputs.sha }}'
     needs: review
     if: needs.review.outputs.state == 'success' && needs.review.outputs.gate == 'true'
     runs-on: ubuntu-latest

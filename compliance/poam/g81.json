@@ -1,0 +1,17 @@
+{
+  "gap": "G81",
+  "id": "g81",
+  "controls": [
+    "pl-04",
+    "pl-04.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Rules of behaviour and external-site restrictions need acknowledged deployment records",
+  "remediation": "Deployment access and privacy owners approve rules of behaviour and external application and public posting restrictions. Verify the rules reach assigned users, acknowledgements or equivalent authorized records exist before access and on revision, and applicable external access restrictions have an operating sample. Record approved scope for external services.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved rules and restrictions, a redacted acknowledgement and dated sample of the applicable enforcement or approval process"
+    }
+  ]
+}

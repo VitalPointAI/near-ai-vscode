@@ -1,0 +1,16 @@
+{
+  "gap": "G144",
+  "id": "g144",
+  "controls": [
+    "ma-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Maintenance policy and procedures need approved scope and operating records",
+  "remediation": "The sponsor maintenance policy official approves procedures for onsite, offsite and non-local maintenance, assigned roles and coordination with security and privacy authorities. Record assigned ownership, distribution and scheduled or event-triggered review. Sample implementation through an approved maintenance record.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and procedures, a named coordinator, distribution and revision records, and a sampled maintenance authorization"
+    }
+  ]
+}

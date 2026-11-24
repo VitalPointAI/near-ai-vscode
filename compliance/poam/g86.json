@@ -1,0 +1,20 @@
+{
+  "gap": "G86",
+  "id": "g86",
+  "controls": [
+    "ir-05",
+    "ir-06",
+    "ir-06.01",
+    "ir-06.02",
+    "ir-06.03"
+  ],
+  "ownerRole": "shared",
+  "title": "Incident tracking and automated reporting need demonstrated handoffs",
+  "remediation": "The deployment incident operations, vulnerability and supplier coordination owners define tracking fields, reporting times, approved recipients and mechanisms. Exercise a synthetic incident through tracking, authorized automated notification, related flaw disclosure and applicable supplier handoff. Retain delivery and acknowledgement timestamps, recorded disposition and evidence of restricted recipients.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a sanitized tracking record and timed automated, vulnerability and applicable supplier notification and acknowledgement receipts"
+    }
+  ]
+}

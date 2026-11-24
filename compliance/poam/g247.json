@@ -1,0 +1,16 @@
+{
+  "gap": "G247",
+  "id": "g247",
+  "controls": [
+    "itsp171-03.04.06"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 least-functionality reviews and removals need effective evidence",
+  "remediation": "The sponsor infrastructure owner defines mission-essential capabilities and the restricted functions, ports, protocols, connections and services. Compare operating settings to this list and sample a periodic review that identified and disabled or removed an unnecessary or nonsecure item. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved functionality and restrictions, effective settings and a periodic review with follow-up evidence"
+    }
+  ]
+}
