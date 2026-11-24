@@ -45,6 +45,32 @@
       "note": "Local models or an authorized endpoint; relay inbound authentication."
     },
     {
+      "id": "hosted-protected-a",
+      "title": "Hosted deployment: Protected A",
+      "kind": "level",
+      "profile": "profiles/protected-a.json",
+      "components": [
+        "workbench",
+        "release-pipeline",
+        "hub"
+      ],
+      "claim": true,
+      "note": "Assesses the hosted deployment of the Sterling workbench at a site your organization owns."
+    },
+    {
+      "id": "hosted-protected-b",
+      "title": "Hosted deployment: Protected B",
+      "kind": "level",
+      "profile": "profiles/itsp-10-033-01-medium.json",
+      "components": [
+        "workbench",
+        "release-pipeline",
+        "hub"
+      ],
+      "claim": true,
+      "note": "Assesses the hosted deployment of the Sterling workbench at a site your organization owns."
+    },
+    {
       "id": "classified",
       "title": "Classified",
       "kind": "level",

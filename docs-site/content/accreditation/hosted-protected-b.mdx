@@ -1,0 +1,11 @@
+---
+sidebar_position: 14
+title: "Hosted: Protected B"
+---
+
+import AccreditationData from '@site/src/components/accreditation/AccreditationData';
+import LevelPage from '@site/src/components/accreditation/LevelPage';
+
+Your organization decides whether a hosted deployment of the Sterling workbench may operate at this level. This page shows the state of the reference site, our own test site, for each control of the reference profile, with the evidence collected for it and what your organization must do. Most controls read "No statement yet" until statements are written for the behaviour that exists. It is not an authorization.
+
+<AccreditationData>{(dashboard) => <LevelPage dashboard={dashboard} levelId="hosted-protected-b" />}</AccreditationData>

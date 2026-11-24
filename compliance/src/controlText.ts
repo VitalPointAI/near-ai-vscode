@@ -26,7 +26,7 @@ function controlParts(items: unknown, inheritedLang = 'en'): { name: string; pro
 
 // Each mixed-source overlay is split by the importer group so its text keeps its own attribution.
 const CATALOGUES = [
-  { file: 'itsp-10-033/catalog.json', source: 'itsp-10-033', pathPart: '/itsp10033', levels: ['unclassified', 'protected-a', 'protected-b'] },
+  { file: 'itsp-10-033/catalog.json', source: 'itsp-10-033', pathPart: '/itsp10033', levels: ['unclassified', 'protected-a', 'protected-b', 'hosted-protected-a', 'hosted-protected-b'] },
   { file: 'itsp-10-171/catalog.json', source: 'itsp-10-171', pathPart: 'itsp10171', levels: ['itsp-10-171', 'cpcsc-level-1'] },
   { file: 'itsg-33/annex-3a.json', source: 'itsg-33', pathPart: 'annex-3a-security-control-catalogue-itsg-33', levels: ['classified'] },
   { file: 'cgp/catalog.json', source: 'defence-production-act', pathPart: '/D-1/section-37.html', levels: ['overlay-cgp'], group: 'dpa', rootSource: 'defence-production-act' },
