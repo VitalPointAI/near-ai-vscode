@@ -15,7 +15,8 @@ import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore'
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
 import {
-  DAMAGED_PIN_TEXT, ENROLMENT_RECORD_FILE, NOT_ENROLLED_TEXT, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStoreError, migrationNoticeText,
+  DAMAGED_PIN_TEXT, ENROLMENT_RECORD_FILE, NOT_ENROLLED_TEXT, NO_SECRET_STORAGE_TEXT, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStore,
+  OrganizationStoreError, migrationNoticeText,
   previewOrganizationFile, setOrganizationWriteProbe
 } from '../gate/organizationStore';
 import { loadDeviceIdentity } from '../team/identity';
@@ -190,6 +191,27 @@ function failedOf(state: ReturnType<GateHost['bundleState']>): { reason: string;
 }
 
 const SECURITY_DESK = contactShown(EXAMPLE_ORGANIZATION.contacts);
+
+test('a secret store that cannot be read fails closed; with nothing from your organization on this computer it says so calmly', async () => {
+  await withWorld(async (world) => {
+    // A fresh Sterling workbench in local mode: every secret read rejects (workbench/extension/src/node/key-stores.ts "unavailable").
+    const unavailable = {
+      get: async () => { throw new Error('Secrets are unavailable'); },
+      store: async () => { throw new Error('Secrets are unavailable'); },
+      delete: async () => { throw new Error('Secrets are unavailable'); }
+    };
+    const fresh = await new OrganizationStore(world.storage, unavailable).load(FIXED_NOW);
+    assert.equal(fresh.state, 'failed');
+    assert.ok(fresh.state === 'failed' && fresh.failure.state === 'failed-closed' && fresh.failure.reason === 'identity-unavailable', 'still failed closed');
+    assert.equal(fresh.state === 'failed' ? fresh.sentence : '', NO_SECRET_STORAGE_TEXT);
+    // Once this computer holds files from your organization, a record of its key was kept: the sentence says the record could not be read.
+    await mkdir(organizationFolder(world), { recursive: true });
+    await writeFile(layerFile(world), '{}');
+    const enrolled = await new OrganizationStore(world.storage, unavailable).load(FIXED_NOW);
+    assert.equal(enrolled.state, 'failed');
+    assert.match(enrolled.state === 'failed' ? enrolled.sentence : '', /could not read its record of your organization's key/);
+  });
+});
 
 test('D-13: a crash after the layer file and before the pin leaves this computer not enrolled', async () => {
   await withWorld(async (world) => {

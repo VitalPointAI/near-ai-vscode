@@ -55,7 +55,8 @@
   ],
   "activationEvents": [
     "workspaceContains:.planning/.near-ai/**",
-    "onCommand:nearAi.openCyber"
+    "onCommand:nearAi.openCyber",
+    "onCommand:sterling.workAreas.create"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -211,6 +212,11 @@
       {
         "command": "nearAi.projectSetup",
         "title": "Project Setup…",
+        "category": "NEAR AI"
+      },
+      {
+        "command": "sterling.workAreas.create",
+        "title": "Create a Defence Work Area",
         "category": "NEAR AI"
       },
       {
@@ -1103,6 +1109,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "sterling.workAreas.create",
+          "when": "false"
+        },
         {
           "command": "nearAi.policy.show",
           "when": "false"

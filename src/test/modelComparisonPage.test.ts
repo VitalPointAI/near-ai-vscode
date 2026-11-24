@@ -12,6 +12,7 @@ import { catalogEntries, comparisonPageHtml, defaultSelection, estimateView, his
 import { heldRoles, privacyWarning, roleAppliedText, roleOptions, roleUpdate } from '../services/modelRoles';
 import type { ModelInfo } from '../services/nearAiClient';
 import { parseToolsPageMessage } from '../services/toolsDirectory';
+import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
 
 // The Compare Models page: the messages it may send, what it shows, and the roles a model can be put into.
 
@@ -285,5 +286,91 @@ test('package.json declares the clear command, and each of the nine model settin
     const text = property.markdownDescription ?? property.description ?? '';
     assert.ok(text.endsWith(sentence), `${setting} ends with the sentence`);
     assert.doesNotMatch(text, /\u2014/, 'no em-dash');
+  }
+});
+
+// ---- D-12 (the #162 reviews): Set Up and Compare Models report a failure to open their page and return nothing to their caller ----
+
+/** One stub for these tests: a module loaded under it keeps it, so every test installs the same one. */
+const handlerStub = createVscodeStub();
+const stubWindow = (handlerStub.vscode as { window: Record<string, unknown> }).window;
+const errorsShown = (): string[] => handlerStub.notifications.filter((note) => note.level === 'error').map((note) => note.message);
+const settle = (): Promise<void> => new Promise((resolve) => { setImmediate(resolve); });
+
+async function withHandlerStub(run: (openPanel: typeof import('../services/webview/openPanel')) => Promise<void>): Promise<void> {
+  handlerStub.notifications.length = 0;
+  const uninstall = installVscodeStub(handlerStub);
+  try {
+    await run(await import('../services/webview/openPanel'));
+  } finally {
+    uninstall();
+  }
+}
+
+test('D-12: panelCommand returns undefined when its page opens, and shows nothing', async () => {
+  await withHandlerStub(async ({ panelCommand }) => {
+    assert.equal(panelCommand(() => ({ reveal: () => undefined }), 'Compare Models')(), undefined);
+    await settle();
+    assert.deepEqual(errorsShown(), []);
+  });
+});
+
+test('D-12: panelCommand reports an opener that throws in one sentence, returns undefined and does not throw', async () => {
+  await withHandlerStub(async ({ panelCommand }) => {
+    const handler = panelCommand(() => { throw new Error('boom'); }, 'Compare Models');
+    assert.equal(handler(), undefined);
+    await settle();
+    const shown = errorsShown();
+    assert.equal(shown.length, 1);
+    assert.match(shown[0], /Compare Models/);
+    assert.match(shown[0], /boom/);
+    assert.doesNotMatch(shown[0], /\u2014|NEAR AI:/, 'no em-dash and no brand prefix');
+  });
+});
+
+test('D-12: panelCommand reports a rejected opener once after it settles, with no unhandled rejection', async () => {
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown): void => { unhandled.push(reason); };
+  process.on('unhandledRejection', record);
+  try {
+    await withHandlerStub(async ({ panelCommand }) => {
+      assert.equal(panelCommand(() => Promise.reject(new Error('late failure')), 'Set Up')(), undefined);
+      assert.deepEqual(errorsShown(), [], 'nothing is shown before the rejection settles');
+      await settle();
+      await settle();
+      const shown = errorsShown();
+      assert.equal(shown.length, 1);
+      assert.match(shown[0], /Set Up/);
+      assert.match(shown[0], /late failure/);
+    });
+  } finally {
+    process.off('unhandledRejection', record);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
+test('D-12: nearAi.compareModels returns undefined and reports once when its tab cannot be made', async () => {
+  const uri = (fsPath: string) => ({ scheme: 'file', fsPath, path: fsPath, toString: (): string => `file://${fsPath}` });
+  const uriTable = (handlerStub.vscode as { Uri: Record<string, unknown> }).Uri;
+  uriTable.joinPath = (base: { fsPath: string }, ...parts: string[]) => uri(path.join(base.fsPath, ...parts));
+  stubWindow.createWebviewPanel = () => { throw new Error('webviews are unavailable'); };
+  try {
+    await withHandlerStub(async () => {
+      const { registerModelComparison } = await import('../services/modelComparisonPanel');
+      const context = { subscriptions: [] as Array<{ dispose(): void }>, extensionUri: uri('/extension'), globalStorageUri: uri('/storage') };
+      registerModelComparison(context as never, {} as never);
+      const compare = handlerStub.commands.get('nearAi.compareModels');
+      assert.ok(compare, 'nearAi.compareModels is registered');
+      assert.equal(compare(), undefined);
+      await settle();
+      const shown = errorsShown();
+      assert.equal(shown.length, 1);
+      assert.match(shown[0], /Compare Models/);
+      assert.match(shown[0], /webviews are unavailable/);
+      for (const disposable of context.subscriptions) disposable.dispose();
+    });
+  } finally {
+    delete stubWindow.createWebviewPanel;
+    delete uriTable.joinPath;
   }
 });

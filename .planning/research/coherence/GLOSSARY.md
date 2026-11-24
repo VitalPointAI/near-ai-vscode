@@ -79,11 +79,11 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 
 ## 5. The copy lint
 
-One test, `src/test/copyLint.test.ts` (new, in the F1 foundation phase), reads every user string source: `package.json` command titles and setting descriptions, string literals passed to `showInformationMessage`, `showWarningMessage`, `showErrorMessage`, quick pick titles and items, and the text nodes of `media/**/*.js` and host-built HTML. It fails when:
+One test, `src/test/copyLint.test.ts` (new, in the F1 foundation phase), reads every user string source: `package.json` command titles and setting descriptions, string literals passed to `showInformationMessage`, `showWarningMessage`, `showErrorMessage`, quick pick titles and items, the text nodes of `media/**/*.js` and host-built HTML, and the Sterling workbench's browser and common sources (`workbench/extension/src/browser` and `workbench/extension/src/common`, Phase 46 D-33). It fails when:
 
 1. A word from the "never on main screens" columns appears outside an allowed context. Allowed contexts are listed in one table in the test (for example "attested" inside the trust details pane, "TEE" inside SECURITY.md quotes, "GSD" on the Tools page).
 2. A mode-varying concept is spelled instead of produced by `term()` (the PORT 5.5 lint, extended).
-3. A panel title has a prefix ("Near AI:", "NEAR AI:") or the brand is spelled other than "NEAR AI" and "VS Code".
+3. A panel title has a prefix ("Near AI:", "NEAR AI:") or the brand is spelled other than "NEAR AI" and "VS Code". "Sterling", "SovAI" and "Sterling Sovereign AI" are the Sterling edition and command-category names and are always allowed; "NEAR AI" stays the provider's spelling and "your organization" the user word.
 4. An em-dash appears in user copy.
 5. The provider's name is put in front of "organization" (the user word is always "your organization"; NEAR AI is only the provider).
 6. A compliance claim about the product appears: "compliant", "accredited", "certified", and the export-control phrases "ITAR compliant", "CGP compliant", "export compliant" (`.planning/research/compliance-dashboard/CGP-ITAR.md`, section 10.3).

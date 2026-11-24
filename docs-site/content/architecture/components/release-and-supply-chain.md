@@ -49,9 +49,9 @@ Back to the [component catalogue](./index.md).
 
 ## tool:cosign
 
-**What it provides.** Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1).
+**What it provides.** Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1); signs the Sterling workbench image the Release workflow publishes and attests its CycloneDX SBOM, verifying both in the same job (Phase 46).
 
-**Why it is needed.** Signs our rebuilt images and the offline bundle with your organization's key, and verifies every signature when a bundle is imported at a site. These signatures are what the registry import and the Kyverno admission check rely on.
+**Why it is needed.** Signs our rebuilt images, the offline bundle and the Sterling workbench image with your organization's key, and verifies every signature: at a site when a bundle is imported, and in the Release workflow right after signing. These signatures are what the registry import and the Kyverno admission check rely on. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
@@ -76,9 +76,9 @@ Conditions:
 
 ## tool:grype
 
-**What it provides.** Scans SBOMs for known fixed vulnerabilities (report-only) in CI.
+**What it provides.** Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.
 
-**Why it is needed.** Scans the SBOMs for known vulnerabilities that have a fix, so they are seen before a release.
+**Why it is needed.** Scans the SBOMs, including the workbench image's in CI and in the Release workflow, for known vulnerabilities that have a fix, so they are seen before a release. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
@@ -125,9 +125,9 @@ Conditions:
 
 ## tool:syft
 
-**What it provides.** Writes CycloneDX SBOMs of the relay image and of every rebuilt deployment image.
+**What it provides.** Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.
 
-**Why it is needed.** Writes the CycloneDX SBOM of the relay image and of every rebuilt deployment image. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it.
+**Why it is needed.** Writes the CycloneDX SBOM of the relay image, of every rebuilt deployment image and of the Sterling workbench image, the one the Release workflow attests. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |

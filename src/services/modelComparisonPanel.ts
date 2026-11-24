@@ -23,6 +23,7 @@ import { readAgentRules, readModelTiers, readRoleModels, readRunBudget, readSett
 import { nanoToUsd, totalNanoUsd } from './spendLedger';
 import { editorWriter } from './stateHome';
 import { ensureMigrated } from './stateMigration';
+import { panelCommand } from './webview/openPanel';
 
 // NEAR AI: Compare Models. A tab that ranks every model tested on this computer, runs new
 // comparisons (only what has no saved result, or everything again), saves each one as it goes,
@@ -67,7 +68,7 @@ let gateHost: GateHost | undefined;
 
 export function registerModelComparison(context: vscode.ExtensionContext, auth: AuthService, gate?: GateHost): void {
   gateHost = gate;
-  context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', () => void openModelComparison(context, auth)));
+  context.subscriptions.push(vscode.commands.registerCommand('nearAi.compareModels', panelCommand(() => openModelComparison(context, auth), 'Compare Models')));
   context.subscriptions.push(vscode.commands.registerCommand('nearAi.clearProjectModelChoices', async () => {
     const configuration = vscode.workspace.getConfiguration('nearAi');
     const text = await clearProjectModelChoices({

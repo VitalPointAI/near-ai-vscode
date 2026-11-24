@@ -66,16 +66,16 @@ Back to the [component catalogue](./index.md).
 
 ## npm:@types/node
 
-**What it provides.** Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub and compliance package.
+**What it provides.** Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub, compliance package and workbench.
 
-**Why it is needed.** Lets the TypeScript type check understand the Node.js APIs used by the extension, relay, hub and compliance package. Without it the type check fails on every Node.js import, and type errors would only show up when the code runs. Types only: nothing ships.
+**Why it is needed.** Lets the TypeScript type check understand the Node.js APIs used by the extension, relay, hub, compliance package and workbench. Without it the type check fails on every Node.js import, and type errors would only show up when the code runs. Types only: nothing ships. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
 | Kind | npm package |
-| Pinned version or digest | `22.20.5` in `compliance/package.json`, `package.json`; `26.6.6` in `hub/package.json`, `relay/package.json` |
+| Pinned version or digest | `22.20.5` in `compliance/package.json`, `package.json`; `26.6.6` in `hub/package.json`, `relay/package.json`, `workbench/package.json` |
 | Architecture component | `release-pipeline` |
-| Used in | `compliance/package.json`, `hub/package.json`, `package.json`, `relay/package.json` |
+| Used in | `compliance/package.json`, `hub/package.json`, `package.json`, `relay/package.json`, `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | MIT |
 | Cryptography | None |
@@ -129,16 +129,16 @@ Back to the [component catalogue](./index.md).
 
 ## npm:esbuild
 
-**What it provides.** Bundles the relay and hub, and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.
+**What it provides.** Bundles the relay, the hub, the workbench engine bundle and test build (workbench/tools/build-engine.mjs, workbench/scripts/build.mjs), and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.
 
-**Why it is needed.** Bundles the relay and hub into single files for their images, and bundles pptxgenjs, the MCP client and Yjs into the extension's vendor/ folder. Bundling lets the extension and the images ship without node\_modules, which keeps the shipped files few and reviewable.
+**Why it is needed.** Bundles the relay and hub into single files for their images, the engine code the workbench backend reuses (the team parser) and the workbench test build, and pptxgenjs, the MCP client and Yjs into the extension's vendor/ folder. Bundling lets the extension and the images ship without extra node\_modules, which keeps the shipped files few and reviewable. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `0.28.2` |
 | Architecture component | `release-pipeline` |
-| Used in | `hub/package.json`, `package.json`, `relay/package.json` |
+| Used in | `hub/package.json`, `package.json`, `relay/package.json`, `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | MIT |
 | Cryptography | None |
@@ -150,16 +150,16 @@ Back to the [component catalogue](./index.md).
 
 ## npm:typescript
 
-**What it provides.** Type-checks and compiles the extension, relay, hub and compliance package.
+**What it provides.** Type-checks and compiles the extension, relay, hub, compliance package and the Sterling workbench extension. In the workbench image it also stays as a runtime dependency of @theia/filesystem (through opfs-worker).
 
-**Why it is needed.** Type-checks and compiles the extension, relay, hub and compliance package. All of the product's own code is TypeScript, so nothing can be built without it.
+**Why it is needed.** Type-checks and compiles the extension, relay, hub, compliance package and the workbench extension. All of the product's own code is TypeScript, so nothing can be built without it. In the workbench image it also stays as a runtime dependency of @theia/filesystem. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `5.9.3` |
 | Architecture component | `release-pipeline` |
-| Used in | `compliance/package.json`, `hub/package.json`, `package.json`, `relay/package.json` |
+| Used in | `compliance/package.json`, `hub/package.json`, `package.json`, `relay/package.json`, `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | Apache-2.0 |
 | Cryptography | None |

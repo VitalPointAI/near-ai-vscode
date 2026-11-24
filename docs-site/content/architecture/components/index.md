@@ -13,7 +13,7 @@ Nothing here is typed by hand. The pages are generated from the compliance fit r
 
 This catalogue is evidence for these controls in the compliance package: CM-8 and CM-8(1) (the inventory, kept current with each change), CM-7 (why each component is needed), SA-4 (the review before a component is used), SA-5 (this documentation) and SR-3 (exact pins). It is evidence only: your organization decides what it accepts.
 
-There are 122 components in 10 areas. Every role has been confirmed.
+There are 137 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
 
 ## How to read an entry
 
@@ -28,7 +28,7 @@ There are 122 components in 10 areas. Every role has been confirmed.
 
 This is what people use. The extension is the agent team inside the editor: chat, Team Studio, the Staff Room and its map. It ships no node\_modules, so the few libraries it needs are copied into the package at fixed versions and reviewed (the vendored entries in this area). The workbench is a browser-based editor built on Eclipse Theia that runs the same extension. At a hosted site, Theia Cloud starts one workbench session for each person after they sign in.
 
-25 components: vendor:@modelcontextprotocol/sdk, vendor:@resvg/resvg-wasm, vendor:dejavu-fonts-ttf, vendor:imagetracerjs, vendor:maplibre-gl, vendor:milsymbol, vendor:pdfjs-dist, vendor:pptxgenjs, vendor:yjs, npm:@modelcontextprotocol/sdk, npm:@resvg/resvg-wasm, npm:dejavu-fonts-ttf, npm:imagetracerjs, npm:lib0, npm:pdfjs-dist, npm:pptxgenjs, npm:yjs, image:docker.io/library/node, image:registry.access.redhat.com/ubi9/nginx-126, image:registry.access.redhat.com/ubi9/nodejs-22, image:registry.access.redhat.com/ubi9/openjdk-21, image:registry.access.redhat.com/ubi9/openjdk-21-runtime, chart:theia-cloud, chart:theia-cloud-base, chart:theia-cloud-crds.
+40 components: vendor:@modelcontextprotocol/sdk, vendor:@resvg/resvg-wasm, vendor:dejavu-fonts-ttf, vendor:imagetracerjs, vendor:maplibre-gl, vendor:milsymbol, vendor:pdfjs-dist, vendor:pptxgenjs, vendor:yjs, npm:@modelcontextprotocol/sdk, npm:@near-ai/sterling-workbench-extension, npm:@playwright/test, npm:@resvg/resvg-wasm, npm:@theia/cli, npm:@theia/core, npm:@theia/editor, npm:@theia/filesystem, npm:@theia/monaco, npm:@theia/navigator, npm:@theia/plugin-ext-vscode, npm:@theia/preferences, npm:@theia/terminal, npm:@theia/workspace, npm:beautiful-mermaid, npm:dejavu-fonts-ttf, npm:imagetracerjs, npm:lib0, npm:markdown-it, npm:pdfjs-dist, npm:pptxgenjs, npm:yjs, image:docker.io/library/node, image:docker.io/openbao/openbao, image:registry.access.redhat.com/ubi9/nginx-126, image:registry.access.redhat.com/ubi9/nodejs-22, image:registry.access.redhat.com/ubi9/openjdk-21, image:registry.access.redhat.com/ubi9/openjdk-21-runtime, chart:theia-cloud, chart:theia-cloud-base, chart:theia-cloud-crds.
 
 ### [Sync hub and relay](./sync-and-relay.md)
 
