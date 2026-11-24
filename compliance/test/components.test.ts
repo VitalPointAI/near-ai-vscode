@@ -43,10 +43,13 @@ test('the extension evidence file names a real gate decision test', () => {
   assert.match(readFileSync(file, 'utf8'), /src\/test\/gateDecide\.test\.ts/, 'a dashboard rule must name its source test');
 });
 
-test('all six component definitions load as OSCAL content', () => {
+test('every component definition loads as OSCAL content', () => {
   const loaded = loadComponents(COMPONENTS);
   assert.deepEqual(loaded.errors, []);
-  assert.deepEqual(loaded.components.map((component) => component.id), ['appliance', 'extension', 'hub', 'model-endpoints', 'relay', 'release-pipeline']);
+  assert.deepEqual(loaded.components.map((component) => component.id), [
+    'appliance', 'cert-manager', 'extension', 'hsm', 'hub', 'image-registry', 'ingress', 'keycloak', 'model-endpoints',
+    'oauth2-proxy', 'offline-bundle', 'openbao', 'relay', 'release-pipeline', 'rke2', 'site-logging', 'site-storage', 'theia-cloud'
+  ]);
 });
 
 test('every mapped test rule has an exact literal target in the checkout', () => {
