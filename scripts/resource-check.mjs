@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The compliance fit check: every third-party resource the repository uses (npm packages, container images, GitHub Actions and the libraries
-// shipped under vendor/) must have a reviewed entry in compliance/resources.json saying how it helps or affects the compliance requirements, and
+// The compliance fit check: every third-party resource the repository uses (npm packages, container images, GitHub Actions, the libraries
+// shipped under vendor/, the Helm charts and pinned tools of the deployment stack) must have a reviewed entry in compliance/resources.json saying how it helps or affects the compliance requirements, and
 // whether it fits. Run by the required `lint` CI job. No dependencies; the files are read as text.
 //
 //   node scripts/resource-check.mjs          check, and exit 1 with one plain line per problem
@@ -15,12 +15,17 @@ export const IMAGE_FILES = Object.freeze(['hub/Dockerfile', 'relay/Dockerfile', 
 export const WORKFLOW_DIR = '.github/workflows';
 export const VENDOR_SCRIPT = 'scripts/vendor-libs.mjs';
 export const VENDORED_JSON = 'media/vendor/VENDORED.json';
+// The deployment stack (Phase 47): vendored Helm charts, pinned tools, third-party images and the base stages of the images we rebuild.
+export const CHART_LOCK = 'deploy/charts/charts.lock.json';
+export const TOOL_PINS = 'compliance/ci/tool-pins.json';
+export const IMAGE_LOCK = 'deploy/bundle/images.lock.json';
+export const CONTAINERFILE_DIR = 'deploy/images';
 
-export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored']);
+export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored', 'chart', 'tool']);
 export const SCOPES = Object.freeze(['runtime', 'build', 'test']);
 export const FITS = Object.freeze(['pass', 'pass-with-conditions', 'fail']);
 const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt']);
-const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:' });
+const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:', chart: 'chart:', tool: 'tool:' });
 const CRYPTO = /^(none|uses-platform|unvalidated|validated:.+)$/;
 const AIR_GAP = /^(ok|no|needs-mirror:.+)$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -69,10 +74,13 @@ export function discover(root) {
     for (const name of Object.keys(pkg.dependencies ?? {})) add(found, `npm:${name}`, 'npm', file, { runtime: true });
     for (const name of Object.keys(pkg.devDependencies ?? {})) add(found, `npm:${name}`, 'npm', file);
   }
-  for (const file of IMAGE_FILES.filter((file) => existsSync(path.join(root, file)))) {
+  const containerfiles = existsSync(path.join(root, CONTAINERFILE_DIR))
+    ? readdirSync(path.join(root, CONTAINERFILE_DIR), { withFileTypes: true }).filter((dir) => dir.isDirectory()).map((dir) => `${CONTAINERFILE_DIR}/${dir.name}/Containerfile`).sort()
+    : [];
+  for (const file of [...IMAGE_FILES, ...containerfiles].filter((file) => existsSync(path.join(root, file)))) {
     const text = read(root, file);
     const stages = new Set();
-    const refs = file.endsWith('Dockerfile')
+    const refs = /(?:Dockerfile|Containerfile)$/.test(file)
       ? [...text.matchAll(/^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?/gim)].map((match) => { const ref = match[1]; if (match[2]) stages.add(match[2].toLowerCase()); return ref; })
       : [...text.matchAll(/^\s*image:\s*['"]?([^\s'"#]+)/gm)].map((match) => match[1]);
     // `${VAR:-name}` is an image this repository builds itself; `FROM <stage>` and `scratch` are not images pulled from anywhere.
@@ -91,6 +99,19 @@ export function discover(root) {
       if (!SHA.test(version)) problems.push(`${file}: the action ${ref} is not pinned to a full 40-character commit SHA; pin it (owner/repo@<sha> # vX.Y.Z).`);
       add(found, `action:${action}`, 'action', file);
     }
+  }
+  // A lock file that does not parse is one plain problem, not a crash.
+  const lock = (file) => {
+    if (!existsSync(path.join(root, file))) return undefined;
+    try { return JSON.parse(read(root, file)); } catch { problems.push(`${file}: is not valid JSON; fix the file so its resources can be checked.`); return undefined; }
+  };
+  for (const chart of lock(CHART_LOCK)?.charts ?? []) add(found, `chart:${chart.name}`, 'chart', CHART_LOCK);
+  for (const name of Object.keys(lock(TOOL_PINS) ?? {})) add(found, `tool:${name}`, 'tool', TOOL_PINS);
+  // Only images[] are pulled from elsewhere; built[] are images this repository builds and release[] another pipeline publishes.
+  for (const image of lock(IMAGE_LOCK)?.images ?? []) {
+    const { name, pinned } = parseImage(String(image.ref));
+    if (!pinned) problems.push(`${IMAGE_LOCK}: the image ${image.ref} is not pinned by a sha256 digest; pin it (name:tag@sha256:...).`);
+    add(found, `image:${name}`, 'image', IMAGE_LOCK, { pinned });
   }
   if (existsSync(path.join(root, VENDOR_SCRIPT))) for (const name of vendoredFromScript(read(root, VENDOR_SCRIPT))) add(found, `vendor:${name}`, 'vendored', VENDOR_SCRIPT);
   if (existsSync(path.join(root, VENDORED_JSON))) for (const pkg of JSON.parse(read(root, VENDORED_JSON)).packages ?? []) add(found, `vendor:${pkg.name}`, 'vendored', VENDORED_JSON);

@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "si-02"
+  ],
+  "gap": "G321",
+  "id": "g321",
+  "milestones": [
+    {
+      "targetDate": "2027-01-29",
+      "title": "Red Hat build fix release for CVE-2026-6856 confirmed and recorded, or the Red Hat build ruled out for hosted sites"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Hosted sites run upstream Keycloak at or above the minimum version in the hosted verification records. Before a site runs the Red Hat build of Keycloak instead, confirm with Red Hat which release of that build fixes CVE-2026-6856 for the release line the site would run (Red Hat's data names 26.4.12 and still lists the build as affected; Bugzilla 2460004 reads NEW), and record the answer with its source and date in the hosted verification records.",
+  "title": "The Red Hat build of Keycloak release that fixes CVE-2026-6856 is not confirmed"
+}

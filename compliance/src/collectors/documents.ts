@@ -21,6 +21,7 @@ export const REQUIRED_DOCUMENTS: readonly RequiredDocument[] = Object.freeze([
   { path: 'docs/security/data-flow.md', reviewRequired: true, headings: ['Extension', 'Messaging relay', 'Sync hub', 'Release pipeline', 'Model endpoints'] },
   { path: 'docs/security/crypto-inventory.md', reviewRequired: true, headings: ['Algorithms', 'Basis'] },
   { path: 'docs/security/controlled-goods-and-itar.md', reviewRequired: true, headings: ['What the product does', 'What it does not do', 'Interim settings'] },
+  { path: 'docs/security/hosted-verification-records.md', reviewRequired: true, headings: ['Section 10 conditions', 'Verification register', 'Keycloak CVE-2026-6856 fix version', 'HSM FIPS 140-3 certificates', 'Go Cryptographic Module certificates', 'Traefik and the Theia Cloud chart', 'OpenBao kms-pkcs11 plugin release', 'Theia Cloud project health', 'Prewarm pool and personal volumes', 'Theia 1.77 supported Node range', 'RHEL 9 OpenSSL FIPS provider certificate', 'Bouncy Castle FIPS Java certificates', 'Harbor and Zot FIPS builds'] },
   { path: 'docs/development-workflow.md', reviewRequired: false, headings: ['8. Repository settings (owner only)'] }
 ]);
 

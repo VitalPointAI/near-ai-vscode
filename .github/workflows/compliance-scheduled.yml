@@ -85,6 +85,7 @@ jobs:
             const repository = process.env.REPOSITORY; const commit = process.env.COMMIT;
             const collectors = {
               documents: { repoRoot: "." }, crypto: { repoRoot: "." },
+              deployment: { file: "compliance/site-evidence/reference.json", signersFile: "compliance/attestations/site-signers.json" },
               settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository },
               audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] }
             };

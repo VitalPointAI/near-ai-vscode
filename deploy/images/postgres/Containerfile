@@ -1,0 +1,8 @@
+# The PostgreSQL image for Keycloak, built by us on UBI 9 minimal from the PGDG EL-9 RPMs pinned as "postgresql" in
+# compliance/ci/tool-pins.json, with RPM signature checking enforced against the PGDG key (D-18, research Decision 2; spike S3 proved
+# PostgreSQL 18.7 installs and runs this way, 47-01-SUMMARY.md). One stage. This file holds only the base; the build steps and image.json come
+# with its build definition (deploy/images/README.md), and without image.json it is not built.
+# Pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1). To re-pin, read the tag's index with an
+# anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check that the bytes fetched by
+# that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9@sha256:2cb89feabb136a960f3e6d34f4bbcdff72404f3a18f43f01920e4a26ef389f18

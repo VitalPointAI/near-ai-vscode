@@ -8,14 +8,26 @@ import path from 'node:path';
 
 const CI_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'ci');
 
+interface Asset {
+  url: string;
+  sha256: string;
+  checksumUrl?: string;
+}
+
 interface ToolPin {
   version: string;
   url: string;
   sha256: string;
-  checksumUrl: string;
+  checksumUrl?: string;
   archive: string;
-  bin: string;
+  bin?: string;
   java?: string;
+  scope?: string;
+  pinKind?: string;
+  commit?: string;
+  tree?: string;
+  tarSha256?: string;
+  assets?: Asset[];
 }
 
 const pins = JSON.parse(readFileSync(path.join(CI_DIR, 'tool-pins.json'), 'utf8')) as Record<string, ToolPin>;
@@ -26,13 +38,23 @@ const installerCode = installer
   .filter((line) => !/^\s*#/.test(line))
   .join('\n');
 
-const SEMVER = /^\d+\.\d+\.\d+$/;
+// x.y or x.y.z, with an optional +build suffix (RKE2's 1.37.2+rke2r1; PostgreSQL's 18.7).
+const VERSION = /^\d+\.\d+(\.\d+)?(\+[0-9A-Za-z.]+)?$/;
 const SHA256 = /^[0-9a-f]{64}$/;
-const ALLOWED_HOSTS = new Set(['repo1.maven.org', 'github.com']);
-const ARCHIVES = new Set(['zip', 'tar.gz']);
+const COMMIT = /^[0-9a-f]{40}$/;
+const ALLOWED_HOSTS = new Set(['repo1.maven.org', 'github.com', 'get.helm.sh', 'download.postgresql.org']);
+const ARCHIVES = new Set(['zip', 'tar.gz', 'binary', 'file']);
+const PLAIN_PATH = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
 
-test('exactly the three CI binaries are pinned: oscal-cli, syft and grype', () => {
-  assert.deepEqual(Object.keys(pins).sort(), ['grype', 'oscal-cli', 'syft']);
+const httpsOnAllowedHost = (name: string, key: string, value: string) => {
+  const address = new URL(value);
+  assert.equal(address.protocol, 'https:', `${name}: ${key} protocol`);
+  assert.ok(ALLOWED_HOSTS.has(address.hostname), `${name}: ${key} host ${address.hostname}`);
+  return address;
+};
+
+test('the pinned tools are exactly the CI binaries and the deployment stack downloads', () => {
+  assert.deepEqual(Object.keys(pins).sort(), ['cosign', 'grype', 'hauler', 'helm', 'kms-pkcs11', 'oscal-cli', 'postgresql', 'rke2', 'softhsm2', 'syft']);
 });
 
 test('syft is 1.57.2 and grype is 0.122.1, linux amd64 tarballs from their immutable GitHub releases', () => {
@@ -52,19 +74,37 @@ test('syft is 1.57.2 and grype is 0.122.1, linux amd64 tarballs from their immut
   }
 });
 
-test('every tool has a semantic version, an https address on Maven Central or GitHub, a 64-hex SHA-256 and a known archive kind', () => {
+test('every tool has an exact version, https addresses on an allowed host, 64-hex SHA-256 values and a known archive kind', () => {
   for (const [name, pin] of Object.entries(pins)) {
-    assert.match(pin.version, SEMVER, `${name}: version`);
-    for (const key of ['url', 'checksumUrl'] as const) {
-      const address = new URL(pin[key]);
-      assert.equal(address.protocol, 'https:', `${name}: ${key} protocol`);
-      assert.ok(ALLOWED_HOSTS.has(address.hostname), `${name}: ${key} host ${address.hostname}`);
-      assert.ok(address.pathname.includes(pin.version), `${name}: ${key} names the pinned version`);
-    }
+    assert.match(pin.version, VERSION, `${name}: version`);
+    const url = httpsOnAllowedHost(name, 'url', pin.url);
     assert.match(pin.sha256, SHA256, `${name}: sha256`);
+    if (pin.pinKind === 'commit') {
+      // No publisher checksum exists (SoftHSM2): the pin is the commit and its tree, reproducible offline with git archive. Test scope only.
+      assert.equal(pin.scope, 'test', `${name}: a commit pin is test scope only`);
+      assert.equal(pin.checksumUrl, undefined, `${name}: a commit pin has no publisher checksum to name`);
+      assert.match(pin.commit ?? '', COMMIT, `${name}: commit`);
+      assert.match(pin.tree ?? '', COMMIT, `${name}: tree`);
+      assert.match(pin.tarSha256 ?? '', SHA256, `${name}: tarSha256`);
+      assert.ok(url.pathname.endsWith(`/archive/${pin.commit}.tar.gz`), `${name}: url is the archive of the pinned commit`);
+    } else {
+      assert.equal(pin.pinKind, undefined, `${name}: pinKind`);
+      assert.ok(decodeURIComponent(url.pathname).includes(pin.version), `${name}: url names the pinned version`);
+      const checksum = httpsOnAllowedHost(name, 'checksumUrl', pin.checksumUrl ?? '');
+      // A yum repository's metadata names the major version in its path, not the full version.
+      const named = checksum.pathname.endsWith('/repodata/repomd.xml') ? `/${pin.version.split('.')[0]}/` : pin.version;
+      assert.ok(decodeURIComponent(checksum.pathname).includes(named), `${name}: checksumUrl names the pinned version`);
+    }
     assert.ok(ARCHIVES.has(pin.archive), `${name}: archive ${pin.archive}`);
-    assert.ok(pin.url.endsWith(pin.archive === 'zip' ? '.zip' : '.tar.gz'), `${name}: address matches the archive kind`);
-    assert.match(pin.bin, /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/, `${name}: bin is a plain relative path`);
+    if (pin.archive === 'zip' || pin.archive === 'tar.gz') assert.ok(pin.url.endsWith(`.${pin.archive}`), `${name}: address matches the archive kind`);
+    if (pin.archive === 'binary') assert.doesNotMatch(pin.url, /\.(zip|tar\.gz|tgz|tar|rpm)$/, `${name}: a binary pin is a bare executable`);
+    if (pin.archive === 'file') assert.equal(pin.bin, undefined, `${name}: a file pin is placed as-is, with no bin`);
+    else assert.match(pin.bin ?? '', pin.archive === 'binary' ? /^[A-Za-z0-9._-]+$/ : PLAIN_PATH, `${name}: bin is a plain relative path`);
+    for (const [index, asset] of (pin.assets ?? []).entries()) {
+      httpsOnAllowedHost(name, `assets[${index}].url`, asset.url);
+      assert.match(asset.sha256, SHA256, `${name}: assets[${index}].sha256`);
+      if (asset.checksumUrl !== undefined) httpsOnAllowedHost(name, `assets[${index}].checksumUrl`, asset.checksumUrl);
+    }
   }
 });
 

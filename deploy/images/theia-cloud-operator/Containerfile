@@ -1,0 +1,10 @@
+# The Theia Cloud operator image, rebuilt by us from the pinned Theia Cloud source on UBI 9 (D-23, D-12). This file holds only the base
+# stages; the build steps and image.json come with its build definition (deploy/images/README.md), and without image.json it is not built.
+#   build:   ubi9/openjdk-21, the JDK and Maven stage (build scope only).
+#   runtime: ubi9/openjdk-21-runtime, the image that runs at a site.
+# Both are pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read
+# the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
+# that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:678acf0a00bb4a0d986b8397f472531aa2fe8d2b068f360c96f835889cac44c3 AS build
+
+FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.24@sha256:7fc9128f130fe28d913ac4ad1659f764675a8382bffaf42eb8c8f8cfbd17865f

@@ -1,0 +1,43 @@
+{
+  "keycloak": {
+    "distribution": "upstream",
+    "version": "26.8.2",
+    "fipsMode": "strict",
+    "passwordAuthenticators": 0,
+    "otpAuthenticators": 0,
+    "loadTestClients": 0,
+    "userEventsEnabled": true,
+    "adminEventsEnabled": true,
+    "eventsLastDay": 412
+  },
+  "openbao": {
+    "version": "2.4.1",
+    "sealType": "pkcs11",
+    "auditDevices": 1,
+    "auditEventsLastDay": 2380
+  },
+  "kubernetes": {
+    "auditPolicySha256": "73bb9c0ba7bd553ffaa93e4af4c7f736f2d53e45d6621866306e18090002cc9f",
+    "sessionsAudited": true,
+    "workspacesAudited": true,
+    "auditEventsLastDay": 15022,
+    "nodes": 3,
+    "fipsNodes": 3
+  },
+  "registry": {
+    "kind": "zot",
+    "enforcingImagePolicies": 1,
+    "unsignedImageResults": 0,
+    "auditEventsLastDay": 96
+  },
+  "images": {
+    "locked": 2,
+    "signatureVerified": 2,
+    "sbomVerified": 2,
+    "provenanceVerified": 2
+  },
+  "workbench": {
+    "sampledSessions": 2,
+    "fipsSessions": 2
+  }
+}

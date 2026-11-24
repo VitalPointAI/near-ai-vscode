@@ -1,0 +1,12 @@
+{
+  "chart": "kyverno",
+  "namespace": "kyverno",
+  "order": 20,
+  "values": ["deploy/values/kyverno.yaml"],
+  "images": [
+    { "lock": "reg.kyverno.io/kyverno/kyverno", "set": { "admissionController.container.image.registry": "registry", "admissionController.container.image.repository": "repository", "admissionController.container.image.tag": "tagAtDigest" } },
+    { "lock": "reg.kyverno.io/kyverno/kyvernopre", "set": { "admissionController.initContainer.image.registry": "registry", "admissionController.initContainer.image.repository": "repository", "admissionController.initContainer.image.tag": "tagAtDigest" } },
+    { "lock": "ghcr.io/kyverno/readiness-checker", "set": { "test.image.registry": "registry", "test.image.repository": "repository", "test.image.tag": "tagAtDigest", "webhooksCleanup.image.registry": "registry", "webhooksCleanup.image.repository": "repository", "webhooksCleanup.image.tag": "tagAtDigest" } }
+  ],
+  "note": "Kyverno v1.20.0, the admission signature check (D-15, research Decision 1): admission controller only."
+}

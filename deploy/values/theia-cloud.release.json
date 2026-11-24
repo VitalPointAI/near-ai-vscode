@@ -1,0 +1,12 @@
+{
+  "chart": "theia-cloud",
+  "namespace": "theia-cloud",
+  "order": 62,
+  "values": ["deploy/values/theia-cloud.yaml"],
+  "images": [
+    { "lock": "sterling/theia-cloud-operator", "set": { "operator.image": "ref" } },
+    { "lock": "sterling/theia-cloud-service", "set": { "service.image": "ref" } },
+    { "lock": "sterling/theia-cloud-landing-page", "set": { "landingPage.image": "ref" } }
+  ],
+  "note": "Theia Cloud 1.2.0 (E1). Every image is one we rebuild on UBI 9 (D-23); each renders with the reserved unpublished digest until the deploy-images job publishes it."
+}

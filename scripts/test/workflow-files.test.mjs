@@ -3,7 +3,7 @@
 // keys and jobs by indentation.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -225,17 +225,48 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   assert.match(upload, /if: steps\.bundle_scan\.outcome == 'success'/);
   assert.match(job, /FAIL_ON_DROP:/);
   assert.match(job, /npm audit[\s\S]*continue-on-error: true|continue-on-error: true[\s\S]*npm audit/);
+  const all = steps(job);
+  const unit = all.findIndex((step) => /run: npm --prefix compliance test$/m.test(step));
+  const load = all.findIndex((step) => step.includes('loadtest/test/*.test.ts'));
+  assert.ok(unit >= 0 && load > unit, 'the load-test tests run after the compliance tests');
+  assert.match(all[load], /if: steps\.has_compliance\.outputs\.present == 'true'/);
+  assert.match(all[load], /if \[ ! -f loadtest\/package\.json \]; then [^\n]*exit 0; fi/, 'a checkout without loadtest/ still passes');
+  assert.match(all[load], /typescript\/bin\/tsc -p loadtest\/tsconfig\.json/);
+  assert.match(inputs, /if \(existsSync\("workbench\/package\.json"\)\) reported\.push\("workbench"\)/);
+  assert.match(inputs, /if \(existsSync\("deploy\/test"\)\) reported\.push\("deploy"\)/);
 });
 
-test('root, relay and hub test reports are always uploaded without changing required checks', async () => {
+/** The public site evidence the dashboard may name: the reference site's export and the public site trust list only (48 D-15, VER-07). */
+const DEPLOYMENT_INPUT = 'deployment: { file: "compliance/site-evidence/reference.json", signersFile: "compliance/attestations/site-signers.json" }';
+
+test('the public workflows collect deployment evidence from the reference site only', () => {
+  for (const name of ['ci.yml', 'compliance-scheduled.yml']) {
+    const text = read(name);
+    assert.equal(text.split(DEPLOYMENT_INPUT).length - 1, 1, `${name} names the reference export and the public trust list once`);
+    assert.deepEqual([...new Set(text.match(/site-evidence\/[^"'\s]*/g))], ['site-evidence/reference.json'], `${name} names no other site export`);
+    assert.deepEqual([...new Set(text.match(/attestations\/site-signers[^"'\s]*/g))], ['attestations/site-signers.json'], `${name} names no other site trust list`);
+  }
+});
+
+test('every package the compliance reports list names has a job that writes and uploads its report, without changing required checks', async () => {
   const all = jobs(read('ci.yml'));
-  for (const id of ['test', 'relay', 'hub']) {
-    const job = all.get(id);
-    assert.match(job, /NEAR_AI_TEST_REPORT/);
+  const inputs = steps(all.get('compliance')).find((step) => /name: Write collector inputs and changed paths/.test(step));
+  const base = JSON.parse(/const reported = (\[[^\]]*\]);/.exec(inputs)?.[1] ?? 'null');
+  assert.deepEqual(base, ['root', 'relay', 'hub']);
+  // A package added when it exists (workbench, deploy) needs its job only once it is in the checkout; until then its report is missing and
+  // only that package's tests observation fails.
+  const conditional = [...inputs.matchAll(/if \(existsSync\("([^"]+)"\)\) reported\.push\("([^"]+)"\);/g)].map(([, marker, id]) => ({ marker, id }));
+  assert.deepEqual(conditional.map(({ id }) => id), ['workbench', 'deploy']);
+  const root = new URL('../../', import.meta.url);
+  const present = [...base, ...conditional.filter(({ marker }) => existsSync(new URL(marker, root))).map(({ id }) => id)];
+  for (const id of present) {
+    const job = all.get(id === 'root' ? 'test' : id);
+    assert.ok(job, `a ${id} job exists for its report`);
+    assert.ok(job.includes(`NEAR_AI_TEST_REPORT: test-report-${id}.ndjson`), `${id} writes its report`);
     assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
-    const upload = steps(job).find((step) => step.includes(`name: test-report-${id === 'test' ? 'root' : id}`));
+    const upload = steps(job).find((step) => step.includes(`name: test-report-${id}\n`));
     assert.ok(upload, `report upload exists for ${id}`);
-    const guard = id === 'test' ? '' : `steps.has_${id}.outputs.present == 'true' && `;
+    const guard = id === 'root' ? '' : `steps.has_${id}.outputs.present == 'true' && `;
     assert.ok(upload.includes(`if: ${guard}always()`));
     assert.match(job, /continue-on-error:\s*true/);
   }

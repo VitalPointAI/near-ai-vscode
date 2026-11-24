@@ -1,5 +1,5 @@
 # Required checks for every PR into main. The job names (lint, test, e2e, release-content, audit,
-# secret-scan, relay, hub, docs) are the branch protection's required status checks: do not rename them
+# secret-scan, relay, hub, docs, deploy) are the branch protection's required status checks: do not rename them
 # without updating branch protection, CI_CHECKS in scripts/lib/workflow.mjs and
 # docs/development-workflow.md in the same PR.
 name: CI
@@ -418,10 +418,78 @@ jobs:
           path: compliance/out/relay-image-scan.json
           if-no-files-found: warn
 
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The detection step below reads the base commit and main's history, not only this commit.
+          fetch-depth: 0
+      # The same hotfix rule as the hub job, keyed on deploy/charts/charts.lock.json: a hotfix/x.y.z branch whose commit and
+      # base commit both lack the deployment stack passes without running anything else; any other change without it fails,
+      # and a push to main never skips. Every later step is guarded by this output.
+      - name: Check that this commit has the deployment stack
+        id: has_deploy
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -f deploy/charts/charts.lock.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"
+          fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null && ! git cat-file -e "$base:deploy/charts/charts.lock.json" 2>/dev/null; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=deploy checks skipped::deploy/charts/charts.lock.json is neither on this commit of $BRANCH nor on its base commit (a hotfix from a release older than the deployment stack), so the deploy checks were skipped."
+          else
+            echo "::error title=deployment stack missing::deploy/charts/charts.lock.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the deployment stack, whose base commit has none either, may skip the deploy checks."
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_deploy.outputs.present == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned helm and cosign
+        if: steps.has_deploy.outputs.present == 'true'
+        run: |
+          sh compliance/ci/install-tool.sh helm compliance/out/tools
+          sh compliance/ci/install-tool.sh cosign compliance/out/tools
+          echo "$PWD/compliance/out/tools/linux-amd64" >> "$GITHUB_PATH"
+          echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
+          echo "HELM=$PWD/compliance/out/tools/linux-amd64/helm" >> "$GITHUB_ENV"
+      - name: Check the vendored chart tarballs against the chart lock (offline)
+        if: steps.has_deploy.outputs.present == 'true'
+        run: node deploy/charts/vendor.mjs --check
+      - name: Render every chart offline, check the hardening invariants and write the evidence report
+        if: steps.has_deploy.outputs.present == 'true'
+        env:
+          NEAR_AI_TEST_REPORT: test-report-deploy.ndjson
+        run: node scripts/run-tests.mjs deploy/test/*.test.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_deploy.outputs.present == 'true' && always()
+        continue-on-error: true
+        with:
+          name: test-report-deploy
+          path: test-report-deploy.ndjson
+          if-no-files-found: warn
+
   compliance:
     name: compliance
     if: always()
-    needs: [lint, test, e2e, release-content, audit, secret-scan, docs, relay, hub, relay-image-scan]
+    needs: [lint, test, e2e, release-content, audit, secret-scan, docs, relay, hub, deploy, relay-image-scan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -465,6 +533,12 @@ jobs:
         run: npm --prefix compliance run lint
       - if: steps.has_compliance.outputs.present == 'true'
         run: npm --prefix compliance test
+      - name: Load-test unit tests and type check
+        if: steps.has_compliance.outputs.present == 'true'
+        run: |
+          if [ ! -f loadtest/package.json ]; then echo 'No loadtest package in this commit.'; exit 0; fi
+          node compliance/node_modules/typescript/bin/tsc -p loadtest/tsconfig.json
+          node scripts/run-tests.mjs loadtest/test/*.test.ts
       - if: steps.has_compliance.outputs.present == 'true'
         run: node compliance/src/cli.ts validate
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -500,12 +574,16 @@ jobs:
           printf '%s\n' "$NEEDS_JSON" > compliance/out/needs.json
           if [ "$EVENT" = "pull_request" ]; then git diff --name-only "$PR_BASE...$COMMIT" > compliance/out/changed.txt; else git diff-tree --no-commit-id --name-only -r "$COMMIT" > compliance/out/changed.txt; fi
           node --input-type=module -e '
-            import { readdirSync, statSync, writeFileSync } from "node:fs";
+            import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
             import { openZip } from "./scripts/lib/zip.mjs";
-            const reports = ["root", "relay", "hub"].map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
+            const reported = ["root", "relay", "hub"];
+            if (existsSync("workbench/package.json")) reported.push("workbench");
+            if (existsSync("deploy/test")) reported.push("deploy");
+            const reports = reported.map(packageName => ({ package: packageName, file: `compliance/out/reports/test-report-${packageName}.ndjson` }));
             const collectors = {
               tests: { reports }, ci: { needsFile: "compliance/out/needs.json" },
-              documents: { repoRoot: "." }, crypto: { repoRoot: "." }
+              documents: { repoRoot: "." }, crypto: { repoRoot: "." },
+              deployment: { file: "compliance/site-evidence/reference.json", signersFile: "compliance/attestations/site-signers.json" }
             };
             if (process.env.VSIX_RESULT === "success") {
               const directory = "compliance/out/vsix";

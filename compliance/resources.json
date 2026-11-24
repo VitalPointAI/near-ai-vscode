@@ -782,10 +782,12 @@
       "conditions": [
         "Air-gapped and on-premise sites must mirror this exact digest into a local registry (gcr.io is a commercial-cloud registry).",
         "The hub's TLS and the relay's token signing run on the Node.js OpenSSL in this image, which is not a FIPS 140 validated module (gap X8): a Protected B deployment needs its authorizing official to accept the comparable-strength basis, or a validated provider.",
-        "Act on the relay-image-scan result before each release; it does not block a merge."
+        "Act on the relay-image-scan result before each release; it does not block a merge.",
+        "Protected B needs a UBI 9 base with the OpenSSL FIPS provider on a FIPS host; the rebase is coordinated with Phase 46 (P11, one Node major).",
+        "On-premise, the hub runs on Kubernetes, several per site, each from the published, signed digest (D-45, D-46)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
+      "reviewedAt": "2026-11-24"
     },
     {
       "id": "image:docker.io/bbernhard/signal-cli-rest-api",
@@ -820,6 +822,1401 @@
       "reviewedAt": "2026-11-23"
     },
     {
+      "id": "image:registry.access.redhat.com/ubi9/go-toolset",
+      "kind": "image",
+      "where": [
+        "deploy/images/oauth2-proxy/Containerfile"
+      ],
+      "component": "oauth2-proxy",
+      "scope": "build",
+      "purpose": "Build stage of our oauth2-proxy image: compiles it from pinned source with the Go FIPS module (Go 1.27.3).",
+      "licence": "Red Hat UBI EULA (redistributable); Go BSD-3-Clause",
+      "controls": [
+        "ia-02",
+        "ac-03",
+        "sc-08",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "none",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned digest on the connected build host; the site never pulls it (it reaches the site inside our signed image)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Rebuilt from pinned source with the Go FIPS module (GOFIPS140); the module's CMVP status is unverified.",
+        "Runs with TLS verification on, secure cookies, real generated secrets and token forwarding (D-22); the render invariants check each.",
+        "Build stage only: nothing but the compiled binary reaches the final image."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/ubi-minimal",
+      "kind": "image",
+      "where": [
+        "deploy/images/oauth2-proxy/Containerfile",
+        "deploy/images/postgres/Containerfile"
+      ],
+      "component": "oauth2-proxy",
+      "scope": "runtime",
+      "purpose": "Runtime base of our oauth2-proxy and Postgres images.",
+      "licence": "Red Hat UBI EULA (redistributable); RHEL packages under their own licences",
+      "controls": [
+        "ia-02",
+        "ac-03",
+        "sc-08",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "unvalidated",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Rebuilt from pinned source with the Go FIPS module (GOFIPS140); the module's CMVP status is unverified.",
+        "Runs with TLS verification on, secure cookies, real generated secrets and token forwarding (D-22); the render invariants check each.",
+        "UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
+        "Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/ubi",
+      "kind": "image",
+      "where": [
+        "deploy/images/openbao-softhsm/Containerfile"
+      ],
+      "component": "hsm",
+      "scope": "test",
+      "purpose": "Build stage of the SoftHSM2 library for the test-only openbao-softhsm image.",
+      "licence": "Red Hat UBI EULA (redistributable)",
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "none",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned digest on the connected build host; the site never pulls it (it reaches the site inside our signed image)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "SoftHSM2 is test scope only and never appears in production values (D-38).",
+        "The site HSM must hold a FIPS 140-3 Level 3 certificate and run in its approved mode.",
+        "HSM hardware is export-controlled: it follows your organization's Controlled Goods and ITAR procedures.",
+        "Build stage of a test-only image; never in production values."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/openbao/openbao-ubi",
+      "kind": "image",
+      "where": [
+        "deploy/images/openbao/Containerfile"
+      ],
+      "component": "openbao",
+      "scope": "runtime",
+      "purpose": "Base of our OpenBao image (OpenBao 2.7.3 on UBI), which adds the pinned kms-pkcs11 plugin.",
+      "licence": "MPL-2.0 (OpenBao); Red Hat UBI EULA (base)",
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "sc-28",
+        "ia-05",
+        "au-02",
+        "au-09",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "unvalidated",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Seal keys are held in a validated site HSM through the kms-pkcs11 plugin, or by Shamir shares under the key ceremony.",
+        "The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.",
+        "The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.",
+        "Never HashiCorp Vault (D-04).",
+        "UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
+        "Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/openjdk-21",
+      "kind": "image",
+      "where": [
+        "deploy/images/theia-cloud-conversion-webhook/Containerfile",
+        "deploy/images/theia-cloud-operator/Containerfile",
+        "deploy/images/theia-cloud-service/Containerfile"
+      ],
+      "component": "theia-cloud",
+      "scope": "build",
+      "purpose": "Build stage of our Theia Cloud operator, service and conversion webhook images (Maven build of the 1.2.0 source).",
+      "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "none",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned digest on the connected build host; the site never pulls it (it reaches the site inside our signed image)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.",
+        "Build stage only; Maven needs Maven Central on the connected build host, and syft records the dependency graph in the SBOM."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/openjdk-21-runtime",
+      "kind": "image",
+      "where": [
+        "deploy/images/theia-cloud-conversion-webhook/Containerfile",
+        "deploy/images/theia-cloud-operator/Containerfile",
+        "deploy/images/theia-cloud-service/Containerfile"
+      ],
+      "component": "theia-cloud",
+      "scope": "runtime",
+      "purpose": "Runtime base of our Theia Cloud operator, service and conversion webhook images.",
+      "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "unvalidated",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.",
+        "UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
+        "The JVM uses the RHEL FIPS crypto policy only on a FIPS-mode host; not confirmed for these images in Phase 47.",
+        "Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/nodejs-22",
+      "kind": "image",
+      "where": [
+        "deploy/images/theia-cloud-landing-page/Containerfile"
+      ],
+      "component": "theia-cloud",
+      "scope": "build",
+      "purpose": "Build stage of our Theia Cloud landing page image.",
+      "licence": "Red Hat UBI EULA (redistributable); Node.js MIT",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "none",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned digest on the connected build host; the site never pulls it (it reaches the site inside our signed image)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.",
+        "Build stage only; npm packages come from a registry on the connected build host."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.access.redhat.com/ubi9/nginx-126",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json",
+        "deploy/images/theia-cloud-landing-page/Containerfile"
+      ],
+      "component": "theia-cloud",
+      "scope": "runtime",
+      "purpose": "Runtime base of our Theia Cloud landing page image, and the lab session image until Phase 46 publishes the workbench (D-55).",
+      "licence": "Red Hat UBI EULA (redistributable); nginx BSD-2-Clause",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "unvalidated",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.",
+        "UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
+        "As a session image it is the lab stand-in only: production AppDefinitions use the signed sterling-workbench digest once Phase 46 publishes it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/jetstack/cert-manager-controller",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "cert-manager",
+      "scope": "runtime",
+      "purpose": "cert-manager controller: issues and renews site certificates.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-08",
+        "sc-12",
+        "sc-13",
+        "ia-05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Go cryptography is not FIPS-validated.",
+        "No ACME issuer exists anywhere in the site values (D-16); the render invariants fail on one.",
+        "Owner to confirm (E2): a bootstrap CA issues only OpenBao's first TLS and the registry's first certificate; after init, a vault-type ClusterIssuer on OpenBao pki_int issues every site certificate. The CA-type issuer with an exported intermediate key is the recorded fallback.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/jetstack/cert-manager-webhook",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "cert-manager",
+      "scope": "runtime",
+      "purpose": "cert-manager admission webhook for its resources.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-08",
+        "sc-12",
+        "sc-13",
+        "ia-05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Go cryptography is not FIPS-validated.",
+        "No ACME issuer exists anywhere in the site values (D-16); the render invariants fail on one.",
+        "Owner to confirm (E2): a bootstrap CA issues only OpenBao's first TLS and the registry's first certificate; after init, a vault-type ClusterIssuer on OpenBao pki_int issues every site certificate. The CA-type issuer with an exported intermediate key is the recorded fallback.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/jetstack/cert-manager-cainjector",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "cert-manager",
+      "scope": "runtime",
+      "purpose": "cert-manager CA injector: writes CA bundles into webhook configurations.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-08",
+        "sc-12",
+        "sc-13",
+        "ia-05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Go cryptography is not FIPS-validated.",
+        "No ACME issuer exists anywhere in the site values (D-16); the render invariants fail on one.",
+        "Owner to confirm (E2): a bootstrap CA issues only OpenBao's first TLS and the registry's first certificate; after init, a vault-type ClusterIssuer on OpenBao pki_int issues every site certificate. The CA-type issuer with an exported intermediate key is the recorded fallback.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/jetstack/cert-manager-startupapicheck",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "cert-manager",
+      "scope": "runtime",
+      "purpose": "cert-manager install-time check that its API answers (a Job, runs once).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-08",
+        "sc-12",
+        "sc-13",
+        "ia-05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Go cryptography is not FIPS-validated.",
+        "No ACME issuer exists anywhere in the site values (D-16); the render invariants fail on one.",
+        "Owner to confirm (E2): a bootstrap CA issues only OpenBao's first TLS and the registry's first certificate; after init, a vault-type ClusterIssuer on OpenBao pki_int issues every site certificate. The CA-type issuer with an exported intermediate key is the recorded fallback.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/haproxytech/kubernetes-ingress",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "ingress",
+      "scope": "runtime",
+      "purpose": "HAProxy Kubernetes Ingress controller 3.4.1: the site ingress (D-07).",
+      "licence": "Apache-2.0 (controller); HAProxy under its own GPL-2.0 licence, run unmodified",
+      "controls": [
+        "sc-07",
+        "sc-08",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "TLS is FIPS-capable only with a validated OpenSSL on a FIPS-mode host; the upstream image is not a Protected B base.",
+        "ingress-nginx is never used: the project is archived and its fit is fail (D-07). Traefik stays out until it is tested.",
+        "The upstream image is built on an Alpine or Debian base (per research; not re-read layer by layer) and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:reg.kyverno.io/kyverno/kyverno",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Kyverno 1.20.0 admission controller: refuses any image not signed with your organization's key (D-15, Decision 1).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:reg.kyverno.io/kyverno/kyvernopre",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Kyverno init container that prepares the admission controller.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:ghcr.io/kyverno/readiness-checker",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Kyverno chart test pods and the pre-delete webhook cleanup hook.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:ghcr.io/project-zot/zot",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Zot v2.1.23: the site registry for the lab and small sites (Decision 8).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/harbor-core",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor core API (HQ and large sites, second wave).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/harbor-portal",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor web portal (HQ and large sites).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/harbor-jobservice",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor job service (replication and retention jobs).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/registry-photon",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor's distribution registry.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/harbor-registryctl",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor registry controller.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/harbor-db",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor internal Postgres database (Harbor sites only).",
+      "licence": "Apache-2.0 (Harbor packaging); PostgreSQL Licence",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/goharbor/valkey-photon",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor internal Redis-compatible cache (Harbor sites only).",
+      "licence": "Apache-2.0 (Harbor packaging); Valkey BSD-3-Clause",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Harbor has no documented FIPS build. The upstream image is built on Photon OS and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Trivy is off at air-gapped sites; Harbor is for HQ and large sites only (second wave)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/keycloak/keycloak",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "keycloak",
+      "scope": "runtime",
+      "purpose": "Keycloak 26.8.2: passkey sign-in for the site (D-30), on the official ubi9-micro image.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "ia-02",
+        "ia-05",
+        "ia-08",
+        "ac-12",
+        "au-02",
+        "au-03",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "CVE-2026-6856: the fixed version is unverified. The 26.8.2 source refuses self-attestation and the none attestation when an AAGUID allowlist is set; Phase 48 closes this (D-30).",
+        "Owner to confirm (E6): FIPS strict mode with BC-FIPS is not delivered in Phase 47.",
+        "Password, OTP and recovery-code authenticators are off in every flow; Keycloak events are shipped to the site log store.",
+        "The official image is built on ubi9-micro with OpenJDK 21, so the UBI 9 base row is met; FIPS mode is not."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/adorsys/keycloak-config-cli",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "keycloak",
+      "scope": "runtime",
+      "purpose": "keycloak-config-cli 6.5.1: applies the site realm as code at install and on every update, as a Kubernetes Job (Decision 10).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "ia-02",
+        "ia-05",
+        "ia-08",
+        "ac-12",
+        "au-02",
+        "au-03",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "CVE-2026-6856: the fixed version is unverified. The 26.8.2 source refuses self-attestation and the none attestation when an AAGUID allowlist is set; Phase 48 closes this (D-30).",
+        "Owner to confirm (E6): FIPS strict mode with BC-FIPS is not delivered in Phase 47.",
+        "Password, OTP and recovery-code authenticators are off in every flow; Keycloak events are shipped to the site log store.",
+        "Holds a Keycloak admin credential only for the Job's run and opens no inbound port.",
+        "The upstream image is a JVM image not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/longhorn-manager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn manager: the reference encrypted storage class (Decision 3).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/longhorn-engine",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn volume engine.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/longhorn-instance-manager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn instance manager for engine and replica processes.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/longhorn-share-manager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn share manager (RWX volumes).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/backing-image-manager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn backing image manager.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/longhorn-ui",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn administration UI.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The UI is reachable only from the site administration network, never through the user ingress.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/support-bundle-kit",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn support bundle collector.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/csi-attacher",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI attacher sidecar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/csi-provisioner",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI provisioner sidecar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/csi-node-driver-registrar",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI node driver registrar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/csi-resizer",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI resizer sidecar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/csi-snapshotter",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI snapshotter sidecar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/longhornio/livenessprobe",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Kubernetes CSI liveness probe sidecar, as Longhorn ships it.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/opensearchproject/opensearch",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "OpenSearch 3.10.0: the site log and audit store (Decision 4).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "FIPS mode needs BC-FJA and BCFKS keystores and is not enabled in Phase 47 (Phase 48); access is limited to a named auditor role.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:cr.fluentbit.io/fluent/fluent-bit",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Fluent Bit 5.2.0: ships container logs, Keycloak events, the OpenBao audit device and the RKE2 audit log to the site store.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/prometheus/prometheus",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Prometheus 3.16.0: site metrics, needed by Phase 48's load test.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Alertmanager is off; metrics stay on the site."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/prometheus-operator/prometheus-config-reloader",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Reloads the Prometheus configuration when it changes.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Alertmanager is off; metrics stay on the site."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:registry.k8s.io/kube-state-metrics/kube-state-metrics",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "kube-state-metrics: Kubernetes object metrics for Prometheus.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Alertmanager is off; metrics stay on the site."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/prometheus/node-exporter",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "node-exporter: host metrics for Prometheus.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "Runs with host access in the PSA-exempt monitoring namespace only.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
+        "Alertmanager is off; metrics stay on the site."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
       "id": "action:actions/checkout",
       "kind": "action",
       "where": [
@@ -827,6 +2224,7 @@
         ".github/workflows/ci.yml",
         ".github/workflows/codeql.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -853,6 +2251,7 @@
         ".github/workflows/agent-review.yml",
         ".github/workflows/ci.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -878,6 +2277,7 @@
       "where": [
         ".github/workflows/ci.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -903,6 +2303,7 @@
       "kind": "action",
       "where": [
         ".github/workflows/ci.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -996,11 +2397,12 @@
       "id": "action:actions/attest",
       "kind": "action",
       "where": [
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Creates GitHub artifact attestations (build provenance) for the VSIX and the compliance package.",
+      "purpose": "Creates GitHub artifact attestations: build provenance for the VSIX and the compliance package, and provenance and SBOM attestations for the rebuilt deployment images (deploy-images, tag-triggered).",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -1017,7 +2419,7 @@
         "Attestations are signed through GitHub's Sigstore service (commercial cloud, not a FIPS 140 validated module): treat them as supplementary provenance beside the release SHA-256 checksum, and download the attestation bundle with the release for offline verification at an air-gapped site."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
+      "reviewedAt": "2026-11-24"
     },
     {
       "id": "action:github/codeql-action/init",
@@ -1312,6 +2714,736 @@
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "chart:cert-manager",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "cert-manager",
+      "scope": "runtime",
+      "purpose": "cert-manager v1.21.3 Helm chart.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-08",
+        "sc-12",
+        "sc-13",
+        "ia-05"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Go cryptography is not FIPS-validated.",
+        "No ACME issuer exists anywhere in the site values (D-16); the render invariants fail on one.",
+        "Owner to confirm (E2): a bootstrap CA issues only OpenBao's first TLS and the registry's first certificate; after init, a vault-type ClusterIssuer on OpenBao pki_int issues every site certificate. The CA-type issuer with an exported intermediate key is the recorded fallback."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:kubernetes-ingress",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "ingress",
+      "scope": "runtime",
+      "purpose": "HAProxy Kubernetes Ingress controller Helm chart 1.57.1 (controller 3.4.1).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-07",
+        "sc-08",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "TLS is FIPS-capable only with a validated OpenSSL on a FIPS-mode host; the upstream image is not a Protected B base.",
+        "ingress-nginx is never used: the project is archived and its fit is fail (D-07). Traefik stays out until it is tested."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:kyverno",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Kyverno Helm chart 3.10.0 (Kyverno v1.20.0); admission controller only.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "Only the admission controller is installed; the legacy-policy-check and CRD-migration hooks are off."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:zot",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Zot Helm chart 0.1.135 (Zot v2.1.23).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:harbor",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "image-registry",
+      "scope": "runtime",
+      "purpose": "Harbor Helm chart 1.19.4 (HQ and large sites, second wave), with the images set to the v2.15.5 digests.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-07",
+        "cm-14",
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "sc-13"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
+        "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
+        "No published chart carries Harbor v2.15.5 (checked 2026-11-23); chart 1.19.4 renders the v2.15.5 images from the lock."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:longhorn",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "site-storage",
+      "scope": "runtime",
+      "purpose": "Longhorn Helm chart 1.13.0.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sc-28",
+        "sc-13",
+        "cp-09"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
+        "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
+        "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
+        "longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:openbao",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "openbao",
+      "scope": "runtime",
+      "purpose": "OpenBao Helm chart 0.30.8, rendered with our rebuilt OpenBao image.",
+      "licence": "MPL-2.0",
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "sc-28",
+        "ia-05",
+        "au-02",
+        "au-09",
+        "cp-09"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Seal keys are held in a validated site HSM through the kms-pkcs11 plugin, or by Shamir shares under the key ceremony.",
+        "The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.",
+        "The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.",
+        "Never HashiCorp Vault (D-04)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:keycloakx",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "keycloak",
+      "scope": "runtime",
+      "purpose": "codecentric keycloakx Helm chart 7.4.0, rendered with the official Keycloak 26.8.2 image (Decision 10).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "ia-02",
+        "ia-05",
+        "ia-08",
+        "ac-12",
+        "au-02",
+        "au-03",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "CVE-2026-6856: the fixed version is unverified. The 26.8.2 source refuses self-attestation and the none attestation when an AAGUID allowlist is set; Phase 48 closes this (D-30).",
+        "Owner to confirm (E6): FIPS strict mode with BC-FIPS is not delivered in Phase 47.",
+        "Password, OTP and recovery-code authenticators are off in every flow; Keycloak events are shipped to the site log store.",
+        "dbchecker is off, so its busybox image is never rendered; not Bitnami and not the Keycloak Operator."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:theia-cloud-base",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "theia-cloud",
+      "scope": "runtime",
+      "purpose": "Theia Cloud base chart 1.2.0 (cluster-wide prerequisites); its self-signed CA and letsencrypt-prod issuers are switched off.",
+      "licence": "EPL-2.0",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:theia-cloud-crds",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "theia-cloud",
+      "scope": "runtime",
+      "purpose": "Theia Cloud custom resource definitions chart 1.2.0, with our rebuilt conversion webhook.",
+      "licence": "EPL-2.0",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:theia-cloud",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "theia-cloud",
+      "scope": "runtime",
+      "purpose": "Theia Cloud chart 1.2.0: operator, service and landing page, rendered with our rebuilt images.",
+      "licence": "EPL-2.0",
+      "controls": [
+        "ac-03",
+        "ac-06",
+        "ac-12",
+        "cm-07",
+        "sc-07"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
+        "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
+        "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:opensearch",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "OpenSearch Helm chart 3.10.0.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:fluent-bit",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Fluent Bit Helm chart 0.58.3, rendered with the Fluent Bit 5.2.0 image from the lock.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19).",
+        "No chart for Fluent Bit 5.2.0 exists; chart 0.58.3 (app 5.1.3) renders the 5.2.0 image from the lock (owner item open)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "chart:prometheus",
+      "kind": "chart",
+      "where": [
+        "deploy/charts/charts.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "prometheus-community Prometheus Helm chart 30.0.0 (server, kube-state-metrics, node-exporter; alertmanager off).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-02",
+        "au-03",
+        "au-09",
+        "au-12"
+      ],
+      "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Logs and audit records ship only to the site store; no outbound output is configured.",
+        "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
+        "Loki is AGPL and is not used (D-19)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:oscal-cli",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Validates and resolves the OSCAL content in CI and the release package (owner-approved 2026-11-21).",
+      "licence": "CC0-1.0 per the metaschema-framework project (confirm at the next bump)",
+      "controls": [
+        "sa-10",
+        "sa-15",
+        "ra-05",
+        "si-02",
+        "sr-04",
+        "sr-11"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:syft",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Writes CycloneDX SBOMs of the relay image and of every rebuilt deployment image.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-10",
+        "sa-15",
+        "ra-05",
+        "si-02",
+        "sr-04",
+        "sr-11"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "none",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:grype",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-10",
+        "sa-15",
+        "ra-05",
+        "si-02",
+        "sr-04",
+        "sr-11"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "needs-mirror:the Grype vulnerability database (grype db import of a downloaded archive)",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:cosign",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "offline-bundle",
+      "scope": "runtime",
+      "purpose": "Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "cm-14",
+        "sc-13"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "cosign runs in key-pair mode only with an empty signing config (no transparency log, no timestamp authority); no keyless signing anywhere (D-47).",
+        "Go cryptography in these tools is not FIPS-validated.",
+        "hauler is young (v2); oras is the recorded fallback. helm installs only from the vendored, hash-checked chart tarballs."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:hauler",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "offline-bundle",
+      "scope": "runtime",
+      "purpose": "Collects images, charts and files into one store, saves it as the offline bundle and loads it into the site registry (spike S1).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "cm-14",
+        "sc-13"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "cosign runs in key-pair mode only with an empty signing config (no transparency log, no timestamp authority); no keyless signing anywhere (D-47).",
+        "Go cryptography in these tools is not FIPS-validated.",
+        "hauler is young (v2); oras is the recorded fallback. helm installs only from the vendored, hash-checked chart tarballs.",
+        "hauler --key cannot verify cosign v3 bundle signatures, so cosign verify runs before hauler store add and again after the copy at the site (spike S1)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:postgresql",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "keycloak",
+      "scope": "runtime",
+      "purpose": "PostgreSQL 18.7 RPMs from PGDG with their signing key, installed into our Postgres image for Keycloak (Decision 2, spike S3).",
+      "licence": "PostgreSQL Licence",
+      "controls": [
+        "ia-02",
+        "ia-05",
+        "ia-08",
+        "ac-12",
+        "au-02",
+        "au-03",
+        "sc-13",
+        "sc-23"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "uses-platform",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "CVE-2026-6856: the fixed version is unverified. The 26.8.2 source refuses self-attestation and the none attestation when an AAGUID allowlist is set; Phase 48 closes this (D-30).",
+        "Owner to confirm (E6): FIPS strict mode with BC-FIPS is not delivered in Phase 47.",
+        "Password, OTP and recovery-code authenticators are off in every flow; Keycloak events are shipped to the site log store.",
+        "Built by us on UBI 9 minimal from GPG-checked RPMs pinned by SHA-256; the host must be in FIPS mode for the RHEL OpenSSL provider.",
+        "One replica; restore is from a volume snapshot or the nightly dump. It holds WebAuthn public credentials and user records only (no passwords by design).",
+        "Never Bitnami; CloudNativePG is the HQ-scale follow-up if Phase 48 shows the need."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:helm",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "offline-bundle",
+      "scope": "runtime",
+      "purpose": "Renders every chart offline in CI (helm template) and installs the vendored tarballs at the site.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "si-07",
+        "sr-04",
+        "sr-11",
+        "cm-14",
+        "sc-13"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "cosign runs in key-pair mode only with an empty signing config (no transparency log, no timestamp authority); no keyless signing anywhere (D-47).",
+        "Go cryptography in these tools is not FIPS-validated.",
+        "hauler is young (v2); oras is the recorded fallback. helm installs only from the vendored, hash-checked chart tarballs."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:rke2",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "rke2",
+      "scope": "runtime",
+      "purpose": "RKE2 1.37.2+rke2r1 release tarball, image archives (core and Canal) and the rke2-selinux RPM for the air-gapped tarball install.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-02",
+        "cm-06",
+        "cm-07",
+        "ac-06",
+        "au-02",
+        "au-12",
+        "sc-08",
+        "sc-13",
+        "sc-28",
+        "si-02",
+        "sr-11"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "needs-mirror:the RKE2 tarball, image archives and rke2-selinux RPM carried by the bundle; host packages from the site's own OS repository",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Production sites run the RKE2 FIPS build with Canal as the only CNI (the only CNI RKE2 rebuilds for FIPS), on hosts in FIPS mode.",
+        "RKE2 runs with profile: cis and the DISA STIG settings, an audit policy that records Theia Cloud resources at Request and Secrets at Metadata only, and secrets-encryption on.",
+        "k3s is for the lab and demos only and never appears in production values (D-14).",
+        "SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:kms-pkcs11",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "openbao",
+      "scope": "runtime",
+      "purpose": "OpenBao kms-pkcs11 plugin 0.3.0: seals OpenBao with a key held in the site HSM.",
+      "licence": "MPL-2.0",
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "sc-28",
+        "ia-05",
+        "au-02",
+        "au-09",
+        "cp-09"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "uses-platform",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Seal keys are held in a validated site HSM through the kms-pkcs11 plugin, or by Shamir shares under the key ceremony.",
+        "The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.",
+        "The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.",
+        "Never HashiCorp Vault (D-04).",
+        "The extracted plugin binary is also pinned (binSha256) for OpenBao's plugin stanza."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "tool:softhsm2",
+      "kind": "tool",
+      "where": [
+        "compliance/ci/tool-pins.json"
+      ],
+      "component": "hsm",
+      "scope": "test",
+      "purpose": "SoftHSM2 2.7.0 source, built into the test-only openbao-softhsm image for the lab and CI.",
+      "licence": "BSD-2-Clause",
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "crypto": "unvalidated",
+      "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "SoftHSM2 is test scope only and never appears in production values (D-38).",
+        "The site HSM must hold a FIPS 140-3 Level 3 certificate and run in its approved mode.",
+        "HSM hardware is export-controlled: it follows your organization's Controlled Goods and ITAR procedures.",
+        "Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
     }
   ]
 }

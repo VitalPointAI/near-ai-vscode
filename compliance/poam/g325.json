@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sc-08",
+    "sc-13"
+  ],
+  "gap": "G325",
+  "id": "g325",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-03-31",
+      "title": "Traefik experiment recorded and the RKE2 Traefik FIPS build confirmed or ruled out"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Run the Traefik experiment on the rig (HAProxy and Traefik, host-based and path-based, rule add latency, route propagation, WebSocket survival, Ingress size growth) and record it; confirm from a source whether RKE2 ships a FIPS build of Traefik. HAProxy stays the default unless the owner then chooses otherwise.",
+  "title": "Traefik with Theia Cloud is untested and RKE2's Traefik FIPS build is not confirmed"
+}

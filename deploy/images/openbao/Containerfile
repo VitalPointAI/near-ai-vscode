@@ -1,0 +1,7 @@
+# The OpenBao image, rebuilt by us on the upstream UBI-based OpenBao 2.7.3 image so it carries the PKCS#11 pieces a site needs (D-23, D-12,
+# D-38). One stage. This file holds only the base; the build steps and image.json come with its build definition (deploy/images/README.md),
+# and without image.json it is not built.
+# Pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read the
+# tag's index with an anonymous manifest request (quay.io needs an anonymous pull token; or podman manifest inspect <image>:<tag>), take the
+# linux/amd64 entry's digest, check that the bytes fetched by that digest hash to it, and replace the line.
+FROM quay.io/openbao/openbao-ubi:2.7.3@sha256:bb94f6b1f1a3fbb7538d17d1c0509a13f1c2b382ebc1a67b99286b12c9628f71

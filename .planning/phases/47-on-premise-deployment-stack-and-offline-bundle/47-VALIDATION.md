@@ -64,6 +64,8 @@ Every command runs under the memory cap above. Render checks are split per area 
 - [ ] `deploy/test/` and the `deploy` CI job; `helm` pinned in `compliance/ci/tool-pins.json`
 - [ ] Spikes, each the first task of the plan it gates: S1 cosign key mode and hauler with Zot; S2 Kyverno static-key image check; S3 Postgres image source; S4 cert-manager `vault` issuer on OpenBao; S5 `kms-pkcs11` with SoftHSM2; S6 Keycloak realm, AAGUID, user export round trip, `acr`/`auth_time`; S7 custom operator template admitted under restricted Pod Security
 
+- Known red until 47-04: `compliance/test/toolPins.test.ts` ("exactly the three CI binaries are pinned" and "every tool has ... a known archive kind") fails from wave 1 on, because wave 1 adds the new tool pins and 47-04 owns that test and `install-tool.sh`. Wave 1 lands only with 47-04 in the one D-52 gate PR, never alone (47-01-SUMMARY.md, "Landing condition").
+
 ---
 
 ## Manual-Only Verifications

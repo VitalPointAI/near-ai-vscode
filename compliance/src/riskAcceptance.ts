@@ -15,6 +15,8 @@ export const RISK_ACCEPTANCE_PURPOSE = 'compliance-risk-acceptance';
 export const MAX_ACCEPTANCE_DAYS = 365;
 /** The signer list's file name inside the attestations folder. */
 export const SIGNERS_FILE = 'signers.json';
+/** The site trust list (48-02): keys whose deployment evidence exports count. It sits in the same gate folder and is never a risk acceptance. */
+export const SITE_SIGNERS_FILE = 'site-signers.json';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -60,7 +62,11 @@ const refuse = (reason: RiskAcceptanceRefusal): RiskAcceptanceVerdict => ({ ok: 
 
 /** Reads and checks the signer list: strict schema, every fingerprint derived from its key, no key named twice. Any problem is an error. */
 export function loadSigners(file: string): Signer[] {
-  const doc = loadJson(file, { maxBytes: MAX_PAYLOAD_BYTES });
+  return parseSigners(loadJson(file, { maxBytes: MAX_PAYLOAD_BYTES }), file);
+}
+
+/** The checks of loadSigners over an already parsed document; `file` names it in errors. The site trust list (48-02) uses the same checks. */
+export function parseSigners(doc: unknown, file: string): Signer[] {
   const result = validateOurs(doc, 'signers');
   if (!result.ok) throw new Error(`${file}: not a valid signers file: ${result.errors.join('; ')}`);
   const signers = (doc as { signers: Signer[] }).signers;
@@ -124,7 +130,7 @@ export function judgeRiskAcceptance(envelope: unknown, signers: readonly Signer[
 }
 
 /**
- * Reads every `*.json` file directly in the attestations folder except the signer list, judges each with judgeRiskAcceptance, and returns the
+ * Reads every `*.json` file directly in the attestations folder except the two signer lists, judges each with judgeRiskAcceptance, and returns the
  * verified ones and the refused ones with their reasons, in file-name order. A missing folder or signer list means nothing verifies. A second file
  * with an id already verified is refused (duplicate-id). Reading never throws for an acceptance file; a bad signer list is an error.
  */
@@ -132,7 +138,7 @@ export function loadRiskAcceptances(dir: string, now: Date): LoadedRiskAcceptanc
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return { verified: [], refused: [] };
   const signersFile = path.join(dir, SIGNERS_FILE);
   const signers = existsSync(signersFile) ? loadSigners(signersFile) : [];
-  const files = readdirSync(dir).filter((name) => name.endsWith('.json') && name !== SIGNERS_FILE && statSync(path.join(dir, name)).isFile()).sort();
+  const files = readdirSync(dir).filter((name) => name.endsWith('.json') && name !== SIGNERS_FILE && name !== SITE_SIGNERS_FILE && statSync(path.join(dir, name)).isFile()).sort();
   const verified: VerifiedRiskAcceptance[] = [];
   const refused: RefusedRiskAcceptance[] = [];
   for (const file of files) {

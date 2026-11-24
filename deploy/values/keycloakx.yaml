@@ -1,0 +1,15 @@
+# Keycloak 26.8.2 (chart deploy/charts/vendored/keycloakx-7.4.0.tgz, which carries 26.8.1), the settings that decide which images render. The
+# descriptor sets image.repository and image.digest to the official quay.io/keycloak/keycloak image from deploy/bundle/images.lock.json
+# (D-20, D-30). 47-08 adds the rest of the Keycloak settings here and must keep these.
+image:
+  # Only the app.kubernetes.io/version label reads the tag; the image itself is pinned by digest.
+  tag: "26.8.2"
+  pullPolicy: IfNotPresent
+
+# No database checker init container: its busybox image would be one more image to mirror; Keycloak's own readiness covers it.
+dbchecker:
+  enabled: false
+
+# No helm test pod (it runs a Selenium Chromium image).
+test:
+  enabled: false

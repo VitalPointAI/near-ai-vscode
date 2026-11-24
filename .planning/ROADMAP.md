@@ -700,10 +700,10 @@ Plans:
 **Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
 
 Plans:
-- [ ] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
-- [ ] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
-- [ ] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
-- [ ] 47-04-PLAN.md: Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
+- [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
+- [x] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
+- [x] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
+- [ ] 47-04-PLAN.md: (tasks 1-3 done, owner gate approval pending) Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
 - [ ] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
 - [ ] 47-06-PLAN.md: Wave 4. Signed offline bundle build, check and import; signed-file mechanism
 - [ ] 47-07-PLAN.md: Wave 4. OpenBao as code: PKCS#11 seal, sterling-workbench and step-up roles, policies, two-key enrolment
@@ -730,12 +730,12 @@ Plans:
 **Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`)
 
 Plans:
-- [ ] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
-- [ ] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
-- [ ] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
-- [ ] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
+- [x] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
+- [x] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
+- [x] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
+- [x] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
 - [ ] 48-04-PLAN.md: Wave 2. Hub load driver and a browser sample with a WebAuthn virtual authenticator (needs Phase 46's workbench package)
-- [ ] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
+- [x] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
 - [ ] 48-07-PLAN.md: Wave 3. Phase 46 components: workbench statements and evidence rules, release pipeline re-assessed for the image; gate PR 2
 - [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
 - [ ] 48-09-PLAN.md: Wave 3. Rig load run to 1,000+ sessions, capacity page and sizing defaults, reference site export; gate PR 4
@@ -1884,8 +1884,8 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 0/18 | Planned 2026-11-23 (beside 46) | - |
-| 48. Load and accreditation verification | 0/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
+| 47. On-premise deployment stack and offline bundle | 3/18 | Planned 2026-11-23 (beside 46) | - |
+| 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

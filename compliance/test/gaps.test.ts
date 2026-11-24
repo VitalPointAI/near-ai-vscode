@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { gapStates, loadGaps, loadPoam } from '../src/gaps.ts';
+import type { Gap, Poam } from '../src/gaps.ts';
+import { reviewedAt } from '../src/collectors/documents.ts';
+import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
+import { selectedIds } from '../src/profiles.ts';
 import { validateOurs } from '../src/validate.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -12,8 +17,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 323);
-  assert.equal(poam.length, 315);
+  assert.equal(gaps.length, 349);
+  assert.equal(poam.length, 326);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 test('release assessment gaps have named open paths', () => {
@@ -196,4 +201,193 @@ test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation pa
   const cpcsc = { level: 'cpcsc-level-1', control, state: 'met' } as const;
   assert.equal(stateFor('G305', [cpcsc]).state, 'planned');
   assert.equal(stateFor('G305', [cpcsc, { level: 'itsp-10-171', control, state: 'met' }]).state, 'closed');
+});
+
+// Hosted verification records (48-05, VER-08, VER-09, D-24): every register row and section 10 row names a reference that
+// resolves. A record is a `## ` heading with a Source address and a Checked date; an open item is a gap with an owner role and a
+// POA&M target date; a decided item names a gap that closes in Phase 48 until its evidence rule exists.
+const RECORDS_FILE = path.resolve(root, '..', 'docs', 'security', 'hosted-verification-records.md');
+const ruleIds = new Set(loadEvidenceRules(path.join(root, 'evidence-rules')).map((rule) => rule.id));
+interface RecordsContext { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly ruleIds: ReadonlySet<string> }
+const realContext: RecordsContext = { gaps, poam, ruleIds };
+
+/** The body rows of the first Markdown table under a `## ` heading. */
+function tableUnder(text: string, heading: string): string[][] {
+  const lines = text.split(/\r?\n/);
+  const start = lines.indexOf(`## ${heading}`);
+  if (start < 0) return [];
+  const rows: string[][] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('## ')) break;
+    if (!line.startsWith('|')) { if (rows.length > 0) break; continue; }
+    rows.push(line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()));
+  }
+  return rows.slice(2);
+}
+
+function sectionOf(text: string, heading: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  const start = lines.indexOf(`## ${heading}`);
+  if (start < 0) return undefined;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('## '));
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n');
+}
+
+interface References { records: string[]; gaps: string[]; rules: string[]; none: boolean; unknown: string[] }
+function referencesIn(cell: string): References {
+  const parsed: References = { records: [], gaps: [], rules: [], none: false, unknown: [] };
+  for (const part of cell.split(';').map((item) => item.trim()).filter((item) => item !== '')) {
+    const record = /^Record: (.+)$/.exec(part); const gap = /^gap ([GX][0-9]+)$/.exec(part); const rule = /^rule ([a-z0-9][a-z0-9.-]*)$/.exec(part);
+    if (record) parsed.records.push(record[1]);
+    else if (gap) parsed.gaps.push(gap[1]);
+    else if (rule) parsed.rules.push(rule[1]);
+    else if (part === 'none') parsed.none = true;
+    else parsed.unknown.push(part);
+  }
+  return parsed;
+}
+
+function recordProblems(text: string, heading: string): string[] {
+  const section = sectionOf(text, heading);
+  if (section === undefined) return [`record "${heading}" has no heading`];
+  const problems: string[] = [];
+  if (!/^Source: https:\/\/\S+$/m.test(section)) problems.push(`record "${heading}" has no Source line`);
+  const checked = /^Checked: ([0-9]{4}-[0-9]{2}-[0-9]{2})$/m.exec(section);
+  if (!checked || reviewedAt(checked[1]) === undefined) problems.push(`record "${heading}" has no valid Checked date`);
+  return problems;
+}
+
+function datedGapProblems(id: string, context: RecordsContext): string[] {
+  const gap = context.gaps.find((item) => item.id === id);
+  if (!gap) return [`gap ${id} does not exist`];
+  if (gap.ownerRole === '') return [`gap ${id} has no owner role`];
+  const item = context.poam.find((candidate) => candidate.id === gap.poam);
+  return item?.milestones.some((milestone) => milestone.targetDate !== undefined) ? [] : [`gap ${id} has no POA&M target date`];
+}
+
+interface RegisterRow { readonly number: number; readonly item: string; readonly state: string; readonly references: References }
+function registerRows(text: string): RegisterRow[] {
+  return tableUnder(text, 'Verification register').map(([number, item, state, reference]) => ({ number: Number(number), item, state, references: referencesIn(reference ?? '') }));
+}
+
+function registerProblems(text: string, context: RecordsContext): string[] {
+  const problems: string[] = [];
+  for (const row of registerRows(text)) {
+    const { records, gaps: gapIds, rules, unknown } = row.references;
+    const at = `register row ${row.number}`;
+    for (const part of unknown) problems.push(`${at}: unknown reference "${part}"`);
+    for (const rule of rules) if (!context.ruleIds.has(rule)) problems.push(`${at}: rule ${rule} does not exist`);
+    for (const heading of records) problems.push(...recordProblems(text, heading).map((problem) => `${at}: ${problem}`));
+    if (row.state === 'closed' || row.state === 'open') {
+      if (row.state === 'closed' && records.length === 0) problems.push(`${at}: closed without a record`);
+      if (row.state === 'open' && gapIds.length === 0) problems.push(`${at}: open without a gap`);
+      for (const id of gapIds) problems.push(...datedGapProblems(id, context).map((problem) => `${at}: ${problem}`));
+    } else if (row.state === 'decided') {
+      if (gapIds.length + rules.length === 0) problems.push(`${at}: decided without a gap or rule`);
+      for (const id of gapIds) {
+        const gap = context.gaps.find((item) => item.id === id);
+        if (!gap) problems.push(`${at}: gap ${id} does not exist`);
+        else if (gap.ownerRole === '' || gap.closesInPhase !== '48') problems.push(`${at}: gap ${id} does not close in Phase 48 with an owner role`);
+      }
+    } else problems.push(`${at}: unknown state "${row.state}"`);
+  }
+  return problems;
+}
+
+const recordsText = (): string => readFileSync(RECORDS_FILE, 'utf8');
+
+test('every hosted verification register row resolves to a dated record, a dated gap or a decided gap', () => {
+  const text = recordsText();
+  assert.ok(registerRows(text).length > 0);
+  assert.deepEqual(registerProblems(text, realContext), []);
+});
+const DESIGN_FILE = path.resolve(root, '..', '.planning', 'research', 'multiuser-hosting', 'DESIGN.md');
+// D-24 adds three desk items after DESIGN section 12's rows: the UBI 9 OpenSSL FIPS provider, BC-FIPS, and Harbor and Zot FIPS builds.
+const D24_EXTRA_ROWS = 3;
+const HOSTED_LEVELS = ['hosted-protected-a', 'hosted-protected-b', 'hosted-itsp-10-171'];
+test('the register has one row per DESIGN section 12 item, in order, then the three D-24 desk items', () => {
+  const designRows = tableUnder(readFileSync(DESIGN_FILE, 'utf8'), '12. Open risks and what must be verified');
+  assert.ok(designRows.length > 0);
+  const rows = registerRows(recordsText());
+  assert.deepEqual(rows.map((row) => row.number), Array.from({ length: designRows.length + D24_EXTRA_ROWS }, (_, index) => index + 1));
+  // The design already decided sign-in strength, the cross-device caveat and the shared relying-party ID (D-26).
+  assert.deepEqual(rows.filter((row) => row.state === 'decided').map((row) => row.number), [11, 12, 13]);
+});
+// The thirteen hosted components (48-01, D-17) plus the two existing components DESIGN section 10 re-assesses.
+const HOSTED_COMPONENTS = ['workbench', 'rke2', 'image-registry', 'ingress', 'cert-manager', 'keycloak', 'theia-cloud', 'oauth2-proxy', 'openbao', 'hsm', 'site-storage', 'site-logging', 'offline-bundle'];
+const SECTION_10_COMPONENTS = new Set([...HOSTED_COMPONENTS, 'release-pipeline', 'hub']);
+// DESIGN section 10 has 18 component rows; split into their separate conditions they are 49 (counted 2026-11-23).
+const SECTION_10_CONDITIONS = 49;
+const NO_CONDITION = 'no section 10 condition';
+const mediumControls = new Set(selectedIds(path.join(root, 'profiles', 'itsp-10-033-01-medium.json')));
+interface SectionTenRow { readonly number: number; readonly component: string; readonly condition: string; readonly controls: string[]; readonly references: References }
+function sectionTenRows(text: string): SectionTenRow[] {
+  return tableUnder(text, 'Section 10 conditions').map(([number, component, condition, , controls, reference]) => ({
+    number: Number(number), component, condition, controls: (controls ?? '').split(',').map((item) => item.trim()).filter((item) => item !== ''), references: referencesIn(reference ?? '')
+  }));
+}
+function sectionTenProblems(text: string, context: RecordsContext): string[] {
+  const problems: string[] = [];
+  for (const row of sectionTenRows(text)) {
+    const at = `section 10 row ${row.number}`;
+    const { records, gaps: gapIds, rules, none, unknown } = row.references;
+    if (!SECTION_10_COMPONENTS.has(row.component)) problems.push(`${at}: unknown component ${row.component}`);
+    for (const part of unknown) problems.push(`${at}: unknown reference "${part}"`);
+    if (row.condition === NO_CONDITION) {
+      if (!none || records.length + gapIds.length + rules.length > 0) problems.push(`${at}: a component with no condition has the reference none`);
+      continue;
+    }
+    if (none || records.length + gapIds.length + rules.length !== 1 || records.length !== 0) problems.push(`${at}: needs exactly one gap or rule`);
+    for (const control of row.controls) if (!mediumControls.has(control)) problems.push(`${at}: control ${control} is not in the Medium profile`);
+    if (row.controls.length === 0) problems.push(`${at}: names no control`);
+    for (const rule of rules) if (!context.ruleIds.has(rule)) problems.push(`${at}: rule ${rule} does not exist`);
+    for (const id of gapIds) {
+      const gap = context.gaps.find((item) => item.id === id);
+      const item = context.poam.find((candidate) => candidate.id === gap?.poam);
+      if (!gap) problems.push(`${at}: gap ${id} does not exist`);
+      else if (gap.ownerRole === '' || (gap.closesInPhase === undefined && !item?.milestones.length)) problems.push(`${at}: gap ${id} has no owner role and phase or milestone`);
+    }
+  }
+  return problems;
+}
+test('every DESIGN section 10 condition maps to a hosted component and exactly one gap or rule', () => {
+  const rows = sectionTenRows(recordsText());
+  assert.equal(rows.filter((row) => row.condition !== NO_CONDITION).length, SECTION_10_CONDITIONS);
+  assert.deepEqual(rows.map((row) => row.number), rows.map((_, index) => index + 1));
+  assert.deepEqual(sectionTenProblems(recordsText(), realContext), []);
+});
+test('every hosted component appears in the section 10 table, marked when DESIGN sets no condition', () => {
+  const rows = sectionTenRows(recordsText());
+  for (const component of HOSTED_COMPONENTS) assert.ok(rows.some((row) => row.component === component), component);
+  assert.deepEqual(rows.filter((row) => row.condition === NO_CONDITION).map((row) => row.component), ['offline-bundle']);
+});
+test('a section 10 row with two references or none fails', () => {
+  const header = ['## Section 10 conditions', '', '| # | Component | Condition | Evidence kind | Controls | Reference |', '|---|---|---|---|---|---|'];
+  const twice = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | gap G2; gap G321 |', ''].join('\n');
+  const missing = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | none |', ''].join('\n');
+  assert.deepEqual(sectionTenProblems(twice, realContext), ['section 10 row 1: needs exactly one gap or rule']);
+  assert.deepEqual(sectionTenProblems(missing, realContext), ['section 10 row 1: needs exactly one gap or rule']);
+});
+test('every gap the hosted records add is scoped to the hosted levels', () => {
+  const text = recordsText();
+  const referenced = new Set([...registerRows(text), ...sectionTenRows(text)].flatMap((row) => row.references.gaps));
+  const added = gaps.filter((gap) => referenced.has(gap.id) && Number(gap.id.slice(1)) > 320);
+  assert.ok(added.length > 0);
+  for (const gap of added) assert.deepEqual(gap.profiles, HOSTED_LEVELS, gap.id);
+});
+test('a closed register row whose record has no Source line fails', () => {
+  const text = recordsText();
+  const [closed] = registerRows(text).filter((row) => row.state === 'closed');
+  const heading = closed.references.records[0];
+  const section = sectionOf(text, heading)!;
+  const withoutSource = text.replace(section, section.replace(/^Source: .*$/gm, ''));
+  assert.ok(registerProblems(withoutSource, realContext).includes(`register row ${closed.number}: record "${heading}" has no Source line`));
+});
+test('an open register row whose gap has no POA&M target date fails', () => {
+  const text = ['## Verification register', '', '| # | Item | State | Reference |', '|---|---|---|---|', '| 1 | Rig item | open | gap G9001 |', ''].join('\n');
+  const gap: Gap = { id: 'G9001', title: 'Rig item', controls: ['sc-05'], remediation: 'Run it.', ownerRole: 'owner', poam: 'g9001' };
+  const undated: Poam = { id: 'g9001', gap: 'G9001', controls: ['sc-05'], milestones: [{ phase: '48', title: 'Run it' }] };
+  assert.deepEqual(registerProblems(text, { gaps: [gap], poam: [undated], ruleIds }), ['register row 1: gap G9001 has no POA&M target date']);
+  const dated: Poam = { ...undated, milestones: [{ phase: '48', targetDate: '2027-03-31', title: 'Run it' }] };
+  assert.deepEqual(registerProblems(text, { gaps: [gap], poam: [dated], ruleIds }), []);
 });

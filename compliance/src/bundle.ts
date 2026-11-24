@@ -14,6 +14,7 @@ import { attestationsCollector } from './collectors/attestations.ts';
 import { settingsCollector } from './collectors/settings.ts';
 import { reviewsCollector } from './collectors/reviews.ts';
 import { codeScanningCollector } from './collectors/codeScanning.ts';
+import { deploymentCollector } from './collectors/deployment.ts';
 import type { Collector, CollectorContext, FetchJson } from './collectors/types.ts';
 import { buildDashboard, type DashboardBuildInput } from './dashboard.ts';
 import type { Observation, TestReportRow } from './model.ts';
@@ -27,7 +28,7 @@ import { writeControlText } from './controlText.ts';
 export const COLLECTORS: readonly Collector[] = Object.freeze([
   // `code-scanning` remains in this list even when no CI input supplies it, so its silence is visible.
   testsCollector, ciCollector, secretScanCollector, documentsCollector, cryptoCollector, auditCollector, sbomCollector,
-  releaseCollector, attestationsCollector, settingsCollector, reviewsCollector, codeScanningCollector
+  releaseCollector, attestationsCollector, settingsCollector, reviewsCollector, codeScanningCollector, deploymentCollector
 ]);
 
 export interface BundleInputs {
