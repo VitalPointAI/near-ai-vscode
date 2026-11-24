@@ -13,7 +13,7 @@ A folder with only a Containerfile is a set of pinned base stages waiting for it
 |---|---|---|
 | `theia-cloud-operator`, `theia-cloud-service`, `theia-cloud-conversion-webhook`, `theia-cloud-landing-page` | base stages only | 47-09 |
 | `oauth2-proxy` | base stages only | 47-09 |
-| `openbao`, `openbao-softhsm` (test scope only) | base stages only | 47-07 |
+| `openbao`, `openbao-softhsm` (test scope only) | built (`image.json`); `openbao-softhsm` builds on the same pinned upstream base as `openbao`, not on our image, because the CI builds every image in parallel | 47-07 |
 | `postgres` | base stage only | 47-11 |
 | `hub` | `image.json` only, pointing at the unchanged `hub/Dockerfile` (D-45, D-46) | 47-11 |
 
