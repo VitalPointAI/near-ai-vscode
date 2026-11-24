@@ -69,6 +69,7 @@ Next, in order (owner, 2026-11-18):
 - Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch claims Phases 60-67 for v0.6.0; 68 keeps both honest.
 - Phase 26 completed on branch perf/research-runs: Performance, faster agent and research runs (PERF-01…07, 5 plans, verified).
 - Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Owner 2026-11-15: deferred until everything else in this plan is finished; it may move to its own product.
+- Phase 44.1 inserted after Phase 44: Accreditation control implementation and evidence closure; planned follow-up with no current development or release gate
 
 ### Locked decisions (encode, do not re-litigate)
 

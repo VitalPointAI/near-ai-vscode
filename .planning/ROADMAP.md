@@ -613,6 +613,21 @@ Plans:
 - [x] 44-18-PLAN.md: Wave 5. Component definitions, statements, evidence rules and overlay statements on the real catalogues
 - [ ] 44-19-PLAN.md: Wave 6. Workflows and gates: compliance and relay image jobs, scheduled evidence, CodeQL, release package and attestations, CODEOWNERS, the owner's steps
 
+### Phase 44.1: Accreditation control implementation and evidence closure
+
+**Goal**: Close missing product controls and evidence for Unclassified and Protected A first, then extend coverage toward Protected B, the Classified appliance baseline, and the applicable ITSP.10.171, CPCSC Level 1, Controlled Goods, and ITAR overlays.
+
+**Scheduling**: Track gaps during development and reassess them as features and deployment boundaries settle. These gaps do not block current development or releases. Use Phase 44's dashboard, evidence rules and POA&M, and link work already planned elsewhere to the phase that will deliver it. Schedule separate implementation work for any remaining product gap. Review readiness against the actual deployment before seeking accreditation for that scope.
+
+**Success Criteria**:
+
+1. Each applicable control has an owner and a verifiable disposition. Gaps identify whether implementation, evidence, or both are missing, and link to a delivery phase or an organization-owned assessment action.
+2. Product-owned gaps are implemented and verified for the stated version and deployment scope. Each implementation statement links to evidence an assessor can inspect, such as a dated screenshot, reproducible test result, configuration snapshot, or audit record.
+3. Evidence gaps remain open until verified. The assessment package distinguishes product evidence, inherited controls, organization-owned evidence, and documented exclusions. Sensitive artifacts stay in the authorized assessor location.
+4. Assess the Unclassified and Protected A baseline first. Review Protected B, the Classified appliance, and each overlay as its prerequisites and deployment scope become available. Authorization remains with the responsible organization.
+
+**Plans:** TBD
+
 ### Export-controlled technical data: Controlled Goods Program and ITAR (Phase 45, added 2026-11-20)
 
 Design: `.planning/research/compliance-dashboard/CGP-ITAR.md`. Owner request of 2026-11-20: "also consider what we need to show compliance for the Controlled Goods Program and ITAR." Meeting either regime is your organization's obligation, confirmed by its counsel, designated official and empowered official; the product provides controls and evidence. Sending controlled technical data to an AI model is a transfer to whoever runs it (Defence Production Act s. 37(3); 22 CFR 120.50, 120.56), and the ITAR encryption carve-out (120.54(a)(5)) covers storage and transmission, not a model reading the data. So controlled content stays on this computer or goes only to endpoints your organization's officials have approved by a signed decision. Planned, not planned in detail.
@@ -1775,6 +1790,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
+| 44.1. Accreditation control implementation and evidence closure | 0/TBD | Planned follow-up for assessment readiness | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
