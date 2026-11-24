@@ -1,0 +1,23 @@
+{
+  "name": "secret-probe",
+  "displayName": "Secret probe (test only)",
+  "description": "Saves and reads one secret through the extension SecretStorage, for the workbench end-to-end test. Never in the image.",
+  "version": "0.0.1",
+  "publisher": "sterling-test",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:secretProbe.save",
+    "onCommand:secretProbe.read"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "secretProbe.save", "title": "Secret probe: Save" },
+      { "command": "secretProbe.read", "title": "Secret probe: Read" }
+    ]
+  }
+}

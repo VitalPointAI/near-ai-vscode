@@ -9,6 +9,7 @@ import { ContextGraphMemory } from './contextGraphMemory';
 import { MemoryApprovalRegistry } from './memoryApproval';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 import { registerTeamUpdates } from './teamUpdateCommands';
+import { CREATE_WORK_AREA_COMMAND, createWorkArea } from './workAreaCommands';
 
 // Team commands (which open Team Studio), the team-file save hook, and the memory flow.
 
@@ -24,6 +25,8 @@ export function registerWorkspaceCommands(context: vscode.ExtensionContext, open
       openStudio({ wizard: 'project' });
     }),
     vscode.commands.registerCommand('nearAi.manageMemory', () => manageMemory()),
+    // The Sterling workbench's work-area pages create a work area through this command and open the folder it returns.
+    vscode.commands.registerCommand(CREATE_WORK_AREA_COMMAND, createWorkArea),
     // Saving a team file checks it and records a version.
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       const file = document.uri.fsPath;

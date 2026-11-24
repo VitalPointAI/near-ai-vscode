@@ -789,17 +789,17 @@ Plans:
   4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
   5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
   6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
-**Plans:** 9 plans in 5 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first; 46-09 and 46 D-44 to 46 D-47 added 2026-11-24 for version safety, VSAFE-03)
+**Plans:** 8/9 plans executed in 5 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first; 46-09 and 46 D-44 to 46 D-47 added 2026-11-24 for version safety, VSAFE-03). Waves 1 to 4 (46-01 to 46-08) complete 2026-11-24 on `feat/phase-46-wave-1`: the verification gaps closed (STERLING_MODEL_SERVERS as one JSON array on both sides, the activity tracker answered, the release image's browser egress proof), the Defence preview's Get Started, rail and work-area pages merged in with the work-area creation command ported into the extension, the activity tracker answered on the pod IP (47-15's lab), and main (#182 to #185) merged. 46-09 (wave 5) is not executed yet.
 
 Plans:
-- [ ] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
-- [ ] 46-02-PLAN.md: Wave 2. Session identity: who signed in from the forwarded token and `THEIACLOUD_SESSION_USER`, OpenBao jwt login, renew and revoke, Retry on failure, step-up link
-- [ ] 46-03-PLAN.md: Wave 2. Air gap and image hardening: addresses only from configuration, a test that the image calls nothing else, one Node major
-- [ ] 46-04-PLAN.md: Wave 2. Compliance fit before use for the workbench packages and the VSIX boundary
-- [ ] 46-05-PLAN.md: Wave 2. Copy lint covers the workbench and accepts Sterling and SovAI; the two #162 command handlers report errors
-- [ ] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
-- [ ] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
-- [ ] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
+- [x] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
+- [x] 46-02-PLAN.md: Wave 2. Session identity: who signed in from the forwarded token and `THEIACLOUD_SESSION_USER`, OpenBao jwt login, renew and revoke, Retry on failure, step-up link
+- [x] 46-03-PLAN.md: Wave 2. Air gap and image hardening: addresses only from configuration, a test that the image calls nothing else, one Node major
+- [x] 46-04-PLAN.md: Wave 2. Compliance fit before use for the workbench packages and the VSIX boundary
+- [x] 46-05-PLAN.md: Wave 2. Copy lint covers the workbench and accepts Sterling and SovAI; the two #162 command handlers report errors
+- [x] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
+- [x] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
+- [x] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
 - [ ] 46-09-PLAN.md: Wave 5. Sessions follow the site's version: the image's release facts, the signed release file in every release, the "new version is ready" notice, and the move at the next idle stop or sign-in with nothing unsaved (version safety, 32.1 D-66)
 
 ### Phase 47: On-premise deployment stack and offline bundle
@@ -2080,7 +2080,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
 | 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/TBD | Stub (trigger: your organization receives ACP-240 Ed A and ADatP-4774 and 4778) | - |
-| 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
+| 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 0/23 | Planned 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |

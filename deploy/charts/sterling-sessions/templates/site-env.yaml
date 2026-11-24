@@ -6,6 +6,10 @@ fresh WebAuthn ceremony, not a hardware key (D-57); so no signInKeys value is he
 */ -}}
 {{- $e := .Values.siteEnv -}}
 {{- range $key := list "openbaoAddr" "stepUpAcr" "openVsxUrl" }}{{ if not (index $e $key) }}{{ fail (printf "siteEnv.%s is not set" $key) }}{{ end }}{{ end -}}
+{{- /* The workbench reads STERLING_MODEL_SERVERS as a JSON array of strings and stops at start on anything else, so refuse any other shape here. */ -}}
+{{- $models := default (list) $e.modelServers -}}
+{{- if not (kindIs "slice" $models) }}{{ fail "siteEnv.modelServers must be a list of URLs" }}{{ end -}}
+{{- range $models }}{{ if not (kindIs "string" .) }}{{ fail "siteEnv.modelServers must be a list of URLs" }}{{ end }}{{ end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,4 +24,4 @@ data:
   STERLING_STEPUP_ACR: {{ $e.stepUpAcr | quote }}
   STERLING_STEPUP_MAX_AGE_SECONDS: {{ $e.stepUpMaxAgeSeconds | int | quote }}
   STERLING_OPEN_VSX_URL: {{ $e.openVsxUrl | quote }}
-  STERLING_MODEL_SERVERS: {{ $e.modelServers | toJson | quote }}
+  STERLING_MODEL_SERVERS: {{ $models | toJson | quote }}

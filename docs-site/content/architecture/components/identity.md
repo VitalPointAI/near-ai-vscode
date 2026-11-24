@@ -106,16 +106,16 @@ Conditions:
 
 ## image:registry.access.redhat.com/ubi9/ubi-minimal
 
-**What it provides.** Runtime base of our oauth2-proxy and Postgres images.
+**What it provides.** Runtime base of our oauth2-proxy and Postgres images, and the build and runtime base of the Sterling workbench image (Node 26 binary copied in, native addons built on it).
 
-**Why it is needed.** The small Red Hat UBI 9 base of our oauth2-proxy and PostgreSQL images. UBI 9 carries the RHEL OpenSSL FIPS provider, the base the hosting design asks for at Protected B on a host in FIPS mode.
+**Why it is needed.** The small Red Hat UBI 9 base of our oauth2-proxy and PostgreSQL images and of the Sterling workbench image. UBI 9 carries the RHEL OpenSSL FIPS provider, the base the hosting design asks for at Protected B on a host in FIPS mode. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
 | Kind | Container image |
-| Pinned version or digest | `9.9@sha256:2cb89feabb136a960f3e6d34f4bbcdff72404f3a18f43f01920e4a26ef389f18` |
+| Pinned version or digest | `9.9@sha256:2cb89feabb136a960f3e6d34f4bbcdff72404f3a18f43f01920e4a26ef389f18` in `deploy/images/oauth2-proxy/Containerfile`, `deploy/images/postgres/Containerfile`; `9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352` in `workbench/Dockerfile` |
 | Architecture component | `oauth2-proxy` |
-| Used in | `deploy/images/oauth2-proxy/Containerfile`, `deploy/images/postgres/Containerfile` |
+| Used in | `deploy/images/oauth2-proxy/Containerfile`, `deploy/images/postgres/Containerfile`, `workbench/Dockerfile` |
 | Scope | Runtime: it runs in the product |
 | Licence | Red Hat UBI EULA (redistributable); RHEL packages under their own licences |
 | Cryptography | Not a validated cryptographic module |
@@ -131,6 +131,7 @@ Conditions:
 - Runs with TLS verification on, secure cookies, real generated secrets and token forwarding (D-22); the render invariants check each.
 - UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).
 - Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing.
+- Workbench: mirror the pinned digest in a local registry through the builder's registry-mirror setting (D-39); FIPS mode is a host property (Phase 47); swap to Red Hat's Node 26 minimal image when it is published.
 
 ## chart:keycloakx
 

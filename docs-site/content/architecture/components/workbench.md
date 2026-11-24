@@ -23,14 +23,29 @@ Back to the [component catalogue](./index.md).
 | vendor:pptxgenjs | Library shipped inside the extension (vendored) | runtime | Pass with conditions |
 | vendor:yjs | Library shipped inside the extension (vendored) | runtime | Pass with conditions |
 | npm:@modelcontextprotocol/sdk | npm package | build | Pass |
+| npm:@near-ai/sterling-workbench-extension | npm package | runtime | Pass |
+| npm:@playwright/test | npm package | test | Pass with conditions |
 | npm:@resvg/resvg-wasm | npm package | build | Pass |
+| npm:@theia/cli | npm package | build | Pass with conditions |
+| npm:@theia/core | npm package | runtime | Pass with conditions |
+| npm:@theia/editor | npm package | runtime | Pass |
+| npm:@theia/filesystem | npm package | runtime | Pass with conditions |
+| npm:@theia/monaco | npm package | runtime | Pass |
+| npm:@theia/navigator | npm package | runtime | Pass |
+| npm:@theia/plugin-ext-vscode | npm package | runtime | Pass with conditions |
+| npm:@theia/preferences | npm package | runtime | Pass |
+| npm:@theia/terminal | npm package | runtime | Pass with conditions |
+| npm:@theia/workspace | npm package | runtime | Pass |
+| npm:beautiful-mermaid | npm package | build | Pass with conditions |
 | npm:dejavu-fonts-ttf | npm package | build | Pass |
 | npm:imagetracerjs | npm package | build | Pass |
 | npm:lib0 | npm package | build | Pass |
+| npm:markdown-it | npm package | build | Pass |
 | npm:pdfjs-dist | npm package | build | Pass |
 | npm:pptxgenjs | npm package | build | Pass |
 | npm:yjs | npm package | build | Pass |
 | image:docker.io/library/node | Container image | runtime | Pass with conditions |
+| image:docker.io/openbao/openbao | Container image | test | Pass with conditions |
 | image:registry.access.redhat.com/ubi9/nginx-126 | Container image | runtime | Pass with conditions |
 | image:registry.access.redhat.com/ubi9/nodejs-22 | Container image | build | Pass with conditions |
 | image:registry.access.redhat.com/ubi9/openjdk-21 | Container image | build | Pass with conditions |
@@ -286,6 +301,52 @@ Conditions:
 | Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-23 |
 
+## npm:@near-ai/sterling-workbench-extension
+
+**What it provides.** The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services, including the answer to Theia Cloud's activity tracker for idle stop (GET /monitor/activity/lastActivity and POST /monitor/activity/popup, only with the session secret, nothing about the person); this repository's own code in workbench/extension.
+
+**Why it is needed.** Our own code in workbench/extension: the Sterling pages, the session identity and key services that keep secrets in your organization's OpenBao or the keyring, the outbound address allow list, and the answer to Theia Cloud's activity tracker for idle stop. It is what makes the Theia application the Sterling workbench. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `0.1.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | MIT (this repository) |
+| Cryptography | Uses the platform's cryptography |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | AC-12, SA-11, SA-15, SR-3 |
+| Security fixes | First-party code: fixed in a reviewed change; its dependencies are the pinned @theia/\* packages. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:@playwright/test
+
+**What it provides.** Drives the built workbench image in Chromium for the browser tests (owner-approved at 1.65.0, 2026-11-24).
+
+**Why it is needed.** Drives the built workbench image in Chromium for the container tests (Get Started, Documentation, secrets, session and egress), so the image that ships is the one the browser tests ran against. Test only: nothing ships. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.65.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Test only: not shipped |
+| Licence | Apache-2.0 |
+| Cryptography | None |
+| Air gap | Works air-gapped once mirrored: Playwright browser builds (downloaded from the Playwright CDN at test time; air-gapped runs use PLAYWRIGHT\_BROWSERS\_PATH) |
+| Compliance fit | Pass with conditions |
+| Controls | SA-11, SR-3 |
+| Security fixes | Exact pin; npm audit in the workbench job; bumped by hand in a reviewed change. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Test only; never in the image. Air-gapped test runs point PLAYWRIGHT\_BROWSERS\_PATH at a mirrored browser build of the pinned release.
+
 ## npm:@resvg/resvg-wasm
 
 **What it provides.** Source of the vendored SVG renderer (see vendor:@resvg/resvg-wasm).
@@ -306,6 +367,268 @@ Conditions:
 | Controls | SA-15, SR-3 |
 | Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-23 |
+
+## npm:@theia/cli
+
+**What it provides.** theia build: generates and bundles the workbench frontend and backend in the image build stage; never in the runtime image.
+
+**Why it is needed.** Runs theia build in the image build stage: it generates and bundles the workbench frontend and backend from workbench/package.json. Build only: nothing of it reaches the runtime image. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Build only: not shipped |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | CM-7, SA-15, SR-3 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- The lockfile records no licence for buffers 0.1.1 and union 0.5.0 (build-only, through @theia/ffmpeg and http-server); confirm each package's own licence file before the first release that ships it.
+- Installed with --ignore-scripts, so it downloads no browser or ffmpeg build; build stage only.
+
+## npm:@theia/core
+
+**What it provides.** The Theia application framework the workbench runs on: the browser shell, the backend, JSON-RPC between them, the connection token and the preferences and command services every Sterling page uses.
+
+**Why it is needed.** The application framework the Sterling workbench is built on. Every Sterling page (Get Started, the work-area pages, Documentation, Compliance, Portfolio, the Team preview) is a Theia widget, and every call from a page to the backend (session identity, saved secrets, signing, the team preview) goes through its JSON-RPC connection. Without it there is no workbench. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | Uses the platform's cryptography |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | AC-3, CM-7, SA-15, SC-8, SC-13, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Its tree holds jschardet 2.3.0 (LGPL-2.1+, unmodified): keep its licence notice and offer its source with the image; the owner confirms the LGPL terms for a bundled JavaScript library before the first hosted release.
+- Its tree holds @vscode/codicons 0.0.45 (CC-BY-4.0 icon font: keep the attribution in the image notices).
+- The lockfile records no licence for fuzzy 0.1.3 and xmlhttprequest-ssl 2.1.2 (through @theia/core and socket.io-client); confirm each package's own licence file before the first release that ships it.
+- Its cryptography (connection token, TLS on the backend) is the upstream Node OpenSSL, not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B.
+
+## npm:@theia/editor
+
+**What it provides.** The editor framework the workbench opens files in (text editors, editor navigation).
+
+**Why it is needed.** Opens files in editors inside the workbench, so a person can read and change the files of a work area. The Monaco editor plugs into it. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:@theia/filesystem
+
+**What it provides.** The file tree service, file upload and download, and file dialogs over the workspace folder in the container.
+
+**Why it is needed.** Reads and writes the workspace folder for the workbench. The work-area pages list work areas and read their markers through its file service, and linking a resource writes through it. Without it no page could see the folder. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- The lockfile records no licence for busboy 1.6.0 and streamsearch 1.1.0 (through @theia/filesystem and multer, for file upload); confirm each package's own licence file before the first release that ships it.
+
+## npm:@theia/monaco
+
+**What it provides.** The Monaco editor integration: syntax colouring, search and the editing widgets of the workbench.
+
+**Why it is needed.** The text editor of the workbench: syntax colouring, search and editing, the same editor VS Code uses. The Sterling extension (the VSIX) needs it for its editors and inputs. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:@theia/navigator
+
+**What it provides.** The file explorer view of the workspace folder.
+
+**Why it is needed.** The file explorer, so a person can see and open the files of the open work area. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:@theia/plugin-ext-vscode
+
+**What it provides.** Runs VS Code extensions in the workbench; the Sterling extension (the VSIX) runs through it in the release image.
+
+**Why it is needed.** Runs the Sterling VS Code extension (the VSIX bundled into the release image) inside the workbench: the NEAR AI chat, Team Studio, Agent Activity and the commands the Sterling pages call, such as creating a work area. Without it the release image would have the Sterling pages but none of the agent features. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | AC-3, CM-7, CM-11, SA-15, SC-7, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one.
+- npm audit --omit=dev in the workbench job is report-only until Theia ships a fix: on 2026-11-24 it reports one high advisory, zod 3.25.x below 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory exhaustion validating oversized collections), through @theia/plugin-ext \> @theia/ai-mcp \> @modelcontextprotocol/sdk; it validates MCP messages, and MCP traffic exists only when a person adds an MCP server.
+
+## npm:@theia/preferences
+
+**What it provides.** The settings service and settings editor; the workbench ships telemetry off as a default preference.
+
+**Why it is needed.** The settings service and editor. The workbench ships telemetry off as a default preference through it, so the image sends no usage data. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:@theia/terminal
+
+**What it provides.** The terminal view of the workbench (a shell inside the container).
+
+**Why it is needed.** The terminal view, a shell inside the person's own session container, for work the pages do not cover. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | AC-3, AC-17, CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Gives a shell to whoever reaches the workbench; hosted sites put it behind sign-in (Phase 47) and the image binds 127.0.0.1 by default.
+
+## npm:@theia/workspace
+
+**What it provides.** Opens the workspace folder (/home/sterling/workspace) and keeps the recent-workspace and trust state.
+
+**Why it is needed.** Opens the workspace folder and switches to a work area when a page opens one. The work-area pages read the open folders and its trust state through it, and refuse to link resources in a folder that is not trusted. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.77.0` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | CM-7, SA-15, SI-2, SR-3, SR-11 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14) |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+## npm:beautiful-mermaid
+
+**What it provides.** Draws the guides' Mermaid diagrams to static SVG in the workbench image build (workbench/tools/documentation-render.mjs), without a DOM or a browser, so the Documentation view shows each diagram instead of its source.
+
+**Why it is needed.** Draws the guides' Mermaid diagrams as static SVG while the image is built (workbench/tools/documentation-render.mjs), so the Documentation view shows the diagram and the image needs no diagram library or browser script at run time. Build only. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.1.3` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Build only: not shipped |
+| Licence | MIT (its tree: elkjs 0.11.1 EPL-2.0 and entities 7.0.1 BSD-2-Clause, build stage only; none of them reaches the runtime image) |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | CM-7, SA-15, SC-18, SR-3 |
+| Security fixes | exact pin; npm audit in the workbench job; bumped by hand in a reviewed change after re-reading the renderer's output |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Build stage only: npm prune --omit=dev removes it and elkjs before the runtime stage; only the SVG it draws ships.
+- Its SVG carries a \<style\> block that @imports Google Fonts: documentation-render.mjs removes the block, keeps only the colour variables, and stops the build if any style, script, foreignObject, image, use, link, event handler or remote address is left. The Documentation view sanitizes the SVG again with DOMPurify.
+- A young project from one company (Craft Docs, first released in 2026): re-review its output before each bump. If it is abandoned, the fallback is a local Mermaid bundle with its own entry.
 
 ## npm:dejavu-fonts-ttf
 
@@ -369,6 +692,27 @@ Conditions:
 | Controls | SA-15, SR-3 |
 | Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-23 |
+
+## npm:markdown-it
+
+**What it provides.** Turns the bundled guides into HTML in the workbench image build (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view never shows Markdown, MDX or HTML source as text. The same version @theia/core already ships for its own Markdown rendering.
+
+**Why it is needed.** Turns the bundled guides into HTML while the image is built (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view shows formatted pages and never Markdown source. Build only. *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `14.3.3` |
+| Architecture component | `extension` |
+| Used in | `workbench/package.json` |
+| Scope | Build only: not shipped |
+| Licence | MIT |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass |
+| Controls | SA-15, SI-10, SR-3 |
+| Security fixes | exact pin; npm audit in the workbench job and the image scan (it is also in the runtime tree through @theia/core); bumped together with @theia/core in a reviewed change |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
 
 ## npm:pdfjs-dist
 
@@ -435,31 +779,55 @@ Conditions:
 
 ## image:docker.io/library/node
 
-**What it provides.** Base of the Sterling Theia workbench image (node:24 bookworm-slim, build and runtime stages; the release image published to GHCR), and build stage of the relay and hub images.
+**What it provides.** Build stage of the relay and hub images, and the workbench's \`node\` stage: its Node 26.13.1 binary and headers are copied into the workbench's UBI 9 build and runtime stages (Red Hat publishes no Node 26 for UBI 9); nothing else of this Debian image reaches the workbench image.
 
-**Why it is needed.** The Node.js base the workbench image is built on and runs on, since Eclipse Theia is a Node.js application. It is also the build stage of the relay and hub images. Without it we would build and patch our own Node.js base image.
+**Why it is needed.** Supplies the pinned Node.js 26 binary the workbench runs on, since Eclipse Theia is a Node.js application and Red Hat publishes no Node.js 26 for UBI 9: only the binary and its headers are copied into the UBI 9 build and runtime stages. It is also the build stage of the relay and hub images, so they run the same Node.js major. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |
 | Kind | Container image |
-| Pinned version or digest | `24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c` in `.planning/spikes/theia-team-studio/Dockerfile`; `26.13.1-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc` in `hub/Dockerfile`, `relay/Dockerfile` |
+| Pinned version or digest | `26.13.1-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc` |
 | Architecture component | `extension` |
-| Used in | `.planning/spikes/theia-team-studio/Dockerfile`, `hub/Dockerfile`, `relay/Dockerfile` |
+| Used in | `hub/Dockerfile`, `relay/Dockerfile`, `workbench/Dockerfile` |
 | Scope | Runtime: it runs in the product |
-| Licence | MIT (Node.js); Debian packages under their own licences |
+| Licence | MIT (Node.js); Debian packages under their own licences (only the Node binary, headers and npm are copied out) |
 | Cryptography | Not a validated cryptographic module |
-| Air gap | Works air-gapped once mirrored: the pinned docker.io/library/node digests, Debian package mirrors and an npm registry mirror holding the locked packages |
+| Air gap | Works air-gapped once mirrored: the pinned docker.io/library/node digest through the builder's registry-mirror setting, and an npm registry mirror holding the locked packages (NPM\_REGISTRY) |
 | Compliance fit | Pass with conditions |
 | Controls | CM-2, CM-7, SC-13, SI-2, SI-7, SR-3, SR-11 |
-| Security fixes | Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). The workbench image is not yet scanned in CI; the relay and hub final images are scanned by grype in relay-image-scan. |
-| Reviewed | Claude (agent review; owner to confirm), 2026-11-23 |
+| Security fixes | Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). Grype scans the workbench image in the workbench CI job and the release image in the Release workflow (report-only); the relay and hub final images are scanned by grype in relay-image-scan. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
 
 Conditions:
 
-- A site that builds these images without internet must mirror the pinned image digests, Debian packages and an npm registry with the locked packages, or build elsewhere and import the signed image.
-- The workbench image uses Debian's OpenSSL, which is not a validated cryptographic module: it is not for Protected B until Phase 46 moves it to UBI 9 in FIPS mode (hosting design #163, section 10).
-- The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (the entrypoint refuses to start otherwise).
-- The workbench image is not yet signed or scanned in CI; signing with your organization's key and an SBOM are Phase 46 items.
+- A site that builds these images without internet must mirror the pinned image digests and an npm registry with the locked packages, or build elsewhere and import the signed image.
+- The upstream Node OpenSSL in the workbench runtime is not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B.
+- The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (it binds 127.0.0.1 by default and refuses a non-loopback local bind without STERLING\_PREVIEW\_NO\_SIGN\_IN=accept).
+
+## image:docker.io/openbao/openbao
+
+**What it provides.** Dev-mode OpenBao 2.7.3 for the workbench container tests only (stage openbao-test, never built into the workbench image). Phase 47 owns production OpenBao (quay.io/openbao/openbao-ubi).
+
+**Why it is needed.** A development-mode OpenBao for the workbench container tests (the Dockerfile's openbao-test stage), so the per-person secret paths and the step-up signing are proven against a real OpenBao. Test only: never part of the workbench image; production OpenBao is the site's own (Phase 47). *This role is waiting for the owner to confirm it.*
+
+| | |
+| --- | --- |
+| Kind | Container image |
+| Pinned version or digest | `2.7.3@sha256:ba4b133eb9586630024e71a617e66f37f29cc3534cdd46a6233e098ceded8dc9` |
+| Architecture component | `extension` |
+| Used in | `workbench/Dockerfile` |
+| Scope | Test only: not shipped |
+| Licence | MPL-2.0 |
+| Cryptography | Not a validated cryptographic module |
+| Air gap | Works air-gapped once mirrored: the pinned digest in a local registry for an offline test run |
+| Compliance fit | Pass with conditions |
+| Controls | SC-12, SC-28, IA-5 |
+| Security fixes | Test scope only: re-pinned by hand in a reviewed change when OpenBao publishes a fix that affects the tests. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- Dev mode, in-memory storage and a known root token: test scope only, never deployed and never in production values.
 
 ## image:registry.access.redhat.com/ubi9/nginx-126
 

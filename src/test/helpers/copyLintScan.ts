@@ -91,6 +91,15 @@ export function extractPackage(manifest: unknown): CopyText[] {
 
 // ---- Sources ----
 
+/** The Sterling workbench's user copy sources (D-33): its browser pages and the common modules they share with the backend. */
+export const WORKBENCH_SOURCES: readonly string[] = Object.freeze(['workbench/extension/src/browser', 'workbench/extension/src/common']);
+/**
+ * The workbench backend (Phase 46 verification W3). Most of it is not copy (start errors name settings for an administrator), so only the
+ * strings it sends to the browser are read, found by rule rather than by a file list: text constants (TEXT_CONSTANT, exported or not), the
+ * values of the result fields an RPC result carries to the browser (RESULT_COPY_KEYS), and the arguments of refused().
+ */
+export const WORKBENCH_BACKEND = 'workbench/extension/src/node';
+
 /** Files no rule ever scans: the mode table is where the mode words live (D-40), and term() is its only reader. */
 export const NEVER_SCANNED: readonly string[] = Object.freeze(['src/domain/org/modes.ts', 'src/domain/org/terms.ts']);
 
@@ -159,7 +168,8 @@ export function isNameList(text: string): boolean {
 
 /** The text a person sees in an HTML fragment: the text between tags, then the values of title, aria-label, placeholder and alt. Scripts and styles are dropped. */
 export function htmlText(raw: string): string[] {
-  const body = raw.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ');
+  // A line break inside one run of text keeps its words in one piece ("Sterling<br>Sovereign AI" is one heading).
+  const body = raw.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style)\b[\s\S]*?<\/\1\s*>/gi, ' ').replace(/<br\s*\/?>/gi, ' ');
   const attributes = [...body.matchAll(COPY_ATTRIBUTE)].map((match) => match[1] ?? match[2] ?? '');
   const nodes = body.replace(/<[^>]*>/g, '\n').split('\n');
   return [...nodes, ...attributes].map((text) => tidy(decodeEntities(text))).filter((text) => text.length > 0);
@@ -254,6 +264,34 @@ function walkHost(file: ts.SourceFile, collector: Collector, services: boolean):
   visit(file);
 }
 
+/**
+ * The workbench pages' DOM helpers (D-33): for each function declared in the file, the position of its parameter named `className`. The position is read
+ * from the helper itself, because the modules disagree: team-preview's element() takes (tag, className, text), the compliance, portfolio and work-area
+ * pages' element() takes (tag, text, className).
+ */
+function classNameParameters(file: ts.SourceFile): Map<string, number> {
+  const out = new Map<string, number>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      const at = node.parameters.findIndex((parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === 'className');
+      if (at >= 0) out.set(node.name.text, at);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return out;
+}
+
+/** True when a workbench literal is a name: a `Symbol()` description, or the class name argument of the file's own DOM helper. */
+function isWorkbenchName(node: ts.Node, classNames: ReadonlyMap<string, number>): boolean {
+  const parent = node.parent;
+  if (!ts.isCallExpression(parent) || parent.expression === node || !ts.isIdentifier(parent.expression)) return false;
+  const name = parent.expression.text;
+  if (name === 'Symbol') return true;
+  const at = classNames.get(name);
+  return at !== undefined && parent.arguments[at] === node;
+}
+
 /** True when a page script literal is a name (selector, event, attribute, class, message type or comparison value), not copy. */
 function isPageName(node: ts.Node): boolean {
   const parent = node.parent;
@@ -275,11 +313,26 @@ function isPageName(node: ts.Node): boolean {
   return false;
 }
 
-/** A page script: every string that holds words, and the text of HTML it builds. */
-function walkPage(file: ts.SourceFile, collector: Collector): void {
+/** The fields of an RPC result that carry words to the browser: ServiceResult's reason and fix, a result's message, a listed item's title. */
+const RESULT_COPY_KEYS = new Set(['message', 'reason', 'fix', 'title', 'label', 'description', 'detail']);
+
+/** The workbench backend: text constants, the values of result copy fields, and refused() arguments (see WORKBENCH_BACKEND). */
+function walkBackend(file: ts.SourceFile, collector: Collector): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && TEXT_CONSTANT.test(node.name.text)) collector.gather(node.initializer, false);
+    if (ts.isPropertyAssignment(node) && RESULT_COPY_KEYS.has(propertyName(node.name))) collector.gather(node.initializer, false);
+    if (ts.isCallExpression(node) && calleeName(node) === 'refused') for (const argument of node.arguments) collector.gather(argument, false);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+}
+
+/** A page script: every string that holds words, and the text of HTML it builds. A workbench page also knows its own name positions. */
+function walkPage(file: ts.SourceFile, collector: Collector, workbench = false): void {
+  const classNames = workbench ? classNameParameters(file) : new Map<string, number>();
   const visit = (node: ts.Node): void => {
     const text = literalText(node);
-    if (text !== undefined && !isPageName(node)) collector.add(node, text, { human: true });
+    if (text !== undefined && !isPageName(node) && !(workbench && isWorkbenchName(node, classNames))) collector.add(node, text, { human: true });
     ts.forEachChild(node, visit);
   };
   visit(file);
@@ -290,9 +343,12 @@ export function extractCopy(source: string, file: string): CopyText[] {
   if (path.posix.basename(file) === 'package.json') return extractPackage(JSON.parse(source) as unknown);
   if (file.endsWith('.html')) return htmlText(source).map((text) => ({ text }));
   const page = file.startsWith('media/');
+  // The Sterling workbench's pages build their DOM from inline strings, so they are read as page scripts, parsed as TypeScript (D-33).
+  const workbench = WORKBENCH_SOURCES.some((folder) => file.startsWith(`${folder}/`));
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, page ? ts.ScriptKind.JS : ts.ScriptKind.TS);
   const collector = new Collector();
-  if (page) walkPage(parsed, collector);
+  if (file.startsWith(`${WORKBENCH_BACKEND}/`)) walkBackend(parsed, collector);
+  else if (page || workbench) walkPage(parsed, collector, workbench);
   else walkHost(parsed, collector, file.startsWith('src/services/'));
   return collector.out;
 }
@@ -305,11 +361,16 @@ function listFiles(root: string, folder: string, keep: (file: string) => boolean
   }
 }
 
-/** Every copy source under `root`, sorted: package.json, src/**\/*.ts outside src/test, and media/**\/*.js and *.html outside media/vendor. */
+/**
+ * Every copy source under `root`, sorted: package.json, src/**\/*.ts outside src/test, media/**\/*.js and *.html outside media/vendor, the Sterling
+ * workbench's browser and common sources (D-33), and its backend sources, read only for what they send to the browser (WORKBENCH_BACKEND).
+ */
 export function copySourceFiles(root: string = REPO_ROOT): string[] {
   const out = ['package.json'];
-  listFiles(root, 'src', (file) => file.endsWith('.ts') && !file.endsWith('.d.ts') && !file.startsWith('src/test/') && !NEVER_SCANNED.includes(file), out);
+  const typescript = (file: string): boolean => file.endsWith('.ts') && !file.endsWith('.d.ts');
+  listFiles(root, 'src', (file) => typescript(file) && !file.startsWith('src/test/') && !NEVER_SCANNED.includes(file), out);
   listFiles(root, 'media', (file) => (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.html')) && !file.startsWith('media/vendor/'), out);
+  for (const folder of [...WORKBENCH_SOURCES, WORKBENCH_BACKEND]) listFiles(root, folder, typescript, out);
   return out.sort();
 }
 
@@ -543,6 +604,12 @@ export interface CountOptions {
   readonly claimContexts?: readonly ClaimContext[];
 }
 
+/**
+ * The Sterling edition's own name (design D1 and D10; D-08, D-33): "Sterling Sovereign AI" is a name, so its "Sovereign" is not the glossary word. Only the
+ * whole phrase: "sovereign" anywhere else still counts. "Sterling" and "SovAI" need no rule, because BRANDS knows only NEAR AI and VS Code.
+ */
+const EDITION_NAME = /(?<![A-Za-z0-9_])Sterling\s+Sovereign\s+AI(?![A-Za-z0-9_])/g;
+
 /** The hits of every rule in `texts`, all counted under `file`. Returns `{}` when nothing is hit, never a zero count. */
 export function countHits(texts: readonly CopyText[], file: string, options: CountOptions = {}): CopyCounts {
   if (NEVER_SCANNED.includes(file)) return {};
@@ -551,7 +618,8 @@ export function countHits(texts: readonly CopyText[], file: string, options: Cou
   const modes = options.modeWords === undefined ? DEFAULT_MODE_MATCHERS : modeMatchers(options.modeWords);
   const rules: Partial<Record<CopyRule, number>> = {};
   const add = (rule: CopyRule, count: number): void => { if (count > 0) rules[rule] = (rules[rule] ?? 0) + count; };
-  for (const { text, title } of texts) {
+  for (const { text: copy, title } of texts) {
+    const text = copy.replace(EDITION_NAME, ' ');
     add('em-dash', countOf(text, EM_DASH));
     add('glossary', longestFirst(GLOSSARY_MATCHERS.flatMap(({ word, regex }) => hitsOf(text, regex, word))).filter((hit) => !allowed.has(hit.key)).length);
     add('brand', brandHits(text, title === true));

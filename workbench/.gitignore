@@ -1,0 +1,17 @@
+/node_modules/
+/lib/
+/src-gen/
+/webpack.config.js
+/webpack.gen.config.js
+/gen-webpack*.js
+/gen-webpack.tmp/
+/extension/lib/
+/esbuild.mjs
+/gen-esbuild.*.mjs
+/engine/
+/dist/
+/test-results/
+/playwright-report/
+/test-report-*.ndjson
+
+/local-plugins/

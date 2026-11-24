@@ -356,6 +356,148 @@ jobs:
         if: steps.has_hub.outputs.present == 'true'
         run: npm run test:container
 
+  # The Sterling Theia workbench (Phase 46, D-10, D-28): install without scripts, audit, lint, unit tests with their report, the image build,
+  # and the container suite with Playwright driving that image in Chromium. Not a required check (D-40). The Release workflow signs the
+  # image it publishes; this job pushes and signs nothing.
+  workbench:
+    name: workbench
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The detection step below reads the base commit and main's history, not only this commit.
+          fetch-depth: 0
+      # The hub's hotfix rule, keyed on workbench/package.json: a hotfix/x.y.z branch whose commit and base commit both lack the workbench
+      # passes without running anything else; any other change without it fails, and a push to main never skips. The branch name and base
+      # commit come in through env, never pasted into the script.
+      - name: Check that this commit has the workbench
+        id: has_workbench
+        working-directory: .
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -f workbench/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"
+          fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null && ! git cat-file -e "$base:workbench/package.json" 2>/dev/null; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=workbench checks skipped::workbench/package.json is neither on this commit of $BRANCH nor on its base commit (a hotfix from a release older than the workbench), so the workbench checks were skipped."
+          else
+            echo "::error title=workbench missing::workbench/package.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the workbench, whose base commit has no workbench either, may skip the workbench checks."
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_workbench.outputs.present == 'true'
+        with:
+          node-version: '26.13.1'
+          cache: npm
+          cache-dependency-path: workbench/package-lock.json
+      - if: steps.has_workbench.outputs.present == 'true'
+        run: npm ci --ignore-scripts
+      # Report-only while the Theia 1.77 tree carries a high advisory with no fix inside the pinned version (zod through @theia/ai-mcp,
+      # GHSA-mrhx-c7xc-m3w5, 2026-11-24); the JSON goes up with the test report and the register records the condition.
+      - name: Audit the workbench runtime dependencies (report-only)
+        if: steps.has_workbench.outputs.present == 'true'
+        continue-on-error: true
+        run: |
+          status=0
+          npm audit --omit=dev --audit-level=high --json > workbench-audit.json || status=$?
+          node -e 'const a = JSON.parse(require("node:fs").readFileSync("workbench-audit.json", "utf8")); console.log(JSON.stringify(a.metadata?.vulnerabilities ?? a.error ?? {}))'
+          exit "$status"
+      - if: steps.has_workbench.outputs.present == 'true'
+        run: npm run lint
+      - name: Run workbench tests and write the evidence report
+        if: steps.has_workbench.outputs.present == 'true'
+        env:
+          NEAR_AI_TEST_REPORT: test-report-workbench.ndjson
+        run: npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_workbench.outputs.present == 'true' && always()
+        continue-on-error: true
+        with:
+          name: test-report-workbench
+          path: |
+            workbench/test-report-workbench.ndjson
+            workbench/workbench-audit.json
+          if-no-files-found: warn
+      # The default (development) target, from the repository root because the engine bundle reads src/.
+      - name: Build the workbench image
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: docker build -f workbench/Dockerfile -t sterling-workbench:ci .
+      # The image's supply-chain record (D-31), with the relay image scan's pinned tools: a CycloneDX SBOM, a Grype scan (report-only)
+      # and the image ID, written before the tests so a failing test still leaves them.
+      - name: Install pinned Syft and Grype
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: |
+          sh compliance/ci/install-tool.sh syft compliance/out/tools
+          sh compliance/ci/install-tool.sh grype compliance/out/tools
+          echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
+      - name: Write the workbench image SBOM
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: syft scan sterling-workbench:ci --output cyclonedx-json=compliance/out/workbench-image-sbom.json
+      - name: Update the Grype database
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: grype db update
+      - name: Record fixed high-severity findings in the workbench image
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        continue-on-error: true
+        run: grype sbom:compliance/out/workbench-image-sbom.json --only-fixed --fail-on high --output json=compliance/out/workbench-image-scan.json
+      - name: Record the workbench image digest
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: |
+          docker image inspect --format '{{.Id}}' sterling-workbench:ci > compliance/out/workbench-image-digest.txt
+          printf '### Workbench image\n\n`%s` (sterling-workbench:ci, not published)\n' "$(cat compliance/out/workbench-image-digest.txt)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_workbench.outputs.present == 'true' && always()
+        with:
+          name: workbench-image-sbom
+          path: compliance/out/workbench-image-sbom.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_workbench.outputs.present == 'true' && always()
+        with:
+          name: workbench-image-scan
+          path: compliance/out/workbench-image-scan.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_workbench.outputs.present == 'true' && always()
+        with:
+          name: workbench-image-digest
+          path: compliance/out/workbench-image-digest.txt
+          if-no-files-found: warn
+      # Chromium from the pinned Playwright release only (never a download npx would make on its own).
+      - name: Install Chromium for the browser tests
+        if: steps.has_workbench.outputs.present == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run the container suite and the browser tests against the built image
+        if: steps.has_workbench.outputs.present == 'true'
+        env:
+          WORKBENCH_TEST_IMAGE: sterling-workbench:ci
+        run: npm run test:container
+
   relay-image-scan:
     name: relay image scan
     runs-on: ubuntu-latest
