@@ -50,6 +50,18 @@
       "kind": "level",
       "profile": "profiles/protected-a.json",
       "components": [
+        "rke2",
+        "image-registry",
+        "ingress",
+        "cert-manager",
+        "keycloak",
+        "theia-cloud",
+        "oauth2-proxy",
+        "openbao",
+        "hsm",
+        "site-storage",
+        "site-logging",
+        "offline-bundle",
         "workbench",
         "release-pipeline",
         "hub"
@@ -63,12 +75,52 @@
       "kind": "level",
       "profile": "profiles/itsp-10-033-01-medium.json",
       "components": [
+        "rke2",
+        "image-registry",
+        "ingress",
+        "cert-manager",
+        "keycloak",
+        "theia-cloud",
+        "oauth2-proxy",
+        "openbao",
+        "hsm",
+        "site-storage",
+        "site-logging",
+        "offline-bundle",
         "workbench",
         "release-pipeline",
         "hub"
       ],
       "claim": true,
       "note": "Assesses the hosted deployment of the Sterling workbench at a site your organization owns."
+    },
+    {
+      "id": "hosted-itsp-10-171",
+      "title": "Hosted deployment: ITSP.10.171 overlay",
+      "kind": "overlay",
+      "profile": "profiles/itsp-10-171-overlay.json",
+      "attachedTo": [
+        "hosted-protected-a",
+        "hosted-protected-b"
+      ],
+      "components": [
+        "rke2",
+        "image-registry",
+        "ingress",
+        "cert-manager",
+        "keycloak",
+        "theia-cloud",
+        "oauth2-proxy",
+        "openbao",
+        "hsm",
+        "site-storage",
+        "site-logging",
+        "offline-bundle",
+        "workbench",
+        "release-pipeline",
+        "hub"
+      ],
+      "claim": true
     },
     {
       "id": "classified",
