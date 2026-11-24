@@ -55,3 +55,31 @@ test('sterling-site-env has exactly the ten names and no secret', () => {
   assert.doesNotMatch(env, /signInKeys|SIGN_IN/i);
   assert.ok(!sessions().some((doc) => kindOf(doc) === 'Secret'));
 });
+
+test('the session environment policy selects only labelled session Deployments and Pods in theia-cloud, and fails closed', () => {
+  const doc = policy();
+  assert.match(doc, /^ {2}name: sterling-session-env$/m);
+  assert.match(doc, /validationActions: \[Deny\]/);
+  assert.match(doc, /failurePolicy: Fail/);
+  assert.match(doc, /resources: \[deployments\]/);
+  assert.match(doc, /resources: \[pods\]/);
+  assert.match(doc, /objectSelector:\n\s+matchLabels:\n\s+sterling-session: "true"/);
+  assert.match(doc, /kubernetes\.io\/metadata\.name: theia-cloud/);
+});
+
+test('the policy refuses envFrom other than sterling-site-env, any Secret or ConfigMap key in env, and names outside the allow-list', () => {
+  const doc = policy();
+  assert.ok(doc.includes("e.configMapRef.name == 'sterling-site-env'"));
+  assert.ok(doc.includes('!has(v.valueFrom.secretKeyRef) && !has(v.valueFrom.configMapKeyRef)'));
+  assert.ok(doc.includes('v.name in variables.allowedNames'));
+  const allowed = JSON.parse(JSON.parse(/name: allowedNames\n\s+expression: (".*")$/m.exec(doc)[1]));
+  assert.equal(allowed.length, 13);
+  assert.ok(allowed.every((name) => name.startsWith('THEIACLOUD_')), 'only the operator template\'s names; the launch request adds none');
+});
+
+test('the policy allows only the oauth2-proxy-secrets Secret volume, and only in the oauth2-proxy container', () => {
+  const doc = policy();
+  assert.ok(doc.includes("v.secret.secretName == 'oauth2-proxy-secrets'"));
+  assert.ok(doc.includes('v.projected.sources.all(s, !has(s.secret))'));
+  assert.ok(doc.includes("c.name == 'oauth2-proxy' || !has(c.volumeMounts) || c.volumeMounts.all(m, !(m.name in variables.secretVolumes))"));
+});
