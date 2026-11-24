@@ -10,8 +10,11 @@ import path from 'node:path';
 /** The empty signing config `cosign signing-config create` writes: no Rekor and no timestamp authority. */
 export const EMPTY_SIGNING_CONFIG = Object.freeze({ mediaType: 'application/vnd.dev.sigstore.signingconfig.v0.2+json', rekorTlogConfig: {}, tsaConfig: {} });
 
-/** The cosign binary to run: an explicit path, $COSIGN, or `cosign` on PATH. */
-export const cosignBinary = (cosign) => cosign || process.env.COSIGN || 'cosign';
+/** The cosign binary to run: an explicit path, $COSIGN, or `cosign` on PATH. A relative path is taken from the working directory. */
+export const cosignBinary = (cosign) => {
+  const binary = cosign || process.env.COSIGN || 'cosign';
+  return binary.includes('/') ? path.resolve(binary) : binary;
+};
 
 /** Runs cosign; returns { ok, status, stdout, stderr }. A missing binary throws a plain message. */
 export function runCosign(args, { cosign, env } = {}) {

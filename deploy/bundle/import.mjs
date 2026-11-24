@@ -49,8 +49,8 @@ async function createHarborProjects(registry, auth, projects, { plainHttp }) {
  * Imports a checked bundle. `load` is the copy step (images and files), injectable so the refusal tests can prove it never runs on a bad
  * bundle; the default copies with hauler. Returns { ok, problems }.
  */
-export async function importBundle({ dir, publicKey, registry, out, auth = null, registryKind = 'zot', registryCa, plainHttp = false, cosign, hauler, check = checkBundle, load }) {
-  const checked = await check({ dir, publicKey, cosign, hauler });
+export async function importBundle({ dir, publicKey, registry, out, auth = null, registryKind = 'zot', registryCa, plainHttp = false, cosign, hauler, listStore, load }) {
+  const checked = await checkBundle({ dir, publicKey, cosign, hauler, ...(listStore ? { listStore } : {}) });
   if (!checked.ok) return { ok: false, problems: checked.problems };
   const { manifest } = checked;
   const images = manifest.items.filter((item) => item.kind === 'image');

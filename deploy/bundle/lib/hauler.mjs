@@ -8,7 +8,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { sha256File } from './manifest.mjs';
 
-export const haulerBinary = (hauler) => hauler || process.env.HAULER || 'hauler';
+/** The hauler binary to run: an explicit path, $HAULER, or `hauler` on PATH. A relative path is taken from the working directory. */
+export const haulerBinary = (hauler) => {
+  const binary = hauler || process.env.HAULER || 'hauler';
+  return binary.includes('/') ? path.resolve(binary) : binary;
+};
 
 /** Runs hauler with a private hauler folder; throws with hauler's message on failure. */
 export function runHauler(args, { hauler, env } = {}) {
