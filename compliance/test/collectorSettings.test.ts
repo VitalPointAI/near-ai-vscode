@@ -23,7 +23,7 @@ function environment(name: string) {
   return {
     name, can_admins_bypass: false,
     protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 123, login: 'private-operator' } }] }],
-    deployment_branch_policy: { protected_branches: name === 'agent-review-gates', custom_branch_policies: name === 'marketplace' }
+    deployment_branch_policy: { protected_branches: name === 'agent-review-gates', custom_branch_policies: name === 'container-release' }
   };
 }
 
@@ -90,17 +90,17 @@ test('main protection rejects allowed force pushes or deletion, missing flags an
 
 test('environment configuration checks required reviewers, explicit bypass restriction and allowed refs', async () => {
   const rows = await collect();
-  assert.equal(rows.find((row) => row.subject === 'environment-marketplace')?.passed, true);
+  assert.equal(rows.find((row) => row.subject === 'environment-container-release')?.passed, true);
   assert.equal(rows.find((row) => row.subject === 'environment-agent-review-gates')?.passed, true);
   assert.ok(!JSON.stringify(rows).includes('private-operator'));
-  const valid = environment('marketplace');
+  const valid = environment('container-release');
   for (const change of [{ can_admins_bypass: true }, { can_admins_bypass: undefined },
     { protection_rules: [] }, { deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } }]) {
-    const rows = await collect(replaceResponse('/environments/marketplace', { ...valid, ...change }));
-    assert.equal(rows.find((row) => row.subject === 'environment-marketplace')?.passed, false);
+    const rows = await collect(replaceResponse('/environments/container-release', { ...valid, ...change }));
+    assert.equal(rows.find((row) => row.subject === 'environment-container-release')?.passed, false);
   }
   const wrongRef = await collect(replaceResponse('/deployment-branch-policies', { branch_policies: [{ type: 'branch', name: 'v*.*.*' }] }));
-  assert.equal(wrongRef.find((row) => row.subject === 'environment-marketplace')?.passed, false);
+  assert.equal(wrongRef.find((row) => row.subject === 'environment-container-release')?.passed, false);
   assert.deepEqual(rows.find((row) => row.subject === 'tag-ruleset')?.counts, { unverified: 1 });
   assert.equal(rows.find((row) => row.subject === 'tag-ruleset')?.passed, false);
 });

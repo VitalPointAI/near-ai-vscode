@@ -33,7 +33,7 @@ export async function waitForCi(repo, sha, {
 export async function tagRelease(repo, version, sha, { wait = true, log = console.log, ci = {} } = {}) {
   const tag = `v${version}`;
   const existing = tagCommit(repo, tag);
-  if (existing && existing !== sha) throw new Error(`${tag} already exists on ${existing.slice(0, 7)}, not ${sha.slice(0, 7)}. Marketplace versions cannot be reused; release the fix as the next patch version.`);
+  if (existing && existing !== sha) throw new Error(`${tag} already exists on ${existing.slice(0, 7)}, not ${sha.slice(0, 7)}. release versions cannot be reused; release the fix as the next patch version.`);
   const plan = releaseGate({ version, sha, onMain: behindBy(repo, 'main', sha).ahead === 0, hotfixHead: branchHead(repo, `hotfix/${version}`) });
   if (!plan.ok) throw new Error(plan.reason);
   const pkg = JSON.parse(fileAt(repo, 'package.json', sha));
@@ -47,6 +47,6 @@ export async function tagRelease(repo, version, sha, { wait = true, log = consol
   }
   if (existing) { log(`${tag} already points at ${sha.slice(0, 7)}.`); return tag; }
   createAnnotatedTag(repo, version, sha);
-  log(`Tagged ${sha.slice(0, 7)} as ${tag}. The Release workflow now builds the VSIX and the GitHub release; publishing waits for the owner's approval in the "marketplace" environment.`);
+  log(`Tagged ${sha.slice(0, 7)} as ${tag}. The Release workflow builds and checks the Sterling image. GHCR publication waits for the owner's approval in the "container-release" environment. The GitHub release records the published digest.`);
   return tag;
 }

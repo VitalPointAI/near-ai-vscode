@@ -14,7 +14,15 @@ const MAX_ENTRIES = 2048;
 const TAR_BLOCK_SIZE = 512;
 const DASHBOARD_PATH = 'evidence/bundle/dashboard/dashboard.json';
 const MANIFEST_PATH = 'evidence/bundle/manifest.json';
-const MARKETPLACE_ENVIRONMENT = 'marketplace';
+/**
+ * Where a release's publication waited for the owner. Releases from 0.4.37 publish the Sterling workbench image to GHCR in the
+ * `container-release` environment; earlier releases published the VSIX to the Marketplace in `marketplace`. Each release run has exactly one.
+ */
+const PUBLISH_GATES = [
+  { job: 'Publish Sterling image', environment: 'container-release', kind: 'container-publish-approval' },
+  { job: 'publish', environment: 'marketplace', kind: 'marketplace-publish-approval' }
+] as const;
+type PublishGate = (typeof PUBLISH_GATES)[number];
 const RELEASE_WORKFLOW = '.github/workflows/release.yml';
 const ACTIONS_RESULT_LIMIT = 10;
 const GITHUB_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
@@ -39,6 +47,9 @@ export interface SaaReleaseEvidence {
 }
 
 export interface SaaMarketplaceApproval {
+  /** The approval environment and the receipt kind of the release's publication (container image or, before 0.4.37, Marketplace). */
+  readonly environment: PublishGate['environment'];
+  readonly kind: PublishGate['kind'];
   readonly tag: string;
   readonly commit: string;
   readonly runUrl: string;
@@ -304,9 +315,9 @@ function canonicalReleaseRun(run: Record<string, unknown>, tag: string, commit: 
     run.status === 'completed' && run.conclusion === 'success' && run.run_attempt === 1;
 }
 
-function configuredMarketplaceReviewer(body: unknown): { environmentId: number; reviewerId: number } | undefined {
+function configuredMarketplaceReviewer(body: unknown, name: string): { environmentId: number; reviewerId: number } | undefined {
   const environment = record(body);
-  if (environment?.name !== MARKETPLACE_ENVIRONMENT || environment.can_admins_bypass !== false ||
+  if (environment?.name !== name || environment.can_admins_bypass !== false ||
       !githubId(environment.id) || !Array.isArray(environment.protection_rules)) return;
   const rules = environment.protection_rules.map(record).filter((rule) => rule?.type === 'required_reviewers');
   const reviewers = rules.length === 1 ? rules[0]?.reviewers : undefined;
@@ -316,7 +327,7 @@ function configuredMarketplaceReviewer(body: unknown): { environmentId: number; 
   if (user?.type === 'User' && githubId(reviewerId)) return { environmentId: environment.id, reviewerId };
 }
 
-function approvedMarketplaceHistory(body: unknown, environmentId: number, reviewerId: number): boolean {
+function approvedMarketplaceHistory(body: unknown, environmentId: number, reviewerId: number, name: string): boolean {
   if (!Array.isArray(body) || body.length > ACTIONS_RESULT_LIMIT) return false;
   const matches: Record<string, unknown>[] = [];
   for (const row of body) {
@@ -325,15 +336,15 @@ function approvedMarketplaceHistory(body: unknown, environmentId: number, review
     for (const row of approval.environments) {
       const environment = record(row);
       if (!githubId(environment?.id) || typeof environment.name !== 'string') return false;
-      if (environment.id !== environmentId && environment.name !== MARKETPLACE_ENVIRONMENT) continue;
-      if (environment.id !== environmentId || environment.name !== MARKETPLACE_ENVIRONMENT) return false;
+      if (environment.id !== environmentId && environment.name !== name) continue;
+      if (environment.id !== environmentId || environment.name !== name) return false;
       matches.push(approval);
     }
   }
   return matches.length === 1 && matches[0].state === 'approved' && record(matches[0].user)?.id === reviewerId;
 }
 
-/** Collect an optional approval receipt after the verified release's Marketplace publication. */
+/** Collect an optional approval receipt after the verified release's publication (the GHCR image from 0.4.37, the Marketplace VSIX before). */
 export async function loadSaaMarketplaceApproval(
   evidence: Pick<SaaReleaseEvidence, 'version' | 'commit'>, signal: AbortSignal, fetcher: typeof fetch = fetch
 ): Promise<SaaMarketplaceApproval | undefined> {
@@ -363,20 +374,21 @@ export async function loadSaaMarketplaceApproval(
     const runPath = `actions/runs/${runId}`;
     const jobs = completeActionsList(await read(`${runPath}/attempts/1/jobs?per_page=${ACTIONS_RESULT_LIMIT}`), 'jobs');
     if (jobs.some((job) => typeof job.name !== 'string' || job.run_id !== runId)) return;
-    const publishes = jobs.filter((job) => job.name === 'publish');
+    const publishes = jobs.filter((job) => PUBLISH_GATES.some((gate) => gate.job === job.name));
     const job = publishes[0];
-    if (publishes.length !== 1 || job.head_sha !== evidence.commit || job.status !== 'completed' ||
+    const gate = PUBLISH_GATES.find((candidate) => candidate.job === job?.name);
+    if (publishes.length !== 1 || !gate || job.head_sha !== evidence.commit || job.status !== 'completed' ||
         job.conclusion !== 'success' || !githubTime(job.completed_at)) return;
     if (!githubTime(tagged[0].created_at) || Date.parse(job.completed_at) < Date.parse(tagged[0].created_at) ||
         Date.parse(job.completed_at) > Date.now()) return;
     // Match against the sole configured reviewer at observation time. Review history is run-wide.
-    const configured = configuredMarketplaceReviewer(await read(`environments/${MARKETPLACE_ENVIRONMENT}`));
+    const configured = configuredMarketplaceReviewer(await read(`environments/${gate.environment}`), gate.environment);
     if (!configured ||
-        !approvedMarketplaceHistory(await read(`${runPath}/approvals`), configured.environmentId, configured.reviewerId)) return;
+        !approvedMarketplaceHistory(await read(`${runPath}/approvals`), configured.environmentId, configured.reviewerId, gate.environment)) return;
     const current = record(await read(runPath));
     if (!current || current.id !== runId || !canonicalReleaseRun(current, tag, evidence.commit)) return;
     return {
-      tag, commit: evidence.commit, runUrl: `${SAA_RELEASE_RUN_URL}${runId}`,
+      environment: gate.environment, kind: gate.kind, tag, commit: evidence.commit, runUrl: `${SAA_RELEASE_RUN_URL}${runId}`,
       publishCompletedAt: job.completed_at, checkedAt: new Date().toISOString()
     };
   } catch {

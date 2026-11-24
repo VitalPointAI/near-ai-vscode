@@ -406,9 +406,12 @@ export async function buildSaaPackage(
   const approval = marketplaceApproval?.tag === `v${evidence.version}` && marketplaceApproval.commit === evidence.commit &&
     marketplaceApproval.runUrl.startsWith(SAA_RELEASE_RUN_URL) && /^[1-9]\d*$/.test(marketplaceApproval.runUrl.slice(SAA_RELEASE_RUN_URL.length))
     ? marketplaceApproval : undefined;
+  const containerPublish = approval?.kind === 'container-publish-approval';
+  const approvalFile = containerPublish ? 'publish-approval.json' : 'marketplace-approval.json';
+  const approvalName = containerPublish ? 'container image publication approval receipt' : 'Marketplace approval receipt';
   if (approval) {
-    append('evidence/marketplace-approval.json', `${JSON.stringify({
-      schemaVersion: 1, kind: 'marketplace-publish-approval', tag: approval.tag, commit: approval.commit,
+    append(`evidence/${approvalFile}`, `${JSON.stringify({
+      schemaVersion: 1, kind: approval.kind, environment: approval.environment, tag: approval.tag, commit: approval.commit,
       runUrl: approval.runUrl, runAttempt: 1, publishCompletedAt: approval.publishCompletedAt, checkedAt: approval.checkedAt
     }, null, 2)}\n`);
   }
@@ -442,8 +445,8 @@ The actual deployment and its control conclusions remain open. Published product
 - The coverage tab counts missing product and deployment evidence paths. The product gaps tab labels these actions Unassigned or Unassigned deployment. Each applicable row is to receive a role, milestone, and closure evidence or approved tailoring decision.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - ${approval
-    ? `The [Marketplace approval receipt](marketplace-approval.json) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`
-    : 'Marketplace approval evidence is pending verification. This export includes the published product findings.'}
+    ? `The [${approvalName}](${approvalFile}) records the [release workflow run](${approval.runUrl}) and its approval from the sole reviewer configured when this export checked GitHub. It supplements the published product findings and confers no deployment authorization.`
+    : 'Publication approval evidence is pending verification. This export includes the published product findings.'}
 - Evidence references for the deployment should identify the assessed component, build and configuration, assessment objective, method, collection date, approved location and reviewer.
 `);
   addSource(`evidence/${evidence.fileName}`, evidence.archive);

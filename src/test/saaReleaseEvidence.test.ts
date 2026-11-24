@@ -218,9 +218,38 @@ test('returns only the minimal Marketplace approval tied to the exact release bu
   const received = await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, fetcher);
   assert.deepEqual(calls, [runsPath, jobsPath, environmentPath, approvalsPath, runPath]);
   assert.ok(received);
-  assert.deepEqual(received, { tag, commit, runUrl: `https://github.com/${repository}/actions/runs/42`, publishCompletedAt, checkedAt: received.checkedAt });
+  assert.deepEqual(received, {
+    environment: 'marketplace', kind: 'marketplace-publish-approval', tag, commit,
+    runUrl: `https://github.com/${repository}/actions/runs/42`, publishCompletedAt, checkedAt: received.checkedAt
+  });
   assert.ok(Date.parse(received.checkedAt) >= Date.parse(publishCompletedAt));
   assert.doesNotMatch(JSON.stringify(received), /approval-comment-secret|configured-reviewer-secret|untrusted-run-link/);
+});
+
+test('a release published to GHCR is approved in container-release, not marketplace', async () => {
+  const containerRelease = { id: 712, name: 'container-release' };
+  const { calls, fetcher } = marketplaceResponses({
+    [jobsPath]: { total_count: 1, jobs: [{ ...publishJob, name: 'Publish Sterling image' }] },
+    '/environments/container-release': { ...containerRelease, can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', reviewers: [reviewer] }] },
+    [approvalsPath]: [{ ...decision, environments: [containerRelease] }]
+  });
+  const received = await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, fetcher);
+  assert.deepEqual(calls, [runsPath, jobsPath, '/environments/container-release', approvalsPath, runPath]);
+  assert.equal(received?.environment, 'container-release');
+  assert.equal(received?.kind, 'container-publish-approval');
+  // An approval recorded in the other environment does not count for a GHCR release.
+  const wrong = marketplaceResponses({
+    [jobsPath]: { total_count: 1, jobs: [{ ...publishJob, name: 'Publish Sterling image' }] },
+    '/environments/container-release': { ...containerRelease, can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', reviewers: [reviewer] }] }
+  });
+  assert.equal(await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, wrong.fetcher), undefined);
+});
+
+test('a release run with both publish jobs is ambiguous and leaves the receipt unavailable', async () => {
+  const { fetcher } = marketplaceResponses({
+    [jobsPath]: { total_count: 2, jobs: [publishJob, { ...publishJob, name: 'Publish Sterling image' }] }
+  });
+  assert.equal(await loadSaaMarketplaceApproval({ version, commit }, new AbortController().signal, fetcher), undefined);
 });
 
 test('untrusted or ambiguous release jobs, environment settings and decisions leave the receipt unavailable', async () => {
