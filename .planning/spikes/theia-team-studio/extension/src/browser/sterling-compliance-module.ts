@@ -31,6 +31,11 @@ type Level = { id: string; title: string; claim: boolean };
 type Gap = { id: string; title: string; remediation: string; ownerRole: string; state: string };
 const sourceLabels = { main: 'Main branch', scheduled: 'Scheduled collection', release: 'Release', local: 'Local collection' } as const;
 type SourceKind = keyof typeof sourceLabels;
+type RefreshRecord = { source: string; commit: string; fetchedAt: string; manifest: 'verified'; attestation: string };
+const attestationWords: Record<string, string> = { verified: 'verified', none: 'none for daily and merge bundles by design', 'not-checked': 'not checked' };
+const responsibilityWords: Record<string, string> = {
+  product: 'Product', shared: 'Shared', 'your-organization': 'Your organization', inherited: 'Inherited', 'not-applicable': 'Not applicable'
+};
 type Dashboard = { schemaVersion: 1; generatedAt: string; commit: string; source: {kind: SourceKind; ref: string}; levels: Level[]; rows: Control[]; gaps?: Gap[]; textIndex?: {file: string}[] };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -79,6 +84,14 @@ function isDashboard(value: unknown): value is Dashboard {
     && itemList(value.rows, isControl)
     && (value.gaps === undefined || itemList(value.gaps, gap => record(gap) && allStrings(gap, ['id', 'title', 'remediation', 'ownerRole', 'state'])))
     && (value.textIndex === undefined || itemList(value.textIndex, entry => record(entry) && typeof entry.file === 'string'));
+}
+
+// compliance:refresh writes refresh.json beside the dashboard only after the bundle's manifest hashes check out.
+function isRefreshRecord(value: unknown, dashboard: Dashboard): value is RefreshRecord {
+  if (!record(value) || value.manifest !== 'verified' || !allStrings(value, ['source', 'commit', 'fetchedAt', 'attestation'])) return false;
+  const recorded = (value.commit as string).toLowerCase();
+  const shown = dashboard.commit.toLowerCase();
+  return recorded.length >= 7 && (recorded.startsWith(shown) || shown.startsWith(recorded));
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
@@ -161,7 +174,7 @@ class SterlingComplianceWidget extends BaseWidget {
     const header = element('header', undefined, 'sterling-compliance-heading');
     const title = element('div');
     title.append(element('h1', 'Compliance'), element('p', 'Published evidence. Authorization is your organization’s decision.'));
-    const refresh = element('button', 'Refresh evidence', 'sterling-evidence-action');
+    const refresh = element('button', 'Reload bundle', 'sterling-evidence-action');
     refresh.type = 'button';
     refresh.addEventListener('click', () => void this.load());
     header.append(title, refresh);
@@ -192,8 +205,8 @@ class SterlingComplianceWidget extends BaseWidget {
       if (request.signal.aborted) return;
       if (!response.ok) {
         this.showStatus(response.status === 404
-          ? 'No public evidence bundle is available in this workbench. Mount the public dashboard projection, then refresh.'
-          : 'The public evidence bundle could not be loaded. Try refreshing.');
+          ? 'This workbench carries no evidence. Mount the public dashboard projection, then reload.'
+          : 'The public evidence bundle could not be loaded. Try reloading.');
         return;
       }
       const data: unknown = await response.json().catch(() => undefined);
@@ -202,15 +215,24 @@ class SterlingComplianceWidget extends BaseWidget {
         this.showStatus('The public evidence bundle is invalid or uses an unsupported schema.');
         return;
       }
-      this.showDashboard(data);
+      const verification = await fetch(new URL('compliance/refresh.json', document.baseURI), { signal: request.signal, cache: 'no-store', mode: 'same-origin', redirect: 'error' });
+      const refreshRecord: unknown = verification.ok ? await verification.json().catch(() => undefined) : undefined;
+      if (request.signal.aborted) return;
+      // Show no states from a bundle that compliance:refresh has not hash-verified.
+      if (!isRefreshRecord(refreshRecord, data)) {
+        this.showStatus('This evidence bundle has no matching verification record, so no states are shown. Write the projection with compliance:refresh, then reload.');
+        return;
+      }
+      this.showDashboard(data, refreshRecord);
     } catch {
-      if (!request.signal.aborted) this.showStatus('The public evidence bundle could not be loaded. Try refreshing.');
+      if (!request.signal.aborted) this.showStatus('The public evidence bundle could not be loaded. Try reloading.');
     }
   }
 
-  private showDashboard(dashboard: Dashboard): void {
+  private showDashboard(dashboard: Dashboard, verified: RefreshRecord): void {
     const generated = Date.parse(dashboard.generatedAt);
     const metadata = element('p', `${sourceLabels[dashboard.source.kind]} · Bundle generated ${Number.isFinite(generated) ? dashboard.generatedAt : 'at an unknown time'} · Commit ${dashboard.commit.slice(0, 12)}`, 'sterling-evidence-meta');
+    const verification = element('p', `Manifest verified · Attestation: ${attestationWords[verified.attestation] ?? verified.attestation} · Fetched ${verified.fetchedAt} from ${verified.source}`, 'sterling-evidence-meta');
     const notice = element('p', 'This evidence bundle is older than 24 hours or has an invalid generation time. Check collection times before relying on it.', 'sterling-evidence-message');
     const age = Date.now() - generated;
     notice.hidden = age >= 0 && age <= 86_400_000;
@@ -407,7 +429,7 @@ class SterlingComplianceWidget extends BaseWidget {
       render();
       search.focus();
     });
-    this.body.replaceChildren(metadata, notice, attention, filters, visuals, columns);
+    this.body.replaceChildren(metadata, verification, notice, attention, filters, visuals, columns);
     render();
   }
 
@@ -437,7 +459,7 @@ class SterlingComplianceWidget extends BaseWidget {
     detail.replaceChildren(close, heading, badge(control.state), element('p', control.reasonText));
     for (const component of control.components) {
       const block = element('section', undefined, 'sterling-evidence-component');
-      block.append(element('h3', component.component), element('p', `Responsibility: ${component.responsibility}`), badge(component.state));
+      block.append(element('h3', component.component), element('p', `Responsibility: ${responsibilityWords[component.responsibility] ?? component.responsibility}`), badge(component.state));
       if (component.statement || component.reasonText) block.append(element('p', component.statement ?? component.reasonText));
       const evidence = element('ul');
       for (const item of component.evidence ?? []) {

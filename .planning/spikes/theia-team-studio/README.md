@@ -52,7 +52,7 @@ The Compliance view displays an evidence bundle's recorded states and source, wi
 --mount "type=bind,source=$PWD/docs-site/static/compliance,target=/repo/.planning/spikes/theia-team-studio/lib/frontend/compliance,readonly"
 ```
 
-Mount only the public projection written by the [documentation site's evidence refresh](../../../docs-site/README.md). The container's `node` user must be able to read its dashboard and public control text. The view reports missing, invalid or stale bundles and shows no evidence counts until a valid projection is available.
+Mount only the public projection written by the [documentation site's evidence refresh](../../../docs-site/README.md). The container's `node` user must be able to read its dashboard, `refresh.json` and public control text. The view shows states only when `refresh.json` records a verified manifest for the same commit as the dashboard. It reports missing, invalid, unverified or old bundles, and shows no evidence counts until a verified projection is available. The view shows the states the bundle recorded when it was built; it does not recompute them.
 
 ## Research
 
