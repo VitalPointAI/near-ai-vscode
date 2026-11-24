@@ -51,6 +51,6 @@ test('the Team preview shows a sample team, and the invalid sample shows the par
   await picker.selectOption({ label: 'Orchard sample' });
   await expect(page.locator('.near-team-member', { hasText: 'schedule-reviewer' })).toBeVisible();
 
-  await picker.selectOption({ label: 'Sample with an invalid team' });
+  await picker.selectOption({ label: 'Sample with an invalid agent team' });
   await expect(page.locator('.near-team-status')).toHaveText(expected);
 });

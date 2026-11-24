@@ -48,14 +48,14 @@ test('a valid sample is ready; a sample without a team file and an unknown id ar
   assert.equal(orchard.kind, 'ready');
   assert.equal(orchard.kind === 'ready' && orchard.team.name, 'Orchard Planning Team');
   assert.deepEqual(orchard.kind === 'ready' && orchard.team.members.map((member) => member.name), ['coordinator', 'schedule-reviewer']);
-  assert.deepEqual(await reader.readProject('empty'), { kind: 'missing', message: 'This sample has no team file.' });
-  assert.deepEqual(await reader.readProject('no-such-sample'), { kind: 'missing', message: 'This sample has no team file.' });
+  assert.deepEqual(await reader.readProject('empty'), { kind: 'missing', message: 'This sample has no agent team file.' });
+  assert.deepEqual(await reader.readProject('no-such-sample'), { kind: 'missing', message: 'This sample has no agent team file.' });
 });
 
 test('a missing engine bundle is "unavailable" when read, never an error when the reader is made', async () => {
   const root = appRootCopy(false);
   const reader = createTeamPreviewReader({ appRoot: root });
-  assert.deepEqual(await reader.readProject('orchard'), { kind: 'missing', message: 'The shipped team sample is unavailable.' });
+  assert.deepEqual(await reader.readProject('orchard'), { kind: 'missing', message: 'The shipped agent team sample is unavailable.' });
 });
 
 test('fixtures reached through a linked parent still load; a fixture linked out of its folder does not', async () => {
@@ -71,7 +71,7 @@ test('fixtures reached through a linked parent still load; a fixture linked out 
   const target = path.join(escaped, 'extension', 'fixtures', 'orchard.md');
   rmSync(target);
   symlinkSync(outside, target, 'file');
-  assert.deepEqual(await createTeamPreviewReader({ appRoot: escaped }).readProject('orchard'), { kind: 'missing', message: 'The shipped team sample is unavailable.' });
+  assert.deepEqual(await createTeamPreviewReader({ appRoot: escaped }).readProject('orchard'), { kind: 'missing', message: 'The shipped agent team sample is unavailable.' });
 });
 
 test('bindBackendService binds one handler for the path that resolves the service lazily and returns refusals as values', async () => {

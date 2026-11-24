@@ -211,11 +211,12 @@ test('D-41 rule 3: a misspelt brand and a brand prefix on a title are counted', 
 
 const WORKBENCH_PAGE = 'workbench/extension/src/browser/example-module.ts';
 
-test('D-33 workbench: the real scan reads the workbench browser and common sources, and no build output, test or declaration file', () => {
+test('D-33 workbench: the real scan reads the workbench browser, common and backend sources, and no build output, test or declaration file', () => {
   const files = copySourceFiles();
-  for (const expected of ['workbench/extension/src/browser/sterling-welcome-module.ts', 'workbench/extension/src/common/team-preview.ts']) assert.ok(files.includes(expected), expected);
-  const outside = files.filter((file) => file.startsWith('workbench/') && !/^workbench\/extension\/src\/(?:browser|common)\//.test(file));
-  assert.deepEqual(outside, [], 'nothing under workbench/node_modules, workbench/lib, workbench/test or the node backend');
+  for (const expected of ['workbench/extension/src/browser/sterling-welcome-module.ts', 'workbench/extension/src/common/team-preview.ts',
+    'workbench/extension/src/node/team-preview-reader.ts']) assert.ok(files.includes(expected), expected);
+  const outside = files.filter((file) => file.startsWith('workbench/') && !/^workbench\/extension\/src\/(?:browser|common|node)\//.test(file));
+  assert.deepEqual(outside, [], 'nothing under workbench/node_modules, workbench/lib or workbench/test');
   assert.ok(!files.some((file) => file.startsWith('workbench/') && (file.endsWith('.d.ts') || !file.endsWith('.ts'))), 'only .ts sources, never a .d.ts');
 });
 
@@ -249,6 +250,22 @@ test('D-33 workbench: a workbench page gives its text arguments, and not class n
     `body.append(element('p', 'Published evidence for your review', 'card wide'));`
   ].join('\n');
   assert.deepEqual(texts(other, 'workbench/extension/src/common/example.ts'), ['Published evidence for your review']);
+});
+
+test('W3 workbench backend: what it sends to the browser is copy (text constants, result fields, refused() arguments), a start error is not', () => {
+  const backend = 'workbench/extension/src/node/example.ts';
+  const source = [
+    `const UNAVAILABLE = { kind: 'missing', message: 'The shipped sample is unavailable.' };`,
+    `const projects = [{ id: 'orchard', title: 'Orchard sample', fixture: 'orchard.md' }];`,
+    `const LOCAL_TEXT = 'Signing is not available on this computer.';`,
+    `function read(error) { return { kind: 'invalid', message: error instanceof Error ? error.message : 'The sample could not be read.' }; }`,
+    `function sign() { return refused('Your signing key is not set up yet.', 'Ask your administrator.'); }`,
+    `function start() { throw new Error('STERLING_MODEL_SERVERS must be a JSON array of addresses.'); }`,
+    `console.error('The Sterling workbench cannot start.');`,
+  ].join('\n');
+  assert.deepEqual(texts(source, backend), ['The shipped sample is unavailable.', 'Orchard sample', 'Signing is not available on this computer.',
+    'The sample could not be read.', 'Your signing key is not set up yet.', 'Ask your administrator.']);
+  assert.deepEqual(countHits(extractCopy(`const missing = { message: 'This sample has no team file.' };`, backend), backend), { [backend]: { 'bare-team': 1 } });
 });
 
 // ---- Rule 5: the provider's name before organization (Task 2) ----
