@@ -1,9 +1,10 @@
 // Phase 46, plan 03, task 2 (D-12, D-13, D-26, D-30, D-34, D-35, D-39, D-42; T-46-12, T-46-14): the runtime image the Phase 47 contract
 // describes. It runs as 10001:0 and can write only its home, its workspace and /tmp; it keeps no package-manager cache; it carries no build or
 // browser tooling, no extension gallery and no model provider package; it binds 127.0.0.1 by default and refuses a bad address setting; it
-// reports healthy; it runs Node 26, the hub's major; and every FROM line of its Dockerfile is literal and pinned by digest. Hygiene as in
-// test/helpers/docker.ts. Run it with `npm run test:container`; it is not part of `npm test`.
+// reports healthy; it answers Theia Cloud's activity tracker only with the session secret and says nothing about the person; it runs Node 26,
+// the hub's major; and every FROM line of its Dockerfile is literal and pinned by digest. Hygiene as in test/helpers/docker.ts. Run it with `npm run test:container`; it is not part of `npm test`.
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -107,6 +108,48 @@ test('with STERLING_LISTEN_HOST=0.0.0.0 and STERLING_PREVIEW_NO_SIGN_IN=accept i
   const started = await runContainer('published', ['-d', '-p', `127.0.0.1:${port}:3000`, '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
   assert.equal(started.code, 0, started.stderr);
   await waitFor(async () => fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(3000) }).then((r) => r.status === 200, () => false), '/healthz on the published port');
+});
+
+test('Theia Cloud\'s activity tracker gets the last use only with the session secret, and no answer says anything about the person', async () => {
+  const port = await freePort();
+  const secret = randomBytes(24).toString('hex');
+  const person = 'person.monitor@site.example';
+  const before = Date.now();
+  const started = await runContainer('monitor', ['-d', '-p', `127.0.0.1:${port}:3000`, '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept',
+    '-e', `THEIACLOUD_SESSION_SECRET=${secret}`, '-e', 'THEIACLOUD_MONITOR_ENABLE_ACTIVITY_TRACKER=true', '-e', `THEIACLOUD_SESSION_USER=${person}`, image]);
+  assert.equal(started.code, 0, started.stderr);
+  const base = `http://127.0.0.1:${port}`;
+  await waitFor(async () => fetch(`${base}/healthz`, { signal: AbortSignal.timeout(3000) }).then((r) => r.status === 200, () => false), '/healthz on the published port');
+  const ask = async (method: string, path: string, authorization?: string): Promise<{ status: number; body: string; headers: Headers }> => {
+    const response = await fetch(`${base}${path}`, { method, headers: authorization ? { authorization } : {}, signal: AbortSignal.timeout(10_000) });
+    return { status: response.status, body: await response.text(), headers: response.headers };
+  };
+  const headerLines = (headers: Headers): string => {
+    const lines: string[] = [];
+    headers.forEach((value, name) => lines.push(`${name}: ${value}`));
+    return lines.join('\n');
+  };
+  const last = '/monitor/activity/lastActivity';
+  const answers = [
+    { expect: 401, body: 'Unauthorized', got: await ask('GET', last) },
+    { expect: 401, body: 'Unauthorized', got: await ask('GET', last, 'Bearer not-the-secret') },
+    { expect: 401, body: 'Unauthorized', got: await ask('POST', '/monitor/activity/popup', secret) },
+    { expect: 200, body: undefined, got: await ask('GET', last, `Bearer ${secret}`) },
+    { expect: 200, body: 'ok', got: await ask('POST', '/monitor/activity/popup', `Bearer ${secret}`) },
+    { expect: 404, body: 'Not found', got: await ask('POST', '/monitor/message', `Bearer ${secret}`) },
+  ];
+  for (const { expect, body, got } of answers) {
+    assert.equal(got.status, expect, got.body);
+    if (body !== undefined) assert.equal(got.body, body);
+    assert.equal(got.headers.get('cache-control'), 'no-store');
+    assert.equal(got.headers.get('set-cookie'), null);
+    const everything = `${got.body}\n${headerLines(got.headers)}`;
+    for (const secretOrPerson of [person, 'person.monitor', secret]) assert.ok(!everything.includes(secretOrPerson), `an answer carries ${secretOrPerson}`);
+  }
+  // The last use is the backend's start until a person uses the page: a whole number of epoch milliseconds since this test began.
+  const lastUse = answers[3].got.body;
+  assert.match(lastUse, /^[0-9]{13}$/);
+  assert.ok(Number(lastUse) >= before - 1000 && Number(lastUse) <= Date.now(), lastUse);
 });
 
 test('an invalid STERLING_MODEL_SERVERS stops the workbench with one line naming the setting', async () => {

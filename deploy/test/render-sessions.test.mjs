@@ -111,6 +111,15 @@ test('a modelServers left empty renders [], and one that is not a list of URLs s
   }
 });
 
+test('the session proxy lets only the activity tracker\'s two paths through without sign-in, anchored (oauth2-proxy matches unanchored)', () => {
+  const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
+  const routes = [...template.matchAll(/--skip-auth-route=(\S+)/g)].map((match) => match[1]);
+  assert.deepEqual(routes, ['^/monitor/activity/(lastActivity|popup)$']);
+  const exempt = new RegExp(routes[0]);
+  for (const route of ['/monitor/activity/lastActivity', '/monitor/activity/popup']) assert.ok(exempt.test(route), route);
+  for (const route of ['/', '/monitor/message', '/files/monitor/x', '/x/monitor/activity/lastActivity', '/monitor/activity/lastActivity/x']) assert.ok(!exempt.test(route), route);
+});
+
 test('the session environment policy selects only labelled session Deployments and Pods in theia-cloud, and fails closed', () => {
   const doc = policy();
   assert.match(doc, /^ {2}name: sterling-session-env$/m);
