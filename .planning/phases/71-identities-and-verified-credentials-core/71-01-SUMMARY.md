@@ -45,8 +45,8 @@ actuals:
   tokens: 16452
   tasks: 3
   commits: 4
-plan_head_before: b1ce8ada
-plan_head_after: 36ac569d
+plan_head_before: 48313baa
+plan_head_after: 46b37843
 ---
 
 # Phase 71 Plan 01: JCS conformance and the eddsa-jcs-2022 tracer Summary
@@ -96,10 +96,14 @@ Floats, -0, NaN, Infinity and integers beyond 2^53-1 are refused before signing 
 **1. [Rule 3 - Blocking] `@digitalbazaar/vc` needs a suite object, and the usual one (`@digitalbazaar/data-integrity`) is not an approved package**
 - **Found during:** Task 3.
 - **Fix:** I did not install a fourth package. Instead, a small test-only suite adapter is written in the test file. Every byte that matters in it comes from the reference packages: the JCS form and both hashes from `eddsa-jcs-2022-cryptosuite`, the @context rule, Ed25519 from `ed25519-multikey`, and base58btc from `base58-universal`. `@digitalbazaar/vc` runs its own credential checks and its issuance purpose. A self-check (the reference re-verifies what it issued) shows the glue is sound.
-- **Files:** `src/test/credentialsConformance.test.ts`. **Commit:** 13948057.
+- **Files:** `src/test/credentialsConformance.test.ts`. **Commit:** e81a308b.
 
 **2. [Rule 1 - Copy lint] Two refusal messages used the glossary word "profile"**
-- **Fix:** I reworded the messages and kept the baseline unchanged. **Commit:** f46df77d.
+- **Fix:** I reworded the messages and kept the baseline unchanged. **Commit:** 9e7f73a0.
+
+## Open conditions
+
+None.
 
 ## Known Stubs
 
@@ -115,4 +119,4 @@ None. The threat register's mitigations are in place:
 
 ## Self-Check: PASSED
 
-All created files exist. Commits f46df77d, d4842b11, 768c7149 and 13948057 are on `feat/phase-71-wave-1`.
+All created files exist. Commits 9e7f73a0, 9fc05966, 15ab7650 and e81a308b (after the rebase onto 48313baa) are on `feat/phase-71-wave-1`.

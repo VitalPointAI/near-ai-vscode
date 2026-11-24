@@ -183,6 +183,8 @@ Only what changes; everything else in the profile stays (D-05: every proof names
 
 ### Condition text for 48.1-09 (crypto inventory)
 
+Recorded in the gap register as **G350** ("Ed25519 does not run in a validated module anywhere in the stack": appliesAt protected-b, blocks production, closes in Phase 71), added by #191.
+
 > **O8 (accepted 2026-11-24):** Verified credentials, people's and your organization's DIDs (`did:webvh` v1.0) and status lists are signed with Ed25519 (`eddsa-jcs-2022`). EdDSA is approved under FIPS 186-5 and recommended by ITSP.40.111 v5, but it runs in upstream Node 26.13.1's bundled OpenSSL 3.5.9 with FIPS off and in OpenBao Transit, which has no FIPS build; the validated OpenSSL FIPS providers (3.1.2, CMVP #4985; RHEL 9 3.0.7, CMVP #5573) do not approve it. Condition: a site that requires FIPS 140-3 validated modules uses the ready fallback (`ecdsa-jcs-2019` on P-256, officers' P-256 `did:key` person keys named in the signed policy, a P-256 status-list key, no `did:webvh`) and validated builds of Node and OpenBao. Open until such a site is planned.
 
 O8 posture: accepted as decided; Ed25519 (eddsa-jcs-2022 and did:webvh) everywhere by default, with the ecdsa-jcs-2019 P-256 fallback specified above and its W3C example verified with node:crypto, and the 48.1-09 condition recorded; no module in our stack is FIPS 140-3 validated for Ed25519 today, which matters only to a site that requires validated modules.

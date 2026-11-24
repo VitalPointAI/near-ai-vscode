@@ -8,7 +8,7 @@ requires: []
 provides:
   - "71-RESEARCH.md: sections (b) did:webvh, (c) Status lists and O8 FIPS posture, each ending in a verdict line read by the preconditions of 71-04, 71-05 and 71-09 to 71-12"
   - "test/fixtures/did/webvh/vectors.json: the DIF did:webvh test-suite vectors at 4351390, unchanged (295 files), with the Apache-2.0 licence"
-  - "Gap G347: the strict-FIPS condition for Ed25519 credentials and did:webvh"
+  - "The strict-FIPS condition is gap G350 in compliance/gaps.json (added by #191: appliesAt protected-b, blocksProduction, closes in Phase 71)"
 affects: [71-04, 71-05, 71-08, 71-09, 71-10, 71-11, 71-12, 48.1-09]
 tech-stack:
   added: []
@@ -20,8 +20,6 @@ key-files:
     - test/fixtures/did/webvh/vectors.json
     - test/fixtures/did/webvh/LICENSE.md
   modified:
-    - compliance/gaps.json
-    - compliance/test/gaps.test.ts
     - .planning/phases/71-identities-and-verified-credentials-core/71-CONTEXT.md
     - .planning/REQUIREMENTS.md
 decisions:
@@ -38,9 +36,9 @@ estimate:
 actuals:
   tokens: 10917
   tasks: 3
-  commits: 3
-plan_head_before: b1ce8ada
-plan_head_after: 36ac569d
+  commits: 2
+plan_head_before: 48313baa
+plan_head_after: 46b37843
 ---
 
 # Phase 71 Plan 02: did:webvh hosting and caching, status list sizing, and the O8 FIPS posture Summary
@@ -75,7 +73,7 @@ The JCS condition is now met: 71-01 recorded `JCS verdict: PASS`.
   - Make the hosting site's hub the witness, with its existing `HUB_SIGNING_KEY` as a `did:key` and threshold 1. HQ is the witness for its own people and for the root. Otherwise a disconnected edge's first sign-in would wait for HQ.
 - **71-11 and 71-12:** a classified edge counts offline age from each list's `validFrom`, so an officer re-signs the lists (with a step-up) when an export for such an edge is cut, at most daily.
 - **71-05 and 71-09:** the compare-and-swap key is the hash of the current list, sent as a request field, so no signed field is added. A later `validFrom` is required, and no revocation bit may clear.
-- **48.1-09:** the condition text is in 71-RESEARCH.md. Gap G347 records it in `compliance/gaps.json`.
+- **48.1-09:** the condition text is in 71-RESEARCH.md. Gap G350 records it in `compliance/gaps.json` (added by #191; protected-b, blocks production, closes in Phase 71).
 
 ## Verification
 
@@ -85,14 +83,15 @@ The JCS condition is now met: 71-01 recorded `JCS verdict: PASS`.
   - the status-list gzip sizes, on Node 24.22.3 and Node 26.13.1;
   - the W3C `ecdsa-jcs-2019` P-256 example verifies with `node:crypto` (`ieee-p1363`);
   - Node 26.13.1 reports `getFips()` 0 and OpenSSL 3.5.9.
-- Compliance tests: 536 of 536 pass after G347 (the register count test is updated from 349 to 350 for the added gap).
+- Compliance tests pass on main with #191's register; this plan adds no gap (G350 already records the condition).
 
 ## Deviations from Plan
 
-**1. [Rule 2 - Missing critical] The strict-FIPS condition added as gap G347.**
-- **Why:** the owner's rule is that every open condition is recorded in `compliance/gaps.json`.
-- **What:** `closesInPhase` 48.1 (the crypto inventory), controls sc-12 and sc-13. The count test is updated for the added entry.
-- **Commit:** bafacfeb.
+**1. The strict-FIPS condition cites gap G350 instead of adding a gap.** At first this plan added its own gap entry (G347). That id collided with #191 (considerations register), which uses G347 for "Node/Electron without FIPS mode" and records this plan's condition as G350. After #191 merged, the branch was rebased, the extra entry and its count change were dropped, and the plan's documents cite G350.
+
+## Open conditions
+
+- Ed25519 (credentials, did:webvh, status lists) does not run in a FIPS 140-3 validated module anywhere in the stack; a site that requires validated modules uses the ecdsa-jcs-2019 P-256 fallback: G350.
 
 ## Known Stubs
 
@@ -100,4 +99,4 @@ None.
 
 ## Self-Check: PASSED
 
-All created files exist. Commits e5325e69, 0477d4b3 and bafacfeb, plus the owner-answers commit 36ac569d, are on `feat/phase-71-wave-1`.
+All created files exist. Commits 06b92876 and e227f9e1, plus the owner-answers commit 1a225794 (after the rebase onto 48313baa), are on `feat/phase-71-wave-1`.
