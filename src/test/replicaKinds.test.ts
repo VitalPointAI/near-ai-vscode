@@ -560,9 +560,9 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list has 68 kinds and the 22 project and roster samples are all of them', () => {
-  assert.equal(REPLICA_KINDS.length, 68, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; 14 roster kinds of Phase 33.1');
-  assert.equal(new Set(REPLICA_KINDS).size, 68, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; 14 roster kinds of Phase 33.1');
+test('the closed kind list has 70 kinds and the 22 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 70, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; 14 roster and 2 personnel kinds of Phase 33.1');
+  assert.equal(new Set(REPLICA_KINDS).size, 70, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; 14 roster and 2 personnel kinds of Phase 33.1');
   // Phase 33.1's roster kinds have their samples in replicaPositionSchemas.test.ts.
   const owned = REPLICA_KINDS.filter((kind) => !ROSTER_KIND_OWNER_33_1.has(kind) && (kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind)));
   assert.equal(owned.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');

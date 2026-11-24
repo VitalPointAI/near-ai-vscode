@@ -116,7 +116,7 @@ const epochCheck: Check = (value, path) => (isSafeIntegerInRange(value, 1, Numbe
 //   the signer, never stored (D-19).
 // - posting.enrol { posting, device, request, member? }: request is the hash of the person's signed device request; member is the new member id, given
 //   only when the order named a new person (Q3).
-// - posting.report { posting, evidence?, status? }: the credentials presented at Report for duty (Q4).
+// - posting.report { posting, evidence?, status? }: the credentials the person presented when reporting (Q4).
 // - posting.decide { posting, decision, unable, start?, position? }: unable is the hash of the person's signed unable report, which carries no reason;
 //   start comes with defer and only then, position with reassign and only then.
 // - posting.return { posting }; posting.end { posting, reason }; posting.cancel { posting, reason }
@@ -250,6 +250,20 @@ function decideRule(data: Record<string, unknown>, path: string): string | undef
   return undefined;
 }
 
+// Phase 31's declared clearance is a declaration that grants nothing (D-39); it never stands beside the member's did or credential evidence (Q6).
+function memberSlotsRule(data: Record<string, unknown>, path: string): string | undefined {
+  const pair = evidencePairProblem(data, path);
+  if (pair !== undefined) return pair;
+  if (hasOwn(data, 'clearance') && (hasOwn(data, 'did') || hasOwn(data, 'evidence'))) return invalidAt(`${path}.clearance`, 'a declaration never stands beside credentials');
+  return undefined;
+}
+
+// A member.admit carries the declared clearance of Phase 31 or the member's own did, never both (Q6).
+function admitRule(data: Record<string, unknown>, path: string): string | undefined {
+  if (!hasOwn(data, 'clearance') && !hasOwn(data, 'did')) return invalidAt(`${path}.clearance`, 'missing field');
+  return memberSlotsRule(data, path);
+}
+
 function stagedRule(data: Record<string, unknown>, path: string): string | undefined {
   return (data.replaces as number) < (data.epoch as number) ? undefined : invalidAt(`${path}.replaces`, 'the epoch it replaces is earlier');
 }
@@ -266,8 +280,17 @@ function stagedRule(data: Record<string, unknown>, path: string): string | undef
 // - hub.readmit (Phase 33 D-42): a lead device trusts an admitted hub again with the pin the lead compared; fromCheckpoint names a restored checkpoint.
 const SHAPES: Readonly<Record<string, Shape>> = {
   'member.invite': { required: { invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, expiresAt: timeCheck, secretHash: hashCheck, rosterPrev: hashCheck }, optional: { forMember: slugCheck } },
-  'member.admit': { required: { member: slugCheck, invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, device: deviceProblem, rosterPrev: hashCheck }, optional: { agentSeats: agentSeatsProblem } },
-  'member.update': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, agentSeats: agentSeatsProblem }, atLeastOneOf: ['name', 'seat', 'roles', 'clearance', 'agentSeats'] },
+  // Phase 33.1 (D-16, D-39, Q6): the member's own did and the credential evidence; a declared clearance never stands beside them, and a member.admit
+  // carries one or the other.
+  'member.admit': {
+    required: { member: slugCheck, invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, device: deviceProblem, rosterPrev: hashCheck },
+    optional: { clearance: clearanceProblem, agentSeats: agentSeatsProblem, did: didCheck, evidence: evidenceCheck, status: statusCheck }, rule: admitRule
+  },
+  'member.update': {
+    required: { member: slugCheck, rosterPrev: hashCheck },
+    optional: { name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, agentSeats: agentSeatsProblem, did: didCheck, evidence: evidenceCheck, status: statusCheck },
+    atLeastOneOf: ['name', 'seat', 'roles', 'clearance', 'agentSeats', 'did', 'evidence'], rule: memberSlotsRule
+  },
   'member.remove': { required: { member: slugCheck, rosterPrev: hashCheck }, optional: { reason: reasonCheck } },
   'device.add': { required: { member: slugCheck, device: deviceProblem, rosterPrev: hashCheck }, optional: { invite: slugCheck } },
   'device.rotate': { required: { member: slugCheck, from: hashCheck, device: deviceProblem, rosterPrev: hashCheck } },

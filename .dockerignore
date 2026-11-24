@@ -16,6 +16,7 @@
 !hub/tsconfig.json
 !hub/scripts
 !hub/src
+!src/domain/org/modes.ts
 !src/domain/redaction.ts
 !src/domain/replica/causal.ts
 !src/domain/replica/cellKeys.ts
@@ -31,6 +32,7 @@
 !src/domain/replica/kindSchemas/doc.ts
 !src/domain/replica/kindSchemas/integrity.ts
 !src/domain/replica/kindSchemas/obs.ts
+!src/domain/replica/kindSchemas/personnel.ts
 !src/domain/replica/kindSchemas/project.ts
 !src/domain/replica/kindSchemas/registers.ts
 !src/domain/replica/kindSchemas/roster.ts
@@ -44,6 +46,7 @@
 !src/domain/replica/roster.ts
 !src/domain/replica/rosterCells.ts
 !src/domain/replica/rosterMembers.ts
+!src/domain/replica/rosterPositions.ts
 !src/domain/replica/rosterView.ts
 !src/domain/replica/safetyCode.ts
 !src/domain/replica/safetyWords.ts

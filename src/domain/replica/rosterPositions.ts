@@ -1,7 +1,7 @@
 // Positions and postings in the roster fold (Phase 33.1, D-01, D-02, D-09, D-12; DESIGN 3.1 to 3.8). Hub-side: pure, no clock, no I/O, no Yjs.
 //
 // A position is an organization-owned roster object that outlives its holder. A posting puts one member into one position: the lead orders it and the
-// posted member's own device (the person key in a hosted session) reports for duty, which makes that member the holder. Every record keeps the roster
+// posted member's own device (the person key in a hosted session) reports, which makes that member the holder. Every record keeps the roster
 // position it took effect at, so each answer is given at the roster an entry cites, as the members module does (D-11).
 //
 // This module holds the state and its queries. Who may write what is decided in one place, positionWriteProblem in roster.ts, which the roster fold
@@ -27,13 +27,13 @@ export interface PostsState { positions: Map<string, PositionRecord>; postings: 
 export const createPostsState = (): PostsState => ({ positions: new Map(), postings: new Map() });
 
 export const POSITION_REFUSALS = {
-  'order-not-allowed': 'Only the staff lead may post a person at this point, so this order is refused.',
+  'order-not-allowed': 'Only the lead may make this order at this point, so it is refused.',
   'position-exists': 'A position with this id already exists, so it is refused.',
-  'unknown-position': 'This names a position that does not exist at the roster it follows, so it is refused.',
+  'unknown-position': 'This names a position that does not exist at this point, so it is refused.',
   'position-not-vacant': 'This position already has a holder or a person posted to it, so this order is refused.',
   'posting-exists': 'A posting with this id already exists, so it is refused.',
-  'unknown-posting': 'This names a posting that does not exist at the roster it follows, so it is refused.',
-  'not-the-posted-member': 'Only the person posted may report for duty, from their own key, so this report is refused.',
+  'unknown-posting': 'This names a posting that does not exist at this point, so it is refused.',
+  'not-the-posted-member': 'Only the person this posting names may report for it, with their own key, so this report is refused.',
   'posting-not-open': 'This posting is not waiting for a report, so this report is refused.',
   'report-before-start': 'This report was signed before the posting starts, so it is refused.'
 } as const;
