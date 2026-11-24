@@ -22,10 +22,10 @@ The GSD confidence seam rates every web source LOW by default. The marks above a
 
 1. **Keep our own cells and key-release format. Do not adopt the OpenTDF platform or ZTDF as the internal format.** Our grants and wraps already are the key-release point that TDF's Key Access Server (KAS) provides, and they work with no network, which a TDF KAS does not. OpenTDF's open-source platform takes subject attributes from identity-provider claims, LDAP or SQL, not from W3C credentials. Its maker says the open-source edition has no FIPS option, no HSM binding, no ZTDF and no STANAG labelling [vendor]. Instead, take two things from the standards now:
    - a STANAG 4774 label mapping and a STANAG 4778-style signed label binding on every release copy and grant;
-   - a TDF/ZTDF export and import adapter later, for coalition exchange (Phase 45 and L5), once the ZTDF text has been obtained through official channels.
-2. **Change the cell wrap to a CCCS-approved curve before any site holds Protected B data.** Today's wrap is X25519 + HKDF + AES-256-GCM [repo]. CCCS ITSP.40.111 version 5 (effective 2026-05-29) lists elliptic-curve key agreement only on the NIST P-curves, and X25519 is not listed [primary]. Wrap format v2 should be HPKE-shaped DHKEM(P-256, HKDF-SHA256) with AES-256-GCM, with a hybrid ML-KEM-768 slot for the 2035 post-quantum deadline. Ed25519 signatures stay: ITSP.40.111 v5 recommends EdDSA on Edwards25519 [primary].
+   - a TDF/ZTDF export and import adapter for NATO and Five Eyes exchange, as its own phase (45.1, section 11). Its label and binding half and the adapter interface are built now; the ZTDF half follows as soon as your organization receives the ACP-240 and ADatP-4774/4778 texts (owner, 2026-11-24).
+2. **Change the cell wrap to hybrid P-256 + ML-KEM-768 before any site holds Protected B data** (decision O3, section 10). Today's wrap is X25519 + HKDF + AES-256-GCM [repo]. CCCS ITSP.40.111 version 5 (effective 2026-05-29) lists elliptic-curve key agreement only on the NIST P-curves, and X25519 is not listed. It does list ML-KEM-512, -768 and -1024 for Unclassified, Protected A and Protected B [primary]. The pinned Node 26.13.1 does both P-256 ECDH and ML-KEM-768 in `node:crypto` (verified by running it). Ed25519 signatures stay: ITSP.40.111 v5 recommends EdDSA on Edwards25519 [primary].
 3. **Pull the identity and credential half of Phase 71 forward as "Phase 71 (core)". Split agent delegation off as Phase 71.1, which stays in Stage 1.**
-   - What 71 (core) contains: the VC 2.0 `eddsa-jcs-2022` profile; Bitstring Status List; `did:key` for devices; `did:webvh` for people and your organization; the trusted-issuer section of the signed policy; the per-level maximum offline age (pulled from L5); one pure verifier that the fold, the hub and the wrap preparer all call; and wrap v2.
+   - What 71 (core) contains: the VC 2.0 `eddsa-jcs-2022` profile; Bitstring Status List; `did:key` for devices; `did:webvh` for people and your organization; the trusted-issuer section of the signed policy; the per-level maximum offline age (pulled from L5); one pure verifier that the fold, the hub and the wrap preparer all call; and the hybrid wrap v2.
    - Order: its research step and pure engine plans run now, beside Phase 33 and 33.1's waves 1 to 3. 33.1's posting check (33.1-04) and observer waves (33.1-18 to 33.1-25) wait for its verifier. 47-19 to 47-21 and 47-14 are amended before they run. 48.1 is amended in text only.
 4. **Add no new runtime component.** Credentials are issued in the issuing officer's own workbench session and signed by their person key in OpenBao Transit, after a passkey step-up. Their authority to issue is itself a credential from your organization's root. One HQ status-list key in Transit signs the status lists. The sync hub serves the `did:webvh` logs and status lists, and the signed site export carries them to disconnected edges. The only new resources are test-only devDependencies (Digital Bazaar's cross-check libraries) and W3C/DIF test vectors, each with a compliance fit entry.
 5. **Every stand-in becomes either a credential or a data attribute** (section 5 has the full table).
@@ -101,7 +101,7 @@ The useful fact: **none of the stand-in shapes in 33.1, 47-19 to 47-21 or 48.1 h
 - **Recommended now:**
   - a mapping table from each scale preset to a 4774 policy identifier, which your organization's security officer confirms, as the Phase 70 presets already need;
   - a signed label binding (label, content hash, signer, time) on every `observer.release` copy and every export. That is a few dozen lines on the existing signer.
-- **ZTDF as a wire format later:** only once your organization obtains the ACP-240/ZTDF text through official channels. It would be an export and import adapter at the coalition boundary (Phase 45's export control and L5's federation), not our storage format.
+- **ZTDF as a wire format:** an export and import adapter at the coalition boundary, never our storage format. It is its own phase (45.1, section 11), started as soon as practicable (owner, 2026-11-24). The parts that need no restricted text are built first; the ZTDF parts follow once your organization obtains the ACP-240 text through official channels.
 
 ### 2.3 US IC-TDF
 
@@ -233,7 +233,7 @@ NIST SP 800-207 places a policy decision point (PDP) and policy enforcement poin
 
 ### 4.3 Key release in hosted mode is closer to a KAS than it looks
 
-In hosted mode the cell epoch keys and the person's X25519 (later P-256) private key sit in the person's OpenBao key store, under a KEK that only their entity can use (33 D-61) [repo]. Every session therefore unwraps through Transit, so disabling the entity, or ending the session, cuts access even to epochs already granted. That is per-session key release, close to the pull model, with no new component (inference).
+In hosted mode the cell epoch keys and the person's X25519 (later P-256 and ML-KEM-768) private keys sit in the person's OpenBao key store, under a KEK that only their entity can use (33 D-61) [repo]. Every session therefore unwraps through Transit, so disabling the entity, or ending the session, cuts access even to epochs already granted. That is per-session key release, close to the pull model, with no new component (inference).
 
 On a single machine and at edges the device holds the keys, so the push model's limits apply (section 6, pitfall 2).
 
@@ -312,9 +312,10 @@ The fold keeps reading `clearance` on old member entries as a legacy declaration
   - HQ as a witness;
   - the DIF test vectors.
 - (c) Status list sizing, time to live, and the per-level maximum offline age.
-- (d) Wrap v2:
-  - HPKE DHKEM(P-256, HKDF-SHA256) with AES-256-GCM on `node:crypto`;
-  - whether Node 26's `node:crypto` offers ML-KEM for the hybrid slot [unverified].
+- (d) Hybrid wrap v2, as specified in section 10.4:
+  - P-256 ECDH plus ML-KEM-768 with an SP 800-56C two-step KDF combiner and AES-256-GCM on `node:crypto` (both primitives verified on Node 26.13.1);
+  - grant paging, because a hybrid wrap is about 1.2 KB raw against 92 bytes today;
+  - the device key binding v2 that carries both public keys.
 
 **Plans (engine plans pure and host-neutral, in `src/domain/credentials/` and `src/domain/did/`):**
 1. VC profile issue and verify, with frozen W3C vectors and a Digital Bazaar cross-check (devDependencies only).
@@ -322,7 +323,7 @@ The fold keeps reading `clearance` on old member entries as a legacy declaration
 3. `did:key` mapping of Phase 69 device keys; `did:webvh` log verification from a cache.
 4. The `credentials@1` bundle section: trusted issuers per type and limit, maximum offline age per level, the credentials required by sensitivity.
 5. `mayRelease` and the evidence citation rule (section 3.3), with property tests that a cited, revoked or out-of-date credential never passes.
-6. Wrap v2 with a format version, plus the `cell.rekey` migration.
+6. Hybrid wrap v2 (`near-ai/cell-wrap/v2`) with grant paging, device key binding v2, a `wrap@2` feature through `roster.require`, and the `cell.rekey` migration.
 7. Issuance in the officer's session (native "Issue credential" card, person key with step-up), and the status-list key in Transit (47-07 addition).
 8. Hub: serve logs and lists; verify on append; the freshness PEP; the watch that stages rekeys.
 9. Signed export of logs, lists and the issuer section (with 47-14).
@@ -340,6 +341,8 @@ The fold keeps reading `clearance` on old member entries as a legacy declaration
 | F | 33.1 observer waves (33.1-18 to 33.1-25) | after E | Observers need issuance and the hub PEP |
 | G | 48.1 statements for the observer area | after F on main | As already planned (statements wait for 33.1) |
 | H | Phase 71.1 (agent delegation), then Phases 72 to 74 | Stage 1 order | Unchanged |
+| I | Phase 45.1 part 1 (label table, signed binding, adapter interface, base TDF) | after B's binding signer; beside D to G | Owner: NATO interoperability as soon as practicable; needs no restricted text |
+| J | Phase 45.1 part 2 (ZTDF, ADatP-4774/4778 serializers, partner key access) | when the texts arrive | The trigger is the texts, not a date |
 
 Step A has to come first: the shapes become permanent the moment 33.1 plan 01 writes them. B has to come before D, because the posting check needs the verifier. E needs 46-07 and 47-07 on main. Everything else runs in parallel.
 
@@ -347,7 +350,7 @@ Step A has to come first: the shapes become permanent the moment 33.1 plan 01 wr
 
 | Option | What it means | Cost | Risk |
 |---|---|---|---|
-| **1. Recommended: own cells, credentials core first, standards-aligned labels** | Section 5.4; no new runtime component; wrap v2; 4774 mapping and 4778-style binding; ZTDF adapter later | Phase 71 (core) is about 10 plans plus its research; 33.1 changes in about 9 plans; 47 gets smaller; 48.1 is text. Observers arrive after 71 (core) rather than with 33.1's first waves | JCS or `did:webvh` surprises (fallback ready); status distribution to edges; observer timeline slips by the length of 71 (core) |
+| **1. Recommended: own cells, credentials core first, standards-aligned labels** | Section 5.4; no new runtime component; hybrid wrap v2; 4774 mapping and 4778-style binding; ZTDF adapter as Phase 45.1 | Phase 71 (core) is about 10 plans plus its research; 33.1 changes in about 9 plans; 47 gets smaller; 48.1 is text. Observers arrive after 71 (core) rather than with 33.1's first waves | JCS or `did:webvh` surprises (fallback ready); status distribution to edges; observer timeline slips by the length of 71 (core) |
 | 2. Fallback: credential-shaped interim | Same profile and the same evidence slots. Issuers are `did:key` officers named in the policy, with no `did:webvh` and no status lists: short validity (for example 30 days) plus roster revocation entries | About 60 percent of option 1's engine work; no hub hosting of logs | Revocation is weaker (validity-bounded); two issuer models for a while; the upgrade still needs `did:webvh` |
 | 3. Adopt the OpenTDF platform | KAS, policy and entity resolution beside or instead of the gate; TDF objects | A Go service and a database in the Phase 47 stack, Keycloak integration, a KAS at every edge, and a second PDP to keep in agreement with the gate | Attributes from IdP claims (against the direction); no FIPS or HSM in open source [vendor]; no ZTDF or STANAG [vendor]; fails the compliance fit; community support only |
 | 4. Adopt ZTDF as the storage format | Re-encode cells as ZTDF objects | Unknown: the spec text is not public [unverified] | Format churn, commercial tooling, KAS model offline; nothing gained inside one organization |
@@ -367,7 +370,7 @@ Step A has to come first: the shapes become permanent the moment 33.1 plan 01 wr
    - **Prevention:** rekey on every revocation; in hosted mode, the OpenBao entity disable cuts unwraps per session; at edges, the per-level maximum offline age, client-enforced, plus epoch rotation.
    - **Honesty:** SECURITY.md says that a device holding keys offline is trusted until its next contact, and that this is not a KAS.
 3. **X25519 in the cell wrap is not in CCCS ITSP.40.111 v5.** Section 5.3 lists ECC CDH and MQV only on P-224, P-256, P-384 and P-521 [primary]. The FIPS 140-3 guidance excludes curves that are not in SP 800-56A rev 3 from key agreement [secondary: OpenSSL FIPS provider man pages].
-   - **Prevention:** wrap v2 on P-256 before any Protected B site; record X25519 as a crypto open condition in 48.1-09 until then.
+   - **Prevention:** hybrid wrap v2 (P-256 + ML-KEM-768) before any Protected B site; record X25519 as a crypto open condition in 48.1-09 until then.
 4. **A second source of truth for the same attribute.** Keeping Keycloak attributes, `security-contacts`, `people.signers` or roster fields beside credentials would let the two disagree.
    - **Prevention:** remove them (section 5.1); a test that no decision reads a token claim.
 5. **Permanent shapes written before this lands.** 33.1 plan 01 writes them into every shared log.
@@ -391,7 +394,8 @@ Step A has to come first: the shapes become permanent the moment 33.1 plan 01 wr
 
 11. **Threshold credentials leak the maximum level** if a holder presents all of them. Present only what is asked.
 12. **Edge clocks.** Use a monotonic counter and the last bundle time (Phase 74).
-13. **The ZTDF text may only be available through official channels.** Do not design the adapter from vendor descriptions.
+13. **The ZTDF text may only be available through official channels.** Do not design the ZTDF half of the adapter from vendor descriptions (section 11).
+14. **Exchange is not cross-domain accreditation.** The adapter moves objects between organizations at the same classification on accredited systems. It is not a guard between networks of different classification.
 
 ### Phase-specific warnings
 
@@ -399,6 +403,7 @@ Step A has to come first: the shapes become permanent the moment 33.1 plan 01 wr
 |---|---|---|
 | 71 (core) research | JCS subset differs from RFC 8785 on some input | Restrict the profile to inputs proven equal, or take the fallback |
 | 71 (core) wrap v2 | Two wrap formats live during migration | Format version in the grant; `cell.rekey` to v2 at the next epoch; refuse v1 for new wraps after the switch |
+| 71 (core) wrap v2 | Hybrid wraps are about 13 times larger, so a grant to many devices passes the 1 MiB grant limit | Grant paging (several signed grant pages per epoch, each committed by the founding entry) |
 | 33.1 | Evidence slots under-specified, then frozen | Settle the slot schema in plan 01 with the Phase 71 (core) profile draft beside it |
 | 47-14 | Status lists in exports go stale at the edge | Per-level maximum offline age; export time stamped and signed |
 | 48.1 | Statements claim credential enforcement before it is on main | 48 D-11 honest-evidence rule: statements only for what is on main |
@@ -412,7 +417,7 @@ Step A has to come first: the shapes become permanent the moment 33.1 plan 01 wr
 | `@digitalbazaar/vc`, `@digitalbazaar/eddsa-jcs-2022-cryptosuite`, `@digitalbazaar/vc-bitstring-status-list` | npm, devDependency (test cross-check only) | BSD-3-Clause (identity-research.md 3.2, npm metadata of 2026-11-15) | pass expected, scope `build` | Nothing ships; pin exactly; air-gap fine from the lockfile |
 | W3C VC and Data Integrity test vectors; DIF `did:webvh` test vectors | test data | W3C Software and Document licence; DIF licence [unverified] | pass expected | Copied into the test folder with their licence |
 | OpenBao Transit key `status-list-<site>` (ed25519) | configuration of an existing component | OpenBao (already assessed) | pass with the FIPS condition of pitfall 6 | 48.1-08 key inventory |
-| P-256 ECDH, HKDF-SHA256, AES-256-GCM on `node:crypto` | crypto of existing runtime | Node.js (already assessed) | pass | ITSP.40.111 v5 sections 5.3, 10.2, 4.2 [primary] |
+| P-256 ECDH, ML-KEM-768, HKDF-SHA256, AES-256-GCM on `node:crypto` | crypto of existing runtime | Node.js (already assessed); OpenSSL 3.5.9 bundled in Node 26.13.1 | pass, with the existing condition that the module is not FIPS-validated | ITSP.40.111 v5 sections 5.3, 5.4, 10.2, 4.2 [primary]; section 10.3 |
 | OpenTDF platform | Go service | BSD-3-Clause-Clear | **not proposed**; would fail on FIPS, HSM and the attribute source | section 2.1 |
 | Keycloak OID4VCI as an issuer | feature of an existing component | Apache-2.0 | **not proposed** | Still experimental in Keycloak 26.x; issues SD-JWT VC and JWT VC rather than our profile; would make the identity provider an attribute authority [primary: https://www.keycloak.org/2026/01/issue-credentials-over-openid4vci ; https://www.keycloak.org/2026/07/keycloak-2670-released] |
 
@@ -420,23 +425,23 @@ No new runtime dependency, no new container, no new service.
 
 ---
 
-## 8. Owner decisions needed
+## 8. Owner decisions (answered 2026-11-24)
 
-Each has the default this report recommends.
+**Owner, 2026-11-24:** "All defaults accepted (O1 to O11) except O3." On O3: "is there a PQC option instead that is acceptable? If so, do that; if not, P-256." On NATO: "ensure NATO interoperability as soon as practicable with the ZTDF adapter if that's the best option."
 
-| Id | Decision | Default |
+| Id | Decision | Answer |
 |---|---|---|
-| O1 | Data format: own cells, OpenTDF, or ZTDF | **Own cells**, plus a STANAG 4774 mapping and 4778-style binding now; a ZTDF/TDF adapter later at the coalition boundary |
-| O2 | Phase order | Section 5.4: docs amendments first; Phase 71 split into 71 (core), pulled forward, and 71.1 (agent delegation), kept in Stage 1; 33.1's posting check and observers wait for 71 (core) |
-| O3 | Cell wrap v2 | **P-256** HPKE-shaped wrap before any Protected B site, with a hybrid ML-KEM slot for the 2035 deadline |
-| O4 | Who issues, and where | **Credentialed officers issue from their own session** with their person key and step-up; one HQ status-list key in Transit; the hub serves logs and lists; no new issuer service |
-| O5 | Releasability for everyone or only outside members | **Everyone** holding a marked cell needs a matching nationality or affiliation credential (HQ issues `CAN` to staff at enrolment) |
-| O6 | Status list time to live and maximum offline age per level | Connected HQ: 15 minutes. Edges: Protected A 7 days, Protected B 72 hours, classified 24 hours. All are examples for the security officer to set |
-| O7 | Which official issues which credential type | Section 5.1 table, recorded in `credentials@1` |
-| O8 | FIPS posture for Ed25519 | Accept ITSP.40.111 v5's EdDSA recommendation; carry `ecdsa-jcs-2019` as a second credential suite; record the `did:webvh` limit as a condition |
-| O9 | Accept the fallback (section 5.5, option 2) if the research step fails | Yes |
-| O10 | Access agreement and visit clearance as credentials issued by your organization's security contact; foreign-issued credentials only later, through L5 trust lists | Yes |
-| O11 | Projects that hold only declared clearances (Phase 31 logs) | Keep working for unmarked and lowest-level cells; anything above needs credentials once `credentials@1` is required |
+| O1 | Data format: own cells, OpenTDF, or ZTDF | **Accepted: own cells**, plus a STANAG 4774 mapping and 4778-style binding now. The ZTDF/TDF adapter at the coalition boundary is its own phase, 45.1, as soon as practicable (owner's NATO direction; section 11) |
+| O2 | Phase order | **Accepted.** Section 5.4, plus Phase 45.1 (section 11): docs amendments first; Phase 71 split into 71 (core), pulled forward, and 71.1 (agent delegation), kept in Stage 1; 33.1's posting check and observers wait for 71 (core) |
+| O3 | Cell wrap v2 | **Answered with the owner's rule, "PQC if acceptable, else P-256": a PQC option is acceptable, so hybrid P-256 + ML-KEM-768 now** (section 10). ML-KEM-768 is listed in ITSP.40.111 v5 for Unclassified, Protected A and Protected B; P-256 ECDH is listed; the combiner is the listed SP 800-56C two-step KDF; both primitives run in the pinned Node 26.13.1. Protected C and classified need Cyber Centre advice, with a reserved second suite |
+| O4 | Who issues, and where | **Accepted.** **Credentialed officers issue from their own session** with their person key and step-up; one HQ status-list key in Transit; the hub serves logs and lists; no new issuer service |
+| O5 | Releasability for everyone or only outside members | **Accepted.** **Everyone** holding a marked cell needs a matching nationality or affiliation credential (HQ issues `CAN` to staff at enrolment) |
+| O6 | Status list time to live and maximum offline age per level | **Accepted.** Connected HQ: 15 minutes. Edges: Protected A 7 days, Protected B 72 hours, classified 24 hours. All are examples for the security officer to set |
+| O7 | Which official issues which credential type | **Accepted.** Section 5.1 table, recorded in `credentials@1` |
+| O8 | FIPS posture for Ed25519 | **Accepted.** Accept ITSP.40.111 v5's EdDSA recommendation; carry `ecdsa-jcs-2019` as a second credential suite; record the `did:webvh` limit as a condition |
+| O9 | Accept the fallback (section 5.5, option 2) if the research step fails | **Accepted.** Yes |
+| O10 | Access agreement and visit clearance as credentials issued by your organization's security contact; foreign-issued credentials only later, through L5 trust lists | **Accepted.** Yes |
+| O11 | Projects that hold only declared clearances (Phase 31 logs) | **Accepted.** Keep working for unmarked and lowest-level cells; anything above needs credentials once `credentials@1` is required |
 
 ---
 
@@ -446,8 +451,118 @@ Each has the default this report recommends.
 - The texts of ACP-240 ZTDF and ADatP-4774/4778: not read. Obtain them through your organization before designing the adapter.
 - The current IC-TDF version [unverified].
 - Whether OpenBao has any FIPS 140-3 validation, and the Ed25519 status in the OpenSSL FIPS provider of the UBI 9 base [secondary, conflicting].
-- ML-KEM in Node 26's `node:crypto` [unverified].
+- ML-KEM in Node 26's `node:crypto`: **verified** on Node 26.13.1 with OpenSSL 3.5.9 (section 10.3).
+- The exact combiner of `MLKEM768-P256` in draft-ietf-hpke-pq-05 and draft-irtf-cfrg-concrete-hybrid-kems [unverified].
+- Whether SP 800-56C rev 2 (and SP 800-227) treat a hybrid secret with one approved component as approved [unverified clause; RFC 10024's FIPS note suggests so, secondary].
+- Who in DND distributes ACP-240 and NATO ADatP documents to your organization [unverified office].
 - The W3C Data Integrity ECDSA status for `ecdsa-jcs-2019` [unverified today].
+
+---
+
+## 10. Decision O3: post-quantum key release (owner rule "PQC if acceptable, else P-256")
+
+### 10.1 Is a PQC option acceptable? Yes
+
+| Question | Finding | Mark |
+|---|---|---|
+| (a) Does ITSP.40.111 v5 list ML-KEM? | Section 5.4 recommends ML-KEM-512, ML-KEM-768 and ML-KEM-1024, "a general-purpose, post-quantum key establishment scheme, as specified in NIST FIPS 203", with no preference among them. Section 2: ML-KEM "will replace the key establishment schemes" of sections 5.1 to 5.3 "for most use cases" | [primary] https://cyber.gc.ca/en/guidance/cryptographic-algorithms-unclassified-protected-and-protected-b-information-itsp40111 |
+| (a) For which levels? | The guidance "applies to UNCLASSIFIED, PROTECTED A and PROTECTED B information"; for Protected C and classified information, contact the Cyber Centre | [primary] same page |
+| (a) Must the module be validated? | Section 13: modules "should be tested and validated" under the CMVP for FIPS 140-3. This is a recommendation, not a mandate | [primary] same page |
+| (b) Does CCCS say anything about hybrid? | Neither ITSP.40.111 v5 nor the migration roadmap ITSM.40.001 (effective 2025-06-23) mentions hybrid key establishment: it is neither required nor forbidden. The roadmap's milestones are a departmental PQC plan by April 2026, high-priority systems migrated by the end of 2031 and the rest by the end of 2035, where "migrated" means quantum-vulnerable algorithms are disabled, isolated or tunnelled. ITSP.40.111 v5 phases out quantum-vulnerable schemes used "without a post-quantum key establishment scheme" by the end of 2035 | [primary] https://www.cyber.gc.ca/en/guidance/roadmap-migration-post-quantum-cryptography-government-canada-itsm40001 ; ITSP.40.111 page |
+| (b) The Treasury Board notice | A Security Policy Implementation Notice in effect from 2025-10-09 requires every organization that manages IT systems to migrate to quantum-safe cryptography | [secondary] https://www.canada.ca/en/government/system/digital-government/policies-standards/spin/migrating-government-canada-post-quantum-cryptography.html |
+| (b) Key derivation | ITSP.40.111 v5 section 10.2 recommends the SP 800-56C rev 2 two-step (extract then expand) KDF and says TLS 1.3's HKDF "follows this specification" | [primary] |
+| (b) NIST hybrid guidance | SP 800-227 (final, 2025-09-18) gives recommendations for KEMs, including hybrid set-ups an attacker must break both halves of; the combiner clause was not read | [secondary] https://csrc.nist.gov/pubs/sp/800/227/final |
+
+**Reading (inference):** a hybrid of two listed schemes (P-256 ECDH, section 5.3; ML-KEM-768, section 5.4) joined by a listed KDF (section 10.2) uses only listed algorithms. It is post-quantum now, and stays acceptable if either half is later broken or deprecated. So it meets the owner's rule.
+
+### 10.2 Can our stack do it? Yes, in process
+
+| Part | Finding | Mark |
+|---|---|---|
+| The images' Node | Both the hub (`hub/Dockerfile`: `node:26.13.1-slim` build stage, `distroless/nodejs26` runtime) and the workbench (46 D-34: the upstream Node 26.13.1 binary on UBI 9 minimal) run upstream Node 26.13.1 | [repo] |
+| ML-KEM in `node:crypto` | Node 26.13.1 docs list key types `ml-kem-512`, `ml-kem-768` and `ml-kem-1024`, and `crypto.encapsulate()` and `crypto.decapsulate()` | [primary] https://nodejs.org/api/crypto.html |
+| Run on the pinned version | Node 26.13.1 on this machine reports OpenSSL 3.5.9. `generateKeyPairSync('ml-kem-768')`, `encapsulate` and `decapsulate` give equal 32-byte secrets with a 1,088-byte ciphertext; P-256 `diffieHellman` gives 32 bytes; `sha3-256` is available. The test was a five-line script of our own, run with the installed Node | [verified by running, 2026-11-24] |
+| FIPS | Upstream Node uses its bundled OpenSSL 3.5.9 with FIPS off (`crypto.getFips()` is 0), so today's X25519, Ed25519 and AES-GCM are not in a validated module either. The UBI 9 system OpenSSL FIPS provider is not used by upstream Node. Whether OpenSSL 3.5's FIPS provider is validated is unclear (validation reported pending in April 2026) | [verified by running]; [secondary] https://docs.openssl.org/3.6/man7/OSSL_PROVIDER-FIPS |
+| OpenBao Transit | No ML-KEM and no ECDH (key types: AES, ChaCha20, ed25519, ECDSA, RSA, ML-DSA, hmac). That does not block anything: as for X25519 today, the P-256 and ML-KEM private keys are kept as an envelope under the person's Transit KEK and opened into backend memory per session (33 D-61) | [repo] 33-CONTEXT D-61, verified there |
+
+### 10.3 Which wire format
+
+| Candidate | Verdict | Why |
+|---|---|---|
+| X-Wing (X25519 + ML-KEM-768, SHA3-256 combiner) | **No** | Its classical half is X25519, which is not on the CCCS list; it is an IRTF draft |
+| `MLKEM768-P256` from draft-ietf-hpke-pq-05 (KEM id 0x0050; encapsulated key 1,153 bytes, public key 1,249 bytes, shared secret 32 bytes; Standards Track, updated 2026-07-06) | **Later, as v3**, once it is an RFC | Right algorithms and an interop path to HPKE and ZTDF tools, but still a draft whose combiner is defined in a separate CFRG draft [primary: https://datatracker.ietf.org/doc/draft-ietf-hpke-pq/ ; combiner details unverified] |
+| TLS-style `SecP256r1MLKEM768` (RFC 10024, Proposed Standard, August 2026): concatenation of the ECDHE and ML-KEM secrets, then the protocol's KDF | **Pattern to follow** | Same two halves, standardized; the RFC notes the hybrid can be implemented in a FIPS-approved way when the ECDHE half is certified [secondary: https://www.rfc-editor.org/rfc/rfc10024] |
+| **Our `cell-wrap/v2`: P-256 ECDH + ML-KEM-768, SP 800-56C two-step KDF (HKDF-SHA256), AES-256-GCM** | **Recommended now** | Every primitive is listed in ITSP.40.111 v5; it is a format version beside v1 with no new dependency; the cell, epoch and device binding of v1 is kept |
+
+### 10.4 `cell-wrap/v2`, specified for the Phase 71 (core) research step to confirm
+
+- **Recipient keys.** Each device or hosted person publishes a P-256 public key (65 bytes) and an ML-KEM-768 encapsulation key (1,184 bytes) in `device.add`, bound to its Ed25519 key by a signature under a new binding domain (`near-ai-vscode/device-kem/v2`). Private keys: the P-256 scalar and the 64-byte ML-KEM seed, enveloped under the Transit KEK in hosted mode and kept in the keyring on a single machine.
+- **Wrap.**
+  1. A fresh ephemeral P-256 key; `Z_ec` = ECDH with the recipient's P-256 key.
+  2. `(Z_pq, ct_pq)` = ML-KEM-768 encapsulation to the recipient's key.
+  3. KDF: HKDF-SHA256 with IKM = `Z_ec || Z_pq` (the classical, listed secret first), salt = SHA-256(`eph_pub || ct_pq`), info = `near-ai/cell-wrap/v2` NUL cell NUL epoch NUL device writer NUL SHA-256(recipient P-256 key || recipient ML-KEM key). This gives a 32-byte key.
+  4. AES-256-GCM over the 32-byte epoch key, with the info as associated data.
+  - Wire: version (1) | eph_pub (65) | ct_pq (1,088) | iv (12) | tag (16) | ciphertext (32) = 1,214 bytes, against 92 for v1.
+- **Size consequence.** A grant now holds about 600 wraps within the 1 MiB `GRANT_MAX_BYTES`, against 4,095 before. One hosted HQ of 400 people fits, with little room left. So v2 brings grant paging: several signed grant pages per epoch, all committed by the founding entry.
+- **Roll-out.**
+  - A `wrap@2` feature through `roster.require`; `cell.rekey` moves each cell to v2 at its next epoch.
+  - After the switch, no new v1 wrap is written.
+  - Before any site holds Protected B data, every cell is on v2.
+- **Second suite reserved.** `ML-KEM-1024 + P-384` is reserved for Protected C and classified edges, pending the Cyber Centre's advice. ITSP.40.111 does not cover those levels.
+- **Signatures stay Ed25519** (`eddsa-jcs-2022`, `did:webvh`). ML-DSA (ITSP.40.111 v5 section 6.5) is the post-quantum signature migration for before 2035. Every proof already names its suite, and OpenBao Transit lists ML-DSA keys [repo: 33 D-61]. That migration is a later decision, not part of O3.
+
+**Decision O3: hybrid P-256 + ML-KEM-768 now** (owner rule satisfied: a PQC option is acceptable). P-256 alone is not needed as a step.
+
+---
+
+## 11. NATO interoperability: the ZTDF adapter path (owner, 2026-11-24: "as soon as practicable")
+
+ZTDF is the best option for NATO and Five Eyes object exchange: ACP-240 Ed A, from the CCEB (Five Eyes, Canada included), defines it as the data-centric object format, and NATO's labels and binding are STANAG 4774 and 4778 (sections 2.2 and 2.4). The adapter sits at the release boundary. Our cells stay the storage format (O1).
+
+### 11.1 What your organization must request, and from whom
+
+| Document | What it gives us | Ask whom | Mark |
+|---|---|---|---|
+| ACP-240 Ed A, "Data-Centric Interoperability Concepts and Design Requirements", with its ZTDF specification | The ZTDF object format, its assertions, label placement and key access | The CCEB publication's Canadian distribution, through DND. A company asks through its DND sponsor (the contract's technical authority). Public release status is unknown | Listed at https://nhqc3s.hq.nato.int/apps/DCRA_Report/id-29d4122b072148f5aaf4882ecc5d963c/elements/id-e2fa11e8135b43919b09f88b8a5574a4.html [primary]; the distribution office is [unverified] |
+| ADatP-4774 Ed A Ver 1 "Confidentiality Metadata Label Syntax" (accepted 2017-12-20); ADatP-4778 Ed A Ver 1:2018 "Metadata Binding Mechanism"; ADatP-4778.2 Ed A Ver 1:2020 "Profiles for Binding Metadata to a Data Object" | The label XML, the binding object and its profiles | The NATO Standardization Office (nso.nato.int), through Canada's national delegation at DND, or directly if the NSO lists them as publicly releasable | Titles and editions [secondary: NISP volume 3 https://nhqc3s.hq.nato.int/apps/architecture/nisp/pdf/NISP-Vol3-v15-release.pdf ; ADatP-4774 entry https://nhqc3s.hq.nato.int/apps/DCRA_Report/id-29d4122b072148f5aaf4882ecc5d963c/elements/id-389800bcd08f4393a156e82e80aa8454.html]; releasability [unverified] |
+| Your organization's label policy for NATO and Five Eyes (the policy identifiers and category values it must use) | The mapping table's values | Your organization's security officer, from its national security authority | Owner action |
+| Sample ZTDF objects with known labels and keys, and a partner test key server (KAS) | Conformance tests | An allied partner's test cell, or a vendor that ships ZTDF (Virtru's commercial platform; Stormshield documents a ZTDF SDK [secondary: https://documentation.stormshield.eu/SEP/en/Content/SDK_doc/ztdf.html]) | Owner action |
+
+### 11.2 What we build now, without the restricted texts
+
+1. **Label interoperability table** (`labelInterop@1` in the signed policy). For each scale preset: the 4774 policy identifier; for each level, the classification value; for compartments, restrictive categories; for releasability, the permissive "Releasable To" category. The table is abstract (identifier, value, category type), so only the XML serializer waits for ADatP-4774. A label with no mapping is refused for export. Property tests check that mapping in and back out gives the same label.
+2. **Signed label binding** (4778-style) on every grant, every `observer.release` copy and every export: `{label, mapping version, content SHA-256, signer DID, time}`, signed with `eddsa-jcs-2022`. A receiver can check that the label belongs to the content and that neither changed. Once ADatP-4778 is read, the same facts are written as a 4778 binding object.
+3. **The adapter interface at the release boundary.**
+   - **Export** is a release to an outside party. It passes the same `mayRelease` check (section 3.4), needs a partner record in the policy's `agreements[]`, and is a recorded person act signed with a step-up.
+   - **Import** verifies the binding, maps the label in, raises the session mark to the join of the labels, and quarantines the object until a person accepts it.
+
+   Interface: `ExchangeAdapter { id, formats, canExport(label, agreement), export(copy, recipient), import(object) }`.
+4. **Base TDF manifest support** from the public OpenTDF spec (4.3.0, BSD-3-Clause-Clear schemas, used as test data after review and never run). ZTDF derives from TDF, so this leaves only the ZTDF-specific assertions and labels for the texts. On key access: an exported object's key is wrapped to the partner's KAS public key (`rsa:2048` or `ec:secp256r1` per the SDK evidence [secondary]). An object addressed to us is opened with our own key held as a non-exportable RSA or P-256 key in OpenBao Transit, so no KAS service runs at our site (inference).
+
+### 11.3 Phase 45.1: NATO and Five Eyes exchange: STANAG labels and the ZTDF adapter
+
+- **Goal:** your organization can send and receive ZTDF objects with allies, with labels a NATO system reads, and nothing leaves without the same credential check as any release.
+- **Depends on:**
+  - Phase 71 (core): `mayRelease`, credentials and the binding signer;
+  - Phase 45: export control and partner agreements;
+  - Phase 33.1: the release act.
+
+  L5 is not needed for file-based exchange.
+- **Part 1 (start once Phase 71 core's binding lands; no texts needed):** items 1 to 4 of section 11.2, with round-trip, tamper and refusal tests.
+- **Part 2 (trigger: your organization receives ACP-240 Ed A with ZTDF, and ADatP-4774 and 4778):**
+  - the 4774 XML serializer and parser;
+  - the 4778 binding object;
+  - ZTDF assertions and label placement;
+  - key access to a partner KAS;
+  - XML canonicalization if the 4778 cryptographic binding uses XML signatures. This is a research item: prefer our own narrow implementation over a new runtime dependency, and if a library is needed, it gets a compliance fit entry.
+- **Tests:**
+  - round-trip of our own objects;
+  - conformance against sample ZTDF objects from an ally or vendor, decrypting with the provided test keys and verifying their labels;
+  - negative tests: a changed label, a changed payload or a broken binding is refused;
+  - an exchange trial with a partner's test KAS when one is offered.
+- **Post-quantum:** ZTDF key access is RSA or EC in the evidence found. A post-quantum key-access type depends on the ACP-240 text and later editions [unverified]. Our side keeps the hybrid wrap internally either way.
+- **Not accreditation:** the adapter exchanges between accredited systems at the same classification; a cross-domain guard is a separate, accredited product (pitfall 14).
+- **Undo cost:** medium. The label mapping table is policy data, and the export record format is permanent in shared logs.
 
 ---
 
@@ -459,6 +574,9 @@ Primary (read today):
 - OpenTDF architecture: https://opentdf.io/architecture
 - OpenTDF repositories: https://github.com/opentdf/platform ; https://github.com/opentdf/spec
 - NATO C3 DCRA, ACP-240 Ed A: https://nhqc3s.hq.nato.int/apps/DCRA_Report/id-29d4122b072148f5aaf4882ecc5d963c/elements/id-e2fa11e8135b43919b09f88b8a5574a4.html
+- CCCS ITSM.40.001 PQC migration roadmap: https://www.cyber.gc.ca/en/guidance/roadmap-migration-post-quantum-cryptography-government-canada-itsm40001
+- Node.js 26 `crypto` documentation: https://nodejs.org/api/crypto.html
+- IETF draft-ietf-hpke-pq-05: https://datatracker.ietf.org/doc/draft-ietf-hpke-pq/
 - Keycloak OID4VCI blog and 26.7.0 release notes: https://www.keycloak.org/2026/01/issue-credentials-over-openid4vci ; https://www.keycloak.org/2026/07/keycloak-2670-released
 
 Standards cited from the earlier research (`.planning/research/platform-direction/identity-research.md`, checked 2026-11-15):
@@ -469,6 +587,10 @@ Standards cited from the earlier research (`.planning/research/platform-directio
 - NIST SP 800-207 (zero trust): https://csrc.nist.gov/pubs/sp/800/207/final
 
 Secondary and vendor:
+- RFC 10024, PQ/T hybrids for TLS 1.3: https://www.rfc-editor.org/rfc/rfc10024
+- NIST SP 800-227: https://csrc.nist.gov/pubs/sp/800/227/final
+- Treasury Board PQC implementation notice: https://www.canada.ca/en/government/system/digital-government/policies-standards/spin/migrating-government-canada-post-quantum-cryptography.html
+- Stormshield ZTDF SDK documentation: https://documentation.stormshield.eu/SEP/en/Content/SDK_doc/ztdf.html
 - Virtru, OpenTDF compared with its commercial platform: https://www.virtru.com/data-security-platform/opentdf-vs-dsp
 - Virtru, ACP-240 adoption (2025-10-15): https://www.virtru.com/newsroom/virtru-data-security-platform-enables-acp-240-adoption-among-allied-nations-and-technology-partners
 - Virtru, ZTDF: https://www.virtru.com/blog/zero-trust/data-format-ztdf-the-clear-path-to-data-interoperability
@@ -492,4 +614,4 @@ Repository (read at the commits named at the top):
 - Phase contexts: `33-CONTEXT.md` (D-60 to D-62), `33.1-CONTEXT.md` (D-11 to D-37, including the amendments branch), `46-CONTEXT.md` (D-03, D-17 to D-25, D-36 to D-38), `47-CONTEXT.md` (D-02, D-30, D-33, D-40, D-58 to D-65), `48.1-CONTEXT.md` (D-08, D-25)
 - Code: `src/domain/gate/labels.ts`, `src/domain/gate/dominance.ts`, `src/domain/replica/cellKeys.ts`, `rosterCells.ts`, `rosterMembers.ts`, `invite.ts`, `src/domain/org/peopleSection.ts`
 
-Nothing was downloaded or run; no third-party code was executed.
+Nothing was downloaded. The only code run was a five-line ML-KEM and P-256 check of our own on the installed Node 26.13.1 (section 10.2).
