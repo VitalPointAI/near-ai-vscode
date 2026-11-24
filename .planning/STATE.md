@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: Completed 33.2-05-PLAN.md
-last_updated: "2026-11-24T21:52:41.394Z"
-state_head: 52397eaf112304d891c654f5268fb4945e24d2ed
+stopped_at: 33.2-06 complete; 33.2-07 Tasks 1-2 done, Task 3 blocked
+last_updated: "2026-11-24T22:46:49.917Z"
+state_head: 5c5c63f004d2a3d3609b2fc38874690165dbb6f2
 progress:
   total_phases: 10
   completed_phases: 1
@@ -162,6 +162,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
+- 33.2-07 Task 3 (cards in the native Staff Room) waits on 33-24 staff-live-engine.ts and 33-26 reaching main
 
 ### Quick Tasks Completed
 
@@ -176,8 +177,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T21:52:41.227Z
-**Stopped at:** Completed 33.2-05-PLAN.md
+**Last session:** 2026-11-24T22:46:49.720Z
+**Stopped at:** 33.2-06 complete; 33.2-07 Tasks 1-2 done, Task 3 blocked
 **Resume file:** None
 
 ## Performance Metrics
@@ -311,3 +312,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 33.2]: 33.2-03: grant pages of at most 607 v2 wraps, committed by the founding hash; a missing page holds the grant missing-blob
 - [Phase 33.2]: 33.2-04: seeds only everywhere; publishing at open behind publishKem; v1 envelopes sealed again as v2 under the same data key; HUB_KEM_KEY optional
 - [Phase 33.2]: 33.2-05: cutover rule shared by fold and hub; wrap@2 known only where the probe passes; wrap@2 at creation behind wrapV2AtCreation until 33.2-06
+- [Phase 33.2]: 33.2-06: every wrap path through wrapForDevice with wrapPlan.formatFor; new projects start switched; Protected B never v1; architecture check enforces it
+- [Phase 33.2]: 33.2-07: switch, move and give-keys actions and the card model; the native Staff Room wiring waits on 33-24 and 33-26
