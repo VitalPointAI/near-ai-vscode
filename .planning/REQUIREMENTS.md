@@ -838,6 +838,23 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | ORG-01 … ORG-03 | Phase 41: complete (FND-07); success criterion 7 of Phase 32.1 checks them on screen |
 | ORG-04 | Phase 32.1: planned |
 
+## Version safety requirements (Phases 32.1, 46, 47 and 48)
+
+**Defined:** 2026-11-24, approved by the owner ("go"), from the owner's principle "the application should always keep itself up to date". People never update anything. An administrator updates a site by importing a signed bundle, so a disconnected edge site can briefly run an older release than HQ. Decisions 32.1 D-60 to 32.1 D-69 in `.planning/phases/32.1-guided-setup-with-viable-options-and-a-plain-recommendation/32.1-CONTEXT.md`.
+**Core value:** a site never applies part of something it cannot read, nobody is asked to update anything, and every session follows its site's release on its own.
+
+- [ ] **VSAFE-01**: The tool your organization uses to write and sign its rules refuses to sign rules that use a feature some target site cannot read yet, and names each such site and the release it needs. Site releases come from the signed site evidence exports; a site with no recent export counts as unknown and is refused unless the author excludes it, with the reason recorded in the signed rules. Every policy feature has a `name@N` id in one registry, named by what a document uses.
+- [ ] **VSAFE-02**: A release that receives rules needing a feature it does not read refuses the whole file and keeps enforcing the last good signed rules, never no rules; a refused update applies itself after the site is updated. People see one plain status line that asks their administrator to update the site; the administrator sees the missing features. No user text tells a person to update the extension or Sterling, for any shared, signed format.
+- [ ] **VSAFE-03**: When a site's image is updated, running sessions show "A new version of Sterling is ready. Save your work; it will reload when you're idle" and move to the new image at the next idle stop or sign-in, never mid-work without warning.
+- [ ] **VSAFE-04**: The signed site evidence export carries the site's Sterling release and the features it reads.
+
+| Requirement | Phase |
+|-------------|-------|
+| VSAFE-01 | Phase 32.1: planned (32.1-30) |
+| VSAFE-02 | Phase 32.1: planned (32.1-31, 32.1-32) |
+| VSAFE-03 | Phases 46 and 47: planned (46-09, 47-32) |
+| VSAFE-04 | Phase 48: planned (48-11) |
+
 ## Phase 32.2 requirements: Local model manager (0.4.x)
 
 **Defined:** 2026-11-21 from `.planning/research/guided-onboarding/DESIGN.md` (section 16.3), added when Phase 32.2 was planned.

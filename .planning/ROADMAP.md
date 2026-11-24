@@ -443,7 +443,7 @@ Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agre
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
 **Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records); Phase 41 (organization policy, endpoints, residency rule, mode table and `term()`, the passport schema, the policy editor for proposals; coherence review 2026-11-20). Phase 74.1 enforcement not required: the guide reads the passport schema from Phase 41.
 **Inserted**: 2026-11-20 at the owner's request.
-**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5; the ids are defined in that design's requirements table and added to REQUIREMENTS.md when Phase 32.1 is planned)
+**Requirements**: GUIDE-01, GUIDE-02, GUIDE-03, GUIDE-04, GUIDE-05, GUIDE-06, GUIDE-07, GUIDE-08, ORG-01, ORG-02, ORG-03, ORG-04 (organization modes added 2026-11-20, `.planning/research/portfolio-and-assignment/DESIGN.md` section 5; the ids are defined in that design's requirements table and added to REQUIREMENTS.md when Phase 32.1 is planned); VSAFE-01, VSAFE-02 (version safety, owner, 2026-11-24)
 **Success Criteria** (what must be TRUE):
   1. On a laptop with no local AI and a NEAR AI key, a developer answering "internal work, Canada No" is recommended NEAR AI private hardware with its reason, and local appears only under "Not available here" with the hardware reason. (GUIDE-01, GUIDE-03, GUIDE-04)
   2. With a local server serving a passported model, an analyst answering "sensitive personal information" gets the project labelled Protected B and is recommended this computer; NEAR AI is greyed with the routing sentence; a hosted option appears for Protected B only when the policy records an authorization for it. (GUIDE-02, GUIDE-04, GUIDE-05)
@@ -482,6 +482,8 @@ Plans:
 **Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer. The guide is what "Set up Sterling" opens from the Sterling Get Started page; its checklist becomes a section of that page; plan 17's walkthrough and title-bar entry are dropped, and there is no second home page. Hosted sessions offer only servers your organization's policy lists. Executed engine plans carry over; it now depends on the native Theia foundation. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.1 and 13.
 
 **Native re-plan (2026-11-23)**: decisions D-45 to D-58 in `32.1-CONTEXT.md` ("Re-aim to native Theia"), research R-N1 to R-N8 in `32.1-RESEARCH.md`. Kept as done on `feat/phase-32.1-get-started`: 01 to 11, 14, 15, 16; 12 and 13 finish as written. Superseded: 17, 18, 19, 20. New: 21 (engine facts: hosted rule, Defence edition kinds, work-area landings, bridge constants) and 27 (chat card) in wave 5; 22 (Defence Team mode), 23 (extension bridge, checklist rows, landing) and 25 (native Set up Sterling widget) in wave 6; 24 (front door activation) in wave 7; 26 (Set up Sterling and Your setup on Get Started, Planning page) in wave 8; 28 (documents) in wave 9; 29 (close-out on the built image) in wave 10. The guide's engine stays in the extension host beside the one live gate and talks to the native widget through commands (owner item N1). Starts after Phase 46 and PR #166 merge, on `feat/phase-32.1-native` (D-55).
+
+**Version safety (owner, 2026-11-24)**: "the application should always keep itself up to date". Decisions 32.1 D-60 to 32.1 D-69 in `32.1-CONTEXT.md` ("Version safety"), requirements VSAFE-01 and VSAFE-02. Every shared, signed format follows one rule: an authoring check first, an edge refusal as the backstop, and no text ever tells a person to update anything. New plans: 30 (wave 7: policy features named by what a document uses, `work-areas@1` for the four work areas and `defence-team@1` for the Defence Team mode, and the check in the tool that signs your organization's rules, reading each site's release from its signed evidence export), 31 (wave 8: a release that cannot read new rules refuses them whole and keeps the last good rules in force, the update applies itself after the site is updated, one plain status line, administrator details), 32 (wave 9: every other update sentence asks the administrator, and a copy-lint rule keeps it so). Plan 28 waits for 31 and plan 29 for all three. Sessions following the site's version are Phase 46's 46-09 and Phase 47's 47-32; site releases in the signed export are Phase 48's 48-11. The class check (D-69) lists the team files, the signed bundle, the federation user export (47-14 amended) and the observer kinds of Phase 33.1, which need plan lines there.
 
 ### Phase 32.2: Local model manager (INSERTED)
 **Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
@@ -714,7 +716,7 @@ Plans:
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
 **Depends on**: the hosting design (`.planning/research/multiuser-hosting/DESIGN.md`, owner decisions D1 to D11, 2026-11-23); the Theia spike (`.planning/spikes/theia-team-studio/`, PR #162); the compliance fit check (`compliance/resources.json`, PR #164). Runs beside Phase 47 from day one.
-**Requirements**: FND-T-01, FND-T-02, FND-T-03, FND-T-04, FND-T-05, FND-T-06, FND-T-07, FND-T-08, FND-T-09, FND-T-10 (from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10)
+**Requirements**: FND-T-01, FND-T-02, FND-T-03, FND-T-04, FND-T-05, FND-T-06, FND-T-07, FND-T-08, FND-T-09, FND-T-10 (from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10); VSAFE-03 (version safety, owner, 2026-11-24)
 **Success Criteria** (what must be TRUE):
   1. The workbench builds, tests and runs from a workspace package in CI, in a browser test against the built container; nothing remains only under `.planning/spikes/`.
   2. A native widget calls engine code in the backend through one JSON-RPC service pattern, with the same refusals the extension host gives.
@@ -722,7 +724,7 @@ Plans:
   4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
   5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
   6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
-**Plans:** 8 plans in 4 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first)
+**Plans:** 9 plans in 5 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first; 46-09 and 46 D-44 to 46 D-47 added 2026-11-24 for version safety, VSAFE-03)
 
 Plans:
 - [ ] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
@@ -733,11 +735,12 @@ Plans:
 - [ ] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
 - [ ] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
 - [ ] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
+- [ ] 46-09-PLAN.md: Wave 5. Sessions follow the site's version: the image's release facts, the signed release file in every release, the "new version is ready" notice, and the move at the next idle stop or sign-in with nothing unsaved (version safety, 32.1 D-66)
 
 ### Phase 47: On-premise deployment stack and offline bundle
 **Goal**: Your organization can install and run the Sterling workbench for many people at a site it owns, connected or fully disconnected: RKE2, a local image registry, HAProxy ingress, cert-manager with an OpenBao CA, Keycloak with sign-in by passkeys or hardware keys only, self-hosted Theia Cloud (one session per person), OpenBao with HSM unseal, and the sync hub, all from a signed offline bundle with no outbound calls.
 **Depends on**: the hosting design (DESIGN.md sections 4 to 7, 10, 11; decisions O2 to O6 accepted 2026-11-23); the compliance fit check (every component needs a passing entry); Phase 46's image only for the end-to-end run. Runs beside Phase 46 from day one.
-**Requirements**: DEP-01 to DEP-13 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list; DEP-13, guest accounts for outside observers, added 2026-11-24 by the owner for Phase 33.1 D-33)
+**Requirements**: DEP-01 to DEP-13 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list; DEP-13, guest accounts for outside observers, added 2026-11-24 by the owner for Phase 33.1 D-33); VSAFE-03 (version safety, owner, 2026-11-24)
 **Success Criteria** (what must be TRUE):
   1. A site installs from one signed offline bundle (images, vendored charts, realm and policy as code) on air-gapped hardware, and nothing in the running stack calls out.
   2. A person signs in with a passkey or a hardware security key, as the site's policy sets, never a password; a lost key is replaced by administrator-attested re-enrolment; two keys are registered per person.
@@ -746,7 +749,7 @@ Plans:
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
   7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account. It uses a passkey or hardware key only, is created at the lead's request (with the security contact's approval for allied military and industry), has its own OpenBao entity and keys, and never holds an administrator role. At its end date the account is disabled, its sessions are stopped and its entity is disabled without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
-**Plans:** 15/21 plans executed in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-65 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults")
+**Plans:** 15/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -770,18 +773,19 @@ Plans:
 - [ ] 47-19-PLAN.md: Wave 6. Guest accounts by hand: `guests` group and attributes in the realm, `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
 - [ ] 47-20-PLAN.md: Wave 7. Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path)
 - [ ] 47-21-PLAN.md: Wave 7. Guests per site unless named in a signed user export (`--include-guests`); the guest accounts runbook
+- [ ] 47-32-PLAN.md: Wave 9. The site's release record from the signed release file, with what its user import reads, mounted live in every session; an update never stops a running session; the user export carries `requires` (47-14 amended; version safety, 47 D-66 to 47 D-69)
 
 **Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
 
 ### Phase 48: Load and accreditation verification
 **Goal**: Before any capacity or compliance claim is made for the hosted workbench, we measure it: a load test on our own hardware to the target number of concurrent sessions, and OSCAL components and evidence rules for every component of Phases 46 and 47 so the compliance dashboard shows the hosted deployment's real state.
 **Depends on**: Phases 46 and 47 for the running stack; the evidence-rule work starts as soon as each component in Phase 47 is chosen; Phase 44's compliance machinery.
-**Requirements**: VER-01 to VER-nn (defined when planned, from DESIGN.md sections 10, 12 and 13(e))
+**Requirements**: VER-01 to VER-nn (defined when planned, from DESIGN.md sections 10, 12 and 13(e)); VSAFE-04 (version safety, owner, 2026-11-24)
 **Success Criteria** (what must be TRUE):
   1. A repeatable load test on our own hardware reaches the target concurrent sessions (revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, so the target is 400 sessions with start bursts of 200; was 1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
   2. Each component of Phases 46 and 47 has an OSCAL component definition and evidence rules, and the dashboard shows its controls from collected evidence, never assumed.
   3. The open verification items in DESIGN.md section 12 are each closed with evidence or recorded as a gap with an owner and date (Keycloak CVE-2026-6856 fix version, HSM and Go FIPS certificate status, Traefik with Theia Cloud).
-**Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`; D-02, D-20 and VER-01 revised 2026-11-24, owner: HQ target of about 400)
+**Plans:** 11 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`; D-02, D-20 and VER-01 revised 2026-11-24, owner: HQ target of about 400; 48-11, 48 D-28, 48 D-29 and VSAFE-04 added 2026-11-24 for version safety)
 
 Plans:
 - [x] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
@@ -794,6 +798,7 @@ Plans:
 - [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
 - [ ] 48-09-PLAN.md: Wave 3. Rig load run to the HQ target of 400 sessions and beyond as headroom (revised 2026-11-24), capacity page and sizing defaults, reference site export; gate PR 4
 - [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
+- [ ] 48-11-PLAN.md: Wave 2. The signed site evidence export carries the site's Sterling release and the policy features it reads (schema 2), read by your organization's rules tool before it signs (version safety, VSAFE-04; gate PR)
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -1938,7 +1943,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 15/21 | In Progress 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
