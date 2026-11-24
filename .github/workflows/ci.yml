@@ -356,8 +356,9 @@ jobs:
         if: steps.has_hub.outputs.present == 'true'
         run: npm run test:container
 
-  # The Sterling Theia workbench (Phase 46, D-10): install without scripts, lint and unit tests with their report. Not a required check.
-  # 46-06 adds the audit, the image build, the container suite with Playwright, the SBOM, the scan and the digest.
+  # The Sterling Theia workbench (Phase 46, D-10, D-28): install without scripts, audit, lint, unit tests with their report, the image build,
+  # and the container suite with Playwright driving that image in Chromium. Not a required check (D-40). The Release workflow signs the
+  # image it publishes; this job pushes and signs nothing.
   workbench:
     name: workbench
     runs-on: ubuntu-latest
@@ -410,6 +411,16 @@ jobs:
           cache-dependency-path: workbench/package-lock.json
       - if: steps.has_workbench.outputs.present == 'true'
         run: npm ci --ignore-scripts
+      # Report-only while the Theia 1.77 tree carries a high advisory with no fix inside the pinned version (zod through @theia/ai-mcp,
+      # GHSA-mrhx-c7xc-m3w5, 2026-11-24); the JSON goes up with the test report and the register records the condition.
+      - name: Audit the workbench runtime dependencies (report-only)
+        if: steps.has_workbench.outputs.present == 'true'
+        continue-on-error: true
+        run: |
+          status=0
+          npm audit --omit=dev --audit-level=high --json > workbench-audit.json || status=$?
+          node -e 'const a = JSON.parse(require("node:fs").readFileSync("workbench-audit.json", "utf8")); console.log(JSON.stringify(a.metadata?.vulnerabilities ?? a.error ?? {}))'
+          exit "$status"
       - if: steps.has_workbench.outputs.present == 'true'
         run: npm run lint
       - name: Run workbench tests and write the evidence report
@@ -422,8 +433,24 @@ jobs:
         continue-on-error: true
         with:
           name: test-report-workbench
-          path: workbench/test-report-workbench.ndjson
+          path: |
+            workbench/test-report-workbench.ndjson
+            workbench/workbench-audit.json
           if-no-files-found: warn
+      # The default (development) target, from the repository root because the engine bundle reads src/.
+      - name: Build the workbench image
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: docker build -f workbench/Dockerfile -t sterling-workbench:ci .
+      # Chromium from the pinned Playwright release only (never a download npx would make on its own).
+      - name: Install Chromium for the browser tests
+        if: steps.has_workbench.outputs.present == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run the container suite and the browser tests against the built image
+        if: steps.has_workbench.outputs.present == 'true'
+        env:
+          WORKBENCH_TEST_IMAGE: sterling-workbench:ci
+        run: npm run test:container
 
   relay-image-scan:
     name: relay image scan

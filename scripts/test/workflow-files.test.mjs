@@ -518,3 +518,35 @@ test('new workflow shell scripts receive GitHub values only through env', () => 
     }
   }
 });
+
+test('the workbench job builds, tests and drives its image in a browser on Node 26, and is not a required check', async () => {
+  const all = jobs(read('ci.yml'));
+  const job = all.get('workbench');
+  assert.ok(job, 'ci.yml has a workbench job');
+  assert.match(job, /permissions:\s*\n\s*contents: read/);
+  const list = steps(job);
+  const presence = list.findIndex((step) => /id: has_workbench/.test(step));
+  assert.ok(presence > 0, 'the presence check follows the checkout');
+  assert.match(list[presence], /\[ -f workbench\/package\.json \]/);
+  assert.ok(list[presence].includes('^hotfix/[0-9]+'), 'the hub\'s hotfix rule');
+  assert.ok(list[presence].includes('BRANCH: ${{ github.head_ref || github.ref_name }}'), 'the branch reaches the script through env');
+  for (const step of list.slice(presence + 1)) assert.match(step, /if: steps\.has_workbench\.outputs\.present == 'true'/, `guarded: ${step.trim().split('\n')[0]}`);
+  assert.match(job, /node-version: '26\.13\.1'/);
+  assert.match(job, /cache-dependency-path: workbench\/package-lock\.json/);
+  assert.doesNotMatch(job, /npm ci(?! --ignore-scripts)/);
+  // In order: install without scripts, audit, lint, unit tests with the report, the image, the browser, the container suite against that image.
+  const order = [/npm ci --ignore-scripts/, /npm audit --omit=dev --audit-level=high/, /npm run lint/, /NEAR_AI_TEST_REPORT: test-report-workbench\.ndjson[\s\S]*npm test/,
+    /docker build -f workbench\/Dockerfile -t sterling-workbench:ci \./, /playwright install --with-deps chromium/, /WORKBENCH_TEST_IMAGE: sterling-workbench:ci[\s\S]*npm run test:container/];
+  let at = presence;
+  for (const pattern of order) {
+    const next = list.findIndex((step, index) => index > at && pattern.test(step));
+    assert.ok(next > at, `${pattern} comes after the step before it`);
+    at = next;
+  }
+  const build = list.find((step) => /docker build -f workbench\/Dockerfile/.test(step));
+  assert.match(build, /working-directory: \./, 'the image builds from the repository root (the engine bundle reads src/)');
+  assert.doesNotMatch(build, /--target/, 'CI tests the default (development) target');
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  assert.ok(!CI_CHECKS.includes('workbench'), 'workbench is not a required check');
+  assert.doesNotMatch(/needs:\s*\[([^\]]*)\]/.exec(all.get('compliance'))?.[1] ?? '', /\bworkbench\b/);
+});
