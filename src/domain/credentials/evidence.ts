@@ -174,9 +174,10 @@ export function checkEvidence(citation: EvidenceCitation, context: EvidenceConte
     if (!Number.isFinite(context.signedAt)) throw new Refused('credential-expired');
     const lists = citedLists(citation, context);
     const checked = citation.evidence.map((hash) => checkOne(hash, lists, context));
+    // The member's own credentials (a role the member holds included); other role credentials are their issuers'; device bindings name devices.
     const roles: RoleEvidence[] = checked.filter((credential) => isRoleType(credential.type)).map((credential) => ({ credential, statusClear: true }));
     const bindings = checked.filter((credential) => credential.type === DEVICE_BINDING_TYPE);
-    const mine = checked.filter((credential) => !isRoleType(credential.type) && credential.type !== DEVICE_BINDING_TYPE);
+    const mine = checked.filter((credential) => credential.type !== DEVICE_BINDING_TYPE && (credential.claims.id === context.member || !isRoleType(credential.type)));
     if (mine.some((credential) => credential.claims.id !== context.member)) throw new Refused('subject-mismatch');
     if (mine.length === 0) throw new Refused('no-evidence');
     const didState: IssuerDidState = { ...context.didState, deviceBindings: [...(context.didState.deviceBindings ?? []), ...bindings] };
