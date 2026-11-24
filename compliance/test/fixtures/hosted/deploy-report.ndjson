@@ -1,0 +1,7 @@
+{"file":"deploy/test/render.test.mjs","path":[],"name":"helm is available for the render tests","status":"passed","skip":null,"ms":36.569955}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"every vendored chart matches charts.lock.json and no unlisted tarball is present","status":"passed","skip":null,"ms":8.19432}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"every rendered release meets the global invariants","status":"passed","skip":null,"ms":1599.256894}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"the harness refuses descriptor mistakes before helm can render an upstream default","status":"passed","skip":null,"ms":5.36895}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"site substitution keeps JSON valid and a local chart renders once per instance with the image from the lock","status":"passed","skip":null,"ms":110.041972}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"a required site setting left empty is refused, never rendered as an empty default (D-11)","status":"passed","skip":null,"ms":2.161947}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"vendor refuses a lock entry whose file leaves deploy/charts/vendored/ before reading, downloading or writing anything","status":"passed","skip":null,"ms":0.751772}
