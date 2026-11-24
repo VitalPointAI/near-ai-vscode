@@ -35,6 +35,7 @@
     { "ref": "docker.io/opensearchproject/opensearch:3.10.0@sha256:ffa260e43be96b49144fb7ececbb135c3fd7081567adc781c49ec9232ce1e47f", "component": "site-logging" },
     { "ref": "cr.fluentbit.io/fluent/fluent-bit:5.2.0@sha256:de3d2860ffaf6a7a3d9f26c80d184b49eb8e08d649730acac4ec2d9cfb671c5b", "component": "site-logging", "note": "Fluent Bit v5.2.0 (Decision 4) on chart 0.58.3, which carries 5.1.3; no chart for 5.2.0 exists (47-02)." },
     { "ref": "quay.io/prometheus/prometheus:v3.16.0@sha256:89c1a644817e9ad70fa2af76c84898e327c1de7063735f962e8313b1e28672c3", "component": "site-logging" },
+    { "ref": "quay.io/prometheus/alertmanager:v0.35.0@sha256:0f6727a39ff00b6cf95e8a5ebaf7442c55af855b79c689fb9a060e2bada1ecbf", "component": "site-logging", "note": "Alertmanager v0.35.0 (the newest release on 2026-11-24, the appVersion of the bundled alertmanager chart 2.5.1): sends the alert rules of deploy/values/prometheus-alerts.yaml to the site mail server only (48.1-02)." },
     { "ref": "quay.io/prometheus-operator/prometheus-config-reloader:v0.95.2@sha256:b4adf5166416c4d8bd2c77dc12a5402f47e7a5daa27e08a3bcdf1191e94f1a23", "component": "site-logging" },
     { "ref": "registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0@sha256:01171220c7c059afc85034ffe687bfe7249e41c0cc46fbe9a5128503ceee3016", "component": "site-logging" },
     { "ref": "quay.io/prometheus/node-exporter:v1.13.1@sha256:f99f6e8dcad00fb95ff9fe81ceb1e6442fd9b4180f177da02e8437c845d570eb", "component": "site-logging" },

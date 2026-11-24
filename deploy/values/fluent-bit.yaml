@@ -59,10 +59,29 @@ env:
   - name: OPENSEARCH_PASSWORD
     valueFrom:
       secretKeyRef: { name: opensearch-writer, key: password }
+# Metrics for the site Prometheus (48.1-02, D-16): the built-in HTTP server on 2020 (the chart's metricsPort), which serves only its read
+# endpoints (metrics, health, uptime; hot reload is off), read by the chart's annotation-driven pod job. The alert rules read the audit input
+# and the one output by their Alias (deploy/values/prometheus-alerts.yaml).
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "2020"
+  prometheus.io/path: /api/v2/metrics/prometheus
 config:
+  service: |
+    [SERVICE]
+        Daemon Off
+        Flush {{ .Values.flush }}
+        Log_Level {{ .Values.logLevel }}
+        Parsers_File /fluent-bit/etc/parsers.conf
+        Parsers_File /fluent-bit/etc/conf/custom_parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port {{ .Values.metricsPort }}
+        Health_Check On
   inputs: |
     [INPUT]
         Name              tail
+        Alias             containers
         Path              /var/log/containers/*.log
         multiline.parser  cri
         Tag               kube.*
@@ -72,6 +91,7 @@ config:
 
     [INPUT]
         Name              tail
+        Alias             audit_kubernetes
         Path              /var/lib/rancher/rke2/server/logs/audit.log
         Parser            k8s_audit_json
         Tag               audit.kubernetes
@@ -100,6 +120,7 @@ config:
   outputs: |
     [OUTPUT]
         Name                opensearch
+        Alias               site_opensearch
         Match               *
         Host                opensearch-cluster-master.sterling-logging.svc
         Port                9200
