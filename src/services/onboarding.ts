@@ -9,7 +9,7 @@ export interface OnboardingActions {
 }
 
 export function openOnboarding(context: vscode.ExtensionContext, actions: OnboardingActions): vscode.WebviewPanel {
-  const panel = vscode.window.createWebviewPanel('nearAiOnboarding', 'Near AI: First Project', vscode.ViewColumn.One, {
+  const panel = vscode.window.createWebviewPanel('nearAiOnboarding', 'First Project', vscode.ViewColumn.One, {
     enableScripts: true,
     retainContextWhenHidden: true,
     localResourceRoots: [onboardingMedia(context.extensionUri), sharedMedia(context.extensionUri)]
@@ -38,7 +38,7 @@ export function onboardingHtml(webview: Pick<vscode.Webview, 'cspSource' | 'asWe
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<title>Near AI for VSCode: First Project</title>
+<title>First Project</title>
 <link rel="stylesheet" href="${asset(shared, 'base.css')}">
 <link rel="stylesheet" href="${asset(onboardingMedia(extensionUri), 'onboarding.css')}">
 </head>

@@ -6,7 +6,7 @@ import { TeamLibrary } from '../agent/teams';
 import { runInProgress, whenIdle } from './runActivity';
 import { PartialUpdateError, resolveTeamFile, RunStartedError, TeamChangedError, TeamPathError, TeamUpdater, UpdateNotices, type TeamUpdatePreview } from './teamUpdates';
 
-// "NEAR AI: Update Team…" and the one-time "Team update available" notice. Nothing is written
+// "SovAI: Update Team…" and the one-time "Team update available" notice. Nothing is written
 // without a preview and a confirmation, never while a run is in progress, and every update can be
 // undone from its backup.
 

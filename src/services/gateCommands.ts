@@ -2,8 +2,8 @@
 // the chat can give each conversation its runtime. It never throws out of activation: whatever goes wrong in the policy check leaves the gate failed-closed
 // (only reading and planning run) with a plain message, and the rest of the extension starts normally.
 //
-// It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, NEAR AI: Show Policy (a read-only virtual document, so
-// nothing is ever written by looking), NEAR AI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
+// It also owns what the person sees of the policy (OFFL-02, D-13, D-33, D-41): the status bar item, SovAI: Show Policy (a read-only virtual document, so
+// nothing is ever written by looking), SovAI: Reset Policy to Defaults (confirmed in a modal, recorded, the only path that re-signs a bundle that failed
 // verification) and the Policy step in the setup view.
 import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -48,7 +48,7 @@ export const RESET_POLICY_COMMAND = 'nearAi.policy.reset';
 export const SET_LABEL_COMMAND = 'nearAi.label.set';
 export const EDIT_POLICY_COMMAND = 'nearAi.policy.edit';
 export const APPLY_POLICY_DRAFT_COMMAND = 'nearAi.policy.applyDraft';
-/** NEAR AI: Policy, the editor page (D-44); Show Policy opens it too, and Show Policy as Stored keeps the read-only text view. */
+/** SovAI: Policy, the editor page (D-44); Show Policy opens it too, and Show Policy as Stored keeps the read-only text view. */
 export const OPEN_POLICY_COMMAND = 'nearAi.policy.open';
 export const SHOW_POLICY_AS_STORED_COMMAND = 'nearAi.policy.showAsStored';
 export const APPLY_DRAFT_ACTION = 'Apply';
@@ -61,7 +61,7 @@ export function unlabelledDefaultText(defaultLabel: Label): string {
 
 /** What Edit Policy says beside the draft it opens (D-27, D-41, CLAS-07). */
 export function editPolicyNotice(defaultLabel: Label): string {
-  return `Your policy draft is open. Change it, then choose Apply, or Apply my draft in NEAR AI: Policy. NEAR AI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
+  return `Your policy draft is open. Change it, then choose Apply, or Apply my draft in SovAI: Policy. SovAI signs and records the change and sets the signer and the dates itself. ${unlabelledDefaultText(defaultLabel)} ${CLEARANCE_SELF_ASSERTED_TEXT} ${LABELS_NOT_ACCREDITATION_TEXT}`;
 }
 
 export const POLICY_SCHEME = 'near-ai-policy';
@@ -81,7 +81,7 @@ export const RESET_DETAIL =
 export const RESET_DETAIL_ORGANIZATION =
   "This replaces your own settings on this computer with the starting rules and signs them with this computer's key. Your organization's rules stay as they are. Your current file is kept beside the new one.";
 export const RESET_DONE_TEXT = 'Your policy was reset to the default. Your old policy file was kept beside the new one.';
-export const RESET_FAILED_TEXT = 'Nothing was changed: NEAR AI could not reset your policy.';
+export const RESET_FAILED_TEXT = 'Nothing was changed: SovAI could not reset your policy.';
 
 export interface GateActivationContext {
   readonly globalStorageUri: { readonly fsPath: string };
@@ -138,7 +138,7 @@ function mcpCeilingLines(ceilings: Readonly<Record<string, Clearance>> | undefin
 }
 
 export function policyDocumentText(state: BundleState | undefined, now: number, layers?: PolicyLayersView): string {
-  const lines: string[] = ['Your NEAR AI policy', ''];
+  const lines: string[] = ['Your SovAI policy', ''];
   // D-23: who set the rules, only when the layers are known and the policy is usable; D-21: your organization's failure is fixed by its contact, never Reset.
   const organization = layers?.organization;
   if (organization !== undefined && state?.state === 'valid' && policyProblem(state, now, layers) === undefined) {
@@ -148,7 +148,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   }
   const organizationFailed = layers?.failedLayer === 'organization' && state?.state === 'failed-closed';
   if (state === undefined) {
-    lines.push('NEAR AI is checking your policy file. Open this view again in a moment.');
+    lines.push('SovAI is checking your policy file. Open this view again in a moment.');
     return lines.join('\n');
   }
   const problem = policyProblem(state, now, layers);
@@ -162,12 +162,12 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   lines.push(organizationFailed
     ? `This view only shows your policy. Editing it changes nothing. Your organization's rules need attention: ask ${contactShown(organization?.state === 'failed' ? organization.contacts : undefined)}.`
     : usable
-    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, open NEAR AI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only.'
+    ? 'This view only shows your policy. Editing it changes nothing. To change your policy, open SovAI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only.'
     : ownUnknownField
-      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of NEAR AI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, Reset my rules in NEAR AI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded.'
+      ? 'This view only shows your policy. Editing it changes nothing. Your policy file has a setting this version does not know. If a newer version of SovAI wrote it, update the extension. It is signed by this computer\'s own key, so if you changed it by hand, Reset my rules in SovAI: Policy signs a fresh default policy for your own rules only and keeps the old file beside it; every change you made to the policy is discarded.'
       : needsUpdate
-        ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of NEAR AI: update the extension. Resetting it would discard every rule it holds.'
-        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open NEAR AI: Policy and choose Reset my rules, which resets your own rules only.', '');
+        ? 'This view only shows your policy. Editing it changes nothing. Your policy file was written for a newer version of SovAI: update the extension. Resetting it would discard every rule it holds.'
+        : 'This view only shows your policy. Editing it changes nothing. To change the policy file itself, open SovAI: Policy and choose Reset my rules, which resets your own rules only.', '');
   if (!usable || state.state !== 'valid') {
     lines.push('State: not usable, so only reading and planning are allowed');
     // The sentence is its own line when there is one; a state with none adds nothing, not a blank line.
@@ -176,7 +176,7 @@ export function policyDocumentText(state: BundleState | undefined, now: number, 
   }
   const bundle = state.bundle;
   lines.push(
-    `State: ${state.renewDue ? 'valid, close to its end and renewed the next time NEAR AI starts' : 'valid'}`,
+    `State: ${state.renewDue ? 'valid, close to its end and renewed the next time SovAI starts' : 'valid'}`,
     `Valid until: ${expiryDate(state.expiresAt)} (${state.expiresAt})`,
     `Signed at: ${bundle.issuedAt}`,
     `Issuer key fingerprint: ${bundle.issuer.fingerprint}`,
@@ -320,7 +320,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   const statusTimers = options.statusTimers;
   const keep = (item: { dispose(): unknown }): void => { try { context.subscriptions?.push(item); } catch { /* the editor owns disposal; a test context may not */ } };
   const attempt = (what: string, run: () => void): void => {
-    try { run(); } catch { try { tell(`NEAR AI could not set up ${what}.`); } catch { /* ignored */ } }
+    try { run(); } catch { try { tell(`SovAI could not set up ${what}.`); } catch { /* ignored */ } }
   };
   attempt('the policy status', () => {
     // The bar reads the host again when its words are due to change (the renewal window opening, the policy ending), so it never waits for a host change.
@@ -383,7 +383,7 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
   });
   attempt('policy drafts', () => {
-    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath, port).catch(() => { tell('NEAR AI could not open a policy draft.'); return undefined; })));
+    keep(vscode.commands.registerCommand(EDIT_POLICY_COMMAND, () => editPolicy(host, context.globalStorageUri.fsPath, port).catch(() => { tell('SovAI could not open a policy draft.'); return undefined; })));
     keep(vscode.commands.registerCommand(APPLY_POLICY_DRAFT_COMMAND, () => applyPolicyDraftCommand(host, context.globalStorageUri.fsPath, port)));
   });
   attempt('Set Label', () => {
@@ -419,11 +419,11 @@ export const LOWER_CHAT_LABEL_ACTION = "Lower This Chat's Label";
  * label only rises on its own, from what its agents read (D-29). Shown with LOWER_CHAT_LABEL_ACTION.
  */
 export const CHAT_KEEPS_LABEL_TEXT = "That label is lower now, but the chat in view keeps its own label: a chat's label only rises on its own, from what its agents read. If what this chat read allows it, lower the chat's label too.";
-export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the NEAR AI chat view first.";
+export const NO_CHAT_IN_VIEW_TEXT = "Nothing was changed: open the chat whose label you want to lower in the SovAI chat view first.";
 /** Said for a chat in view that has not run yet: it has no label of its own, and its first run starts at the project's label (PR #87 review). */
 export const CHAT_NOT_RUN_TEXT = "Nothing was changed: this chat has not run yet, so it has no label of its own. Its first run starts at the project's label, and a chat is never lowered below its project.";
 export const NOTHING_LOWER_TEXT = "Nothing was changed: this chat's label is already the project's label, and a chat is never lowered below its project.";
-export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this computer, but NEAR AI could not sign the lowering, so it will not reach your other computers: they keep the higher label.";
+export const LOWERING_NOT_SIGNED_TEXT = "This chat's label was lowered on this computer, but SovAI could not sign the lowering, so it will not reach your other computers: they keep the higher label.";
 /** Said with every lowering: other computers cannot check this computer's key yet (owner answer, verified devices come later), so they keep the higher label. */
 export const LOWERED_HERE_ONLY_TEXT = "Your other computers cannot check this computer's key yet, so the copies of this chat there keep the higher label until you lower it there too.";
 export const LOWER_CHAT_REASON_PROMPT = "Why may this chat's content now go where a lower label allows? The reason is kept with the chat, and travels with its encrypted metadata to your other computers.";
@@ -476,7 +476,7 @@ export function lowerChoices(mark: Mark, project: Mark, scales: Parameters<typeo
 }
 
 /**
- * NEAR AI: Lower This Chat's Label (CLAS-04, D-29): the only way a person lowers a chat's mark. It acts on the chat in view, offers only labels below its
+ * SovAI: Lower This Chat's Label (CLAS-04, D-29): the only way a person lowers a chat's mark. It acts on the chat in view, offers only labels below its
  * mark down to the project's label, requires a non-empty reason, lowers the mark, saves the lowering with the chat and records label.declassify with the old
  * label, the new one and the reason. Returns true when the label was lowered.
  */
@@ -506,7 +506,7 @@ export async function lowerChatLabel(host: GateHost, chat: ChatInView | undefine
   // The chat may have read more while the person chose: lower only from what it holds now, and only if the choice is still lower and still covers the project.
   const now = mark.current();
   if (!isLowerMark(picked.mark, now, policy.scales) || !coversProject(picked.mark, project, policy.scales)) {
-    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run NEAR AI: Lower This Chat's Label again.`, LOWER_CHAT_LABEL_ACTION))
+    void Promise.resolve(vscode.window.showWarningMessage(`Nothing was changed: this chat read more meanwhile, and its label is now ${labelsShown(now)}. Run SovAI: Lower This Chat's Label again.`, LOWER_CHAT_LABEL_ACTION))
       .then((picked) => { if (picked === LOWER_CHAT_LABEL_ACTION) void lowerChatLabel(host, chat); }).catch(() => undefined);
     return false;
   }
@@ -538,14 +538,14 @@ export const ACCEPT_BRANCH_QUESTION = "Use this branch's labels?";
 export const ACCEPT_BRANCH_DETAIL = 'The label file in this project is signed, but it is not the one this computer last checked (for example after switching branches). Using it makes its labels the current ones, signed again with this computer\'s key.';
 
 export const NO_LABELS_WHILE_FAILED_TEXT =
-  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Open NEAR AI: Policy to see why and what fixes it, then set the label.';
+  'Nothing can be labelled while your policy cannot be trusted, because a policy in that state holds no clearances. Open SovAI: Policy to see why and what fixes it, then set the label.';
 
 /** Said after the person accepts another branch's signed labels (D-61). */
-export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones NEAR AI checks in this project.";
+export const BRANCH_LABELS_ACCEPTED_TEXT = "This branch's labels are now the ones SovAI checks in this project.";
 
 /** The words of the refusal when the person's own clearance does not cover the label they chose (D-27). */
 export function notYourClearanceText(label: Label): string {
-  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance first: open NEAR AI: Policy and choose Edit my rules. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
+  return `You cannot set ${labelKeyShown(label)}: your policy gives you no clearance that covers it, so you could not read what you label. Add a clearance first: open SovAI: Policy and choose Edit my rules. ${CLEARANCE_SELF_ASSERTED_TEXT}`;
 }
 
 /** What Set Label acts on: a project, and a project-relative path in it (a folder ends with `/`, the project itself is the empty path). */
@@ -573,7 +573,7 @@ function labelParts(shown: string, compartments: readonly string[], handling: re
 }
 
 /** Said when the label file changed under Set Label so that the change became a lowering no reason was given for: nothing is written. */
-export const LOWER_NEEDS_REASON_TEXT = 'Nothing was written: this change lowers a label, and no reason was given for it. Run NEAR AI: Set Label again to give one.';
+export const LOWER_NEEDS_REASON_TEXT = 'Nothing was written: this change lowers a label, and no reason was given for it. Run SovAI: Set Label again to give one.';
 
 /** True when `next` is lower than `current` on some scale: raising `next` by every label of `current` changes it. */
 function lowers(current: readonly Label[], next: Label | undefined, scales: Parameters<typeof raiseMark>[2]): boolean {
@@ -584,7 +584,7 @@ function lowers(current: readonly Label[], next: Label | undefined, scales: Para
 }
 
 /**
- * NEAR AI: Set Label. Before the first pick the person sees LABELS_NOT_ACCREDITATION_TEXT (CLAS-07), and beside the government and NATO scales the scales
+ * SovAI: Set Label. Before the first pick the person sees LABELS_NOT_ACCREDITATION_TEXT (CLAS-07), and beside the government and NATO scales the scales
  * caveat (CLAS-02). The person picks a scale, a level, optional compartments and handling flags. A label their own clearance does not cover is refused with
  * the Edit Policy hint (D-27); lowering a label asks for a reason. The change is signed into the project's label file and recorded as label.set.
  * Returns true when a label was set or removed.
@@ -594,7 +594,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
   const policy = host.labelPolicy();
   const key = target.path === '' ? '' : labelMapKey(target.path.replace(/\/$/, ''), target.path.endsWith('/'));
   if (typeof key !== 'string' && !key.ok) {
-    void Promise.resolve(vscode.window.showWarningMessage('NEAR AI cannot label that path. Pick a file or folder inside the project.')).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage('SovAI cannot label that path. Pick a file or folder inside the project.')).catch(() => undefined);
     return false;
   }
   const keyText = typeof key === 'string' ? key : key.value;
@@ -677,7 +677,7 @@ export async function setLabel(host: GateHost, target: LabelTarget): Promise<boo
       // A person's recorded change (label.set below, with the reason when it lowers): the one path that may lower or remove a label.
     }, confirm, { lowering: { kind: 'person', reason: reason ?? '' } });
   } catch (error) {
-    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not save the label.')).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: SovAI could not save the label.')).catch(() => undefined);
     return false;
   }
   host.recordLabelEvent(target.root, { event: 'label.set', path: keyText, ...(label === undefined ? {} : { label }), ...(current.origin === 'default' ? {} : { from: current.mark }), ...(reason === undefined ? {} : { reason }) });
@@ -727,7 +727,7 @@ async function followRenames(host: GateHost, files: ReadonlyArray<{ readonly old
 // Edit Policy and Apply Policy Draft (D-41, D-53)
 
 /**
- * NEAR AI: Edit Policy. Writes the personal layer as stored (never your organization's narrowed view, D-44), pretty-printed and unsigned, to this extension's
+ * SovAI: Edit Policy. Writes the personal layer as stored (never your organization's narrowed view, D-44), pretty-printed and unsigned, to this extension's
  * storage (never the project) with that layer's hash beside it, opens it, and says what Apply does, with the self-declared clearance words. Returns its path.
  */
 export async function editPolicy(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<string | undefined> {
@@ -749,7 +749,7 @@ export async function editPolicy(host: GateHost, globalStorageDir: string, port?
   return files.draft;
 }
 
-/** NEAR AI: Apply Policy Draft: the draft is shown on the policy page as a proposal and applied only from there (D-44). Returns true when applied. */
+/** SovAI: Apply Policy Draft: the draft is shown on the policy page as a proposal and applied only from there (D-44). Returns true when applied. */
 export function applyPolicyDraftCommand(host: GateHost, globalStorageDir: string, port?: PolicyEditorPort): Promise<boolean> {
   return proposeDraft(host, globalStorageDir, port);
 }
@@ -770,7 +770,7 @@ export async function labelNotice(host: GateHost, root: string, state: LabelMapS
     if (accepted) void Promise.resolve(vscode.window.showInformationMessage(BRANCH_LABELS_ACCEPTED_TEXT)).catch(() => undefined);
     return accepted;
   } catch (error) {
-    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : "Nothing was changed: NEAR AI could not use this branch's labels.")).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : "Nothing was changed: SovAI could not use this branch's labels.")).catch(() => undefined);
     return false;
   }
 }
@@ -786,7 +786,7 @@ export async function labelRaiseRefused(host: GateHost, root: string, message: s
   try {
     return await host.signAgainForRaises(root);
   } catch (error) {
-    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: NEAR AI could not sign the label file.')).catch(() => undefined);
+    void Promise.resolve(vscode.window.showWarningMessage(error instanceof LabelMapError ? error.message : 'Nothing was changed: SovAI could not sign the label file.')).catch(() => undefined);
     return false;
   }
 }

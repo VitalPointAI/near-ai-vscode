@@ -282,7 +282,7 @@ export function teamLiveHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'csp
   </div>
 </header>
 <main>
-  <p id="empty" class="hint">No team is working right now. Run a team with /team:&lt;name&gt; in the NEAR AI chat, or a workflow that starts agents, and watch it here.</p>
+  <p id="empty" class="hint">No team is working right now. Run a team with /team:&lt;name&gt; in the SovAI chat, or a workflow that starts agents, and watch it here.</p>
   <p id="restored" class="hint" hidden>The last run in this project, as it ended. It is drawn from the activity history kept on this computer.</p>
   <div id="stage" class="stage" hidden>
     <svg id="lines" class="lines" aria-hidden="true" focusable="false"></svg>

@@ -1,6 +1,6 @@
 // MCP server manifests (GATE-03, D-06, D-07, D-38): a server added from now on starts restrictive and labelled, one configured before has no manifest and behaves as
 // it always did, the person can declare what each tool does, and the words on the MCP and Tools pages say so in a fixed order and always end with the sentence
-// that this is a declaration NEAR AI cannot check.
+// that this is a declaration SovAI cannot check.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';

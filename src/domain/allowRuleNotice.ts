@@ -3,6 +3,6 @@
 // the one place to fix it. Pure: no vscode, no I/O.
 export function rememberedRuleNotice(rule: string, saved: boolean, where: string): string {
   return saved
-    ? `Learned: "${rule}" now runs without asking in this ${where}, so this command is not asked about again. Remove it under Settings, NEAR AI, Agent: Allow Commands.`
-    : `"${rule}" could not be saved to this ${where}; it is allowed for this run only. Add it under Settings, NEAR AI, Agent: Allow Commands.`;
+    ? `Learned: "${rule}" now runs without asking in this ${where}, so this command is not asked about again. Remove it under Settings, SovAI, Agent: Allow Commands.`
+    : `"${rule}" could not be saved to this ${where}; it is allowed for this run only. Add it under Settings, SovAI, Agent: Allow Commands.`;
 }

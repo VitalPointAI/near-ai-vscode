@@ -523,7 +523,7 @@ export function trustPirDecisions(register: readonly PirEntry[], recorded: Reado
     const expected = entry.status === 'rejected' ? 'rejected' : 'approved';
     const record = recorded.get(decisionKey({ kind: 'pir', id: entry.id }));
     if (entry.decision?.decision === expected && decisionMatches(record, entry.decision, pirWording(entry))) return entry;
-    findings.push({ rule: 'decision-unrecorded', severity: 'block', subject: entry.id, message: `${entry.id} says ${entry.status}, but no signed decision by a person records that on this wording, so it is read as awaiting a decision. Only NEAR AI: Staff: Decide a PIR records a PIR decision.` });
+    findings.push({ rule: 'decision-unrecorded', severity: 'block', subject: entry.id, message: `${entry.id} says ${entry.status}, but no signed decision by a person records that on this wording, so it is read as awaiting a decision. Only SovAI: Staff: Decide a PIR records a PIR decision.` });
     const { decision: _dropped, ...rest } = entry;
     return { ...rest, status: 'awaiting-decision' as const };
   });

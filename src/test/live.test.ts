@@ -45,7 +45,7 @@ function pick(models: ModelInfo[], pattern: RegExp): string | undefined {
 
 /** Runs the harness non-interactively in `root` and returns the outcome and usage. */
 async function agent(near: NearAiClient, model: string, root: string, prompt: string, maxTurns = 30): Promise<{ outcome: string; answer: string; usage: UsageMetadata[]; ms: number; changed: string[] }> {
-  // The production system prompt and loop (shared with NEAR AI: Compare Models); every action is allowed here.
+  // The production system prompt and loop (shared with SovAI: Compare Models); every action is allowed here.
   return runAgentInFolder(near, model, root, prompt, { maxTurns, policy: { mode: 'fully-autonomous', emergencyStop: false }, rules: DEFAULT_RULES, requestApproval: async () => ({ decision: 'allow' }), gate: testGateRuntime() });
 }
 
@@ -80,7 +80,7 @@ test('live eval: models compared on coding, research, and planning tasks', { ski
   assert.ok(candidates.length, `none of ${wanted.join(', ')} is offered`);
   const runs = Math.max(1, Number(process.env.NEAR_LIVE_EVAL_RUNS ?? 2));
   // Coding, research, planning, and building from a plan, an issue, or a spec in a multi-file project
-  // (scored by acceptance tests the model never sees): the same tasks and graders NEAR AI: Compare Models uses.
+  // (scored by acceptance tests the model never sees): the same tasks and graders SovAI: Compare Models uses.
   const tasks = (await loadBenchmarkTasks()).map((benchmark) => ({ name: benchmark.id, kind: benchmark.kind, prompt: benchmark.prompt, benchmark }));
   const total = candidates.length * tasks.length * runs;
   const rows: Array<{ model: string; task: string; kind: string; run: number; score: number; outOf: number; outcome: string; review?: string; turns: number; seconds: number; tokPerSec?: number; costUsd?: number; reviewCostUsd?: number; cachePct: number; misses: string }> = [];

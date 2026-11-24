@@ -1,13 +1,13 @@
 // The copy lint's scanner (FND-07, Phase 41 D-41 and D-64; GLOSSARY section 5). It reads the product's user copy sources, counts the hits of each copy
 // rule per file, and compares the counts with the checked-in baseline (src/test/copy-lint-baseline.json). A helper with no `.test` suffix, so it can be
 // loaded without registering tests. Pure apart from reading files under the repository root; no vscode.
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as ts from 'typescript';
 import { MODES, ModeId, ModeRow } from '../../domain/org/modes';
 
 /** The copy rules, in the order GLOSSARY section 5 and D-41 number them (the compliance claim is rule 7, after the bare team rule). */
-export const COPY_RULES = ['glossary', 'mode-word', 'brand', 'em-dash', 'provider-organization', 'bare-team', 'compliance-claim'] as const;
+export const COPY_RULES = ['glossary', 'mode-word', 'brand', 'em-dash', 'provider-organization', 'bare-team', 'compliance-claim', 'product-name'] as const;
 export type CopyRule = (typeof COPY_RULES)[number];
 
 /** Counts per file (path from the repository root, forward slashes) and rule. A zero count is never stored. */
@@ -33,7 +33,8 @@ export const RULE_ADVICE: Readonly<Record<CopyRule, string>> = Object.freeze({
   'em-dash': 'a colon, a comma or two sentences',
   'provider-organization': '"your organization" (NEAR AI is only the provider)',
   'bare-team': '"agent team" for agents, the mode word from term() for people, or "Microsoft Teams"',
-  'compliance-claim': 'a status with its evidence, never a claim that the product is compliant, certified or accredited'
+  'compliance-claim': 'a status with its evidence, never a claim that the product is compliant, certified or accredited',
+  'product-name': '"Sterling Sovereign AI" or "SovAI" for the product and "SovAI:" for its commands; NEAR AI is only the provider'
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -487,6 +488,37 @@ const BRANDS: ReadonlyArray<{ readonly regex: RegExp; readonly correct: string }
 ];
 /** A brand prefix on a panel or command title, in any case. */
 const TITLE_PREFIX = /^\s*near\s?ai\s*:/i;
+/**
+ * Rule 8 (owner, 2026-11-24): the product is Sterling Sovereign AI, short name SovAI, and NEAR AI is only the provider. The old product names
+ * ("NEAR AI for VS Code", "the NEAR AI extension") and a "NEAR AI:" command prefix anywhere in a sentence count. A prefix at the start of a title is
+ * already a brand hit, so it is not counted twice.
+ */
+const OLD_PRODUCT_NAMES: readonly RegExp[] = [
+  /(?<![A-Za-z0-9_])near\s?ai\s+for\s+vs\s?code(?![A-Za-z0-9_])/gi,
+  /(?<![A-Za-z0-9_])near\s?ai\s+extensions?(?![A-Za-z0-9_])/gi,
+  /(?<![A-Za-z0-9_])near\s?ai\s*:/gi
+];
+
+/** The old product name hits in `text` (rule 8). A title's leading prefix is left to the brand rule. */
+export function productNameHits(text: string, title = false): number {
+  const rest = title ? text.replace(TITLE_PREFIX, '') : text;
+  return OLD_PRODUCT_NAMES.reduce((sum, regex) => sum + [...rest.matchAll(regex)].length, 0);
+}
+
+/**
+ * The documentation people read about the product (rule 8 outside the extension's copy): README.md, SECURITY.md, CONTRIBUTING.md, the guides in
+ * docs/ and docs-site/content/, the docs site's README, configuration and sidebars, and the workbench's README and MIGRATION.md. CHANGELOG.md is
+ * history and is not read.
+ */
+export function documentationFiles(root: string = REPO_ROOT): string[] {
+  const out = ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'docs-site/README.md', 'docs-site/docusaurus.config.js', 'docs-site/sidebars.js',
+    'workbench/README.md', 'workbench/MIGRATION.md'];
+  const markdown = (file: string): boolean => file.endsWith('.md') || file.endsWith('.mdx');
+  listFiles(root, 'docs', markdown, out);
+  listFiles(root, 'docs-site/content', markdown, out);
+  return out.filter((file) => existsSync(path.join(root, file))).sort();
+}
+
 /** The provider's name, with or without AI and an apostrophe s, in front of organization (the user word is always "your organization"). */
 const PROVIDER_ORGANIZATION = /(?<![A-Za-z0-9_])NEAR(?:\s+AI)?(?:['’]s)?\s+organi[sz]ations?(?![A-Za-z0-9_])/gi;
 
@@ -627,6 +659,7 @@ export function countHits(texts: readonly CopyText[], file: string, options: Cou
     add('provider-organization', hitsOf(text, PROVIDER_ORGANIZATION, 'provider').length);
     add('bare-team', bareTeamHits(text));
     add('compliance-claim', claimHits(text, claimsAllowed));
+    add('product-name', productNameHits(text, title === true));
   }
   return Object.keys(rules).length > 0 ? { [file]: rules } : {};
 }

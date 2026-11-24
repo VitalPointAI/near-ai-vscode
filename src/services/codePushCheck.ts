@@ -43,9 +43,9 @@ export interface CodePushBlock {
 export interface CodePushPlan {
   /** Every file that would go up: tracked, plus untracked and not ignored. Never anything in the NEAR AI state folder, and no untracked NEAR AI record. */
   files: string[];
-  /** NEAR AI's own records (account, runs, costs) that git does not track: left off the list and kept on this computer. Paths from the project root, sorted. */
+  /** SovAI's own records (account, runs, costs) that git does not track: left off the list and kept on this computer. Paths from the project root, sorted. */
   heldBack: string[];
-  /** NEAR AI's own records that git already tracks: the push cannot keep them off (they are in git and its history), so they stay on the list and are named. Sorted. */
+  /** SovAI's own records that git already tracks: the push cannot keep them off (they are in git and its history), so they stay on the list and are named. Sorted. */
   trackedPrivate: string[];
   blocked: CodePushBlock[];
   /** Files that could not be read as text (binary or very large), so they were not checked for secrets. */
@@ -160,7 +160,7 @@ function isNearAiPrivateRecord(file: string): boolean {
 
 /**
  * What would go up and what must not. Git decides the list (tracked plus untracked and not ignored), the state folder is left out whatever git says,
- * NEAR AI's own records in the project folder are held back unless they are shared configuration, and each file is checked by name and then by content.
+ * SovAI's own records in the project folder are held back unless they are shared configuration, and each file is checked by name and then by content.
  * A blocked file is reported once, with the first reason found.
  */
 export async function planCodePush(root: string, git: GitRunner): Promise<CodePushPlan> {
@@ -177,7 +177,7 @@ export async function planCodePush(root: string, git: GitRunner): Promise<CodePu
     if (!blocked.has(file)) blocked.set(file, { file, reason, ...(trackedFiles.has(file) ? { tracked: true } : {}) });
   };
   for (const file of files) {
-    if (file.startsWith(STATE_FOLDER)) block(file, "NEAR AI's private state folder is never pushed as code.");
+    if (file.startsWith(STATE_FOLDER)) block(file, "SovAI's private state folder is never pushed as code.");
     else if (isSecretFileName(file)) block(file, NAME_REASON);
   }
   const candidates: WorkspaceFile[] = files.filter((file) => !blocked.has(file)).map((file) => ({ absolute: path.join(root, file), relative: file }));
@@ -284,7 +284,7 @@ export async function scanHistory(root: string, ref: string, remote: string, git
     const key = `${entry.blob}\0${entry.file}`;
     if (seenEntry.has(key)) continue;
     seenEntry.add(key);
-    if (entry.file.startsWith(STATE_FOLDER)) { addHit({ file: entry.file, commit: short(entry.commit), reason: "NEAR AI's private state folder is never pushed as code." }); continue; }
+    if (entry.file.startsWith(STATE_FOLDER)) { addHit({ file: entry.file, commit: short(entry.commit), reason: "SovAI's private state folder is never pushed as code." }); continue; }
     if (isSecretFileName(entry.file)) { addHit({ file: entry.file, commit: short(entry.commit), reason: NAME_REASON }); continue; }
     byBlob.set(entry.blob, [...byBlob.get(entry.blob) ?? [], entry]);
   }
@@ -349,7 +349,7 @@ function historyBlockedMessage(hits: readonly HistoryHit[]): string {
   return [
     'Your code was not pushed. Something that looks like a secret was saved earlier in this project\'s history:',
     ...shown, ...more, '',
-    'Pushing a branch puts everything ever saved on it online, even a file you deleted later. Adding a file to .gitignore does not take it out of the history, and NEAR AI will not rewrite your history for you.',
+    'Pushing a branch puts everything ever saved on it online, even a file you deleted later. Adding a file to .gitignore does not take it out of the history, and SovAI will not rewrite your history for you.',
     'A key that was saved in a project should be replaced with a new one. Syncing still works without pushing your code.'
   ].join('\n');
 }
@@ -381,12 +381,12 @@ function namesInFolder(files: readonly string[]): string {
 }
 
 function heldBackNote(files: readonly string[]): string {
-  return `These NEAR AI files hold your own account and run records and stay on this computer: ${namesInFolder(files)}.`;
+  return `These SovAI files hold your own account and run records and stay on this computer: ${namesInFolder(files)}.`;
 }
 
 function trackedPrivateNote(files: readonly string[]): string {
   const many = files.length > 1;
-  return `${namesInFolder(files)} ${many ? 'are' : 'is'} already saved in git, so ${many ? 'they go' : 'it goes'} up with your code. ${many ? 'They hold' : 'It holds'} your own NEAR AI records, such as your organization's name and profile settings (no keys).`;
+  return `${namesInFolder(files)} ${many ? 'are' : 'is'} already saved in git, so ${many ? 'they go' : 'it goes'} up with your code. ${many ? 'They hold' : 'It holds'} your own SovAI records, such as your organization's name and profile settings (no keys).`;
 }
 
 function trackedPrivateBlockedMessage(files: readonly string[]): string {
@@ -394,7 +394,7 @@ function trackedPrivateBlockedMessage(files: readonly string[]): string {
   const shown = files.slice(0, MAX_NAMES_LISTED).join(', ');
   const names = files.length > MAX_NAMES_LISTED ? `${shown} and ${files.length - MAX_NAMES_LISTED} more` : shown;
   const it = many ? 'them' : 'it';
-  return `Your code was not pushed: ${names} ${many ? 'hold' : 'holds'} your own NEAR AI records and git already tracks ${it}, so a public repository would show ${it}; remove ${it} from git first (git rm --cached) and try again.`;
+  return `Your code was not pushed: ${names} ${many ? 'hold' : 'holds'} your own SovAI records and git already tracks ${it}, so a public repository would show ${it}; remove ${it} from git first (git rm --cached) and try again.`;
 }
 
 function blockedMessage(blocked: readonly CodePushBlock[]): string {

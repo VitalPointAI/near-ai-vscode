@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-24
 
-This plan says what the maintainers of NEAR AI for VS Code do when someone reports a security
+This plan says what the maintainers of Sterling Sovereign AI do when someone reports a security
 problem in the product, from the first report to telling users, and what stays with your
 organization. It covers the extension, the Sterling workbench image that ships it, the messaging
 relay (`relay/`) and the sync hub (`hub/`) in this repository, and the pipeline that releases

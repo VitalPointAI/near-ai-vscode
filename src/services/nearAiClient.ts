@@ -276,7 +276,7 @@ export function parseRetryAfter(value: string | null | undefined, nowMs = Date.n
   return Math.max(0, Math.min(MAX_RETRY_AFTER_MS, Math.round(ms)));
 }
 
-/** Where rate-limit and error diagnostics go (the NEAR AI output channel in the extension). */
+/** Where rate-limit and error diagnostics go (the SovAI output channel in the extension). */
 let diagnosticsSink: ((line: string) => void) | undefined;
 export function setNearAiDiagnostics(sink: ((line: string) => void) | undefined): void {
   diagnosticsSink = sink;
@@ -284,7 +284,7 @@ export function setNearAiDiagnostics(sink: ((line: string) => void) | undefined)
 function diagnose(line: string): void {
   try { diagnosticsSink?.(redactSecrets(line)); } catch { /* diagnostics never break a request */ }
 }
-/** A line in the NEAR AI output channel from elsewhere in the extension (secrets redacted); nothing when no channel is set (tests). */
+/** A line in the SovAI output channel from elsewhere in the extension (secrets redacted); nothing when no channel is set (tests). */
 export function nearAiLog(line: string): void {
   diagnose(line);
 }

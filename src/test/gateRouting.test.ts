@@ -356,7 +356,7 @@ test('CLAS-05 (D-50): a NEAR client at attested-cloud is refused without a fresh
     assert.ok(!sentence.includes(String.fromCharCode(0x2014)), 'no em-dash');
   }
   // Plan 25 (PR 4d) built the background check, so the unknown sentence now says it runs and to try again; the others promise no check.
-  assert.match(BINDING_REFUSALS.unknown, /NEAR AI checks the connection in the background, so try again in a moment/);
+  assert.match(BINDING_REFUSALS.unknown, /SovAI checks the connection in the background, so try again in a moment/);
   assert.ok(!/background|later check/i.test(BINDING_REFUSALS['not-bound']) && !/background|later check/i.test(BINDING_REFUSALS.unavailable));
 });
 
@@ -447,7 +447,7 @@ test('S1: the notice for a policy with a *. pattern names the entry, what change
   assert.match(text, /\*\.example\.org/);
   assert.match(text, /exact name/);
   assert.match(text, /https/);
-  assert.match(text, /in NEAR AI: Policy, choose Edit my rules/);
+  assert.match(text, /in SovAI: Policy, choose Edit my rules/);
   assert.ok(!text.includes(String.fromCharCode(0x2014)) && !/NEAR organization/i.test(text));
   assert.equal(routing.localHostMatch('https://a.example.org', ['*.example.org']), 'pattern');
   assert.equal(routing.localHostMatch('https://a.example.org', ['a.example.org']), 'exact');

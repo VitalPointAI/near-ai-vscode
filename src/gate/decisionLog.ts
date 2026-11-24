@@ -29,7 +29,7 @@ export const MAX_ROTATED_FILES = 4;
 /** One record is a name, a path, a rule id and a sentence, never contents; a line larger than this is not written. */
 const MAX_RECORD_BYTES = 64 * 1024;
 const PROJECT_KEY_PATTERN = /^[0-9a-f]{32}$/;
-const WRITE_FAILED = 'NEAR AI could not save its record of what was allowed or refused, so records for this project are not being kept. Your work is not affected.';
+const WRITE_FAILED = 'SovAI could not save its record of what was allowed or refused, so records for this project are not being kept. Your work is not affected.';
 
 /** The first 32 hex characters of the SHA-256 of the normalised project root, so a file name never carries a path. */
 export function projectLogKey(root: string): string {
@@ -177,7 +177,7 @@ export class DecisionLog {
       // The record that is checked is exactly the record that is stored: the real sequence goes in first, then the check, then the line is made from it.
       // A rule nobody knows is kept under record.unknown-rule with the id beside it, never dropped (PR #74 review round 11); the log says so once.
       const known = withKnownRule(clean);
-      if (known !== clean) this.fail(new RecordRefused('A decision record named a rule NEAR AI does not know, so it was kept under record.unknown-rule. Your work is not affected.'));
+      if (known !== clean) this.fail(new RecordRefused('A decision record named a rule SovAI does not know, so it was kept under record.unknown-rule. Your work is not affected.'));
       const stored: DecisionRecord = { ...known, metadata: { ...known.metadata, sequence } };
       const checked = validateDecisionRecord(stored);
       if (!checked.ok) throw new RecordRefused('A decision record was not valid, so it was not saved. Your work is not affected.');

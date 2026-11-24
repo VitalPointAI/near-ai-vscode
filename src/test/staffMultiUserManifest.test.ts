@@ -1,5 +1,5 @@
 // package.json contributions of the multi-user staff commands (plan 31-23, D-36, D-37) and the gate around them: the setting, the commands
-// under NEAR AI with "Staff: " titles, each hidden from the Command Palette until the setting is on, plain words, none a Staff Room person decision,
+// under SovAI with "Staff: " titles, each hidden from the Command Palette until the setting is on, plain words, none a Staff Room person decision,
 // every one registered; and activation with the setting off loads nothing from src/staff/replica and makes no file, folder or secret (D-29).
 // This file imports no replica module, so the module cache can prove the commands did not load one.
 import assert from 'node:assert/strict';
@@ -123,11 +123,11 @@ test('nearAi.staff.multiUserPreview is a boolean, off by default, application sc
   assert.match(setting.description ?? '', /declared by the staff lead, not verified/);
 });
 
-test('each multi-user command is contributed under NEAR AI with its "Staff: " title', () => {
+test('each multi-user command is contributed under SovAI with its "Staff: " title', () => {
   assert.deepEqual([...IDS].sort(), Object.keys(TITLES).sort());
   for (const id of IDS) {
     const entries = manifest.contributes.commands.filter((entry) => entry.command === id);
-    assert.deepEqual(entries, [{ command: id, title: TITLES[id], category: 'NEAR AI' }], id);
+    assert.deepEqual(entries, [{ command: id, title: TITLES[id], category: 'SovAI' }], id);
     plain(TITLES[id], id);
   }
 });

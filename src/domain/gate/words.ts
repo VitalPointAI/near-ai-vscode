@@ -14,7 +14,7 @@ export const RUNS_ON_THIS_MACHINE_TEXT = 'Runs on this machine with your permiss
  * with a person here it asks, with nobody here it refuses.
  */
 export const EFFECTS_NOT_DECLARED_TEXT = 'What it does is not declared, so each call asks first, or is refused when nobody is there';
-export const MANIFEST_IS_A_CLAIM_TEXT = 'This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.';
+export const MANIFEST_IS_A_CLAIM_TEXT = 'This is what you or the server declared it does. SovAI cannot check what a server does inside itself.';
 
 const RUNS_ELSEWHERE = 'Runs on another machine';
 const READS_FILES = 'Reads files in this project';

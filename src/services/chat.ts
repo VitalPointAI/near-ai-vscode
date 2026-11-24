@@ -463,7 +463,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const pick = typeof vscode.window.showQuickPick === 'function'
       ? await vscode.window.showQuickPick(tabs.map((tab) => ({ label: tab.title || 'New conversation', description: STATUS_WORDS[conversationStatus({ running: isRunning(tab), waiting: waitingCount(tab), outcome: tab.outcome })], id: tab.id })), { placeHolder: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Choose one to close (its transcript stays in history).` })
       : undefined;
-    if (!pick) { onScreen().post({ type: 'notice', text: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Close one (×) to start another; its transcript stays in NEAR AI: Show Chat History.` }); return false; }
+    if (!pick) { onScreen().post({ type: 'notice', text: `${MAX_OPEN_CONVERSATIONS} conversations are open, the most at once. Close one (×) to start another; its transcript stays in SovAI: Show Chat History.` }); return false; }
     await closeConversation(pick.id);
     return tabs.length < MAX_OPEN_CONVERSATIONS;
   };
@@ -480,7 +480,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     const tab = tabs.find((candidate) => candidate.id === id);
     if (!tab) return;
     if (isRunning(tab) || waitingCount(tab)) {
-      const choice = await vscode.window.showWarningMessage(`"${tab.title || 'This conversation'}" is still running. Stop it and close the conversation? Its transcript stays in NEAR AI: Show Chat History.`, { modal: true }, STOP_AND_CLOSE);
+      const choice = await vscode.window.showWarningMessage(`"${tab.title || 'This conversation'}" is still running. Stop it and close the conversation? Its transcript stays in SovAI: Show Chat History.`, { modal: true }, STOP_AND_CLOSE);
       if (choice !== STOP_AND_CLOSE) return;
     }
     const index = tabs.indexOf(tab);
@@ -599,7 +599,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // SYNC-07 / D-03: only a run this editor itself lost (a reload) resumes by itself. A cut-off run another editor left keeps its Resume button.
     const own = new Set(ownEditorMarkers(tabs.flatMap((tab) => (tab.interrupted ? [tab.interrupted] : [])), editorWriter(context.globalState as MementoLike | undefined)));
     const chosen = new Set(autoResumeChoice([...own], { enabled, emergencyStopped }));
-    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "NEAR AI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
+    if (emergencyStopped && enabled) for (const tab of tabs) if (tab.interrupted && own.has(tab.interrupted) && shouldAutoResume(tab.interrupted, true)) { const text = 'Not resumed automatically: the emergency stop is on. Run "SovAI: Resume", then press Resume here.'; tab.log.add({ type: 'notice', text }); tab.post({ type: 'notice', text }); }
     const due = tabs.filter((tab) => tab.interrupted && chosen.has(tab.interrupted));
     for (const tab of due) {
       if (isEmergencyStopped()) break;
@@ -828,7 +828,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     }
     if (!tab.title) tab.title = conversationTitle(typed) ?? '';
     sendSummary();
-    if (isEmergencyStopped()) { tab.post({ type: 'outbound-blocked', text: '', model: '', reason: 'Emergency stop is on. Run "NEAR AI: Resume" to continue.', confirm: false }); return; }
+    if (isEmergencyStopped()) { tab.post({ type: 'outbound-blocked', text: '', model: '', reason: 'Emergency stop is on. Run "SovAI: Resume" to continue.', confirm: false }); return; }
     const root = workspaceRoot();
     let active;
     try {
@@ -838,9 +838,9 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       return;
     }
     if (!root || !active) {
-      // Nothing is written here: a chat attempt before setup must not turn the workspace into a NEAR AI project.
+      // Nothing is written here: a chat attempt before setup must not turn the workspace into a SovAI project.
       await sendProfileStatus(panel, auth);
-      tab.post({ type: 'auth-required', text: 'Set up a NEAR AI profile for this project to start chatting.' });
+      tab.post({ type: 'auth-required', text: 'Set up an AI profile for this project to start chatting.' });
       return;
     }
     // The person is acting in this project: what this editor kept in its own storage is merged into the state home before the run starts (once; no-op after).
@@ -859,7 +859,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
         await whenTeamsMoved();
         const library = new TeamLibrary(teamLibraryDir(homeFolder()));
         team = await library.find(message.command.slice(5), root).catch((error: Error) => { throw new Error(`That team file has a problem: ${error.message}`); });
-        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with NEAR AI: Team Studio.` }); return; }
+        if (!team) { tab.post({ type: 'assistant-error', text: `There is no team called ${message.command.slice(5)}. Create one with SovAI: Team Studio.` }); return; }
         if (!message.args?.trim()) { tab.post({ type: 'assistant-error', text: `Tell the team what to do: /team:${team.slug} <task>` }); return; }
         // 0.4.26: a team added with Import team runs only once the person approves it.
         if (!await allowLibraryTeam(team, library)) { tab.post({ type: 'assistant-error', text: `The imported team "${team.name}" was not approved, so it did not run. Run /team:${team.slug} again to be asked.` }); return; }
@@ -867,7 +867,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       } else if (message.type === 'open-command') {
         if (!(await gsdHost.context())) {
           if (!shouldAutoInstallGsd()) { tab.post({ type: 'assistant-error', text: 'Open-GSD is not installed. Turn on nearAi.autoInstallGsd to install it when you run a workflow.' }); return; }
-          tab.post({ type: 'notice', text: 'Installing Open-GSD for NEAR AI (first workflow only)…' });
+          tab.post({ type: 'notice', text: 'Installing Open-GSD for SovAI (first workflow only)…' });
         }
         gsd = await gsdHost.ensure();
         const found = findSkill(gsd.skills, message.command);
@@ -1028,7 +1028,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     if (!root) { blocked('No project folder is open, so it was not sent to the running agent. Open the project folder, then send it again.'); return; }
     const staged = ids.map((id) => state.attachments.get(id)).filter((item): item is StagedAttachment => Boolean(item));
     // It goes to the provider like any message, so it passes the same outbound check, with what is attached to it.
-    if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "NEAR AI: Resume" to continue.'); return; }
+    if (isEmergencyStopped()) { blocked('Emergency stop is on. Run "SovAI: Resume" to continue.'); return; }
     const guard = state.guard ?? new OutboundGuard(readSettings());
     const attachedText = attachedTextOf(staged);
     const verdict = guard.check({ model: tab.model ?? '', modelInfo: tab.modelInfo, text: attachedText ? `${message.text}\n${attachedText}` : message.text }, state.spend?.spentTodayUsd().usd ?? 0);
@@ -1041,7 +1041,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       // 0.4.21: the files are read now (images described, audio transcribed) and go to the running agent in the same message as these words.
       try {
         const active = await activeProvider(root, auth);
-        if (!active) { blocked('No NEAR AI profile is set up, so the attachments could not be read.'); return; }
+        if (!active) { blocked('No AI profile is set up, so the attachments could not be read.'); return; }
         const model = tab.model ?? '';
         const teeBlock = attachmentTeeBlock(staged, tab.modelInfo, active.models);
         if (teeBlock) { blocked(`${teeBlock} It was not sent to the running agent.`); return; }
@@ -1351,7 +1351,7 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
   const announce = (prompt: Record<string, unknown>) => {
     const text = prompt.type === 'approval-request' ? `An agent in "${title()}" is waiting for your approval: ${String(prompt.title ?? 'an action')}`
       : prompt.type === 'image-review-request' ? `An agent in "${title()}" made an image and is waiting for your review: ${imageReviewTitle(prompt)}`
-      : `NEAR AI has a question for you in "${title()}" and is waiting for the answer.`;
+      : `SovAI has a question for you in "${title()}" and is waiting for the answer.`;
     void Promise.resolve(vscode.window.showWarningMessage(text, 'Show chat')).then((choice) => { if (choice) void vscode.commands.executeCommand('nearAiChatView.focus'); });
   };
   const forward = (outbound: Record<string, unknown>) => {
@@ -1390,7 +1390,7 @@ function conversationFor(context: vscode.ExtensionContext, root: string, panel: 
 /** The view's badge while prompts wait for the user, in one conversation or several. */
 export function waitingBadge(count: number, conversations = 1): { value: number; tooltip: string } | undefined {
   if (count <= 0) return undefined;
-  return { value: count, tooltip: conversations > 1 ? `NEAR AI is waiting for you in ${conversations} conversations` : 'NEAR AI is waiting for you' };
+  return { value: count, tooltip: conversations > 1 ? `SovAI is waiting for you in ${conversations} conversations` : 'SovAI is waiting for you' };
 }
 
 function showWaitingBadge(panel: ChatHost, count: number, conversations: number): void {

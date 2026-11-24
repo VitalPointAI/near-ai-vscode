@@ -363,14 +363,14 @@ test('sidebar: a background conversation\'s approval keeps it waiting, counts in
     const a = sidebar.summary()!.activeId;
     const runA = sidebar.send({ type: 'send', text: 'edit in A', model: MODEL, conversationId: a });
     await until(() => sidebar.item(a)?.status === 'waiting');
-    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'SovAI is waiting for you' });
 
     await sidebar.send({ type: 'new-chat' });
     const b = sidebar.summary()!.activeId;
     const runB = sidebar.send({ type: 'send', text: 'edit in B', model: MODEL, conversationId: b });
     await until(() => sidebar.item(b)?.status === 'waiting');
     assert.equal(sidebar.summary()!.waiting, 2);
-    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'NEAR AI is waiting for you in 2 conversations' });
+    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'SovAI is waiting for you in 2 conversations' });
     assert.equal(sidebar.item(a)?.status, 'waiting', 'still waiting in the background');
 
     // Both runs asked under the same call id; the reply goes to the conversation it names.
@@ -378,7 +378,7 @@ test('sidebar: a background conversation\'s approval keeps it waiting, counts in
     await runB;
     assert.equal(sidebar.item(b)?.status, 'done');
     assert.equal(sidebar.item(a)?.status, 'waiting', 'A\'s prompt was not answered by B\'s reply');
-    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'SovAI is waiting for you' });
 
     // Switching pins A's prompt again; answering it there lets A finish.
     const before = sidebar.posted.length;
@@ -830,7 +830,7 @@ test('sidebar: a waiting approval is announced when the window is not focused, a
     assert.match(warnings.at(-1)!, /"edit while here" is waiting for your approval/);
     for (const listener of windowListeners) listener({ focused: true });
     assert.equal(announced(), start + 2, 'once per prompt');
-    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'NEAR AI is waiting for you in 2 conversations' }, 'the badge stays');
+    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'SovAI is waiting for you in 2 conversations' }, 'the badge stays');
 
     await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: a });
     await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: b });

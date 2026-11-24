@@ -1,4 +1,4 @@
-# NEAR AI for VS Code
+# Sterling Sovereign AI
 
 **Private AI agents for the work you do in VS Code: code, research, proposals,
 writing, and data. You can see, steer, and afford them.**
@@ -9,7 +9,7 @@ projects through built-in Open-GSD workflows, with a team suited to the kind of
 project. You see the model, tokens, and cost of every answer, and decide
 exactly what is allowed to leave your machine.
 
-![NEAR AI chat beside the editor in VS Code](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-chat.png)
+![SovAI chat beside the editor](https://raw.githubusercontent.com/VitalPointAI/near-ai-vscode/main/docs/marketplace/near-ai-chat.png)
 
 ## What you can use it for
 
@@ -29,18 +29,18 @@ exactly what is allowed to leave your machine.
 - **Data analysis.** Read spreadsheets and data files, analyse them with your
   own tools, and write up the results with charts and graphics.
 
-**NEAR AI: Set Up Project Team** asks which kind of project you have and sets
+**SovAI: Set Up Project Team** asks which kind of project you have and sets
 up a team and workflow for it. Your files stay in your workspace, and work is
-sent only to the model you pick. After you connect NEAR AI, the extension
+sent only to the model you pick. After you connect a model provider, the extension
 suggests this as your next step in the chat when the project has no team yet;
 the same card offers **Set up a staff team** for a military staff project.
-**NEAR AI: Project Setup** shows every setup step again: your project team, a
-spending limit and web search. **NEAR AI: Set Up a New Profile** connects
-another NEAR AI key or local runtime, and **NEAR AI: Select Profile** picks the
-one this project uses. **NEAR AI: Use a Saved Profile** uses a profile you set
+**SovAI: Project Setup** shows every setup step again: your project team, a
+spending limit and web search. **SovAI: Set Up a New Profile** connects
+another NEAR AI key or local runtime, and **SovAI: Select Profile** picks the
+one this project uses. **SovAI: Use a Saved Profile** uses a profile you set
 up in another project, without entering the key again.
 
-## Why choose NEAR AI
+## Why choose SovAI
 
 - **You know where your work goes.** NEAR AI runs some models inside attested
   trusted execution environments and forwards others to third parties. Every
@@ -71,7 +71,7 @@ up in another project, without entering the key again.
 
 ### An agent, not just a chat
 
-Ask for a change and NEAR AI does the work in your workspace: it searches and
+Ask for a change and SovAI does the work in your workspace: it searches and
 reads your code, edits files, and runs your build and tests, showing every step
 as a row in the chat.
 
@@ -88,7 +88,7 @@ as a row in the chat.
 - **A card says what the risk is.** Above the buttons, the card names the kind
   of risk in one plain sentence (it reaches outside this project, it can
   destroy work, it can send data off this machine, it reads keys, it installs
-  software, or NEAR AI was not sure), then the rule's own reason, with
+  software, or SovAI was not sure), then the rule's own reason, with
   **Show what will run** to expand the whole reason and the exact command or
   code.
 - **Auto approve that stays out of your way.** In Auto mode, fixed rules clear
@@ -141,7 +141,7 @@ as a row in the chat.
 - Streaming answers with formatted code and tables, plus **Copy** and
   **Insert at cursor** on every code block. Wide tables scroll sideways inside
   the message.
-- **Panels fit narrow widths.** Make the chat or any NEAR AI panel narrow and
+- **Panels fit narrow widths.** Make the chat or any SovAI panel narrow and
   it wraps, stacks or hides less important columns instead of scrolling
   sideways; on a very narrow panel each table row becomes a small card. Code
   and diffs keep their own sideways scroll so lines are never wrapped.
@@ -197,7 +197,7 @@ as a row in the chat.
 Type `/` for every installed Open-GSD workflow: start a project, onboard an
 existing codebase, discuss, plan, and execute phases, verify work, review code,
 map the codebase, and more, with arguments such as `/gsd-plan-phase 3`.
-Workflows run on the NEAR AI agent runner with your chosen model: their
+Workflows run on the SovAI agent runner with your chosen model: their
 sub-agents appear as activity rows, file changes ask for approval and can be
 reverted, and when a workflow needs a decision it asks you right in the chat.
 Open-GSD installs itself into the extension's own storage the first time you
@@ -207,7 +207,7 @@ run a workflow and stays current; your `~/.claude` setup is never touched.
 
 ### Project types and red teaming
 
-**NEAR AI: Set Up Project Team** first asks what kind of project this is:
+**SovAI: Set Up Project Team** first asks what kind of project this is:
 software development, research and analysis, presales and solution design,
 writing and content, data analysis, or general. Each type gets a tailored team
 (for example architect, developer, reviewer, QA, security, and DevOps for
@@ -243,7 +243,7 @@ missing, or checked an older draft. Nothing is released without SIGN-OFF,
 and the delivered report carries its sources as real footnotes or endnotes
 (CreateDocument and CreatePdf). The presales reviewer and the writing editor
 are release gates in the same way. A project set up before this keeps its own
-team file; run **NEAR AI: Update Team…** to pick up the new roles.
+team file; run **SovAI: Update Team…** to pick up the new roles.
 
 In a software project, the **DevOps** member sets up a protected way of
 working: a CI workflow on every pull request (tests, a secret scan, and a
@@ -253,7 +253,7 @@ It never asks for or stores a token, and it never changes settings outside
 the repository itself: for branch protection, environments, or secrets it
 writes the exact commands and leaves them for you to approve and run.
 
-**NEAR AI: Set Up a Staff Team** (also **Set up a staff team** in Team
+**SovAI: Set Up a Staff Team** (also **Set up a staff team** in Team
 Studio) makes a military staff section team for this project: choose the
 section (J2 intelligence, J5 plans, J3 operations or J4 logistics), the doctrine profile (US Joint, US Army
 MDMP or NATO/Canadian), the level, the nation and the kind of planning, then
@@ -266,7 +266,7 @@ and the section's skills go under `.planning/staff/`, the staff settings into
 between markers of its own, so teams of different sections can share a project. An
 earlier team file of the same name moves to your teams archive. The team is
 private, its members draft and recommend, and a named person decides: only
-the **NEAR AI: Staff** commands approve, reject or release a product. It then
+the **SovAI: Staff** commands approve, reject or release a product. It then
 offers to load the starter scenario. The project records each section's team
 (`staff.teams` in its settings), and the message when setup finishes names the
 team, with **Task it now** (puts `/team:<name> ` in the chat's message box,
@@ -275,7 +275,7 @@ shows a **Staff teams** card instead of "This project has no team yet": each
 section with its team and a **Task** button, and **Set up** for sections not set
 up yet. The card appears as soon as the setup finishes, even with the chat
 already open; if the staff settings cannot be read, it says why and the reason
-is in the **NEAR AI** output. The `/team` menu lists the project's staff teams first, labelled by
+is in the **SovAI** output. The `/team` menu lists the project's staff teams first, labelled by
 section, and each section card in the Staff Room has **Task in chat**. A team
 file deleted or renamed in your teams shows as missing with **Set up again**. A
 project set up before this was recorded is offered the matching teams already in
@@ -285,7 +285,7 @@ a preview: turn on `nearAi.staff.multiUserPreview` to try the invite, join and
 admit commands, **Make This Staff Project Multi-User** and **Make a
 Single-Machine Copy**. You can convert a project with labelled products when your
 declared clearance covers those products. Operators can deploy the sync hub, and
-live editing across computers comes in a later release. **NEAR AI: Update Team…** recognises a
+live editing across computers comes in a later release. **SovAI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
@@ -326,7 +326,7 @@ tool family (`mcp__logistics__calc*`, `logstat*`, `movement*`, `readiness*`):
   you put in the project, by unit and equipment type, with stale figures
   marked.
 
-For military staff teams, **NEAR AI: Load Staff Exercise Scenario** puts an
+For military staff teams, **SovAI: Load Staff Exercise Scenario** puts an
 exercise scenario into `.planning/staff/scenario/` for the team to read. The
 starter scenario, Exercise IRON LANTERN, is fictional and unclassified: a
 peninsula with a coast and a strait, friendly and adversary orders of battle,
@@ -345,7 +345,7 @@ staff profile's own terms, with a checklist of the headings, terms and
 citations each product must contain. Loading again moves the earlier
 scenario to `.planning/staff/archive/` rather than deleting it.
 
-**NEAR AI: Staff: Start the Exercise Feed Simulation** replays Exercise IRON
+**SovAI: Staff: Start the Exercise Feed Simulation** replays Exercise IRON
 LANTERN as live feeds for a J2 demo, on this machine only: Cursor on Target
 tracks and spot reports, AIS sentences for ships in and near the Varn Strait,
 RSS from fictional outlets, and a mock partner MCP server with fictional
@@ -357,7 +357,7 @@ follows the J2 demo script and holds when the mid-demo report lands.
 resumes, steps and sets the speed: 0.5x, 1x, 2x or 4x. The inject script that
 drives it, `resources/staff/scenarios/iron-lantern.sim.jsonl`, and the message
 shapes are described in `src/domain/staff/sim/`.
-**NEAR AI: Staff: Import Feed File...** brings your own GeoJSON, KML, Cursor
+**SovAI: Staff: Import Feed File...** brings your own GeoJSON, KML, Cursor
 on Target, RSS, Atom or AIS (NMEA) file into the project's observation store.
 The file is read in a separate process, never in the editor; you see how many
 reports it holds, the format, the label and the time span, and what is held
@@ -365,14 +365,14 @@ back because it lies outside the exercise frame, and nothing is written until
 you choose Import. Imported reports name the file they came from, and
 importing the same file twice adds nothing.
 
-**NEAR AI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
+**SovAI: Open Staff Room** (also **Open the Staff Room** in Team Studio once
 you have a staff team) shows the project's staff run as a war room. The process
 rail across the top shows each step in your profile's own words and whether it
 is done, working now, next, or waiting for a named person. Below it, each staff
 section is a squad of agents, each with its state in words; a token opens the
 agent's card. On the right, **Human decisions** (in gold) lists every product
 waiting for a person: **Approve…**, **Reject…** and **Release…** run the
-**NEAR AI: Staff** commands, which ask who you are, confirm in a dialog and
+**SovAI: Staff** commands, which ask who you are, confirm in a dialog and
 sign, so nothing is decided in the page itself. Below it, the **Product
 ledger** lists every product with its state; a row opens its provenance. The
 workspaces share one map, the ledger, the decisions and one clock: **War room**
@@ -441,12 +441,12 @@ Frag O under NATO/Canadian), and the battle rhythm with open suspenses. **J4** s
 back until corrected, every calculator result with its formula, the movement
 and readiness boards, supportability per COA and the logistics annex with the
 profile's letter (the sustainment annex under US Army). Long
-registers show a page at a time. **NEAR AI: Open Staff Room** opens on a
+registers show a page at a time. **SovAI: Open Staff Room** opens on a
 section when a command passes it one (`j5`, `j3`, `j4`).
 
 **Standing watches.** A standing watch binds a PIR's indicator to an area, a
 time window and the weakest source grade it counts, until the PIR's latest
-time of value, and names the person it alerts. **NEAR AI: Staff: Create a
+time of value, and names the person it alerts. **SovAI: Staff: Create a
 Standing Watch** creates and arms one; J2 watch members can only propose one,
 which you arm with **Staff: Arm a Standing Watch**. Arming and retiring are
 signed with your device key, so a watch written into the file by hand arms
@@ -464,7 +464,7 @@ work is; press **?** for the keys.
 
 ### MCP connections
 
-**NEAR AI: Manage MCP Connections** adds Model Context Protocol servers, remote
+**SovAI: Manage MCP Connections** adds Model Context Protocol servers, remote
 (a URL) or local (a command), and shows each one's status, tools, calls,
 errors, and last use. A server is off until you switch it on for a project.
 Agents then get its tools as `mcp__<server>__<tool>`; a team member gets them
@@ -485,7 +485,7 @@ named project paths, reach named hosts). A declaration is your statement that yo
 may delete or reach the open world, or says neither way, keeps asking.
 The MCP page has a "What it does" menu for each tool, so you can say whether it
 only reads or changes data on the server. A local server runs on this machine
-with your permissions. This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+with your permissions. This is what you or the server declared it does. SovAI cannot check what a server does inside itself.
 
 **The COP map** (`mcp:cop-map`) is a built-in local server for military
 staff teams that reaches no network. Members read the COP layers and put
@@ -526,13 +526,13 @@ approved; if it later adds a tool or changes a tool's description, inputs or
 hints, those tools are not offered to agents until you choose **Approve tool
 changes** on the MCP page. Pointing a server at a new address, transport or
 program holds all its tools the same way. Your policy can also set the highest label each
-server may receive (`ceiling.mcpLabelCeilings`, through **NEAR AI: Edit
+server may receive (`ceiling.mcpLabelCeilings`, through **SovAI: Edit
 Policy**): a call from a chat whose label is above it is refused before
 anything is sent. See SECURITY.md, "MCP connections".
 
 ### Compare Models
 
-**NEAR AI: Compare Models** (also on the Tools page) shows which models do your
+**SovAI: Compare Models** (also on the Tools page) shows which models do your
 kind of work best, measured on real tasks rather than published benchmarks.
 
 - **Leaderboard first.** The top of the page ranks every model you have
@@ -561,7 +561,7 @@ kind of work best, measured on real tasks rather than published benchmarks.
 
 ### Agent Activity
 
-**NEAR AI: Open Agent Activity** (the pulse button on the chat view, or
+**SovAI: Open Agent Activity** (the pulse button on the chat view, or
 **Activity** next to running agents) is an overview of agent activity; the chat
 itself shows the work. **Now** lists the agents running: role, model (with a
 TEE, Local, or Forwarded badge), what each is doing (thinking, writing, running
@@ -595,7 +595,7 @@ and names the agent that started it.
 the running agents in the chat (next to a row of dots, one per agent, that
 shows each one's state), with **Watch the team** in Agent Activity's **Now**,
 with **Watch it live** on Team Studio's **Team shape** tab while that team is
-running, or with **NEAR AI: Watch the Team Live**. It shows the newest team run
+running, or with **SovAI: Watch the Team Live**. It shows the newest team run
 in the conversation on screen; when two runs go at once, pick one at the top.
 Plain runs that start agents (an Open-GSD workflow, for example) show too.
 
@@ -636,7 +636,7 @@ The page never shows prompts, files or tool results. Task labels are the short
 descriptions the lead gives each agent, with secrets removed and cut to 80
 characters.
 
-**NEAR AI: Show Run Performance Report** opens, for this project, where its runs'
+**SovAI: Show Run Performance Report** opens, for this project, where its runs'
 time went (model wait, tools and sub-agents, approval wait, idle), tokens in,
 cached and out, model latency (p50, p90, max), input tokens per call, unanswered
 approvals, and runs a reload cut off, with one row per run. From a terminal,
@@ -644,14 +644,14 @@ approvals, and runs a reload cut off, with one row per run. From a terminal,
 same report for any project. The activity history keeps a run's events up to
 256 KiB per run rather than its last 100 events.
 
-**NEAR AI: Set Up Research Verifiers** applies the research profile to an
+**SovAI: Set Up Research Verifiers** applies the research profile to an
 existing project: a block in AGENTS.md, coarse phases, and three scripts in
 `scripts/verify/` (citation resolution, figure recompute from
 `report/figures.json`, and an internal-path leak check) plus `verify-all.mjs`.
 They read files only, so agents run them without asking; existing files are
 never overwritten. You may edit them, but an edited verifier no longer matches
 the hash recorded when it was scaffolded, so agents ask before running it until
-you run **NEAR AI: Trust Research Verifiers**, which lists what changed and asks
+you run **SovAI: Trust Research Verifiers**, which lists what changed and asks
 before recording the new versions.
 
 In a research project the plan checker is skipped only for plans that change
@@ -663,7 +663,7 @@ asking, and its next line says "PLAN CHECK SKIPPED (content-only plan): the plan
 checker was NOT run" with the evidence: the marker means "carry on", not
 "checked". See SECURITY.md, "Plan checks the research profile skips".
 
-**NEAR AI: Export Usage and Activity** (also on the Agent Activity page and in
+**SovAI: Export Usage and Activity** (also on the Agent Activity page and in
 the Tools tab) saves usage for an organization, a project, or everything, over
 today, the last 7 or 30 days, or custom dates, as CSV or JSON: one row per run
 (time, organization, project, conversation and run IDs, the redacted first line,
@@ -711,13 +711,13 @@ response, in batches, even after a reload. Figures say how sure they are:
   asked again every hour. NEAR's total appears without any action once NEAR
   turns the summary on.
 
-**Where to set the usage reporting token.** Any of these runs **NEAR AI: Set
+**Where to set the usage reporting token.** Any of these runs **SovAI: Set
 Usage Reporting Token**:
 
-- **Settings** (search "NEAR AI" or "usage reporting"): `nearAi.spend.useNearUsageTotal`,
+- **Settings** (search "SovAI" or "usage reporting"): `nearAi.spend.useNearUsageTotal`,
   next to the daily limit, has **Set usage reporting token** and **Clear**
   links. The setting itself is only an on/off switch (on by default) for using
-  NEAR's total once a token is set; a token pasted into any NEAR AI setting is
+  NEAR's total once a token is set; a token pasted into any SovAI setting is
   moved to secret storage and removed from settings.
 - **The chat**: below the status line, "Match the NEAR console exactly: sign
   in to set up usage reporting" when no token is set. With a token set, the
@@ -728,7 +728,7 @@ Usage Reporting Token**:
 - **Spending Limits**: **Set usage reporting token…** and **Clear usage
   reporting token**.
 - **Agent Activity**, above the overview's cost, and **Elsewhere** in the Tools tab.
-- The Command Palette: **NEAR AI: Set Usage Reporting Token**.
+- The Command Palette: **SovAI: Set Usage Reporting Token**.
 
 **How to get one: sign in once.** The token is not in the NEAR AI Cloud
 console's UI, so the extension makes it for you. **Set Usage Reporting Token**
@@ -739,8 +739,8 @@ offers **Sign in with GitHub** or **Sign in with Google**:
 2. NEAR sends the sign-in back to a one-time listener on `127.0.0.1` that
    only this sign-in can use. The page takes the sign-in out of the address
    bar and browser history.
-3. The extension creates a read-only (`usage:read`) token named "NEAR AI for
-   VS Code (date)" with no expiry, so it keeps working until it is revoked.
+3. The extension creates a read-only (`usage:read`) token named "Sterling
+   Sovereign AI (date)" with no expiry, so it keeps working until it is revoked.
    It revokes the token the extension's previous sign-in made, then signs the
    session out, which revokes the sign-in itself. Only the read-only token is
    kept, in secret storage.
@@ -1026,7 +1026,7 @@ until it runs out aren't shown.
 - **Update Team.** A team made from a built-in project type records where it
   came from in its frontmatter (`template`, `templateVersion`, and a
   `templateBase` list with a fingerprint of each member as generated), so it
-  can pick up improved built-in roles later. **NEAR AI: Update Team…** (or
+  can pick up improved built-in roles later. **SovAI: Update Team…** (or
   **Update team…** on the team's card in Team Studio) previews the change
   member by member before anything is written: a member you never changed is
   replaced with the current definition; a member you changed is shown as a
@@ -1125,16 +1125,16 @@ until it runs out aren't shown.
   made, personal data and J4 numbers without a calculation). Every product
   follows one path: draft, guard-checked, awaiting decision, then approved or
   rejected, then released. No agent can approve, reject or release anything:
-  only a named person can, with **NEAR AI: Staff: Approve a Product**,
+  only a named person can, with **SovAI: Staff: Approve a Product**,
   **Reject a Product**, **Release a Product** or **Withdraw a Product**,
   signed with this device's key. Your name and role are self-declared until
-  verified credentials arrive. **NEAR AI: Staff: Show Products** lists every
-  product, what waits for you, and its history. **NEAR AI: Staff: Decide a
+  verified credentials arrive. **SovAI: Staff: Show Products** lists every
+  product, what waits for you, and its history. **SovAI: Staff: Decide a
   PIR** approves or rejects a PIR awaiting a decision, signed the same way; a
   decision written into the PIR register any other way does not count. After
   switching to a git branch with an older or different staff ledger, **NEAR
   AI: Staff: Use This Branch's Ledger** makes that branch's ledger the one
-  NEAR AI checks, if its own signatures and chain verify. The
+  SovAI checks, if its own signatures and chain verify. The
   exercise box and the
   real-entity list are yours to set in `.planning/.near-ai/staff-guard.json`
   and `.planning/staff/real-entities.txt`. Everything a staff team writes
@@ -1144,7 +1144,7 @@ until it runs out aren't shown.
 
 ### Cybersecurity scans
 
-**NEAR AI: Cybersecurity** opens a panel that tests a system you own for
+**SovAI: Cybersecurity** opens a panel that tests a system you own for
 security problems. Pick a target, a web address, a folder in your project, a
 range of addresses, a running container, or a git folder, and the panel shows
 the exact scope it will touch before anything is sent to a model: hosts, ports,
@@ -1187,7 +1187,7 @@ because a safety-tuned model may refuse a scan's payloads.
 
 ### Your project's state follows the project
 
-Everything NEAR AI keeps for a project lives in one folder inside the project,
+Everything SovAI keeps for a project lives in one folder inside the project,
 `.near-ai/state/`, which the extension keeps out of git. Every editor that
 opens the folder on this computer (VS Code, code-server, another window) reads
 and writes the same files, so they all show the same thing.
@@ -1200,7 +1200,7 @@ and writes the same files, so they all show the same thing.
 - **Five live, the rest archived.** The 5 most recently used conversations stay
   open and instant (change it with `nearAi.history.liveConversations`). Older
   ones are archived inside the project, never deleted, and still listed in
-  **NEAR AI: Show Chat History**; choosing one opens it whole and makes it live
+  **SovAI: Show Chat History**; choosing one opens it whole and makes it live
   again.
 - **Runs, checkpoints and spend history** for the project are kept there too,
   so an editor never mistakes another editor's live run for a cut-off one.
@@ -1211,7 +1211,7 @@ and writes the same files, so they all show the same thing.
   Choices you applied earlier in one editor's user settings are offered for
   import once, never copied without a click. Compare Models lists what this
   project has chosen under **Chosen for this project**, with a **Use my
-  settings** button on each row. To drop every choice at once, run **NEAR AI:
+  settings** button on each row. To drop every choice at once, run **SovAI:
   Clear This Project's Model Choices**. A cleared choice stays cleared on every
   computer after sync. Putting a model into one role changes only that role.
 - **Pick up where you left off.** When you open a project in another editor or
@@ -1222,7 +1222,7 @@ and writes the same files, so they all show the same thing.
 - **Your old chats come along.** The first time 0.4.20 runs in an editor, that
   editor's earlier chats, runs, comparisons and spend for the project are
   merged into the project folder. Nothing is overwritten or deleted, and
-  opening a folder you never used NEAR AI in still writes nothing.
+  opening a folder you never used SovAI in still writes nothing.
 - **The same NEAR AI key, no set-up.** A second editor on the same computer
   uses the project's NEAR AI key without asking, because an encrypted copy of
   it lives in the state folder. It is opened only inside the editor on your
@@ -1234,7 +1234,7 @@ and writes the same files, so they all show the same thing.
 
 Project sync keeps an encrypted copy of the project's state on its own git
 host, so the same chats, runs, comparisons, model choices and NEAR AI key are
-there on another computer. It is off until you turn it on. NEAR AI pushes only
+there on another computer. It is off until you turn it on. SovAI pushes only
 its own encrypted `near-ai/state` branch there, plus your own branch when you
 choose to put your code online (see below). Sync itself never touches your
 branches and never pushes to `main`.
@@ -1247,27 +1247,27 @@ branches and never pushes to `main`.
   under the control. One click starts the right step. It works from the
   keyboard and in light, dark and high-contrast themes. While sync is off, the
   pick-up card and the first-run screen also offer **Keep this project on your
-  other machines**. On a computer that has no NEAR AI profile yet it appears
+  other machines**. On a computer that has no AI profile yet it appears
   only after NEAR AI is connected, so **Connect NEAR AI to start** comes first.
   Dismiss it once and it never comes back.
-- **Turn on** (**NEAR AI: Turn On Project Sync**). It first shows what your git
+- **Turn on** (**SovAI: Turn On Project Sync**). It first shows what your git
   host will and will not be able to see, and only after you agree does it make
   your recovery code.
 - **The recovery code** is 52 characters in 13 groups of 4, shown once. It is
-  never stored, logged or sent anywhere, and nobody, including NEAR AI, can
+  never stored, logged or sent anywhere, and nobody, including SovAI, can
   recover it for you. Keep it in a password manager.
 - **Sync is turned on in each editor you use.** Whether sync is on is decided
   in each editor, not by a file in the project. A second editor on the same
   computer shows **Sync off · Turn on** until you click it; there it shows the
   same consent screen and makes no new recovery code.
-- **On another computer**, open the cloned project and run **NEAR AI: Enter
+- **On another computer**, open the cloned project and run **SovAI: Enter
   Recovery Code**. Your chats, runs, comparisons and model choices appear, and
   the NEAR AI key is set up for that project. If that computer already has
   chats of its own, they are kept and added.
 - **When it runs.** Saving on this computer is immediate. Sync runs after a
   run or chat reply ends, 60 seconds after you leave the window when nothing is
   running, every `nearAi.sync.intervalMinutes` minutes (10 by default, 0 turns
-  it off) while the editor is open and idle, and on **NEAR AI: Sync Project
+  it off) while the editor is open and idle, and on **SovAI: Sync Project
   Now**. It pulls when the project opens (the card says "Checking for
   updates…" and chatting is never blocked) and when you come back to the window
   after 5 minutes or more. A long chat does not hold sync back: while a run is
@@ -1327,39 +1327,39 @@ Nothing happens on your account until you click.
   people you invite, and GitHub's free plan limits some features for private
   repositories. On a public one, anyone can see your project's code, but your
   chats, keys and other state stay encrypted and unreadable.
-- **NEAR AI pushes only two things.** Its own encrypted `near-ai/state`
+- **SovAI pushes only two things.** Its own encrypted `near-ai/state`
   branch, and your own current branch when you choose to put your code online.
   It creates no other branch and never forces a push.
 - **Pushing your own code is a separate step**, after sync. It shows exactly
   which files would go up and blocks likely secrets (`.env` files, keys,
   credential files). It also checks the earlier commits that would be
   published, not only the current files: a secret committed and later deleted
-  still blocks the push, because the history would carry it. NEAR AI never
+  still blocks the push, because the history would carry it. SovAI never
   rewrites your history for you. Declining the code push leaves sync working,
   and ends with a sentence saying how to do it later.
 - **Put your code online whenever you choose.** Run
-  **NEAR AI: Put This Project's Code Online** in the Command Palette. It runs
+  **SovAI: Put This Project's Code Online** in the Command Palette. It runs
   the same checks as the setup (every file listed, secrets blocked, the history
   checked, your click on the summary, your own git name and email) against the
   project's online repository. Running **Give This Project an Online Home**
   again on a project that already has one offers the same push when your
   branch is not online yet, and otherwise tells you the online home has its
   code.
-- **Your own records stay on this computer.** NEAR AI's account and run records
+- **Your own records stay on this computer.** SovAI's account and run records
   in `.planning/.near-ai/` (your organization and profiles, activity, costs,
   resume points and the like) are left out of the code push, and the summary
   names them. Only the shared project files, `team.md`, `project.json` and
   `verifiers.json`, go up with your code.
 - **The default branch.** While `near-ai/state` is the only branch in the
   repository, GitHub shows it as the repository's default branch. Once your
-  code is pushed, NEAR AI makes your branch the default branch on GitHub when
+  code is pushed, SovAI makes your branch the default branch on GitHub when
   the default is still `near-ai/state`, using your GitHub sign-in. It never
-  changes a default branch you chose yourself. On a pasted address NEAR AI
+  changes a default branch you chose yourself. On a pasted address SovAI
   cannot do this, so it tells you which setting to change (on GitHub:
   Settings, then Default branch).
 - **A repository set up by an earlier version** may still show `near-ai/state`
   as its default branch. Run **Give This Project an Online Home** again: when
-  your branch is already online, NEAR AI asks once, with a click, whether to
+  your branch is already online, SovAI asks once, with a click, whether to
   make it the default branch. Nothing changes unless you click, and nothing is
   pushed.
 - **Without GitHub sign-in** (for example in code-server without the GitHub
@@ -1373,7 +1373,7 @@ Nothing happens on your account until you click.
 
 | Your git host and anyone who can read the repository | |
 | --- | --- |
-| Can see | That this project uses NEAR AI sync, roughly how much is stored, and when you save |
+| Can see | That this project uses SovAI sync, roughly how much is stored, and when you save |
 | Cannot see | Conversation titles or text, messages, ids, model names, your NEAR AI key, or your name |
 
 Everything is encrypted on your computer before it leaves, and only the
@@ -1390,13 +1390,13 @@ teams above. It is an early preview and is off until you turn on the setting
 `nearAi.team.preview`. For now a team holds only its owner: inviting teammates
 arrives in a later release.
 
-- **NEAR AI: Enable Team Mode** creates a team for the open project. It asks
+- **SovAI: Enable Team Mode** creates a team for the open project. It asks
   for a team name and your name as teammates will see it, makes a signing key
   for this computer and keeps it in the editor's secret storage, starts a
   signed team log on its own branch of the project's git remote, and commits a
   small `team.json` so every clone can find the team. Your code branch is
   pushed only if you choose **Share with my team** afterwards.
-- **NEAR AI: Verify Team Log** checks every entry in the team log (signatures,
+- **SovAI: Verify Team Log** checks every entry in the team log (signatures,
   order and permissions) and reports who is in the team and anything it
   refused. It is shown when the preview is on or a team is running in this
   project.
@@ -1418,12 +1418,12 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Get started in two minutes
 
-1. Install **NEAR AI for VS Code** and open a project folder. From 0.4.38 each release also ships
+1. Install **Sterling Sovereign AI** and open a project folder. From 0.4.38 each release also ships
    as the Sterling workbench container image on the GitHub Container Registry, recorded by digest
    on the GitHub release (0.4.37's image is on the registry without one); the image has no
    sign-in of its own, so run it on `127.0.0.1` only.
-2. Open the **NEAR AI** chat and choose **Set up a new profile** (or run
-   **NEAR AI: Set Up a New Profile** from the Command Palette). A profile is
+2. Open the **SovAI** chat and choose **Set up a new profile** (or run
+   **SovAI: Set Up a New Profile** from the Command Palette). A profile is
    your NEAR AI key or local runtime for this project; it is working once the
    extension has checked that it connects. Until then the chat shows only
    this step, because everything else needs a working profile.
@@ -1434,12 +1434,12 @@ copy of Open-GSD to a project that doesn't already have one.
 4. Once you are connected, the chat comes into view and suggests what to do
    next. If the project has no team yet, it starts with setting up your
    project team. You can skip it and start chatting.
-5. Open the **NEAR AI** view in the secondary side bar and start chatting, or
+5. Open the **SovAI** view in the secondary side bar and start chatting, or
    type `/new-project` to plan something new.
 
 ## Security and privacy
 
-Use **NEAR AI: Generate SA&A Package…** in the Command Palette to export a Security
+Use **SovAI: Generate SA&A Package…** in the Command Palette to export a Security
 Assessment and Authorization draft for a published release. Choose the version and
 where to save the ZIP. The extension checks the published evidence archive against
 its release digest and builds a consolidated editable sponsor Word draft and a
@@ -1452,7 +1452,7 @@ records missing and partial coverage. Your organization completes deployment
 scope, findings, and approvals through its own review process.
 
 - **Web research with guard rails.** Agents search with the provider you pick
-  (**NEAR AI: Set Up Web Search**: your own SearXNG, Brave Search, or Tavily),
+  (**SovAI: Set Up Web Search**: your own SearXNG, Brave Search, or Tavily),
   read pages and documents with WebFetch, verify quotes with
   CheckCitations, and check a draft for copied or closely paraphrased
   passages with CheckOriginality (it compares the draft only with pages
@@ -1463,7 +1463,7 @@ scope, findings, and approvals through its own review process.
   scanned only when you name it literally, an intrusive step needs one grant and
   is still refused if it strays outside the scope, and exploit payloads run in a
   container or temporary folder with no network, never on your machine.
-- **Dependency checks.** **NEAR AI: Scan Dependencies for Vulnerabilities**
+- **Dependency checks.** **SovAI: Scan Dependencies for Vulnerabilities**
   writes an SBOM (`sbom.cdx.json`, CycloneDX) from your lockfiles and checks
   every package on OSV.dev and your runtimes on endoflife.date, after asking
   once per project; only names and versions are sent. Findings appear in
@@ -1478,10 +1478,10 @@ scope, findings, and approvals through its own review process.
 - **Your policy.** A signed policy file in this extension's own storage, never
   in your project, sets the most the agent may do, and your settings only
   narrow it. Your organization can hand every computer its rules as a signed
-  file: **NEAR AI: Add Your Organization's Rules** opens it and shows twelve
+  file: **SovAI: Add Your Organization's Rules** opens it and shows twelve
   words to compare with the ones your organization's security contact reads
   to you, and your own rules can then only narrow your organization's.
-  **NEAR AI: Policy** opens the policy page, "Your organization's rules" (or
+  **SovAI: Policy** opens the policy page, "Your organization's rules" (or
   "Your rules" without them), read only: a change is shown there as a
   proposal first, applied to your own rules or saved as a file for your
   organization, and the page has **Edit my rules**, **Show as stored** and
@@ -1502,9 +1502,9 @@ scope, findings, and approvals through its own review process.
   meeting those programs stays your organization's obligation. Every model request is checked against its routing before anything is
   sent and leaves a record in a log of its own; on a fresh install nothing
   changes where requests go. See [Your policy file and decision records](SECURITY.md#your-policy-file-and-decision-records).
-- **Labels and clearances.** **NEAR AI: Set Label** labels a file, a folder or
+- **Labels and clearances.** **SovAI: Set Label** labels a file, a folder or
   the project, and agents cannot read what your clearances do not cover. Add a
-  clearance in **NEAR AI: Policy** with **Edit my rules**, then **Apply my draft**.
+  clearance in **SovAI: Policy** with **Edit my rules**, then **Apply my draft**.
   A chat's label rises with what its agents read and decides where its content
   is sent. Content at a level that needs a private cloud model goes to NEAR AI
   Cloud only over a connection proven to end inside its private hardware, and
@@ -1516,7 +1516,7 @@ scope, findings, and approvals through its own review process.
   the computer is not recorded as accredited. Labels show the scale's name with
   the level ("Organization: Internal"); the organization's Confidential level
   reads "Sensitive".
-  Only you lower a chat's label, with **NEAR AI: Lower This Chat's Label** and a
+  Only you lower a chat's label, with **SovAI: Lower This Chat's Label** and a
   reason. Click the chat's label beside the model to run it, or use the button
   under a refusal that names it; lowering a file's label does not lower a chat
   that already read it. Labels and routing are an organizational control that helps prevent
@@ -1567,11 +1567,11 @@ Read the full [security and trust report](SECURITY.md).
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `nearAi.defaultModel` | `z-ai/glm-5.3` | Model used for new chats. |
-| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands, including reading credential files inside the project; writes into `.git/` and NEAR AI's state folders, publishing, signing in or out and destruction still ask with no "always allow", after a credential read anything that could send data out asks too, and the key folder and credential stores are refused (intended for throwaway workspaces; actions held after the agent read outside content still ask; see SECURITY.md, "What the agent can do without asking"). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
+| `nearAi.actionPolicy` | `approve-risky` | `approve-risky`: edits and commands ask first. `mostly-autonomous`: edits run, commands ask. `auto`: edits run, and commands run when they pass the safety check (fixed rules for clear cases, a private TEE model for the rest; risky or uncertain commands ask, with the reason). `fully-autonomous`: everything runs except deny-listed commands, including reading credential files inside the project; writes into `.git/` and SovAI's state folders, publishing, signing in or out and destruction still ask with no "always allow", after a credential read anything that could send data out asks too, and the key folder and credential stores are refused (intended for throwaway workspaces; actions held after the agent read outside content still ask; see SECURITY.md, "What the agent can do without asking"). You can also switch it from the picker next to the model in the chat's bottom bar (Ask before edits / Edits auto / Auto / Full auto); it writes user settings, or the workspace or folder settings when the value is set there, asks before Full auto, and shows "Stopped" while the emergency stop is on. |
 | `nearAi.agent.allowCommands` | `git status`, `git diff`, `ls`, … | Commands that run without asking, matched by their leading words (`git push` covers `git push origin main`, but never `--force` or a URL). The approval card's **Always allow** adds entries. In `auto`, each part of a chained command is matched on its own; in other modes, anything with `;`, `\|`, `>`, or `$( )` asks. |
 | `nearAi.agent.denyCommands` | `rm -rf /`, `git push --force`, … | Commands the agent may never run. |
 | `nearAi.agent.deepModel` / `standardModel` / `fastModel` | Kimi K3 / GLM 5.3 / Qwen3.6-35B-A3B | Models for Open-GSD's sub-agent tiers (opus / sonnet / haiku). By default only research, synthesis, and mapping roles use the fast tier; GSD's `budget` and `adaptive` model profiles also send checkers and the test-writing auditor there. |
-| `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**NEAR AI: Update Team…**). |
+| `nearAi.teams.updateNotifications` | `true` | Say once per version when a team made from a built-in project type has a newer template (**SovAI: Update Team…**). |
 | `nearAi.agent.safetyModel` | the fast tier | With `auto`, the model that checks commands the rules cannot decide. Used only when it runs privately (TEE or local); otherwise those commands ask. |
 | `nearAi.agent.imageReview` | `ask` | `ask`: each image the agent makes waits in the chat for you to accept, change or discard it, and is saved to its path only when you accept it (the agent waits too, in every approval mode; past `nearAi.agent.approvalTimeoutMinutes` the run is paused on it, except in Full auto and for a background helper agent, where the review times out, the draft is kept and the run carries on). `off`: images are saved straight away. |
 | `nearAi.agent.maxParallelAgents` | `8` | Sub-agents that may run at once. |
@@ -1596,9 +1596,9 @@ Read the full [security and trust report](SECURITY.md).
 | `nearAi.dailySpendLimitUsd` | `0` (none) | Stop sending requests once today's spend reaches this amount: the larger of NEAR's own total for the key (with a usage reporting token) and this computer's spend ledger. |
 | `nearAi.spend.dayBoundary` | `local` | When "today" starts for spend figures and the daily limit: local midnight, or `utc`. |
 | `nearAi.spend.useNearUsageTotal` | `true` | With a usage reporting token set, show NEAR's own total (and check the daily limit against it). Its description links to **Set usage reporting token** and **Clear**; the token itself lives in secret storage. |
-| `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in NEAR AI projects. |
+| `nearAi.autoInstallGsd` | `true` | Install Open-GSD when a workflow needs it and keep it current in SovAI projects. |
 | `nearAi.mcp.localServerEffects` | `{}` | What the tools of an MCP server that runs on this computer may do, by server id, declared once: `"read"`, `{ "workspaceWrite": ["docs/**"] }`, `{ "network": ["api.example.com"] }`. A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. Until a local server is declared, its tools that change data ask before every call in every mode, and a tool that says it may delete or reach the open world, or does not say, keeps asking. A declaration that cannot be read is ignored with a warning. User settings only. See SECURITY.md, "MCP connections". |
-| `nearAi.team.preview` | `false` | Shows **NEAR AI: Enable Team Mode** in the Command Palette. Team Mode is an early preview, and for now a team holds only its owner (see [Team Mode](#team-mode-preview)). |
+| `nearAi.team.preview` | `false` | Shows **SovAI: Enable Team Mode** in the Command Palette. Team Mode is an early preview, and for now a team holds only its owner (see [Team Mode](#team-mode-preview)). |
 | `nearAi.team.pollSeconds` | `15` | How often, in seconds, Team Mode checks the team log while this window is focused (5 to 3600); unfocused windows check every 2 minutes. |
 
 ## Good to know
@@ -1625,7 +1625,7 @@ Read the full [security and trust report](SECURITY.md).
 - **Endpoint rejected:** use an `https://` URL, or `http://localhost` for a
   local runtime.
 - **Local runtime unreachable:** start it (for example `ollama serve`) and
-  check the URL ends in `/v1`, then run **NEAR AI: Set Up** again.
+  check the URL ends in `/v1`, then run **SovAI: Set Up** again.
 - **A model goes quiet mid-reply:** a reply that sends nothing new for 2
   minutes (keep-alive pings don't count; reasoning does), that NEAR cuts off
   before it finishes, or that runs past an hour is stopped and its request
@@ -1663,29 +1663,29 @@ Read the full [security and trust report](SECURITY.md).
   minutes, which stops every run in it. Keep the tab open and in front during
   long runs; if a run is cut off, **Resume** it from the chat.
 - **A conversation says "Locked conversation":** this editor cannot open its
-  key. Run **NEAR AI: Enter Recovery Code** and paste the recovery code that was
+  key. Run **SovAI: Enter Recovery Code** and paste the recovery code that was
   shown when sync was turned on. It happens when `nearAi.sync.keepKeyInProject`
   is off, or when the chat came from another computer that you have not
   unlocked yet.
 - **"This project has no online home yet, so it cannot sync":** the project has
   no git remote. Click **No online home · Set up** in the chat bar, or run
-  **NEAR AI: Give This Project an Online Home**.
+  **SovAI: Give This Project an Online Home**.
 - **Sync says "Sync needs you to sign in. Choose Sync Project Now.":** automatic
-  syncs never open a sign-in. Run **NEAR AI: Sync Project Now** and sign in to
+  syncs never open a sign-in. Run **SovAI: Sync Project Now** and sign in to
   GitHub when asked. If the message says git asked for a sign-in the editor
   cannot show, run `git fetch` once in a terminal in the project so your
   credential helper can save it.
 - **I lost the recovery code:** nobody can recover it for you. On a computer
-  that is still unlocked, run **NEAR AI: Show a New Recovery Code**. A new code
+  that is still unlocked, run **SovAI: Show a New Recovery Code**. A new code
   does not lock out the old one: anyone who has your old code and can read the
   project's repository can still open everything synced, including what is
   synced from now on, because your chats keep the same key. A way to change that
   key is planned.
 - **Chats are not saved in this project:** the project's saved-state folder is
-  part of the project's files in git, so NEAR AI does not use it. Chats still
+  part of the project's files in git, so SovAI does not use it. Chats still
   work, but they are not saved until the folder is taken out of the repository.
   Nothing was changed. Take it out of git's index, for example with
-  `git rm -r --cached .near-ai/state .near-ai/locks`, then commit. NEAR AI's own
+  `git rm -r --cached .near-ai/state .near-ai/locks`, then commit. SovAI's own
   `.gitignore` files keep it out from then on.
 - **"This conversation is running in another editor right now":** another
   editor on this project is running that conversation. Wait for it to finish

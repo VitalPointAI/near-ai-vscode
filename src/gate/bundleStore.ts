@@ -50,9 +50,9 @@ export const POLICY_DRAFT_FILE = 'policy-draft.json';
 export const POLICY_DRAFT_BASE_FILE = 'policy-draft.base';
 
 /** Said when a draft was made from a policy that is no longer the one in force (D-53). */
-export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open NEAR AI: Policy and choose Edit my rules again to start from the policy in force.';
+export const STALE_DRAFT_TEXT = 'Your policy changed after this draft was made. Open SovAI: Policy and choose Edit my rules again to start from the policy in force.';
 /** A draft that is not one JSON object. */
-export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in NEAR AI: Policy wrote it.';
+export const POLICY_DRAFT_SHAPE_TEXT = 'Nothing was changed: the draft must be one JSON object, the policy as Edit my rules in SovAI: Policy wrote it.';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A file larger than this is not read at all; the verifier's own limit applies to what is signed, this one protects memory. */
@@ -213,7 +213,7 @@ async function install(globalStorageDir: string, secrets: SecretStorageLike, env
     await announceNextHash(secrets, before.hash);
   } catch (error) {
     await withdrawNextHash(secrets).catch(() => undefined);
-    throw new BundleStoreError('Nothing was written: NEAR AI could not update its record of your policy in this computer\'s secret storage.', { cause: error });
+    throw new BundleStoreError('Nothing was written: SovAI could not update its record of your policy in this computer\'s secret storage.', { cause: error });
   }
   try {
     await writeFileAtomic(file, `${JSON.stringify(envelope, null, 2)}\n`);
@@ -389,7 +389,7 @@ async function asideName(file: string, nowMs: number): Promise<string> {
 }
 
 /**
- * The person's own command (NEAR AI: Reset Policy to Defaults): signs a fresh default bundle and keeps the old file beside it as
+ * The person's own command (SovAI: Reset Policy to Defaults): signs a fresh default bundle and keeps the old file beside it as
  * policy-bundle.json.replaced-<epoch ms>, never deleted. Returns the event policy.reset for the caller to record. Throws BundleStoreError with a plain
  * message, with the old file still in place, when the identity or the disk fails.
  */
@@ -405,7 +405,7 @@ export async function resetPolicyToDefaults(globalStorageDir: string, secrets: S
       marker = await readLastValid(secrets);
       identity = await identityFor(globalStorageDir, secrets, options);
     } catch (error) {
-      throw new BundleStoreError('Nothing was changed: NEAR AI could not use its signing key on this computer, so the policy was not reset.', { cause: error });
+      throw new BundleStoreError('Nothing was changed: SovAI could not use its signing key on this computer, so the policy was not reset.', { cause: error });
     }
     const effective = effectiveNow(nowMs, lastValidAtOf(marker));
     const payload = defaultBundlePayload({ issuer: { fingerprint: identity.fingerprint, publicKey: identity.publicKey }, now: effective });
@@ -454,7 +454,7 @@ export interface OwnedDraftFields {
 }
 
 /** Added to a v2 draft refusal whose cause is a newer format (an unknown section or feature), so the person updates instead of guessing (D-07). */
-export const DRAFT_UPDATE_TEXT = 'If a newer version of NEAR AI wrote this draft, update the extension first.';
+export const DRAFT_UPDATE_TEXT = 'If a newer version of SovAI wrote this draft, update the extension first.';
 
 /**
  * Reads a draft as a personal layer document (FND-02, D-04). JSON and object checks with today's messages; a draft with `bundleVersion` 1 or none takes
@@ -530,7 +530,7 @@ export interface ApplyPolicyDraftInput {
 }
 
 /**
- * NEAR AI: Apply Policy Draft (D-41, D-53, FND-02). Under bundle.lock: the personal layer stored now must be valid and its hash must equal `baseHash` (the
+ * SovAI: Apply Policy Draft (D-41, D-53, FND-02). Under bundle.lock: the personal layer stored now must be valid and its hash must equal `baseHash` (the
  * hash of the layer the draft was made from), so an old draft never undoes another window's edit or a reset; the draft is read by parsePolicyDraft, with
  * this extension setting the issuer (this install's key) and the dates itself, so a draft cannot sign a policy in another device's name or with a past or
  * far-future date (D-12). Under your organization's layer, an edit that widens past it is refused with the key named (D-20), and a value already clamped
@@ -548,7 +548,7 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
     try {
       marker = await readLastValid(secrets);
     } catch (error) {
-      throw new BundleStoreError('Nothing was changed: NEAR AI could not read its record of your policy in this computer\'s secret storage.', { cause: error });
+      throw new BundleStoreError('Nothing was changed: SovAI could not read its record of your policy in this computer\'s secret storage.', { cause: error });
     }
     const disk = await verifyDisk(globalStorageDir, secrets, nowMs, marker);
     const stored = disk.state;
@@ -558,7 +558,7 @@ export async function applyPolicyDraft(globalStorageDir: string, secrets: Secret
     try {
       identity = await identityFor(globalStorageDir, secrets, options);
     } catch (error) {
-      throw new BundleStoreError('Nothing was changed: NEAR AI could not use its signing key on this computer.', { cause: error });
+      throw new BundleStoreError('Nothing was changed: SovAI could not use its signing key on this computer.', { cause: error });
     }
     const effective = effectiveNow(nowMs, lastValidAtOf(marker));
     const next = parsePolicyDraft(draftText, {

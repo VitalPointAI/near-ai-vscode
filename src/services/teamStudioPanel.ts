@@ -30,7 +30,7 @@ import { homeFolder, teamLibraryDir, teamsMoveInFlight, whenTeamsMoved } from '.
 import { ActivityStore } from './activityStore';
 import { keptRoleTests, projectIdentity, teamKey } from '../domain/teamDashboard';
 
-// The NEAR AI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
+// The SovAI Team Studio tab. One tab at a time; opening it again shows it (and, for the project
 // team setup, starts the guided builder).
 
 const DRAFT_KEY = 'nearAi.teamStudio.draft';
@@ -92,7 +92,7 @@ async function optimisationSetup(auth: AuthService, context: vscode.ExtensionCon
 async function teamAiDeps(auth: AuthService, runtimeOf: (root: string) => Promise<GateRuntime | undefined>): Promise<TeamAiDeps> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
   const active = await activeProvider(root, auth).catch(() => undefined);
-  if (!active) throw new Error('Set up a NEAR AI profile for this project first.');
+  if (!active) throw new Error('Set up an AI profile for this project first.');
   const tiers = readModelTiers();
   const settings = readSettings();
   return {
@@ -147,7 +147,7 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
   const library = new TeamLibrary(teamLibraryDir(homeFolder()));
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'teams');
   const shared = sharedMedia(context.extensionUri);
-  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'NEAR AI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
+  const panel = vscode.window.createWebviewPanel('nearAiTeamStudio', 'SovAI Team Studio', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media, shared] });
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => panel.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
   panel.webview.html = teamStudioHtml({ cspSource: panel.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('teams.js'), style: asset('teams.css'), network: asset('network.css'), base: panel.webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString(), probe: layoutProbeAsset(panel.webview, shared) });
@@ -288,8 +288,8 @@ export async function openTeamStudio(context: vscode.ExtensionContext, auth: Aut
     },
     ask: (prompt, value, validate) => Promise.resolve(vscode.window.showInputBox({ title: 'Team Studio', prompt, value, validateInput: (text) => text.trim() ? validate?.(text) : 'Enter a name.' })),
     // A share file is <team>.near-team.json; the dialog filters on its last extension, json. A team .md file can be imported too.
-    pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'NEAR AI team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
-    pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'NEAR AI team': ['json', 'md'] }, title: 'Import a NEAR AI team', canSelectMany: false }))?.[0]?.fsPath,
+    pickShareTarget: async (name) => (await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(rootNow() ?? homeFolder(), name)), filters: { 'SovAI agent team': ['json'] }, title: 'Share team: save it as one file to send' }))?.fsPath,
+    pickImportSource: async () => (await vscode.window.showOpenDialog({ filters: { 'SovAI agent team': ['json', 'md'] }, title: 'Import a SovAI agent team', canSelectMany: false }))?.[0]?.fsPath,
     // 0.4.30: a picture for a team's icon. The host checks it by its bytes (PNG, JPEG or WebP, at most 2 MB); SVG is never offered or accepted.
     pickIconSource: async () => (await vscode.window.showOpenDialog({ filters: { Images: ['png', 'jpg', 'jpeg', 'webp'] }, title: 'Choose a picture for the team icon', canSelectMany: false, openLabel: 'Use as icon' }))?.[0]?.fsPath,
     home: homeFolder(),

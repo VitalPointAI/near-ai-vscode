@@ -320,8 +320,8 @@ test('every refusal sentence is plain', () => {
     assert.ok(!sentence.includes(['NEAR', 'organization'].join(' ')), `${name}: says your organization`);
     assert.match(sentence, /\.$/, `${name}: a whole sentence`);
   }
-  assert.match(ENROLMENT_REFUSALS['needs-update'], /Update the NEAR AI extension/);
-  assert.match(ORGANIZATION_LAYER_REFUSALS['needs-update'], /Update the NEAR AI extension/);
+  assert.match(ENROLMENT_REFUSALS['needs-update'], /Update SovAI/);
+  assert.match(ORGANIZATION_LAYER_REFUSALS['needs-update'], /Update SovAI/);
 });
 
 test('D-12, D-14: the modal and expiry words', () => {

@@ -2,7 +2,7 @@
 // install, and the last-valid marker in SecretStorage is the main proof of an earlier one. When that marker is gone because the whole secret store was
 // wiped (a cleared browser on code-server, a new keyring), the disk still remembers: this module looks for what survives there, so a wiped store never
 // reads as a fresh install and never signs a policy by itself. Anything found, or anything that cannot be read, counts as evidence; the person then
-// restores trust with NEAR AI: Reset Policy to Defaults (which is itself recorded as policy.reset).
+// restores trust with SovAI: Reset Policy to Defaults (which is itself recorded as policy.reset).
 //
 // What it looks at, in order, and stops at the first hit:
 //   1. a policy file or a kept-aside copy of one in the gate folder (a file that exists and does not verify is never the start of a new install), or an

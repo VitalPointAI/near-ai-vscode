@@ -5,7 +5,7 @@
 // It is a built-in local server, not a process: the tools run inside the extension and are named `mcp__orders__<tool>`, so a team file grants them as
 // `mcp:orders` or `mcp__orders__*`, and the run gives them only to the members whose tools line grants them (staffGrantGate.ts). Nothing is fetched or
 // sent. Assembly and the FRAGO tool write a draft product and register it with the host's propose, the owner's verb: the release guard checks that exact
-// version, the section lead submits it, and only a person approves and releases it, with the NEAR AI: Staff commands. No tool here approves, releases,
+// version, the section lead submits it, and only a person approves and releases it, with the SovAI: Staff commands. No tool here approves, releases,
 // issues or sends anything.
 import * as path from 'node:path';
 import { ANNEX_SUBJECTS, DOCTRINE_PROFILES, FRAGMENTARY_ORDER, ORDER_KINDS, ORDER_PARAGRAPHS } from '../domain/staff/doctrine';

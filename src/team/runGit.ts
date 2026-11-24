@@ -11,9 +11,9 @@ const TIMED_OUT_CODE = 124;
 
 // Coordination commits never carry a member's name or email (D-04). Attribution lives in the signed event.
 export const NEUTRAL_IDENTITY_ENV: Readonly<Record<string, string>> = {
-  GIT_AUTHOR_NAME: 'NEAR AI Team',
+  GIT_AUTHOR_NAME: 'SovAI Team',
   GIT_AUTHOR_EMAIL: 'coordination@near-ai.invalid',
-  GIT_COMMITTER_NAME: 'NEAR AI Team',
+  GIT_COMMITTER_NAME: 'SovAI Team',
   GIT_COMMITTER_EMAIL: 'coordination@near-ai.invalid'
 };
 

@@ -130,9 +130,6 @@
     "bare-team": 7,
     "glossary": 1
   },
-  "src/services/cyberPanel.ts": {
-    "brand": 1
-  },
   "src/services/cyberPanelPage.ts": {
     "glossary": 1
   },
@@ -144,7 +141,7 @@
   },
   "src/services/onboarding.ts": {
     "bare-team": 3,
-    "brand": 5,
+    "brand": 2,
     "glossary": 7
   },
   "src/services/onlineHomeVscode.ts": {

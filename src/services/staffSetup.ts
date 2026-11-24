@@ -1,4 +1,4 @@
-// NEAR AI: Set Up a Staff Team, without VS Code: what a person can choose for each staff template, the roster they check before anything is written,
+// SovAI: Set Up a Staff Team, without VS Code: what a person can choose for each staff template, the roster they check before anything is written,
 // and the writes themselves. The command in staffSetupCommand.ts asks the questions and confirms; everything here is testable on a temporary folder.
 //
 // What it writes, for one section (J2, J5, J3 or J4) and one set of choices:

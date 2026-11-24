@@ -14,7 +14,7 @@ export const RISK_HEADLINE: Readonly<Record<RiskKind, string>> = Object.freeze({
   'leaves-machine': 'It can send data off this machine, or publish.',
   credentials: 'It reads or changes something that can hold keys or secrets.',
   installs: 'It installs or runs software the project did not already have.',
-  unsure: 'NEAR AI was not sure this is safe.'
+  unsure: 'SovAI was not sure this is safe.'
 });
 
 /** The longest reason the card shows before the full text goes in the expander. */

@@ -165,7 +165,7 @@ export async function signInForReportingToken(context: vscode.ExtensionContext, 
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const key = await cloudKeyForRoot(root, auth);
   if (!key) {
-    void vscode.window.showWarningMessage('Set up a NEAR AI Cloud API key for this project first (NEAR AI: Set Up). The token is made for the organization that key belongs to.');
+    void vscode.window.showWarningMessage('Set up a NEAR AI Cloud API key for this project first (SovAI: Set Up). The token is made for the organization that key belongs to.');
     return false;
   }
   try {

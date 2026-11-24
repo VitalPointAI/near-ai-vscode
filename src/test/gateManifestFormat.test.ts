@@ -446,7 +446,7 @@ test('describeMcpManifest: a stdio server leads with where it runs, a remote one
     assert.equal(words.at(-1), MANIFEST_IS_A_CLAIM_TEXT);
     assertPlainWords(words);
   }
-  assert.ok(MANIFEST_IS_A_CLAIM_TEXT.includes('NEAR AI cannot check what a server does inside itself'));
+  assert.ok(MANIFEST_IS_A_CLAIM_TEXT.includes('SovAI cannot check what a server does inside itself'));
 });
 
 test('describeMcpManifest: declared tool effects appear once, in verb order, and a hostile server name cannot add a dash, a line break or unbounded text', () => {

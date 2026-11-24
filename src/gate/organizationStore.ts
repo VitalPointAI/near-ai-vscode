@@ -58,24 +58,24 @@ export const ENROLMENT_RECORD_FILE = 'enrolment.json';
 export const ORGANIZATION_ISSUER_SECRET = 'nearAi.gate.organizationIssuer';
 
 /** The command a person runs to give this computer a file from your organization (41-14 registers it). */
-const ADD_RULES_COMMAND = 'NEAR AI: Add Your Organization\'s Rules';
+const ADD_RULES_COMMAND = 'SovAI: Add Your Organization\'s Rules';
 const MAX_ASIDE_ATTEMPTS = 50;
 const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const MAX_SERIAL = 2 ** 31;
 
 export const NOT_ENROLLED_TEXT = 'This computer has no rules from your organization yet. Open the enrolment file your organization\'s security contact gave you first.';
-export const DAMAGED_PIN_TEXT = `NEAR AI could not read which key your organization uses on this computer. Open your organization's enrolment file again with ${ADD_RULES_COMMAND}.`;
+export const DAMAGED_PIN_TEXT = `SovAI could not read which key your organization uses on this computer. Open your organization's enrolment file again with ${ADD_RULES_COMMAND}.`;
 export const WORDS_NOT_CONFIRMED_TEXT = 'Nothing was changed: the twelve words were not confirmed, so this computer does not use these rules.';
-const NOT_ORGANIZATION_FILE_TEXT = 'This is not a file from your organization that this version of NEAR AI can read. Ask your organization\'s security contact for a new one.';
+const NOT_ORGANIZATION_FILE_TEXT = 'This is not a file from your organization that this version of SovAI can read. Ask your organization\'s security contact for a new one.';
 const MISSING_LAYER_TEXT = 'Your organization\'s rules file is missing from this computer, so only reading and planning run.';
-const SECRET_UNREADABLE_TEXT = 'NEAR AI could not read its record of your organization\'s key in this computer\'s secret storage, so only reading and planning run.';
+const SECRET_UNREADABLE_TEXT = 'SovAI could not read its record of your organization\'s key in this computer\'s secret storage, so only reading and planning run.';
 /**
  * The same failure where nothing from your organization was ever saved on this computer (a fresh Sterling workbench in local mode has no secret
  * storage at all): it still fails closed, but it does not speak of a record of your organization's key that this computer never had.
  */
-export const NO_SECRET_STORAGE_TEXT = 'This computer\'s secret storage is not available to NEAR AI, so only reading and planning run. No rules from your organization are set up here.';
-const PIN_NOT_SAVED_TEXT = 'Nothing was changed: NEAR AI could not update its record of your organization\'s key in this computer\'s secret storage.';
+export const NO_SECRET_STORAGE_TEXT = 'This computer\'s secret storage is not available to SovAI, so only reading and planning run. No rules from your organization are set up here.';
+const PIN_NOT_SAVED_TEXT = 'Nothing was changed: SovAI could not update its record of your organization\'s key in this computer\'s secret storage.';
 const FILES_NOT_SAVED_TEXT = 'Nothing was changed: your organization\'s rules could not be saved and read back in this extension\'s storage folder.';
 
 function askFor(contact: string): string {

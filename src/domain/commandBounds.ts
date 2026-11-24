@@ -1,4 +1,4 @@
-// How much of a shell command NEAR AI reads (PR #74 reviews): one set of bounds for the shell classifier and the credential-store check, so neither reads
+// How much of a shell command SovAI reads (PR #74 reviews): one set of bounds for the shell classifier and the credential-store check, so neither reads
 // what the other gives up on. Past them, a command is not read at all, and what it does is unknown (the gate asks with a person and refuses with nobody).
 
 /** How many levels deep the classifier reads a command inside another (a wrapper, a script, a substitution, an inline shell). One bound for every path. */

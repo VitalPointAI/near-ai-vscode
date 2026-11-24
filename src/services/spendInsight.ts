@@ -213,7 +213,7 @@ export function describeUsageError(error: unknown, stage: 'api-key' | 'summary',
   if (status === 408) return { code: 'timeout', status, message: 'NEAR AI did not answer in time. Check your connection and try again.' };
   if (status !== undefined && status >= 500) return { code: 'server', status, message: `NEAR AI Cloud had a server error (HTTP ${status}). Try again later.` };
   if (stage === 'api-key') {
-    if (status === 401) return { code: 'api-key-rejected', status, message: 'NEAR rejected this project\'s API key (HTTP 401) when asked which organization it belongs to. Check the key with NEAR AI: Setup.' };
+    if (status === 401) return { code: 'api-key-rejected', status, message: 'NEAR rejected this project\'s API key (HTTP 401) when asked which organization it belongs to. Check the key with SovAI: Setup.' };
     if (status === 402) return { code: 'out-of-credits', status, message: 'NEAR says this organization is out of credits or this API key\'s spend limit is reached (HTTP 402). Top up credits in the NEAR AI Cloud console.' };
   } else {
     if (status === 401) return { code: 'token-rejected', status, message: 'NEAR rejected the usage reporting token (HTTP 401): it is invalid, expired, or revoked. Fix token signs in again and makes a new one.' };

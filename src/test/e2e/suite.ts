@@ -732,7 +732,7 @@ async function teamLogTail(): Promise<string> {
     for (const entry of await readdir(folder, { withFileTypes: true }).catch(() => [])) {
       const child = path.join(folder, entry.name);
       if (entry.isDirectory()) await walk(child, depth + 1);
-      else if (entry.name.includes('NEAR AI Team')) found.push(child);
+      else if (entry.name.includes('SovAI Team')) found.push(child);
     }
   };
   await walk(path.join(userData, 'logs'), 0);
@@ -787,7 +787,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
 
       // Preview off (the default): Enable is not offered, so accepting for 5 s starts nothing.
       assert.equal(vscode.workspace.getConfiguration('nearAi').get('team.preview'), false);
-      await runFromPalette('NEAR AI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
+      await runFromPalette('SovAI: Enable Team Mode', () => existsSync(teamFilePath), 5_000, 1);
       await pause(1_000);
       assert.equal(existsSync(teamFilePath), false, PREVIEW_OFF_SIGNAL);
       await vscode.commands.executeCommand('notifications.clearAll');
@@ -802,7 +802,7 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
       const { ENABLE_COMMIT_MESSAGE } = require(path.join(extension.extensionPath, 'dist/team/enable')) as typeof import('../../team/enable');
       const { DEFAULT_COORDINATION_REF } = require(path.join(extension.extensionPath, 'dist/team/gitTransport')) as typeof import('../../team/gitTransport');
       const enabled = () => existsSync(teamFilePath) && commitSubject() === ENABLE_COMMIT_MESSAGE && getApi().team.session() !== undefined;
-      await runFromPalette('NEAR AI: Enable Team Mode', enabled, 60_000);
+      await runFromPalette('SovAI: Enable Team Mode', enabled, 60_000);
       if (!enabled()) {
         // The commit and the session follow team.json by a moment, so wait for them before judging.
         await waitUntil(enabled, 10_000);
@@ -898,7 +898,7 @@ async function probe(name: string): Promise<LayoutReport> {
   const extension = vscode.extensions.getExtension(EXTENSION_ID)!;
   const { probeLayout } = require(path.join(extension.extensionPath, 'dist/services/layoutProbe')) as typeof import('../../services/layoutProbe');
   // The chat shares the secondary sidebar with VS Code's own chat view, which the resize steps
-  // bring up; if the NEAR AI chat is not on screen when asked, it is shown again and asked once more.
+  // bring up; if the SovAI chat is not on screen when asked, it is shown again and asked once more.
   for (let attempt = 0; ; attempt += 1) {
     try { return await probeLayout(name, 5_000); } catch (error) {
       if (attempt >= 2) throw error;

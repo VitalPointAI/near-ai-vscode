@@ -114,9 +114,9 @@ test('fail closed: arguments that cannot be read, and a full fingerprint set, ar
   assert.equal(anything.decision.rule, 'label.outbound-match', 'a full set counts as a match');
   // Owner answer: past the limit the refusal says why and what to do.
   assert.equal(anything.decision.reason, OUTBOUND_FULL_TEXT);
-  assert.match(OUTBOUND_FULL_TEXT, /more labelled content than NEAR AI can keep track of/);
+  assert.match(OUTBOUND_FULL_TEXT, /more labelled content than SovAI can keep track of/);
   assert.match(OUTBOUND_FULL_TEXT, /Start a new chat/);
-  assert.match(OUTBOUND_FULL_TEXT, /NEAR AI: Lower This Chat's Label/);
+  assert.match(OUTBOUND_FULL_TEXT, /SovAI: Lower This Chat's Label/);
   // At an any-cloud mark the payload is not checked, even with fingerprints held.
   const open = grantsAt([label('org', 'Public')]);
   open.outbound!.add(LINE);

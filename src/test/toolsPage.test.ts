@@ -15,7 +15,7 @@ import { ProfileStore } from '../services/profileStore';
 import type { McpServerStatus } from '../services/mcpRegistry';
 import { buildToolsDirectory, DirectoryInput, firstSentence, parseToolsPageMessage, skillGroup, ToolsDirectory, toolsPageHtml } from '../services/toolsDirectory';
 
-// The NEAR AI Tools tab: a directory of what agents can use, replacing the old second chat page.
+// The SovAI Tools tab: a directory of what agents can use, replacing the old second chat page.
 
 const MODES: ActionPolicyMode[] = ['approve-risky', 'mostly-autonomous', 'auto', 'fully-autonomous'];
 const SCRIPT = path.join(__dirname, '..', '..', 'media', 'tools', 'tools.js');
@@ -358,7 +358,7 @@ test('host path: the Tools tab loads real data, prefills the sidebar, and refres
     const context = { subscriptions: [], globalStorageUri: { fsPath: storage }, extensionUri: { fsPath: root }, secrets: new MemorySecrets(), globalState: new Memento(), workspaceState: new Memento() };
     initEmergencyStop(context as never);
     openTools(context as never, auth, { prefill: async (text) => { prefills.push(text); } });
-    assert.match(panel.webview.html, /<h1>NEAR AI Tools<\/h1>/);
+    assert.match(panel.webview.html, /<h1>SovAI Tools<\/h1>/);
     assert.doesNotMatch(panel.webview.html, /id="(?:messages|input|send)"/);
     assert.match(panel.webview.html, /media\/tools\/tools\.js/);
     openTools(context as never, auth, { prefill: async () => undefined });

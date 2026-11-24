@@ -19,7 +19,7 @@ export const POLICY_READING_ONLY_TEXT = 'Policy: reading only';
 export const POLICY_CHECKING_TEXT = 'Policy: checking';
 export const POLICY_ENDS_SOON_TEXT = 'Policy: ends soon';
 
-const CHECKING_TOOLTIP = 'NEAR AI is checking your policy file.';
+const CHECKING_TOOLTIP = 'SovAI is checking your policy file.';
 const READING_ONLY_NOTE = 'Click to see your policy.';
 
 export interface GateStatusShown {
@@ -81,7 +81,7 @@ function policyStatusText(state: BundleState | undefined, now: number, layers?: 
     : `Your organization's rules${organization.name === undefined ? '' : ` (${organization.name})`} are signed and valid until ${expiryDate(state.expiresAt)}. Your settings on this computer can only narrow them.`;
   // `renewDue` is what the check found when it ran; a window that opened since then counts too, so a long-open editor shows it with no new check.
   if (state.renewDue || needsRenewal({ expiresAt: state.expiresAt }, now)) {
-    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} It is close to its end and is renewed the next time NEAR AI starts.`, warning: false };
+    return { text: POLICY_RENEWING_TEXT, tooltip: `${until} It is close to its end and is renewed the next time SovAI starts.`, warning: false };
   }
   return { text: POLICY_STATUS_TEXT, tooltip: `${until} Click to see your policy.`, warning: false };
 }
@@ -136,7 +136,7 @@ export interface GateStatusBar {
 export function createGateStatusBar(options: GateStatusBarOptions = {}): GateStatusBar {
   const timers = options.timers ?? defaultTimers;
   const item = vscode.window.createStatusBarItem('nearAi.gate', vscode.StatusBarAlignment.Left, 49);
-  item.name = 'NEAR AI Policy';
+  item.name = 'SovAI Policy';
   item.command = SHOW_POLICY_COMMAND;
   const apply = (shown: GateStatusShown): void => {
     item.text = shown.text;

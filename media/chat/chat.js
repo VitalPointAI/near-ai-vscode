@@ -398,8 +398,8 @@
     if (send) postFor({ type: 'continue-run' });
   }
   // Lower This Chat's Label, as a button wherever a message names it (owner, after the 0.4.31 check: people looked at the chat, not the Command Palette).
-  const LOWER_NAME = 'NEAR AI: Lower This Chat\u2019s Label';
-  function namesLower(text) { return typeof text === 'string' && (text.includes(LOWER_NAME) || text.includes("NEAR AI: Lower This Chat's Label")); }
+  const LOWER_NAME = 'SovAI: Lower This Chat\u2019s Label';
+  function namesLower(text) { return typeof text === 'string' && (text.includes(LOWER_NAME) || text.includes("SovAI: Lower This Chat's Label")); }
   function lowerButton() { return textButton('Lower This Chat\u2019s Label', () => postFor({ type: 'lower-chat-label' })); }
   function notice(text, actions, isError) {
     const node = el('div', isError ? 'turn notice error' : 'turn notice');
@@ -615,7 +615,7 @@
       card.append(more);
     }
     const feedback = el('input');
-    feedback.placeholder = 'Optional: tell NEAR AI what to do instead';
+    feedback.placeholder = 'Optional: tell SovAI what to do instead';
     feedback.setAttribute('aria-label', 'Instructions if you decline');
     const choices = el('div', 'choices');
     const answer = (decision) => {
@@ -645,7 +645,7 @@
     if (pendingQueue.has(m.id)) return;
     const card = el('div', 'question questions');
     card.setAttribute('role', 'group');
-    card.setAttribute('aria-label', 'NEAR AI has questions');
+    card.setAttribute('aria-label', 'SovAI has questions');
     const readers = m.questions.map((question, index) => {
       const block = el('fieldset', 'q');
       const legend = el('legend', '', (question.header ? question.header + ' · ' : '') + question.question);
@@ -683,7 +683,7 @@
     card.append(submitButton);
     const first = m.questions[0] || { question: 'Questions' };
     const title = first.question + (m.questions.length > 1 ? ' (+' + (m.questions.length - 1) + ' more)' : '');
-    addPending({ id: m.id, kind: 'questions', agent: m.agent, title }, card, card.querySelector('input') || submitButton, 'NEAR AI is asking you ' + (m.questions.length === 1 ? 'a question: ' + first.question : m.questions.length + ' questions.'));
+    addPending({ id: m.id, kind: 'questions', agent: m.agent, title }, card, card.querySelector('input') || submitButton, 'SovAI is asking you ' + (m.questions.length === 1 ? 'a question: ' + first.question : m.questions.length + ' questions.'));
   }
 
   // 0.4.23: a generated image waiting for review. The image is shown (a data URL, which the view's CSP allows), with where it will be saved, the model,
@@ -743,7 +743,7 @@
     const changeRow = el('div', 'choices image-review-change-row');
     changeRow.append(request);
     card.append(changes, changeRow);
-    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, m.missing ? discard : accept, (m.agent || 'NEAR AI') + ' made an image for you to review: ' + (m.path || ''));
+    addPending({ id: m.id, kind: 'image', agent: m.agent, title }, card, m.missing ? discard : accept, (m.agent || 'SovAI') + ' made an image for you to review: ' + (m.path || ''));
   }
 
   // Running sub-agents with what each is doing, how long it has run, and pause, resume, and stop.
@@ -1095,7 +1095,7 @@
       policy.dataset.state = 'stopped';
       policy.dataset.risky = 'false';
       policy.setAttribute('aria-label', 'Approval policy: stopped');
-      policy.title = 'Emergency stop is on: NEAR AI sends and runs nothing. Run "NEAR AI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
+      policy.title = 'Emergency stop is on: SovAI sends and runs nothing. Run "SovAI: Resume" to continue (approval policy stays ' + (current.label || state.mode) + ').';
       policyMenu.replaceChildren();
       return;
     }
@@ -1468,7 +1468,7 @@
       case 'auth-required':
         if (current) { removeTurn(current.node); current = undefined; }
         setBusy(false);
-        notice(m.text || 'Set up NEAR AI to start chatting.', [
+        notice(m.text || 'Set up AI to start chatting.', [
           textButton('Set up a new profile', () => post({ type: 'new-profile' }), true),
           textButton('Choose a profile', () => post({ type: 'select-profile' }))
         ]);

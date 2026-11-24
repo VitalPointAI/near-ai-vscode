@@ -334,7 +334,7 @@ test('agent loop in auto: npm test runs without asking, git push asks with the r
 });
 
 test('auto: when the safety model cannot answer, the card says so and why the rules could not decide', async () => {
-  const busy: CommandSafetyCheck = { async check() { return { allow: false, reason: 'The safety check model is busy (rate limited by NEAR), so NEAR AI is asking you instead.' }; } };
+  const busy: CommandSafetyCheck = { async check() { return { allow: false, reason: 'The safety check model is busy (rate limited by NEAR), so SovAI is asking you instead.' }; } };
   const decided = await decide('npm install left-pad', { safety: busy });
   assert.equal(decided.decision, 'ask');
   const reason = decided.decision === 'ask' ? decided.reason ?? '' : '';

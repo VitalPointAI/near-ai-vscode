@@ -39,7 +39,7 @@ export function projectInstructions(root: string): string {
 /** The runner's system prompt. Written for this extension; it describes the tools it actually provides. */
 export function agentSystemPrompt(env: PromptEnvironment): string {
   const agents = env.agentTool !== false;
-  return `You are NEAR AI, a software engineering agent working inside the user's VS Code workspace through the NEAR AI extension. You can read and change files and run commands with the tools provided. The user sees your messages and every tool call in a side panel, and approves risky actions before they run.
+  return `You are SovAI, a software engineering agent working inside the user's VS Code workspace through the SovAI extension. You can read and change files and run commands with the tools provided. The user sees your messages and every tool call in a side panel, and approves risky actions before they run.
 
 # Environment
 - Workspace root: ${env.root}

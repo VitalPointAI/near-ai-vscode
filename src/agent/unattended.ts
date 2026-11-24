@@ -262,7 +262,7 @@ async function checkClosure(entry: string, realRoot: string, context: CommandCon
     // always asks, whatever it contains. "Since" uses the change time as well as the modified time: an agent can set a file's modified time back
     // (`touch -d`, `cp -p`), but not its change time. A file with recent times still counts as the project's own when its bytes equal its committed
     // copy at the commit the run started on (a worktree checked out during the run), which no agent can alter after the fact. The only other
-    // exception is a scaffolded verifier whose text is exactly what NEAR AI wrote and recorded.
+    // exception is a scaffolded verifier whose text is exactly what SovAI wrote and recorded.
     const touched = Math.max(info.mtimeMs, info.ctimeMs);
     const since = context.taintedAt ?? context.runStartedAt;
     const fresh = (moment: number | undefined) => moment !== undefined && touched >= moment - 1_000;

@@ -1,4 +1,4 @@
-// NEAR AI: Load Staff Exercise Scenario (design 10, section 8; WP-DEMO). Puts the starter scenario, or a scenario file of your own, into
+// SovAI: Load Staff Exercise Scenario (design 10, section 8; WP-DEMO). Puts the starter scenario, or a scenario file of your own, into
 // `.planning/staff/scenario/` for a staff team to read, with the J2 and J5 demo scripts beside it. The reading, checking and writing live in
 // staffScenarioLoader.ts; this file only asks the questions.
 import * as path from 'node:path';
@@ -39,7 +39,7 @@ export async function loadStaffScenario(deps: StaffScenarioDeps = {}): Promise<v
   if (!root) return;
   const source = await vscode.window.showQuickPick([
     { label: STARTER_PICK, detail: 'Fictional and unclassified: a peninsula, a coast and a strait, two sides with an order of battle, a mission and graded reports.' },
-    { label: OWN_PICK, detail: `A NEAR AI staff scenario (JSON). It must be marked fictional, unclassified exercise data; names on your real-entity list (${REAL_ENTITIES_FILE} or the guard settings) are refused.` }
+    { label: OWN_PICK, detail: `A SovAI staff scenario (JSON). It must be marked fictional, unclassified exercise data; names on your real-entity list (${REAL_ENTITIES_FILE} or the guard settings) are refused.` }
   ], { title: 'Load exercise scenario', placeHolder: 'Which scenario?' });
   if (!source) return;
 

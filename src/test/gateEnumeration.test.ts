@@ -403,7 +403,7 @@ test('if the bundle fails between the card and the answer, an allow is re-checke
     setup.shell.dispose();
   }
   assert.equal(existsSync(path.join(root, 'late.md')), false);
-  assert.match(toolOutputs(setup)[0] ?? '', /^Not allowed: Your policy file was changed outside NEAR AI/);
+  assert.match(toolOutputs(setup)[0] ?? '', /^Not allowed: Your policy file was changed outside SovAI/);
   const records = await logOf(fresh, root);
   assert.deepEqual(records.map((record) => [outcomeOf(record), ruleOf(record)]), [['asked', 'settings.mode.edits'], ['denied', 'bundle.failed-closed']]);
 });

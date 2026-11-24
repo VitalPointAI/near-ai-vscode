@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping with NEAR AI for VS Code. This page has the rules every change follows. The
+Thanks for helping with Sterling Sovereign AI. This page has the rules every change follows. The
 full process, including reviews, releases and recovery, is in
 [docs/development-workflow.md](docs/development-workflow.md).
 

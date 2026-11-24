@@ -403,7 +403,7 @@ test('the chat\'s read of the staff teams never fails in silence: an error is lo
   assert.equal(logged.length, 0);
   // An unexpected error (here, working out the library folder): logged with its stack, and the card says why instead of turning into "no team yet".
   const failed = await projectStaffTeamsReported(root, () => { throw new Error('HOME is not set'); }, (line) => logged.push(line));
-  assert.deepEqual([failed.staff, failed.sections, failed.problem], [true, [], 'HOME is not set. The NEAR AI output has the details.']);
+  assert.deepEqual([failed.staff, failed.sections, failed.problem], [true, [], 'HOME is not set. The SovAI output has the details.']);
   assert.match(logged.at(-1) ?? '', /^Staff teams could not be read: Error: HOME is not set/);
   // A record that does not read: the reason is on the card and in the log.
   await writeFile(path.join(root, PROJECT_JSON), JSON.stringify({ staff: { profile: 'nobody' } }));

@@ -107,10 +107,10 @@ test('a tampered or malformed share file is refused with a plain message', () =>
     ['an extra key', JSON.stringify({ ...pkg, run: 'curl evil' }), damaged],
     ['a listing in version 1', JSON.stringify({ ...pkg, listing: { price: 1 } }), damaged],
     ['knowledge of the wrong shape', JSON.stringify({ ...pkg, knowledge: { nodes: 'x' } }), damaged],
-    ['not JSON', 'not json at all', /^This file is not a NEAR AI team\./],
-    ['another format', JSON.stringify({ ...pkg, format: 'something-else' }), /^This file is not a NEAR AI team\./],
+    ['not JSON', 'not json at all', /^This file is not a SovAI agent team\./],
+    ['another format', JSON.stringify({ ...pkg, format: 'something-else' }), /^This file is not a SovAI agent team\./],
     // 0.4.30: version 2 (a share file that carries the team's icon) is read now, so the first newer version is 3.
-    ['a newer version', JSON.stringify({ ...pkg, formatVersion: 3 }), /^This team was shared from a newer version of NEAR AI\. Update the extension, then import it again\.$/],
+    ['a newer version', JSON.stringify({ ...pkg, formatVersion: 3 }), /^This team was shared from a newer version of SovAI\. Update the extension, then import it again\.$/],
     ['too large', `${' '.repeat(3 * 1024 * 1024)}{}`, /too large/]
   ];
   for (const [what, text, message] of cases) {

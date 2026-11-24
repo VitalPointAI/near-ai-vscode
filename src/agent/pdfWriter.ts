@@ -527,7 +527,7 @@ export function createPdf(spec: DocumentSpec): PdfResult {
   }
   set(catalog, `<< /Type /Catalog /Pages ${pagesId} 0 R${outlinesId ? ` /Outlines ${outlinesId} 0 R /PageMode /UseOutlines` : ''} >>`);
   const date = spec.date ? pdfDate(spec.date) : undefined;
-  set(info, `<< /Title ${textString(spec.title)}${spec.author ? ` /Author ${textString(spec.author)}` : ''} /Creator (NEAR AI for VS Code) /Producer (NEAR AI for VS Code CreatePdf)${date ? ` /CreationDate (${date}) /ModDate (${date})` : ''} >>`);
+  set(info, `<< /Title ${textString(spec.title)}${spec.author ? ` /Author ${textString(spec.author)}` : ''} /Creator (Sterling Sovereign AI) /Producer (Sterling Sovereign AI CreatePdf)${date ? ` /CreationDate (${date}) /ModDate (${date})` : ''} >>`);
 
   const parts: Buffer[] = [Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1')];
   let length = parts[0].length;

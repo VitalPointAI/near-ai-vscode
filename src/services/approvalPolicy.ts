@@ -87,7 +87,7 @@ export interface PolicyChoiceResult {
 export async function applyPolicyChoice(mode: unknown, configuration: PolicyConfiguration, targets: PolicyTargets, confirm: (message: string) => Promise<boolean>): Promise<PolicyChoiceResult> {
   if (!isPolicyMode(mode)) return { written: false, text: 'That approval policy is not recognised.' };
   const option = POLICY_OPTIONS.find((candidate) => candidate.mode === mode)!;
-  if (mode === 'fully-autonomous' && !(await confirm('Switch NEAR AI to Full auto? File edits and shell commands will run without asking, except deny-listed commands. Writes into .git/ and NEAR AI\'s state folders, publishing and destruction still ask. Use this only in a throwaway workspace.'))) {
+  if (mode === 'fully-autonomous' && !(await confirm('Switch SovAI to Full auto? File edits and shell commands will run without asking, except deny-listed commands. Writes into .git/ and NEAR AI\'s state folders, publishing and destruction still ask. Use this only in a throwaway workspace.'))) {
     return { written: false, text: 'Approval policy unchanged.' };
   }
   const found = effectivePolicyScope(configuration.inspect('actionPolicy'));

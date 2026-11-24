@@ -285,11 +285,11 @@ export const CLEARANCE_SELF_ASSERTED_TEXT =
 
 /** What labels and routing do and do not promise (D-32, amended by D-40). SECURITY.md and the label settings repeat this string exactly. */
 export const LABELS_NOT_ACCREDITATION_TEXT =
-  'Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.';
+  'Labels and routing are an organizational control that helps prevent mistakes. They check what SovAI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.';
 
 /** Where the preset lists come from and who confirms them (D-23). */
 export const SCALE_PRESETS_CAVEAT_TEXT =
-  "The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how NEAR AI reads them. Your organization's security officer should confirm both before you rely on them.";
+  "The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how SovAI reads them. Your organization's security officer should confirm both before you rely on them.";
 
 /** A clearance's `expiresAt` as epoch milliseconds, or NaN when it is not in the one time form the gate uses (see parseIsoMillis in shape.ts). */
 export function expiryMs(text: string): number {

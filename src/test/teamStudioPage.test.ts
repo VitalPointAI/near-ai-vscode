@@ -1038,7 +1038,7 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
     registerWorkspaceCommands(context as never, (options) => openTeamStudio(context as never, auth, { prefill: async () => undefined }, options));
     await commands.get('nearAi.manageTeams')!();
     assert.equal(created, 1);
-    assert.match(panel.webview.html, /<title>NEAR AI Team Studio<\/title>/);
+    assert.match(panel.webview.html, /<title>SovAI Team Studio<\/title>/);
     assert.match(panel.webview.html, /media\/teams\/teams\.js/);
     assert.ok(watchers.some((entry) => entry.endsWith(`teams|{*.md,.archived/*.md}`)), 'watches the team library');
     assert.ok(watchers.some((entry) => entry.endsWith(`.near-ai|team.md`)), 'watches the project team file');
@@ -1049,9 +1049,9 @@ test('host path: Manage Teams opens one Team Studio tab; Set Up Project Team sta
     // The panel's only way to a model is teamAiDeps (PR #69 review): with no profile, drafting and Improve with AI both stop with its message, and the
     // network stub above proves nothing was sent.
     await receive!({ type: 'draft-team', idea: 'A research team' });
-    assert.equal(posted.filter((message) => message.type === 'error').at(-1)!.text, 'The team could not be drafted: Set up a NEAR AI profile for this project first.');
+    assert.equal(posted.filter((message) => message.type === 'error').at(-1)!.text, 'The team could not be drafted: Set up an AI profile for this project first.');
     await receive!({ type: 'improve-check', seq: 1, draft: { name: 'T', description: '', members: [{ name: 'a', role: 'writer', model: '', tools: null, instructions: 'Write it. Report it.' }] } });
-    assert.deepEqual(posted.filter((message) => message.type === 'improve-checked').at(-1)!.ai, { available: false, reason: 'Set up a NEAR AI profile for this project first.', skipped: [] });
+    assert.deepEqual(posted.filter((message) => message.type === 'improve-checked').at(-1)!.ai, { available: false, reason: 'Set up an AI profile for this project first.', skipped: [] });
     await commands.get('nearAi.setupProjectTeam')!();
     assert.equal(created, 1, 'the same tab');
     assert.equal(revealed, 1);
@@ -1439,7 +1439,7 @@ test('host: Share refuses a team holding a key and asks before sharing one that 
   assert.equal(last(other, 'error').text, 'This team file was changed or damaged after it was shared, so it was not imported. Ask for the file again.');
   await writeFile(bad, '{ not json');
   await other.send({ type: 'import' });
-  assert.match(last(other, 'error').text, /^This file is not a NEAR AI team\./);
+  assert.match(last(other, 'error').text, /^This file is not a SovAI agent team\./);
   assert.deepEqual(await other.library.list(), [], 'nothing was added');
   assert.equal(other.asked.length, 0, 'a refused file is never offered');
   h.close(); other.close();
@@ -1761,9 +1761,9 @@ test('host: the privacy rule and the outbound check decide what may be sent, and
   assert.match(last(h, 'improve-result').reason, /looks like a key/);
   assert.equal(clean.sent.length, 0);
   // No profile: the reason from the host, and nothing else breaks.
-  h.deps.teamAi = async () => { throw new Error('Set up a NEAR AI profile for this project first.'); };
+  h.deps.teamAi = async () => { throw new Error('Set up an AI profile for this project first.'); };
   await h.send({ type: 'improve-check', seq: 8, draft: improveDraft() });
-  assert.deepEqual([last(h, 'improve-checked').ai.available, last(h, 'improve-checked').ai.reason], [false, 'Set up a NEAR AI profile for this project first.']);
+  assert.deepEqual([last(h, 'improve-checked').ai.available, last(h, 'improve-checked').ai.reason], [false, 'Set up an AI profile for this project first.']);
 });
 
 test('host: an imported, unapproved team is reviewed as untrusted data', async () => {

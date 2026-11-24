@@ -99,7 +99,7 @@ test('preconditions report each missing prerequisite in plain language and write
     const root = fixture.clones.plain as string;
     const missing = await checkEnablePreconditions(root);
     assert.deepEqual(missing.ok ? undefined : missing.code, 'not-initialised');
-    assert.match(missing.ok ? '' : missing.message, /NEAR AI: Set Up/);
+    assert.match(missing.ok ? '' : missing.message, /SovAI: Set Up/);
   }, { initialised: false });
 
   await withFixture(['a'], async (fixture) => {

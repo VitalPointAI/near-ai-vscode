@@ -14,7 +14,7 @@ import { MODES, ModeId, ModeRow } from '../domain/org/modes';
 import {
   ALLOWED_CLAIM_CONTEXTS, ALLOWED_CONTEXTS, BASELINE_PATH, COMPLIANCE_CLAIMS, COPY_RULES, CopyCounts, DISTINCTIVE_MODE_WORDS, GLOSSARY_WORDS, MODEL_INSTRUCTIONS,
   REPO_ROOT, baselineText, checkTightness, compareWithBaseline, copySourceFiles, countHits, extractCopy, extractPackage, increaseMessage, modeWordsFromTable,
-  readBaseline, scanRepository, writeBaselineAndFail
+  documentationFiles, productNameHits, readBaseline, scanRepository, writeBaselineAndFail
 } from './helpers/copyLintScan';
 
 const EM_DASH = String.fromCharCode(0x2014);
@@ -204,7 +204,33 @@ test('D-41 rule 3: a misspelt brand and a brand prefix on a title are counted', 
   assert.deepEqual(one('Near AI: Something', SERVICE, true), { brand: 1 }, 'the prefix counts once, not also as a misspelling');
   assert.deepEqual(one('near ai: Something', SERVICE, true), { brand: 1 });
   for (const word of ['NEAR AI', 'VS Code', 'near-ai-vscode', 'vscode.open', '@vscode/vsce', 'nearAi.baseUrl']) assert.deepEqual(one(`Open ${word} now.`), {}, word);
-  assert.deepEqual(one('NEAR AI: Something'), {}, 'a prefix only counts on a title');
+  assert.deepEqual(one('NEAR AI: Something'), { 'product-name': 1 }, 'off a title a prefix is the old command prefix (rule 8), not a brand hit');
+});
+
+// ---- Rule 8: the product is Sterling Sovereign AI, short name SovAI; NEAR AI is only the provider (owner, 2026-11-24) ----
+
+test('rule 8: the old product names and a NEAR AI: command prefix count, the provider and the new names do not', () => {
+  assert.deepEqual(one('Thanks for using NEAR AI for VS Code.'), { 'product-name': 1 });
+  assert.deepEqual(one('Update the NEAR AI extension, then open the file again.'), { 'product-name': 1 });
+  assert.deepEqual(one('Open your policy with NEAR AI: Policy, then choose Edit my rules.'), { 'product-name': 1 });
+  assert.deepEqual(one('Run "Near AI: Resume" first.'), { brand: 1, 'product-name': 1 }, 'a misspelt prefix is both');
+  assert.deepEqual(one('NEAR AI: Policy', SERVICE, true), { brand: 1 }, 'a title prefix counts once, as the brand rule');
+  assert.deepEqual(one('Policy, then NEAR AI: Set Label', SERVICE, true), { 'product-name': 1 }, 'a prefix later in a title is rule 8');
+  for (const text of ['Open SovAI: Policy.', 'Sterling Sovereign AI keeps your rules.', 'Choose a model on NEAR AI Cloud.', 'NEAR AI private hardware',
+    'Update SovAI to use them.']) assert.deepEqual(one(text), {}, text);
+});
+
+test('rule 8: README, SECURITY.md, CONTRIBUTING.md and the guides never use the old product names', () => {
+  const files = documentationFiles();
+  for (const file of ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'docs-site/docusaurus.config.js', 'docs/development-workflow.md']) assert.ok(files.includes(file), file);
+  assert.ok(files.some((file) => file.startsWith('docs-site/content/')), 'the docs site guides');
+  assert.ok(!files.includes('CHANGELOG.md'), 'history is not read');
+  // The whole file at once, so a name wrapped over two lines still counts.
+  const hits = files.flatMap((file) => {
+    const count = productNameHits(readFileSync(path.join(REPO_ROOT, file), 'utf8'));
+    return count > 0 ? [`${file}: ${String(count)}`] : [];
+  });
+  assert.deepEqual(hits, [], 'say "Sterling Sovereign AI" or "SovAI" for the product and "SovAI:" for its commands');
 });
 
 // ---- D-33: the Sterling workbench's sources and its edition names (Phase 46) ----

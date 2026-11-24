@@ -31,7 +31,7 @@ export const SCENARIO_FAILURES = {
   ...STAFF_PARSE_FAILURES,
   'not-json': 'The file is not valid JSON.',
   'too-large': 'The file is larger than a scenario may be.',
-  'wrong-format': 'The file is not a NEAR AI staff scenario in a version this extension reads.',
+  'wrong-format': 'The file is not a SovAI staff scenario in a version this extension reads.',
   'not-fictional': 'A scenario must be marked fictional, unclassified exercise data.',
   marking: 'The text carries a classification or caveat marking. Only unclassified exercise data may be loaded.',
   'real-entity': 'The text names an entry on your organization\'s real-entity list.',

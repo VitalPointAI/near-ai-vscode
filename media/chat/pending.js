@@ -41,7 +41,7 @@
 
   /** The heading over the pinned prompt: who is asking, and how many wait. */
   function headerText(item, position, size) {
-    const who = (item && item.agent) || 'NEAR AI';
+    const who = (item && item.agent) || 'SovAI';
     const what = item && item.kind === 'approval' ? who + ' needs your approval' : item && item.kind === 'image' ? who + ' made an image for you to review' : who + ' is asking you';
     return size > 1 ? what + ' · ' + position + ' of ' + size + ' waiting' : what;
   }

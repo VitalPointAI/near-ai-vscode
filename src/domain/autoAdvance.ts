@@ -2,7 +2,7 @@
 // then "maybe surface that setting like the auto approve picker and put it next to the picker so user can adjust it during the runs".
 //
 // The cause was not the extension: Open-GSD reads `workflow.auto_advance` and `workflow._auto_chain_active` from the project's .planning/config.json, and
-// when both are false it prints "▶ Recommended next step" and exits at every boundary. NEAR AI never set them, so even in Auto mode GSD was told to stop
+// when both are false it prints "▶ Recommended next step" and exits at every boundary. SovAI never set them, so even in Auto mode GSD was told to stop
 // and wait for a person. This module is the one rule for what those flags should be, so the switch beside the approval picker and the config write agree.
 // Pure: no I/O, no vscode.
 

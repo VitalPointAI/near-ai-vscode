@@ -1,4 +1,4 @@
-// NEAR AI: Add Your Organization's Rules (FND-01, D-11 to D-14, D-20, D-27): the command a person runs to take the enrolment file or the rules file their
+// SovAI: Add Your Organization's Rules (FND-01, D-11 to D-14, D-20, D-27): the command a person runs to take the enrolment file or the rules file their
 // organization's security contact gave them, and the one-time notices at start. Editor layer: it shows the file picker and the messages, and leaves every
 // check to the organization store and the host, which judge the file again under their lock.
 //
@@ -28,8 +28,8 @@ export const MIGRATION_NOTICE_KEY = 'nearAi.policy.migrationNoticeShown';
 export const IGNORED_NOTICE_KEY = 'nearAi.policy.ignoredNoticeShown';
 
 export const UNCHANGED_RULES_TEXT = 'These are the rules already in use. Nothing was changed.';
-export const RULES_NOT_USED_TEXT = "Nothing was changed: NEAR AI could not use your organization's rules.";
-export const RULES_FILE_UNREADABLE_TEXT = 'Nothing was changed: NEAR AI could not read that file.';
+export const RULES_NOT_USED_TEXT = "Nothing was changed: SovAI could not use your organization's rules.";
+export const RULES_FILE_UNREADABLE_TEXT = 'Nothing was changed: SovAI could not read that file.';
 
 export function enrolledText(name: string): string {
   return `Your organization's rules from ${name} are now in use on this computer.`;
@@ -86,7 +86,7 @@ async function tellIgnored(host: GateHost, tell: (message: string) => void, meme
 }
 
 /**
- * NEAR AI: Add Your Organization's Rules. Picks one file, refuses one too large before reading it, previews it (nothing written), asks for the twelve words
+ * SovAI: Add Your Organization's Rules. Picks one file, refuses one too large before reading it, previews it (nothing written), asks for the twelve words
  * for a new key or a handover, and only then hands it to the host, which reads it again under its lock.
  */
 export async function addOrganizationRules(host: GateHost, deps: AddRulesDeps): Promise<AddRulesOutcome> {

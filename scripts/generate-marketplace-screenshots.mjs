@@ -121,7 +121,7 @@ function frame(sidebarFile) {
     <nav class="activity"><i></i><i></i><i></i><i></i></nav>
     <aside class="explorer"><h4>EXPLORER</h4><div>.planning</div><div>src</div><div class="on">&nbsp;&nbsp;client.ts</div><div>&nbsp;&nbsp;invoices.ts</div><div>tests</div><div>package.json</div></aside>
     <section class="editor"><div class="tabs"><div class="tab">client.ts</div></div><div class="code">${editorLines()}</div></section>
-    <aside class="side"><header><span>NEAR AI: CHAT</span>${TITLE_ICONS.map(ICON).join('')}</header><iframe src="${pathToFileURL(sidebarFile).href}"></iframe></aside>
+    <aside class="side"><header><span>SovAI: CHAT</span>${TITLE_ICONS.map(ICON).join('')}</header><iframe src="${pathToFileURL(sidebarFile).href}"></iframe></aside>
   </div>
   <div class="status"><span>⎇ main</span></div>
   </body></html>`;

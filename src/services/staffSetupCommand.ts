@@ -1,4 +1,4 @@
-// NEAR AI: Set Up a Staff Team. Asks the section, the doctrine profile, the level, the nation, the planning type and what the template offers on top,
+// SovAI: Set Up a Staff Team. Asks the section, the doctrine profile, the level, the nation, the planning type and what the template offers on top,
 // shows the roster (who drafts and who decides), then writes the team, its skills, PROFILE.md, the staff settings and the section's guidance, and offers
 // to load the starter exercise scenario. The planning and writing live in staffSetup.ts; this file only asks and confirms.
 import { OPEN_STAFF_ROOM_COMMAND } from '../domain/staff/commands';
@@ -39,7 +39,7 @@ export function rosterItems(plan: StaffSetupPlan): vscode.QuickPickItem[] {
   const { roster } = plan;
   return [
     { label: 'A person decides', kind: vscode.QuickPickItemKind.Separator },
-    { label: `$(person) ${roster.humanLead ?? 'The section lead'}`, description: 'named person', detail: 'Approves, rejects and releases every product with the NEAR AI: Staff commands. No member can.' },
+    { label: `$(person) ${roster.humanLead ?? 'The section lead'}`, description: 'named person', detail: 'Approves, rejects and releases every product with the SovAI: Staff commands. No member can.' },
     { label: `Agents draft (${roster.members.length} members, private models only)`, kind: vscode.QuickPickItemKind.Separator },
     ...roster.members.map((member) => ({ label: `$(hubot) ${member.name}`, description: member.role ?? '', detail: member.reportsTo ? `Reports to ${member.reportsTo}` : 'Leads the section\'s lanes and merges their work' }))
   ];
@@ -61,7 +61,7 @@ export interface StaffSetupChat { prefill(text: string): Promise<void> }
 
 /** The "team is ready" message: it names the team and how to task it, with "Task it now" and "Open the Staff Room". */
 export function readyMessage(teamName: string, slug: string, archived: boolean): string {
-  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the NEAR AI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
+  return `${teamName} is set up for this project as /team:${slug}. ${STAFF_PRIVATE_MODELS_TEXT} Task it now to put its command in the SovAI chat, or open the Staff Room.${archived ? ' The earlier file is in your teams archive.' : ''}`;
 }
 
 export async function setUpStaffTeam(library = new TeamLibrary(teamLibraryDir(homeFolder())), section?: StaffTeamSection, chat?: StaffSetupChat): Promise<string | undefined> {

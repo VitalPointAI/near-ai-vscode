@@ -92,7 +92,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   initProfileIndex(context.globalState);
   initEmergencyStop(context);
   // NEAR AI errors and rate-limit headers (status, model, request ID, Retry-After, NEAR's message), never keys or prompts.
-  const nearLog = vscode.window.createOutputChannel('NEAR AI');
+  const nearLog = vscode.window.createOutputChannel('SovAI');
   setNearAiDiagnostics((line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`));
   context.subscriptions.push(nearLog, { dispose: () => setNearAiDiagnostics(undefined) });
   // A second editor on this computer uses this project's NEAR AI key from its sealed copy in the project's state home, with no prompt (D-15). Nothing
@@ -166,11 +166,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.useSavedProfile', () => useSavedProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
       await setEmergencyStop(true);
-      void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped (in other open windows within a few seconds), and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
+      void vscode.window.showWarningMessage('SovAI emergency stop is on. Running requests and workflows were stopped (in other open windows within a few seconds), and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
     }),
     vscode.commands.registerCommand('nearAi.resume', async () => {
       await setEmergencyStop(false);
-      void vscode.window.showInformationMessage('NEAR AI resumed.');
+      void vscode.window.showInformationMessage('SovAI resumed.');
     }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
@@ -258,15 +258,15 @@ async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise
 
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
+  if (!root) { void vscode.window.showInformationMessage('Open a folder to see SovAI conversations.'); return; }
   // A person asked for the list: conversations from before 0.4.20 that this editor kept in its own storage are merged in first.
   await ensureMigrated(root);
   // D-08: the list is the thread index (the threads' small meta files); no log is opened for any item. Every thread is listed: live, archived, from the
   // Chat view, or locked on this device.
   const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).index();
-  if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
+  if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved SovAI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
   // Typing filters by title (the label); the description and detail are searched too, so "Archived" or a model name also finds them.
-  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
+  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a SovAI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
   if (!picked) return;
   // A locked conversation is listed so it never seems to have vanished, but it cannot be opened on this device.
   if (picked.locked) { void vscode.window.showInformationMessage(LOCKED_DETAIL); return; }
@@ -289,7 +289,7 @@ async function saveCheckpoint(): Promise<void> {
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
 }
 
-/** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
+/** SovAI: Set Up. Exported for the host tests of what follows a successful setup. */
 export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
@@ -437,7 +437,7 @@ async function useSavedProfile(context: vscode.ExtensionContext, auth: AuthServi
 
 async function openApiKeyPortal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse('https://cloud.near.ai/'));
-  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run NEAR AI: Set Up again and choose “I already have a key”.');
+  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run SovAI: Set Up again and choose “I already have a key”.');
 }
 
 async function showStatus(auth: AuthService): Promise<void> {

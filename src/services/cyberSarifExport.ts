@@ -14,7 +14,7 @@ import type { LedgerEntry } from '../domain/cyberLedger';
 
 export const SARIF_VERSION = '2.1.0';
 export const SARIF_SCHEMA = 'https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json';
-export const TOOL_NAME = 'Near AI Cybersecurity';
+export const TOOL_NAME = 'SovAI Cybersecurity';
 export const TOOL_URI = 'https://github.com/VitalPointAI/near-ai-vscode';
 
 /** The sentinel `redactSecrets` leaves behind; an export containing a raw value is refused. */

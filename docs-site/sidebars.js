@@ -15,7 +15,7 @@ export default {
     'index',
     {
       type: 'category',
-      label: 'Using NEAR AI',
+      label: 'Using SovAI',
       collapsed: false,
       items: [
         'using/getting-started',

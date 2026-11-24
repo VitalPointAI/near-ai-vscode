@@ -25,9 +25,9 @@ description, and wins wherever the two seem to differ.
   sent. See [The outbound check](./policy.synced.md#the-outbound-check).
 - **Your organization's rules set the ceiling.** A signed policy file, kept in the extension's own
   storage and never in your project, sets the most the agent may do. Your settings can only narrow
-  it. Your organization can hand every computer its rules as a signed file, added with **NEAR AI:
+  it. Your organization can hand every computer its rules as a signed file, added with **SovAI:
   Add Your Organization's Rules** after you compare twelve words with its security contact; your
-  own rules can then only narrow your organization's. **NEAR AI: Policy** shows the rules in force
+  own rules can then only narrow your organization's. **SovAI: Policy** shows the rules in force
   and every proposed change before it is made, and **Reset my rules** there resets your own rules
   only. See [Your policy file and decision records](./policy.synced.md#your-policy-file-and-decision-records).
 - **Labels decide where content may go.** Files, folders and projects carry labels, agents cannot

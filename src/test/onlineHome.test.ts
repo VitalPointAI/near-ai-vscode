@@ -664,7 +664,7 @@ test('declining the code offer ends with one sentence that names the command and
   assert.equal(run.result.status, 'done');
   const told = run.ui.messages.filter((message) => message.includes(COMMAND_NAME));
   assert.equal(told.length, 1, run.ui.messages.join('|'));
-  assert.match(told[0] as string, /only NEAR AI's encrypted sync branch/);
+  assert.match(told[0] as string, /only SovAI's encrypted sync branch/);
   assert.match(told[0] as string, /stays on this computer/);
   assert.equal(told[0]?.includes('default branch'), false);
   assert.equal(patches(run).length, 0);

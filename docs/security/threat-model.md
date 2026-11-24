@@ -2,7 +2,7 @@
 
 Last reviewed: 2026-11-24
 
-This is the threat model of NEAR AI for VS Code and the services that come with it in this
+This is the threat model of Sterling Sovereign AI and the services that come with it in this
 repository: the extension, the messaging relay (`relay/`) and the sync hub (`hub/`), the Sterling
 workbench image that ships the extension, and the pipeline that releases them. It says what is protected, where the trust boundaries are, which
 threats the product handles and where, and what it cannot stop. Each mitigation links to the
