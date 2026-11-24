@@ -278,3 +278,8 @@ test('a deployment export signed 7 days and an hour ago makes its control Stale'
   const dashboard = await deploymentDashboard(7 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000);
   assert.equal(dashboard.rows[0].state, 'stale');
 });
+
+test('a deployment export exactly 7 days old is still fresh and one a millisecond older is Stale', async () => {
+  assert.equal((await deploymentDashboard(7 * 24 * 60 * 60 * 1000)).rows[0].state, 'met');
+  assert.equal((await deploymentDashboard(7 * 24 * 60 * 60 * 1000 + 1)).rows[0].state, 'stale');
+});

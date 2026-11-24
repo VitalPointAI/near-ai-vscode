@@ -1,0 +1,6 @@
+[
+  { "id": "6f1d0c1e-3c55-4a8e-9d53-1f2b8f1d2a01", "clientId": "sterling-sessions", "enabled": true, "publicClient": false, "secret": "fixture-client-secret-not-real" },
+  { "id": "6f1d0c1e-3c55-4a8e-9d53-1f2b8f1d2a02", "clientId": "sterling-workbench", "enabled": true, "publicClient": true },
+  { "id": "6f1d0c1e-3c55-4a8e-9d53-1f2b8f1d2a03", "clientId": "account-console", "enabled": true, "publicClient": true },
+  { "id": "6f1d0c1e-3c55-4a8e-9d53-1f2b8f1d2a04", "clientId": "admin-cli", "enabled": true, "publicClient": true }
+]
