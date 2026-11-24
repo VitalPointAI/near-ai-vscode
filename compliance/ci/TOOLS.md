@@ -61,6 +61,44 @@ finding. The confirmed defaults validate database age and cap it at 120h; CI
 sets `GRYPE_DB_VALIDATE_AGE=true` and `GRYPE_DB_MAX_ALLOWED_BUILT_AGE=120h`
 explicitly before scanning.
 
+### The vulnerability database for the bundle and sites
+
+Since Phase 47 (D-72, 47-26) grype also runs at sites, on the import host, so
+the database a site scans with travels in signed media. `grype.anchore.io` is
+reached only from the connected build host; nothing at a site contacts it.
+
+On the connected build host, the bundle build:
+
+1. Reads Anchore's listing with `grype db list -o json`. Each listing entry
+   names the archive `path` (relative to `https://grype.anchore.io/databases`),
+   its `built` time and its `checksum` (`sha256:<hex>`).
+2. Downloads the `active` archive over https into a private folder and checks
+   its SHA-256 against the listing's checksum before anything else reads it.
+3. Runs `grype db import <archive>` into a private cache
+   (`GRYPE_DB_CACHE_DIR` set to a folder of its own), scans each image SBOM
+   from that cache, and adds the archive to the bundle as
+   `vulnerability-db.tar.zst`, under the one manifest signature.
+
+Between bundles HQ can ship a newer archive as a file signed with your
+organization's key (`scan.mjs db-pack`, 47-29); a site checks the signature
+before importing it.
+
+At a site, a rescan runs grype against the database from the bundle or the
+signed file, with every update check off:
+
+```sh
+export GRYPE_DB_CACHE_DIR=<private folder>
+export GRYPE_DB_AUTO_UPDATE=false        # never contact the listing
+export GRYPE_CHECK_FOR_APP_UPDATE=false  # never contact Anchore for a newer grype
+export GRYPE_DB_VALIDATE_AGE=false       # an air-gapped database is older than 120h by design;
+                                         # the report shows the database's build date instead
+grype db import vulnerability-db.tar.zst
+grype sbom:<sbom-file> --only-fixed --output json=<scan-file>
+```
+
+Scans at sites are report-only; the site change board decides (D-72). These
+setting names are confirmed from `grype config` of the pinned 0.122.1.
+
 ## Compliance Trestle 5.2.1
 
 The owner-approved PyPI wheel is pinned to

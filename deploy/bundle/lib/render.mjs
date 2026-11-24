@@ -36,7 +36,7 @@ const TOKEN = /("?)\$\{site\.([A-Za-z0-9_.-]+)\}("?)/g;
 
 /** The site settings every site file must set to a non-empty value (deploy/values/site.example.yaml ships them empty, D-11). */
 export const REQUIRED_SITE_SETTINGS = Object.freeze(['siteName', 'domain', 'rpId', 'registry', 'registryKind', 'clusterCidrs.pod', 'clusterCidrs.service',
-  'clusterCidrs.nodes', 'storageClass', 'requestedStorage', 'signInKeys', 'organizationPublicKey', 'stepUpAcr']);
+  'clusterCidrs.nodes', 'alertRecipients', 'storageClass', 'requestedStorage', 'signInKeys', 'organizationPublicKey', 'stepUpAcr']);
 /** The only settings an empty string is a meaningful value for (storageEncryptionAtRest is empty for the reference Longhorn class). */
 export const OPTIONAL_EMPTY = new Set(['storageEncryptionAtRest']);
 

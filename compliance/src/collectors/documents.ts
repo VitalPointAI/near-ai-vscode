@@ -3,6 +3,7 @@
 import path from 'node:path';
 import type { Observation } from '../model.ts';
 import type { Collector, CollectorContext } from './types.ts';
+import { loadBlocks, staleBlocks, type Block } from '../hosted/generate.ts';
 
 export interface RequiredDocument {
   readonly path: string;
@@ -22,7 +23,22 @@ export const REQUIRED_DOCUMENTS: readonly RequiredDocument[] = Object.freeze([
   { path: 'docs/security/crypto-inventory.md', reviewRequired: true, headings: ['Algorithms', 'Basis'] },
   { path: 'docs/security/controlled-goods-and-itar.md', reviewRequired: true, headings: ['What the product does', 'What it does not do', 'Interim settings'] },
   { path: 'docs/security/hosted-verification-records.md', reviewRequired: true, headings: ['Section 10 conditions', 'Verification register', 'Keycloak CVE-2026-6856 fix version', 'HSM FIPS 140-3 certificates', 'Go Cryptographic Module certificates', 'Traefik and the Theia Cloud chart', 'OpenBao kms-pkcs11 plugin release', 'Theia Cloud project health', 'Prewarm pool and personal volumes', 'Theia 1.77 supported Node range', 'RHEL 9 OpenSSL FIPS provider certificate', 'Bouncy Castle FIPS Java certificates', 'Harbor and Zot FIPS builds'] },
-  { path: 'docs/development-workflow.md', reviewRequired: false, headings: ['8. Repository settings (owner only)'] }
+  { path: 'docs/development-workflow.md', reviewRequired: false, headings: ['8. Repository settings (owner only)'] },
+  // 48.1-01 (D-06, D-08): the hosted SA&A documents, registered with their fixed headings before they are written, so a document not yet
+  // written reads as failing evidence. Generated blocks inside them are checked too (stale-blocks, D-09).
+  { path: 'docs/security/hosted-interconnections.md', reviewRequired: true, headings: ['Exchanges and interconnections', 'Exchange diagram', 'Agreements'] },
+  { path: 'docs/security/hosted-external-services.md', reviewRequired: true, headings: ['External services', 'Adding a service'] },
+  { path: 'docs/security/hosted-architecture.md', reviewRequired: true, headings: ['Network and boundary', 'Ports, protocols and services', 'Workload rights'] },
+  { path: 'docs/security/hosted-system-description.md', reviewRequired: true, headings: ['System', 'Information types', 'Authorization boundary', 'What the site inherits', 'Users and roles', 'Diagrams'] },
+  { path: 'docs/security/hosted-audit.md', reviewRequired: true, headings: ['Alerts', 'Audit review', 'Archive and integrity', 'Retention'] },
+  { path: 'docs/security/hosted-key-management.md', reviewRequired: true, headings: ['Key inventory', 'Lifecycle', 'Hardware security module', 'Signing keys', 'Compromise and revocation', 'Known limits'] },
+  { path: 'docs/security/hosted-crypto-inventory.md', reviewRequired: true, headings: ['Components', 'Open conditions'] },
+  { path: 'docs/security/hosted-suppliers.md', reviewRequired: true, headings: ['Suppliers', 'Assessment and notification'] },
+  { path: 'docs/security/hosted-roles-and-duties.md', reviewRequired: true, headings: ['Roles', 'Separation of duties', 'Training'] },
+  { path: 'docs/security/hosted-privacy.md', reviewRequired: true, headings: ['Personal information inventory', 'Retention and disposal', 'Testing and training data', 'Privacy impact assessment inputs'] },
+  { path: 'docs/security/hosted-incident-playbooks.md', reviewRequired: true, headings: ['Signing key compromise', 'HQ root or intermediate compromise', 'HSM loss or tamper', 'Unseal failure', 'Person key or passkey compromise', 'Spill to an observer', 'Credential issuer or status-list key compromise', 'Stale status list at an edge'] },
+  { path: 'docs/security/hosted-continuous-monitoring.md', reviewRequired: true, headings: ['What is monitored', 'Cadence', 'Disconnected sites', 'Reviews and triggers'] },
+  { path: 'docs/security/hosted-observers.md', reviewRequired: true, headings: ['Releasability tokens', 'Authority', 'Agreements and clearances', 'Rules of behaviour'] }
 ]);
 
 export interface DocumentsInput {
@@ -60,6 +76,8 @@ export const documentsCollector: Collector<DocumentsInput> = Object.freeze({
   async collect(input: DocumentsInput, context: CollectorContext): Promise<Observation[]> {
     if (!input || typeof input.repoRoot !== 'string' || input.repoRoot === '') throw new Error('documents collector: input.repoRoot is required');
     const observations: Observation[] = [];
+    const blocks: readonly Block[] = await loadBlocks();
+    const source = { readText: (relativePath: string) => context.readFile(safeDocumentPath(input.repoRoot, relativePath)) };
     for (const document of REQUIRED_DOCUMENTS) {
       const subject = document.path.toLowerCase();
       let text: string | undefined;
@@ -78,13 +96,16 @@ export const documentsCollector: Collector<DocumentsInput> = Object.freeze({
       const review = reviewMatch ? reviewedAt(reviewMatch[1]) : undefined;
       const reviewFresh = review !== undefined && context.now.getTime() - review.getTime() <= DOCUMENT_MAX_AGE_MS && context.now.getTime() >= review.getTime();
       const reviewOk = !document.reviewRequired || reviewFresh;
+      // A document with generated blocks (48.1-01, D-09) fails while any block differs from what its source produces.
+      const hasBlocks = blocks.some((block) => block.document === document.path) || text.includes('<!-- generated:');
+      const stale = hasBlocks ? (await staleBlocks(text, document.path, blocks, source)).length : 0;
       observations.push({
         collector: 'documents',
         subject,
-        passed: missingHeadings === 0 && reviewOk,
+        passed: missingHeadings === 0 && reviewOk && stale === 0,
         collectedAt: review?.toISOString() ?? context.now.toISOString(),
         commit: context.commit,
-        counts: { missing: 0, 'missing-headings': missingHeadings, ...(document.reviewRequired ? { 'missing-review': review ? 0 : 1, 'stale-review': review && !reviewFresh ? 1 : 0 } : {}) }
+        counts: { missing: 0, 'missing-headings': missingHeadings, ...(document.reviewRequired ? { 'missing-review': review ? 0 : 1, 'stale-review': review && !reviewFresh ? 1 : 0 } : {}), ...(hasBlocks ? { 'stale-blocks': stale } : {}) }
       });
     }
     return observations;

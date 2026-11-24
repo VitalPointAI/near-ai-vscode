@@ -177,6 +177,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
+      # 48.1-01 (D-09): the generated blocks of the hosted SA&A documents match their sources, and the exchange register names every deploy
+      # module that calls one of the six signing helpers (signFile, verifySignedFile, signBlob, verifyBlob, signImage, verifyImage). Node
+      # alone: the command imports only Node built-ins.
+      - name: Check the generated blocks of the hosted SA&A documents
+        working-directory: .
+        run: node compliance/src/cli.ts hosted-docs --check
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
       - name: Test the documentation site
@@ -411,11 +417,10 @@ jobs:
           cache-dependency-path: workbench/package-lock.json
       - if: steps.has_workbench.outputs.present == 'true'
         run: npm ci --ignore-scripts
-      # Report-only while the Theia 1.77 tree carries a high advisory with no fix inside the pinned version (zod through @theia/ai-mcp,
-      # GHSA-mrhx-c7xc-m3w5, 2026-11-24); the JSON goes up with the test report and the register records the condition.
-      - name: Audit the workbench runtime dependencies (report-only)
+      # Blocking at high. zod GHSA-mrhx-c7xc-m3w5 (through @theia/ai-mcp) is fixed by the scoped override in workbench/package.json;
+      # the JSON still goes up with the test report.
+      - name: Audit the workbench runtime dependencies
         if: steps.has_workbench.outputs.present == 'true'
-        continue-on-error: true
         run: |
           status=0
           npm audit --omit=dev --audit-level=high --json > workbench-audit.json || status=$?
@@ -441,7 +446,7 @@ jobs:
       - name: Build the workbench image
         if: steps.has_workbench.outputs.present == 'true'
         working-directory: .
-        run: docker build -f workbench/Dockerfile -t sterling-workbench:ci .
+        run: bash .github/retry-registry-auth.sh docker build -f workbench/Dockerfile -t sterling-workbench:ci .
       # The image's supply-chain record (D-31), with the relay image scan's pinned tools: a CycloneDX SBOM, a Grype scan (report-only)
       # and the image ID, written before the tests so a failing test still leaves them.
       - name: Install pinned Syft and Grype
@@ -530,7 +535,7 @@ jobs:
           echo "present=false" >> "$GITHUB_OUTPUT"
       - name: Build the relay image
         if: steps.has_relay_scan.outputs.present == 'true'
-        run: docker build -f relay/Dockerfile -t near-ai-relay:scan .
+        run: bash .github/retry-registry-auth.sh docker build -f relay/Dockerfile -t near-ai-relay:scan .
       - name: Install pinned Syft and Grype
         if: steps.has_relay_scan.outputs.present == 'true'
         run: |

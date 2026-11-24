@@ -5704,6 +5704,343 @@
       "title": "Phase 31's typed-in clearance stays readable for replay"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ca-03",
+        "ca-09",
+        "sa-09.02"
+      ],
+      "id": "G389",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Generate the exchange and interconnection register from one source with an agreement field per exchange and an exchange diagram (48.1-01), and the internal ports, protocols and services list from the rendered charts (48.1-11), both checked in CI against the code.",
+      "title": "The hosted deployment has no exchange and interconnection register"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sa-09",
+        "sa-09.08",
+        "sa-400"
+      ],
+      "id": "G390",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Register each external service (model endpoints, the container registry, CI and the signing transparency service) as a fit-checked resource with its function, data sent, location, jurisdiction and terms, found from the code, and bring the model endpoints into the hosted levels (48.1-06).",
+      "title": "External services are not fit-checked or in the hosted scope"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "pl-02",
+        "pl-08",
+        "sa-17",
+        "ra-02"
+      ],
+      "id": "G391",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Name the Sterling system and its id in the hosted plan, with its information types, boundary narrative, what the site inherits, users and roles, and generated architecture and data-flow diagrams (48.1-11, 48.1-13).",
+      "title": "The hosted system security plan does not describe the Sterling system"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ra-03",
+        "ra-09"
+      ],
+      "id": "G392",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add a hosted section to the threat model that consolidates the Phase 47 threat rows by trust boundary, and name the critical items: the HSM, the seal, the HQ root, the signing keys and Keycloak (48.1-07).",
+      "title": "The hosted deployment has no consolidated threat model or criticality analysis"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "au-05",
+        "au-06",
+        "si-04.05"
+      ],
+      "id": "G393",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Turn on Alertmanager with rules as code for audit shipping, a still audit index, OpenBao seal and audit device state, certificate expiry, backup failure and refused unsigned images, each guarded so a missing input raises an alert, and write the auditor review runbook (48.1-02, 48.1-12).",
+      "title": "Audit pipeline failures raise no alert and audit review has no runbook"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "au-09",
+        "au-09.02",
+        "au-09.04",
+        "au-11"
+      ],
+      "id": "G394",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Run a daily write-once archive of the audit indices with signed, chained manifests, delete an online index only after its day is archived and verified, and keep every hosted audit record 1,825 days, 730 of them online (owner decision b) (48.1-14, 48.1-15, 48.1-16, 48.1-20). This row replaces the hosted pointer to G2.",
+      "title": "The hosted audit store has no tamper evidence and deletes records after its retention"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-12",
+        "sc-12.01",
+        "ia-05",
+        "sr-10",
+        "sr-11",
+        "sr-12"
+      ],
+      "id": "G395",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Write the key management plan and a key inventory checked against the code, covering rotation, expiry, compromise and revocation, escrow and destruction of every key, the HSM lifecycle and the known limits (48.1-08).",
+      "title": "The hosted keys have no management plan or inventory"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-12",
+        "sr-11"
+      ],
+      "id": "G396",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Separate the supplier release key from the organization site key (owner decision a): sign bundles, re-signed images, person exports, certificate requests and revocation lists with the site key through its PKCS#11 address, kept in SoftHSM2 in development and in the HSM in production (48.1-17, 48.1-22). The SoftHSM2 module itself is G352.",
+      "title": "One signing key serves supplier releases and site trust files"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G397",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Generate the hosted cryptography inventory per component from the register, with each certificate record, and list the conditions no statement carries with their rebuild path or an item for the authorizing official (48.1-09).",
+      "title": "The cryptography of each hosted component is not listed"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ac-21",
+        "ac-21.400",
+        "ac-21.401",
+        "ac-16",
+        "ps-06",
+        "pl-04"
+      ],
+      "id": "G398",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Document the releasability tokens and who sets them, the credentials and agreements an observer needs by sensitivity, and the observer rules of behaviour, then add hub and workbench statements once the release check is on main (48.1-05, 48.1-19).",
+      "title": "Observers have no documented releasability vocabulary, agreements or rules of behaviour"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "pm-05.01",
+        "pm-25",
+        "si-12"
+      ],
+      "id": "G399",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Write the hosted privacy inventory with retention and disposal, including departed people, the rule that tests use generated people only, and the privacy impact assessment inputs (48.1-03).",
+      "title": "Personal information in the hosted deployment is not inventoried"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ir-08",
+        "ir-04"
+      ],
+      "id": "G400",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Write the hosted playbooks: signing key, HQ root or intermediate, HSM loss, unseal failure, person key or passkey, a spill to an observer, a credential issuer or status-list key, and a stale status list at an edge (48.1-04).",
+      "title": "The hosted deployment has no incident playbooks"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ac-05",
+        "ac-06",
+        "at-03"
+      ],
+      "id": "G401",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Generate the separation of duties matrix and role list from the OpenBao policies, the log store roles and the realm, with invariant tests, and a role-based training outline (48.1-10).",
+      "title": "Hosted roles have no separation of duties matrix or training outline"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sr-06",
+        "sr-08"
+      ],
+      "id": "G402",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Generate the supplier register from the fit register, one supplier per publisher, with an assessment and notification terms for each, checked both ways (48.1-09).",
+      "title": "Hosted suppliers are not assessed"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "ca-07"
+      ],
+      "id": "G403",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Write the continuous monitoring strategy for sites: what is monitored, cadences, owners, how a disconnected edge reports to HQ by signed file, and the triggers for reassessment (48.1-04).",
+      "title": "Hosted sites have no continuous monitoring strategy"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sr-11"
+      ],
+      "id": "G404",
+      "ownerRole": "owner",
+      "poam": "g404",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Our signatures carry no trusted time (the cosign signing configuration is empty), so after a key compromise no signature can be dated before it and every signed item is re-issued. Decide whether a site timestamp authority is added.",
+      "title": "No timestamp authority dates our signatures"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "mp-06"
+      ],
+      "id": "G405",
+      "ownerRole": "owner",
+      "poam": "g405",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "One LUKS class key encrypts every workspace volume, so a departed person's volume cannot be erased by destroying its own key; the disks follow your organization's media handling. Record the authorizing official's acceptance of this limit, or design per-person volume keys.",
+      "title": "Removing a workspace volume does not cryptographically erase it"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "au-09.04"
+      ],
+      "id": "G406",
+      "ownerRole": "owner",
+      "poam": "g406",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Signing is restricted to the archive job's account, but a cluster administrator could sign that day's manifest; a day already archived on write-once storage cannot be changed. Detect a second signature with the daily signature watch, then record the authorizing official's acceptance of the residual risk, or design a manifest signer outside the cluster's administration.",
+      "title": "A cluster administrator can sign the current day's audit archive manifest"
+    },
+    {
       "appliesAt": "now",
       "blocksProduction": true,
       "closesInPhase": "47",

@@ -17,8 +17,8 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 396);
-  assert.equal(poam.length, 353);
+  assert.equal(gaps.length, 414);
+  assert.equal(poam.length, 356);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });
 // Every gap names the lowest level where it matters and whether it blocks production (the road to production page groups by both).
@@ -188,6 +188,24 @@ test('release assessment gaps have named open paths', () => {
     assert.ok(item?.controls.includes(control), control);
     assert.equal(item?.milestones[0]?.phase, phase, control);
     assert.equal(stateFor(id).state, 'planned', control);
+  }
+});
+test('the 48.1 hosted SA&A areas are planned gaps on the hosted levels, and the owner items are POA&M items that point back', () => {
+  // 48.1-01 (D-01, D-07): fifteen areas (G389 to G403) close in Phase 48.1; three items (G404 to G406) wait on the owner or the authorizing official.
+  const hosted = ['hosted-protected-a', 'hosted-protected-b', 'hosted-itsp-10-171'];
+  for (let number = 389; number <= 403; number += 1) {
+    const gap = gaps.find((item) => item.id === `G${number}`);
+    assert.equal(gap?.closesInPhase, '48.1', `G${number}`);
+    assert.deepEqual(gap?.profiles, hosted, `G${number}`);
+    assert.equal(stateFor(`G${number}`).state, 'planned', `G${number}`);
+  }
+  for (const id of ['G404', 'G405', 'G406']) {
+    const gap = gaps.find((item) => item.id === id);
+    const item = poam.find((candidate) => candidate.id === gap?.poam);
+    assert.equal(item?.gap, id);
+    assert.equal(gap?.ownerRole, 'owner');
+    assert.deepEqual(item?.controls, gap?.controls);
+    assert.ok(item?.milestones.length, id);
   }
 });
 test('a gap closes only when every control has met or reviewed-not-applicable evidence', () => assert.equal(stateFor('G13', [{ level: 'protected-b', control: 'sc-08', state: 'met' }, { level: 'protected-b', control: 'sr-11', state: 'not-applicable' }]).state, 'closed'));

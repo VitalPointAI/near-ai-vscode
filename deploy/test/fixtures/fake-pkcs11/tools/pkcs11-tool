@@ -1,0 +1,70 @@
+#!/bin/sh
+# Fake OpenSC pkcs11-tool for deploy/test/dev-site-key.test.mjs. Records its arguments in $FAKE_LOG and works on the fake token folders
+# that the fake softhsm2-util makes. --keypairgen prompts for the user PIN on standard input (never stored) and prints the new objects the
+# way OpenSC 0.27 does, with an Access line; FAKE_EXTRACTABLE=1 makes the private key extractable and FAKE_NOT_SENSITIVE=1 not sensitive.
+# The public key is the fixture key-$FAKE_KEY.spki.b64 (a or b), written as DER to standard output by --read-object.
+set -eu
+printf 'pkcs11-tool' >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+
+HERE=$(cd -P "$(dirname "$0")" && pwd)
+FIXTURES=${FAKE_FIXTURES:-$HERE/..}
+module="" token="" label="" id="" type="" keytype="" action="" login=no extractable=no
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --module) module=$2; shift 2 ;;
+    --token-label) token=$2; shift 2 ;;
+    --label) label=$2; shift 2 ;;
+    --id) id=$2; shift 2 ;;
+    --type) type=$2; shift 2 ;;
+    --key-type) keytype=$2; shift 2 ;;
+    --login) login=yes; shift ;;
+    --sensitive) shift ;;
+    --extractable) extractable=yes; shift ;;
+    --usage-sign) shift ;;
+    --list-objects) action=list; shift ;;
+    --keypairgen) action=gen; shift ;;
+    --read-object) action=read; shift ;;
+    *) echo "fake pkcs11-tool: unexpected argument $1" >&2; exit 2 ;;
+  esac
+done
+[ -f "$module" ] || { echo "error: Failed to load pkcs11 module" >&2; exit 1; }
+[ -f "${SOFTHSM2_CONF:-}" ] || { echo "error: PKCS11 function C_Initialize failed" >&2; exit 1; }
+tokendir=$(sed -n 's/^directories\.tokendir = //p' "$SOFTHSM2_CONF")
+dir=""
+for candidate in "$tokendir"/*/; do
+  if [ -f "$candidate/label" ] && [ "$(cat "$candidate/label")" = "$token" ]; then dir=${candidate%/}; fi
+done
+[ -n "$dir" ] || { echo "error: No slot with token label \"$token\" found" >&2; exit 1; }
+
+pubkey_object() {
+  printf 'Public Key Object; EC  EC_POINT 256 bits\n  label:      %s\n  ID:         %s\n  Usage:      verify\n  Access:     local\n' "$(cat "$dir/key-label")" "$(cat "$dir/key-id")"
+}
+
+case "$action" in
+  list)
+    if [ -f "$dir/key-label" ] && { [ "$type" = pubkey ] || [ -z "$type" ]; }; then pubkey_object; fi
+    ;;
+  gen)
+    [ "$login" = yes ] || { echo "error: generating a key needs --login" >&2; exit 1; }
+    [ "$keytype" = EC:prime256v1 ] || { echo "fake: unexpected key type $keytype" >&2; exit 2; }
+    [ ! -f "$dir/key-label" ] || { echo "fake: the token already holds a key" >&2; exit 1; }
+    printf 'Please enter User PIN: '
+    IFS= read -r pin || { echo "error: util_getpass error" >&2; exit 1; }
+    [ -n "$pin" ] || { echo "error: C_Login failed" >&2; exit 1; }
+    printf '%s' "$label" > "$dir/key-label"
+    printf '%s' "$id" > "$dir/key-id"
+    cp "$FIXTURES/key-${FAKE_KEY:-a}.spki.b64" "$dir/key.spki.b64"
+    access="sensitive, always sensitive, never extractable, local"
+    if [ "${FAKE_EXTRACTABLE:-0}" = 1 ] || [ "$extractable" = yes ]; then access="sensitive, extractable, local"; fi
+    if [ "${FAKE_NOT_SENSITIVE:-0}" = 1 ]; then access="never extractable, local"; fi
+    printf 'Key pair generated:\nPrivate Key Object; EC\n  label:      %s\n  ID:         %s\n  Usage:      sign\n  Access:     %s\n' "$label" "$id" "$access"
+    pubkey_object
+    ;;
+  read)
+    [ "$type" = pubkey ] && [ -f "$dir/key-label" ] && [ "$(cat "$dir/key-label")" = "$label" ] || { echo "error: object not found" >&2; exit 1; }
+    base64 -d < "$dir/key.spki.b64"
+    ;;
+  *) echo "fake pkcs11-tool: unsupported call" >&2; exit 2 ;;
+esac

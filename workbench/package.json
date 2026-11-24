@@ -31,6 +31,11 @@
     "markdown-it": "14.3.3",
     "typescript": "5.9.3"
   },
+  "overrides": {
+    "@modelcontextprotocol/sdk": {
+      "zod": "4.6.7"
+    }
+  },
   "scripts": {
     "build": "node tools/build-engine.mjs && npm run build --workspace @near-ai/sterling-workbench-extension && theia build --mode production && cp extension/assets/* lib/frontend/ && node tools/build-sterling-documentation.mjs",
     "lint": "tsc --noEmit -p extension/tsconfig.json && tsc -p tsconfig.json",

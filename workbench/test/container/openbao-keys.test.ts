@@ -141,6 +141,21 @@ test("after a fresh step-up, sign's signature verifies with ed25519 against A's 
   assert.equal(verify(null, Buffer.from('something else'), spki, Buffer.from(signature, 'base64')), false);
 });
 
+test("the session token reads A's own signing key and its public key matches personPublicKey; B's key, A's KEK and the key list are refused", async () => {
+  const bob = await signIn('b');
+  const own = await createKeyService(ada.identity).personPublicKey();
+  assert.equal(own.kind, 'ok', JSON.stringify(own));
+  const byRoot = await bao.api('GET', `transit/keys/person-${ada.entityId}`);
+  const latest = (byRoot.json as { data: { latest_version: number; keys: Record<string, { public_key: string }> } }).data;
+  assert.deepEqual((own as { value: unknown }).value, { publicKey: Buffer.from(latest.keys[String(latest.latest_version)].public_key, 'base64').toString('base64url'), keyVersion: latest.latest_version });
+  assert.equal((await bao.api('GET', `transit/keys/person-${ada.entityId}`, undefined, ada.token)).status, 200);
+  assert.equal((await bao.api('GET', `transit/keys/person-${bob.entityId}`, undefined, ada.token)).status, 403);
+  assert.equal((await bao.api('GET', `transit/keys/kek-${ada.entityId}`, undefined, ada.token)).status, 403);
+  assert.equal((await bao.api('GET', 'transit/keys?list=true', undefined, ada.token)).status, 403);
+  assert.equal((await bao.api('POST', `transit/keys/person-${ada.entityId}/rotate`, {}, ada.token)).status, 403);
+  assert.equal((await bao.api('GET', `transit/export/public-key/person-${ada.entityId}`, undefined, ada.token)).status, 403);
+});
+
 test('OpenBao itself refuses to sign with the ordinary session token, and refuses a token without the step-up acr at the step-up role', async () => {
   const input = Buffer.from('x').toString('base64');
   assert.equal((await bao.api('POST', `transit/sign/person-${ada.entityId}`, { input }, ada.token)).status, 403);
