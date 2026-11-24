@@ -170,6 +170,8 @@ These refine the decisions above; where they differ, these win.
 - **Interface additions for Phase 47:** use oauth2-proxy alpha config with `loginURLParameters` for `max_age`/`acr_values`/`prompt`; set `THEIA_HOSTS` if the proxy rewrites Host (Theia checks Origin against Host on the WebSocket); with the sidecar in the same pod, the workbench may stay on `127.0.0.1` and `STERLING_LISTEN_HOST` is only needed if the proxy reaches it by pod address. The workbench calls `auth/token/lookup-self` too, so the policy must allow it.
 
 ## For the owner to confirm
+
+**Accepted by the owner, 2026-11-23:** every default below is accepted as written ("defaults are fine"). Items stay listed for traceability; none is open.
 1. **Folder and image name:** `workbench/` and `sterling-workbench`.
 2. **Node major and base (P11, D-34):** Node 26 for both the workbench and the hub, with the upstream Node 26 binary on UBI 9 minimal (Red Hat has no Node 26 for UBI 9 yet). The alternative is Red Hat's Node 24 image for both, which would move the hub back from 26. Default: upstream Node 26 on UBI 9.
 2b. **Base-image mirrors (D-39):** through the builder's registry-mirror setting, not a `FROM` argument. Default as listed.
