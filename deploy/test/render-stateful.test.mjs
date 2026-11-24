@@ -51,3 +51,23 @@ test('two hubs in a site render two StatefulSets with their own volumes, and no 
     for (const doc of splitDocs(yaml).filter((entry) => kindOf(entry) === 'Ingress')) assert.doesNotMatch(doc, /hub-(north|south)/, `${name} routes an Ingress to a hub`);
   }
 });
+
+test('sessions reach a hub by its cluster address and members by its node port, both plain TCP to the hub\'s own TLS', () => {
+  const docs = renderHubs(TWO);
+  const services = docs.filter((doc) => kindOf(doc) === 'Service');
+  assert.equal(services.length, 4);
+  const internal = services.find((doc) => /^ {2}name: hub-north$/m.test(doc));
+  const external = services.find((doc) => /^ {2}name: hub-north-external$/m.test(doc));
+  assert.match(internal, /type: ClusterIP/);
+  assert.match(external, /type: NodePort/);
+  assert.match(external, /nodePort: 30843/);
+  for (const doc of [internal, external]) {
+    assert.match(doc, /port: 8443/);
+    assert.match(doc, /protocol: TCP/);
+  }
+  const certificate = docs.find((doc) => kindOf(doc) === 'Certificate' && doc.includes('hub-north-tls'));
+  assert.match(certificate, /kind: ClusterIssuer\n\s+name: site-pki-hub/);
+  for (const name of ['"hub-north.site.example"', 'hub-north.sterling-hubs.svc', 'hub-north.sterling-hubs.svc.cluster.local']) assert.ok(certificate.includes(`- ${name}`), name);
+  assert.match(certificate, /- server auth/);
+  assert.throws(() => renderHubs([{ ...TWO[0], nodePort: undefined }]), /nodePort is not set/);
+});

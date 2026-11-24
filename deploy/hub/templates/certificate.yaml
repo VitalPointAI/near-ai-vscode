@@ -1,0 +1,32 @@
+{{- /*
+The hub's TLS certificate from the site PKI (D-43, D-44): ClusterIssuer site-pki-hub (OpenBao pki_int role hub, 47-07 and 47-13), for the
+public address members use and both cluster names sessions use; cert-manager renews it well before it expires. Backups (MUS 10.9): the
+hub's volume is covered by the storage class's daily snapshots and backups (47-10) and its key Secret is kept apart in OpenBao; a restore is
+a rollback that members' computers refuse and refill (runbook, 47-17).
+*/ -}}
+{{- $i := .Values.instance -}}
+{{- $host := index (splitList ":" $i.publicAddress) 0 -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hub-{{ $i.name }}-tls
+spec:
+  secretName: hub-{{ $i.name }}-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: site-pki-hub
+  commonName: {{ $host | quote }}
+  dnsNames:
+    - {{ $host | quote }}
+    - hub-{{ $i.name }}.{{ .Release.Namespace }}.svc
+    - hub-{{ $i.name }}.{{ .Release.Namespace }}.svc.cluster.local
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: 2160h
+  renewBefore: 720h
