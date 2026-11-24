@@ -215,14 +215,9 @@ export function buildEngagement(input: {
   };
 }
 
-/** Deterministic-enough ids without importing node:crypto into the webview boundary. */
+/** A random v4 UUID from Web Crypto (Node and webviews both provide it), so engagement and gate-record ids are unpredictable. */
 function cryptoRandomUuid(): string {
-  const bytes = new Uint8Array(16);
-  for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return globalThis.crypto.randomUUID();
 }
 
 /** The one place the acceptance snapshot is derived, so the panel and the run gate agree. */

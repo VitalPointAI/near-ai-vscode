@@ -443,3 +443,10 @@ test('nearAi.openThread shows the panel and reopens the thread, and refuses an i
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string }> } };
   assert.equal(manifest.contributes.commands.some((entry) => entry.command === 'nearAi.openThread'), false, 'it is not in the Command Palette');
 });
+
+test('model text shaped like a footer cannot make the footer pattern backtrack (CodeQL js/redos)', () => {
+  const started = Date.now();
+  assert.equal(USAGE_FOOTER_TAIL.test(`\n\n*) · ${') · '.repeat(2000)}`), false);
+  assert.ok(Date.now() - started < 1000, 'matched without catastrophic backtracking');
+  assert.equal(USAGE_FOOTER_TAIL.test('\n\n*model · Local · runs on this machine · 1,234 tokens · ~$0.0012 est.*'), true);
+});
