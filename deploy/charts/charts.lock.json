@@ -1,0 +1,15 @@
+{
+  "note": "Every upstream Helm chart the site stack installs, vendored under deploy/charts/vendored/ (D-13, D-21). sha256 is the digest the chart repository's index.yaml publishes for that version, confirmed against the downloaded tarball; renders and installs read only the tarball. Download and check: node deploy/charts/vendor.mjs [--check]. The compliance fit check reads this file (chart:<name>).",
+  "charts": [
+    {
+      "name": "cert-manager",
+      "version": "v1.21.3",
+      "appVersion": "v1.21.3",
+      "repository": "https://charts.jetstack.io",
+      "url": "https://charts.jetstack.io/charts/cert-manager-v1.21.3.tgz",
+      "sha256": "9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17",
+      "file": "deploy/charts/vendored/cert-manager-v1.21.3.tgz",
+      "component": "cert-manager"
+    }
+  ]
+}

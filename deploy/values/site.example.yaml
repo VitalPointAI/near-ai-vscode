@@ -1,0 +1,43 @@
+{
+  "note": {
+    "about": "The site globals: one file per site, written by the site's operator from this example. It is JSON, which is also valid YAML, so the deploy scripts read it without a YAML library. Values files name a setting as ${site.<key>} (dotted for nested keys, for example ${site.clusterCidrs.pod}); a render stops with a plain message when a named setting is missing. Per-component site settings live in deploy/values/site.example/<release>.yaml.",
+    "siteName": "A short name for this site, used in labels and messages.",
+    "domain": "The site's parent domain; its host names (sessions, sign-in, registry) sit under it.",
+    "rpId": "The WebAuthn relying-party ID (D-08): your organization's one shared parent domain of every site's host names. Chosen once for your organization's deployment and entered with the same value in every site file at HQ and at every edge site, never chosen per site, so a key registered at one site works at the others. No default is shipped.",
+    "registry": "The host and port the site registry serves on (for example registry.site.example:5000). Every image is pulled from it by digest.",
+    "registryKind": "zot (the lab and small sites) or harbor (HQ and large sites).",
+    "clusterCidrs": "pod and service are the RKE2 defaults; nodes is the site's node network (required, no default).",
+    "egressAllow": "The only addresses outside the cluster that pods may reach, each one something your organization's signed policy allows (for example the site mail server or an approved model endpoint), D-01. Empty means none.",
+    "storageClass": "The storage class every workspace and data volume uses; it must be encrypted at rest (D-17).",
+    "storageEncryptionAtRest": "How the class is encrypted at rest when it is not the reference Longhorn class (for example the array's own encryption for Ceph or NFS). Empty for Longhorn, whose class carries encrypted: \"true\".",
+    "requestedStorage": "The size of each person's workspace volume (for example 10Gi). Required: there is no silent default (D-11).",
+    "sessionTimeoutMinutes": "Idle minutes before a session is stopped; provisional until Phase 48 measures it (D-11).",
+    "signInKeys": "The site's sign-in policy (D-57). passkeys accepts any WebAuthn passkey, including phone passkeys; hardware-only requires attested, allowlisted, device-bound hardware keys. passkeys is the default for development and the lab; hardware-only is recommended for production defence sites once they have keys.",
+    "acceptableAaguids": "The approved hardware key models (AAGUIDs), used only under signInKeys hardware-only, where an empty list is refused (D-31).",
+    "organizationPublicKey": "The PEM text (not a path) of your organization's cosign public key, which admission and the bundle import check every image and file against.",
+    "stepUpAcr": "The level the realm asks for at step-up; the one source for the workbench's step-up setting, the realm's level-2 flow and OpenBao's step-up role.",
+    "stepUpMaxAgeSeconds": "How recent a sign-in must be for a step-up action; the same one source as stepUpAcr.",
+    "hubs": "The sync hubs this site runs, one item per hub with at least a name; each item becomes its own release."
+  },
+  "siteName": "",
+  "domain": "",
+  "rpId": "",
+  "registry": "",
+  "registryKind": "zot",
+  "clusterCidrs": {
+    "pod": "10.42.0.0/16",
+    "service": "10.43.0.0/16",
+    "nodes": ""
+  },
+  "egressAllow": [],
+  "storageClass": "sterling-encrypted",
+  "storageEncryptionAtRest": "",
+  "requestedStorage": "",
+  "sessionTimeoutMinutes": 30,
+  "signInKeys": "passkeys",
+  "acceptableAaguids": [],
+  "organizationPublicKey": "",
+  "stepUpAcr": "webauthn-fresh",
+  "stepUpMaxAgeSeconds": 300,
+  "hubs": []
+}

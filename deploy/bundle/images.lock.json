@@ -1,0 +1,11 @@
+{
+  "note": "Every image the site stack runs, by digest (D-12, D-20). images: third-party, ref is <host>/<repository>:<tag>@sha256:<64 hex> (the multi-arch index digest; 47-03 re-pins if spike S1 records that only the linux/amd64 manifest digest survives the bundle copy), discovered by the compliance fit check. built: ours, built from deploy/images/<name>/image.json, digest null until published. release: published by another pipeline, digest null until published. The site registry serves each image at <site registry>/<sitePath>, see deploy/bundle/lib/locks.mjs.",
+  "images": [
+    { "ref": "quay.io/jetstack/cert-manager-controller:v1.21.3@sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-webhook:v1.21.3@sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-cainjector:v1.21.3@sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-startupapicheck:v1.21.3@sha256:1c519d4afca1413d1e4ccd78bdc756184418ab55a34569a3b3de39d32f9974e1", "component": "cert-manager" }
+  ],
+  "built": [],
+  "release": []
+}
