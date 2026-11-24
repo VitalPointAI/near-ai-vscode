@@ -120,8 +120,8 @@ async function hosted(person: RosterDevice, overrides: Partial<ActiveSession> = 
 
 const clock = { now: () => NOW };
 
-function started(h: Hosted, person: RosterDevice) {
-  const result = startSessionKeys(h.keyService, h.identity, clock, { personPublicKey: person.publicKey, engine });
+async function started(h: Hosted, person: RosterDevice) {
+  const result = await startSessionKeys(h.keyService, h.identity, clock, { personPublicKey: person.publicKey, engine });
   assert.equal(result.kind, 'ok');
   if (result.kind !== 'ok') throw new Error('unreachable');
   return result.value;
@@ -133,7 +133,7 @@ test('tracer: a fresh sign-in certifies a new session key through KeyService, an
   assert.equal(entryMatches, true);
   const s = shared();
   const h = await hosted(s.pat);
-  const keys = started(h, s.pat);
+  const keys = await started(h, s.pat);
   const project = target(s);
 
   const certified = await keys.certificate(project, { member: PAT, slot: 2 });
@@ -155,7 +155,7 @@ test('tracer: a fresh sign-in certifies a new session key through KeyService, an
 test('the session key is the engine\'s signer shape, lasts 12 hours, and its private key is reachable only through sign', async () => {
   assert.equal(SESSION_NOT_AFTER_MS, engine.SESSION_DEFAULT_LIFETIME_MS);
   const s = shared();
-  const keys = started(await hosted(s.pat), s.pat);
+  const keys = await started(await hosted(s.pat), s.pat);
   const { sessionSigner } = keys;
   assert.equal(sessionSigner.publicKey.length, 43);
   assert.match(sessionSigner.fingerprint, /^dev-[0-9a-f]{32}$/);
@@ -182,7 +182,7 @@ test('the session key is the engine\'s signer shape, lasts 12 hours, and its pri
 test('a stale sign-in certifies nothing: the refusal asks for the passkey or security key, and OpenBao is not called', async () => {
   const s = shared();
   const h = await hosted(s.pat, { authTime: NOW / 1000 - 3600 });
-  const keys = started(h, s.pat);
+  const keys = await started(h, s.pat);
   const project = target(s);
   assert.deepEqual(await keys.certificate(project, { member: PAT, slot: 2 }), {
     kind: 'refused', reason: SESSION_KEY_TEXT.stepUp, fix: KEY_SERVICE_TEXT.confirm,
@@ -196,12 +196,12 @@ test('a stale sign-in certifies nothing: the refusal asks for the passkey or sec
 test('no session keys in local mode or before the sign-in is active, and none for a person key that is not one', async () => {
   const s = shared();
   const local = await hosted(s.pat, {}, true);
-  assert.deepEqual(startSessionKeys(local.keyService, local.identity, clock, { personPublicKey: s.pat.publicKey, engine }), { kind: 'refused', reason: KEY_SERVICE_TEXT.local });
+  assert.deepEqual(await startSessionKeys(local.keyService, local.identity, clock, { personPublicKey: s.pat.publicKey, engine }), { kind: 'refused', reason: KEY_SERVICE_TEXT.local });
   const waiting = await hosted(s.pat);
   waiting.session.current = undefined;
-  assert.deepEqual(startSessionKeys(waiting.keyService, waiting.identity, clock, { personPublicKey: s.pat.publicKey, engine }), { kind: 'refused', reason: KEY_SERVICE_TEXT.notReady });
+  assert.deepEqual(await startSessionKeys(waiting.keyService, waiting.identity, clock, { personPublicKey: s.pat.publicKey, engine }), { kind: 'refused', reason: KEY_SERVICE_TEXT.notReady });
   const active = await hosted(s.pat);
-  assert.deepEqual(startSessionKeys(active.keyService, active.identity, clock, { personPublicKey: 'not-a-key', engine }), { kind: 'refused', reason: SESSION_KEY_TEXT.noPersonKey });
+  assert.deepEqual(await startSessionKeys(active.keyService, active.identity, clock, { personPublicKey: 'not-a-key', engine }), { kind: 'refused', reason: SESSION_KEY_TEXT.noPersonKey });
 });
 
 // ---- Task 3: the session lifecycle and the person signer's refusals ------------------------------------------------------------------------------
@@ -209,7 +209,7 @@ test('no session keys in local mode or before the sign-in is active, and none fo
 test('at stopping, stop() drops the session key and every secret held with it; a later sign or certificate signs nothing', async () => {
   const s = shared();
   const h = await hosted(s.pat);
-  const keys = started(h, s.pat);
+  const keys = await started(h, s.pat);
   let dropped = 0;
   keys.hold({ drop: () => { dropped += 1; } });
   // The identity reaches stopping (46-02), and the backend stops the session's keys.
@@ -258,8 +258,67 @@ test('the person signer never throws: another key\'s signature, a key store that
 test('a refusal other than the step-up passes through to the certificate with its own sentence', async () => {
   const s = shared();
   const h = await hosted(s.pat, {}, false);
-  const keys = started(h, s.pat);
+  const keys = await started(h, s.pat);
   // Signing is not set up on this site (no STERLING_STEPUP_ACR).
   h.session.current = { ...(h.session.current as ActiveSession), config: { ...(h.session.current as ActiveSession).config, stepUpAcr: undefined } };
   assert.deepEqual(await keys.certificate(target(s), { member: PAT, slot: 2 }), { kind: 'refused', reason: KEY_SERVICE_TEXT.notSetUp });
+});
+
+// ---- The person key read from Transit (owner decision 2026-11-24: the session policy reads transit/keys/person-<entity> only) -------------------
+
+/** The KeyService with personPublicKey as Transit answers it (46-07 adds it on main; here it answers for the given key and version). */
+function reading(h: Hosted, key: RosterDevice | undefined, keyVersion = 1, refusal?: string) {
+  let reads = 0;
+  return {
+    sign: h.keyService.sign,
+    reads: () => reads,
+    async personPublicKey() {
+      reads += 1;
+      if (refusal !== undefined) return { kind: 'refused' as const, reason: refusal };
+      return { kind: 'ok' as const, value: { publicKey: (key as RosterDevice).publicKey, keyVersion } };
+    },
+  };
+}
+
+test('without a given key the session reads the person key from Transit once, and certifies with it', async () => {
+  const s = shared();
+  const h = await hosted(s.pat);
+  const keyService = reading(h, s.pat);
+  const result = await startSessionKeys(keyService, h.identity, clock, { engine });
+  assert.equal(result.kind, 'ok');
+  if (result.kind !== 'ok') return;
+  assert.equal(keyService.reads(), 1);
+  assert.equal(result.value.personSigner.publicKey, s.pat.publicKey);
+  const certified = await result.value.certificate(target(s), { member: PAT, slot: 2 });
+  assert.equal(certified.kind, 'ok', JSON.stringify(certified));
+  const writer = engine.writerIdOf(result.value.sessionSigner.publicKey);
+  assert.deepEqual(engine.certifiedWriter(rosterView(s.world.foldRoster()), writer, s.head), { member: PAT, device: s.pat.writer, slot: 2 });
+  assert.equal(keyService.reads(), 1, 'read once');
+});
+
+test('a read key that is not the key that signs, or a signature by another key version, certifies nothing', async () => {
+  const s = shared();
+  const h = await hosted(s.pat);
+  // Transit answered another key's public key: the first signature does not verify against it.
+  const other = await startSessionKeys(reading(h, s.world.device('NOT-PAT', 'mbr-other')), h.identity, clock, { engine });
+  assert.equal(other.kind, 'ok');
+  if (other.kind !== 'ok') return;
+  const project = target(s);
+  assert.deepEqual(await other.value.certificate(project, { member: PAT, slot: 2 }), { kind: 'refused', reason: PERSON_SIGNER_TEXT.mismatch });
+  // The key read is version 2, and the key store signed with version 1 (the fake answers vault:v1:): rotated in between.
+  const rotated = await startSessionKeys(reading(h, s.pat, 2), h.identity, clock, { engine });
+  assert.equal(rotated.kind, 'ok');
+  if (rotated.kind !== 'ok') return;
+  assert.deepEqual(await rotated.value.certificate(project, { member: PAT, slot: 2 }), { kind: 'refused', reason: PERSON_SIGNER_TEXT.rotated });
+  assert.equal(project.appended, 0);
+  assert.equal(s.world.foldRoster().sessions.size, 0);
+});
+
+test('a refused read passes its own sentence through, and a KeyService that cannot read gives no session keys without a key', async () => {
+  const s = shared();
+  const h = await hosted(s.pat);
+  assert.deepEqual(await startSessionKeys(reading(h, undefined, 1, KEY_SERVICE_TEXT.signingKeyMissing), h.identity, clock, { engine }), {
+    kind: 'refused', reason: KEY_SERVICE_TEXT.signingKeyMissing,
+  });
+  assert.deepEqual(await startSessionKeys({ sign: h.keyService.sign }, h.identity, clock, { engine }), { kind: 'refused', reason: SESSION_KEY_TEXT.noPersonKey });
 });

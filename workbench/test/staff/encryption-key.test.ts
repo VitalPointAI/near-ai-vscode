@@ -255,7 +255,7 @@ test('the opened key is dropped with the session key when the session stops', as
   const s = session(where);
   const key = await opened(s);
   const personPublicKey = Buffer.from(generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64url');
-  const keys = startSessionKeys(s.keyService, s.identity, { now: () => Date.now() }, { personPublicKey, engine });
+  const keys = await startSessionKeys(s.keyService, s.identity, { now: () => Date.now() }, { personPublicKey, engine });
   assert.equal(keys.kind, 'ok');
   if (keys.kind !== 'ok') return;
   keys.value.hold(key);

@@ -3,7 +3,8 @@
  * reached only through KeyService.sign (46-07). KeyService logs in to the step-up role with the latest sign-in for every signature, so a
  * signature needs a fresh passkey or security key confirmation and OpenBao enforces it. Every refusal comes back as a value carrying KeyService's
  * own sentence and, when there is one, its fix; sign never throws. Each signature is checked against the person's public key before it is
- * returned, so a key store that answers with another key's signature signs nothing.
+ * returned, so a key store that answers with another key's signature signs nothing. When the key's Transit version is known (the session read
+ * it with the public key), a signature by any other version is refused too, so a key rotated during the session signs nothing here.
  *
  * The signer keeps nothing between calls: no token, no signature, no message. It never logs. Nothing here imports Theia.
  */
@@ -27,6 +28,7 @@ export interface PersonSigner {
 
 export const PERSON_SIGNER_TEXT = {
   mismatch: "Your organization's key store signed with a key that is not your person key, so nothing was signed. Ask your administrator.",
+  rotated: 'Your person key was changed while this session was open, so nothing was signed. Sign in again.',
 } as const;
 
 const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -44,10 +46,10 @@ export function isPublicKeyText(publicKey: unknown): publicKey is string {
 }
 
 /**
- * The person signer for the key whose raw public key is `publicKey`. Throws only for a public key that is not one (a programming error); every
- * answer of sign is a signature (base64url, as the engine verifies) or a refusal value.
+ * The person signer for the key whose raw public key is `publicKey`, and, when given, whose Transit version is `keyVersion`. Throws only for a
+ * public key that is not one (a programming error); every answer of sign is a signature (base64url, as the engine verifies) or a refusal value.
  */
-export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: string): PersonSigner {
+export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: string, keyVersion?: number): PersonSigner {
   if (!isPublicKeyText(publicKey)) throw new Error('The person key must be a 32-byte Ed25519 public key written as base64url.');
   const key = createPublicKey({ key: Buffer.concat([SPKI_ED25519_PREFIX, Buffer.from(publicKey, 'base64url')]), format: 'der', type: 'spki' });
 
@@ -59,6 +61,7 @@ export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: st
       return { refused: KEY_SERVICE_TEXT.unreachable };
     }
     if (answer.kind === 'refused') return answer.fix === undefined ? { refused: answer.reason } : { refused: answer.reason, fix: answer.fix };
+    if (keyVersion !== undefined && answer.value.keyVersion !== keyVersion) return { refused: PERSON_SIGNER_TEXT.rotated };
     const signature = Buffer.from(answer.value.signature, 'base64');
     let matches = false;
     try {
