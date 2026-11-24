@@ -5726,8 +5726,50 @@
       ],
       "id": "G420",
       "ownerRole": "maintainers",
-      "remediation": "Escrow records hold a SHA-256 of each longhorn-crypto value, and the ConfigMap sterling-escrow-record holds the same digests in the cluster, so a record kept with the runbook records reveals nothing only while CRYPTO_KEY_VALUE is random. Nothing generates that value yet: the storage class says the install script (47-16) writes it from OpenBao kv/apps/storage. 47-16 generates it with at least 256 random bits, never a typed passphrase, and its preflight refuses a shorter value. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-25-SUMMARY.md.",
+      "remediation": "Escrow records hold a SHA-256 of each longhorn-crypto value, and the ConfigMap sterling-escrow-record holds the same digests in the cluster, so a record kept with the runbook records reveals nothing only while CRYPTO_KEY_VALUE is random. 47-16 now generates it in memory with 256 random bits (43 base64url characters) before the first encrypted volume, never replaces an existing one, and refuses a shorter value in OpenBao; this closes when 47-18's lab run shows the generated key in use and escrowed. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-25-SUMMARY.md.",
       "title": "The volume encryption key must be random for digest-only escrow records to be safe"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "sc-12",
+        "sc-28",
+        "ia-05"
+      ],
+      "id": "G421",
+      "ownerRole": "maintainers",
+      "remediation": "The site install writes the static application secrets its release descriptors declare (install.mjs secrets): today longhorn-crypto, postgres-superuser, keycloak-db and keycloak-admin-bootstrap, and the registry account through install.mjs registry. The others the charts expect are not declared yet: opensearch-internal-users with opensearch-admin and opensearch-writer (bcrypt hashes), oauth2-proxy-secrets, keycloak-realm-applier, the Harbor Secrets on Harbor sites, and each hub-<name>-keys (the hub-key generator exists). Without them a full apply stops at the first release that needs one. Declare them, with their hashing, before 47-18's lab run. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-16-SUMMARY.md.",
+      "title": "The site install does not yet write every application secret the charts expect"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "cm-02",
+        "cm-06",
+        "cp-10"
+      ],
+      "id": "G423",
+      "ownerRole": "maintainers",
+      "remediation": "install.mjs apply (the ordered releases, both ceremony stops, the bootstrap volume key, the secrets step, the OpenSearch objects, the admission switch), status and retire-bootstrap are tested with a fake runner only, and the runbooks name them without a walk-through on a cluster. The lab VM proved node-files (RKE2 up from the folder it wrote, the registry image named for the site registry) and bootstrap-ca. 47-18 installs a lab site with these commands and walks site-install.md, key-ceremony.md, backup-and-restore.md and recovery-plan.md, correcting each step that differs. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-16-SUMMARY.md.",
+      "title": "The site install and its runbooks have not run end to end on a cluster"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cp-04",
+        "cp-10",
+        "ma-02"
+      ],
+      "id": "G424",
+      "ownerRole": "maintainers",
+      "remediation": "The restore drill's postgres, opensearch and volume drivers and drain-check's Longhorn and OpenBao rules are tested on kubectl fixtures only. On the lab VM, cert-check, drain-check's etcd rule, upgrade-check's version and etcd snapshot rules and the escrow drill ran against a real RKE2 node. Run the postgres driver on 47-18's lab site, and the opensearch and volume drivers, the Longhorn drain rule and the OpenBao drain rule on Phase 48's multi-node lab-full rig, and record each in a sterling-restore-test/1 record. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-27-SUMMARY.md.",
+      "title": "Restore drivers and maintenance checks for OpenSearch, Longhorn and an OpenBao cluster have not run live"
     }
   ]
 }
