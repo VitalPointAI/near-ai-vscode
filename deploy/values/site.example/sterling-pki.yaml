@@ -1,0 +1,16 @@
+{
+  "note": {
+    "about": "Per-site PKI settings, written by the site's operator and the install script from this example (the release descriptor names this file as its site file). JSON syntax (valid YAML) so the install script writes it without a YAML library.",
+    "siteCaChain": "The PEM text of the site CA chain: your organization's HQ offline root and this site's OpenBao intermediate, as written by deploy/openbao/pki-files.mjs import-intermediate --chain-out (47-14). It becomes ConfigMap sterling-site-ca (key ca.crt) in every namespace that verifies site TLS, and the CA bundle of the site-pki issuers. Left empty here: every site has its own chain, and an empty chain trusts nothing (fails closed).",
+    "bootstrapCaCertificate": "The PEM text of the bootstrap CA certificate (never its key) while OpenBao and the registry still serve their bootstrap certificates. The install script sets it at install and empties it at retire-bootstrap, then re-applies this release, so the bootstrap CA is trusted nowhere afterwards (D-16).",
+    "siteCaTruststore": "The same chain as a password-less PKCS12, base64, for Java clients (the realm applier reads key truststore.p12). The install script makes it from siteCaChain.",
+    "certificates": "Lifetime and renewal of the server certificates issued from site-pki. The pki_int roles allow at most 90 days (2160h)."
+  },
+  "siteCaChain": "",
+  "bootstrapCaCertificate": "",
+  "siteCaTruststore": "",
+  "certificates": {
+    "duration": "2160h",
+    "renewBefore": "720h"
+  }
+}

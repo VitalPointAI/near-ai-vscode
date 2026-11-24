@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // OpenBao as code (D-37 to D-41): mounts, the jwt auth bound to the site's Keycloak, the session and step-up roles, the policies, the PKI
-// intermediate's mount and roles and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
+// intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
 // through the API ("use declarative, config-based audit device management", spike S5), so it is an audit stanza in the server configuration
 // (deploy/values/openbao.yaml). Run at install and again on every update; a second run
 // changes nothing (each write is compared with what OpenBao already holds and skipped when equal).
@@ -19,12 +19,42 @@ import { loadSite } from '../bundle/lib/render.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
-export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install']);
+export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
 /** Base session token: 15 minutes, renewable to a working day. */
 export const BASE_TTL = Object.freeze({ token_ttl: 900, token_max_ttl: 28800 });
+
+/**
+ * cert-manager's login (D-16, 47-13): the ClusterIssuers site-pki and site-pki-hub (deploy/charts/sterling-pki) ask Kubernetes for a short
+ * token of this dedicated service account, with this audience, and log in to auth/kubernetes role cert-manager with it. The controller's own
+ * service account token never leaves the cluster.
+ */
+export const CERT_MANAGER = Object.freeze({ role: 'cert-manager', serviceAccount: 'openbao-issuer', namespace: 'cert-manager', audience: 'sterling-openbao-pki' });
+/**
+ * The cluster service domains the ingress role may sign besides the site domain: the in-cluster names of the services that serve TLS from the
+ * site PKI (OpenBao and its Raft peers, Keycloak and its Postgres, OpenSearch, the registry, Theia Cloud's CRD conversion webhook). Every
+ * other cluster name is refused. conversion.cert is only for the upstream webhook certificate's fixed common name (crd.conversion.cert in
+ * the theia-cloud-crds chart, not a value); no client resolves it.
+ */
+export const SERVICE_DOMAINS = Object.freeze(['sterling-openbao', 'sterling-identity', 'sterling-logging', 'sterling-registry', 'theia-cloud']
+  .flatMap((namespace) => [`${namespace}.svc`, `${namespace}.svc.cluster.local`]).concat(['openbao-internal', 'conversion.cert']));
+
+/** The revocation list lifetime when the site file sets none: 30 days, longer than signed media takes to reach an edge site. */
+export const DEFAULT_CRL_EXPIRY = '720h';
+const DURATION = /^(\d+)(s|m|h)?$/;
+/** A duration ("720h", "30m", "2592000s" or a number of seconds) in seconds, or NaN. */
+export function durationSeconds(value) {
+  const match = DURATION.exec(String(value ?? '').trim());
+  return match ? Number(match[1]) * ({ s: 1, m: 60, h: 3600 }[match[2] ?? 's']) : Number.NaN;
+}
+/** The site's crlExpiry (optional), refused when it is not a duration of at least one day. */
+export function crlExpiry(site) {
+  const value = site.crlExpiry ?? DEFAULT_CRL_EXPIRY;
+  if (!(durationSeconds(value) >= 86400)) throw new Error(`the site setting crlExpiry (${JSON.stringify(value)}) must be a duration of at least a day, for example 720h.`);
+  return String(value);
+}
 
 const policyText = (name) => readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8');
 
@@ -54,11 +84,23 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     // outlive the step-up window.
     role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
       token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
-    // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before.
-    { what: 'PKI role ingress', read: 'pki_int/roles/ingress', write: 'pki_int/roles/ingress', body: { allowed_domains: [site.domain], allow_subdomains: true,
-      allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: false, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
+    // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
+    // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10).
+    { what: 'PKI role ingress', read: 'pki_int/roles/ingress', write: 'pki_int/roles/ingress', body: { allowed_domains: [site.domain, ...SERVICE_DOMAINS], allow_subdomains: true,
+      allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: true, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
     { what: 'PKI role hub', read: 'pki_int/roles/hub', write: 'pki_int/roles/hub', body: { allowed_domains: [site.domain, 'sterling-hubs.svc', 'sterling-hubs.svc.cluster.local'],
       allow_subdomains: true, allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: false, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
+    // The intermediate's revocation list (D-49): edge sites check it from a signed file carried on media (47-14), so it must stay valid
+    // longer than the media takes to arrive. OpenBao's default is 72 hours; the site setting crlExpiry overrides the 30-day default here.
+    { what: 'PKI revocation list lifetime', read: 'pki_int/config/crl', write: 'pki_int/config/crl', body: { expiry: crlExpiry(site) },
+      compare: (current, body) => durationSeconds(current?.expiry) === durationSeconds(body.expiry) },
+    // cert-manager signs through auth/kubernetes (D-16): OpenBao checks the token with the cluster's TokenReview API, using its own pod's service
+    // account (the chart's auth-delegator binding) and the in-cluster CA, so no reviewer token or CA is written here.
+    { what: 'auth kubernetes/', read: 'sys/auth', write: 'sys/auth/kubernetes', body: { type: 'kubernetes' }, compare: (auths) => auths?.['kubernetes/']?.type === 'kubernetes' },
+    { what: 'kubernetes config (this cluster)', read: 'auth/kubernetes/config', write: 'auth/kubernetes/config', body: { kubernetes_host: 'https://kubernetes.default.svc' } },
+    { what: `kubernetes role ${CERT_MANAGER.role}`, read: `auth/kubernetes/role/${CERT_MANAGER.role}`, write: `auth/kubernetes/role/${CERT_MANAGER.role}`, body: {
+      bound_service_account_names: [CERT_MANAGER.serviceAccount], bound_service_account_namespaces: [CERT_MANAGER.namespace], audience: CERT_MANAGER.audience,
+      token_policies: ['cert-manager'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 300 } },
     // The approvers of key moves between sites (key-move.hcl); members are added at the key ceremony and never by this script.
     { what: 'identity group key-custodians', read: 'identity/group/name/key-custodians', write: 'identity/group/name/key-custodians', body: { type: 'internal', policies: [] },
       compare: (group) => group?.type === 'internal' }
