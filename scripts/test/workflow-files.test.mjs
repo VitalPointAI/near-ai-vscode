@@ -94,8 +94,13 @@ test('the Sterling image bundles the verified VSIX and is smoke-tested before ar
   assert.match(image, /needs\.build\.outputs\.sha256/);
   assert.match(image, /sha256sum --check[\s\S]*docker build --target release/);
   assert.match(image, /docker run[\s\S]*curl[\s\S]*docker exec[\s\S]*docker save/);
-  // 46-03's egress suite runs against this release image before it is archived, with a script-free install of the test harness.
-  assert.match(image, /docker exec[\s\S]*WORKBENCH_TEST_IMAGE="sterling-release:\$TAG" node \.\.\/scripts\/run-tests\.mjs --test-concurrency=1 dist\/test\/container\/egress\.test\.js[\s\S]*docker save/);
+  // 46-03's egress suite runs against the archived image ID after the archive and every other artifact are uploaded (its harness and
+  // Playwright's Chromium download run with Docker access), with a script-free install of the harness.
+  const list = steps(image);
+  const egress = list.findIndex((step) => step.includes('dist/test/container/egress.test.js'));
+  assert.ok(egress > list.findIndex((step) => /docker save/.test(step)), 'the egress run comes after the archive is saved');
+  list.forEach((step, index) => { if (/actions\/upload-artifact@/.test(step)) assert.ok(index < egress, 'every upload comes before the egress run'); });
+  assert.match(list[egress], /IMAGE_ID: \$\{\{ steps\.archive\.outputs\.image_id \}\}[\s\S]*test "\$\(docker image inspect --format '\{\{\.Id\}\}' "sterling-release:\$TAG"\)" = "\$IMAGE_ID"\n\s*WORKBENCH_TEST_IMAGE="sterling-release:\$TAG" node \.\.\/scripts\/run-tests\.mjs --test-concurrency=1 dist\/test\/container\/egress\.test\.js/);
   assert.doesNotMatch(image, /npm ci(?! --ignore-scripts)|cache:\s*npm/);
   assert.match(image, /archive_sha256: \$\{\{ steps\.archive\.outputs\.sha256 \}\}/);
   assert.match(image, /image_id: \$\{\{ steps\.archive\.outputs\.image_id \}\}/);

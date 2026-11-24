@@ -463,21 +463,6 @@ jobs:
             --max-time 5 "http://$address/" -o sterling-index.html
           grep -q 'bundle.js' sterling-index.html
           docker exec sterling-release-smoke test -s /plugins/extension/package.json
-      # 46-03's no-egress proof against the image about to be archived: under the outbound recording hook it starts and restarts on a
-      # network with no route out, and in Chromium the bundled extension's plugin host starts and the page calls nothing outside its own
-      # origin. The test harness installs without scripts and without an npm cache; the image itself is never changed.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '26.13.1'
-      - name: Check the release image makes no outbound call
-        working-directory: workbench
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          npm ci --ignore-scripts
-          npx --no-install playwright install --with-deps chromium
-          node scripts/build.mjs
-          WORKBENCH_TEST_IMAGE="sterling-release:$TAG" node ../scripts/run-tests.mjs --test-concurrency=1 dist/test/container/egress.test.js
       - name: Save the tested image
         id: archive
         env:
@@ -535,6 +520,24 @@ jobs:
           path: release-cosign/cosign
           retention-days: 1
           if-no-files-found: error
+      # 46-03's no-egress proof against the archived image, last in the job: under the outbound recording hook it starts and restarts on a
+      # network with no route out, and in Chromium, with no model servers set, the bundled NEAR AI chat opens and nothing calls out. It runs
+      # after the archive is hashed and uploaded because the harness and Playwright's Chromium download run here with Docker access; the
+      # image ID check ties the result to the archived image. Publish needs this job, so a failure still stops the release.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.1'
+      - name: Check the archived release image makes no outbound call
+        working-directory: workbench
+        env:
+          TAG: ${{ github.ref_name }}
+          IMAGE_ID: ${{ steps.archive.outputs.image_id }}
+        run: |
+          npm ci --ignore-scripts
+          npx --no-install playwright install --with-deps chromium
+          node scripts/build.mjs
+          test "$(docker image inspect --format '{{.Id}}' "sterling-release:$TAG")" = "$IMAGE_ID"
+          WORKBENCH_TEST_IMAGE="sterling-release:$TAG" node ../scripts/run-tests.mjs --test-concurrency=1 dist/test/container/egress.test.js
 
   publish:
     name: Publish Sterling image

@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Release image's browser egress check never reaches network-idle with the bundled extension, so workbench/test/e2e/egress.spec.ts (46-03's no-egress proof, run by workbench/test/container/egress.test.ts) times out before its checks run."
 created: 2026-11-24T00:00:00Z
-updated: 2026-11-24T16:55:00Z
+updated: 2026-11-24T17:45:00Z
 ---
 
 ## Current Focus
@@ -70,10 +70,25 @@ started: first observed in 46-08 when the release target was tested; development
   found: release 4/4 pass (browser test 16.4 s); dev 4/4 pass (browser test 16.0 s)
   implication: the browser proof now runs to completion on both targets
 
+- timestamp: 2026-11-24T17:30:00Z
+  checked: coordinator follow-up - the NEAR AI chat webview's content must be in the proof. Probe at localhost on the release image, F1 "NEAR AI: Open Chat", then 10 s and 40 s windows; process environments read while the chat was open
+  found: the chat renders inside [id^="plugin-webview:"] iframe (http://<uuid>.webview.localhost:<port>/webview/index.html) > iframe#active-frame (fake.html), with textarea#input "Message NEAR AI" and "Connect NEAR AI to start"; its resources load from the same webview origin (/webview/theia-resource/file///plugins/extension/media/chat/*.js|css). The extension activated (its notifications: organization key not readable, proxy-support tip, "Policy: reading only"). Every request went to http://localhost:<port> or http://f15e741b-1725-5f15-984f-3e4a907fc985.webview.localhost:<port>. The plugin host (/app/lib/backend/plugin-host, pid 44) runs with NODE_OPTIONS=--import=/test-hook/outbound-hook.mjs (Theia drops only HOSTED_PLUGIN* from its env). The hook logged only 'allowed net 127.0.0.1:3000' over 40 s with the chat open and STERLING_MODEL_SERVERS unset
+  implication: no outbound attempt by the extension at start or on opening the chat with no model servers - no finding to report; the proof can cover the chat at localhost with the webview origin allowed exactly
+
+- timestamp: 2026-11-24T17:35:00Z
+  checked: Playwright 1.65 browser download (playwright-core coreBundle.js downloadBrowserWithProgressBar)
+  found: the Chromium zip is fetched over HTTPS with no hash check
+  implication: concrete reason to run the egress step after the image archive is hashed and uploaded (the harness runs with Docker access in the image job)
+
+- timestamp: 2026-11-24T17:40:00Z
+  checked: follow-up fix - spec at localhost opens "NEAR AI: Open Chat" on the release image and waits for the chat's textbox; recorder allows the page origin and only http://<uuid>.webview.localhost:<same port>; container test opens localhost and proves the hook log is live before asserting; release.yml runs the egress step last, after every upload, on the archived image ID
+  found: egress suite release 4/4 (browser test 17.7 s, chat open), dev 4/4 (15.6 s). Planted checks: A env unset fails (release, dev); B count 2 fails with the real 'Start of 1 plugin' line; C fetch + WebSocket to 127.0.0.2, a webview host on port+1, evil.localhost:<port>, notauuid.webview.localhost:<port> and a fetch from inside the chat's webview frame are all listed (release 6, dev 5 - dev has no webview frame); D unchanged spec passes on both. Workflow tests 25/25, resource check 136 pass; workflow mutants (egress removed, npm ci with scripts, egress back before docker save, image ID check removed) all fail the test
+  implication: the proof now covers the chat's content and the extension's start with no model servers, and fails closed
+
 ## Resolution
 
 root_cause: "The spec's page.waitForLoadState('networkidle') never resolves on the release image although the page is idle: Playwright 1.65 clears the main frame's idle bit when a request starts after the first networkidle and does not re-arm it when that request ends; the bundled extension's chat webview iframe (release target only) attaches afterwards and its idle timer recalculates the frame tree, removing 'networkidle' from the main frame; with no later main-frame HTTP request it never fires again. AND-gate: late main-frame request; late child frame; no main-frame request afterwards. Not a long-poll, WebSocket churn, retry or outbound call."
-fix: "egress.spec.ts waits for deterministic readiness (Get Started + Team preview shown + Theia's 'Start of N plugin(s)' when STERLING_EXPECT_PLUGINS=N>0, set by egress.test.ts from /plugins in the image), then watches a fixed 10 s window; records via BrowserContext 'request' (adds service-worker requests) and page 'websocket' (adds WebSockets); asserts the recorder saw same-origin requests. Release workflow image job runs the egress suite against sterling-release:$TAG before docker save."
+fix: "(follow-up) at localhost the spec opens the NEAR AI chat on the release image, waits for its textbox inside the webview, and allows exactly <uuid>.webview.localhost on the session port besides the page origin; the container test proves the hook log is live before asserting none; release.yml runs the egress step last in the image job, after every upload, on the archived image ID. (first fix) egress.spec.ts waits for deterministic readiness (Get Started + Team preview shown + Theia's 'Start of N plugin(s)' when STERLING_EXPECT_PLUGINS=N>0, set by egress.test.ts from /plugins in the image), then watches a fixed 10 s window; records via BrowserContext 'request' (adds service-worker requests) and page 'websocket' (adds WebSockets); asserts the recorder saw same-origin requests. Release workflow image job runs the egress suite against sterling-release:$TAG before docker save."
 verification:
   target_test: { result: pass, detail: "egress suite (4 tests) release 4/4 (browser 16.4 s), dev 4/4 (browser 16.0 s)" }
   mutation_check: { result: pass, tool: "manual (no Stryker configured)", mutants: "spec A env unset -> fails closed (NaN); B STERLING_EXPECT_PLUGINS=2 on the one-plugin image -> poll fails, shows Theia's real 'Start of 1 plugin' line; C fetch + WebSocket to 127.0.0.2 planted in the observation window -> both listed; D unchanged spec -> passes. Workflow assertion: m1 egress line removed, m2 npm ci with scripts, m3 egress moved after docker save -> all fail the test; original passes" }
