@@ -332,7 +332,7 @@ Plans:
   6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 24 plans in 12 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-35 and 19 owner items, 17 of them accepted)
+**Plans:** 25 plans in 12 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-35 and 19 owner items, 17 of them accepted)
 **UI hint**: yes
 
 Plans:
@@ -360,6 +360,7 @@ Plans:
 - [ ] 33.1-22-PLAN.md: Wave 11. Native: inviting and releasing to observers, the feedback inbox, markings, the approval card and the observer's own view
 - [ ] 33.1-23-PLAN.md: Wave 9. Every key wrap through releasability; a narrowed marking rekeys in the same action
 - [ ] 33.1-24-PLAN.md: Wave 10. The observer's own client without the roster, and the server's narrow view for observers
+- [ ] 33.1-25-PLAN.md: Wave 9. Observer invitations that survive restarts and lead handovers, and a way out when one cannot be completed
 
 **Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 12 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR. Observer positions (POST-09, criterion 6, D-27 to D-35) were added by the owner on 2026-11-24, and the same day the owner decided that observers receive no roster: staff release chosen versions into each observer's own stream. Outside observers are not usable on a real site until Phase 47 guest accounts (planned) ship (D-33).
 
@@ -1917,7 +1918,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/24 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
