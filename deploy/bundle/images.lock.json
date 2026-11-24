@@ -1,11 +1,23 @@
 {
-  "note": "Every image the site stack runs, by digest (D-12, D-20). images: third-party, ref is <host>/<repository>:<tag>@sha256:<64 hex> (the multi-arch index digest; 47-03 re-pins if spike S1 records that only the linux/amd64 manifest digest survives the bundle copy), discovered by the compliance fit check. built: ours, built from deploy/images/<name>/image.json, digest null until published. release: published by another pipeline, digest null until published. The site registry serves each image at <site registry>/<sitePath>, see deploy/bundle/lib/locks.mjs.",
+  "note": "Every image the site stack runs, by digest (D-12, D-20). images: third-party, ref is <host>/<repository>:<tag>@sha256:<64 hex>, the digest being the linux/amd64 image manifest, not the multi-arch index (spike S1, 47-01: that is the form that survives the bundle copy with its signatures); discovered by the compliance fit check. built: ours, built from deploy/images/<name>/image.json, digest null until the deploy-images job publishes it. release: published by another pipeline, digest null until published. A render injects the reserved unpublished digest for a null digest and the install refuses it. The site registry serves each image at <site registry>/<sitePath>, see deploy/bundle/lib/locks.mjs.",
   "images": [
-    { "ref": "quay.io/jetstack/cert-manager-controller:v1.21.3@sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc", "component": "cert-manager" },
-    { "ref": "quay.io/jetstack/cert-manager-webhook:v1.21.3@sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458", "component": "cert-manager" },
-    { "ref": "quay.io/jetstack/cert-manager-cainjector:v1.21.3@sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f", "component": "cert-manager" },
-    { "ref": "quay.io/jetstack/cert-manager-startupapicheck:v1.21.3@sha256:1c519d4afca1413d1e4ccd78bdc756184418ab55a34569a3b3de39d32f9974e1", "component": "cert-manager" }
+    { "ref": "quay.io/jetstack/cert-manager-controller:v1.21.3@sha256:9b262e9493ab3e0daebc2c9cfbddc6df68b9ac91afc036a759584f3d49d607e5", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-webhook:v1.21.3@sha256:fc2845cc042ab57c8b98c5ff62462d50dcd5d8d3302f9e6875cd05042ce1020b", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-cainjector:v1.21.3@sha256:165691f631d61931a27e4fbbb82bbed8205431d0446b3c14d170081aeff75f0a", "component": "cert-manager" },
+    { "ref": "quay.io/jetstack/cert-manager-startupapicheck:v1.21.3@sha256:6b9e17adc075c80c0c5cb1f901654f0efa4c5d4b1a8b369985ac67f5bbb0b8d2", "component": "cert-manager" }
   ],
-  "built": [],
-  "release": []
+  "built": [
+    { "name": "sterling/theia-cloud-operator", "image": "deploy/images/theia-cloud-operator/image.json", "component": "theia-cloud", "digest": null },
+    { "name": "sterling/theia-cloud-service", "image": "deploy/images/theia-cloud-service/image.json", "component": "theia-cloud", "digest": null },
+    { "name": "sterling/theia-cloud-conversion-webhook", "image": "deploy/images/theia-cloud-conversion-webhook/image.json", "component": "theia-cloud", "digest": null },
+    { "name": "sterling/theia-cloud-landing-page", "image": "deploy/images/theia-cloud-landing-page/image.json", "component": "theia-cloud", "digest": null },
+    { "name": "sterling/oauth2-proxy", "image": "deploy/images/oauth2-proxy/image.json", "component": "oauth2-proxy", "digest": null },
+    { "name": "sterling/postgres", "image": "deploy/images/postgres/image.json", "component": "keycloak", "digest": null },
+    { "name": "sterling/openbao", "image": "deploy/images/openbao/image.json", "component": "openbao", "digest": null },
+    { "name": "sterling/openbao-softhsm", "image": "deploy/images/openbao-softhsm/image.json", "component": "hsm", "scope": "test", "digest": null },
+    { "name": "sterling/near-ai-hub", "image": "deploy/images/hub/image.json", "component": "hub", "note": "Built from the unchanged hub/Dockerfile (D-45, D-46).", "digest": null }
+  ],
+  "release": [
+    { "name": "sterling/sterling-workbench", "from": "Phase 46: the GHCR repository #165's Release workflow publishes, by digest, signed in container-release (D-12)", "digest": null }
+  ]
 }

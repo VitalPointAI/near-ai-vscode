@@ -2,7 +2,7 @@
 // deploy/bundle/images.lock.json (every image, by digest) and compliance/ci/tool-pins.json (the pinned tools). Node built-ins only; the files are
 // read as JSON, never run.
 //
-// Image lock sections: `images` (third-party, { ref: "<host>/<repository>:<tag>@sha256:<64 hex>", component }), `built` (ours, { name:
+// Image lock sections: `images` (third-party, { ref: "<host>/<repository>:<tag>@sha256:<64 hex, the linux/amd64 manifest>", component }), `built` (ours, { name:
 // "sterling/<name>", image: "deploy/images/<name>/image.json", component, digest: null | "sha256:..." }) and `release` (published by another
 // pipeline, { name, from, digest: null | "sha256:..." }). A site registry serves every image under `sitePath(ref)`.
 import { readFileSync } from 'node:fs';
@@ -48,7 +48,7 @@ export function splitRef(ref) {
 /**
  * The repository path an image has in the site registry: the source registry host removed, the rest kept
  * (`quay.io/jetstack/cert-manager-controller:v1.21.3@sha256:...` is `jetstack/cert-manager-controller`; a built image `sterling/<name>` stays as is).
- * Spike S1 (47-01) confirms this is the path the bundle copy produces; 47-03 changes it here if S1 records a different one.
+ * Spike S1 (47-01) confirmed this is the path the hauler bundle copy produces in the site registry.
  */
 export function sitePath(ref) {
   return splitRef(ref).repository;
