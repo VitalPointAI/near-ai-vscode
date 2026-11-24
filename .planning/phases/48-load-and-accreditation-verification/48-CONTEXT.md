@@ -3,13 +3,14 @@
 **Gathered:** 2026-11-23
 **Status:** Decided on the owner's behalf from the hosting design; nobody was available for questions. Decisions the design or the owner already settled are marked (owner). Open points took the design's default or the recommended option and are listed under "For the owner to confirm" with the default the plans use.
 **Source:** ADR Ingest Express Path (`.planning/research/multiuser-hosting/DESIGN.md`, format narrative). The GSD ingest parser returned 0 decisions for DESIGN.md because its decisions are tables, so this file was written by hand from DESIGN sections 2, 4, 7, 10, 12, 13 and 14, `RESEARCH.md` sections 2 and 7, the Phase 48 entry in `.planning/ROADMAP.md`, the Phase 44 compliance package (`compliance/`) and `44-CONTEXT.md`, on `origin/docs/phases-46-48-plan` at 2fca5dc9.
+**Revised:** 2026-11-24 (owner): the first goal is one HQ with about 400 concurrent people, not thousands. D-02, D-20, VER-01, success criterion 1 and owner items 1 and 8 changed. Their numbers are Claude defaults the owner can change. See "Revision 2026-11-24" at the end.
 
 <domain>
 ## Phase Boundary
 
 Phase 48 makes every capacity and compliance statement about the hosted workbench rest on collected evidence:
 
-- **A repeatable load test on our own hardware** to 1,000 or more concurrent Theia Cloud sessions. It records session start time, steady-state resource use per person, operator throughput under start bursts of 500+, the shared Ingress object's size and reload behaviour, etcd load per session, and sync hub load under the same run. Capacity figures in docs come only from a recorded run. (DESIGN 12 row 1, 13(e))
+- **A repeatable load test on our own hardware** to the HQ target of 400 concurrent Theia Cloud sessions, then beyond while the rig allows (revised 2026-11-24, owner; D-02). It records session start time, steady-state resource use per person, operator throughput under start bursts of 200, the shared Ingress object's size and reload behaviour, etcd load per session, and sync hub load under the same run. Capacity figures in docs come only from a recorded run. (DESIGN 12 row 1, 13(e))
 - **OSCAL component definitions and evidence rules for every component of Phases 46 and 47**, so the Phase 44 compliance dashboard shows the hosted deployment's real state from collected evidence, never assumed. Every section 10 condition becomes a statement with an evidence rule, or a recorded gap. (DESIGN 10)
 - **The open verification items of DESIGN section 12 closed** with evidence, or recorded as a gap with an owner and a date: Keycloak CVE-2026-6856 fix version; HSM FIPS 140-3 and Go FIPS module certificate status; Traefik with Theia Cloud; the prewarm pool and how a person's volume attaches at claim; and the rest of that table. (DESIGN 12)
 
@@ -21,7 +22,7 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 
 ### Accepted from the design (owner)
 - **D-01 (owner, D2):** On-premise only. The load test runs on our own hardware; no commercial cloud, no managed Kubernetes, no cloud load generator.
-- **D-02 (owner, D3):** Target is 1,000 or more concurrent sessions per site, with start bursts of 500+.
+- **D-02 (owner, D3; revised 2026-11-24, owner):** The first goal is one HQ with about 400 concurrent people (was 1,000 or more per site, with bursts of 500+). Claude defaults the owner can change: the load test targets 400 concurrent sessions at the HQ, with start bursts of 200 (half the target, the same ratio as before). Edge sites stay as before: disconnected and smaller. The design still grows beyond 400 later; a larger site gets its own target and its own run.
 - **D-03 (owner, D4):** One session per person (`sessionsPerUser: 1`), one pod per session; the test exercises that configuration, not a denser one.
 - **D-04 (owner, D9):** Nothing counts toward any claim until it is in `compliance/` and assessed. Section 10 verdicts are starting points, not results.
 - **D-05 (owner, O2):** HAProxy is the ingress until Traefik is tested. The Traefik test is in this phase; its result changes the default only if the owner then chooses to.
@@ -52,7 +53,7 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 
 ### Load test
 - **D-19:** The load test is code in this repository, in its own folder with its own lockfile and exact versions, and every new tool has a compliance fit entry. It drives sessions through Theia Cloud's service API with tokens from a load-test-only Keycloak client in a test realm on the rig, and opens a sampled share of sessions in a real browser through a WebAuthn virtual authenticator to measure time to a usable workbench. The production realm keeps passwords and every non-WebAuthn flow off; the test realm is never in the offline bundle.
-- **D-20:** Stages: 50, 250, 500, 1,000, then above 1,000 while the rig allows. Each stage holds steady state long enough to measure per-person use, then a burst of 500+ starts. The run file records every stage reached.
+- **D-20 (revised 2026-11-24, owner):** Stages: 50, 100, 200, 400, then beyond 400 while the rig allows (was 50, 250, 500, 1,000 and beyond). Each stage holds steady state long enough to measure per-person use, then a burst of 200 starts. The run file records every stage reached. A stage beyond 400 is headroom, never a claim: the capacity page marks it as headroom and gives it no sizing default. Claude default; the owner can change it.
 - **D-21:** Load per person is a scripted, versioned activity profile (open files, edit, run a terminal command, an idle share). An empty idle session is reported separately and never presented as the per-person figure.
 - **D-22:** Metrics come from the site's own metrics store and the Kubernetes API, not the load generator's estimates; the run file stores the queries used.
 - **D-23:** The sync hub is measured under the same run against its 150-people-per-hub target (MUS 10.9), with several hubs per site.
@@ -74,7 +75,7 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 <requirements>
 ## Requirements (VER-01 to VER-09)
 
-- **VER-01:** A repeatable load test, kept as code, runs on our own hardware against the Phase 47 stack and the Phase 46 image by digest, in stages to 1,000 or more concurrent sessions with start bursts of 500+.
+- **VER-01 (revised 2026-11-24, owner):** A repeatable load test, kept as code, runs on our own hardware against the Phase 47 stack and the Phase 46 image by digest, in stages to the HQ target of 400 concurrent sessions with start bursts of 200, then beyond 400 while the rig allows.
 - **VER-02:** Each run writes one hashed run file with inputs, hardware, image digests and chart versions, and per stage: session start time (p50, p95, p99; cold, and warm if a pool is tested), steady-state CPU and memory per person under the activity profile, operator reconcile throughput, shared Ingress object size and ingress reload time, etcd size and load per session, and load per hub.
 - **VER-03:** Capacity figures in docs and the per-site sizing defaults (volume size, idle timeout, memory per person) are read from a run file; a check refuses a capacity figure without one; a stage not reached is reported as not reached.
 - **VER-04:** Every component of Phases 46 and 47 has an OSCAL component definition with one responsibility per implemented requirement and statements only for behaviour that exists.
@@ -119,7 +120,7 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 <specifics>
 ## Specific Ideas
 
-- Success criterion 1: a run file from the rig that reached the 1,000 stage, and a docs check that fails when a capacity figure lacks a run id.
+- Success criterion 1 (revised 2026-11-24, owner): a run file from the rig that reached the 400 stage, and a docs check that fails when a capacity figure lacks a run id.
 - Success criterion 2: the dashboard JSON for the hosted scope lists every hosted component, every row's state traces to a rule and a collected result, and a fixture export with a lapsed audit shows Stale.
 - Success criterion 3: a verification register (one row per DESIGN 12 item), each row closed with an evidence reference or a gap in `compliance/gaps.json` or the POA&M with owner and date.
 </specifics>
@@ -144,13 +145,36 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 
 **Accepted by the owner, 2026-11-23:** every default below is accepted as written ("defaults are fine"). Items stay listed for traceability; none is open.
 
-1. **Test-rig hardware.** Default: our own rack sized from the design estimate for the top stage (DESIGN 7: about 1 to 2 GiB and 0.25 to 1 vCPU per session, so roughly 1.2 to 2.2 TiB worker memory and 300 to 1,000 vCPU for 1,000 sessions, plus platform overhead), 3 control-plane nodes with fast local disks for etcd, an encrypted storage class, and one HSM if available. Until that exists, run the stages the available hardware reaches and record the rest as not reached (D-10).
+**Revised 2026-11-24 (owner):** the target changed to one HQ with about 400 concurrent people (D-02). Items 1 and 8 now carry new Claude defaults that follow from it. The owner can change them.
+
+1. **Test-rig hardware (revised 2026-11-24, owner).** Default: our own rack sized from the design estimate for the 400 stage (DESIGN 7: about 1 to 2 GiB and 0.25 to 1 vCPU per session, so roughly 0.5 to 0.9 TiB worker memory, the sessions' 0.4 to 0.8 TiB with some margin, and 100 to 400 vCPU for 400 sessions, plus platform overhead), 3 control-plane nodes with fast local disks for etcd, an encrypted storage class, and one HSM if available. The burst of 200 on top of the 400 stage peaks at 600 sessions. To hold that burst too, the rack needs pod and memory room for 600 sessions (at Kubernetes' stated 110 pods per node, at least six worker nodes, or a raised kubelet `maxPods` recorded in the run file); otherwise that burst is recorded as not reached (D-10). Stages beyond 400 run only as far as the rack allows. Until the rack exists, run the stages the available hardware reaches and record the rest as not reached (D-10). (Was: sized for 1,000 sessions, roughly 1.2 to 2.2 TiB and 300 to 1,000 vCPU.)
 2. **Hosted scope in `levels.json` (D-18).** Default: separate hosted-deployment entries; alternative: add hosted components to the existing levels.
 3. **Reference site as the public evidence source (D-15).** Default: the rig is the public reference site; customer sites only in local overlays.
 4. **Test realm with a load-test client (D-19).** Default: on the rig only, never in the bundle; the production realm keeps every non-WebAuthn flow off.
 5. **HSM model for the `kms-pkcs11` test.** Default: whichever FIPS 140-3 Level 3 model your organization buys; until then SoftHSM2 proves the wiring only and the certificate item stays a gap with owner and date.
 6. **Load-test tool registration.** `scripts/resource-check.mjs` scans a fixed list of package files, so a `loadtest/package.json` would go unregistered. Default: the harness is a dependency-free Node script; its browser sample reuses the Playwright release Phase 46 pins and registers; no change to the script here (Phase 47 already extends it with a `chart` kind). If a dependency is needed, the one-line `PACKAGE_FILES` addition goes in this phase's single gate pull request with owner approval.
 7. **Deployment export freshness and signing key.** Default: the 7-day `settings` window; signed with a dedicated site operator key listed in a new trust file (a gate path), not an OpenBao Transit key.
-8. **Cold-start threshold.** Default: p95 time to a usable workbench under 60 seconds at the 1,000 stage; above that, the prewarm pool experiment decides whether the pool turns on.
+8. **Cold-start threshold (revised 2026-11-24, owner).** Default: p95 time to a usable workbench under 60 seconds at the 400 stage (was the 1,000 stage); above that, the prewarm pool experiment decides whether the pool turns on.
+
+## Revision 2026-11-24 (owner): HQ target of about 400
+
+The owner, 2026-11-24: "our first goal will be a HQ that might have about 400 concurrent users, not thousands previously mentioned."
+
+Claude defaults that follow. The owner can change any of them.
+- Target: 400 concurrent sessions at the HQ, with start bursts of 200 (D-02, VER-01).
+- Stages: 50, 100, 200, 400, then beyond 400 while the rig allows. A stage beyond 400 is headroom, never a claim (D-20).
+- Site size classes for the sizing defaults (D-07): up to 100, 200 and 400 people (was 250, 500 and 1,000). No class above the target.
+- Rig: roughly 0.5 to 0.9 TiB worker memory and 100 to 400 vCPU, plus platform overhead; 3 control-plane nodes (owner item 1).
+- Cold start: p95 under 60 seconds at the 400 stage (owner item 8).
+- Edge sites: unchanged, disconnected and smaller.
+
+**Harness code on main still has the earlier values** (48-03 merged before this revision). This revision changes no code. An executor makes these changes, with their tests, before the rig run; 48-09 Task 1 carries them so they cannot be skipped:
+1. `loadtest/config.example.json` line 12: `"stages": [50, 250, 500, 1000]` becomes `"stages": [50, 100, 200, 400]`. Line 13: `"burst": 500` becomes `"burst": 200`.
+2. `loadtest/src/capacity.ts` lines 127 and 128: the comment says "up to 100, 200 and 400 people (D-07, the HQ target)", and `BASE_CLASSES = [250, 500, 1_000]` becomes `[100, 200, 400]`.
+3. `loadtest/src/capacity.ts` lines 143 and 144: drop the `higher` list (each reached stage above `1_000` became a size class); the classes are `BASE_CLASSES` only (D-20: no sizing default for headroom).
+4. `loadtest/src/capacity.ts` line 119 (the stage table in `runSection`): a reached stage above the last base class prints `reached (headroom)` instead of `reached` (D-20).
+5. `loadtest/test/measure.test.ts` lines 131 to 140: the fixture uses `stage(100, ...)`, `stage(200, ...)` and `notReached(400, ...)` with inputs `stages: [100, 200, 400]`; the expected rows become `| Up to 100 people | ${run.id} | 1,024 MiB | 3 GiB | 45 minutes | 318 MiB | 10,940 ms |` (nearest-rank p95 of 100 cold starts from 10,000 ms in steps of 10), the old 500 row's pattern with `Up to 200 people` (still ending `| 45 minutes | 318 MiB | 41,800 ms |`), and `| Up to 400 people | not measured | | | | | |`. Add one case with a run that reached 400 and 600: no `Up to 600 people` row, and the stage table row for 600 starts `| 600 | reached (headroom) |`.
+
+Unchanged on purpose: `loadtest/test/stages.test.ts` (its stage lists are arbitrary controller inputs), `docs-site/test/capacityFigures.test.mjs` ("1,000 concurrent sessions" is a sample hand-typed figure the check must flag), `docs/hosting/capacity.md` (generated; no run yet), and register row 1 in `docs/security/hosted-verification-records.md` (it says "the target session count", with no number).
 </content>
 </invoke>

@@ -717,7 +717,7 @@ Plans:
   4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
-**Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
+**Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -744,10 +744,10 @@ Plans:
 **Depends on**: Phases 46 and 47 for the running stack; the evidence-rule work starts as soon as each component in Phase 47 is chosen; Phase 44's compliance machinery.
 **Requirements**: VER-01 to VER-nn (defined when planned, from DESIGN.md sections 10, 12 and 13(e))
 **Success Criteria** (what must be TRUE):
-  1. A repeatable load test on our own hardware reaches the target concurrent sessions (1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
+  1. A repeatable load test on our own hardware reaches the target concurrent sessions (revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, so the target is 400 sessions with start bursts of 200; was 1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
   2. Each component of Phases 46 and 47 has an OSCAL component definition and evidence rules, and the dashboard shows its controls from collected evidence, never assumed.
   3. The open verification items in DESIGN.md section 12 are each closed with evidence or recorded as a gap with an owner and date (Keycloak CVE-2026-6856 fix version, HSM and Go FIPS certificate status, Traefik with Theia Cloud).
-**Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`)
+**Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`; D-02, D-20 and VER-01 revised 2026-11-24, owner: HQ target of about 400)
 
 Plans:
 - [x] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
@@ -758,7 +758,7 @@ Plans:
 - [x] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
 - [ ] 48-07-PLAN.md: Wave 3. Phase 46 components: workbench statements and evidence rules, release pipeline re-assessed for the image; gate PR 2
 - [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
-- [ ] 48-09-PLAN.md: Wave 3. Rig load run to 1,000+ sessions, capacity page and sizing defaults, reference site export; gate PR 4
+- [ ] 48-09-PLAN.md: Wave 3. Rig load run to the HQ target of 400 sessions and beyond as headroom (revised 2026-11-24), capacity page and sizing defaults, reference site export; gate PR 4
 - [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
 
 ## Milestone v0.5.0: Governed agent platform

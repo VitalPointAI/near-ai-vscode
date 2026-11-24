@@ -1,5 +1,5 @@
 // The load-test command line (Phase 48 D-03, D-06, D-09, D-19):
-//   node loadtest/src/cli.ts run --config <file> [--stages 50,250] [--kind load|dry-run]
+//   node loadtest/src/cli.ts run --config <file> [--stages 50,100] [--kind load|dry-run]
 //   node loadtest/src/cli.ts users --count <n> --out <path outside the repository>
 //   node loadtest/src/cli.ts capacity [--check]
 //   node loadtest/src/cli.ts verify <file> | --all
@@ -178,7 +178,7 @@ const stamp = (ms: number): string => new Date(ms).toISOString().replace(/[-:]/g
 async function run(args: readonly string[], deps: CliDeps): Promise<number> {
   const configFile = option(args, '--config');
   const kind = (option(args, '--kind') ?? 'load') as RunKind;
-  if (!configFile || (kind !== 'load' && kind !== 'dry-run')) { deps.error('usage: run --config <file> [--stages 50,250] [--kind load|dry-run]\n'); return 2; }
+  if (!configFile || (kind !== 'load' && kind !== 'dry-run')) { deps.error('usage: run --config <file> [--stages 50,100] [--kind load|dry-run]\n'); return 2; }
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as RunConfig;
   const stagesArg = option(args, '--stages');
   const stages = stagesArg ? stagesArg.split(',').map((value) => Number.parseInt(value, 10)) : config.stages;
