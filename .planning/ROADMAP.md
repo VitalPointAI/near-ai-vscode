@@ -298,6 +298,24 @@ Plans:
 
 **Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer: a Monaco co-editing binding, native presence and cursors, a native Staff Room, and Share with people on the Sterling work-area page. Each person gets their own Theia Cloud session; secrets and long-term keys move to OpenBao through the native Theia foundation, which this phase now depends on. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.2 and 13.
 
+**Re-planned for native Theia (2026-11-23)**: 31 plans in 12 waves. Details are in `33-CONTEXT.md`, section "Re-aim to native Theia", decisions D-50 to D-68, owner items 22 to 29. The plan list above is not edited here; this note gives the current state.
+- **Done** on `feat/phase-33-live-multi-user`: 33-01, 33-02, 33-04 and 33-19. 33-19 stays in the tree, never attached in the image.
+- **To finish** in wave 1: 33-05 (merge `367a45ec`), 33-06 (retry window and live projection) and 33-18 (WIP on `feat/phase-33-18-wire-pieces`).
+- **Engine plans** kept with adjustments: 33-03, 33-07, 33-08, 33-09, 33-12 (engine only) and 33-14.
+- **Superseded** by native plans: 33-10 by 33-24, 33-11 by 33-27, 33-13 by 33-26, 33-20 by 33-28.
+- **New plans:**
+  - P7, the session-key fold (33-21) and the hub's acceptance of session keys (33-22).
+  - P6, workbench session keys (33-23).
+  - The native live engine (33-24) and its module registration (33-31).
+  - Monaco co-editing (33-25).
+  - The native Staff Room (33-26).
+  - Share with people on the work-area page (33-27).
+  - The Sterling status entry (33-28).
+  - Native cursors and Show Who Wrote This (33-29).
+  - Two-browser acceptance against the built image (33-30).
+- **Order:** native plans start after Phase 46-01, 46-02 and 46-07 are on `main`.
+- **Release:** criterion 4's release is the next Sterling container image by digest (33-17 replanned). There is no VSIX or Marketplace release.
+
 ### Phase 33.1: Assigned positions and handover (INSERTED)
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
