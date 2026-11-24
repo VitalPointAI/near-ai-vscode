@@ -25,20 +25,20 @@ key-files:
     - workbench/package.json
     - src/services/nearAiClient.ts
 key-decisions:
-  - "The person public key is an input to startSessionKeys and personSigner, checked against every Transit signature: no session policy can read transit/keys/person-<entity> (47-07), so the plan's read through KeyService is not possible (open condition 1)."
+  - "The person public key is read once from transit/keys/person-<entity> through KeyService.personPublicKey (owner decision 2026-11-24, option a; the policy grant and the method are on fix/session-reads-own-person-key from main), or given; every Transit signature is checked against it and its key version."
   - "A certificate is per shared project: certificate(target, { member, slot }) appends one session.certify through the project's appendOwn with the person signer, since the project id and slot are inside the signed binding (33-21)."
   - "keyStoreSecrets refuses to store under the single-machine names that hold plain private keys, so a hosted session can never keep a long-term key in the person's store by a wrong wiring (D-61)."
   - "The sealed content of the envelope is versioned JSON { v: 1, x25519 }, so 33.2-04 can add its P-256 and ML-KEM keys beside it and still open envelopes written now."
 requirements: [MUS-09]
 requirements-completed: []
 actuals:
-  tokens: 16400
+  tokens: 19000
   tasks: 3
-  commits: 3
+  commits: 5
 completed: 2026-11-24
 duration: 35min
 plan_head_before: 2e02248e3887d8766fda45446cf9fa33311c67e3
-plan_head_after: c9cc5fb6
+plan_head_after: e6ffc850
 ---
 
 # Phase 33 Plan 23: The person signer and session keys in a hosted session Summary
@@ -69,13 +69,13 @@ For 33.1-17 (`person-signer.ts`):
 ```ts
 export interface PersonSignRefused { readonly refused: string; readonly fix?: string }
 export interface PersonSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): Promise<string | PersonSignRefused> }
-export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: string): PersonSigner
+export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: string, keyVersion?: number): PersonSigner
 export function signerFingerprint(publicKey: string): string   // the engine's fingerprintOf, "dev-" + 32 hex
 export function isPublicKeyText(publicKey: unknown): publicKey is string
-export const PERSON_SIGNER_TEXT: { mismatch: string }
+export const PERSON_SIGNER_TEXT: { mismatch: string; rotated: string }
 ```
 
-- `sign` never throws. A KeyService refusal comes back as `{ refused: reason, fix? }`, with KeyService's own text: a stale step-up is `{ refused: 'Signing needs a fresh confirmation with your passkey or security key.', fix: 'Confirm with your passkey or security key' }`. A KeyService that throws or does not answer gives `KEY_SERVICE_TEXT.unreachable`. A signature that does not verify against `publicKey` gives `PERSON_SIGNER_TEXT.mismatch`.
+- `sign` never throws. A KeyService refusal comes back as `{ refused: reason, fix? }`, with KeyService's own text: a stale step-up is `{ refused: 'Signing needs a fresh confirmation with your passkey or security key.', fix: 'Confirm with your passkey or security key' }`. A KeyService that throws or does not answer gives `KEY_SERVICE_TEXT.unreachable`. A signature that does not verify against `publicKey` gives `PERSON_SIGNER_TEXT.mismatch`, and with `keyVersion` given, a signature by another Transit version gives `PERSON_SIGNER_TEXT.rotated`.
 - A signature is returned as base64url, the form the engine verifies; Transit's base64 is converted.
 - The signer keeps no state between calls. `person-signer.ts` has no `writeFile` and no `keyStore` (33.1-17's guard grep gives 0 today).
 - 33.1-17 adds the optional `{ action }` argument to `sign` and the pending-action registry. The person signer tests are in `workbench/test/staff/session-keys.test.ts`; 33.1-17's `person-signer.test.ts` is a new file.
@@ -112,10 +112,12 @@ export interface SessionKeys {
   certificate(target: CertifyTarget, seat: { member: string; slot: number }): Promise<ServiceResult<SessionCertificate>>;
   hold(secret: { drop(): void }): void; stop(): void;
 }
-export function startSessionKeys(keyService: Pick<KeyService, 'sign'>, identity: { status(): SessionIdentityStatus }, clock: { now(): number },
-  options: { personPublicKey: string; engine: Pick<StaffEngine, 'sessionCertifyData' | 'writerIdOf'> }): ServiceResult<SessionKeys>
+export interface PersonKeyReader { personPublicKey(): Promise<ServiceResult<{ readonly publicKey: string; readonly keyVersion: number }>> }
+export function startSessionKeys(keyService: Pick<KeyService, 'sign'> & Partial<PersonKeyReader>, identity: { status(): SessionIdentityStatus },
+  clock: { now(): number }, options: { personPublicKey?: string; engine: Pick<StaffEngine, 'sessionCertifyData' | 'writerIdOf'> }): Promise<ServiceResult<SessionKeys>>
 ```
 
+- Pass the session's KeyService and leave `personPublicKey` out: the key is read once through `KeyService.personPublicKey()` (on main with fix/session-reads-own-person-key), and a refused read comes back with its own sentence.
 - `ReplicaProject` satisfies `CertifyTarget` structurally.
 - `sessionSigner` goes to `ReplicaProjectDeps.sessionSigner` and `HubTransportOptions.signer`, and `personSigner` to `ReplicaProjectDeps.personSigner`.
 - `SessionCertificate.entry` is the sealed entry for `HubTransportOptions.certificate` (33-22).
@@ -124,7 +126,7 @@ export function startSessionKeys(keyService: Pick<KeyService, 'sign'>, identity:
 ## How each truth was met
 
 - **Session key at active, certified through KeyService.sign.** `startSessionKeys` refuses in local mode (`KEY_SERVICE_TEXT.local`), before `active` (`KEY_SERVICE_TEXT.notReady`) and without a person key. Otherwise it makes an Ed25519 key in memory. `certificate()` builds `session.certify` data with the engine's `sessionCertifyData`, which the session key signs. It then appends the entry through the project with the person signer: one step-up login, a Transit sign and a revoke, and no other prompt right after sign-in. A stale sign-in returns `refused('Confirm with your passkey or security key to work on shared projects.', 'Confirm with your passkey or security key')`, appends nothing and makes no OpenBao call. In the tracer, the roster world folds the entry: `sessions` holds it, it takes no roster position, and the engine bundle's `certifiedWriter` returns `{ member: 'mbr-pat', device: <person key writer>, slot: 2 }`.
-- **The person public key and device.add.** The workbench creates, rotates, exports and deletes no Transit key, and calls only `sign`, `datakey/wrapped` and `decrypt`. The public key cannot be read in the session (open condition 1). It is an input, and every signature is verified against it.
+- **The person public key and device.add.** The workbench creates, rotates, exports and deletes no Transit key. Its one read under `transit/keys/` is its own `person-<entity>`, through `KeyService.personPublicKey()` (owner decision 2026-11-24). Every signature is verified against the key read and its Transit version.
 - **The X25519 key at rest only as an envelope.** It is opened into backend memory at session start, held by the session keys and dropped at `stop()`. No `writeFile` appears in `encryption-key.ts` (grep 0). The tests scan the key store and a workspace folder, used as the working folder during two sessions, for six encodings of the private key and find none.
 - **keyring.ts unchanged over the key store.** Join secrets are stored, read, refused when different and forgotten. An epoch key added by one session's `DeviceKeyRing` is read back by a new session's ring. All of it runs from `engine/staff.cjs` over `keyStoreSecrets` and the OpenBao key store, under `users/<entity>/`.
 - **The person signer returns refusals as values.** It is covered for a stale step-up, a fresh step-up (the signature verifies against the Transit key), another key's signature, an unreachable key store and a throwing KeyService.
@@ -136,7 +138,7 @@ export function startSessionKeys(keyService: Pick<KeyService, 'sign'>, identity:
 
 ## Deviations from Plan
 
-1. **[Rule 4 territory, recorded and not decided] The person public key is not read from KeyService.** The plan and D-61 say it is read from `transit/keys/person-<entity>`. Phase 47's `sterling-workbench` and `sterling-workbench-sign` policies grant no `transit/keys/` path. `deploy/test/openbao.test.mjs` asserts that no session policy does, and 46-07's own test asserts that no key path is called. Changing that is a Phase 47 security-policy decision, so this plan takes the key as `personPublicKey`. A wrong key cannot forge anything: `personSigner` and the engine's `finishPayload` verify every signature against it, and refuse on a mismatch.
+1. **[Rule 4, decided by the owner] The person public key read.** The plan and D-61 say it is read from `transit/keys/person-<entity>`, but Phase 47's session policies granted no `transit/keys/` path and its tests asserted that. The first hand-off took the key as an input and raised the question. The owner chose option (a) on 2026-11-24: the session may read its own person key, read only. Branch `fix/session-reads-own-person-key` (from main, `305118c6`) adds the grant to `sterling-workbench.hcl`, `KeyService.personPublicKey()` (backend only), and the policy, unit and container tests. Commit `e6ffc850` here reads the key through it and adds the key-version check. A trial merge of that branch into this one passed the workbench tests (124) and lint and was aborted; nothing was merged.
 2. **[Rule 3] The certificate is per project.** The plan's artifact reads `startSessionKeys(...): { sessionSigner, certificate, stop }`. The certificate's signed binding includes the project and the device's slot (33-21), so `certificate(target, seat)` is a method, called once per shared project. `startSessionKeys` is synchronous and signs nothing itself. The "stale sign-in" refusal therefore comes from `certificate()`.
 3. **[Rule 3] A stopped session signer throws, and does not return a refusal.** The engine's `PayloadSigner.sign` (`ReplicaProjectDeps.sessionSigner`, the hub transport) is synchronous and returns a string, so it has no refusal value. After `stop()` it throws `SESSION_KEY_TEXT.ended`, and `certificate()` returns `refused(SESSION_KEY_TEXT.ended)`.
 4. **[Rule 2, T-33-N8] `keyStoreSecrets` refuses plain private-key names.** These are `nearAi.identity.encryptionKey` and the three device-key names. Without the guard, opening a `ReplicaProject` over the person's key store would store a plain X25519 and Ed25519 key there. The test checks the names against the engine's and identity's own constants.
@@ -154,14 +156,15 @@ All runs used the shared heavy lock, MemoryMax=6G, MemorySwapMax=0 and choom. Th
 | Run | Result |
 |-----|--------|
 | `npm --prefix workbench test` and `npm --prefix workbench run lint` (Task 3's verify) | **119 tests: 119 passed, 0 failed, 0 skipped**; lint exit 0 |
-| `session-keys.test.ts` | 8 passed (plan: at least 6) |
+| The same after the person-key read (`e6ffc850`) | **122 passed, 0 failed**; lint exit 0. With `fix/session-reads-own-person-key` trial-merged (not committed): 124 passed, lint exit 0 |
+| `session-keys.test.ts` | 11 passed (plan: at least 6) |
 | `encryption-key.test.ts` | 7 passed (plan: at least 4) |
 | Root `npm run lint` | exit 0 |
 | Root, focused: spendCapture, gateRouteGuard, phase11 (transcription), replicaSessionCertify, staffPersonKeySigning, staffReplicaKeyring | 79 passed, 0 failed |
 | Root: copyLint, architecture, spendCapture, phase11, after the frozen-size fix | 58 passed, 0 failed |
 
 - Acceptance greps: `staff-engine-entry` in `build-engine.mjs` gives 2. `writeFile` in `encryption-key.ts` gives 0. `export function personSigner` gives 1, and `export function startSessionKeys` gives 1.
-- **Tests added: 15** (8 and 7). **Tests changed: 0.**
+- **Tests added: 18** (11 and 7). **Tests changed:** the existing calls now await `startSessionKeys`, which returns a Promise; no assertion was removed or weakened.
 - No container or Playwright suite was run, per D-65.
 
 ## Threat model
@@ -180,22 +183,18 @@ None. The modules are complete for what they do. 33-24 wires them: it finds shar
 
 ## Threat Flags
 
-None. No new network endpoint or route was added. The OpenBao paths called are the three 46-07 allows, plus the person's own KV path through 46-07's key store.
+None. No new network endpoint or route was added. The OpenBao paths called are the three 46-07 allows, the read of the person's own signing key (owner decision 2026-11-24, granted on fix/session-reads-own-person-key), and the person's own KV path through 46-07's key store.
 
 ## Open conditions
 
-1. **The person public key has no source in a hosted session.** No gap id was filed: Phase 33 does not edit `compliance/` (D-03, D-63), so the orchestrator should file it against Phase 47. D-61 and this plan assume the session reads `transit/keys/person-<entity>`, but 47-07's policies forbid any `transit/keys/` path for a session token, and its tests assert that. One of these is needed before 33-24 can open a shared project in a hosted session:
-   - (a) a read-only `transit/keys/person-{{identity.entity.id}}` grant in `sterling-workbench`, with the 47-07 test changed by the owner;
-   - (b) enrolment (`deploy/openbao/enrol.mjs`) writes the public key where the session can read it, for example the person's KV path, which needs a KV grant for the enrolment operator;
-   - (c) the public key is carried in the person's roster `device.add`, made at enrolment.
+None for this plan. The person-key source (the first hand-off's condition) was decided by the owner and is built on `fix/session-reads-own-person-key`. This plan's hosted path needs that branch on main and main merged here; until then `startSessionKeys` refuses with `SESSION_KEY_TEXT.noPersonKey` when no key is given, which is visible, not silent.
 
-   Whichever source is chosen, `startSessionKeys` and `personSigner` already verify it against every signature. This blocks 33-24's hosted path, not 33.1-17 or 33.2-04.
-2. **Hand-off to 33-24:**
-   - In a hosted session, `ReplicaProject` must be opened with the session and person signers and the opened encryption key. Its single-machine `loadOrCreateDeviceIdentity` and `loadOrCreateEncryptionKey` over `keyStoreSecrets` now fail visibly with `KEY_STORE_SECRETS_TEXT.plainPrivateKey`.
-   - The person's member and slot for `certificate()` come from the roster, through the person key's writer id.
-   - The staff engine entry needs the replica project and live replicator added, with the decode worker file and the vendored Yjs paths that `decodeHost.ts` and `doc.ts` load through `__dirname`.
+Hand-off to 33-24, not a condition of this plan:
+- In a hosted session, `ReplicaProject` must be opened with the session and person signers and the opened encryption key. Its single-machine `loadOrCreateDeviceIdentity` and `loadOrCreateEncryptionKey` over `keyStoreSecrets` fail visibly with `KEY_STORE_SECRETS_TEXT.plainPrivateKey`.
+- The person's member and slot for `certificate()` come from the roster, through the person key's writer id.
+- The staff engine entry needs the replica project and live replicator added, with the decode worker file and the vendored Yjs paths that `decodeHost.ts` and `doc.ts` load through `__dirname`.
 
 ## Self-Check: PASSED
 
 - Created files exist: staff-engine-entry.ts, staff-engine.ts, person-signer.ts, session-keys.ts, encryption-key.ts, keystore-secrets.ts, and test/staff/session-keys.test.ts and encryption-key.test.ts.
-- The commits `c59d7f03`, `f408b49f` and `c9cc5fb6` are in HEAD.
+- The commits `c59d7f03`, `f408b49f`, `c9cc5fb6` and `e6ffc850` are in HEAD.
