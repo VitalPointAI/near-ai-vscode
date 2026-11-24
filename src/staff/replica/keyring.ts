@@ -7,6 +7,9 @@
 //   (DEVICE_KEY_SECRET), stored the same way (PKCS8 DER as base64). It is made inside the same identity-create lock as the device key, with the same
 //   read-back check, so two windows never make two keys. Its public half is bound to the device by an Ed25519 signature over x25519BindingBytes,
 //   which the roster entry that admits the device carries (D-19).
+// - The post-quantum keys (33.2 D-03): the 32-byte P-256 scalar and the 64-byte ML-KEM-768 seed, one pair per install, in SecretStorage under
+//   KEM_KEY_SECRET as base64url, made inside the same identity-create lock with the same read-back check. Only the seeds are kept (BoringSSL in
+//   VS Code's Electron imports no other ML-KEM form); the key objects are made from them in memory.
 // - Epoch keys: in memory, written through to one SecretStorage value per project (EPOCH_KEY_SECRET_PREFIX + project): the keys the roster settled
 //   and the keys this device made, each with the hash of the grant that carries it. For a grant on disk the value is only a cache: the grants are
 //   ciphertext wrapped to this device, so a lost value is rebuilt by opening them again once the roster places them (D-24). Only a grant the roster
@@ -29,9 +32,13 @@ import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import type { CellRecord, CellsState, EpochRecord } from '../../domain/replica/rosterCells';
 import type { KeyRing } from '../../domain/replica/rosterView';
 import { isRecord } from '../../domain/team/validate';
+import { MLKEM_SEED_BYTES, P256_SCALAR_BYTES, kemPrivateFromSeeds, kemPublicFromSeeds, newKemSeeds } from '../../domain/replica/cellWrapV2';
+import type { KemPrivateKeys, KemPublicKeys, KemSeeds } from '../../domain/replica/cellWrapV2';
 
 /** The SecretStorage name of this install's X25519 private key, beside nearAi.identity.deviceKey (D-19). */
 export const ENCRYPTION_KEY_SECRET = 'nearAi.identity.encryptionKey';
+/** The SecretStorage name of this install's post-quantum key seeds (33.2 D-03), beside the encryption key. */
+export const KEM_KEY_SECRET = 'nearAi.identity.kemKey';
 /** The SecretStorage name prefix of the opened epoch keys of one project; the project id follows. */
 export const EPOCH_KEY_SECRET_PREFIX = 'nearAi.staff.epochKeys.';
 /** The SecretStorage name prefix of a join secret; the invite id follows. */
@@ -89,6 +96,48 @@ export async function loadOrCreateEncryptionKey(secrets: SecretStorageLike, opti
   const publicKey = x25519PublicRaw(privateKey).toString('base64url');
   const binding = options.identity.sign(x25519BindingBytes(publicKey, writerIdOf(options.identity.publicKey)));
   return { publicKey, privateKey, binding };
+}
+
+/** This install's post-quantum keys: the public keys to publish and the private key objects (never exported). */
+export interface DeviceKemKeys { readonly publicKeys: KemPublicKeys; readonly privateKeys: KemPrivateKeys }
+
+function kemSeedsFromStored(stored: string): KemSeeds {
+  try {
+    const value = JSON.parse(stored) as unknown;
+    if (!isRecord(value) || typeof value.p256 !== 'string' || typeof value.mlkem768 !== 'string') throw new Error('shape');
+    const seeds = { p256: Buffer.from(value.p256, 'base64url'), mlkem768: Buffer.from(value.mlkem768, 'base64url') };
+    if (seeds.p256.length !== P256_SCALAR_BYTES || seeds.mlkem768.length !== MLKEM_SEED_BYTES) throw new Error('size');
+    kemPrivateFromSeeds(seeds);
+    return seeds;
+  } catch (error) {
+    throw new Error('The stored post-quantum keys could not be read.', { cause: error });
+  }
+}
+
+async function loadStoredKemSeeds(secrets: SecretStorageLike): Promise<KemSeeds | undefined> {
+  const stored = await secrets.get(KEM_KEY_SECRET);
+  return stored ? kemSeedsFromStored(stored) : undefined;
+}
+
+/**
+ * This install's post-quantum keys, made on first need (33.2 D-03), like loadOrCreateEncryptionKey: the check, the creation, the store and the
+ * read-back run inside identity-create.lock, and a stored value that cannot be read is refused and never replaced. Call it only where the runtime
+ * passed probeWrapV2.
+ */
+export async function loadOrCreateKemKeys(secrets: SecretStorageLike, options: { identityDir: string }): Promise<DeviceKemKeys> {
+  await mkdir(options.identityDir, { recursive: true, mode: 0o700 });
+  const seeds = await withFileLock(options.identityDir, IDENTITY_CREATE_LOCK_FILE, async () => {
+    const existing = await loadStoredKemSeeds(secrets);
+    if (existing) return existing;
+    const made = newKemSeeds();
+    await secrets.store(KEM_KEY_SECRET, JSON.stringify({ p256: made.p256.toString('base64url'), mlkem768: made.mlkem768.toString('base64url') }));
+    const readBack = await loadStoredKemSeeds(secrets);
+    if (!readBack || !readBack.p256.equals(made.p256) || !readBack.mlkem768.equals(made.mlkem768)) {
+      throw new Error('The new post-quantum keys could not be read back from this computer\'s secret storage, so they were not used.');
+    }
+    return readBack;
+  });
+  return { publicKeys: kemPublicFromSeeds(seeds), privateKeys: kemPrivateFromSeeds(seeds) };
 }
 
 // ---- the key ring (D-24, D-44) -------------------------------------------------------------------------------------------------------------------

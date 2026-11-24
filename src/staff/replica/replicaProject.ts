@@ -49,7 +49,8 @@ import type { HeadSet } from '../../domain/replica/transport';
 import { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, readAnchorFile, sameAnchor, writeAnchorFile } from './anchorFile';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
-import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
+import { DeviceKeyRing, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from './keyring';
+import * as kemPublish from './kemPublish';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
@@ -135,6 +136,9 @@ export interface ReplicaProjectDeps {
    *  signs the person-key kinds. Absent on a single machine, where this device's key signs everything as before. */
   sessionSigner?: PayloadSigner;
   personSigner?: AsyncPayloadSigner;
+  /** Publish this computer's post-quantum keys at open (33.2 D-05). Off unless set: the host sets it where a project opens for live work, not for a
+   *  command's short open, whose flows promise to write nothing. A hosted session publishes through its own step-up instead. */
+  publishKem?: boolean;
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -263,7 +267,12 @@ export class ReplicaProject {
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
     const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-    return new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
+    if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
+      await kemPublish.ensureDeviceKem(project, { loadKeys: () => loadOrCreateKemKeys(deps.secrets, { identityDir: deps.identityDir ?? identityDirOf(deps.globalStorageDir) }) });
+    }
+    return project;
   }
 
   /**
