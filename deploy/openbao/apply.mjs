@@ -85,9 +85,12 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
       token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
     // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
-    // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10).
+    // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10). key_type any: the
+    // Certificates cert-manager makes from Ingress annotations (Theia Cloud, Harbor) and the Theia Cloud webhook's use RSA 2048 keys, which
+    // an EC-only role refused (spike S7); OpenBao still refuses RSA keys under 2048 bits. Our own Certificates ask for ECDSA P-256. Those
+    // Ingress Certificates carry only DNS names, no common name, so require_cn is off (the names are still checked against allowed_domains).
     { what: 'PKI role ingress', read: 'pki_int/roles/ingress', write: 'pki_int/roles/ingress', body: { allowed_domains: [site.domain, ...SERVICE_DOMAINS], allow_subdomains: true,
-      allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: true, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
+      allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: true, key_type: 'any', require_cn: false, max_ttl: 7776000 } },
     { what: 'PKI role hub', read: 'pki_int/roles/hub', write: 'pki_int/roles/hub', body: { allowed_domains: [site.domain, 'sterling-hubs.svc', 'sterling-hubs.svc.cluster.local'],
       allow_subdomains: true, allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: false, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
     // The intermediate's revocation list (D-49): edge sites check it from a signed file carried on media (47-14), so it must stay valid

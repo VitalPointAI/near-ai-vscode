@@ -1,11 +1,13 @@
-# Theia Cloud 1.2.0 (chart deploy/charts/vendored/theia-cloud-1.2.0.tgz), the settings that decide which images render and how they are pulled.
-# The descriptor (theia-cloud.release.json) sets operator.image, service.image and landingPage.image to our rebuilt images by digest from
-# deploy/bundle/images.lock.json (D-20, D-23). 47-15 adds the rest of the Theia Cloud settings here and must keep these.
+# Theia Cloud 1.2.0 (chart deploy/charts/vendored/theia-cloud-1.2.0-sterling.tgz: the upstream chart with the carried patch
+# deploy/charts/patches/theia-cloud-oauth2.patch, D-22). The descriptor (theia-cloud.release.json) sets operator.image, service.image and
+# landingPage.image to our rebuilt images and operator.oAuth2ProxyVersion to the whole oauth2-proxy reference, each by digest from
+# deploy/bundle/images.lock.json (D-20, D-23). Per-site settings (host prefixes, landing page texts) are in
+# deploy/values/site.example/theia-cloud.yaml.
 
 # Root pull policy (the chart default is Always) and each component's own (D-20, hardening 1).
 imagePullPolicy: IfNotPresent
 
-# The chart's demo AppDefinition hard-codes uid, port and capacity (research Pitfall 5); ours is shipped by the sterling-site release instead.
+# The chart's demo AppDefinition hard-codes uid, port and capacity (research Pitfall 5); ours is the sterling-sessions release (47-12).
 demoApplication:
   install: false
 
@@ -13,18 +15,71 @@ demoApplication:
 preloading:
   enable: false
 
+# Host names under the site domain: <landing>.<domain> (the start page), <service>.<domain> (the service API), <instance>.<domain> (the
+# sessions). The prefixes are per site.
+hosts:
+  usePaths: false
+  configuration:
+    baseHost: "${site.domain}"
+
+# Sign-in through the site's Keycloak (47-08): realm sterling, client sterling-sessions. No secret is a value here: oauth2-proxy and the
+# service read the client secret, and oauth2-proxy the cookie secret, from Secret oauth2-proxy-secrets (keys client-secret, cookie-secret)
+# written by the install script from OpenBao (D-41). The two fields below are only text the patched chart no longer uses as secrets; they
+# replace the chart's public sample values so those never render (ConfigMap service-config still shows KEYCLOAK_CLIENTSECRET, overridden by
+# the Secret in the service container).
+keycloak:
+  enable: true
+  authUrl: "https://keycloak.${site.domain}/"
+  realm: sterling
+  clientId: sterling-sessions
+  clientSecret: "from-secret-oauth2-proxy-secrets"
+  cookieSecret: "from-secret-oauth2-proxy-secrets"
+
+# Read by the patched oauth2-proxy ConfigMap: the workbench's port (Phase 46 image, the AppDefinition port, 47-12) and the step-up level that
+# /oauth2/start may pass on as acr_values (the one source shared with the realm and OpenBao).
+sterling:
+  workbenchPort: 3000
+  stepUpAcr: "${site.stepUpAcr}"
+
 operator:
   imagePullPolicy: IfNotPresent
   # Annotation mode: the operator sets bandwidth annotations and never starts the wondershaper image, so that image is not bundled (D-20).
   # The chart still passes its default name as --wondershaperImage; it is never pulled in this mode.
   bandwidthLimiter: "K8SANNOTATION"
+  # One session per person, no eager start (prewarm pool 0, D-25, hardening 8).
+  sessionsPerUser: "1"
+  eagerStart: false
+  # Every workspace volume on the site's encrypted class (D-17, D-24), sized by the site (D-11): no 250Mi default. An empty
+  # requestedStorage stops the render (render.mjs) and the install preflight (47-16).
+  storageClassName: "${site.storageClass}"
+  requestedStorage: "${site.requestedStorage}"
 
 service:
   imagePullPolicy: IfNotPresent
 
 landingPage:
   imagePullPolicy: IfNotPresent
+  # Persistent workspaces (D-24, hardening 7): the start page asks for a person's workspace, never an ephemeral session.
+  ephemeralStorage: false
+  # The workbench AppDefinition of the sterling-sessions release (47-12).
+  appDefinition: sterling-workbench
+  # The start page's launch request times out after 5 minutes and shows the service's reason (hard-coded in the 1.2.0 landing page,
+  # node/landing-page/src/App.tsx; not a value): a session that does not start ends with a message, it never waits silently.
 
-# Every Theia Cloud Ingress certificate comes from the site PKI (D-16, 47-13); the chart default letsencrypt-prod is an ACME issuer name.
+# HAProxy is the ingress (D-07, 47-13), and every Theia Cloud Ingress certificate comes from the site PKI (D-16): the chart default
+# letsencrypt-prod is an ACME issuer name.
 ingress:
+  controller: haproxy
+  ingressClassName: haproxy
+  certManagerAnnotations: true
   clusterIssuer: site-pki
+  tls: true
+  addTLSSecretName: true
+
+# The operator's monitor: the activity tracker stops idle sessions (the AppDefinition's notifyAfter and timeoutAfter, 47-12), polling every
+# minute.
+monitor:
+  enable: true
+  activityTracker:
+    enable: true
+    interval: 1
