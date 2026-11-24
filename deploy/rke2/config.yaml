@@ -1,0 +1,29 @@
+# RKE2 server configuration for a production site node (D-14), copied to /etc/rancher/rke2/config.yaml by install-node.sh after site
+# substitution. The RKE2 release is the pinned FIPS build (GoBoring) from compliance/ci/tool-pins.json; host FIPS mode is a separate site
+# requirement that install-node.sh checks.
+#
+# DISA STIG: the RKE2 STIG settings come from two places, the CIS profile below (which also forces protect-kernel-defaults and network
+# policies on the built-in namespaces) and the host's own DISA STIG content applied by the site's OS hardening. The STIG page for RKE2 was
+# not read during research (unverified); Phase 48 checks this file against it.
+profile: cis
+# Canal is the only CNI RKE2 rebuilds for FIPS (research, RKE2 answers).
+cni: canal
+# HAProxy Kubernetes Ingress is installed by us (D-07); RKE2's bundled ingress controller is never used.
+ingress-controller: none
+# Secrets are encrypted at rest in etcd (D-41).
+secrets-encryption: true
+# Pod Security: restricted everywhere except the six namespaces in psa.yaml.
+pod-security-admission-config-file: /etc/rancher/rke2/psa.yaml
+# The API audit log: what audit-policy.yaml selects, kept 30 days in at most 10 files of 100 MB before Fluent Bit ships it (47-10).
+audit-policy-file: /etc/rancher/rke2/audit-policy.yaml
+kube-apiserver-arg:
+  - "audit-log-path=/var/lib/rancher/rke2/server/logs/audit.log"
+  - "audit-log-maxage=30"
+  - "audit-log-maxbackup=10"
+  - "audit-log-maxsize=100"
+# etcd snapshots for backup and restore (D-54): every six hours, the last 28 kept (a week); the runbook copies them off the node.
+etcd-snapshot-schedule-cron: "0 */6 * * *"
+etcd-snapshot-retention: 28
+# Nothing falls back to a public registry: every pull goes to the site registry named in registries.yaml (D-01, D-15).
+disable-default-registry-endpoint: true
+write-kubeconfig-mode: "0600"

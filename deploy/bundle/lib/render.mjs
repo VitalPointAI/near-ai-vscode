@@ -150,7 +150,7 @@ function chartPath(root, release) {
 }
 
 /** The --set-string arguments of the descriptor's image mappings, each resolved from the image lock with the site registry. */
-function imageSets(root, release, site) {
+export function imageSets(root, release, site) {
   const lock = readImagesLock(root);
   const registry = siteValue(site, 'registry');
   if (!release.images.length) return [];

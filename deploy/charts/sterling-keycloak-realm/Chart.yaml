@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-keycloak-realm
+description: Applies realm sterling from code with keycloak-config-cli at install and on every update (D-30).
+type: application
+version: 0.1.0

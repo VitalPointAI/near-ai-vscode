@@ -1,0 +1,48 @@
+{{- /*
+The workbench's AppDefinition (D-25, D-29): one per site, the Sterling image by digest from Phase 46's release (or the pinned lab placeholder
+until it is published, D-55). Session lifecycle (DESIGN section 7): requested -> refused when maxInstances sessions are running (Theia Cloud
+refuses the launch); idle-warned and stopping come from the activity tracker's notifyAfter and timeoutAfter; stopped keeps the volume.
+No prewarm pool: minInstances 0 until Phase 48 shows how a pooled pod gets a person's volume. The capacity refusal text ("All sessions are in
+use. Try again in a few minutes, or ask your administrator.") is not a chart value; it is a Phase 46 or upstream item (owner-confirm item 9).
+The session start timeout is the launch request's timeout, set by whoever starts sessions (the landing page, 47-15), so no session waits
+silently. Theia Cloud AppDefinitions have no environment field: the site environment reaches the pod through envFrom sterling-site-env in
+our operator template (47-09).
+*/ -}}
+{{- $a := .Values.appDefinition -}}
+{{- $image := ternary .Values.labPlaceholder.image $a.image (eq ($a.usePlaceholder | toString) "true") -}}
+{{- if not $image }}{{ fail "the AppDefinition image is not set" }}{{ end -}}
+{{- if lt (int $a.notifyAfterMinutes) 1 }}{{ fail "appDefinition.notifyAfterMinutes must be at least 1" }}{{ end -}}
+{{- if not (kindIs "float64" $a.maxInstances) }}{{ fail "appDefinition.maxInstances (the site's session capacity) must be a number in the per-site file" }}{{ end -}}
+apiVersion: theia.cloud/v1beta10
+kind: AppDefinition
+metadata:
+  name: sterling-workbench
+spec:
+  name: sterling-workbench
+  image: {{ $image | quote }}
+  imagePullPolicy: IfNotPresent
+  {{- if eq ($a.usePlaceholder | toString) "true" }}
+  uid: {{ .Values.labPlaceholder.uid }}
+  port: {{ .Values.labPlaceholder.port }}
+  {{- else }}
+  uid: {{ $a.uid }}
+  port: {{ $a.port }}
+  {{- end }}
+  ingressname: {{ $a.ingressName | quote }}
+  minInstances: 0
+  maxInstances: {{ $a.maxInstances | int }}
+  timeout: {{ $a.maxSessionMinutes | int }}
+  requestsMemory: {{ $a.resources.requests.memory | quote }}
+  requestsCpu: {{ $a.resources.requests.cpu | quote }}
+  limitsMemory: {{ $a.resources.limits.memory | quote }}
+  limitsCpu: {{ $a.resources.limits.cpu | quote }}
+  downlinkLimit: 0
+  uplinkLimit: 0
+  mountPath: {{ $a.mountPath | quote }}
+  {{- if ne ($a.usePlaceholder | toString) "true" }}
+  monitor:
+    port: {{ $a.port }}
+    activityTracker:
+      notifyAfter: {{ $a.notifyAfterMinutes | int }}
+      timeoutAfter: {{ $a.timeoutAfterMinutes | int }}
+  {{- end }}

@@ -18,7 +18,7 @@
     "organizationPublicKey": "The PEM text (not a path) of your organization's cosign public key, which admission and the bundle import check every image and file against.",
     "stepUpAcr": "The level the realm asks for at step-up; the one source for the workbench's step-up setting, the realm's level-2 flow and OpenBao's step-up role.",
     "stepUpMaxAgeSeconds": "How recent a sign-in must be for a step-up action; the same one source as stepUpAcr.",
-    "hubs": "The sync hubs this site runs, one item per hub with at least a name; each item becomes its own release."
+    "hubs": "The sync hubs this site runs, one item per hub: { name, publicAddress (the host name, with an optional :port, members computers use), nodePort (the TCP port on every node), storage (the state volume size) }. Each item becomes its own release (deploy/hub). Several hubs at HQ, each serving a set of projects (MUS 10.9)."
   },
   "siteName": "",
   "domain": "",

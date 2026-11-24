@@ -1,0 +1,26 @@
+{{- /*
+One egress policy per namespace (D-01, D-55): every pod may reach the cluster's pods and services, the site's nodes, and the addresses your
+organization's signed policy allows (egressAllow), and nothing else. Ingress is not restricted here.
+*/ -}}
+{{- $cidrs := concat (list .Values.cidrs.pod .Values.cidrs.service .Values.cidrs.nodes) (.Values.egressAllow | default list) }}
+{{- range $cidrs }}
+{{- if or (not .) (eq . "0.0.0.0/0") (eq . "::/0") }}{{ fail (printf "egress address %q is empty or open to everything; list only what your organization's policy allows" .) }}{{ end }}
+{{- end }}
+{{- range .Values.namespaces }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-site-only
+  namespace: {{ .name }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- range $cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+{{- end }}

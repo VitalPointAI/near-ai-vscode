@@ -5,3 +5,12 @@
 # settings here and must keep these.
 image:
   pullPolicy: IfNotPresent
+
+# Our encrypted class (deploy/charts/sterling-storage, 47-10) is the only class: the chart's own unencrypted default class is not created.
+persistence:
+  createStorageClass: false
+  defaultClass: false
+# FIPS mode: Longhorn's LUKS volumes use the host's cryptsetup. On a FIPS host keep the key derivation to PBKDF2 with the host's approved
+# settings (CRYPTO_PBKDF and CRYPTO_PBKDF_FORCE_ITERATIONS in the longhorn-crypto Secret the install script writes) instead of argon2.
+# The backup target and per-site sizes are in deploy/values/site.example/longhorn.yaml. Host packages (cryptsetup, open-iscsi, NFS client)
+# must come from the site's own OS repository; the install preflight checks them (research Pitfall 12, 47-16).

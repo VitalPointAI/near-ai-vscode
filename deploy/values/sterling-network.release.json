@@ -1,0 +1,7 @@
+{
+  "chart": "path:deploy/charts/sterling-network",
+  "namespace": "sterling-network",
+  "order": 15,
+  "values": ["deploy/values/sterling-network.yaml"],
+  "note": "Namespaces with Pod Security labels and the egress-site-only policy in each (D-01). Installs right after the registry, before every other release."
+}

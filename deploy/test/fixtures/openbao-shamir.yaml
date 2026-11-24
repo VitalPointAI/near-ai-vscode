@@ -1,0 +1,6 @@
+# A small edge site without an HSM: one node, Shamir unseal (deploy/test/openbao.test.mjs renders OpenBao with this site file).
+server:
+  ha:
+    replicas: 1
+sterling:
+  seal: shamir

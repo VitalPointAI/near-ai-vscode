@@ -1,0 +1,81 @@
+{{- /*
+The nightly dump (D-54): pg_dump of the keycloak database over verified TLS into a second volume on the encrypted class, keeping the
+per-site number of days. Volume snapshots and backups of both volumes come from the storage class's recurring jobs (47-10); the restore
+steps are in the backup runbook (47-17).
+*/ -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sterling-postgres-dumps
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.dump.size | quote }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sterling-postgres-dump
+spec:
+  schedule: {{ .Values.dump.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 26
+            runAsGroup: 26
+            fsGroup: 26
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: dump
+              image: {{ .Values.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  export PGPASSWORD="$(cat /etc/postgres-secrets/keycloak-password)"
+                  name="keycloak-$(date -u +%Y%m%dT%H%M%SZ).dump"
+                  pg_dump "host=sterling-postgres.{{ .Release.Namespace }}.svc dbname=keycloak user=keycloak sslmode=verify-full sslrootcert=/etc/postgres-tls/ca.crt" \
+                    --format=custom --file="/dumps/$name.partial"
+                  mv "/dumps/$name.partial" "/dumps/$name"
+                  find /dumps -name 'keycloak-*.dump' -mtime +{{ .Values.dump.retainDays }} -delete
+              securityContext:
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - { name: dumps, mountPath: /dumps }
+                - { name: tls, mountPath: /etc/postgres-tls, readOnly: true }
+                - { name: passwords, mountPath: /etc/postgres-secrets, readOnly: true }
+          volumes:
+            - name: dumps
+              persistentVolumeClaim:
+                claimName: sterling-postgres-dumps
+            - name: tls
+              secret:
+                secretName: sterling-postgres-tls
+                defaultMode: 0440
+                items:
+                  - { key: ca.crt, path: ca.crt }
+            - name: passwords
+              secret:
+                secretName: postgres-superuser
+                defaultMode: 0440
+                items:
+                  - { key: keycloak-password, path: keycloak-password }

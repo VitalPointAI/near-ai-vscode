@@ -11,11 +11,11 @@ A folder with only a Containerfile is a set of pinned base stages waiting for it
 
 | Folder | Status | Build steps and `image.json` written by |
 |---|---|---|
-| `theia-cloud-operator`, `theia-cloud-service`, `theia-cloud-conversion-webhook`, `theia-cloud-landing-page` | base stages only | 47-09 |
-| `oauth2-proxy` | base stages only | 47-09 |
-| `openbao`, `openbao-softhsm` (test scope only) | base stages only | 47-07 |
-| `postgres` | base stage only | 47-11 |
-| `hub` | `image.json` only, pointing at the unchanged `hub/Dockerfile` (D-45, D-46) | 47-11 |
+| `theia-cloud-operator`, `theia-cloud-service`, `theia-cloud-conversion-webhook`, `theia-cloud-landing-page` | built (`image.json`, Theia Cloud 1.2.0 at `e2d201fd`); the operator carries our session pod template in `templates/` | 47-09 |
+| `oauth2-proxy` | built (`image.json`, v7.15.6 at `ea755ac0`, Go FIPS module) | 47-09 |
+| `openbao`, `openbao-softhsm` (test scope only) | built (`image.json`); `openbao-softhsm` builds on the same pinned upstream base as `openbao`, not on our image, because the CI builds every image in parallel | 47-07 |
+| `postgres` | built (`image.json`; the pinned PGDG RPMs and key from the `postgresql` pin, signature-checked) | 47-11 |
+| `hub` | `image.json` only, pointing at the unchanged `hub/Dockerfile` with context `.` (D-45, D-46) | 47-11 |
 
 ## `image.json`
 
@@ -47,8 +47,8 @@ Dockerfile itself does not change.
 Every `FROM` that pulls an image is written `<registry>/<repository>:<tag>@sha256:<64 hex>`. The digest is the linux/amd64 image manifest,
 not the multi-platform index: spike S1 (`.planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-01-SUMMARY.md`) showed that
 this is the form that stays the same through the hauler bundle copy, and that hauler refuses to select one platform from an index pinned by
-digest. A `FROM ${VAR}` names an image this repository builds (for example `openbao-softhsm` builds on our own `openbao` image) and is passed
-in by digest as a build argument.
+digest. A `FROM ${VAR}` takes an image passed in as a build argument by digest (for example the final stage of `openbao-softhsm`, whose
+`image.json` passes the same pinned upstream OpenBao base that `openbao` uses).
 
 To re-pin a base:
 

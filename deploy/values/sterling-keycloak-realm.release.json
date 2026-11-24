@@ -1,0 +1,11 @@
+{
+  "chart": "path:deploy/charts/sterling-keycloak-realm",
+  "namespace": "sterling-identity",
+  "order": 58,
+  "values": ["deploy/values/sterling-keycloak-realm.yaml"],
+  "site": "deploy/values/site.example/sterling-keycloak-realm.yaml",
+  "images": [
+    { "lock": "docker.io/adorsys/keycloak-config-cli", "set": { "image": "ref" } }
+  ],
+  "note": "keycloak-config-cli applies realm sterling (deploy/keycloak/realm.json) after Keycloak; installed only by deploy/keycloak/apply.mjs, which checks the realm first (D-30)."
+}

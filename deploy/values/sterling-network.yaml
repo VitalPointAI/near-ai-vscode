@@ -1,0 +1,48 @@
+# Every namespace a release of the site stack installs into (D-01, D-14). deploy/test/rke2.test.mjs fails when a release descriptor names a
+# namespace that is not listed here, so no release can appear without an egress policy. podSecurity is privileged only for the namespaces
+# exempt in deploy/rke2/psa.yaml (Longhorn, the log shipper that reads host logs, node-exporter).
+namespaces:
+  - name: sterling-registry
+    create: false
+    podSecurity: restricted
+  - name: sterling-network
+    create: false
+    podSecurity: restricted
+  - name: kyverno
+    create: true
+    podSecurity: restricted
+  - name: cert-manager
+    create: true
+    podSecurity: restricted
+  - name: haproxy-controller
+    create: true
+    podSecurity: restricted
+  - name: longhorn-system
+    create: true
+    podSecurity: privileged
+  - name: sterling-openbao
+    create: true
+    podSecurity: restricted
+  - name: sterling-identity
+    create: true
+    podSecurity: restricted
+  - name: theia-cloud
+    create: true
+    podSecurity: restricted
+  - name: sterling-hubs
+    create: true
+    podSecurity: restricted
+  - name: sterling-logging
+    create: true
+    podSecurity: restricted
+  - name: sterling-log-shipper
+    create: true
+    podSecurity: privileged
+  - name: sterling-monitoring
+    create: true
+    podSecurity: privileged
+cidrs:
+  pod: "${site.clusterCidrs.pod}"
+  service: "${site.clusterCidrs.service}"
+  nodes: "${site.clusterCidrs.nodes}"
+egressAllow: ${site.egressAllow}

@@ -1,0 +1,3 @@
+# Keycloak's Postgres (deploy/charts/sterling-postgres).
+storageClass: "${site.storageClass}"
+allowCidrs: ["${site.clusterCidrs.pod}"]

@@ -1,0 +1,6 @@
+{
+  "name": "openbao",
+  "containerfile": "deploy/images/openbao/Containerfile",
+  "context": "deploy/images/openbao",
+  "tools": [{ "pin": "kms-pkcs11", "dir": "plugins" }]
+}

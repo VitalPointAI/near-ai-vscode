@@ -1,11 +1,31 @@
 # The Theia Cloud landing page image (the session start page; owner-confirm E4 default: rebuild it), rebuilt by us from the pinned Theia
-# Cloud source on UBI 9 (D-23, D-12). This file holds only the base stages; the build steps and image.json come with its build definition
-# (deploy/images/README.md), and without image.json it is not built.
+# Cloud source on UBI 9 (D-23, D-12). The source is the pinned Theia Cloud 1.2.0 commit in image.json, given to the
+# build as the named build context upstream (deploy/images/README.md).
 #   build:   ubi9/nodejs-22, builds the static page (build scope only).
 #   runtime: ubi9/nginx-126, serves it at a site.
 # Both are pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read
 # the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
 # that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
 FROM registry.access.redhat.com/ubi9/nodejs-22:9.9@sha256:806f1f15c1a2165203869817094e7a53c2ff493c437e75cec7f87fb57c170a03 AS build
+# The upstream build (dockerfiles/landing-page/Dockerfile at 1.2.0) from its lockfile; install scripts off. The page asks no address
+# outside the site: the upstream index.html loads a font from fonts.googleapis.com, which is removed (the page falls back to a local
+# monospace font), and the build fails if any src or href in the built page still names an outside address.
+USER 1001
+WORKDIR /opt/app-root/src/app
+COPY --from=upstream --chown=1001:0 node/common/src ./common/src
+COPY --from=upstream --chown=1001:0 node/common/package.json node/common/tsconfig.json node/common/tsconfig.esm.json ./common/
+COPY --from=upstream --chown=1001:0 node/configs ./configs/
+COPY --from=upstream --chown=1001:0 node/tsconfig.json node/package.json node/package-lock.json ./
+COPY --from=upstream --chown=1001:0 node/landing-page/ ./landing-page/
+RUN sed -i '/fonts\.googleapis\.com/d' landing-page/index.html \
+ && npm ci --ignore-scripts --no-audit --no-fund \
+ && npm run build -w common && npm run build -w landing-page \
+ && chmod 644 landing-page/dist/favicon.ico \
+ && ! grep -rqE '(src|href)="(https?:)?//' landing-page/dist
 
 FROM registry.access.redhat.com/ubi9/nginx-126:9.9@sha256:84a9a99efbefa521e343e739883d2ef3c994becd3bb6eecc99f79aa274fa8bea
+# Static files only, served by the image's nginx as its non-root user (1001) on the unprivileged port 8080.
+COPY --from=build --chown=0:0 /opt/app-root/src/app/landing-page/dist/ /opt/app-root/src/
+USER 1001
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]

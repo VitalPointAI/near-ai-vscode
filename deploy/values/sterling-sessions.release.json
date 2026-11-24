@@ -1,0 +1,12 @@
+{
+  "chart": "path:deploy/charts/sterling-sessions",
+  "namespace": "theia-cloud",
+  "order": 65,
+  "values": ["deploy/values/sterling-sessions.yaml"],
+  "site": "deploy/values/site.example/sterling-sessions.yaml",
+  "images": [
+    { "lock": "sterling/sterling-workbench", "set": { "appDefinition.image": "ref" } },
+    { "lock": "registry.access.redhat.com/ubi9/nginx-126", "set": { "labPlaceholder.image": "ref" } }
+  ],
+  "note": "The workbench AppDefinition, the site environment and the session environment policy (D-25, D-29, hardening 13); after Theia Cloud."
+}

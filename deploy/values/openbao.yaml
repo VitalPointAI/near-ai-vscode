@@ -1,6 +1,7 @@
-# OpenBao (chart deploy/charts/vendored/openbao-0.30.8.tgz), the settings that decide which images render. The descriptor sets the server image
-# to our rebuilt sterling/openbao by digest from deploy/bundle/images.lock.json (D-20, D-38: our image carries the kms-pkcs11 plugin). 47-07
-# adds the rest of the OpenBao settings here and must keep these.
+# OpenBao 2.7.3 (chart deploy/charts/vendored/openbao-0.30.8.tgz) as a Raft cluster with TLS, the PKCS#11 seal (or Shamir) and the audit
+# device (D-04, D-37, D-38). The descriptor sets the server image to our rebuilt sterling/openbao by digest from deploy/bundle/images.lock.json
+# (D-20); it carries the kms-pkcs11 plugin. Per-site settings (replicas, seal, HSM library and labels) are in deploy/values/site.example/openbao.yaml
+# under `sterling`, read by the configuration template below. Never HashiCorp Vault (D-04).
 
 # No agent injector (it would pull the HashiCorp vault-k8s image) and no CSI provider: static secrets come from our install script (Decision 6).
 injector:
@@ -8,6 +9,103 @@ injector:
 csi:
   enabled: false
 
+global:
+  # TLS on the API and cluster ports, with the certificate from Secret openbao-tls (the bootstrap CA first, then site-pki, 47-13).
+  tlsDisable: false
+
 server:
   image:
     pullPolicy: IfNotPresent
+  # Pod Security restricted (sterling-openbao is not exempt): the upstream user (uid 100, gid 1000), no privilege escalation, no capabilities.
+  statefulSet:
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+  dataStorage:
+    enabled: true
+    storageClass: "${site.storageClass}"
+  auditStorage:
+    enabled: false
+  extraVolumes:
+    - type: secret
+      name: openbao-tls
+  ha:
+    enabled: true
+    raft:
+      enabled: true
+      setNodeId: true
+      # Rendered with helm's tpl: the seal stanza only when the site seal is pkcs11, and one retry_join per replica.
+      config: |
+        ui            = false
+        disable_mlock = true
+
+        listener "tcp" {
+          address            = "[::]:8200"
+          cluster_address    = "[::]:8201"
+          tls_cert_file      = "/openbao/userconfig/openbao-tls/tls.crt"
+          tls_key_file       = "/openbao/userconfig/openbao-tls/tls.key"
+          tls_client_ca_file = "/openbao/userconfig/openbao-tls/ca.crt"
+          tls_min_version    = "tls12"
+        }
+
+        storage "raft" {
+          path = "/openbao/data"
+          {{- range $index := until (int .Values.server.ha.replicas) }}
+          retry_join {
+            leader_api_addr     = "https://{{ $.Release.Name }}-{{ $index }}.{{ $.Release.Name }}-internal:8200"
+            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
+          }
+          {{- end }}
+        }
+
+        service_registration "kubernetes" {}
+
+        # The kms-pkcs11 plugin in our image (deploy/images/openbao). KMS plugins must be declared here (they are needed while sealed);
+        # sha256sum is the extracted binary's, the binSha256 of the kms-pkcs11 pin in compliance/ci/tool-pins.json.
+        plugin_directory = "/openbao/plugins"
+        plugin "kms" "pkcs11" {
+          command   = "openbao-plugin-kms-pkcs11"
+          version   = "v0.3.0"
+          sha256sum = "96fefa80e721551725ea01be79b0dae0f3951f15f01291fd87846d5e45475be6"
+        }
+        {{- if eq .Values.sterling.seal "pkcs11" }}
+
+        # Auto-unseal from the site HSM (SoftHSM2 in development, CI and the lab). The PIN comes from BAO_HSM_PIN (Secret openbao-hsm-pin).
+        seal "pkcs11" {
+          lib         = "{{ .Values.sterling.pkcs11.lib }}"
+          token_label = "{{ .Values.sterling.pkcs11.tokenLabel }}"
+          key_label   = "{{ .Values.sterling.pkcs11.keyLabel }}"
+          mechanism   = "{{ .Values.sterling.pkcs11.mechanism }}"
+        }
+        {{- else if ne .Values.sterling.seal "shamir" }}
+        {{- fail "sterling.seal must be pkcs11 or shamir" }}
+        {{- end }}
+
+        # The audit log to the container's standard output, which Fluent Bit ships to the site log store (47-10); tamper-evidence is gap G2.
+        # Declared here because OpenBao 2.7 refuses to enable audit devices through the API (spike S5).
+        audit "file" "stdout" {
+          description = "to the container log, shipped to the site log store"
+          options {
+            file_path = "stdout"
+            log_raw   = "false"
+          }
+        }
+
+# Per-site settings (deploy/values/site.example/openbao.yaml). The seal has no default: a site chooses pkcs11 or shamir, and the render
+# stops otherwise.
+sterling:
+  seal: ""
+  pkcs11:
+    lib: ""
+    tokenLabel: ""
+    keyLabel: ""
+    mechanism: ""

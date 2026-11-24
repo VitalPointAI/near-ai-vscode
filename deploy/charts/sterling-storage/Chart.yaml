@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-storage
+description: The site storage class, encrypted at rest with Longhorn LUKS volumes, and the recurring snapshots and backups of every volume (D-17, D-54).
+type: application
+version: 0.1.0

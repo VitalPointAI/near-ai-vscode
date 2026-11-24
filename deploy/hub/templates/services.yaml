@@ -1,0 +1,40 @@
+{{- /*
+Reaching the hub (D-44, research Decision 9, Pitfall 9): sessions use the cluster address https://hub-<name>.sterling-hubs.svc:8443 (Phase 46
+interface item 9); members' computers use the instance's node port on every node, where the site's DNS points publicAddress. Both are plain
+TCP: nothing in front of the hub ends TLS, because members bind their session to the hub's own certificate (MUS 10.1). No Ingress routes here.
+*/ -}}
+{{- $i := .Values.instance -}}
+{{- if not $i.nodePort }}{{ fail (printf "hub %s: nodePort is not set in the site file" $i.name) }}{{ end -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub-{{ $i.name }}
+  labels:
+    app.kubernetes.io/name: sterling-hub
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: hub-{{ $i.name }}
+  ports:
+    - name: hub
+      port: 8443
+      targetPort: hub
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub-{{ $i.name }}-external
+  labels:
+    app.kubernetes.io/name: sterling-hub
+spec:
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/instance: hub-{{ $i.name }}
+  ports:
+    - name: hub
+      port: 8443
+      targetPort: hub
+      nodePort: {{ $i.nodePort }}
+      protocol: TCP

@@ -1,0 +1,27 @@
+# Kubernetes API audit policy (D-14, D-26, D-41), copied to /etc/rancher/rke2/audit-policy.yaml by install-node.sh. RKE2's own default records
+# nothing (level None, research Pitfall 13). The log at /var/lib/rancher/rke2/server/logs/audit.log is shipped to the site log store by
+# Fluent Bit (47-10). Rules apply in order; the first match wins.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # Theia Cloud sessions, workspaces and app definitions: every write with its request body, so who started, changed or stopped whose session
+  # is on record (hardening item 9).
+  - level: Request
+    resources:
+      - group: theia.cloud
+        resources: [sessions, workspaces, appdefinitions]
+    verbs: [create, update, patch, delete, deletecollection]
+  # Secrets, ConfigMaps and token reviews: who touched what, never the content (D-41).
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: [secrets, configmaps, serviceaccounts/token]
+      - group: authentication.k8s.io
+        resources: [tokenreviews]
+  # Read-only calls on everything else are noise at this volume.
+  - level: None
+    verbs: [get, list, watch]
+  # Everything else: who did what to which object.
+  - level: Metadata
