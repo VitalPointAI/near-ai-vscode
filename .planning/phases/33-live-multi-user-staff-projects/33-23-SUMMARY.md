@@ -185,14 +185,17 @@ None. The modules are complete for what they do. 33-24 wires them: it finds shar
 
 None. No new network endpoint or route was added. The OpenBao paths called are the three 46-07 allows, the read of the person's own signing key (owner decision 2026-11-24, granted on fix/session-reads-own-person-key), and the person's own KV path through 46-07's key store.
 
-## Open conditions
+## Hand-off to 33-24
 
-None for this plan. The person-key source (the first hand-off's condition) was decided by the owner and is built on `fix/session-reads-own-person-key`. This plan's hosted path needs that branch on main and main merged here; until then `startSessionKeys` refuses with `SESSION_KEY_TEXT.noPersonKey` when no key is given, which is visible, not silent.
+The person-key source (the first hand-off's condition) was decided by the owner and is built on `fix/session-reads-own-person-key` (PR #197). This plan's hosted path needs that branch on main and main merged here; until then `startSessionKeys` refuses with `SESSION_KEY_TEXT.noPersonKey` when no key is given, which is visible, not silent.
 
-Hand-off to 33-24, not a condition of this plan:
 - In a hosted session, `ReplicaProject` must be opened with the session and person signers and the opened encryption key. Its single-machine `loadOrCreateDeviceIdentity` and `loadOrCreateEncryptionKey` over `keyStoreSecrets` fail visibly with `KEY_STORE_SECRETS_TEXT.plainPrivateKey`.
 - The person's member and slot for `certificate()` come from the roster, through the person key's writer id.
 - The staff engine entry needs the replica project and live replicator added, with the decode worker file and the vendored Yjs paths that `decodeHost.ts` and `doc.ts` load through `__dirname`.
+
+## Open conditions
+
+None.
 
 ## Self-Check: PASSED
 

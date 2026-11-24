@@ -5702,6 +5702,19 @@
       "poam": "g388",
       "remediation": "Plan 33.1-01 keeps the typed-in clearance field of Phase 31's member invite and admit entries readable, so existing logs still replay. It grants nothing: access comes only from verified credentials. Remove it once no log from before Phase 33.1 remains. Source: .planning/phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md.",
       "title": "Phase 31's typed-in clearance stays readable for replay"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "cm-08",
+        "sr-04"
+      ],
+      "id": "G416",
+      "ownerRole": "maintainers",
+      "remediation": "The workbench image now carries the staff engine with the vendored Yjs 13.6.33 and lib0 0.2.119 build (workbench/engine/vendor/yjs, hash-pinned in scripts/crdt-vendor.json), which the image SBOM written by syft does not list, because a bundled file has no package manifest. Add those two packages to the image's supply-chain record from scripts/crdt-vendor.json before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-24-SUMMARY.md.",
+      "title": "The workbench image SBOM does not list the Yjs build in the staff engine"
     }
   ]
 }
