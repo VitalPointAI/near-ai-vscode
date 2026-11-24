@@ -1,14 +1,22 @@
-// Phase 46, plan 07, task 1 (D-04, D-17 to D-19, D-36, D-37; T-46-25, T-46-27). Task 1: against the fake OpenBao, the OpenBao key
+// Phase 46, plan 07, tasks 1 and 2 (D-04, D-17 to D-19, D-36, D-37; T-46-25, T-46-27). Task 1: against the fake OpenBao, the OpenBao key
 // store writes, reads, lists and deletes the person's own KV v2 paths with the session token, refuses every call without an active session,
 // and never puts a secret, a token or the entity id in a rejection or on the console; the unavailable store rejects all six methods.
+// Task 2: the start-time choice, the keyring override that never falls back to memory, and the rebind of Theia's KeyStoreService.
+import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { SECRET_STORE_TEXT } from '../extension/src/common/secret-store.ts';
+import { Container } from '@theia/core/shared/inversify';
+import { KeyStoreService } from '@theia/core/lib/common/key-store.js';
+import { InMemoryCredentialsProvider, KeyStoreServiceImpl } from '@theia/core/lib/node/key-store-server.js';
+import { SECRET_STORE_TEXT, SecretStoreService, type SecretStoreStatus } from '../extension/src/common/secret-store.ts';
 import { readHostingConfig, type HostedConfig } from '../extension/src/node/hosting-config.ts';
 import { encodeSegment, secretPath } from '../extension/src/node/kv-path.ts';
-import { createOpenBaoKeyStore, createUnavailableKeyStore, type KeyStore, type SessionSource } from '../extension/src/node/key-stores.ts';
+import { chooseKeyStore, createOpenBaoKeyStore, createUnavailableKeyStore, type KeyringCandidate, type KeyStore, type SessionSource } from '../extension/src/node/key-stores.ts';
+import { KeyringKeyStoreService } from '../extension/src/node/keyring-key-store.ts';
+import { createKeyStoreModule } from '../extension/src/node/key-store-backend-module.ts';
 import { createOpenBaoClient } from '../extension/src/node/openbao-client.ts';
 import type { ActiveSession } from '../extension/src/node/session-identity.ts';
+import { SessionIdentity } from '../extension/src/node/session-identity.ts';
 import { captureOutput, startFakeOpenBao, type FakeCall, type FakeOpenBao } from './helpers/fake-openbao.ts';
 
 const ENTITY = '7d3f9b1a-2c4e-4f6a-8b0c-1d2e3f4a5b6c';
@@ -144,4 +152,98 @@ test('the unavailable store rejects all six methods with its reason and never re
     store.findPassword('svc'), store.findCredentials('svc'), store.keys('svc'),
   ];
   for (const call of calls) await assert.rejects(call, { message: SECRET_STORE_TEXT.noStore });
+});
+
+// Task 2.
+
+/** Counts every use of Theia's in-memory provider: it must never hold a secret (T-46-27). */
+function spyOnMemory(): { uses: () => number; restore: () => void } {
+  const proto = InMemoryCredentialsProvider.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const names = ['getPassword', 'setPassword', 'deletePassword', 'findPassword', 'findCredentials', 'clear'];
+  const originals = names.map((name) => proto[name]);
+  let uses = 0;
+  names.forEach((name, index) => { proto[name] = function (this: unknown, ...args: unknown[]) { uses += 1; return originals[index].apply(this, args); }; });
+  return { uses: () => uses, restore: () => names.forEach((name, index) => { proto[name] = originals[index]; }) };
+}
+
+/** A keytar double: the six keytar functions over a Map, as the real module would answer them. */
+function fakeKeytar(): Record<string, (...args: string[]) => Promise<unknown>> {
+  const vault = new Map<string, string>();
+  const key = (service: string, account: string): string => JSON.stringify([service, account]);
+  return {
+    getPassword: async (service, account) => vault.get(key(service, account)) ?? null,
+    setPassword: async (service, account, password) => { vault.set(key(service, account), password); },
+    deletePassword: async (service, account) => vault.delete(key(service, account)),
+    findPassword: async (service) => [...vault].find(([k]) => JSON.parse(k)[0] === service)?.[1] ?? null,
+    findCredentials: async (service) => [...vault].filter(([k]) => JSON.parse(k)[0] === service).map(([k, password]) => ({ account: JSON.parse(k)[1], password })),
+  };
+}
+
+function keyringWith(load: () => Promise<unknown>): KeyringKeyStoreService {
+  const keyring = new KeyringKeyStoreService();
+  (keyring as unknown as { loadKeytar: () => Promise<unknown> }).loadKeytar = load;
+  return keyring;
+}
+
+const noIdentity: SessionSource = { session: () => undefined };
+
+test('hosted settings choose the OpenBao store without touching the keyring', async () => {
+  let asked = 0;
+  const choice = await chooseKeyStore(HOSTED, { identity: noIdentity, keyring: () => { asked += 1; throw new Error('no keyring here'); } });
+  assert.equal(choice.kind, 'openbao');
+  assert.equal(choice.reason, undefined);
+  assert.equal(asked, 0);
+  await assert.rejects(choice.store.getPassword('svc', 'acct'), { message: SECRET_STORE_TEXT.notReady });
+});
+
+test('local settings with a keytar that does not load choose unavailable; saving fails and memory is never used', async () => {
+  const memory = spyOnMemory();
+  try {
+    const failing = (): Promise<unknown> => Promise.reject(new Error('libsecret-1.so.0: cannot open shared object file'));
+    const choice = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(failing) });
+    assert.equal(choice.kind, 'unavailable');
+    assert.equal(choice.reason, SECRET_STORE_TEXT.keyringFailed);
+    await assert.rejects(choice.store.setPassword('svc', 'acct', SECRET), { message: SECRET_STORE_TEXT.keyringFailed });
+    // Even used directly, the override rethrows where Theia's own getKeytar would quietly switch to memory.
+    await assert.rejects(keyringWith(failing).setPassword('svc', 'acct', SECRET), { message: SECRET_STORE_TEXT.keyringFailed });
+    const missing = Object.assign(new Error("Cannot find module 'keytar'"), { code: 'ERR_MODULE_NOT_FOUND' });
+    const absent = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(() => Promise.reject(missing)) });
+    assert.deepEqual([absent.kind, absent.reason], ['unavailable', SECRET_STORE_TEXT.noStore]);
+    assert.equal(memory.uses(), 0, "Theia's in-memory provider was never used");
+  } finally {
+    memory.restore();
+  }
+});
+
+test('local settings with a keytar that loads and answers choose the keyring, which round-trips a password', async () => {
+  const keytar = fakeKeytar();
+  const choice = await chooseKeyStore({ mode: 'local' }, { identity: noIdentity, keyring: () => keyringWith(async () => keytar) });
+  assert.equal(choice.kind, 'keyring');
+  await choice.store.setPassword('svc', 'acct', SECRET);
+  assert.equal(await choice.store.getPassword('svc', 'acct'), SECRET);
+  assert.deepEqual(await choice.store.keys('svc'), ['acct']);
+  assert.equal(await choice.store.deletePassword('svc', 'acct'), true);
+});
+
+test("Theia's KeyStoreService binding is rebound to the delegating store, and a call before the choice is made waits for it", async () => {
+  const container = new Container();
+  container.bind(KeyStoreService).to(KeyStoreServiceImpl).inSingletonScope();
+  container.bind(SessionIdentity).toConstantValue({ session: () => undefined });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const keytar = fakeKeytar();
+  const keyring = (): KeyringCandidate => keyringWith(async () => { await gate; return keytar; });
+  container.load(createKeyStoreModule({ env: {}, keyring, log: () => undefined }));
+
+  const service = container.get<KeyStoreService>(KeyStoreService);
+  assert.ok(!(service instanceof KeyStoreServiceImpl), "Theia's own KeyStoreServiceImpl is no longer what KeyStoreService resolves to");
+  let settled = false;
+  const saving = service.setPassword('svc', 'acct', SECRET).then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(settled, false, 'the save waits for the start-time choice');
+  release();
+  await saving;
+  assert.equal(await service.getPassword('svc', 'acct'), SECRET);
+  const status = await container.get<{ status(): Promise<SecretStoreStatus> }>(SecretStoreService).status();
+  assert.deepEqual(status, { store: 'keyring' });
 });

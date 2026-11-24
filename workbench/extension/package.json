@@ -38,6 +38,10 @@
     {
       "frontend": "lib/browser/session-identity-frontend-module",
       "backend": "lib/node/session-identity-backend-module"
+    },
+    {
+      "frontend": "lib/browser/secret-store-frontend-module",
+      "backend": "lib/node/key-store-backend-module"
     }
   ]
 }
