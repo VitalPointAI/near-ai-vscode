@@ -321,7 +321,7 @@ Plans:
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
 **Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
-**Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (in REQUIREMENTS.md since 2026-11-24)
+**Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08, POST-09 (in REQUIREMENTS.md since 2026-11-24; POST-09, observer positions, added by the owner the same day)
 **Prerequisite**: POST-01 belongs to Phase 33; this phase registers `positions@1` on it.
 **Success Criteria** (what must be TRUE):
   1. A J1 delegate posts a person to "Watch Officer, night" from 1 December (from today in the built-image check); the person chooses "Confirm it is you" in a hosted session ("Prove this computer" on a single machine) and compares the safety code, sees no Decline, and reports for duty from the start date after a passkey confirmation; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
@@ -329,9 +329,10 @@ Plans:
   3. In a handover, a decision the outgoing holder signs after the incoming's report is refused, the incoming reads new entries and the outgoing cannot, and a membership change between order and report forces a restage, in random fold orders and through an offline split. (POST-06)
   4. Acting postings move decision roles and back on return; a dual-hatted person cannot approve a product they own; a client without the positions feature refuses the project with the update sentence. (POST-01, POST-07)
   5. An existing multi-user project switched to an assignment mode (Defence Team in the Defence edition, Military elsewhere) gives the same decisions and grants after migration from seats; invitation-mode projects keep their screens and outcomes, with silent positions per seat. (POST-08)
+  6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 17 plans in 9 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-26 and 17 owner items)
+**Plans:** 25 plans in 12 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-35 and 19 owner items, 17 of them accepted)
 **UI hint**: yes
 
 Plans:
@@ -346,14 +347,22 @@ Plans:
 - [ ] 33.1-09-PLAN.md: Wave 7. Native: posting cards and tasker actions in the Sterling Staff Room
 - [ ] 33.1-10-PLAN.md: Wave 8. Native: the posting file and Share with people in assignment modes
 - [ ] 33.1-11-PLAN.md: Wave 8. Native: the position workspace and rechecks in an open session
-- [ ] 33.1-12-PLAN.md: Wave 9. Close-out on the built image: criteria 1 to 5 in two browsers, SECURITY.md, the full suites once
+- [ ] 33.1-12-PLAN.md: Wave 12. Close-out on the built image: criteria 1 to 6 in two browsers, SECURITY.md, the full suites once
 - [ ] 33.1-13-PLAN.md: Wave 4. A posting delivered and proven through your organization's server
 - [ ] 33.1-14-PLAN.md: Wave 7. The acting position checked at your organization's server, on replay and before signing
 - [ ] 33.1-15-PLAN.md: Wave 1. Your organization's people rules handed to the workbench by one hidden extension command
 - [ ] 33.1-16-PLAN.md: Wave 7. Presence that shows each person once, in the position they work in, and grants nothing
 - [ ] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
+- [ ] 33.1-18-PLAN.md: Wave 3. Observer shapes, the observer invitation and one fold of an observer stream
+- [ ] 33.1-19-PLAN.md: Wave 8. Observers placed into Observer positions with their own cell; releasability and signer-approved markings at the key grant
+- [ ] 33.1-20-PLAN.md: Wave 10. Your organization's security contact approves outside observers and release markings; nothing widens without a new approval
+- [ ] 33.1-21-PLAN.md: Wave 9. Releases to an observer, their comments and staff replies; what may be written in an observer stream
+- [ ] 33.1-22-PLAN.md: Wave 11. Native: inviting and releasing to observers, the feedback inbox, markings, the approval card and the observer's own view
+- [ ] 33.1-23-PLAN.md: Wave 9. Every key wrap through releasability; a narrowed marking rekeys in the same action
+- [ ] 33.1-24-PLAN.md: Wave 10. The observer's own client without the roster, and the server's narrow view for observers
+- [ ] 33.1-25-PLAN.md: Wave 9. Observer invitations that survive restarts and lead handovers, and a way out when one cannot be completed
 
-**Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 9 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR.
+**Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 12 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR. Observer positions (POST-09, criterion 6, D-27 to D-35) were added by the owner on 2026-11-24, and the same day the owner decided that observers receive no roster: staff release chosen versions into each observer's own stream. Outside observers are not usable on a real site until Phase 47 guest accounts (planned) ship (D-33).
 
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
@@ -757,6 +766,8 @@ Plans:
 - [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
 - [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
 - [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
+
+**Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
 
 ### Phase 48: Load and accreditation verification
 **Goal**: Before any capacity or compliance claim is made for the hosted workbench, we measure it: a load test on our own hardware to the target number of concurrent sessions, and OSCAL components and evidence rules for every component of Phases 46 and 47 so the compliance dashboard shows the hosted deployment's real state.
@@ -1907,7 +1918,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/17 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
