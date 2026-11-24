@@ -22,7 +22,10 @@ export { SCHEMA_PENDING };
 
 const KINDS_BY_FAMILY = {
   project: ['project.genesis', 'project.import'],
-  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require', 'hub.readmit'],
+  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require', 'hub.readmit',
+    // Phase 33.1 (D-09 to D-15, D-43): positions, postings, delegated posting authority, the staged key change and the shared project's signed mode.
+    'position.create', 'position.update', 'position.disestablish', 'authority.delegate', 'authority.revoke', 'posting.order', 'posting.enrol',
+    'posting.report', 'posting.decide', 'posting.return', 'posting.end', 'posting.cancel', 'cell.rekey.staged', 'project.mode'],
   doc: ['doc.client', 'doc.update', 'doc.compact'],
   versions: ['product.create', 'product.owner', 'version.propose', 'version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'],
   registers: ['register.row', 'pir.decide', 'watch.decide'],
