@@ -1,6 +1,6 @@
 // Product content checks for Phase 44.  The dashboard computes a state; these
 // checks keep its source material tied to real catalogues and real evidence.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -9,7 +9,7 @@ import { loadComponents } from '../src/components.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { checkRuleTargets } from '../src/rules.ts';
 import { buildDashboard } from '../src/dashboard.ts';
-import type { Observation, TestReportRow } from '../src/model.ts';
+import { NS, type Observation, type TestReportRow } from '../src/model.ts';
 import { selectedIds } from '../src/profiles.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -43,10 +43,15 @@ test('the extension evidence file names a real gate decision test', () => {
   assert.match(readFileSync(file, 'utf8'), /src\/test\/gateDecide\.test\.ts/, 'a dashboard rule must name its source test');
 });
 
-test('all six component definitions load as OSCAL content', () => {
+test('every component definition loads as OSCAL content, one per file, named by its component id', () => {
   const loaded = loadComponents(COMPONENTS);
   assert.deepEqual(loaded.errors, []);
-  assert.deepEqual(loaded.components.map((component) => component.id), ['appliance', 'extension', 'hub', 'model-endpoints', 'relay', 'release-pipeline']);
+  assert.deepEqual(loaded.components.map((component) => component.id), ['appliance', 'extension', 'hub', 'model-endpoints', 'relay', 'release-pipeline', 'workbench']);
+  for (const file of readdirSync(COMPONENTS).filter((name) => name.endsWith('.json'))) {
+    const definition = JSON.parse(readFileSync(path.join(COMPONENTS, file), 'utf8'))['component-definition'];
+    const ids = definition.components.map((component: any) => component.props.filter((prop: any) => prop.ns === NS && prop.name === 'component-id').map((prop: any) => prop.value));
+    assert.deepEqual(ids, [[file.slice(0, -'.json'.length)]], file);
+  }
 });
 
 test('every mapped test rule has an exact literal target in the checkout', () => {
