@@ -221,6 +221,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 71 P04 | ~70min | 2 tasks | 5 files |
 | Phase 71 P05 | ~25min | 2 tasks | 2 files |
 | Phase 71 P06 | ~60min | 3 tasks | 12 files |
+| Phase 71 P07 | ~60min | 3 tasks | 9 files |
+| Phase 71 P08 | ~75min | 3 tasks | 14 files |
 
 ## Decisions
 
@@ -318,3 +320,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 71]: 71-04: did:key from Phase 69 keys unchanged; did:webvh v1.0 verified on our own code from any copy (82/82 DIF logs, every negative vector refused); WebvhState resumes from verified bytes; methodsAt answers the key in force at a time
 - [Phase 71]: 71-05: status lists of 131,072 random never-reused indexes, signed by the site's status-list key and checked only against the key the policy names; a signed version orders copies; revocation never clears
 - [Phase 71]: 71-06: credentials@1 and agreements@1 appended to the policy features; the root issues roles only, people with a root role issue within the ceiling, devices and agents never (2,000-case property test); requirements by sensitivity only tighten (store, layers, wideningOf)
+- [Phase 71]: 71-07: checkEvidence decides from cited credentials and lists only (1,000-replica property test); mayRelease on whyNotDominated for every holder; checkFreshness at the enforcement points; facts only from factsFrom
+- [Phase 71]: 71-08: wallet under near-ai.credentials checked with the fold's checker; the gate's clearances come only from the fresh wallet under credentials@1 (clearancesInForce); credential-check.mjs ships with its generated engine in the offline bundle
