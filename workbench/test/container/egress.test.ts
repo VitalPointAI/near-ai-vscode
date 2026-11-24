@@ -1,7 +1,8 @@
 // Phase 46, plan 03, task 3 (D-02, D-26, D-28; T-46-12): the running image makes no outbound connection outside its allow list. The
 // recording hook (test/helpers/outbound-hook.mjs, mounted read-only and loaded with NODE_OPTIONS=--import, which forked children inherit)
 // logs every connection attempt. On a docker network with no route out the workbench starts, serves a page, restarts and starts again with
-// only loopback attempts logged; in the browser smoke on a bridge network the same holds, and the page makes only same-origin requests. A
+// only loopback attempts logged; in the browser smoke on a bridge network the same holds (with the bundled NEAR AI chat open on the release
+// image and no model servers set), and the page requests only its own origin and its webview origins (test/e2e/egress.spec.ts). A
 // control run shows the hook catches each API, and a planted call shows the check names what it finds. Hygiene as in test/helpers/docker.ts;
 // the suite also removes the one network it makes.
 import assert from 'node:assert/strict';
@@ -154,16 +155,25 @@ test('on a network with no route out the workbench starts, serves a page, restar
   assertNoOutbound(lines, 'at start and restart on an internal network');
 });
 
-test('in the browser smoke the backend calls out to nothing and the page makes only same-origin requests', async () => {
+test('in the browser smoke, with the NEAR AI chat open on the release image and no model servers set, nothing calls out', async () => {
   const name = 'browser';
   const port = await freePort();
+  // STERLING_MODEL_SERVERS is left unset (no model servers), so the backend allow list and the hook's both hold only loopback.
   const started = await runContainer(name, ['-d', '-p', `127.0.0.1:${port}:3000`, ...hooked(),
     '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
   assert.equal(started.code, 0, started.stderr);
-  const url = `http://127.0.0.1:${port}`;
-  await waitHealthy(name, url);
-  const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: url });
+  await waitHealthy(name, `http://127.0.0.1:${port}`);
+  // Theia deploys each entry of /plugins (THEIA_DEFAULT_PLUGINS=local-dir:///plugins on the release target); the spec waits until it has
+  // started that many and, when there are any, opens the NEAR AI chat. The development target has no /plugins.
+  const plugins = await mustRun('docker', ['exec', containerName(name), 'node', '-e',
+    "const fs = require('fs'); console.log(fs.existsSync('/plugins') ? fs.readdirSync('/plugins').filter((entry) => !entry.startsWith('.')).length : 0)"]);
+  // At localhost, as the README says, so the chat's <uuid>.webview.localhost origin loads (published on 127.0.0.1 only).
+  const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: `http://localhost:${port}`, STERLING_EXPECT_PLUGINS: plugins.stdout.trim() });
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   assert.match(result.stdout, /\b1 passed\b/);
-  assertNoOutbound(await copiedLog(name), 'during the browser smoke');
+  // One loopback call through the hook, so an empty or missing log cannot pass for a quiet one.
+  await healthyInside(name);
+  const lines = await copiedLog(name);
+  assert.ok(lines.some((line) => line.startsWith('allowed ')), 'the hook was loaded and logged the loopback calls');
+  assertNoOutbound(lines, 'during the browser smoke');
 });
