@@ -4,15 +4,15 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: Completed 47-15-PLAN.md
-last_updated: "2026-11-24T17:19:36.868Z"
-state_head: 3ef10383eced827c70c7da97655fbb74c8d339e8
+stopped_at: Completed 33.2-05-PLAN.md
+last_updated: "2026-11-24T21:52:41.394Z"
+state_head: 52397eaf112304d891c654f5268fb4945e24d2ed
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 1
-  total_plans: 55
+  total_plans: 69
   completed_plans: 67
-  percent: 11
+  percent: 10
 last_activity: 2026-11-19
 current_phase: 70
 current_phase_name: Capability vocabulary, manifests and one gate with a floor
@@ -176,8 +176,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T17:19:36.678Z
-**Stopped at:** Completed 47-15-PLAN.md
+**Last session:** 2026-11-24T21:52:41.227Z
+**Stopped at:** Completed 33.2-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -306,3 +306,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-13: pki_int CRL lifetime is the site setting crlExpiry, default 720h
 - [Phase 47]: 47-15: Spike S7 passed; Theia Cloud runs under Pod Security restricted only with the carried patches (security contexts for operator, service, landing page, webhook); oauth2-proxy alpha config, secrets from files
 - [Phase 47]: 47-15: forged X-Forwarded-Uri bypass closed: trusted_proxy_ips per site (fails closed), HAProxy overwrites forwarded headers, session NetworkPolicy (HAProxy and operator only)
+- [Phase 33.2]: 33.2-01: owner accepted the cell-wrap/v2 permanent shapes as proposed (2026-11-24); no new ITSP.40.111 v5 compliance issue
+- [Phase 33.2]: 33.2-02: device.kem is a base-cell, person-key kind folded beside the roster line; invitations carry the required features so join requests send kem only for wrap@2
+- [Phase 33.2]: 33.2-03: grant pages of at most 607 v2 wraps, committed by the founding hash; a missing page holds the grant missing-blob
+- [Phase 33.2]: 33.2-04: seeds only everywhere; publishing at open behind publishKem; v1 envelopes sealed again as v2 under the same data key; HUB_KEM_KEY optional
+- [Phase 33.2]: 33.2-05: cutover rule shared by fold and hub; wrap@2 known only where the probe passes; wrap@2 at creation behind wrapV2AtCreation until 33.2-06

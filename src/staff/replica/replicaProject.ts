@@ -49,12 +49,14 @@ import type { HeadSet } from '../../domain/replica/transport';
 import { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, readAnchorFile, sameAnchor, writeAnchorFile } from './anchorFile';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
-import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
+import { DeviceKeyRing, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from './keyring';
+import * as kemPublish from './kemPublish';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
 import type { SyncLocal } from './hubSync';
-import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGate';
+import { UPDATE_SENTENCE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from './requireGate';
+import { WRAP_V2_FEATURE } from '../../domain/replica/features';
 
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -129,12 +131,19 @@ export interface ReplicaProjectDeps {
   cellOrder?: (roster: RosterState, keys: DeviceKeyRing) => ReplicaContext['cellOrder'];
   /** The memory-capped decode worker entries from outside pass (D-05); the project makes its own on first need when absent, and close() ends it. */
   decodeHost?: DecodeHost;
-  /** The features this build folds; KNOWN_REPLICA_FEATURES when absent. Tests set it to stand in for a newer version (POST-01). */
+  /** The features this build folds; clientReplicaFeatures() when absent. Tests set it to stand in for a newer version (POST-01) or a runtime
+   *  without wrap@2 (33.2 D-05). */
   knownFeatures?: readonly string[];
   /** A hosted session (Phase 33 D-60): the session key signs this device's ordinary writes, and the person key, through your organization's key store,
    *  signs the person-key kinds. Absent on a single machine, where this device's key signs everything as before. */
   sessionSigner?: PayloadSigner;
   personSigner?: AsyncPayloadSigner;
+  /** Publish this computer's post-quantum keys at open (33.2 D-05). Off unless set: the host sets it where a project opens for live work, not for a
+   *  command's short open, whose flows promise to write nothing. A hosted session publishes through its own step-up instead. */
+  publishKem?: boolean;
+  /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). Off until every wrap path writes
+   *  cell-wrap/v2 (33.2-06): before that, a switched project would refuse the X25519 grants today's paths still write. */
+  wrapV2AtCreation?: boolean;
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -155,6 +164,9 @@ async function deviceKeys(deps: ReplicaProjectDeps): Promise<DeviceKeys> {
   const encryption = await loadOrCreateEncryptionKey(deps.secrets, { identityDir: dir, identity });
   return { identity, writer: writerIdOf(identity.publicKey), encryption };
 }
+
+/** Whether a project made shared now requires wrap@2 from the start: asked for, and known on this computer (its probe passed). */
+const wrapV2AtCreation = (deps: ReplicaProjectDeps): boolean => deps.wrapV2AtCreation === true && (deps.knownFeatures ?? clientReplicaFeatures()).includes(WRAP_V2_FEATURE);
 
 function storeDeps(deps: ReplicaProjectDeps, identity: DeviceIdentity): ReplicaStoreDeps {
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
@@ -263,7 +275,12 @@ export class ReplicaProject {
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
     const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-    return new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
+    if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
+      await kemPublish.ensureDeviceKem(project, { loadKeys: () => loadOrCreateKemKeys(deps.secrets, { identityDir: deps.identityDir ?? identityDirOf(deps.globalStorageDir) }) });
+    }
+    return project;
   }
 
   /**
@@ -294,7 +311,7 @@ export class ReplicaProject {
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
       const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
       const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
-      const rearmed = await ensureRequireArmed(reused);
+      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) });
       return isProjectRefused(rearmed) ? rearmed : reused;
     }
 
@@ -330,7 +347,8 @@ export class ReplicaProject {
     if (!(await writeAnchorFile(projectFile(root), anchor))) return refuse('pin-damaged');
     const created = new ReplicaProject(path.resolve(root), anchor, deps, store, ring, device);
     created.lamports.set(genesis.hash, 1);
-    const armed = await ensureRequireArmed(created);
+    // New shared work requires wrap@2 from the start where this computer knows it (33.2 D-05).
+    const armed = await ensureRequireArmed(created, { withWrapV2: wrapV2AtCreation(deps) });
     return isProjectRefused(armed) ? armed : created;
   }
 

@@ -18,7 +18,7 @@ import { EventHub, realScheduler, type Scheduler } from './live/events';
 import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
-import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
+import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readKemKey, readSigningKey, type HubEncryptionKey, type HubKemKey, type HubSigningKey } from './keys';
 import { Logger, printKeyFile, stdoutLine } from './log/logger';
 import { Redactor } from './log/redact';
 import { HUB_SECRETS, loadSecrets, refusePlainSecretEnv, SecretError } from './secrets';
@@ -291,7 +291,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   if (argv[0] === '--generate-key') {
     const kind = KEY_KINDS.find((candidate) => candidate === argv[1]);
     if (argv.length !== 2 || kind === undefined) {
-      logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --generate-key signing, or --generate-key encryption' });
+      logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --generate-key signing, --generate-key encryption, or --generate-key kem' });
       process.exitCode = 1;
       return;
     }
@@ -358,9 +358,13 @@ export async function main(argv: readonly string[]): Promise<void> {
 
   let signing: HubSigningKey;
   let encryption: HubEncryptionKey;
+  let kem: HubKemKey | undefined;
   try {
     signing = readSigningKey(secrets.get('HUB_SIGNING_KEY') ?? '');
     encryption = readEncryptionKey(secrets.get('HUB_ENCRYPTION_KEY') ?? '', signing);
+    // The post-quantum keys are optional (33.2 D-03): without HUB_KEM_KEY the hub works as before and receives v1 wraps only.
+    const kemLine = secrets.get('HUB_KEM_KEY');
+    kem = kemLine === undefined ? undefined : readKemKey(kemLine, signing);
   } catch (error) {
     logger.error('hub.start_refused', { reason: 'keys', detail: error instanceof KeyFileError ? error.message : 'the hub keys could not be read' });
     process.exitCode = 1;
@@ -376,7 +380,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   // The identity a hub file and hub.admit name: both keys, and the pin of the certificate's key, so a renewal with the same key keeps it.
-  const identity = hubIdentityOf(signing, encryption, tls.cert, config.publicAddress);
+  const identity = hubIdentityOf(signing, encryption, tls.cert, config.publicAddress, kem);
 
   // --hub-file opens the store without the blob folder sweep: a running hub may share the folder, and this process writes one enrolment row only.
   let store: HubStore;

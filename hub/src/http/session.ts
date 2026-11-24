@@ -32,6 +32,7 @@ import { deviceAt } from '@ext/domain/replica/rosterMembers';
 import type { RosterCache } from '../append/rosterCache';
 import type { HubStore } from '../store/hubStore';
 import { sessionKeying, uploadUnderWay } from './server';
+import { hubReplicaFeatures } from '../features';
 
 export const CHALLENGE_TTL_MS = 60_000;
 export const TOKEN_TTL_MS = 15 * 60_000;
@@ -184,7 +185,7 @@ export class SessionRegistry {
       const standing = judged.standingAt(read.writer, now);
       if (standing === 'session-expired' || standing === 'quarantined' || standing === 'revoked') return refuse(standing);
       if (standing !== 'admitted') return refuse('not-admitted');
-      if (!coversRequired(read.features, judged.state.required)) return refuse('needs-update');
+      if (!coversRequired(read.features, judged.state.required, hubReplicaFeatures())) return refuse('needs-update');
       return this.issue(socket, keying, { project: open.project, writer: read.writer, expiresAt: Math.min(now + TOKEN_TTL_MS, Date.parse(certificate.notAfter)), certificate: certificate.hash }, certificate.device);
     }
     const standing = roster.standing(read.writer);
@@ -193,7 +194,7 @@ export class SessionRegistry {
     const device = deviceAt(roster.state.members, read.writer, roster.headPosition);
     if (device === undefined || device.publicKey !== read.publicKey) return refuse('not-admitted');
     if (device.kind !== 'person') return refuse('not-a-person-device');
-    if (!coversRequired(read.features, roster.state.required)) return refuse('needs-update');
+    if (!coversRequired(read.features, roster.state.required, hubReplicaFeatures())) return refuse('needs-update');
 
     return this.issue(socket, keying, { project: open.project, writer: read.writer, expiresAt: this.now() + TOKEN_TTL_MS });
   }

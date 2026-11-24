@@ -13,8 +13,20 @@ export const REPLICA_FEATURE_PATTERN = /^[a-z][a-z0-9-]{0,31}@[1-9][0-9]{0,2}$/;
 /** At most this many ids in one feature list (a session announcement or a roster.require entry). */
 export const MAX_FEATURES = 16;
 
-/** The features this build folds, sorted. positions@1 is added by the release that folds positions. */
+/** The features this build folds on any runtime, sorted. positions@1 is added by the release that folds positions. */
 export const KNOWN_REPLICA_FEATURES: readonly string[] = Object.freeze(['cells@1', 'hub@1', 'replica@2', 'require@1']);
+
+/** Post-quantum cell keys (33.2 D-05): known only where the runtime passes cell-wrap/v2's start-up probe (probeWrapV2). */
+export const WRAP_V2_FEATURE = 'wrap@2';
+
+/**
+ * The features this build folds on this runtime: KNOWN_REPLICA_FEATURES, plus wrap@2 when the probe passed. The caller runs probeWrapV2 once at
+ * start-up and passes its answer (this file imports nothing). A runtime that fails the probe lacks wrap@2, so a project that requires it stops with
+ * UPDATE_SENTENCE instead of falling back.
+ */
+export function knownReplicaFeatures(wrapV2: boolean): readonly string[] {
+  return wrapV2 ? Object.freeze([...KNOWN_REPLICA_FEATURES, WRAP_V2_FEATURE].sort()) : KNOWN_REPLICA_FEATURES;
+}
 
 /**
  * What a person sees when shared work needs a feature this build does not fold. D-67 replaces portfolio DESIGN 3.9's extension sentence: people do
@@ -33,8 +45,8 @@ export function missingFeatures(required: readonly string[], known: readonly str
   return [...new Set(required)].filter((id) => !knownIds.has(id)).sort();
 }
 
-/** A session covers a requirement only when the device announces it and this build knows it. */
-export function coversRequired(announced: readonly string[], required: readonly string[]): boolean {
+/** A session covers a requirement only when the device announces it and this build knows it (known: this build's features on this runtime). */
+export function coversRequired(announced: readonly string[], required: readonly string[], known: readonly string[] = KNOWN_REPLICA_FEATURES): boolean {
   const announcedIds = new Set(announced);
-  return required.every((id) => announcedIds.has(id) && KNOWN_REPLICA_FEATURES.includes(id));
+  return required.every((id) => announcedIds.has(id) && known.includes(id));
 }

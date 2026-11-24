@@ -20,6 +20,7 @@
 //    grant equal to its commitment);
 // 6. after the line, places each session.certify (Phase 33 D-62) by the rules in sessionKeys.ts, oldest cited roster first, and refuses a roster
 //    change or certificate written by a certified session key with person-key-required (D-60). Certificates never take a position.
+// 7. after the line, places each device.kem (33.2 D-03) by the rules in deviceKem.ts; like certificates they take no position.
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
 // kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
@@ -27,6 +28,11 @@
 import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
+import type { CellGrant } from './cellKeys';
+import { readGrantPages } from './grantPages';
+import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
+import { deviceKemContext, placeDeviceKems } from './deviceKem';
+import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
@@ -127,8 +133,12 @@ export interface RosterState {
   // The features the project requires (POST-01, D-04): the sorted union of every applied roster.require. It never shrinks. Whether this build knows
   // them is the host's question (requireGate.ts against KNOWN_REPLICA_FEATURES), never the fold's.
   required: readonly string[];
+  // The roster position at which each required feature was first required (33.2 D-06 reads wrap@2's).
+  requiredFrom: Map<string, number>;
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
+  // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
+  kems: Map<string, KemRecord>;
   // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
   notChosen: Set<string>;
   refused: RosterRefused[];
@@ -147,7 +157,9 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     pending: [],
     choices: [],
     required: Object.freeze([]),
+    requiredFrom: new Map(),
     sessions: new Map(),
+    kems: new Map(),
     notChosen: new Set(),
     refused: [],
     held: []
@@ -315,9 +327,10 @@ function applyHandover(state: RosterState, entry: VerifiedEntry, position: numbe
 
 // roster.require (POST-01, D-04): the driver already allowed only a lead device and a person. The required set grows by the union and never shrinks; an
 // entry whose features are all required already applies as a no-op and keeps its place in the line, so two leads arming at once never conflict.
-function applyRequire(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+function applyRequire(state: RosterState, entry: VerifiedEntry, position: number): ApplyOutcome {
   // The closed schema checked the ids (name@N, distinct, sorted) at verification.
   const features = (entry.data as { features: readonly string[] }).features;
+  for (const feature of features) if (!state.requiredFrom.has(feature)) state.requiredFrom.set(feature, position);
   state.required = Object.freeze([...new Set([...state.required, ...features])].sort());
   return { status: 'applied' };
 }
@@ -334,7 +347,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
-  if (entry.body.kind === 'roster.require') return applyRequire(state, entry);
+  if (entry.body.kind === 'roster.require') return applyRequire(state, entry, position);
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
@@ -378,6 +391,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   }
   const ready: VerifiedEntry[] = [];
   const certificates: VerifiedEntry[] = [];
+  const kemEntries: VerifiedEntry[] = [];
   const refuse = (hash: string, kind: string, reason: string): void => { state.refused.push({ hash, kind, reason }); };
 
   for (;;) {
@@ -396,6 +410,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
       }
       const entry = outcome.entry;
       if (entry.body.kind === 'session.certify') certificates.push(entry);
+      if (entry.body.kind === 'device.kem') kemEntries.push(entry);
       if (entry.keep === 'newer-version' || !isRouted(entry.body.kind)) continue;
       const settled = settledRefusal(state, entry);
       if (settled !== undefined) refuse(hash, entry.body.kind, settled);
@@ -466,12 +481,13 @@ export function foldRoster(input: RosterFoldInput): RosterState {
 
   markNotChosen(state, ready);
   placeSessions(state, certificates);
+  placeKems(state, kemEntries);
   // A roster change or certificate by a certified session key: refused for good (D-60). Anything else still waiting is held as an unknown writer.
   const settledView: ReplicaContext = { roster: rosterView(state), keys: input.keys, blobs: input.blobs, now: input.now };
   for (const [hash, raw] of waiting) {
     const outcome = state.sessions.size === 0 ? undefined : verifyEntry(raw, settledView);
     const entry = outcome?.status === 'verified' ? outcome.entry : undefined;
-    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify')) refuse(hash, entry.body.kind, 'person-key-required');
+    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify' || entry.body.kind === 'device.kem')) refuse(hash, entry.body.kind, 'person-key-required');
     else state.held.push({ hash, reason: 'unknown-writer' });
   }
   // Verified entries that never reached the head: on a branch nobody chose (D-11), or following a roster that is not on this machine's line.
@@ -504,6 +520,15 @@ function placeSessions(state: RosterState, certificates: readonly VerifiedEntry[
   }
 }
 
+// Places the device key bindings (33.2 D-03) against the settled line with deviceKem.ts's one check, shared with your organization's server.
+function placeKems(state: RosterState, entries: readonly VerifiedEntry[]): void {
+  const offLine = (roster: string): string => (state.notChosen.has(roster) ? 'roster-branch-not-chosen' : 'missing-roster');
+  const result = placeDeviceKems(entries, deviceKemContext(state, (writer, position) => isRosterWriterAt(state, writer, position)), (roster) => state.positionOf.get(roster), offLine);
+  state.kems = result.placed;
+  state.refused.push(...result.refused);
+  state.held.push(...result.held);
+}
+
 function append(state: RosterState, hash: string): void {
   state.positions.push(hash);
   state.positionOf.set(hash, state.positions.length - 1);
@@ -528,19 +553,50 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
   }
 }
 
+// Places the grants. A grant that lists pages (33.2 D-04) is read with readGrantPages together with the pages it lists and placed as one grant under
+// its own hash; a listed page is never placed alone. A grant whose pages have not all arrived waits, held missing-blob under its hash like an entry
+// whose blob has not arrived (33-07), and is placed when they come.
 function placeGrants(state: RosterState, grants: readonly unknown[]): void {
-  const seen = new Set<string>();
+  const reads: Array<{ value: unknown; read: Extract<ReturnType<typeof readGrant>, { ok: true }> }> = [];
+  const byHash = new Map<string, unknown>();
   for (const value of grants) {
     const read = readGrant(value);
     if (!read.ok) {
       state.refused.push({ hash: '', kind: 'grant', reason: read.reason });
       continue;
     }
-    if (seen.has(read.hash)) continue;
-    seen.add(read.hash);
+    if (byHash.has(read.hash)) continue;
+    byHash.set(read.hash, value);
+    reads.push({ value, read });
+  }
+  const listed = new Set<string>();
+  for (const { read } of reads) for (const page of read.grant.pages ?? []) listed.add(page);
+  for (const { value, read: first } of reads) {
+    if (listed.has(first.hash)) continue;
+    let read: { grant: CellGrant; hash: string; signer: { writer: string } } = first;
+    if ((first.grant.pages ?? []).length > 0) {
+      const pages = (first.grant.pages as string[]).map((hash) => byHash.get(hash));
+      if (pages.some((page) => page === undefined)) {
+        state.held.push({ hash: first.hash, reason: 'missing-blob' });
+        continue;
+      }
+      const paged = readGrantPages(value, pages);
+      if (!paged.ok) {
+        state.refused.push({ hash: first.hash, kind: 'grant', reason: paged.reason });
+        continue;
+      }
+      read = paged;
+    }
     const position = state.positionOf.get(read.grant.roster);
     if (position === undefined) {
       state.held.push({ hash: read.hash, reason: 'missing-roster' });
+      continue;
+    }
+    // The cutover rule (33.2 D-06), the same function your organization's server calls: no v1 wrap for an epoch founded after the switch.
+    const founded = state.cells.cells.get(read.grant.cell)?.epochs.find((epoch) => epoch.epoch === read.grant.epoch)?.from;
+    const format = founded === undefined ? undefined : wrapFormatProblem(read.grant, founded, state.requiredFrom.get(WRAP_FEATURE));
+    if (format !== undefined) {
+      state.refused.push({ hash: read.hash, kind: 'grant', reason: format });
       continue;
     }
     const outcome = addGrant(state.cells, {

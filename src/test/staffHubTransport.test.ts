@@ -26,7 +26,8 @@ import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { canonicalBytes, fingerprintOf } from '../domain/team/canonical';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { APPEND_MAX_ENTRIES, CONNECT_TIMEOUT_MS, HubTransport, HubTransportError, PRESENCE_BODY_MAX_BYTES, RESPONSE_MAX_BYTES, appendBatches } from '../staff/replica/hubTransport';
-import { KNOWN_REPLICA_FEATURES } from '../domain/replica/features';
+import { KNOWN_REPLICA_FEATURES, WRAP_V2_FEATURE } from '../domain/replica/features';
+import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import type { EventReport, HubTransportOptions } from '../staff/replica/hubTransport';
 import { FIXTURE_CA, FIXTURE_CERT, FakeHubServer, fakeHubState, hubRoutes, seedGrants, seedHub } from './helpers/fakeHubServer';
 import type { FakeAnswer, FakeHandler, FakeHubOptions, FakeHubState } from './helpers/fakeHubServer';
@@ -1229,11 +1230,12 @@ test('append: a 200 refusing an entry blob-missing (Phase 33 D-28) puts the batc
   });
 });
 
-test('features: every session answer announces KNOWN_REPLICA_FEATURES, sorted, signed with the rest (POST-01, D-07)', async () => {
+test('features: every session answer announces this computer\'s features (the registry, with wrap@2 where the probe passes), sorted, signed with the rest (POST-01, D-07; 33.2 D-05)', async () => {
   await withFake({ handle: routes({ [`GET /v1/projects/${PROJECT}/heads`]: () => ({ json: headsBody() }) }) }, async (fake, transport) => {
     await transport.hubHeads();
     assert.equal(fake.sessions.length, 1);
-    assert.deepEqual(fake.sessions[0]?.features, [...KNOWN_REPLICA_FEATURES].sort());
+    assert.deepEqual(fake.sessions[0]?.features, [...clientReplicaFeatures()].sort());
+    assert.deepEqual(fake.sessions[0]?.features, [...KNOWN_REPLICA_FEATURES, WRAP_V2_FEATURE].sort(), 'this Node passes the probe');
   });
 });
 

@@ -40,7 +40,7 @@ import type { TLSSocket } from 'node:tls';
 import { readGrant } from '../../domain/replica/cellKeys';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, entryHash } from '../../domain/replica/entry';
-import { KNOWN_REPLICA_FEATURES } from '../../domain/replica/features';
+import { clientReplicaFeatures } from './clientFeatures';
 import type { SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, buildSessionAnswer, certPinOf, enrolmentMac } from '../../domain/replica/hubFile';
 import type { HeadSet, PullRequest, PushResult, ReplicaTransport, Unsubscribe } from '../../domain/replica/transport';
@@ -117,7 +117,7 @@ export interface HubTransportOptions {
    * replica can say which blob an entry uses, and the hub keeps and serves a blob only for the entries that name it (WR-06).
    */
   blobsCitedBy?: (entryHashes: readonly string[]) => Promise<Array<{ entry: string; blob: string }>>;
-  /** The replica features this device announces in its signed session answer (POST-01, D-07); KNOWN_REPLICA_FEATURES when absent. */
+  /** The replica features this device announces in its signed session answer (POST-01, D-07); clientReplicaFeatures() when absent (wrap@2 only where the probe passes, 33.2 D-05). */
   features?: readonly string[];
   /**
    * For a person's session key (Phase 33 D-62): the session.certify entry that vouches for the key in `signer`. The session answer names it and
@@ -478,7 +478,7 @@ export class HubTransport implements ReplicaTransport {
     this.connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
     this.cap = options.responseMaxBytes ?? RESPONSE_MAX_BYTES;
     this.blobsCitedBy = options.blobsCitedBy;
-    this.features = options.features ?? KNOWN_REPLICA_FEATURES;
+    this.features = options.features ?? clientReplicaFeatures();
     this.certificate = options.certificate;
   }
 

@@ -4,6 +4,7 @@
  * loads that file on first use. The extension's own code cannot import src/ (its rootDir is extension/src), so the names it calls are typed here
  * structurally; the workbench lint checks this interface against the entry. Nothing here imports Theia, and nothing here reaches the browser.
  */
+import type { KeyObject } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { defaultAppRoot } from '../team-preview-reader.js';
@@ -28,8 +29,32 @@ export interface SessionCertifyData {
   readonly sessionSig: string;
 }
 
+/** A device's post-quantum public keys as base64url (src/domain/replica/cellWrapV2.ts KemPublicKeys). */
+export interface KemPublicKeys {
+  readonly p256: string;
+  readonly mlkem768: string;
+}
+
+/** The post-quantum private parts as kept: the 32-byte P-256 scalar and the 64-byte ML-KEM-768 seed. */
+export interface KemSeeds {
+  readonly p256: Buffer;
+  readonly mlkem768: Buffer;
+}
+
+export interface KemPrivateKeys {
+  readonly p256: KeyObject;
+  readonly mlkem768: KeyObject;
+}
+
 /** The engine names the staff backend calls. 33-24 adds the replica project and the live replicator. */
 export interface StaffEngine {
+  newKemSeeds(): KemSeeds;
+  kemPublicFromSeeds(seeds: KemSeeds): KemPublicKeys;
+  kemPrivateFromSeeds(seeds: KemSeeds): KemPrivateKeys;
+  probeWrapV2(): boolean;
+  kemBindingBytes(keys: KemPublicKeys, writer: string): Buffer;
+  /** The roster's v2 keys for a device; the roster is the engine's RosterState, passed through untouched. */
+  kemKeysAt(roster: never, writer: string): KemPublicKeys | undefined;
   sessionCertifyData(fields: SessionBindingFields, sign: (bytes: Buffer) => string): SessionCertifyData;
   writerIdOf(publicKey: string): string;
   readonly SESSION_DEFAULT_LIFETIME_MS: number;

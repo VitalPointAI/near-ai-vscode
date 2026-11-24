@@ -35,9 +35,13 @@ import { GENESIS_PREV, entryHash, openBlob, openBody, parseHeaderShape, sha256He
 import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { canonicalProof, proofHash } from '@ext/domain/replica/equivocation';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
+import { DEVICE_KEM_REFUSALS, deviceKemContext, deviceKemProblem } from '@ext/domain/replica/deviceKem';
+import type { DeviceKemData } from '@ext/domain/replica/deviceKem';
 import { missingFeatures } from '@ext/domain/replica/features';
-import { validateBody } from '@ext/domain/replica/kinds';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
+import { WRAP_FEATURE, WRAP_FORMAT_REFUSALS, wrapFormatProblem } from '@ext/domain/replica/wrapFormat';
+import { hubReplicaFeatures } from '../features';
+import { validateBody, validateData } from '@ext/domain/replica/kinds';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, isRosterWriterAt } from '@ext/domain/replica/roster';
 import { SESSION_REFUSALS, isPersonKeyKind } from '@ext/domain/replica/sessionKeys';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
@@ -74,7 +78,11 @@ export const APPEND_REFUSALS = {
   // Phase 33 D-60, D-62: a person's session key.
   'session-expired': 'Your session key has ended. Sign in again.',
   'person-key-required': SESSION_REFUSALS['person-key-required'],
-  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.'
+  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.',
+  // 33.2 D-03: a device's post-quantum key binding, checked with the fold's own function.
+  ...DEVICE_KEM_REFUSALS,
+  // 33.2 D-06: the cutover rule, the fold's own function.
+  ...WRAP_FORMAT_REFUSALS
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -260,7 +268,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const base = await ctx.cache.get(project);
   // POST-01 (D-07): a project that requires a feature this hub does not fold takes no append, so an outdated hub never accepts writes it cannot
   // judge. The whole batch is refused; no entry is called bad. Reads still answer.
-  if (missingFeatures(base.state.required).length > 0) return refuseBatch('needs-update');
+  if (missingFeatures(base.state.required, hubReplicaFeatures()).length > 0) return refuseBatch('needs-update');
   // A session key pushing after its certificate's notAfter (Phase 33 D-62): the whole batch, 403, never retried. Its token normally ends first.
   if (base.standingAt(input.device, now) === 'session-expired') return refuseBatch('session-expired');
   // Restore mode (D-32, D-45): every entry must be one the hub holds or one at a place a kept or handed-back checkpoint covers. Anything else waits
@@ -275,10 +283,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   // list) for the entries after it. Only the grants the final fold places are kept.
   const offered: Array<{ index: number; value: unknown; hash: string; cell: string; epoch: number }> = [];
   const grantsRefused: Refused[] = [];
+  // The cutover rule (33.2 D-06) per grant or page, at the roster as the hub holds it before this batch; the fold applies it again after.
+  const switchedAt = base.state.requiredFrom.get(WRAP_FEATURE);
   grantsIn.forEach((value, index) => {
     const read = readGrant(value);
-    if (read.ok) offered.push({ index, value, hash: read.hash, cell: read.grant.cell, epoch: read.grant.epoch });
-    else grantsRefused.push({ index, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+    if (!read.ok) {
+      grantsRefused.push({ index, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+      return;
+    }
+    const founded = base.state.cells.cells.get(read.grant.cell)?.epochs.find((epoch) => epoch.epoch === read.grant.epoch)?.from;
+    const format = founded === undefined ? undefined : wrapFormatProblem(read.grant, founded, switchedAt);
+    if (format !== undefined) grantsRefused.push({ index, hash: read.hash, reason: format, message: APPEND_REFUSALS[format] });
+    else offered.push({ index, value, hash: read.hash, cell: read.grant.cell, epoch: read.grant.epoch });
   });
   const offeredValues = offered.map((grant) => grant.value);
 
@@ -471,6 +487,21 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         }
         baseEntries.push({ header, body: raw.body as string });
         dirty = true;
+      } else if (read.opened.kind === 'device.kem') {
+        // A device's post-quantum keys (33.2 D-03): judged at the roster the entry cites with the fold's deviceKemProblem. A cited roster the hub's
+        // line does not hold is stored, like a roster entry: the fold judges it once that roster applies.
+        const state = roster.state;
+        const problem = !validateData('device.kem', read.opened.data).ok
+          ? 'kem-binding-invalid'
+          : state.positionOf.has(read.opened.roster)
+            ? deviceKemProblem({ signer: header.writer, roster: read.opened.roster, data: read.opened.data as DeviceKemData }, deviceKemContext(state, (writer, position) => isRosterWriterAt(state, writer, position)))
+            : undefined;
+        if (problem !== undefined) {
+          refuse(problem, hash);
+          continue;
+        }
+        baseEntries.push({ header, body: raw.body as string });
+        dirty = true;
       }
     }
     entries.push({ index, hash, stream: header.stream, writer: header.writer, seq: header.seq, row: { header: canonicalize(header), body: raw.body as string, receivedAt: now } });
@@ -484,7 +515,9 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const grants: GrantInput[] = [];
   for (const grant of offered) {
     if (!roster.placedGrants.has(grant.hash)) {
-      grantsRefused.push({ index: grant.index, hash: grant.hash, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+      // An epoch this batch founds is judged by the fold; its refusal names the cutover rule when that is the reason.
+      const reason = roster.state.refused.some((item) => item.hash === grant.hash && item.reason === 'old-wrap-after-switch') ? 'old-wrap-after-switch' : 'grant-not-placed';
+      grantsRefused.push({ index: grant.index, hash: grant.hash, reason, message: APPEND_REFUSALS[reason] });
     } else if (!base.placedGrants.has(grant.hash) && !grants.some((item) => item.hash === grant.hash)) {
       grants.push({ hash: grant.hash, cell: grant.cell, epoch: grant.epoch, body: canonicalize(grant.value), receivedAt: now });
     }

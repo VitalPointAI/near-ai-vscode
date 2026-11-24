@@ -5,6 +5,7 @@
 import { MAX_LAMPORT, isRecord, isSafeIntegerInRange, matches } from '../team/validate';
 import { HASH_PATTERN, MAX_DEPS } from './entry';
 import type { Dep, EntryBody } from './entry';
+import { validateDeviceData } from './kindSchemas/device';
 import { validateDocData } from './kindSchemas/doc';
 import { validateIntegrityData } from './kindSchemas/integrity';
 import { validateObsData } from './kindSchemas/obs';
@@ -31,7 +32,9 @@ const KINDS_BY_FAMILY = {
   obs: ['obs.segment', 'obs.coalesced', 'obs.pruned'],
   integrity: ['equivocation.proof', 'digest.report'],
   // A person device's certificate for a session key (Phase 33 D-62): in the roster cell, folded beside the roster line and never on it.
-  session: ['session.certify']
+  session: ['session.certify'],
+  // A device's post-quantum key binding (33.2 D-03): in the roster cell, folded beside the roster line and never on it, like session.certify.
+  device: ['device.kem']
 } as const;
 
 export type KindFamily = keyof typeof KINDS_BY_FAMILY;
@@ -39,7 +42,7 @@ export type ReplicaKind = typeof KINDS_BY_FAMILY[KindFamily][number];
 
 // The closed list: DESIGN 4.3 plus deputy.name (DESIGN 7.1), so a deputy lead can be honoured without a format change (D-27), plus the roster kind that
 // voids an open invite (D-17, D-49), plus roster.require (the feature check, POST-01) and hub.readmit (trusting
-// your organization's server again, Phase 33 D-42), plus session.certify (a person's session key, Phase 33 D-62): 54 kinds.
+// your organization's server again, Phase 33 D-42), plus session.certify (a person's session key, Phase 33 D-62), plus device.kem (a device's post-quantum keys, 33.2 D-03): 55 kinds.
 export const REPLICA_KINDS: readonly ReplicaKind[] = (Object.values(KINDS_BY_FAMILY) as ReadonlyArray<readonly ReplicaKind[]>).flat();
 
 // A Map, because a kind is chosen by whoever wrote the entry.
@@ -115,7 +118,8 @@ const FAMILY_VALIDATORS: Readonly<Record<KindFamily, (kind: string, data: unknow
   runs: validateRunsData,
   obs: validateObsData,
   integrity: validateIntegrityData,
-  session: validateSessionData
+  session: validateSessionData,
+  device: validateDeviceData
 };
 
 // Validates the data of a known kind. Unknown kinds are not checked here (the caller keeps them).

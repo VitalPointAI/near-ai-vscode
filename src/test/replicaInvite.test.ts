@@ -7,6 +7,8 @@ import test from 'node:test';
 import { sealBlob } from '../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { grantHash } from '../domain/replica/cellKeys';
+import { kemPublicFromSeeds } from '../domain/replica/cellWrapV2';
+import type { KemPublicKeys } from '../domain/replica/cellWrapV2';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import {
   HUB_JOIN_INFO, INVITE_REFUSALS, WELCOME_MAX_BYTES, buildHubJoin, buildInvite, buildJoinRequest, buildWelcome, checkAdmittedRequest, checkHubJoinMac, checkJoinRequest, hubJoinCheckKey, hubJoinMac,
@@ -60,7 +62,7 @@ function invited(options: { forMember?: string; expiresAt?: string; genesisHash?
 }
 
 // The joiner's side: read the invite text, answer it with this device, return the request as text.
-function answer(state: Invited, device: RosterDevice = state.joiner, extra: { member?: string } = {}): string {
+function answer(state: Invited, device: RosterDevice = state.joiner, extra: { member?: string; kem?: KemPublicKeys } = {}): string {
   const read = readInvite(state.inviteText, NOW);
   assert.equal(reasonOf(read), 'ok');
   const invite = (read as { ok: true; invite: InvitePayload }).invite;
@@ -760,4 +762,56 @@ test('D-48: readHubJoin refuses an envelope signed by another device, for anothe
   for (const input of ['not json', 'null', '{}', 'x'.repeat(MAX_PAYLOAD_BYTES + 1)]) refusedAs(readHubJoin(input, request), input.length > MAX_PAYLOAD_BYTES ? 'too-large' : 'malformed');
   refusedAs(readHubJoin(asFile(join), 'not json'), 'malformed');
   refusedAs(readHubJoin(asFile(join), { payload: {} }), 'malformed');
+});
+
+// ---- 33.2 D-03: post-quantum keys in a join request ----
+
+const KEM_KEYS = kemPublicFromSeeds({ p256: createHash('sha256').update('jo kem p256').digest(), mlkem768: createHash('sha512').update('jo kem mlkem').digest() });
+
+// The lead's invitation names the project's required features; the joiner answers with its post-quantum keys.
+function invitedRequiring(requires: string[]): Invited {
+  const state = invited();
+  const signed = buildInvite(state.world.lead.signer, {
+    genesisHash: state.genesis.hash, project: state.world.project, name: state.world.projectName, lead: { member: state.world.lead.member, x25519: state.world.lead.x25519 }, invite: INVITE_ID,
+    secret: state.secret, expiresAt: INVITE_EXPIRES, now: NOW, requires
+  });
+  return { ...state, inviteText: asFile(signed), invite: signed.payload };
+}
+
+test('an invitation requiring wrap@2 lists it; the join request then carries kem, the lead accepts it, and both screens show the same words covering kem', () => {
+  const state = invitedRequiring(['require@1', 'wrap@2']);
+  const read = readInvite(state.inviteText, NOW);
+  assert.equal(reasonOf(read), 'ok');
+  const joinerInvite = (read as { ok: true; invite: InvitePayload }).invite;
+  assert.deepEqual(joinerInvite.requires, ['require@1', 'wrap@2']);
+  const requestText = answer(state, state.joiner, { kem: KEM_KEYS });
+  const request = requestOf(requestText).payload;
+  assert.deepEqual({ p256: request.kem?.p256, mlkem768: request.kem?.mlkem768 }, KEM_KEYS);
+  const checked = checkJoinRequest(requestText, { invite: state.invite, secret: state.secret });
+  assert.equal(reasonOf(checked), 'ok');
+  const leadWords = inviteSafetyCode(state.invite, (checked as { ok: true; request: JoinRequestPayload }).request);
+  const joinerWords = inviteSafetyCode(joinerInvite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519, nonce: request.nonce, kem: KEM_KEYS });
+  assert.deepEqual(leadWords, joinerWords);
+  assert.notDeepEqual(leadWords, inviteSafetyCode(joinerInvite, { publicKey: state.joiner.publicKey, x25519: state.joiner.x25519, nonce: request.nonce }));
+});
+
+test('without wrap@2 in the invitation the joiner sends no kem, and a request that carries kem anyway is refused malformed (an older lead never meets unknown keys)', () => {
+  const plain = invited();
+  assert.equal(requestOf(answer(plain, plain.joiner, { kem: KEM_KEYS })).payload.kem, undefined);
+  const requiring = invitedRequiring(['wrap@2']);
+  const withKem = answer(requiring, requiring.joiner, { kem: KEM_KEYS });
+  const { requires: _none, ...withoutRequires } = requiring.invite;
+  assert.equal(reasonOf(checkJoinRequest(withKem, { invite: withoutRequires, secret: requiring.secret })), 'malformed');
+  assert.equal(reasonOf(checkJoinRequest(withKem, { invite: { ...requiring.invite, requires: ['require@1'] }, secret: requiring.secret })), 'malformed');
+});
+
+test('a join request whose kem binding was made by another key is refused bad-binding; an invitation with an unsorted requires list is malformed', () => {
+  const state = invitedRequiring(['wrap@2']);
+  const signed = requestOf(answer(state, state.joiner, { kem: KEM_KEYS }));
+  const other = rosterDevice('NOT-JO', JOINER_MEMBER);
+  const forgedKem = { ...KEM_KEYS, sig: other.signer.sign(Buffer.from('not the binding')) };
+  const resigned = signPayload(state.joiner.signer, 'staff-join-request', { ...signed.payload, kem: forgedKem }, { now: () => NOW });
+  assert.equal(reasonOf(checkJoinRequest(asFile(resigned), { invite: state.invite, secret: state.secret })), 'bad-binding');
+  const unsorted = { ...inviteObject(state), payload: { ...(inviteObject(state).payload as Json), requires: ['wrap@2', 'require@1'] } };
+  assert.equal(reasonOf(readInvite(asFile(unsorted), NOW)), 'malformed');
 });

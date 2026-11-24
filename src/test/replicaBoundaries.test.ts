@@ -44,7 +44,9 @@ export const HUB_SIDE: readonly string[] = [
   // against the same registry it compiles, so features.ts is data and pure functions with no import.
   'domain/replica/features',
   // Session key certificates (Phase 33 D-62): the hub folds them with the roster and checks session writers with the same rules as every client.
-  'domain/replica/sessionKeys'
+  'domain/replica/sessionKeys',
+  // Post-quantum cell keys (33.2): the v2 wrap, the device key binding the hub checks on append, and the grant pages the hub keeps and folds.
+  'domain/replica/cellWrapV2', 'domain/replica/deviceKem', 'domain/replica/grantPages', 'domain/replica/wrapFormat'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }

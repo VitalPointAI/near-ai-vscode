@@ -556,10 +556,11 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list has 54 kinds and the 22 project and roster samples are all of them', () => {
-  assert.equal(REPLICA_KINDS.length, 54, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33');
-  assert.equal(new Set(REPLICA_KINDS).size, 54, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33');
-  const owned = REPLICA_KINDS.filter((kind) => kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind));
+test('the closed kind list has 55 kinds and the 22 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
+  assert.equal(new Set(REPLICA_KINDS).size, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
+  // device.kem is the device family's (33.2 D-03), not a roster kind, though its name starts with device.
+  const owned = REPLICA_KINDS.filter((kind) => kind !== 'device.kem' && (kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind)));
   assert.equal(owned.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
 });
