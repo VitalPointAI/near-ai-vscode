@@ -1,8 +1,9 @@
 // A dev-mode OpenBao for the container suite (46-02; 46-03 and 46-08 reuse it on their own networks, 46-07 adds keys with createPersonKeys).
 // The image reference is read from the openbao-test FROM line of workbench/Dockerfile, so the tests run the pinned image the fit check sees
 // (D-29). It starts in dev mode (in memory, unsealed) with a random root token and 512 MiB, mounts kv (version 2) and transit, enables jwt auth
-// with the public key of a test signer (no Keycloak), and writes the policy and role the Phase 47 contract names. This policy is a test
-// fixture that mirrors the contract; Phase 47 owns the real one. stop() removes only this helper's own container.
+// with the public key of a test signer (no Keycloak), and writes the policies and the two roles the Phase 47 contract names: the ordinary
+// sterling-workbench role (KV, data keys, token self paths) and the step-up role that alone may sign (46-07). These policies are test
+// fixtures that mirror the contract; Phase 47 owns the real ones. stop() removes only this helper's own container.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -17,10 +18,22 @@ export const TEST_AUDIENCE = 'sterling-workbench-test';
 export const STERLING_POLICY = `
 path "kv/data/users/{{identity.entity.id}}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "kv/metadata/users/{{identity.entity.id}}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "transit/sign/person-{{identity.entity.id}}" { capabilities = ["update"] }
 path "transit/datakey/wrapped/kek-{{identity.entity.id}}" { capabilities = ["update"] }
 path "transit/decrypt/kek-{{identity.entity.id}}" { capabilities = ["update"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
+path "auth/token/revoke-self" { capabilities = ["update"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
+`;
+
+/** The acr the test step-up role is bound to; a test JWT carrying it stands for a fresh passkey or security key sign-in. */
+export const TEST_STEPUP_ACR = 'urn:sterling:test:acr:phishing-resistant';
+
+/**
+ * The step-up role's policy (46-07, mirroring the Phase 47 contract in 47-07): signing only, and only with a token from the role whose bound
+ * claims require the step-up acr. The ordinary sterling-workbench token above cannot sign.
+ */
+export const STERLING_STEPUP_POLICY = `
+path "transit/sign/person-{{identity.entity.id}}" { capabilities = ["update"] }
 path "auth/token/revoke-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
 `;
@@ -106,6 +119,16 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
     token_policies: ['sterling-workbench'],
     token_ttl: options.tokenTtl ?? '1h',
     token_max_ttl: options.tokenMaxTtl ?? '24h',
+  });
+  await must('POST', 'sys/policies/acl/sterling-workbench-stepup', { policy: STERLING_STEPUP_POLICY });
+  await must('POST', 'auth/jwt/role/sterling-workbench-stepup', {
+    role_type: 'jwt',
+    bound_audiences: [TEST_AUDIENCE],
+    bound_claims: { acr: TEST_STEPUP_ACR },
+    user_claim: 'sub',
+    token_policies: ['sterling-workbench-stepup'],
+    token_ttl: '5m',
+    token_max_ttl: '5m',
   });
 
   return {

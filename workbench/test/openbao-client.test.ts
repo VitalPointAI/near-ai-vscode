@@ -68,12 +68,13 @@ test('with STERLING_OPENBAO_ADDR unset or empty the session is local', () => {
   assert.deepEqual(readHostingConfig({ STERLING_OPENBAO_ADDR: '   ' }), { mode: 'local' });
 });
 
-test('hosted mode takes the defaults jwt, sterling-workbench, kv, transit and 300', () => {
+test('hosted mode takes the defaults jwt, sterling-workbench, sterling-workbench-stepup, kv, transit and 300', () => {
   assert.deepEqual(readHostingConfig(HOSTED), {
     mode: 'hosted',
     addr: 'https://bao.example.test:8200',
     jwtMount: 'jwt',
     jwtRole: 'sterling-workbench',
+    stepUpRole: 'sterling-workbench-stepup',
     kvMount: 'kv',
     transitMount: 'transit',
     stepUpMaxAgeSeconds: 300,
@@ -81,9 +82,9 @@ test('hosted mode takes the defaults jwt, sterling-workbench, kv, transit and 30
   });
   const custom = readHostingConfig({ ...HOSTED, STERLING_OPENBAO_CA_FILE: '/etc/sterling/ca.pem', STERLING_OPENBAO_JWT_MOUNT: 'keycloak',
     STERLING_OPENBAO_JWT_ROLE: 'hq-workbench', STERLING_OPENBAO_KV_MOUNT: 'secret', STERLING_OPENBAO_TRANSIT_MOUNT: 'keys',
-    STERLING_STEPUP_ACR: 'urn:example:acr:hw', STERLING_STEPUP_MAX_AGE_SECONDS: '120' });
+    STERLING_STEPUP_ACR: 'urn:example:acr:hw', STERLING_STEPUP_MAX_AGE_SECONDS: '120', STERLING_OPENBAO_STEPUP_ROLE: 'hq-workbench-stepup' });
   assert.deepEqual(custom, { mode: 'hosted', addr: 'https://bao.example.test:8200', caFile: '/etc/sterling/ca.pem', jwtMount: 'keycloak',
-    jwtRole: 'hq-workbench', kvMount: 'secret', transitMount: 'keys', stepUpAcr: 'urn:example:acr:hw', stepUpMaxAgeSeconds: 120,
+    jwtRole: 'hq-workbench', stepUpRole: 'hq-workbench-stepup', kvMount: 'secret', transitMount: 'keys', stepUpAcr: 'urn:example:acr:hw', stepUpMaxAgeSeconds: 120,
     sessionUser: 'ada@example.test' });
 });
 
@@ -108,7 +109,7 @@ test('an address with a user name, a password, a query, a fragment or a path is 
   }
 });
 
-test('mount names, the step-up window and the session user are checked, each refusal naming its setting', () => {
+test('mount names, the roles, the step-up window and the session user are checked, each refusal naming its setting', () => {
   for (const setting of ['STERLING_OPENBAO_JWT_MOUNT', 'STERLING_OPENBAO_KV_MOUNT', 'STERLING_OPENBAO_TRANSIT_MOUNT']) {
     for (const value of ['a/b', '..', 'kv/..', 'Upper', '']) {
       if (value === '') continue; // empty means the default
@@ -116,6 +117,9 @@ test('mount names, the step-up window and the session user are checked, each ref
     }
   }
   refusesNaming(() => readHostingConfig({ ...HOSTED, STERLING_OPENBAO_JWT_ROLE: 'a/b' }), 'STERLING_OPENBAO_JWT_ROLE');
+  refusesNaming(() => readHostingConfig({ ...HOSTED, STERLING_OPENBAO_STEPUP_ROLE: 'a/b' }), 'STERLING_OPENBAO_STEPUP_ROLE');
+  // The step-up role must differ from the ordinary one, or the ordinary session token could sign (46-07).
+  refusesNaming(() => readHostingConfig({ ...HOSTED, STERLING_OPENBAO_STEPUP_ROLE: 'sterling-workbench' }), 'STERLING_OPENBAO_STEPUP_ROLE');
   for (const value of ['0', '3601', '5m', '1.5', '-1']) {
     refusesNaming(() => readHostingConfig({ ...HOSTED, STERLING_STEPUP_MAX_AGE_SECONDS: value }), 'STERLING_STEPUP_MAX_AGE_SECONDS');
   }

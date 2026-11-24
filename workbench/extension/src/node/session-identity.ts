@@ -40,6 +40,8 @@ export interface IdentityClock {
 export interface ActiveSession {
   readonly token: string;
   readonly entityId: string;
+  /** The latest forwarded sign-in token (the JWT), for KeyService's step-up login only. Backend only, like the token. */
+  readonly forwardedToken: string;
   readonly acr?: string;
   /** Seconds since the epoch, from the latest forwarded token. */
   readonly authTime?: number;
@@ -359,13 +361,14 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
       };
     },
     session() {
-      if (state !== 'active' || baoToken === undefined || entityId === undefined) return undefined;
-      const claims = latest?.claims;
+      if (state !== 'active' || baoToken === undefined || entityId === undefined || latest === undefined) return undefined;
+      const claims = latest.claims;
       return {
         token: baoToken,
         entityId,
-        ...(claims?.acr === undefined ? {} : { acr: claims.acr }),
-        ...(claims?.authTime === undefined ? {} : { authTime: claims.authTime }),
+        forwardedToken: latest.jwt,
+        ...(claims.acr === undefined ? {} : { acr: claims.acr }),
+        ...(claims.authTime === undefined ? {} : { authTime: claims.authTime }),
         client: client!,
         config,
       };

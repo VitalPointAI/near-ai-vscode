@@ -17,6 +17,8 @@ export interface HostedConfig {
   readonly caFile?: string;
   readonly jwtMount: string;
   readonly jwtRole: string;
+  /** The jwt role whose bound claims require the step-up acr; KeyService logs in to it for each signature (46-07; defined by Phase 47). */
+  readonly stepUpRole: string;
   readonly kvMount: string;
   readonly transitMount: string;
   /** The acr the identity provider issues after a fresh passkey or security key step-up; 46-07 refuses signing without it. */
@@ -73,6 +75,9 @@ export function readHostingConfig(env: NodeJS.ProcessEnv): HostingConfig {
 
   const jwtRole = setting(env, 'STERLING_OPENBAO_JWT_ROLE') ?? 'sterling-workbench';
   if (!ROLE.test(jwtRole)) throw new Error('STERLING_OPENBAO_JWT_ROLE must be a role name of letters, digits, ".", "-" or "_".');
+  const stepUpRole = setting(env, 'STERLING_OPENBAO_STEPUP_ROLE') ?? 'sterling-workbench-stepup';
+  if (!ROLE.test(stepUpRole)) throw new Error('STERLING_OPENBAO_STEPUP_ROLE must be a role name of letters, digits, ".", "-" or "_".');
+  if (stepUpRole === jwtRole) throw new Error('STERLING_OPENBAO_STEPUP_ROLE must name a role other than STERLING_OPENBAO_JWT_ROLE.');
 
   const rawMaxAge = setting(env, 'STERLING_STEPUP_MAX_AGE_SECONDS');
   let stepUpMaxAgeSeconds = DEFAULT_MAX_AGE_SECONDS;
@@ -96,6 +101,7 @@ export function readHostingConfig(env: NodeJS.ProcessEnv): HostingConfig {
     ...(caFile === undefined ? {} : { caFile }),
     jwtMount: mount(env, 'STERLING_OPENBAO_JWT_MOUNT', 'jwt'),
     jwtRole,
+    stepUpRole,
     kvMount: mount(env, 'STERLING_OPENBAO_KV_MOUNT', 'kv'),
     transitMount: mount(env, 'STERLING_OPENBAO_TRANSIT_MOUNT', 'transit'),
     ...(stepUpAcr === undefined ? {} : { stepUpAcr }),

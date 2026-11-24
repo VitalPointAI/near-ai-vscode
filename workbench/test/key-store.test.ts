@@ -22,6 +22,7 @@ import { captureOutput, startFakeOpenBao, type FakeCall, type FakeOpenBao } from
 const ENTITY = '7d3f9b1a-2c4e-4f6a-8b0c-1d2e3f4a5b6c';
 const TOKEN = 's.SESSIONTOKENVALUE0123456789abcdef';
 const SECRET = 'probe-secret-value-4f1c';
+const FORWARDED = 'eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJrYy1hZGEifQ.forwarded-signature';
 const output = captureOutput();
 const fakes: FakeOpenBao[] = [];
 
@@ -29,7 +30,7 @@ after(async () => {
   for (const fake of fakes) await fake.close();
   output.stop();
   const text = output.text();
-  for (const value of [TOKEN, SECRET, ENTITY]) assert.ok(!text.includes(value), 'no token, secret value or entity id reached the console');
+  for (const value of [TOKEN, SECRET, ENTITY, FORWARDED]) assert.ok(!text.includes(value), 'no token, secret value or entity id reached the console');
 });
 
 const HOSTED = readHostingConfig({ STERLING_OPENBAO_ADDR: 'http://127.0.0.1:8200', THEIACLOUD_SESSION_USER: 'ada@example.test' }) as HostedConfig;
@@ -64,7 +65,7 @@ async function kvWorld(): Promise<{ fake: FakeOpenBao; store: KeyStore; data: Ma
   fakes.push(fake);
   const client = createOpenBaoClient({ addr: fake.url, timeoutMs: 2000 });
   const active = { on: true };
-  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, client, config: HOSTED };
+  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, forwardedToken: FORWARDED, client, config: HOSTED };
   const identity: SessionSource = { session: () => (active.on ? session : undefined) };
   return { fake, store: createOpenBaoKeyStore(identity, { kvMount: 'kv' }), data, active };
 }
@@ -134,7 +135,7 @@ test('without an active session every method rejects with the not-ready sentence
 test('an OpenBao refusal or silence becomes a plain sentence with no secret, token or entity id', async () => {
   const fake = await startFakeOpenBao({ 'POST /v1/kv/data/users/7d3f9b1a-2c4e-4f6a-8b0c-1d2e3f4a5b6c/udmFj/uYQ': () => ({ status: 403, json: { errors: ['permission denied'] } }) });
   fakes.push(fake);
-  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, client: createOpenBaoClient({ addr: fake.url, timeoutMs: 2000 }), config: HOSTED };
+  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, forwardedToken: FORWARDED, client: createOpenBaoClient({ addr: fake.url, timeoutMs: 2000 }), config: HOSTED };
   const store = createOpenBaoKeyStore({ session: () => session }, { kvMount: 'kv' });
   await assert.rejects(store.setPassword('vac', 'a', SECRET), (error: Error) => {
     assert.equal(error.message, SECRET_STORE_TEXT.refused);

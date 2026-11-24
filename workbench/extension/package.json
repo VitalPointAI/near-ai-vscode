@@ -42,6 +42,9 @@
     {
       "frontend": "lib/browser/secret-store-frontend-module",
       "backend": "lib/node/key-store-backend-module"
+    },
+    {
+      "backend": "lib/node/key-service-backend-module"
     }
   ]
 }

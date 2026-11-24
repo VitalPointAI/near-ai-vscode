@@ -274,6 +274,7 @@ test('in active, a token or email header naming someone else is ignored and neve
   identity.observe(headers(jwt({ acr: 'bob-header' }), 'bob@example.test'));
   assert.equal((identity.status() as { state: string }).state, 'active');
   assert.equal(identity.session()?.acr, 'own');
+  assert.equal(identity.session()?.forwardedToken, own, "session() carries the person's own latest forwarded token, for the step-up login (46-07)");
   assert.ok(logs.filter((line) => /person-mismatch/.test(line)).length >= 2, 'logged by reason code');
   answers.renew = { status: 403, json: { errors: ['permission denied'] } };
   clock.advance(10_000);
