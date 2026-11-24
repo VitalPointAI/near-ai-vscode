@@ -13,3 +13,5 @@
 /compliance/responsibility/ @ALuhning
 /compliance/profiles/ @ALuhning
 /compliance/levels.json @ALuhning
+/compliance/resources.json @ALuhning
+/scripts/resource-check.mjs @ALuhning

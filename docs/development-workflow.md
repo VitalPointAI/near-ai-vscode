@@ -53,7 +53,7 @@ A PR can merge only when all of these hold:
 
 | Gate | Where it comes from |
 | --- | --- |
-| `lint` | CI: `npm run lint` (TypeScript type check) |
+| `lint` | CI: `npm run lint` (TypeScript type check), then `node scripts/resource-check.mjs` (every npm package, image, action and vendored library has a reviewed compliance fit entry in `compliance/resources.json`) |
 | `test` | CI: `npm test` (unit tests, including the workflow scripts' tests) |
 | `e2e` | CI: the extension in a real VS Code under xvfb, in a NEAR AI project and in a plain folder |
 | `release-content` | CI: `npm run verify:release` (package the VSIX, build the SBOM, check its contents); the VSIX is kept as a build artifact for 7 days |

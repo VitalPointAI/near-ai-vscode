@@ -39,6 +39,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run lint
+      - name: Compliance fit check (every resource has a reviewed entry in compliance/resources.json)
+        run: node scripts/resource-check.mjs
 
   test:
     name: test

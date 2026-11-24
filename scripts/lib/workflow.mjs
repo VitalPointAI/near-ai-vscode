@@ -601,6 +601,9 @@ export const GATE_PATHS = Object.freeze([
   // (package.json's npm scripts define CI too, but every release bumps package.json, so gating it would hold every release for the owner; not done.)
   /^scripts\/test\//,
   /^scripts\/vendor-libs\.mjs$/,
+  // The compliance fit check and its register: adding or approving a third-party resource is a gate change.
+  /^scripts\/resource-check\.mjs$/,
+  /^compliance\/resources\.json$/,
   /^SECURITY\.md$/,
   /^\.claude\/commands\//,
   /^compliance\/tailoring\//,
