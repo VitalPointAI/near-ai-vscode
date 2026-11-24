@@ -7,9 +7,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (file) => readFileSync(path.join(ROOT, file), 'utf8');
+const HELM = process.env.HELM || 'helm';
 
 /** The lines of a YAML file with comments and blank lines removed. */
 const lines = (text) => text.split('\n').filter((line) => line.trim() && !line.trim().startsWith('#'));
@@ -94,4 +96,42 @@ test('k3s appears in no production node or values file (D-14)', () => {
   walk('deploy/values');
   assert.ok(files.length > 10);
   for (const file of files) assert.doesNotMatch(read(file), /k3s/i, `${file} names k3s`);
+});
+
+/** The namespaces listed in deploy/values/sterling-network.yaml, read line by line (`  - name: <ns>`). */
+function networkNamespaces() {
+  return lines(read('deploy/values/sterling-network.yaml')).map((line) => /^ {2}- name: ([a-z0-9-]+)$/.exec(line)?.[1]).filter(Boolean);
+}
+
+test('every namespace a release uses has an egress policy entry (D-01)', () => {
+  const listed = new Set(networkNamespaces());
+  const missing = listReleases(ROOT).map((release) => release.namespace).filter((namespace) => !listed.has(namespace));
+  assert.deepEqual([...new Set(missing)], [], 'release namespaces missing from deploy/values/sterling-network.yaml');
+});
+
+test('the rendered network release has one site-only egress policy per namespace and no open rule', () => {
+  const site = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+  const docs = splitDocs(renderRelease(ROOT, 'sterling-network', { site, helm: HELM }));
+  const policies = docs.filter((doc) => /^kind: NetworkPolicy$/m.test(doc));
+  const namespaces = networkNamespaces();
+  assert.ok(namespaces.length >= 12);
+  assert.equal(policies.length, namespaces.length);
+  for (const namespace of namespaces) {
+    const policy = policies.find((doc) => doc.includes(`  namespace: ${namespace}\n`));
+    assert.ok(policy, `an egress policy in ${namespace}`);
+    assert.match(policy, /^ {2}name: egress-site-only$/m);
+    assert.match(policy, /^ {2}podSelector: \{\}$/m);
+    assert.match(policy, /^ {2}policyTypes:\n {4}- Egress$/m);
+    assert.doesNotMatch(policy, /0\.0\.0\.0\/0|::\/0/, `${namespace}: an open egress rule`);
+    const cidrs = [...policy.matchAll(/cidr: "?([^"\s]+)"?/g)].map((match) => match[1]);
+    assert.deepEqual(cidrs.sort(), [site.clusterCidrs.pod, site.clusterCidrs.service, site.clusterCidrs.nodes, ...site.egressAllow].sort());
+  }
+  const created = docs.filter((doc) => /^kind: Namespace$/m.test(doc));
+  assert.ok(!created.some((doc) => /name: sterling-registry$/m.test(doc)), 'sterling-registry exists before this release');
+  const exempt = new Set(['longhorn-system', 'sterling-log-shipper', 'sterling-monitoring']);
+  for (const doc of created) {
+    const name = /^ {2}name: (\S+)$/m.exec(doc)[1];
+    const level = exempt.has(name) ? 'privileged' : 'restricted';
+    assert.match(doc, new RegExp(`pod-security\\.kubernetes\\.io/enforce: "?${level}"?$`, 'm'), `${name} Pod Security ${level}`);
+  }
 });

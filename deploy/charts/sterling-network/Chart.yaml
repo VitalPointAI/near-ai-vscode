@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-network
+description: The site's namespaces with their Pod Security labels and an egress policy limited to the cluster, the nodes and policy-allowed addresses (D-01).
+type: application
+version: 0.1.0
