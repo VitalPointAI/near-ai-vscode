@@ -23,6 +23,17 @@ function helmFound() {
   return !run.error && run.status === 0;
 }
 
+/** A rendered document with the values of a Secret's top-level `data:` and `stringData:` maps removed (keys kept). Other documents are unchanged. */
+function withoutSecretValues(doc) {
+  if (!/^kind:[ \t]*Secret[ \t]*$/m.test(doc)) return doc;
+  let inValues = false;
+  return doc.split('\n').map((line) => {
+    if (/^(data|stringData):[ \t]*$/.test(line)) { inValues = true; return line; }
+    if (!/^[ \t]/.test(line)) inValues = false;
+    return inValues ? line.replace(/:[ \t].*$/, ':') : line;
+  }).join('\n');
+}
+
 /** The `metadata.name` of a rendered document: the first indented `name:` line under a top-level `metadata:` line (line by line, no backtracking). */
 function metadataName(doc) {
   const lines = doc.split('\n');
@@ -70,7 +81,9 @@ test('every rendered release meets the global invariants', (t) => {
       if (/^(Cluster)?Issuer$/.test(kind)) assert.doesNotMatch(doc, /^[ \t]*acme:/m, `${where}: an ACME issuer (D-16)`);
       assert.doesNotMatch(doc, /ingress-nginx|nginx\.ingress\.kubernetes\.io/, `${where}: ingress-nginx (D-07)`);
       assert.doesNotMatch(doc, /ingressClassName:[ \t]*["']?nginx["']?[ \t]*$|kubernetes\.io\/ingress\.class:[ \t]*["']?nginx["']?[ \t]*$/m, `${where}: the nginx ingress class (D-07)`);
-      assert.doesNotMatch(doc, /k3s/i, `${where}: k3s (D-14)`);
+      // A Secret's data values are generated at random by some charts (harbor-core), so any three letters can appear in them by chance;
+      // the k3s check reads everything except those values. A real k3s dependency shows up in names, images or labels, not in random data.
+      assert.doesNotMatch(withoutSecretValues(doc), /k3s/i, `${where}: k3s (D-14)`);
       assert.doesNotMatch(doc, /grafana\/loki/, `${where}: the Loki log store (D-19)`);
     }
   }
