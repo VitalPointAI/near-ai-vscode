@@ -73,7 +73,7 @@
 
 - [ ] **VCRD-01**: Authority, clearance (classification level), access roles and compartments are attributed per identity only as W3C Verifiable Credentials 2.0, never inside a DID document and never on chain: membership, clearance (threshold), compartment, role, device binding and delegation credentials, each with an issuer, a subject DID, an expiry and a status entry.
 - [ ] **VCRD-02**: Credentials follow one narrow profile: a fixed `@context` list (the VC 2.0 context plus one of our own; any other is refused and no JSON-LD processing runs), `DataIntegrityProof` with the `eddsa-jcs-2022` cryptosuite only, Ed25519 keys as Multikey, integers only. It is built on `node:crypto` Ed25519 and the existing canonical JSON with zero new runtime dependencies, signs through Phase 69's signer interface and honours its key status (a revoked key is refused for everything).
-- [ ] **VCRD-03**: The W3C `eddsa-jcs-2022` test vectors are frozen tests, and Digital Bazaar's `@digitalbazaar/eddsa-jcs-2022-cryptosuite` and `@digitalbazaar/vc`, added as devDependencies only, verify our credentials and we verify theirs; the extension bundle gains no runtime dependency.
+- [x] **VCRD-03**: The W3C `eddsa-jcs-2022` test vectors are frozen tests, and Digital Bazaar's `@digitalbazaar/eddsa-jcs-2022-cryptosuite` and `@digitalbazaar/vc`, added as devDependencies only, verify our credentials and we verify theirs; the extension bundle gains no runtime dependency.
 - [ ] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
 - [ ] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
 - [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
@@ -275,7 +275,7 @@ From the owner's data-centric access direction (`.planning/research/data-centric
 | DLGT-08 | Phase 71.1: Agent delegation that only narrows | Pending |
 | VCRD-01 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-02 | Phase 71: Identities and verified credentials (core) | Pending |
-| VCRD-03 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-03 | Phase 71: Identities and verified credentials (core) | Complete |
 | VCRD-04 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-05 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-06 | Phase 71: Identities and verified credentials (core) | Pending |
