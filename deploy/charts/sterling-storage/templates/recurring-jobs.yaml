@@ -1,0 +1,26 @@
+{{- /*
+Backups (D-54): a daily snapshot and a daily backup of every volume in the default group, which covers the workspace volumes the operator
+creates, the hub volumes and the Postgres volume. Backups go to the per-site backup target (Longhorn defaultSettings.backupTarget,
+deploy/values/site.example/longhorn.yaml). The restore steps are in the backup runbook (47-17).
+*/ -}}
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: sterling-daily-snapshot
+spec:
+  task: snapshot
+  cron: {{ .Values.snapshot.cron | quote }}
+  retain: {{ .Values.snapshot.retain }}
+  concurrency: 2
+  groups: [default]
+---
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: sterling-daily-backup
+spec:
+  task: backup
+  cron: {{ .Values.backup.cron | quote }}
+  retain: {{ .Values.backup.retain }}
+  concurrency: 2
+  groups: [default]

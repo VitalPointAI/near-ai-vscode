@@ -1,0 +1,13 @@
+# Per-site Longhorn and storage settings, written by the site's operator from this example. Both the longhorn and sterling-storage releases
+# read this file (the chart ignores keys it does not know).
+defaultSettings:
+  # Where daily backups go: an NFS or S3-compatible target inside the site (never a public cloud unless your organization's policy allows it).
+  backupTarget: "nfs://backup.${site.domain}:/export/longhorn"
+  defaultReplicaCount: 3
+  allowRecurringJobWhileVolumeDetached: true
+# sterling-storage: replicas of each volume, and how many daily snapshots and backups are kept.
+replicas: 3
+snapshot:
+  retain: 7
+backup:
+  retain: 14
