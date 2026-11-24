@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fake sudo for deploy/test/dev-site-key.test.mjs: records its arguments in $FAKE_LOG and runs them as the same user.
+set -eu
+printf 'sudo' >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+exec "$@"

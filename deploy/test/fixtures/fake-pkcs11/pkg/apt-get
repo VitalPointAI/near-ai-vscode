@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake package manager (apt-get) for deploy/test/dev-site-key.test.mjs. Records its arguments in $FAKE_LOG;
+# "install" copies the fake token tools into $FAKE_INSTALL_BIN and makes the fake PKCS#11 module file $STERLING_PKCS11_MODULE.
+set -eu
+printf '%s' "$(basename "$0")" >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+HERE=$(cd -P "$(dirname "$0")" && pwd)
+[ "${1:-}" = install ] || { echo "fake: unsupported call" >&2; exit 2; }
+cp "$HERE/../tools/softhsm2-util" "$HERE/../tools/pkcs11-tool" "$FAKE_INSTALL_BIN/"
+: > "$STERLING_PKCS11_MODULE"
