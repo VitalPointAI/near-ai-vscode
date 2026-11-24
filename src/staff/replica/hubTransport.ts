@@ -595,8 +595,9 @@ export class HubTransport implements ReplicaTransport {
   }
 
   /**
-   * POST append with {entries, grants?, blobRefs?}. A 409 blob-missing answer means the hub lacks a blob the batch names: every blob of the batch that
-   * this computer holds (blobs) is put, and the batch is sent once more.
+   * POST append with {entries, grants?, blobRefs?}. When the hub lacks a blob the batch names (an entry refused blob-missing in the answer, Phase 33
+   * D-28, or the batch-level 409 of a Phase 32 hub), every blob of the batch that this computer holds (blobs) is put, and the batch is sent once
+   * more: the entries the hub stored the first time come back as held, so the second answer is the whole answer.
    */
   public async append(batch: AppendBatch, blobOf: BlobLookup = () => undefined): Promise<AppendAnswer> {
     const body: Record<string, unknown> = { entries: batch.entries };
@@ -604,8 +605,14 @@ export class HubTransport implements ReplicaTransport {
     if (batch.blobRefs !== undefined && batch.blobRefs.length > 0) body.blobRefs = batch.blobRefs;
     const target = `/v1/projects/${this.project}/append`;
     let answer = await this.call('POST', target, { json: body });
+    const blobMissing = (): boolean => {
+      if (answer.status === 409) return this.errorId(answer) === 'blob-missing';
+      if (answer.status !== 200) return false;
+      const value = this.answerJson(answer, 200);
+      return isRecord(value) && Array.isArray(value.refused) && value.refused.some((item) => isRecord(item) && item.reason === 'blob-missing');
+    };
     let blobsPut = false;
-    if (answer.status === 409 && this.errorId(answer) === 'blob-missing') {
+    if (blobMissing()) {
       for (const ref of batch.blobRefs ?? []) {
         const blob = await blobOf(ref.blob);
         if (blob !== undefined) await this.putBlob(blob.hash, Buffer.from(blob.bytes, 'base64url'));

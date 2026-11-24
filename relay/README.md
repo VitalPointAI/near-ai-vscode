@@ -276,6 +276,7 @@ The hub logs one JSON line per event, through a redacting logger. Lines name a p
 | `store.damaged`, `store.recovered` | The store found a missing blob file (restore from a backup), or cleaned up after an interrupted write. |
 | `checkpoint.signed` | A checkpoint was signed for a project. |
 | `checkpoint.waiting` | After a restore, the hub holds checkpoints that members handed back but not yet every change they cover, so it signs nothing for that project until members push those changes again. |
+| `hub.restore-started`, `hub.restore-ended` | The hub started in restore mode because the state folder holds the marker `restore-mode`, and later left it (reason `members-synced` or `marker-removed`). |
 | `checkpoint.conflict` | The checkpoints the hub holds for a project do not form one history, so it signs nothing more for it (see the restore drill). |
 | `checkpoint.trimmed`, `checkpoint.too_large` | A checkpoint was too large and left out some parts the hub was granted, or could not be made small enough. |
 | `checkpoint.failed` | Signing a checkpoint failed with an error; the next change tries again. |
@@ -317,11 +318,13 @@ One limit needs care. To a member's computer, an honest restore and a hub that s
        const fs = require('node:fs');
        const dir = '/var/lib/near-ai-hub';
        for (const name of fs.readdirSync(dir)) fs.rmSync(dir + '/' + name, { recursive: true });
-       fs.cpSync('/backup/state', dir, { recursive: true });"
+       fs.cpSync('/backup/state', dir, { recursive: true });
+       fs.writeFileSync(dir + '/restore-mode', '', { mode: 0o600 });"
    docker compose -f relay/compose.yaml --env-file relay/secrets/hub.env --profile hub start hub
    ```
 
-4. Let every member's computer sync. Watch the logs: `checkpoint.waiting` names projects that still miss changes, and `checkpoint.signed` follows once a project is whole again.
+   The last line writes the marker file `restore-mode`. With it the hub starts in restore mode (`hub.restore-started`): it takes back only changes that a checkpoint it kept, or one a member hands back, already covers, and answers anything newer with "being restored, send again in a moment" until members have handed back what they hold.
+4. Let every member's computer sync. Watch the logs: `checkpoint.waiting` names projects that still miss changes, and `checkpoint.signed` follows once a project is whole again. The hub leaves restore mode by itself once every member's computer has asked it for a checkpoint since the restart, removes the marker and logs `hub.restore-ended`. To end it early, remove the file `restore-mode` from the state folder; the hub notices within 30 seconds.
 5. When the staff lead has confirmed that every device has synced, and the logs show no `checkpoint.waiting` after the last of them reconnected, members may make changes again.
 
 If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead re-admits the hub; re-admitting a hub arrives with the editor's hub commands in a later release.
@@ -334,9 +337,9 @@ When members can connect projects from the editor, practise a restore before you
 
 1. Take a backup.
 2. Make a change from two members' computers and let both sync.
-3. Ask both members to stop changing the project, restore the backup and start the hub.
+3. Ask both members to stop changing the project, restore the backup with the marker file `restore-mode` (step 3 above) and start the hub.
 4. Let both computers sync. Each should say once that the hub was rolled back, then nothing more.
-5. Check the logs: `checkpoint.waiting` lines stop and a `checkpoint.signed` line follows, with no `checkpoint.conflict`.
+5. Check the logs: `hub.restore-ended` appears once both computers have synced, `checkpoint.waiting` lines stop and a `checkpoint.signed` line follows, with no `checkpoint.conflict`.
 6. Check that both computers show both changes.
 
 Until then, the hub's own test suite runs this drill on every change (`hub/test/restoreDrill.test.ts`), and you can practise the backup and restore commands on a hub with no projects: after the restore it must start and show `healthy`.

@@ -24,6 +24,7 @@ import { Redactor } from './log/redact';
 import { HUB_SECRETS, loadSecrets, refusePlainSecretEnv, SecretError } from './secrets';
 import { finishStartup } from './startup';
 import { prepareStateDir, StateDirError } from './stateDir';
+import { RestoreMode, type RestoreLog } from './restore';
 
 declare const __HUB_VERSION__: string;
 
@@ -161,6 +162,10 @@ export interface HubParts {
   joinChecks?: JoinChecks;
   /** The join desk's log lines (project id, invite id and a reason word). */
   onJoinLog?: JoinLog;
+  /** The state directory: restore mode is read from its marker at start (Phase 33 D-32). No restore mode when absent. */
+  stateDir?: string;
+  /** Restore mode's two log lines (an event and a reason word). */
+  onRestoreLog?: RestoreLog;
 }
 
 export interface ComposedHub {
@@ -174,6 +179,8 @@ export interface ComposedHub {
   checkpoints: Checkpointer | undefined;
   /** Invitations and join requests (32-25); its 7 day removal runs at start and every hour. */
   join: JoinDesk;
+  /** Restore mode (Phase 33 D-32); undefined when no state directory was given. */
+  restore: RestoreMode | undefined;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -203,6 +210,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onJoinLog === undefined ? {} : { log: parts.onJoinLog }),
   });
   join.start(parts.scheduler ?? realScheduler);
+  const restore = parts.stateDir === undefined ? undefined : RestoreMode.fromStateDir(parts.stateDir, { store, cache, now, ...(parts.onRestoreLog === undefined ? {} : { log: parts.onRestoreLog }) });
   const routes = createRoutes({
     store,
     cache,
@@ -216,6 +224,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onAccepted === undefined ? {} : { onAccepted: parts.onAccepted }),
     ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
     ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
+    ...(restore === undefined ? {} : { restore }),
   });
   const checkpoints =
     parts.signCheckpoints === false
@@ -241,7 +250,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence, checkpoints, join };
+  return { server, sessions, cache, limits, events, presence, checkpoints, join, restore };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
@@ -411,6 +420,8 @@ export async function main(argv: readonly string[]): Promise<void> {
       onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
       onCheckpointLog: (level, event, fields) => logger[level](event, fields),
       onJoinLog: (level, event, fields) => logger[level](event, fields),
+      stateDir: config.stateDir,
+      onRestoreLog: (level, event, fields) => logger[level](event, fields),
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);

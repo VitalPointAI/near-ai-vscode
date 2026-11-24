@@ -54,6 +54,8 @@ export const LIMITS = Object.freeze({
    */
   pendingJoinsPerInvite: 8,
   pendingJoinsPerProject: 64,
+  /** Restore mode (Phase 33 D-32): the Retry-After of a restoring answer, and how often the hub looks whether the operator removed the marker. */
+  restoreRetrySeconds: 30,
   /** The most buckets one map keeps. */
   maxTrackedBuckets: 10_000,
 });

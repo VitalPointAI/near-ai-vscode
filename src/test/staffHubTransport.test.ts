@@ -1201,3 +1201,29 @@ test('replicaProject read accessors: heads, entries after a seq, wanted and cite
     await world.a.close();
   }
 });
+
+// ---- Phase 33 (33-07, 33-08): per-entry blob-missing, signed features, presence and restore mode ------------------------------------------------
+
+test('append: a 200 refusing an entry blob-missing (Phase 33 D-28) puts the batch\'s blobs and sends the batch once more; the second answer is the whole answer', async () => {
+  const blobBytes = Buffer.from('fictional sealed blob bytes, per entry');
+  const blob = { hash: sha256Hex(blobBytes), bytes: blobBytes.toString('base64url') };
+  const entry = { header: { v: 2, stream: PROJECT, writer: DEVICE.writer, seq: 0, prev: '0'.repeat(64), epoch: 1, body: { hash: HASH_A, size: 1 }, sig: 'x' }, body: 'AA' } as never;
+  const stored = new Map<string, Buffer>();
+  let appends = 0;
+  await withFake({
+    handle: routes({
+      [`POST /v1/projects/${PROJECT}/append`]: () => {
+        appends += 1;
+        if (!stored.has(blob.hash)) return { json: { project: PROJECT, accepted: [], refused: [{ index: 0, hash: HASH_A, reason: 'blob-missing', message: 'Missing.' }], rosterHead: HASH_A } };
+        return { json: { project: PROJECT, accepted: [HASH_A], refused: [], rosterHead: HASH_A } };
+      },
+      [`PUT /v1/blobs/${blob.hash}`]: (req) => {
+        stored.set(blob.hash, req.body);
+        return { status: 201, json: { project: PROJECT, hash: blob.hash } };
+      }
+    })
+  }, async (_fake, transport) => {
+    const answer = await transport.append({ entries: [entry], blobRefs: [{ entry: HASH_A, blob: blob.hash }] }, (hash) => (hash === blob.hash ? blob : undefined));
+    assert.deepEqual([answer.accepted, answer.refused, answer.blobsPut, appends], [[HASH_A], [], true, 2]);
+  });
+});

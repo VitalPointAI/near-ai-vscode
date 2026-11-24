@@ -19,6 +19,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type http from 'node:http';
 import type { TLSSocket } from 'node:tls';
+import { UPDATE_SENTENCE, coversRequired } from '@ext/domain/replica/features';
 import { CHALLENGE_BYTES, SESSION_REFUSALS as ANSWER_REFUSALS, readSessionAnswer } from '@ext/domain/replica/hubFile';
 import type { SessionExpectation, SessionRead } from '@ext/domain/replica/hubFile';
 import { STREAM_ID_PATTERN } from '@ext/domain/replica/entry';
@@ -48,6 +49,8 @@ export const SESSION_REFUSALS = {
   'bad-signature': ANSWER_REFUSALS['bad-signature'],
   'challenge-expired': 'The challenge has expired. Open a new session and answer its challenge within a minute.',
   malformed: ANSWER_REFUSALS.malformed,
+  // POST-01 (D-07): the device's signed features do not cover what the project requires, so a client too old for it cannot write through the hub.
+  'needs-update': UPDATE_SENTENCE,
 } as const;
 export type SessionRefusal = keyof typeof SESSION_REFUSALS;
 
@@ -165,6 +168,7 @@ export class SessionRegistry {
     const device = deviceAt(roster.state.members, read.writer, roster.headPosition);
     if (device === undefined || device.publicKey !== read.publicKey) return refuse('not-admitted');
     if (device.kind !== 'person') return refuse('not-a-person-device');
+    if (!coversRequired(read.features, roster.state.required)) return refuse('needs-update');
 
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
     const session: Session = { project: open.project, writer: read.writer, expiresAt: this.now() + TOKEN_TTL_MS };

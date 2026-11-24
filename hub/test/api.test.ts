@@ -247,7 +247,7 @@ test('append over HTTP: every outcome comes back with its id, index and hash, an
     assert.equal(moved.rosterHead, invite.hash);
   }));
 
-test('append over HTTP: 201 entries is 413, a missing blob is 409 blob-missing, and a burst past the bucket is 429 with Retry-After', () =>
+test('append over HTTP: 201 entries is 413, a missing blob is a 200 refusing that entry blob-missing (Phase 33 D-28), and a burst past the bucket is 429 with Retry-After', () =>
   withHub({ limits: { writerBurst: 5, writerPerSecond: 1 } }, async (hub) => {
     const { world } = await staffed(hub);
     const lead = await hub.openSession(world.lead, world.project);
@@ -258,8 +258,9 @@ test('append over HTTP: 201 entries is 413, a missing blob is 409 blob-missing, 
     assert.equal(tooMany.json().error, 'batch-too-large');
     const one = note(world, world.lead);
     const missing = await lead.connection.post(appendPath, { entries: [one.entry], blobRefs: [{ entry: one.hash, blob: 'b'.repeat(64) }] }, lead.token);
-    assert.equal(missing.status, 409);
-    assert.equal(missing.json().error, 'blob-missing');
+    // Per entry since Phase 33 D-28: the batch is answered 200 and only the entry naming the missing blob is refused.
+    assert.equal(missing.status, 200);
+    assert.deepEqual(missing.json<{ refused: Array<{ hash: string; reason: string }> }>().refused.map((item) => [item.hash, item.reason]), [[one.hash, 'blob-missing']]);
     // The bucket holds 5: the refused blob-missing batch took 1 (the bucket runs first), these 4 take the rest, and the next entry is refused.
     const burst = Array.from({ length: 4 }, () => note(world, world.lead));
     assert.equal((await lead.connection.post(appendPath, { entries: [one.entry, ...burst.slice(0, 3).map((item) => item.entry)] }, lead.token)).status, 200);
