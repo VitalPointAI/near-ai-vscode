@@ -1,4 +1,4 @@
-// A test certificate authority and a server certificate for 127.0.0.1, made at run time with openssl, as hub/test/helpers/tlsFixture.ts does
+// A test certificate authority and a server certificate for 127.0.0.1 (and any DNS names asked for), made at run time with openssl, as hub/test/helpers/tlsFixture.ts does
 // (46-02). Nothing is committed: the files live in a temporary folder and go with cleanup(). A missing openssl fails the test with a plain
 // sentence; it never skips, because a skipped TLS test proves nothing.
 import { spawnSync } from 'node:child_process';
@@ -29,13 +29,15 @@ function openssl(dir: string, args: string[]): void {
   }
 }
 
-export function makeTestCertificate(): TestCertificate {
+/** A CA and a server certificate for 127.0.0.1 and, when given, the DNS names a container on a test network is reached by (46-08). */
+export function makeTestCertificate(options: { dnsNames?: readonly string[] } = {}): TestCertificate {
   const dir = mkdtempSync(path.join(tmpdir(), 'sterling-workbench-tls-'));
   const ec = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes'];
   openssl(dir, ['req', '-x509', ...ec, '-keyout', 'ca.key', '-out', 'ca.pem', '-days', '1', '-subj', '/CN=Sterling workbench test CA',
     '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign']);
   openssl(dir, ['req', ...ec, '-keyout', 'server.key', '-out', 'server.csr', '-subj', '/CN=127.0.0.1']);
-  writeFileSync(path.join(dir, 'server.ext'), 'subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n');
+  const names = ['IP:127.0.0.1', ...(options.dnsNames ?? []).map((name) => `DNS:${name}`)].join(',');
+  writeFileSync(path.join(dir, 'server.ext'), `subjectAltName=${names}\nbasicConstraints=CA:FALSE\nextendedKeyUsage=serverAuth\n`);
   openssl(dir, ['x509', '-req', '-in', 'server.csr', '-CA', 'ca.pem', '-CAkey', 'ca.key', '-CAcreateserial', '-out', 'server.pem', '-days', '1', '-extfile', 'server.ext']);
   const read = (file: string): string => readFileSync(path.join(dir, file), 'utf8');
   return {
