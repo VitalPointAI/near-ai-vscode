@@ -1,0 +1,9 @@
+# A lab site file for sterling-sessions before Phase 46 publishes its image (render-sessions.test.mjs uses it as the release's site file).
+appDefinition:
+  maxInstances: 5
+  notifyAfterMinutes: 25
+  maxSessionMinutes: 0
+  usePlaceholder: true
+siteEnv:
+  openVsxUrl: "https://open-vsx.${site.domain}"
+  modelServers: []

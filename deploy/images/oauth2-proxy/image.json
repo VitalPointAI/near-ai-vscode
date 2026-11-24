@@ -1,0 +1,7 @@
+{
+  "name": "oauth2-proxy",
+  "containerfile": "deploy/images/oauth2-proxy/Containerfile",
+  "context": "deploy/images/oauth2-proxy",
+  "source": { "repository": "oauth2-proxy/oauth2-proxy", "ref": "ea755ac07aa200acc22e02f95d25b91de6c9fe20" },
+  "buildArgs": { "OAUTH2_PROXY_VERSION": "v7.15.6" }
+}

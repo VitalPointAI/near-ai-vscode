@@ -1,0 +1,2 @@
+# The site storage class (deploy/charts/sterling-storage). Its name is the site setting storageClass.
+storageClass: "${site.storageClass}"

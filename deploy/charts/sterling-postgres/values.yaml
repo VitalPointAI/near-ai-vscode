@@ -1,0 +1,16 @@
+# Set by digest from deploy/bundle/images.lock.json (sterling/postgres).
+image: ""
+storageClass: ""
+# The only client ranges (cluster pods); everything else, and anything without TLS, is refused.
+allowCidrs: []
+dataSize: ""
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+dump:
+  schedule: "30 0 * * *"
+  retainDays: 14
+  size: ""

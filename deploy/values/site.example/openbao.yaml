@@ -1,0 +1,36 @@
+# Per-site OpenBao settings, written by the site's operator from this example (the release descriptor names this file as its site file).
+# The example is sized for an HQ of about 400 people with sign-in bursts of about 200; sizes are provisional until Phase 48 measures them.
+server:
+  ha:
+    # 3 nodes at HQ and large sites, 1 at a small edge site (D-37).
+    replicas: 3
+  dataStorage:
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  # The HSM PIN for the pkcs11 seal, from Secret openbao-hsm-pin written by the install script (never a ConfigMap). Remove for shamir.
+  extraSecretEnvironmentVars:
+    - envName: BAO_HSM_PIN
+      secretName: openbao-hsm-pin
+      secretKey: pin
+  # The site HSM's PKCS#11 client library comes from the site's own volume (a site decision; FIPS 140-3 Level 3 in approved mode is the fit
+  # condition). Example: a hostPath or a read-only image volume carrying the vendor library, mounted at /usr/lib64/site-hsm.
+  # volumes: [...]
+  # volumeMounts: [...]
+
+sterling:
+  # pkcs11: auto-unseal from the site HSM through the kms-pkcs11 plugin (D-38). shamir: no HSM; unseal shares held by key custodians
+  # (key ceremony runbook, 47-17).
+  seal: pkcs11
+  pkcs11:
+    # The site HSM's library path inside the pod. The lab and CI use SoftHSM2 from the test-scope image sterling/openbao-softhsm:
+    # /usr/lib64/softhsm/libsofthsm2.so, with its token folder /var/lib/softhsm/tokens on a persistent volume (losing it loses the data set).
+    lib: /usr/lib64/site-hsm/libpkcs11.so
+    tokenLabel: OpenBao
+    keyLabel: bao-root-key
+    # AES_GCM with an AES-256 key in the token (OpenBao creates no key material); RSA_PKCS_OAEP with an RSA 4096 key pair is the alternative.
+    mechanism: AES_GCM

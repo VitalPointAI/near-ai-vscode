@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-hub
+description: One sync hub (MUS section 10) as a single-writer StatefulSet with the Compose hardening, ending TLS itself (D-42 to D-44).
+type: application
+version: 0.1.0

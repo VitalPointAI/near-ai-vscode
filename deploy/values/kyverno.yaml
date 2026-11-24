@@ -39,3 +39,7 @@ admissionController:
   container:
     image:
       pullPolicy: IfNotPresent
+
+# Signature lookups go only to the site registry, whose TLS certificate is issued by the site CA: the admission controller trusts exactly
+# that CA bundle, set per site in deploy/values/site.example/kyverno.yaml (the install script writes the site CA there, 47-16).
+# The policies themselves are the sterling-admission release (deploy/charts/sterling-admission), installed after this one.

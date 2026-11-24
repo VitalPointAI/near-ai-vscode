@@ -1,0 +1,2 @@
+# The sync hubs (deploy/hub), one release per item of the site setting hubs.
+storageClass: "${site.storageClass}"

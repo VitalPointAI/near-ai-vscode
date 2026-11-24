@@ -1,0 +1,6 @@
+{
+  "name": "postgres",
+  "containerfile": "deploy/images/postgres/Containerfile",
+  "context": "deploy/images/postgres",
+  "tools": [{ "pin": "postgresql", "dir": "rpms" }]
+}

@@ -1,0 +1,7 @@
+# Per-site Zot settings, written by the site's operator from this example (the release descriptor names this file as its site file).
+service:
+  # The node port the registry serves on; the site setting registry (site.example.yaml) is <registry host>:<this port>.
+  nodePort: 30500
+pvc:
+  storage: 200Gi
+  storageClassName: "${site.storageClass}"

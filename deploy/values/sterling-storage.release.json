@@ -1,0 +1,9 @@
+{
+  "chart": "path:deploy/charts/sterling-storage",
+  "namespace": "longhorn-system",
+  "order": 39,
+  "values": ["deploy/values/sterling-storage.yaml"],
+  "site": "deploy/values/site.example/longhorn.yaml",
+  "enabledWhen": { "storageProvider": "longhorn" },
+  "note": "The encrypted reference storage class and the recurring snapshots and backups of every volume (D-17, D-54); right after Longhorn."
+}

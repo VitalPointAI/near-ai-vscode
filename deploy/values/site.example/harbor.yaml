@@ -1,0 +1,18 @@
+# Per-site Harbor settings (HQ and large sites, registryKind harbor), written by the site's operator from this example. Sized for an HQ of
+# about 400 people whose sessions start in bursts of about 200 (image pulls are by digest and cached on each node); provisional until
+# Phase 48.
+core:
+  replicas: 2
+portal:
+  replicas: 2
+registry:
+  # One: the registry's filesystem storage is a ReadWriteOnce volume (more replicas need shared object storage).
+  replicas: 1
+jobservice:
+  replicas: 1
+persistence:
+  persistentVolumeClaim:
+    registry:
+      size: 500Gi
+    database:
+      size: 10Gi

@@ -2,9 +2,18 @@
   "chart": "opensearch",
   "namespace": "sterling-logging",
   "order": 80,
-  "values": ["deploy/values/opensearch.yaml"],
+  "values": [
+    "deploy/values/opensearch.yaml"
+  ],
+  "site": "deploy/values/site.example/opensearch.yaml",
   "images": [
-    { "lock": "docker.io/opensearchproject/opensearch", "set": { "image.repository": "name", "image.tag": "tagAtDigest" } }
+    {
+      "lock": "docker.io/opensearchproject/opensearch",
+      "set": {
+        "image.repository": "name",
+        "image.tag": "tagAtDigest"
+      }
+    }
   ],
   "note": "OpenSearch 3.10.0, the site log and audit store (D-19, research Decision 4)."
 }
