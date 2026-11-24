@@ -663,6 +663,51 @@ Design: `.planning/research/compliance-dashboard/CGP-ITAR.md`. Owner request of 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 45 to break down)
 
+### Phase 46: Native Theia foundation
+**Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
+**Depends on**: the hosting design (`.planning/research/multiuser-hosting/DESIGN.md`, owner decisions D1 to D11, 2026-11-23); the Theia spike (`.planning/spikes/theia-team-studio/`, PR #162); the compliance fit check (`compliance/resources.json`, PR #164). Runs beside Phase 47 from day one.
+**Requirements**: FND-T-01 to FND-T-nn (defined when planned, from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10)
+**Success Criteria** (what must be TRUE):
+  1. The workbench builds, tests and runs from a workspace package in CI, in a browser test against the built container; nothing remains only under `.planning/spikes/`.
+  2. A native widget calls engine code in the backend through one JSON-RPC service pattern, with the same refusals the extension host gives.
+  3. A secret saved in the workbench survives a container restart, is readable only by that person, and is stored in OpenBao (or the OS keyring on a single machine); no secret is held only in memory.
+  4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
+  5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
+  6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 46 to break down)
+
+### Phase 47: On-premise deployment stack and offline bundle
+**Goal**: Your organization can install and run the Sterling workbench for many people at a site it owns, connected or fully disconnected: RKE2, a local image registry, HAProxy ingress, cert-manager with an OpenBao CA, Keycloak with sign-in by passkeys or hardware keys only, self-hosted Theia Cloud (one session per person), OpenBao with HSM unseal, and the sync hub, all from a signed offline bundle with no outbound calls.
+**Depends on**: the hosting design (DESIGN.md sections 4 to 7, 10, 11; decisions O2 to O6 accepted 2026-11-23); the compliance fit check (every component needs a passing entry); Phase 46's image only for the end-to-end run. Runs beside Phase 46 from day one.
+**Requirements**: DEP-01 to DEP-nn (defined when planned, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list)
+**Success Criteria** (what must be TRUE):
+  1. A site installs from one signed offline bundle (images, vendored charts, realm and policy as code) on air-gapped hardware, and nothing in the running stack calls out.
+  2. A person signs in with a hardware security key or a device-bound passkey, never a password; a lost key is replaced by administrator-attested re-enrolment; two keys are registered per person.
+  3. Each person gets their own Theia session with a durable workspace volume; idle sessions stop; per-person secrets come from OpenBao, unsealed by an HSM (or Shamir where no HSM exists).
+  4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
+  5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
+  6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 47 to break down)
+
+### Phase 48: Load and accreditation verification
+**Goal**: Before any capacity or compliance claim is made for the hosted workbench, we measure it: a load test on our own hardware to the target number of concurrent sessions, and OSCAL components and evidence rules for every component of Phases 46 and 47 so the compliance dashboard shows the hosted deployment's real state.
+**Depends on**: Phases 46 and 47 for the running stack; the evidence-rule work starts as soon as each component in Phase 47 is chosen; Phase 44's compliance machinery.
+**Requirements**: VER-01 to VER-nn (defined when planned, from DESIGN.md sections 10, 12 and 13(e))
+**Success Criteria** (what must be TRUE):
+  1. A repeatable load test on our own hardware reaches the target concurrent sessions (1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
+  2. Each component of Phases 46 and 47 has an OSCAL component definition and evidence rules, and the dashboard shows its controls from collected evidence, never assumed.
+  3. The open verification items in DESIGN.md section 12 are each closed with evidence or recorded as a gap with an owner and date (Keycloak CVE-2026-6856 fix version, HSM and Go FIPS certificate status, Traefik with Theia Cloud).
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 48 to break down)
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -1805,6 +1850,9 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
+| 46. Native Theia foundation | 0/TBD | Planning 2026-11-23 (beside 47) | - |
+| 47. On-premise deployment stack and offline bundle | 0/TBD | Planning 2026-11-23 (beside 46) | - |
+| 48. Load and accreditation verification | 0/TBD | Planning 2026-11-23 (after 46 and 47) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
