@@ -1,6 +1,6 @@
 # 71-01 Task 1: package check of the three test-only packages
 
-**Checked:** 2026-11-24 by Claude (agent), for the owner to confirm. **Status:** waiting for the owner (blocking-human gate). Nothing is installed in the repository.
+**Checked:** 2026-11-24 by Claude (agent), for the owner to confirm. **Status:** approved by the owner on 2026-11-24 ("approved"); installed with `--save-dev --save-exact --ignore-scripts` in 71-01 Task 2. The installed tree has the same versions and integrity as the tree checked below.
 
 How it was checked, without installing or running any package code:
 - `npm view <package> --json` for each package (registry metadata).
