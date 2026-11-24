@@ -230,7 +230,7 @@ class SterlingComplianceWidget extends BaseWidget {
   private showDashboard(dashboard: Dashboard, verified: RefreshRecord): void {
     const generated = Date.parse(dashboard.generatedAt);
     const metadata = element('p', `${sourceLabels[dashboard.source.kind]} · Bundle generated ${Number.isFinite(generated) ? dashboard.generatedAt : 'at an unknown time'} · Commit ${dashboard.commit.slice(0, 12)}`, 'sterling-evidence-meta');
-    const verification = element('p', `Manifest verified · Attestation: ${attestationWords[verified.attestation] ?? verified.attestation} · Fetched ${verified.fetchedAt} from ${verified.source}`, 'sterling-evidence-meta');
+    const verification = element('p', `Manifest verified · Signature: ${attestationWords[verified.attestation] ?? verified.attestation} · Fetched ${verified.fetchedAt} from ${verified.source}`, 'sterling-evidence-meta');
     const notice = element('p', 'This evidence bundle is older than 24 hours or has an invalid generation time. Check collection times before relying on it.', 'sterling-evidence-message');
     const age = Date.now() - generated;
     notice.hidden = age >= 0 && age <= 86_400_000;

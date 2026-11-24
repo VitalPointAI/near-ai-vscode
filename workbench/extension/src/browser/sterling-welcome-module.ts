@@ -60,7 +60,7 @@ class SterlingWelcomeWidget extends BaseWidget {
             <p>Choose AI providers, build agent teams, and govern how they work.</p>
             <p class="sterling-domains">Cyber · Space · Land · Sea · Air</p>
             <div class="sterling-actions">
-              <button type="button" class="sterling-primary">Explore a sample team <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
+              <button type="button" class="sterling-primary">Explore a sample agent team <i class="codicon codicon-arrow-right" aria-hidden="true"></i></button>
             </div>
             <p class="sterling-status" role="status" hidden></p>
           </div>
@@ -91,7 +91,7 @@ class SterlingWelcomeWidget extends BaseWidget {
       try {
         await this.commands.executeCommand('near-ai.team-studio.preview');
       } catch {
-        status.textContent = 'Sterling could not open the sample team. Try opening Team Studio from the command palette.';
+        status.textContent = 'Sterling could not open the sample agent team. Try opening Team Studio from the command palette.';
         status.hidden = false;
       }
     });
