@@ -1,0 +1,6 @@
+{
+  "keycloak": {
+    "passwordAuthenticators": 0,
+    "otpAuthenticators": 0
+  }
+}
