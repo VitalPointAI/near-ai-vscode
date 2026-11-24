@@ -21,7 +21,7 @@ Back to the [component catalogue](./index.md).
 
 **What it provides.** Signs and verifies the relay's JSON Web Tokens; bundled into the relay image.
 
-**Why it is needed.** Listed as a runtime dependency of the relay, to sign and verify the relay's JSON Web Tokens. No relay source file imports it yet, because the relay is still only its foundation. Owner to confirm it is still planned, or remove it. *This role is waiting for the owner to confirm it.*
+**Why it is needed.** The relay's planned library for signing and verifying its JSON Web Tokens, and its only runtime dependency: the relay workspace test (relay/test/workspace.test.ts) requires exactly this dependency. No relay source imports it yet; the relay channel phases are the first to use it, for token checks. Without it the relay would need its own JWT code.
 
 | | |
 | --- | --- |
@@ -42,7 +42,7 @@ Back to the [component catalogue](./index.md).
 
 **What it provides.** Optional Signal sidecar for the relay (Compose profile "signal", off by default); it relays messages through the Signal service.
 
-**Why it is needed.** Optional sidecar that would let the relay carry chats from Signal. It is off by default, and the relay does not send or receive Signal messages yet. Owner to confirm it is still wanted before Phase 82 re-pins it. *This role is waiting for the owner to confirm it.*
+**Why it is needed.** The planned Signal channel sidecar for the relay (Phase 82). It is off by default and is not started until Phase 82 re-pins it to a current release and re-reviews this entry; the relay does not send or receive Signal messages yet. Without it the relay would need its own Signal client.
 
 | | |
 | --- | --- |

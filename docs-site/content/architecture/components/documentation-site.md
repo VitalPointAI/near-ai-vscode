@@ -19,7 +19,6 @@ Back to the [component catalogue](./index.md).
 | npm:@docusaurus/theme-mermaid | npm package | build | Pass |
 | npm:@easyops-cn/docusaurus-search-local | npm package | build | Pass |
 | npm:@mdx-js/react | npm package | build | Pass |
-| npm:clsx | npm package | build | Pass |
 | npm:prism-react-renderer | npm package | build | Pass |
 | npm:react | npm package | build | Pass |
 | npm:react-dom | npm package | build | Pass |
@@ -140,27 +139,6 @@ Back to the [component catalogue](./index.md).
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `3.1.1` |
-| Architecture component | `release-pipeline` |
-| Used in | `docs-site/package.json` |
-| Scope | Build only: not shipped |
-| Licence | MIT |
-| Cryptography | None |
-| Air gap | Works with no internet access |
-| Compliance fit | Pass |
-| Controls | SA-15, SR-3 |
-| Security fixes | Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR. |
-| Reviewed | Claude (agent review; owner to confirm), 2026-11-23 |
-
-## npm:clsx
-
-**What it provides.** Class-name helper bundled into the static documentation site.
-
-**Why it is needed.** Small helper that joins CSS class names. Our own site code does not import it; the Docusaurus theme brings its own copy. Owner to confirm it is still needed as a direct dependency, or remove it. *This role is waiting for the owner to confirm it.*
-
-| | |
-| --- | --- |
-| Kind | npm package |
-| Pinned version or digest | `2.1.1` |
 | Architecture component | `release-pipeline` |
 | Used in | `docs-site/package.json` |
 | Scope | Build only: not shipped |

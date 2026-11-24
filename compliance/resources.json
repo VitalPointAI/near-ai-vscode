@@ -404,9 +404,8 @@
       "component": "relay",
       "scope": "runtime",
       "purpose": "Signs and verifies the relay's JSON Web Tokens; bundled into the relay image.",
-      "role": "Listed as a runtime dependency of the relay, to sign and verify the relay's JSON Web Tokens. No relay source file imports it yet, because the relay is still only its foundation. Owner to confirm it is still planned, or remove it.",
+      "role": "The relay's planned library for signing and verifying its JSON Web Tokens, and its only runtime dependency: the relay workspace test (relay/test/workspace.test.ts) requires exactly this dependency. No relay source imports it yet; the relay channel phases are the first to use it, for token checks. Without it the relay would need its own JWT code.",
       "architectureArea": "sync-and-relay",
-      "roleNeedsReview": true,
       "licence": "MIT",
       "controls": [
         "ia-05",
@@ -552,31 +551,6 @@
       "purpose": "MDX runtime bundled into the static documentation site.",
       "role": "Renders MDX pages, the pages that embed live components, such as the Accreditation pages. Docusaurus requires it as a peer package.",
       "architectureArea": "documentation-site",
-      "licence": "MIT",
-      "controls": [
-        "sa-15",
-        "sr-03"
-      ],
-      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
-      "crypto": "none",
-      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
-      "airGap": "ok",
-      "fit": "pass",
-      "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
-    },
-    {
-      "id": "npm:clsx",
-      "kind": "npm",
-      "where": [
-        "docs-site/package.json"
-      ],
-      "component": "release-pipeline",
-      "scope": "build",
-      "purpose": "Class-name helper bundled into the static documentation site.",
-      "role": "Small helper that joins CSS class names. Our own site code does not import it; the Docusaurus theme brings its own copy. Owner to confirm it is still needed as a direct dependency, or remove it.",
-      "architectureArea": "documentation-site",
-      "roleNeedsReview": true,
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -868,9 +842,8 @@
       "component": "relay",
       "scope": "runtime",
       "purpose": "Optional Signal sidecar for the relay (Compose profile \"signal\", off by default); it relays messages through the Signal service.",
-      "role": "Optional sidecar that would let the relay carry chats from Signal. It is off by default, and the relay does not send or receive Signal messages yet. Owner to confirm it is still wanted before Phase 82 re-pins it.",
+      "role": "The planned Signal channel sidecar for the relay (Phase 82). It is off by default and is not started until Phase 82 re-pins it to a current release and re-reviews this entry; the relay does not send or receive Signal messages yet. Without it the relay would need its own Signal client.",
       "architectureArea": "sync-and-relay",
-      "roleNeedsReview": true,
       "licence": "MIT (signal-cli-rest-api); bundles signal-cli (GPL-3.0) and libsignal (AGPL-3.0), run as a separate unmodified container",
       "controls": [
         "ac-20",

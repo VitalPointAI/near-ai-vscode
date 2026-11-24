@@ -13,7 +13,7 @@ Nothing here is typed by hand. The pages are generated from the compliance fit r
 
 This catalogue is evidence for these controls in the compliance package: CM-8 and CM-8(1) (the inventory, kept current with each change), CM-7 (why each component is needed), SA-4 (the review before a component is used), SA-5 (this documentation) and SR-3 (exact pins). It is evidence only: your organization decides what it accepts.
 
-There are 123 components in 10 areas. The role of 3 of them is waiting for the owner to confirm it; each says so.
+There are 122 components in 10 areas. Every role has been confirmed.
 
 ## How to read an entry
 
@@ -76,7 +76,7 @@ The compliance package turns evidence from CI into control states and the assess
 
 This site is built with Docusaurus into static pages, with an offline search index and diagrams drawn from text, so it works on a site with no internet. A small file server serves it on the documentation host.
 
-11 components: npm:@docusaurus/core, npm:@docusaurus/plugin-content-docs, npm:@docusaurus/theme-classic, npm:@docusaurus/theme-mermaid, npm:@easyops-cn/docusaurus-search-local, npm:@mdx-js/react, npm:clsx, npm:prism-react-renderer, npm:react, npm:react-dom, npm:sirv.
+10 components: npm:@docusaurus/core, npm:@docusaurus/plugin-content-docs, npm:@docusaurus/theme-classic, npm:@docusaurus/theme-mermaid, npm:@easyops-cn/docusaurus-search-local, npm:@mdx-js/react, npm:prism-react-renderer, npm:react, npm:react-dom, npm:sirv.
 
 ### [Build and test only](./build-and-test.md)
 
