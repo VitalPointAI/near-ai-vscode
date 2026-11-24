@@ -4,10 +4,10 @@ import { resolve } from 'node:path';
 import type { TeamPreviewProject, TeamPreviewResult, TeamPreviewService, TeamPreviewTeam } from '../common/team-preview.js';
 
 const projects: readonly (TeamPreviewProject & { readonly fixture?: string })[] = [
-  { id: 'orchard', title: 'Orchard project', fixture: 'orchard.md' },
-  { id: 'lighthouse', title: 'Lighthouse project', fixture: 'lighthouse.md' },
-  { id: 'empty', title: 'Project without a team' },
-  { id: 'invalid', title: 'Project with an invalid team', fixture: 'invalid.md' }
+  { id: 'orchard', title: 'Orchard sample', fixture: 'orchard.md' },
+  { id: 'lighthouse', title: 'Lighthouse sample', fixture: 'lighthouse.md' },
+  { id: 'empty', title: 'Sample without a team' },
+  { id: 'invalid', title: 'Sample with an invalid team', fixture: 'invalid.md' }
 ];
 
 const spikeRoot = process.cwd();
