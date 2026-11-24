@@ -55,7 +55,7 @@ export function contestedCards(products: readonly ProductVersions[], names: Deci
         const outcome = recordedDecisionOutcome(act.kind, act.data.outcome);
         if (outcome === undefined) return [];
         const reasons = act.data.reasons;
-        const name = act.actor.kind === 'person' ? (names(act.member, act.roster) ?? 'A decision maker') : 'A project agent';
+        const name = act.actor.kind === 'person' ? (names(act.member, act.roster) ?? 'A decision maker') : 'An agent';
         return [{
           name,
           outcome,

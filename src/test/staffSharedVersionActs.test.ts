@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
+import * as path from 'node:path';
 import test from 'node:test';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../domain/replica/doc';
 import type { Actor, BuiltEntry } from '../domain/replica/entry';
+import { replicaVersionHash } from '../domain/replica/versions';
 import type { ProductVersions } from '../domain/replica/versions';
 import { appendProductEntry, proposeVersion } from '../staff/replica/labelCells';
 import { updateMember } from '../staff/replica/membership';
 import { ReplicaProject } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
-import { StaffHost } from '../staff/staffHost';
-import { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../staff/replica/versionActs';
+import { productPath, StaffHost } from '../staff/staffHost';
+import { CHANGED_WHILE_DECIDING_TEXT, VERSION_ACT_WORDS, VersionActs } from '../staff/replica/versionActs';
 import { bringIn, hostOf, leadWith, ok, orgClearance, project, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
 import { trusting } from './helpers/staffFixtures';
@@ -546,4 +549,121 @@ test('supersession requires both releases and writes their exact version referen
   assert.equal(a.product.records[0]?.release.supersededBy, 2);
   assert.equal(a.fold.digests[stream], b.fold.digests[stream]);
   assert.deepEqual(a.product.refusals, []);
+});
+
+// ---- 33-05: proposing from the live text, and the staff host's shared branch ----------------------------------------------------------------
+
+/** A product with live text and no version yet. */
+async function liveProduct(lead: Seat) {
+  const created = await appendProductEntry(lead.host, 'product.create', { product: PRODUCT, section: 'j4', roles: ROLES, title: 'Logistics estimate' }, { label: LABEL });
+  assert.ok(created.ok, created.ok ? undefined : created.message);
+  const { roster } = await lead.p.state();
+  const clientId = clientIdOf(roster.members.devices.get(lead.writer)?.[0]?.slot ?? 1, 0);
+  assert.ok((await appendProductEntry(lead.host, 'doc.client', { product: PRODUCT, clientId, actor: { kind: 'person' } })).ok);
+  const doc = createLocalDoc(clientId);
+  const type = async (text: string): Promise<void> => {
+    const update = Buffer.from(localInsert(doc, docText(doc).length, text)).toString('base64url');
+    assert.ok((await appendProductEntry(lead.host, 'doc.update', { product: PRODUCT, update })).ok);
+  };
+  await type('Fuel for three days.');
+  return { stream: created.stream, type };
+}
+
+test('propose takes the live text the fold accepted, keeps the newest header, and refuses an unchanged text or a first version with no kind', async () => {
+  const lead = await leadWith();
+  const { stream, type } = await liveProduct(lead);
+  const owner = new VersionActs(lead.p, OWNER, { deps: lead.at.deps });
+  const before = streamEntries(lead.at, stream);
+  const missing = await owner.propose({ product: PRODUCT });
+  assert.equal(missing.ok ? undefined : missing.reason, 'header-missing');
+  const without = await new VersionActs(lead.p, OWNER).propose({ product: PRODUCT, header: { kind: 'estimate', profile: 'j4', level: 'official' } });
+  assert.equal(without.ok ? undefined : without.reason, 'cannot-write');
+  const unknown = await owner.propose({ product: 'no-such-product' });
+  assert.equal(unknown.ok ? undefined : unknown.reason, 'product-unavailable');
+  assert.deepEqual(streamEntries(lead.at, stream), before);
+
+  const first = await owner.propose({ product: PRODUCT, header: { kind: 'estimate', profile: 'j4', level: 'official' } });
+  assert.ok(first.ok, first.ok ? undefined : first.message);
+  assert.equal(first.version, replicaVersionHash('Fuel for three days.', []));
+  let { product, fold } = await versionFold(lead, stream);
+  assert.deepEqual(product.versions.map((version) => [version.number, version.hash, version.header]),
+    [[1, first.version, { label: LABEL, kind: 'estimate', profile: 'j4', level: 'official' }]]);
+  assert.deepEqual(fold.refused, []);
+  const again = await owner.propose({ product: PRODUCT });
+  assert.equal(again.ok ? undefined : again.reason, 'unchanged');
+
+  await type(' Water for two.');
+  const second = await owner.propose({ product: PRODUCT });
+  assert.ok(second.ok, second.ok ? undefined : second.message);
+  ({ product, fold } = await versionFold(lead, stream));
+  assert.deepEqual(product.versions.map((version) => [version.number, version.hash, version.header.kind]),
+    [[1, first.version, 'estimate'], [2, replicaVersionHash('Fuel for three days. Water for two.', []), 'estimate']]);
+  assert.deepEqual(fold.refused, []);
+  assert.deepEqual(product.refusals, []);
+});
+
+test('in a shared project the staff host proposes, checks, submits and decides on the shared record, and the mechanical check binds to the version', async () => {
+  const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+  ok(await updateMember(lead.host, { member: lead.member, agentSeats: [ROLES.releaseGuard] }), 'authorise guard');
+  const { stream } = await liveProduct(lead);
+  const { signer } = await ReplicaProject.localDevice(lead.at.deps);
+  const host = new StaffHost({
+    root: lead.at.root, signer: async () => signer, keyStatus: async () => trusting(signer), headStore: lead.at.secrets,
+    now: () => lead.at.clock.now.getTime(), replica: { globalStorageDir: lead.at.global }
+  });
+  const team = { slug: 'j4-logistics', section: 'j4' as const, sectionLead: ROLES.sectionLead, members: Object.values(ROLES) };
+  const as = (member: string) => ({ member, run: `${member}-run`, root: lead.at.root, team });
+  const person = { kind: 'person' as const, name: 'A. Demo', role: 'commander', deviceFingerprint: signer.fingerprint };
+  const text = (result: { ok: true; text: string } | { ok: false; message: string }): string => (result.ok ? result.text : result.message);
+  try {
+    const proposed = await host.propose(as(ROLES.owner), { product: PRODUCT, kind: 'estimate' });
+    assert.ok(proposed.ok, text(proposed));
+    assert.match(text(proposed), /^logistics-estimate version 1 recorded in the shared record\./);
+    const target = { product: PRODUCT, hash: replicaVersionHash('Fuel for three days.', []) };
+    const { writeProjections } = await import('../staff/replica/projection');
+    const { projectionInputOf } = await import('../staff/replica/migrate');
+    await writeProjections(lead.at.root, await projectionInputOf(lead.p, lead.at.deps));
+    const file = path.join(lead.at.root, ...productPath('j4', PRODUCT).split('/'));
+    const projected = readFileSync(file);
+
+    // A file that is not the version named is never what a CLEARED rests on.
+    writeFileSync(file, `${projected.toString('utf8')}\nAn edit made outside the shared editor.\n`);
+    const refused = await host.verdict(as(ROLES.releaseGuard), { ...target, gate: 'guard', verdict: 'CLEARED', reasons: [] });
+    assert.equal(text(refused), 'CLEARED is refused: the product file on this computer is not version 1. Sync, then check it again.');
+    assert.equal((await lead.p.findOwnAll('version.verdict', () => true)).length, 0);
+    writeFileSync(file, projected);
+
+    const cleared = await host.verdict(as(ROLES.releaseGuard), { ...target, gate: 'guard', verdict: 'CLEARED', reasons: [] });
+    assert.ok(cleared.ok, text(cleared));
+    assert.equal(text(cleared), 'CLEARED recorded on logistics-estimate version 1; it is now guard-checked.');
+    const submitted = await host.submit(as(ROLES.owner), { product: PRODUCT, decisionFor: 'commander' });
+    assert.ok(submitted.ok, text(submitted));
+    assert.match(text(submitted), /^logistics-estimate version 1 is awaiting a decision by the commander\./);
+    const [submission] = await lead.p.findOwnAll('version.submit', () => true);
+    assert.deepEqual(submission?.data, { ...target, decisionFor: 'commander' });
+
+    // Withdrawing is a person's step; an agent asking the host writes nothing.
+    const before = streamEntries(lead.at, stream);
+    assert.equal(text(await host.withdraw(as(ROLES.owner), { product: PRODUCT, reason: 'Overtaken by events.' })), VERSION_ACT_WORDS['agent-cannot-decide']);
+    // A decision dialog that showed another state of the version is stopped with the D-24 sentence.
+    assert.equal(text(await host.decide(person, { ...target, action: 'approve', stamp: 'f'.repeat(64) })), CHANGED_WHILE_DECIDING_TEXT);
+    // An approval names the version the person saw.
+    assert.equal(text(await host.decide(person, { product: PRODUCT, action: 'approve' })), VERSION_ACT_WORDS['stale-version']);
+    assert.deepEqual(streamEntries(lead.at, stream), before);
+
+    const stamp = await (await host.sharedReplica())?.decisionStamp(target);
+    assert.ok(stamp);
+    const released = await host.decide(person, { ...target, action: 'approve', stamp, releaseOnApproval: true, reasons: ['Ready to proceed.'] });
+    assert.ok(released.ok, text(released));
+    assert.equal(text(released), 'logistics-estimate version 1 is now released, by A. Demo (commander).');
+    const [decision] = await lead.p.findOwnAll('version.decide', () => true);
+    assert.deepEqual(decision?.data, { ...target, outcome: 'approve', reasons: ['Ready to proceed.'], decisionsSeen: [] });
+    const { product, fold } = await versionFold(lead, stream);
+    assert.deepEqual(product.records[0]?.acts.find((act) => act.entry === decision.hash)?.actor, PERSON);
+    assert.equal(product.versions[0]?.state, 'released');
+    assert.deepEqual(fold.refused, []);
+    assert.deepEqual(product.refusals, []);
+  } finally {
+    await host.close();
+  }
 });

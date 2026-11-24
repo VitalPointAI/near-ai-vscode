@@ -105,5 +105,5 @@ test('an earlier format of agent withdrawal is credited to an agent rather than 
   };
   const row = contested([approve, withdrawal]);
   const [card] = contestedCards([row], () => 'Morgan');
-  assert.deepEqual(card.decisions[1], { name: 'A project agent', outcome: 'withdraw', reasons: ['The draft is obsolete.'] });
+  assert.deepEqual(card.decisions[1], { name: 'An agent', outcome: 'withdraw', reasons: ['The draft is obsolete.'] });
 });

@@ -30,9 +30,9 @@
 // - One ReplicaProject is kept per host while its store keeps the same identity (the store folder's device and inode numbers and the roster head
 //   this device's mark names), so its fold context is reused. Before each shared read the identity is compared: Start Again (here or in another window), a folder replaced, or a roster
 //   change another window recorded closes the old project and opens it again; a refused fold drops it too; invalidateShared() forgets it (D-09).
-// - single-machine writes are refused with SHARED_PROJECT_REFUSAL before any file is touched; methods without a result throw SharedProjectError.
-// - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back at their usual
-//   paths, unchanged.
+// - propose, verdict, submit, withdraw and decide write the shared record through replica/versionActs sharedHostAct; every other write is refused
+//   with SHARED_PROJECT_REFUSAL before any file is touched (a method without a result throws SharedProjectError).
+// - the reads of the decision log, the wargame ledger, the event log and the logistics files read the files the projection wrote back, unchanged.
 import { decidePir as decidePirEntry, parseRegisterText, pirRegisterProductBody, registerPath, renderRegister, trustPirDecisions } from '../domain/staff/intel';
 import type { PirEntry } from '../domain/staff/intel';
 import { DECISION_LOG_FILE, DECISION_LOG_GENESIS, pirWording, replayPersonDecisions } from '../domain/staff/personDecisions';
@@ -471,7 +471,7 @@ export class StaffHost {
   }
 
   /** Acquires the admitted project and a read-only decision stamp lookup bound to its verified fold. */
-  public async sharedReplica(): Promise<{ readonly project: SharedProject; decisionStamp(target: { product: string; hash: string }): Promise<string | undefined> } | undefined> {
+  public async sharedReplica(): Promise<{ readonly project: SharedProject; readonly context: { readonly deps: SharedProjectDeps }; decisionStamp(target: { product: string; hash: string }): Promise<string | undefined> } | undefined> {
     if (await this.sharedProjectRefusal() !== SHARED_PROJECT_REFUSAL) return undefined;
     const { pending, opened } = await this.currentShared();
     if ('problem' in opened || this.sharedOpen !== pending) return undefined;
@@ -482,7 +482,7 @@ export class StaffHost {
       const identity = await this.storeIdentity();
       if (this.sharedOpen === pending && identity[0] === folder && folder !== 'missing' && folder !== 'unreadable' && identity[1] === (roster.positions.length > 1 ? head : null)) {
         opened.identity = identity;
-        return !opened.project.context().roster.isAdmitted(opened.project.deviceWriter, head) ? undefined : { project: opened.project,
+        return !opened.project.context().roster.isAdmitted(opened.project.deviceWriter, head) ? undefined : { project: opened.project, context: { deps: opened.deps },
           decisionStamp: async (target) => (await import('./replica/versionActs')).decisionStampAt(fold, opened.project.projectId, target) };
       }
     } catch {
@@ -1035,10 +1035,10 @@ export class StaffHost {
    * owner); a later one is a revision, and after a person approved, released or withdrew the last version it starts a new line with the next number.
    */
   public async propose(caller: StaffCaller, input: { product: string; kind?: string; label?: string; dependsOn?: readonly ProductDependency[] }): Promise<StaffResult> {
-    const sharedRefused = await this.sharedRefusal();
-    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return (await import('./replica/versionActs')).sharedHostAct(this, sharedRefused, SHARED_PROJECT_REFUSAL, { act: 'propose', caller, member, input, defaults: await this.settings(caller.team) });
     if (!STAFF_SLUG.test(input.product)) return refuse('A product name is lower case letters, digits and dashes.');
     // A write-limited member (the red team, the release guard) registers only a product inside its limit: the red team its critique, the guard nothing.
     const limit = staffWriteLimit({ section: caller.team.section }, member);
@@ -1172,10 +1172,10 @@ export class StaffHost {
    * refused while guard-scan holds that version; SIGN-OFF while the tradecraft lint has a finding. The tool writes the gate's report beside the product.
    */
   public async verdict(caller: StaffCaller, input: { product: string; gate: StaffGate; verdict: string; hash: string; reasons: readonly string[] }): Promise<StaffResult> {
-    const sharedRefused = await this.sharedRefusal();
-    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return (await import('./replica/versionActs')).sharedHostAct(this, sharedRefused, SHARED_PROJECT_REFUSAL, { act: 'verdict', caller, member, input });
     const role = await this.roleProblem(member, input.product, 'verdict', input.gate);
     if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
@@ -1226,10 +1226,10 @@ export class StaffHost {
 
   /** submit: the owner or section lead puts a guard-checked product in front of a person, with the options, their risk and the dissent. */
   public async submit(caller: StaffCaller, input: { product: string; decisionFor: string; options?: readonly DecisionOption[]; dissent?: readonly string[]; deadline?: string }): Promise<StaffResult> {
-    const sharedRefused = await this.sharedRefusal();
-    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return (await import('./replica/versionActs')).sharedHostAct(this, sharedRefused, SHARED_PROJECT_REFUSAL, { act: 'submit', caller, member, input });
     const role = await this.roleProblem(member, input.product, 'submit');
     if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
@@ -1253,10 +1253,10 @@ export class StaffHost {
 
   /** withdraw: the owner takes back a product that no person has decided on. */
   public async withdraw(caller: StaffCaller, input: { product: string; reason: string }): Promise<StaffResult> {
-    const sharedRefused = await this.sharedRefusal();
-    if (sharedRefused) return sharedRefused;
     const member = this.memberOf(caller);
     if (typeof member !== 'string') return member;
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return (await import('./replica/versionActs')).sharedHostAct(this, sharedRefused, SHARED_PROJECT_REFUSAL, { act: 'withdraw', caller, member, input });
     const role = await this.roleProblem(member, input.product, 'withdraw');
     if (role) return role;
     const fresh = await this.refresh(caller.root, input.product, caller.run);
@@ -1578,10 +1578,10 @@ export class StaffHost {
    * A named person approves, rejects, releases or withdraws a product, signed with this device's key. Reached only from the VS Code commands; no agent
    * tool calls it, and the state machine refuses each of these from an agent in any case. A release also supersedes the older released version.
    */
-  public async decide(person: PersonActor, input: { product: string; action: 'approve' | 'reject' | 'release' | 'withdraw'; hash?: string; reasons?: readonly string[]; releaseOnApproval?: boolean }): Promise<StaffResult> {
-    const sharedRefused = await this.sharedRefusal();
-    if (sharedRefused) return sharedRefused;
+  public async decide(person: PersonActor, input: { product: string; action: 'approve' | 'reject' | 'release' | 'withdraw'; hash?: string; reasons?: readonly string[]; releaseOnApproval?: boolean; stamp?: string; settle?: boolean }): Promise<StaffResult> {
     if (!isNamedPerson(person)) return refuse(RELEASE_REFUSALS['unnamed-person']);
+    const sharedRefused = await this.sharedRefusal();
+    if (sharedRefused) return (await import('./replica/versionActs')).sharedHostAct(this, sharedRefused, SHARED_PROJECT_REFUSAL, { act: 'decide', person, input });
     const root = this.options.root;
     const fresh = await this.refresh(root, input.product, 'person');
     const state = fresh.replay.products.get(input.product);
