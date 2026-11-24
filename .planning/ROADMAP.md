@@ -336,6 +336,8 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 33.1 to break down)
 
+**Amendment (2026-11-24, from Phase 48.1, observer compliance AC-21.400, AC-21.401, PS-6)**: `observer.approve` records three references with each observer it admits: the information-sharing agreement or arrangement with the observer's organization, the visit clearance, and the signed access agreement. The roster shows on what basis an observer was admitted. Phase 48.1-19 writes the hub and workbench statements from 33.1's tests once this is on `main`; the vocabulary, authorities and rules of behaviour are in `docs/security/hosted-observers.md` (48.1-05).
+
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
 **Depends on**: Phase 33
@@ -760,6 +762,39 @@ Plans:
 - [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
 - [ ] 48-09-PLAN.md: Wave 3. Rig load run to the HQ target of 400 sessions and beyond as headroom (revised 2026-11-24), capacity page and sizing defaults, reference site export; gate PR 4
 - [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
+
+### Phase 48.1: Hosted SA&A completeness (INSERTED)
+**Goal**: Every documentation and evidence obligation that the controls require of the hosted deployment is identified, planned and delivered by us, not left for the owner to spot (owner, 2026-11-24): exchanges and interconnections, external services, the hosted SSP, the threat model and criticality, alerting and audit review, audit store integrity and retention, key management, the hosted crypto inventory, observers, privacy, incident playbooks, roles and separation of duties, suppliers, and continuous monitoring. Generated from one source with CI drift checks wherever possible; written by hand only what cannot be generated.
+**Depends on**: the component catalogue on `docs/component-catalogue` (CM-8, the generated catalogue and the OSCAL inventory; built on, not duplicated); Phase 47 (47-14 and 47-16 before the key separation); Phase 48's compliance machinery and its statement plans 48-04, 48-07 and 48-08, which it fits around; Phase 33.1 for the observer statements. The Phase 47 follow-ups planned in parallel (time source, bundle image scanning, contingency and backup runbooks, media handling, maintenance, the AC-8 notice, guest accounts) are referenced, not planned here.
+**Requirements**: SAA-01 to SAA-14 (defined in `48.1-CONTEXT.md`, one per audit area, with their control ids)
+**Success Criteria** (what must be TRUE):
+  1. Each of the fourteen areas has a gap row from the first plan, and its documents are required documents whose generated blocks a required CI job keeps in step with their sources (exchanges, services, ports and services, diagrams, key inventory, crypto inventory, suppliers, roles, alerts, system description).
+  2. The hosted SSP names the Sterling system and id and carries information types, the boundary with what the site inherits, users and roles, recovery objectives and generated diagrams; the extension SSPs are unchanged.
+  3. Audit failures raise alerts that cannot be silently broken by a missing metric; audit records are archived daily to write-once storage with a signed, chained manifest only the archive job can sign, and leave the online store only after the archive holds them.
+  4. Every hosted key is inventoried from code with its lifecycle; the owner has decided on separating the supplier release key from the site key, and the decision is applied or recorded.
+  5. Every 48.1 obligation shows on the hosted dashboard from current documents and passing tests, and its gap closes only on that evidence.
+**Plans:** 19 plans in 6 waves (planned 2026-11-24; decisions D-01 to D-27 and owner items a to d in `48.1-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
+
+Plans:
+- [ ] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
+- [ ] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with absent() guards; the stale comment fixed
+- [ ] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
+- [ ] 48.1-04-PLAN.md: Wave 1. Six hosted incident playbooks and the continuous monitoring strategy (disconnected edges by signed file)
+- [ ] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
+- [ ] 48.1-06-PLAN.md: Wave 2. External services as a fit-checked `service` kind and their register; model-endpoints and the Controlled Goods and ITAR overlays in the hosted scope
+- [ ] 48.1-07-PLAN.md: Wave 2. Hosted threat model by trust boundary (every T-47 row), criticality analysis, hosted data flows
+- [ ] 48.1-08-PLAN.md: Wave 2. Key management plan and a code-checked key inventory; the cosign, timestamp and crypto-erase limits
+- [ ] 48.1-10-PLAN.md: Wave 2. Roles and separation-of-duties matrix from the policies, invariant tests, training outline
+- [ ] 48.1-12-PLAN.md: Wave 2. Certificate, backup and admission alerts; the generated alert list; the auditor review runbook
+- [ ] 48.1-09-PLAN.md: Wave 3. Hosted crypto inventory per component with open conditions planned; supplier register from resources.json
+- [ ] 48.1-11-PLAN.md: Wave 3. Ports, protocols and services, the network and boundary diagram and workload rights from the rendered charts
+- [ ] 48.1-14-PLAN.md: Wave 3. Audit archive tools: daily export, signed and chained manifest, offline verifier, sign-only OpenBao policy
+- [ ] 48.1-13-PLAN.md: Wave 4. Hosted SSP: Sterling name and id, information types, boundary and inheritance, recovery objectives, users and roles, diagrams
+- [ ] 48.1-15-PLAN.md: Wave 4. Audit archive at the site: our image, the CronJob, the write-once store setting, the fit register repoint
+- [ ] 48.1-16-PLAN.md: Wave 4. Retention (2 years online), archive before delete, archive alerts, the archive and retention documents
+- [ ] 48.1-17-PLAN.md: Wave 5. Owner decision on separating the keys, then the two-key bundle build or the recorded risk
+- [ ] 48.1-18-PLAN.md: Wave 5. Statements and evidence rules for the 48.1 controls
+- [ ] 48.1-19-PLAN.md: Wave 6. Observer statements for the hub and the workbench after Phase 33.1
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -1906,6 +1941,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
 | 47. On-premise deployment stack and offline bundle | 12/18 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
+| 48.1. Hosted SA&A completeness | 0/19 | Planned 2026-11-24 (wave 1 now, 48.1-01 after the component catalogue; owner items a to d open) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
