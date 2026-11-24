@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ia-11"
+  ],
+  "gap": "G328",
+  "id": "g328",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-03-31",
+      "title": "Step-up experiment recorded on the rig"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "On the rig, force a fresh WebAuthn step from a running session and record whether the workbench sees a new auth_time and acr through oauth2-proxy.",
+  "title": "Step-up re-authentication through the session sidecar is not shown"
+}

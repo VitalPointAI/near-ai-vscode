@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cp-02.02"
+  ],
+  "gap": "G327",
+  "id": "g327",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-03-31",
+      "title": "Cold-start experiment recorded on the rig"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Measure cold-start time on the rig with and without image preloading and record it in a run file against the owner's cold-start threshold. The prewarm pool stays at 0 for persistent workspaces, because a pooled pod cannot take a person's saved workspace volume.",
+  "title": "Cold-start time for persistent workspaces is not measured"
+}

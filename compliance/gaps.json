@@ -3950,6 +3950,191 @@
       ],
       "remediation": "Hosted sites run upstream Keycloak at or above the minimum version in the hosted verification records. Before a site runs the Red Hat build of Keycloak instead, confirm with Red Hat which release of that build fixes CVE-2026-6856 for the release line the site would run (Red Hat's data names 26.4.12 and still lists the build as affected; Bugzilla 2460004 reads NEW), and record the answer with its source and date in the hosted verification records.",
       "title": "The Red Hat build of Keycloak release that fixes CVE-2026-6856 is not confirmed"
+    },
+    {
+      "controls": [
+        "cp-02.02",
+        "sc-05"
+      ],
+      "id": "G322",
+      "ownerRole": "owner",
+      "poam": "g322",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Provide the load-test rig, run the load test to the target stage with start bursts, and commit the hashed run file. A stage the rig does not reach is recorded as not reached with its reason; capacity figures in docs come only from the run file.",
+      "title": "The hosted deployment has no recorded load test at the target session count"
+    },
+    {
+      "controls": [
+        "cp-02.02"
+      ],
+      "id": "G323",
+      "ownerRole": "owner",
+      "poam": "g323",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Run several hubs per site under the same load-test run and record each hub's load against its per-hub target in the run file.",
+      "title": "Sync hub load at its per-hub target is not measured under the hosted load test"
+    },
+    {
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G324",
+      "ownerRole": "owner",
+      "poam": "g324",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap.",
+      "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
+    },
+    {
+      "controls": [
+        "sc-08",
+        "sc-13"
+      ],
+      "id": "G325",
+      "ownerRole": "owner",
+      "poam": "g325",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Run the Traefik experiment on the rig (HAProxy and Traefik, host-based and path-based, rule add latency, route propagation, WebSocket survival, Ingress size growth) and record it; confirm from a source whether RKE2 ships a FIPS build of Traefik. HAProxy stays the default unless the owner then chooses otherwise.",
+      "title": "Traefik with Theia Cloud is untested and RKE2's Traefik FIPS build is not confirmed"
+    },
+    {
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G326",
+      "ownerRole": "owner",
+      "poam": "g326",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Test the kms-pkcs11 plugin release in use against the chosen HSM on the rig and record the experiment; until then OpenBao does not rely on it. SoftHSM2 results prove wiring only.",
+      "title": "The OpenBao kms-pkcs11 plugin is not tested against the chosen HSM"
+    },
+    {
+      "controls": [
+        "cp-02.02"
+      ],
+      "id": "G327",
+      "ownerRole": "owner",
+      "poam": "g327",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Measure cold-start time on the rig with and without image preloading and record it in a run file against the owner's cold-start threshold. The prewarm pool stays at 0 for persistent workspaces, because a pooled pod cannot take a person's saved workspace volume.",
+      "title": "Cold-start time for persistent workspaces is not measured"
+    },
+    {
+      "controls": [
+        "ia-11"
+      ],
+      "id": "G328",
+      "ownerRole": "owner",
+      "poam": "g328",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "On the rig, force a fresh WebAuthn step from a running session and record whether the workbench sees a new auth_time and acr through oauth2-proxy.",
+      "title": "Step-up re-authentication through the session sidecar is not shown"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "ia-05"
+      ],
+      "id": "G329",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add evidence rules on the realm as code that prove each signInKeys level: passkeys accepts synced and device-bound passkeys; hardware-only requires attestation, a non-empty AAGUID allowlist and device-bound keys and is the recommended production setting. State that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped.",
+      "title": "The signInKeys levels have no evidence rule yet"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "ia-05"
+      ],
+      "id": "G330",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the evidence rule that proves each site's relying-party ID is the shared parent domain of its DNS layout (O3).",
+      "title": "The shared relying-party ID has no evidence rule yet"
+    },
+    {
+      "controls": [
+        "ia-05.02"
+      ],
+      "id": "G331",
+      "ownerRole": "owner",
+      "poam": "g331",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "On the rig, measure Keycloak memory and refresh time against a large revocation list, or test a local OCSP responder, and record the experiment.",
+      "title": "Large smart-card revocation lists are not tested"
+    },
+    {
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G332",
+      "ownerRole": "owner",
+      "poam": "g332",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Keycloak's FIPS guide asks for bc-fips 2.1.3, which Bouncy Castle describes as going into submission; the active certificates name 2.0.0 and 2.1.x. Record a certificate that names the version in use, or record the owner's decision on which certificate-listed version to run in strict mode and how it is proven to work.",
+      "title": "No FIPS 140-3 certificate names the BC-FIPS version Keycloak 26.8 asks for"
+    },
+    {
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G333",
+      "ownerRole": "owner",
+      "poam": "g333",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Decide between running Harbor and Zot under recorded conditions without a validated module and rebuilding them (Zot with a pinned GOFIPS140 module version; Harbor component by component), then record the decision and, for a rebuild, the build evidence.",
+      "title": "Harbor and Zot have no build made with a validated module"
     }
   ]
 }

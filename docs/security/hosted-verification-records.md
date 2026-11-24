@@ -13,9 +13,38 @@ stale a year after the last review.
 
 ## Verification register
 
+One row per item of DESIGN section 12, in its order, then the three desk items D-24 adds. A row
+reads closed when a dated record settles it, decided when the design already settled it and an
+evidence rule will prove the configuration, and open when it waits on the rig, a purchase or an
+upstream source. A row that is closed for one part and open for another names both its record and
+its gap.
+
 | # | Item | State | Reference |
 |---|---|---|---|
+| 1 | No public proof of a Theia Cloud deployment at the target session count: a load test on our own hardware to the target, with start bursts, operator reconcile rate, the shared Ingress object's size against etcd's request limit, etcd load per session, ingress reload time and cold-start time | open | gap G322 |
+| 2 | Hub capacity at its per-hub target (MUS 10.9): several hubs per site, measured under the same load test | open | gap G323 |
 | 3 | Keycloak CVE-2026-6856 (acceptable AAGUID bypass with self-attestation): the fixed version to pin | closed | Record: Keycloak CVE-2026-6856 fix version; gap G321 |
+| 4 | HSM certificates: the FIPS 140-3 certificate numbers of the HSM models | closed | Record: HSM FIPS 140-3 certificates; gap G324 |
+| 5 | Go FIPS module: its CMVP certificate status at build time | closed | Record: Go Cryptographic Module certificates |
+| 6 | Traefik with Theia Cloud: untested, and HAProxy stays the default until it is tested | open | Record: Traefik and the Theia Cloud chart; gap G325 |
+| 7 | OpenBao `kms-pkcs11` plugin (v0.3.0): tested against the chosen HSM before relying on it | open | Record: OpenBao kms-pkcs11 plugin release; gap G326 |
+| 8 | Theia Cloud project health: small maintainer group, last stable release; we pin, and fork the operator library only if needed | closed | Record: Theia Cloud project health |
+| 9 | Prewarm pool with personal volumes: how a pooled pod gets the person's volume at claim; the pool stays at 0 until shown | open | Record: Prewarm pool and personal volumes; gap G327 |
+| 10 | Step-up re-authentication through the sidecar: the workbench forces a fresh WebAuthn step and sees the new `acr` | open | gap G328 |
+| 11 | Synced passkeys: accepted under `signInKeys: passkeys`, refused under `hardware-only`, which requires attestation, an AAGUID allowlist and device-bound keys and is the recommended production setting for defence sites | decided | gap G329 |
+| 12 | Cross-device (hybrid) passkey sign-in: needs Bluetooth and an Apple or Google internet relay, so it is unavailable air-gapped; same-device passkeys need no internet | decided | gap G329 |
+| 13 | Shared relying-party ID across sites: the DNS layout per deployment (O3) | decided | gap G330 |
+| 14 | Large smart-card revocation lists: a local OCSP responder or a scheduled CRL refresh at each site | open | gap G331 |
+| 15 | Theia 1.77 supported Node range, before settling P11 | closed | Record: Theia 1.77 supported Node range |
+| 16 | UBI 9 OpenSSL FIPS provider: its certificate number (D-24) | closed | Record: RHEL 9 OpenSSL FIPS provider certificate |
+| 17 | BC-FIPS for Keycloak strict mode: the module certificates and the version Keycloak accepts (D-24) | closed | Record: Bouncy Castle FIPS Java certificates; gap G332 |
+| 18 | Harbor and Zot FIPS builds (D-24) | open | Record: Harbor and Zot FIPS builds; gap G333 |
+
+The decided rows are not reopened here (D-26). Which `signInKeys` level a site runs is that
+site's setting: `passkeys` is the default for development and the lab, and `hardware-only` is the
+recommended setting for defence production. Their gaps close in Phase 48 when the evidence rules
+that prove each level's configuration from the realm as code, and the shared relying-party ID,
+exist. SoftHSM2 on a lab rig proves the HSM wiring only and is never evidence for a FIPS claim.
 
 ## Keycloak CVE-2026-6856 fix version
 
@@ -121,3 +150,413 @@ Red Hat build for it, and Bugzilla still reads NEW. A site that runs the Red Hat
 the upstream pin confirms the fixed release with Red Hat first.
 
 Minimum upstream version: 26.8.0
+
+## HSM FIPS 140-3 certificates
+
+The candidate models' certificates, as NIST shows them. They are candidates only: the certificate
+that counts is the one that matches the model, hardware version, firmware and approved mode your
+organization buys, so the chosen model stays open as gap G324. SoftHSM2 never stands in for it.
+The Utimaco u.trust General Purpose HSM Se-Series is not named on any active NIST certificate
+found, and #5223 (u.trust Anchor) is not assumed to cover it.
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4684
+Checked: 2026-11-23
+
+```text
+Certificate #4684
+Module Name Thales Luna K7 Cryptographic Module
+Standard FIPS 140-3
+Status Active
+Sunset Date 4/1/2029
+Overall Level 3
+Caveat When operated in approved mode
+Hardware Versions 808-000048-002, 808-000048-003, 808-000066-001, 808-000073-001, 808-000073-002
+Firmware Versions 7.8.4 with bootloader version 1.1.1, 1.1.2, 1.1.4 or 1.1.5; 7.8.5 with bootloader version 1.1.1, 1.1.2, 1.1.4 or 1.1.5
+Validation history: 4/2/2024 Initial; 7/7/2025 Update
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5329
+Checked: 2026-11-23
+
+```text
+Certificate #5329
+Module Name nShield 5s Hardware Security Module
+Standard FIPS 140-3
+Status Active
+Sunset Date 8/18/2029
+Overall Level 3
+Caveat When installed, initialized and configured as specified in Section 11.3 of the Security Policy
+Validation history: 6/15/2026 Initial; updates 6/22/2026, 6/29/2026, 8/26/2026, 9/11/2026, 11/10/2026
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4745
+Checked: 2026-11-23
+
+```text
+Certificate #4745
+Module Name nShield 5s Hardware Security Module
+Standard FIPS 140-3
+Status Active
+Sunset Date 7/30/2029
+Overall Level 3
+Caveat When installed, initialized and configured as specified in Section 11.3 of the Security Policy
+Hardware Versions PCA10005-01 revision 03 and 04; PCA10051-01 revision 01
+Firmware Versions primary-version 13.2.4; recovery-version 13.2.4; uboot-version 1.1.0, uboot-version 1.4.1 and uboot-version 14.2.2
+Validation history: 7/31/2024 Initial; updates 4/1/2025, 9/8/2026, 9/23/2026
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4765
+Checked: 2026-11-23
+
+```text
+Certificate #4765 Historical - The referenced cryptographic module should not be included by Federal Agencies in new procurements.
+Module Name nShield 5s Hardware Security Module
+Status Historical
+Historical Reason Replaced by certificate #5329
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5223
+Checked: 2026-11-23
+
+```text
+Certificate #5223
+Module Name u.trust Anchor
+Standard FIPS 140-3
+Status Active
+Sunset Date 3/31/2031
+Overall Level 3
+Caveat When operated in approved mode. When installed, initialized and configured as specified in Section 11.1 of the Security Policy. No assurance of minimum security of SSPs (e.g., keys, bit strings) that are externally loaded, or of SSPs established with externally loaded SSPs.
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/validated-modules/search?SearchMode=Basic&Vendor=Utimaco&CertificateStatus=Active&ValidationYear=0
+Checked: 2026-11-23
+
+```text
+5223 Utimaco IS GmbH u.trust Anchor Hardware 04/01/2026
+4992 Utimaco Inc. Atalla Cryptographic Subsystem (ACS) Hardware 03/25/2025
+```
+
+## Go Cryptographic Module certificates
+
+Both Go Cryptographic Module versions have active FIPS 140-3 certificates. The mapping from
+module version to certificate comes from go.dev; the NIST pages do not show the module version.
+Go keeps an older module version only until a newer one is validated, so every rebuild job that
+uses the module pins the Go toolchain and the `GOFIPS140` module version and records both.
+Go+BoringCrypto is not an alternative: it does not work with the native FIPS 140-3 mode.
+
+Source: https://go.dev/doc/security/fips140
+Checked: 2026-11-23
+
+```text
+Go Cryptographic Module v1.26.0 was frozen in early 2026 from Go 1.26. It is available from Go 1.26.12, Go 1.27.5, and Go 1.28. Previous versions of Go 1.26 and Go 1.27 include an earlier iteration of Go Cryptographic Module v1.26.0. It is covered by CMVP Certificate #5581 and CAVP Certificate A8028 .
+Go Cryptographic Module v1.0.0 was frozen in early 2024 from Go 1.24. It is available from Go 1.24.8, Go 1.25.2, and Go 1.26. Earlier versions of Go 1.24 and Go 1.25 include an earlier iteration of Go Cryptographic Module v1.0.0. It is covered by CMVP Certificate #5247 and CAVP Certificate A6650 .
+Older Go Cryptographic Module versions continue to be supported and available for as long as a more recent version has not obtained a CMVP validation certificate. Once a more recent version has obtained a CMVP validation certificate, older versions will be removed.
+NOTE: Simply using a FIPS 140-3 compliant and validated cryptographic module may not—on its own—satisfy all relevant regulatory requirements.
+Go+BoringCrypto is incompatible with the native FIPS 140-3 mode.
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5247
+Checked: 2026-11-23
+
+```text
+Certificate #5247
+Module Name Go Cryptographic Module
+Vendor Geomys LLC
+Standard FIPS 140-3
+Status Active
+Sunset Date 4/26/2031
+Overall Level 1
+Caveat When operated in approved mode. No assurance of the minimum strength of generated SSPs (e.g., keys). No assurance of minimum security of SSPs (e.g., keys, bit strings) that are externally loaded, or of SSPs established with externally loaded SSPs.
+Validation history: 4/27/2026 Initial; 7/7/2026 Update
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5581
+Checked: 2026-11-23
+
+```text
+Certificate #5581
+Module Name Go Cryptographic Module
+Vendor Geomys LLC
+Standard FIPS 140-3
+Status Active
+Sunset Date 11/12/2031
+Overall Level 1
+Caveat When operated in approved mode. No assurance of minimum security of SSPs (e.g., keys, bit strings) that are externally loaded, or of SSPs established with externally loaded SSPs.
+Validation history: 11/13/2026 Initial; 11/20/2026 Update
+```
+
+## Traefik and the Theia Cloud chart
+
+What the desk can settle before the rig experiment. The Theia Cloud chart supports HAProxy and
+nginx annotations and otherwise only annotations set explicitly, so Traefik works only through
+explicit annotations. RKE2 makes Traefik the default ingress for new clusters, but its FIPS page
+names its NGINX ingress, not Traefik, as the FIPS-built ingress. So both the Traefik experiment and
+a FIPS build of RKE2's Traefik stay open as gap G325.
+
+Source: https://github.com/eclipse-theia/theia-cloud-helm/blob/7687955f5dd8936a313c940ac42550f1fb331db6/charts/theia-cloud/values.yaml
+Checked: 2026-11-23
+
+```text
+# -- The ingress controller to use. Currently supported: "nginx", "haproxy", or null
+# Determines controller-specific default annotations and ingress class name to use.
+# Using null or an unknown value results in only explicitly specified annotations being used.
+controller: haproxy
+# false uses an explicit host for each service
+usePaths: false
+```
+
+Source: https://github.com/eclipse-theia/theia-cloud/issues/464
+Checked: 2026-11-23
+
+```text
+title: Move away from nginx-ingress-controller
+state: closed
+closed_at: 2026-04-09T11:26:33Z
+```
+
+Source: https://docs.rke2.io/networking/networking_services
+Checked: 2026-11-23
+
+```text
+Ingress NGINX went End-of-Life in March 2026 . Starting with v1.36, Traefik is the default for new clusters.
+ingress-nginx went EOL in March 2026. No new images or fixes are expected.
+In v1.36, RKE2 still includes ingress-nginx but with a deprecated status. In v1.37, ingress-nginx is removed
+```
+
+Source: https://docs.rke2.io/security/fips_support
+Checked: 2026-11-23
+
+```text
+FIPS 140-2 Enablement
+RKE2 supports selecting a different CNI via the --cni flag and comes bundled with several CNIs including Canal (default), Calico, Cilium, and Multus. Of these, only Canal (the default) is rebuilt for FIPS compliance.
+RKE2 ships with FIPS compliant NGINX as its default ingress provider.
+(The page body does not mention Traefik.)
+```
+
+## OpenBao kms-pkcs11 plugin release
+
+The plugin is still at v0.3.0, the newest `kms-pkcs11` release. It is tested against the chosen
+HSM on the rig before OpenBao relies on it (gap G326).
+
+Source: https://github.com/openbao/openbao-plugins/releases
+Checked: 2026-11-23
+
+```text
+kms-pkcs11-v0.3.0 2026-11-03T09:05:33Z
+kms-pkcs11-v0.2.1 2026-09-23T19:07:16Z
+kms-pkcs11-v0.2.0 2026-09-08T15:06:40Z
+kms-pkcs11-v0.1.0 2026-06-18T08:37:52Z
+```
+
+## Theia Cloud project health
+
+Refreshed: the project is active and its licence is unchanged, the last stable release is still
+1.2.0, and a few maintainers do most of the work. The decision stands: pin the assessed release or
+our own build of an assessed commit, and fork the operator library only if needed (D-06).
+
+Source: https://github.com/eclipse-theia/theia-cloud
+Checked: 2026-11-23
+
+```text
+pushed_at: 2026-11-20T13:37:46Z
+archived: false
+license: EPL-2.0
+contributors by commits (top four): jfaltermeier 199, lucas-koehler 96, sgraband 75, martin-fleck-at 22
+commits since 2026-05-23 by author: lucas-koehler 4, ANAMASGARD 4, jfaltermeier 1, Krutskik 1, ndoschek 1
+```
+
+Source: https://github.com/eclipse-theia/theia-cloud/releases
+Checked: 2026-11-23
+
+```text
+1.2.0 2026-04-09T09:12:21Z
+1.1.2 2025-09-29T07:24:16Z
+1.1.1 2025-08-01T13:44:32Z
+```
+
+## Prewarm pool and personal volumes
+
+The desk part: neither upstream Theia Cloud nor EduIDE gives a pooled pod a person's saved
+workspace volume. EduIDE serves only temporary workspaces from its pool, and upstream eager start
+is not fully supported. So the pool stays at 0 for persistent workspaces. The rig part, cold-start
+time measured against the owner's cold-start threshold with and without image preloading, is gap
+G327.
+
+Source: https://github.com/EduIDE/Docs/blob/a9c4cf548fd834f7e3bd359ba140e6820238f1af/docs/developer/platform/session-prewarming.md
+Checked: 2026-11-23
+
+The source of the EduIDE session prewarming page (`eduide.github.io/Docs/developer/platform/session-prewarming`):
+
+```text
+A saved workspace (`volume`) always starts cold, because Kubernetes cannot attach a volume to a running pod. A pool serves temporary workspaces (`none`) only.
+```
+
+Source: https://github.com/eclipse-theia/theia-cloud/blob/main/documentation/Architecture.md
+Checked: 2026-11-23
+
+```text
+the following options are not fully supported at the moment:
+--eagerStart | boolean | Whether sessions will be created before there is a user to speed up starts
+minInstances | integer | Instances that should be started eagerly without an existing user
+```
+
+Source: https://github.com/eclipse-theia/theia-cloud-helm/blob/7687955f5dd8936a313c940ac42550f1fb331db6/charts/theia-cloud/values.yaml
+Checked: 2026-11-23
+
+```text
+# Currently only false is fully supported.
+eagerStart: false
+```
+
+## Theia 1.77 supported Node range
+
+Theia 1.77.0 requires Node 24 or later and its own CI tests Node 24 and Node 26, so P11 can settle
+on Node 26. Phase 46 has not recorded this item, so it is recorded here. The workbench's native
+addons still need Phase 46's build proof.
+
+Source: https://github.com/eclipse-theia/theia/blob/v1.77.0/package.json
+Checked: 2026-11-23
+
+```text
+"engines": {"node": ">=24"}
+```
+
+Source: https://github.com/eclipse-theia/theia/blob/v1.77.0/.github/workflows/ci-cd.yml
+Checked: 2026-11-23
+
+```text
+72:        node: [24.x, 26.x]
+release v1.77.0 published 2026-11-05T19:31:06Z
+```
+
+## RHEL 9 OpenSSL FIPS provider certificate
+
+The RHEL 9 OpenSSL FIPS provider has an active FIPS 140-3 certificate, #5573, which replaced
+#4857. It is validated only in approved mode, and Red Hat lists it for RHEL 9.0 to 9.8. Red Hat's
+page does not discuss UBI container images, so the conditions stay as section 10 states them: a
+host in FIPS mode and the RHEL provider in the image.
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/5573
+Checked: 2026-11-23
+
+```text
+Certificate #5573
+Module Name Red Hat Enterprise Linux 9 - OpenSSL FIPS Provider
+Standard FIPS 140-3
+Status Active
+Sunset Date 10/28/2029
+Overall Level 1
+Caveat When operated in approved mode. The module generates SSPs (e.g., keys) whose strengths are modified by available entropy. No assurance of minimum security of SSPs (e.g., keys, bit strings) that are externally loaded, or of SSPs established with externally loaded SSPs.
+Validation history: 11/9/2026 Initial
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4857
+Checked: 2026-11-23
+
+```text
+Certificate #4857 Historical
+Module Name Red Hat Enterprise Linux 9 - OpenSSL FIPS Provider
+Status Historical
+Historical Reason Replaced by certificate #5573
+Software Versions 3.0.7-395c1a240fbfffd8
+```
+
+Source: https://access.redhat.com/compliance/fips
+Checked: 2026-11-23
+
+```text
+RHEL 9.8 ... Cryptographic Module Module Version Associated Packages Validation Status Certificate OpenSSL 3.0.7-395c1a240fbfffd8 openssl-fips-provider-3.0.7-6.el9 (1) Active #5573
+RHEL 9.0 ... OpenSSL 3.0.1-3f45e68ee408cd9c openssl-3.0.1-46.el9_0.3 Active #5573
+```
+
+## Bouncy Castle FIPS Java certificates
+
+BC-FJA 2.0.0 and 2.1.x have active FIPS 140-3 certificates (#4743 and #4943). Keycloak's FIPS
+guide asks for bc-fips 2.1.3, which Bouncy Castle describes as a patch release going into
+submission, so no certificate names the version Keycloak 26.8 asks for. That coupling is gap
+G332. The guide also says the Bouncy Castle FIPS library is validated with OpenJDK 21, not 25,
+which matches the OpenJDK 21 condition in section 10.
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4743
+Checked: 2026-11-23
+
+```text
+Certificate #4743
+Module Name BC-FJA (Bouncy Castle FIPS Java API)
+Standard FIPS 140-3
+Status Active
+Sunset Date 7/28/2029
+Overall Level 1
+Caveat When operated in approved mode. No assurance of the minimum strength of generated SSPs (e.g., keys).
+Software Versions 2.0.0
+```
+
+Source: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943
+Checked: 2026-11-23
+
+```text
+Certificate #4943
+Module Name BC-FJA (Bouncy Castle FIPS Java API)
+Standard FIPS 140-3
+Status Active
+Sunset Date 1/16/2030
+Overall Level 1
+Caveat Interim Validation. When operated in approved mode. The module generates SSPs (e.g., keys) whose strengths are modified by available entropy
+Software Versions 2.1.1
+Validation history: 1/17/2025 Initial; updates 11/14/2025, 11/10/2026
+```
+
+Source: https://www.bouncycastle.org/download/bouncy-castle-java-fips/
+Checked: 2026-11-23
+
+```text
+BC-FJA 2.1.0/2.1.3 The 2.1.0 release, BC-FJA 2.1.0 ( Certificate #4943 ) , is certified for use on Java 8, Java 11, Java 17, and Java 21. The 2.1.3 release is a patch release on 2.1.0/2.1.1/2.1.3, going into submission.
+```
+
+Source: https://www.keycloak.org/server/fips
+Checked: 2026-11-23
+
+The guide at its current-version address on the checked date, when 26.8.2 was the latest release:
+
+```text
+The supported BCFIPS bits needed are: bc-fips version 2.1.3. bctls-fips version 2.1.25. bcpkix-fips version 2.1.13. bcutil-fips version 2.1.8.
+Keycloak FIPS 140-2 integration is tested with OpenJDK 25, however the underlying BouncyCastle FIPS library is not officially validated with OpenJDK 25. Hence for FIPS 140-2 compliance, it is still recommended to use Keycloak on OpenJDK 21.
+The more secure alternative is to use --features=fips --fips-mode=strict in which case BouncyCastle FIPS will use "approved mode".
+```
+
+## Harbor and Zot FIPS builds
+
+Neither project publishes a build made with a validated module. Zot documents a FIPS 140-3 mode
+switched on at run time, which uses whichever Go Cryptographic Module the binary was built with;
+its releases do not say they were built with a validated module version. Harbor documents no FIPS
+build. So the choice between running them under conditions and rebuilding them is gap G333, an
+owner decision.
+
+Source: https://github.com/project-zot/project-zot.github.io/blob/main/docs/general/whats-new.md
+Checked: 2026-11-23
+
+```text
+## [v2.1.9](https://github.com/project-zot/zot/releases/tag/v2.1.9)
+### FIPS 140-3 Compliance
+On Linux, zot can be deployed in FIPS 140-3 mode (in terms of cryptographic protocols used) by setting the environment variable [`GODEBUG="fips140=only"`](https://go.dev/doc/security/fips140).
+```
+
+Source: https://github.com/project-zot/zot/blob/main/test/blackbox/helpers_pushpull.bash
+Checked: 2026-11-23
+
+```text
+if [ "${PUSHPULL_FIPS_MODE:-0}" = 1 ]; then
+    export GODEBUG="fips140=only"
+fi
+```
+
+Source: https://github.com/search?q=org%3Agoharbor+FIPS&type=code
+Checked: 2026-11-23
+
+GitHub code search through the API (`search/code?q=org:goharbor+FIPS`), and the same search of
+the Harbor website repository:
+
+```text
+org:goharbor FIPS: total_count 2 (src/pkg/reg/adapter/awsecr/adapter.go, src/pkg/reg/adapter/awsecr/adapter_test.go)
+repo:goharbor/website fips: total_count 0
+```
