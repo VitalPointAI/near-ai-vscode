@@ -41,7 +41,7 @@ const railActions: ReadonlyArray<{ readonly label: string; readonly icon: string
 const workAreaCards: ReadonlyArray<{ readonly label: string; readonly icon: string; readonly description: string; readonly kind: string }> = [
   { label: 'Capability Development', icon: 'project', description: 'Organize the programs, projects, and products that deliver a capability.', kind: 'capability-development' },
   { label: 'Exercises & Training', icon: 'mortar-board', description: 'Prepare exercises and organize training.', kind: 'training' },
-  { label: 'Operations', icon: 'briefcase', description: 'Organize coordination, reporting, and records.', kind: 'operations' },
+  { label: 'Planning', icon: 'checklist', description: 'Develop strategic, operational, and tactical plans.', kind: 'operations' },
   { label: 'Resource Management', icon: 'layers', description: 'Coordinate people, equipment, and capacity.', kind: 'resources' }
 ];
 
@@ -202,6 +202,12 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   @inject(CommandRegistry)
   protected readonly commandRegistry!: CommandRegistry;
 
+  @inject(WorkspaceService)
+  protected readonly workspaceService!: WorkspaceService;
+
+  @inject(FileService)
+  protected readonly fileService!: FileService;
+
   onStart(app: FrontendApplication): void {
     app.shell.addClass(edition.workbenchClass);
     const { tabBar } = app.shell.rightPanelHandler;
@@ -249,7 +255,16 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
     tabBar.addClass('sterling-managed-rail');
   }
 
+  /** A workspace that is one work area opens on that work area's page; anything else opens on Get Started. */
   async initializeLayout(): Promise<void> {
+    const [root, ...otherRoots] = await this.workspaceService.roots;
+    if (root && !otherRoots.length) {
+      const area = await readActiveWorkArea(this.fileService, root.resource);
+      if (area) {
+        await this.commandRegistry.executeCommand('sterling.workAreas.open', area.kind);
+        return;
+      }
+    }
     await this.openView({ activate: true });
   }
 
