@@ -777,7 +777,7 @@ Plans:
 - [ ] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
 - [ ] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
 - [ ] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
-- [ ] 48.1-04-PLAN.md: Wave 1. Six hosted incident playbooks and the continuous monitoring strategy (disconnected edges by signed file)
+- [ ] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
 - [ ] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
 - [ ] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
 - [ ] 48.1-06-PLAN.md: Wave 2. External services as a fit-checked `service` kind and their register; model-endpoints and the Controlled Goods and ITAR overlays in the hosted scope
@@ -796,7 +796,7 @@ Plans:
 - [ ] 48.1-15-PLAN.md: Wave 5. Audit archive at the site: our image, the archive and sign-watch CronJobs, the object store and 1,825-day settings, the fit register repoint
 - [ ] 48.1-18-PLAN.md: Wave 6. Statements and evidence rules for the 48.1 controls
 - [ ] 48.1-21-PLAN.md: Wave 6. Key separation in the inventory, key plan, playbooks and fit register text
-- [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench after Phase 33.1, whose observer.approve records the required references according to what the observer may see (33.1 D-37; 48.1-HANDOFFS.md H-18)
+- [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench once Phase 71 (core)'s credential release check and 33.1's observer waves are on main: access and visit-clearance credentials, the agreements record and the clearance level for marked material (48.1-HANDOFFS.md H-18)
 
 ## Milestone v0.5.0: Governed agent platform
 
