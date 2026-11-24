@@ -120,7 +120,7 @@ One format decides what a credential is: two fixed contexts, one type of sevente
 
 - G350: Ed25519 still runs in no validated module. This plan delivers the ready fallback suite. A strict-FIPS site also needs validated builds of Node and OpenBao, which do not exist yet.
 
-Owner item 3 (D-05) is still open: the context URL `https://w3id.org/sterling/credentials/v1` is the default the code uses, and it is to be registered with w3id.org before the first real credential. Verification never fetches it. This is tracked in 71-CONTEXT.md; no gap was added here.
+- G425: the context address `https://w3id.org/sterling/credentials/v1` (owner item 3, D-05) is to be registered with w3id.org before the first real credential (appliesAt now, blocks production, closes in Phase 71). Verification never fetches it.
 
 ## Known Stubs
 

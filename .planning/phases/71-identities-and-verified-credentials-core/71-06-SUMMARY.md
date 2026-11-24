@@ -140,7 +140,7 @@ agreements: { v: 1, items: [{ id, partner, tokens (sorted label tokens), levelCe
 
 ## Notes for later plans
 
-- The load path's roll-forward (a newer layer signed by the pinned key found on disk) does not call `requirementsOnlyTighten`; the plan asked to change only the accept path. Such a file needs your organization's key, and the accept path that writes it already checked it.
+- The load path's roll-forward (a newer layer signed by the pinned key found on disk) is now held to the same rule (coordinator, 2026-11-24; fix commit 9c133bff). The pin keeps the requirements map of the layer in force, and a looser file fails the whole policy closed. The new store test failed on the code before the fix.
 - `issuerAuthority` reads device bindings and delegations from the caller. A verifier that does not know a binding cannot refuse that person's device key as an issuer, so 71-07's `checkEvidence` must pass the bindings it holds. A `did:key` issuer is refused structurally either way.
 
 ## Open conditions
