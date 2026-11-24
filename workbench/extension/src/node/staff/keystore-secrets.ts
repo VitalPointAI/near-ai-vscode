@@ -7,6 +7,7 @@
  * device key is the person key in Transit. So storing under the names the single-machine identity keeps its plain private keys in is refused,
  * which turns a wrong wiring into a visible failure instead of a long-term key in the store. Nothing here imports Theia or logs.
  */
+import type { SecretStoreKind } from '../../common/secret-store.js';
 import type { KeyStore } from '../key-stores.js';
 
 /** The engine's SecretStorageLike (src/services/auth.ts), structurally. */
@@ -34,11 +35,17 @@ export const PLAIN_PRIVATE_KEY_SECRETS: readonly string[] = Object.freeze([
   'nearAi.identity.previousDeviceKey',
 ]);
 
-export function keyStoreSecrets(keyStore: Pick<KeyStore, 'getPassword' | 'setPassword' | 'deletePassword'>, service: string): SecretStorageLike {
+/**
+ * The key store as SecretStorageLike. `kind` is the store's (key-stores.ts): the plain private-key names are refused for your organization's OpenBao
+ * store (a hosted session); this computer's keyring (a single machine) keeps the device key and the X25519 key as the extension does.
+ */
+export function keyStoreSecrets(
+  keyStore: Pick<KeyStore, 'getPassword' | 'setPassword' | 'deletePassword'>, service: string, kind: SecretStoreKind = 'openbao',
+): SecretStorageLike {
   return {
     get: (key) => keyStore.getPassword(service, key),
     store: async (key, value) => {
-      if (PLAIN_PRIVATE_KEY_SECRETS.includes(key)) throw new Error(KEY_STORE_SECRETS_TEXT.plainPrivateKey);
+      if (kind !== 'keyring' && PLAIN_PRIVATE_KEY_SECRETS.includes(key)) throw new Error(KEY_STORE_SECRETS_TEXT.plainPrivateKey);
       await keyStore.setPassword(service, key, value);
     },
     delete: async (key) => {
