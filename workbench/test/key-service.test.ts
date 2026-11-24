@@ -1,7 +1,8 @@
 // Phase 46, plan 07, task 3 (D-20, D-21, D-25; T-46-28 to T-46-30), against the fake OpenBao: sign logs in to the step-up role with the fresh
 // forwarded token, signs with that short-lived token and revokes it, in that order, and only after the acr and auth_time guard passes; the
 // session's own token never signs. Wrapped data keys and unwrapping use the session token. Missing keys, local mode and an inactive session
-// are plain refusals; only sign, datakey/wrapped and decrypt paths are ever called; the RPC object has no unwrapDataKey; nothing leaks.
+// are plain refusals; only sign, datakey/wrapped and decrypt paths are ever called, and one read of the person's own signing key (Phase 33
+// D-61, owner decision 2026-11-24); the RPC object has no unwrapDataKey and no personPublicKey; nothing leaks.
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { KEY_SERVICE_TEXT } from '../extension/src/common/key-service.ts';
@@ -20,6 +21,8 @@ const ACR = 'urn:sterling:acr:phishing-resistant';
 const NOW = 1_795_000_000_000;
 const SIGNATURE = Buffer.alloc(64, 7).toString('base64');
 const MESSAGE = Buffer.from('a statement to sign').toString('base64');
+const PUBLIC_V1 = Buffer.alloc(32, 1);
+const PUBLIC_V2 = Buffer.alloc(32, 2);
 const output = captureOutput();
 const fakes: FakeOpenBao[] = [];
 const allCalls: FakeCall[] = [];
@@ -29,10 +32,13 @@ after(async () => {
   output.stop();
   const text = output.text();
   for (const value of [SESSION_TOKEN, STEPUP_TOKEN, FORWARDED, ENTITY]) assert.ok(!text.includes(value), 'no token or entity id reached the console');
-  // Across the whole file: only the step-up login, its revoke and the three Transit paths, never a key administration path (T-46-30).
+  // Across the whole file: only the step-up login, its revoke, the three Transit paths and a GET of the person's own signing key, never a key
+  // administration path (T-46-30).
+  const ownKey = `GET /v1/transit/keys/person-${ENTITY}`;
   const allowed = [/^\/v1\/auth\/jwt\/login$/, /^\/v1\/auth\/token\/revoke-self$/, /^\/v1\/transit\/sign\//, /^\/v1\/transit\/datakey\/wrapped\//, /^\/v1\/transit\/decrypt\//];
-  for (const call of allCalls) assert.ok(allowed.some((rule) => rule.test(call.path)), `unexpected OpenBao path ${call.path}`);
-  assert.ok(allCalls.every((call) => !/transit\/(keys|rotate|export|config|restore|backup|trim)/.test(call.path)));
+  for (const call of allCalls) assert.ok(`${call.method} ${call.path}` === ownKey || allowed.some((rule) => rule.test(call.path)), `unexpected OpenBao path ${call.path}`);
+  assert.ok(allCalls.every((call) => `${call.method} ${call.path}` === ownKey || !/transit\/(keys|rotate|export|config|restore|backup|trim)/.test(call.path)));
+  assert.ok(allCalls.every((call) => !/transit\/(rotate|export|config|restore|backup|trim)|\/keys\/.*\//.test(call.path)));
 });
 
 const HOSTED_ENV = { STERLING_OPENBAO_ADDR: 'http://127.0.0.1:8200', THEIACLOUD_SESSION_USER: 'ada@example.test', STERLING_STEPUP_ACR: ACR };
@@ -54,6 +60,9 @@ async function world(options: {
     [`POST /v1/transit/sign/person-${ENTITY}`]: () => ({ json: { data: { signature: `vault:v1:${SIGNATURE}`, key_version: 1 } } }),
     [`POST /v1/transit/datakey/wrapped/kek-${ENTITY}`]: () => ({ json: { data: { ciphertext: 'vault:v1:d3JhcHBlZA==', key_version: 1 } } }),
     [`POST /v1/transit/decrypt/kek-${ENTITY}`]: () => ({ json: { data: { plaintext: Buffer.alloc(32, 9).toString('base64') } } }),
+    [`GET /v1/transit/keys/person-${ENTITY}`]: () => ({ json: { data: { type: 'ed25519', latest_version: 2, exportable: false, keys: {
+      1: { public_key: PUBLIC_V1.toString('base64'), name: 'ed25519' }, 2: { public_key: PUBLIC_V2.toString('base64'), name: 'ed25519' },
+    } } } }),
     ...options.routes,
   };
   const recording = Object.fromEntries(Object.entries(routes).map(([key, route]) => [key, (call: FakeCall) => { allCalls.push(call); return route(call); }]));
@@ -159,12 +168,36 @@ test('unwrapDataKey refuses a malformed ciphertext without a call and decrypts a
   assert.deepEqual(fake.calls.map((call) => [call.path, call.body, call.token]), [[`/v1/transit/decrypt/kek-${ENTITY}`, { ciphertext: 'vault:v1:d3JhcHBlZA==' }, SESSION_TOKEN]]);
 });
 
+test('personPublicKey reads the latest version of the person\'s own signing key with the session token, no step-up needed', async () => {
+  const { fake, service } = await world({ session: { acr: undefined, authTime: undefined } });
+  assert.deepEqual(await service.personPublicKey(), { kind: 'ok', value: { publicKey: PUBLIC_V2.toString('base64url'), keyVersion: 2 } });
+  assert.deepEqual(fake.calls.map((call) => [call.method, call.path, call.token]), [['GET', `/v1/transit/keys/person-${ENTITY}`, SESSION_TOKEN]]);
+});
+
+test('personPublicKey: a missing key, a refusal and an answer that is not one ed25519 public key are plain refusals', async () => {
+  const route = `GET /v1/transit/keys/person-${ENTITY}`;
+  const answer = (data: unknown) => () => ({ json: { data } });
+  const cases: Array<[() => { status?: number; json?: unknown }, string]> = [
+    [() => ({ status: 404, json: { errors: [] } }), KEY_SERVICE_TEXT.signingKeyMissing],
+    [() => ({ status: 403, json: { errors: ['permission denied'] } }), KEY_SERVICE_TEXT.refused],
+    [answer({ type: 'aes256-gcm96', latest_version: 1, keys: { 1: 1700000000 } }), KEY_SERVICE_TEXT.unreachable],
+    [answer({ type: 'ed25519', latest_version: 3, keys: { 1: { public_key: PUBLIC_V1.toString('base64') } } }), KEY_SERVICE_TEXT.unreachable],
+    [answer({ type: 'ed25519', latest_version: 1, keys: { 1: { public_key: Buffer.alloc(31).toString('base64') } } }), KEY_SERVICE_TEXT.unreachable],
+    [answer({ type: 'ed25519', latest_version: 0, keys: {} }), KEY_SERVICE_TEXT.unreachable],
+  ];
+  for (const [reply, reason] of cases) {
+    const { service } = await world({ routes: { [route]: reply } });
+    assert.deepEqual(await service.personPublicKey(), { kind: 'refused', reason });
+  }
+});
+
 test('local mode: long-term keys are not available on this computer, for every method, with no call', async () => {
   const { fake, service } = await world({ local: true, session: null });
   const local = { kind: 'refused', reason: KEY_SERVICE_TEXT.local };
   assert.deepEqual(await service.sign(MESSAGE), local);
   assert.deepEqual(await service.generateWrappedDataKey(), local);
   assert.deepEqual(await service.unwrapDataKey('vault:v1:d3JhcHBlZA=='), local);
+  assert.deepEqual(await service.personPublicKey(), local);
   assert.equal(fake.calls.length, 0);
 });
 
@@ -174,6 +207,7 @@ test('an inactive hosted session is refused not-ready for every method, with no 
   assert.deepEqual(await service.sign(MESSAGE), notReady);
   assert.deepEqual(await service.generateWrappedDataKey(), notReady);
   assert.deepEqual(await service.unwrapDataKey('vault:v1:d3JhcHBlZA=='), notReady);
+  assert.deepEqual(await service.personPublicKey(), notReady);
   assert.equal(fake.calls.length, 0);
 });
 
@@ -187,7 +221,7 @@ test('an OpenBao that refuses or does not answer gives a plain refusal with no t
   for (const value of [SESSION_TOKEN, ENTITY]) assert.ok(!JSON.stringify([denied, late]).includes(value));
 });
 
-test('the RPC object has sign and generateWrappedDataKey, and no unwrapDataKey', async () => {
+test('the RPC object has sign and generateWrappedDataKey, and no unwrapDataKey or personPublicKey', async () => {
   const { fake, service } = await world();
   const rpc = keyServiceRpc(service);
   assert.deepEqual(Object.keys(rpc).sort(), ['generateWrappedDataKey', 'sign']);

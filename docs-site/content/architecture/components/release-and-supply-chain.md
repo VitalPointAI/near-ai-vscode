@@ -15,7 +15,7 @@ Back to the [component catalogue](./index.md).
 | --- | --- | --- | --- |
 | npm:@vscode/vsce | npm package | build | Pass |
 | tool:cosign | Pinned tool | runtime | Pass with conditions |
-| tool:grype | Pinned tool | build | Pass |
+| tool:grype | Pinned tool | runtime | Pass with conditions |
 | tool:hauler | Pinned tool | runtime | Pass with conditions |
 | tool:syft | Pinned tool | build | Pass |
 | action:actions/attest | GitHub Action | build | Pass with conditions |
@@ -76,7 +76,7 @@ Conditions:
 
 ## tool:grype
 
-**What it provides.** Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.
+**What it provides.** Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job; the offline bundle build scans the SBOM of every image it carries, and sites rescan offline from the bundle's SBOMs on the import host, as cosign runs there (47-29).
 
 **Why it is needed.** Scans the SBOMs, including the workbench image's in CI and in the Release workflow, for known vulnerabilities that have a fix, so they are seen before a release. *This role is waiting for the owner to confirm it.*
 
@@ -84,16 +84,23 @@ Conditions:
 | --- | --- |
 | Kind | Pinned tool |
 | Pinned version or digest | `0.122.1 (sha256:f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538)` |
-| Architecture component | `release-pipeline` |
+| Architecture component | `offline-bundle` |
 | Used in | `compliance/ci/tool-pins.json` |
-| Scope | Build only: not shipped |
+| Scope | Runtime: it runs in the product |
 | Licence | Apache-2.0 |
 | Cryptography | Not a validated cryptographic module |
-| Air gap | Works air-gapped once mirrored: the Grype vulnerability database (grype db import of a downloaded archive) |
-| Compliance fit | Pass |
-| Controls | SA-10, SA-15, RA-5, SI-2, SR-4, SR-11 |
+| Air gap | Works air-gapped once mirrored: the vulnerability database, downloaded on the connected build host and shipped in the signed bundle or a signed database file |
+| Compliance fit | Pass with conditions |
+| Controls | SA-10, SA-15, RA-5, SI-2, SR-4, SR-11, RA-5(2), CM-4 |
 | Security fixes | Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- The vulnerability database is fetched only on the connected build host, from Anchore's listing at grype.anchore.io, with the listing's checksum verified, and reaches sites only inside the signed bundle or as a file signed with your organization's key.
+- At sites grype runs with database auto-update, age validation and application update checks off, against a private cache, and reports the database's build date.
+- Scans are report-only; the site change board decides.
+- Go cryptography in grype is not FIPS-validated and protects nothing here.
 
 ## tool:hauler
 
@@ -125,7 +132,7 @@ Conditions:
 
 ## tool:syft
 
-**What it provides.** Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.
+**What it provides.** Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, of the Sterling release image the Release workflow attests, and of every image in each offline bundle, made on the connected build host (47-29).
 
 **Why it is needed.** Writes the CycloneDX SBOM of the relay image, of every rebuilt deployment image and of the Sterling workbench image, the one the Release workflow attests. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it. *This role is waiting for the owner to confirm it.*
 

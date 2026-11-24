@@ -184,3 +184,27 @@ test('the exchange diagram names every exchange id exactly once', () => {
     assert.equal(diagram.split(`|"${exchange.id}"|`).length - 1, 1, exchange.id);
   }
 });
+
+test('a malformed marker or a missing blocks folder ends hosted-docs with exit 1 and one plain line, not a stack trace', async () => {
+  const root = copyRoot();
+  const file = path.join(root, INTERCONNECTIONS);
+  writeFileSync(file, readFileSync(file, 'utf8').replace('<!-- generated:exchanges end -->\n', ''));
+  for (const mode of ['--write', '--check']) {
+    let text = '';
+    const code = await runHostedDocs([mode, '--root', root], { stdout: (chunk) => { text += chunk; }, stderr: (chunk) => { text += chunk; } });
+    assert.equal(code, 1, mode);
+    assert.match(text, /generated block exchange-diagram begins inside block exchanges|generated block exchanges has no end marker/, mode);
+    assert.doesNotMatch(text, /\n\s+at /, `${mode}: no stack trace`);
+  }
+  const empty = mkdtempSync(path.join(tmpdir(), 'hosted-blocks-'));
+  const cases: Array<[string, RegExp]> = [
+    [path.join(empty, 'missing'), /^hosted-docs: the hosted blocks folder .* does not exist\n$/],
+    [empty, /^hosted-docs: the hosted blocks folder .* has no block modules/]
+  ];
+  for (const [blocksDir, expected] of cases) {
+    let text = '';
+    const code = await runHostedDocs(['--check'], { stdout: (chunk) => { text += chunk; }, stderr: (chunk) => { text += chunk; }, blocksDir });
+    assert.equal(code, 1, blocksDir);
+    assert.match(text, expected);
+  }
+});

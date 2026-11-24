@@ -9,6 +9,8 @@ import { checkAll, loadBlocks, REPO_ROOT, writeAll } from '../hosted/generate.ts
 export interface HostedDocsIo {
   readonly stdout?: (text: string) => void;
   readonly stderr?: (text: string) => void;
+  /** The folder of block modules; the real one unless a test points elsewhere. */
+  readonly blocksDir?: string;
 }
 
 const USAGE = 'usage: hosted-docs (--check | --write) [--root <repository>]\n';
@@ -21,9 +23,17 @@ export async function run(args: readonly string[], io: HostedDocsIo = {}): Promi
   const root = rootAt < 0 ? REPO_ROOT : args[rootAt + 1];
   const known = new Set(['--check', '--write', '--root', ...(rootAt < 0 ? [] : [root])]);
   if (!mode || (args.includes('--write') && args.includes('--check')) || !root || args.some((arg) => !known.has(arg))) { err(USAGE); return 2; }
-  const blocks = await loadBlocks();
-  if (mode === 'write') for (const document of await writeAll(root, blocks)) out(`wrote ${document}\n`);
-  const report = await checkAll(root, blocks);
+  let blocks: Awaited<ReturnType<typeof loadBlocks>>;
+  let report: Awaited<ReturnType<typeof checkAll>>;
+  try {
+    blocks = await loadBlocks(io.blocksDir);
+    if (mode === 'write') for (const document of await writeAll(root, blocks)) out(`wrote ${document}\n`);
+    report = await checkAll(root, blocks);
+  } catch (error) {
+    // A malformed marker, a missing blocks folder or an unreadable document is one plain line and exit 1, never a stack trace.
+    err(`hosted-docs: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
   for (const warning of report.warnings) err(`warning: ${warning}\n`);
   for (const line of [...report.stale, ...report.problems]) err(`${line}\n`);
   if (report.stale.length || report.problems.length) return 1;

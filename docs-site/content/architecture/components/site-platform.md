@@ -662,7 +662,7 @@ Conditions:
 | Cryptography | Not a validated cryptographic module |
 | Air gap | Works air-gapped once mirrored: the RKE2 tarball, image archives and rke2-selinux RPM carried by the bundle; host packages from the site's own OS repository |
 | Compliance fit | Pass with conditions |
-| Controls | CM-2, CM-6, CM-7, AC-6, AU-2, AU-12, SC-8, SC-13, SC-28, SI-2, SR-11 |
+| Controls | CM-2, CM-6, CM-7, AC-6, AU-2, AU-12, SC-8, SC-13, SC-28, SI-2, SR-11, AU-8, AU-8(1), SC-45, CP-9 |
 | Security fixes | Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
 
@@ -672,3 +672,5 @@ Conditions:
 - RKE2 runs with profile: cis and the DISA STIG settings, an audit policy that records Theia Cloud resources at Request and Secrets at Metadata only, and secrets-encryption on.
 - k3s is for the lab and demos only and never appears in production values (D-14).
 - SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here.
+- Every node and the import host run chrony from the site's own OS repository, configured only with the site's on-site authoritative time source (a GNSS-disciplined NTP appliance or a stratum-1 server). The node install refuses a clock that is unsynchronised, on its local clock, or beyond time.maxClockErrorMs (D-71, 47-22).
+- The server token, which any etcd restore needs, and the secrets-encryption configuration are escrowed on custody media held by two key custodians apart from the backups; escrow-node.sh check finds a stale escrow after a rotation (D-73, 47-25).

@@ -11,6 +11,8 @@ import { listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/
 import { readImagesLock, resolveImage } from '../bundle/lib/locks.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/** Every RegExp metacharacter escaped, backslash included, so a site value is matched literally. */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
 const HELM = process.env.HELM || 'helm';
 const ALERTS_FILE = 'deploy/values/prometheus-alerts.yaml';
@@ -59,11 +61,11 @@ test('one Alertmanager runs from the lock by digest, and its only receiver mails
   const config = prometheus.filter((doc) => kindOf(doc) === 'ConfigMap' && /alertmanager/.test(nameOf(doc) ?? '')).join('\n');
   const realm = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example/sterling-keycloak-realm.yaml'), 'utf8'));
   const mailServer = `${realm.smtp.host.replace('${site.domain}', SITE.domain)}:${realm.smtp.port}`;
-  assert.match(config, new RegExp(`smtp_smarthost: ${mailServer.replace(/\./g, '\\.')}`), 'the smarthost is the realm mail server of the site');
+  assert.match(config, new RegExp(`smtp_smarthost: ${escapeRegExp(mailServer)}`), 'the smarthost is the realm mail server of the site');
   assert.match(config, /smtp_require_tls: true/);
   const kinds = [...config.matchAll(/^[\s-]+([a-z0-9]+)_configs:/gm)].map((match) => match[1]);
   assert.deepEqual([...new Set(kinds)], ['email'], 'email is the only receiver kind: no webhook, chat or remote receiver');
-  assert.match(config, new RegExp(`\\bto: ${SITE.alertRecipients.replace(/[.@]/g, '\\$&')}$`, 'm'), 'mail goes to the site file\'s recipients');
+  assert.match(config, new RegExp(`\\bto: ${escapeRegExp(SITE.alertRecipients)}$`, 'm'), 'mail goes to the site file\'s recipients');
   assert.match(config, /receiver: site-security-operators/);
 });
 

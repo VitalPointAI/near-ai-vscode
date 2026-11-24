@@ -121,12 +121,14 @@ export function checkExchanges(root: string, register: ExchangeRegister): CheckR
   }
   for (const file of signingCallSites(root)) {
     const owners = named.get(file) ?? [];
-    if (!owners.length) problems.push(`${file} signs or verifies a file or image but no exchange names it in implementedBy; add its exchange to ${EXCHANGES_FILE}`);
+    if (!owners.length) problems.push(`${file} calls a signing helper (${SIGNING_FUNCTIONS.join(', ')}) but no exchange names it in implementedBy; add its exchange to ${EXCHANGES_FILE}`);
   }
   return { problems, warnings };
 }
 
-const cell = (text: string): string => text.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
+// A Markdown table cell: every backslash and pipe is escaped in one pass (so an added backslash is never escaped again), and line breaks
+// become spaces.
+const cell = (text: string): string => text.replace(/[\\|]/g, (character) => `\\${character}`).replace(/\s*\n\s*/g, ' ');
 const code = (text: string): string => `\`${text}\``;
 
 function parse(text: string): ExchangeRegister {

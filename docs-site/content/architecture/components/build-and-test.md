@@ -39,7 +39,7 @@ Back to the [component catalogue](./index.md).
 | Used in | `package.json` |
 | Scope | Test only: not shipped |
 | Licence | BSD-3-Clause |
-| Cryptography | None |
+| Cryptography | Not a validated cryptographic module |
 | Air gap | Works with no internet access |
 | Compliance fit | Pass with conditions |
 | Controls | SA-11, SA-15, SR-3 |
@@ -49,6 +49,7 @@ Back to the [component catalogue](./index.md).
 Conditions:
 
 - Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node\_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).
+- Test-only reference cryptography: Ed25519 and Multikey (and SHA-256) used only to check our own credentials in tests; it is not a validated module and never runs in the product.
 - No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.
 - Not updated since its only release (1.0.0, 2024-11-08, two years old); it predates the W3C Recommendation of 2025-05-15, so the frozen W3C vectors in our test are the arbiter if the two ever disagree.
 
@@ -66,7 +67,7 @@ Conditions:
 | Used in | `package.json` |
 | Scope | Test only: not shipped |
 | Licence | BSD-3-Clause |
-| Cryptography | None |
+| Cryptography | Not a validated cryptographic module |
 | Air gap | Works with no internet access |
 | Compliance fit | Pass with conditions |
 | Controls | SA-11, SA-15, SR-3 |
@@ -76,6 +77,7 @@ Conditions:
 Conditions:
 
 - Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node\_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).
+- Test-only reference cryptography: Ed25519 and Multikey (and SHA-256) used only to check our own credentials in tests; it is not a validated module and never runs in the product.
 - No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.
 - Brings JSON-LD and HTTP client code (jsonld, ky, undici); tests pass a static document loader, so no context is ever fetched.
 
