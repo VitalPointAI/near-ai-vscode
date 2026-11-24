@@ -1,8 +1,10 @@
 // did:key for devices and agents, and the minimal DID document (Phase 71 plan 04 Task 1; D-13, DLGT-01, PROJECT decision 8).
 // The fixed keys are the published did:key test vectors (Ed25519 and P-256, did:key method 0.9) and the DIF suite's first test key; nothing here is secret.
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import test from 'node:test';
+import { createProof, verifyProof } from '../domain/credentials/dataIntegrity';
+import type { CredentialSigner } from '../domain/credentials/dataIntegrity';
 import { encodePublicKeyMultibase } from '../domain/credentials/multibase';
 import { DID_DOCUMENT_FAILURES, readDidDocument, verificationMethodsOf } from '../domain/did/didDocument';
 import { didKeyFromDevice, didKeyFromPublicKey, didKeyMethodId, isDidKey, resolveDidKey } from '../domain/did/didKey';
@@ -64,6 +66,21 @@ test('isDidKey separates a did:key from a did:webvh, a malformed string and a di
   const mismatch = resolveDidKey(`${ED25519_DID}#${P256_DID.slice('did:key:'.length)}`);
   assert.equal(mismatch.ok, false);
   if (!mismatch.ok) assert.equal(mismatch.reason, 'fragment-mismatch');
+});
+
+test('a proof signed by a Phase 69 device key verifies with the key its did:key resolves to, and not with another device\'s', async () => {
+  const device = generateKeyPairSync('ed25519');
+  const other = generateKeyPairSync('ed25519');
+  const did = didKeyFromDevice(device.publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url'));
+  const resolved = resolveDidKey(did);
+  assert.ok(resolved.ok);
+  const signer: CredentialSigner = { verificationMethod: resolved.method.id, suite: 'eddsa-jcs-2022', sign: async (bytes) => new Uint8Array(cryptoSign(null, bytes, device.privateKey)) };
+  const document = { kind: 'device-binding-request', device: did };
+  const proof = await createProof(document, { proofPurpose: 'authentication' }, signer);
+  assert.equal(verifyProof({ ...document, proof }, resolved.publicKey.key, { proofPurpose: 'authentication' }).ok, true);
+  const otherKey = resolveDidKey(didKeyFromDevice(other.publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('base64url')));
+  assert.ok(otherKey.ok);
+  assert.equal(verifyProof({ ...document, proof }, otherKey.publicKey.key, { proofPurpose: 'authentication' }).ok, false);
 });
 
 test('didKeyFromDevice refuses anything but a strict 32-byte base64url key', () => {
