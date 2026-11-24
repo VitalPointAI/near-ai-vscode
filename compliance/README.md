@@ -82,6 +82,11 @@ The export is signed in the extension's signed-payload format for the purpose `s
 
 Each observation is dated at the export's signed time and judged on the 7-day settings window. An export older than 7 days reads Stale, whatever CI ran since.
 
+Making an export on a site takes two steps, both run by the site operator:
+
+1. `compliance/site-export/collect.sh --out <empty folder>` collects the raw outputs. It only reads: `kubectl get`, `kcadm.sh get`, `bao status` and `bao read`, `cosign verify` and `cosign verify-attestation` for each digest in the image lock list, a count query to the log store, `/proc/sys/crypto/fips_enabled` on each node over SSH, and `node -p "crypto.getFips()"` in a sample of session pods. It starts no pod and changes nothing. Its settings and the tools it needs are listed at the top of the script; credentials come from the operator's environment. The folder holds raw site data, so it stays on the site.
+2. `node compliance/src/cli.ts site-export --sources <folder> --site <id> --key <pkcs8.pem> --out <export.json>` reads only the files it knows from that folder, keeps only the facts, and signs. For a key in an HSM or other external signer, run it with `--public-key <key> --emit-signing-input <file> --out <unsigned.json>`, sign the bytes of that file with Ed25519, then run `site-export --unsigned <unsigned.json> --attach-signature <signature> --out <export.json>`. The command checks the signature before it writes. It stops without writing when a source file is missing, too large or unreadable, or when the repository's secret scan flags any text in the export.
+
 The reference site's export reaches the public dashboard as a committed file under `compliance/site-evidence/`, signed by the owner-approved key.
 
 Your organization's own sites stay in your organization's local view and are never uploaded. Give the bundle your own export and your own trust list as the `deployment` collector input, `{ "deployment": { "file": "<your export>", "signersFile": "<your trust list>" } }` in the inputs file of `node compliance/src/cli.ts bundle --inputs <file> --out <bundle>`, then show it with `npm --prefix docs-site run compliance:refresh -- --from-dir <bundle>`. The public trust list refuses your export. The organization overlay cannot carry this evidence: it only changes rows that are your organization's responsibility.
