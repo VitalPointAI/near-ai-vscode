@@ -148,6 +148,11 @@ function fakeRig(options: { sessionsPerUser: string; appImage: string }): { kube
     if (kind === 'appdefinitions.theia.cloud') return JSON.stringify({ spec: { image: options.appImage, ingressname: 'theia-cloud-ingress' } });
     if (kind === 'deployment') return JSON.stringify({ spec: { template: { spec: { containers: [{ image: `registry.site.example/sterling/theia-cloud-operator@${DIGEST('a')}`, args: ['--keycloak', '--sessionsPerUser', options.sessionsPerUser] }] } } } });
     if (kind === 'ingress') return JSON.stringify({ spec: { rules: [] } });
+    const created = '2026-11-23T12:00:00Z';
+    const numbers = [1, 2, 3];
+    if (kind === 'sessions.theia.cloud') return JSON.stringify({ items: numbers.map((n) => ({ metadata: { name: `session-${n}`, creationTimestamp: created }, spec: { name: `session-${n}` } })) });
+    if (kind === 'deployments') return JSON.stringify({ items: numbers.map((n) => ({ metadata: { name: `dep-${n}`, creationTimestamp: created, ownerReferences: [{ kind: 'Session', name: `session-${n}` }] } })) });
+    if (kind === 'pods') return JSON.stringify({ items: numbers.map((n) => ({ metadata: { name: `dep-${n}-abc` }, status: { phase: 'Running', conditions: [{ type: 'Ready', status: 'True', lastTransitionTime: created }] } })) });
     return JSON.stringify({ items: [] });
   };
   let session = 0;

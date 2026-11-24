@@ -1,0 +1,32 @@
+{
+  "realm": "loadtest-sterling",
+  "displayName": "Sterling load test (rig only; never in production or the offline bundle)",
+  "enabled": true,
+  "sslRequired": "all",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "duplicateEmailsAllowed": false,
+  "loginWithEmailAllowed": false,
+  "accessTokenLifespan": 14400,
+  "ssoSessionIdleTimeout": 14400,
+  "ssoSessionMaxLifespan": 43200,
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
+  "clients": [
+    {
+      "clientId": "loadtest-client",
+      "name": "Load-test client (password grant for synthetic users)",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://site.example/*"],
+      "webOrigins": ["https://site.example"],
+      "attributes": { "pkce.code.challenge.method": "S256" }
+    }
+  ]
+}
