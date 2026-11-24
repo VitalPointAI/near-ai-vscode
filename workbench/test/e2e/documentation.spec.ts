@@ -48,7 +48,6 @@ test('figures and diagrams render as images and SVG, never as source, and load o
   await expect(diagrams).toHaveCount(3);
   await expect(diagrams.first()).toBeVisible();
   await expectNoRawSyntax(page);
-  const darkText = await diagrams.first().locator('text').first().evaluate((node) => getComputedStyle(node).fill);
 
   await openTopic(page, 'Features and settings');
   const screenshots = page.locator('.sterling-documentation article img');
@@ -64,21 +63,24 @@ test('figures and diagrams render as images and SVG, never as source, and load o
 
   // Links between pages still open the page in the view, and search still finds a diagram's words.
   await openTopic(page, 'Welcome');
-  await page.locator('.sterling-documentation article a', { hasText: 'Architecture overview' }).click();
+  await page.locator('.sterling-documentation article a', { hasText: 'Architecture overview' }).first().click();
   await expect(page.locator('.sterling-documentation nav button[aria-current="page"]')).toHaveText('Architecture overview');
   await expect(diagrams).toHaveCount(3);
   await page.locator('.sterling-documentation input[type="search"]').fill('Keycloak sign-in, no passwords');
   await expect(page.locator('.sterling-documentation nav button')).toContainText(['Architecture overview']);
   await page.locator('.sterling-documentation input[type="search"]').fill('');
 
-  // The diagrams follow the theme: in the light theme their text takes the light editor colour.
-  await runCommand(page, 'Preferences: Color Theme', 'Light (Theia)');
-  await openTopic(page, 'Architecture overview');
-  const lightText = await diagrams.first().locator('text').first().evaluate((node) => getComputedStyle(node).fill);
-  const lightForeground = await page.locator('.sterling-documentation').evaluate((node) => getComputedStyle(node).color);
-  expect(lightText).not.toEqual(darkText);
-  expect(lightText).toEqual(lightForeground);
-  await expectNoRawSyntax(page);
+  // The diagrams follow the theme: in the dark and the light theme their text takes that theme's editor colour.
+  const diagramText = async (theme: string): Promise<string> => {
+    await runCommand(page, 'Preferences: Color Theme', theme);
+    await openTopic(page, 'Architecture overview');
+    const fill = await diagrams.first().locator('g.node text').first().evaluate((node) => getComputedStyle(node).fill);
+    const foreground = await page.locator('.sterling-documentation').evaluate((node) => getComputedStyle(node).color);
+    expect(fill, `diagram text in ${theme}`).toEqual(foreground);
+    await expectNoRawSyntax(page);
+    return fill;
+  };
+  expect(await diagramText('Dark (Theia)')).not.toEqual(await diagramText('Light (Theia)'));
 
   await page.waitForLoadState('networkidle');
   expect(elsewhere, 'requests to another origin').toEqual([]);
