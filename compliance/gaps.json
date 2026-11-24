@@ -4315,8 +4315,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests: a CA issuer chained to the OpenBao PKI and no ACME issuer.",
-      "title": "cert-manager is not assessed"
+      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests for a CA issuer chained to the OpenBao PKI. The statement that no rendered issuer uses ACME already has its rule (cert-manager.sc-17.no-acme).",
+      "title": "cert-manager is not assessed and has no CA issuer statement"
     },
     {
       "closesInPhase": "48",

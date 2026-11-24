@@ -22,7 +22,8 @@ const RENDER_TEST = 'every rendered release meets the global invariants';
 /** The Phase 47 statements on main, each proven by the render test's global invariants. Later batches add their rows here. */
 const BATCH = [
   { component: 'rke2', control: 'cm-07', rule: 'rke2.cm-07.no-k3s' },
-  { component: 'ingress', control: 'cm-07', rule: 'ingress.cm-07.no-ingress-nginx' }
+  { component: 'ingress', control: 'cm-07', rule: 'ingress.cm-07.no-ingress-nginx' },
+  { component: 'cert-manager', control: 'sc-17', rule: 'cert-manager.sc-17.no-acme' }
 ] as const;
 
 const levels = () => (JSON.parse(readFileSync(path.join(COMPLIANCE, 'levels.json'), 'utf8')).levels as { id: string; components: string[] }[]);
