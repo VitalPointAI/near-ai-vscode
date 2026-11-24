@@ -783,6 +783,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **POST-06**: Atomic handover: authority switches at the incoming's report entry; staged key changes activate at the same point; stale staging refused and restaged; writes held until the staged epoch is folded; a client or server without the positions feature stops.
 - [ ] **POST-07**: Acting, temporary and dual-hatted postings with the single-authority invariant, decisions that name their position, and separation-of-duty checks.
 - [ ] **POST-08**: Personnel key group for report-unable reasons and order references; migration from seats with parity; silent positions per seat in invitation mode; team files name positions, never people; Staff Room screens in the mode's words and, in the Defence Team mode, the words that follow how a person serves.
+- [ ] **POST-09**: Observer positions for industry, allied military members and others invited to observe and give feedback (owner, 2026-11-24): placed by invitation into an Observer position; time-limited; read only the key groups the position lists that their releasability allows (checked at the key grant); comment in their own feedback stream, which no other observer can read; never edit, decide, approve, post or see personnel data; allied-military and industry observers approved by your organization's security contact.
 
 | Requirement | Phase |
 |-------------|-------|
@@ -790,7 +791,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-04 … MUS-06 | Phase 31 |
 | MUS-07, MUS-08 | Phase 32 |
 | MUS-09, POST-01 | Phase 33 |
-| POST-02 … POST-08 | Phase 33.1 |
+| POST-02 … POST-09 | Phase 33.1 |
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
