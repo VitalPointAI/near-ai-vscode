@@ -194,6 +194,8 @@ test('a delegated project mode cannot grant the clearance needed to raise a sign
   assertMode(check.modeRow, 'military', MODE_SUGGESTED_TEXT);
   assert.ok(check.changes.some(({ area, waitsFor }) => area === 'label' && waitsFor === 'rules-change'));
   assert.ok(!check.changes.some(({ id }) => id === 'your-rules:clearance'));
+  const ask = check.changes.find(({ id }) => id === 'your-rules:clearance-contact');
+  assert.ok(ask?.text.includes(`ask ${EXAMPLE_ORGANIZATION.contacts[0].name} to add your clearance`), ask?.text);
   await guide.receive({ type: 'apply' });
   const snapshot = await run.deps.readPolicy(at);
   assert.ok('route' in snapshot);

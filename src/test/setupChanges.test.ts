@@ -56,6 +56,18 @@ test('D-33, F5: clearance gap', () => {
   assert.equal(find(changeList(input), 'label').effect, 'apply');
 });
 
+test('F5, 32.1-11: under your organization a clearance gap names the contact and opens no proposal', () => {
+  const items = changeList({ ...input, clearances: [{ ...internal, level: 'Restricted' }], clearanceContact: 'Security desk {label}' });
+  assert.ok(!items.some(({ id }) => id === 'your-rules:clearance'));
+  const ask = find(items, 'your-rules:clearance-contact');
+  assert.equal(ask.text, "Your organization's rules: ask Security desk {label} to add your clearance for Canada, Protected: Protected B.");
+  assert.equal(ask.effect, 'waits');
+  assert.equal(ask.waitsFor, 'rules-change');
+  assert.equal(find(items, 'label').effect, 'waits');
+  // A clearance that covers the label needs no contact.
+  assert.ok(!changeList({ ...input, clearanceContact: 'Security desk' }).some(({ area }) => area === 'your-rules'));
+});
+
 test('D-34: project rules', () => {
   const add = find(changeList({ ...input, canada: 'yes' }), 'project-rules');
   assert.equal(add.text, 'This project: work must stay in Canada.');

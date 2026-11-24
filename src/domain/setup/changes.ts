@@ -52,6 +52,8 @@ export interface ChangeInput {
   readonly canada?: YesNoUnsure;
   readonly residencyBySetting: 'project' | 'already';
   readonly clearances: readonly Clearance[];
+  /** Your organization's contact when its rules hold the clearances: the guide names them and opens no proposal (F5, 32.1-11). */
+  readonly clearanceContact?: string;
   readonly dominance: DominanceContext;
   readonly shared: boolean;
   readonly proposals: readonly { readonly id: string; readonly text: string }[];
@@ -66,6 +68,7 @@ export const CHANGE_TEXT = Object.freeze({
   connectionRemoved: 'AI services: remove {option}. Requests that use this connection will stop working.',
   clearance: 'Your rules: add your clearance for {label} (declared by you)',
   clearanceExplanation: CLEARANCE_SELF_ASSERTED_TEXT,
+  clearanceContact: "Your organization's rules: ask {contact} to add your clearance for {label}.",
   waitsForRules: '{change} Waits for your rules change.',
   waitsForShared: '{change} Waits for the next update: shared project settings.',
   canada: 'This project: work must stay in Canada.',
@@ -105,9 +108,13 @@ function labelChanges(input: ChangeInput): readonly ChangeItem[] {
   const item: ChangeItem = { id: 'label', group, area: 'label', effect: 'apply', text };
   if (input.shared) return [projectChange(item, true)];
   if (input.clearances.some((clearance) => dominates(clearance, checked.proposed, input.dominance))) return [item];
+  const contact = input.clearanceContact;
   return [
     { ...item, effect: 'waits', waitsFor: 'rules-change', text: fillSlots(CHANGE_TEXT.waitsForRules, { change: text }) },
-    { id: 'your-rules:clearance', group: 'added', area: 'your-rules', effect: 'proposal', text: fillSlots(CHANGE_TEXT.clearance, { label }) },
+    contact === undefined
+      ? { id: 'your-rules:clearance', group: 'added', area: 'your-rules', effect: 'proposal', text: fillSlots(CHANGE_TEXT.clearance, { label }) }
+      : { id: 'your-rules:clearance-contact', group: 'added', area: 'your-rules', effect: 'waits', waitsFor: 'rules-change',
+        text: fillSlots(CHANGE_TEXT.clearanceContact, { contact, label }) },
   ];
 }
 

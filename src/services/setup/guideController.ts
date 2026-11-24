@@ -358,8 +358,10 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
       chosen: chosen ? [chosen.kind] : [], chosenIds: chosen ? [chosen.optionId] : [],
       mode, exercise, canada, residencyBySetting: policy.locked.canada ? 'already' : 'project',
       clearances: route.clearances, dominance: { scales: route.scales, mappings: route.mappings, now: now() },
+      // Your organization's rules hold the clearances: name who to ask instead of proposing a personal one (F5).
+      ...(clearance === undefined ? { clearanceContact: contactFor(policy) } : {}),
       shared, proposals: [], scales: route.scales
-    }).filter(({ id }) => id !== 'your-rules:clearance' || clearance !== undefined);
+    });
     applyContext = {
       label,
       project: { ...(mode.changeable ? { mode: mode.mode } : {}), ...(canadaOnly ? { residency: { required: ['CA'] } } : {}),
