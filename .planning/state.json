@@ -1,11 +1,11 @@
 {
   "contract": "1.0.0",
   "flavor": "core",
-  "milestone": "v0.5.0: Governed agent platform",
+  "milestone": "v0.5.0 — Governed agent platform",
   "phases": [
     {
       "number": "27",
-      "name": "Project state follows the project (0.4.20; shipped, owner host check passed 2026-11-17)",
+      "name": "Project state follows the project (0.4.20)",
       "status": "complete"
     },
     {
@@ -19,6 +19,116 @@
       "status": "pending"
     },
     {
+      "number": "30",
+      "name": "Replication contract and co-editing core",
+      "status": "in_progress"
+    },
+    {
+      "number": "31",
+      "name": "Staff roster, cell keys and migration",
+      "status": "in_progress"
+    },
+    {
+      "number": "32",
+      "name": "Your organization's sync hub",
+      "status": "complete"
+    },
+    {
+      "number": "33",
+      "name": "Live multi-user staff projects",
+      "status": "pending"
+    },
+    {
+      "number": "33.1",
+      "name": "Assigned positions and handover",
+      "status": "pending"
+    },
+    {
+      "number": "34",
+      "name": "Offline transports for staff projects",
+      "status": "pending"
+    },
+    {
+      "number": "35",
+      "name": "Shared agent work, observations and hub watches",
+      "status": "pending"
+    },
+    {
+      "number": "32.1",
+      "name": "Guided setup with viable options and a plain recommendation",
+      "status": "in_progress"
+    },
+    {
+      "number": "32.2",
+      "name": "Local model manager",
+      "status": "in_progress"
+    },
+    {
+      "number": "36",
+      "name": "Cohere Model Vault provider, sovereign-region class and cost control",
+      "status": "pending"
+    },
+    {
+      "number": "37",
+      "name": "Cohere Encrypted Vault as an attested endpoint",
+      "status": "pending"
+    },
+    {
+      "number": "38",
+      "name": "Organization tree, publications and label-safe roll-up",
+      "status": "pending"
+    },
+    {
+      "number": "39",
+      "name": "Portfolio Room, prioritization and scenarios",
+      "status": "pending"
+    },
+    {
+      "number": "40",
+      "name": "Capacity, allocation, dependencies and gates",
+      "status": "pending"
+    },
+    {
+      "number": "41",
+      "name": "Organization policy foundation (F1)",
+      "status": "in_progress"
+    },
+    {
+      "number": "42",
+      "name": "Capital project offices on the replica",
+      "status": "pending"
+    },
+    {
+      "number": "43",
+      "name": "Programme and portfolio offices, the capital tab",
+      "status": "pending"
+    },
+    {
+      "number": "44",
+      "name": "Accreditation evidence and compliance dashboard",
+      "status": "in_progress"
+    },
+    {
+      "number": "44.1",
+      "name": "Accreditation control implementation and evidence closure",
+      "status": "pending"
+    },
+    {
+      "number": "46",
+      "name": "Native Theia foundation",
+      "status": "in_progress"
+    },
+    {
+      "number": "47",
+      "name": "On-premise deployment stack and offline bundle",
+      "status": "in_progress"
+    },
+    {
+      "number": "48",
+      "name": "Load and accreditation verification",
+      "status": "in_progress"
+    },
+    {
       "number": "68",
       "name": "Relay foundation",
       "status": "complete"
@@ -26,12 +136,12 @@
     {
       "number": "69",
       "name": "Team Mode reconciliation",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "70",
-      "name": "Capability vocabulary, manifests and one gate with a floor",
-      "status": "in_progress"
+      "name": "Capability vocabulary, manifests and one gate",
+      "status": "pending"
     },
     {
       "number": "71",
@@ -51,6 +161,91 @@
     {
       "number": "74",
       "name": "Run contracts",
+      "status": "pending"
+    },
+    {
+      "number": "85",
+      "name": "Host and local inference on Strix Halo (L1a), measured",
+      "status": "pending"
+    },
+    {
+      "number": "86",
+      "name": "Microsoft 365 connector spike",
+      "status": "pending"
+    },
+    {
+      "number": "87",
+      "name": "Extraction and OCR throughput spike",
+      "status": "pending"
+    },
+    {
+      "number": "88",
+      "name": "Ingestion core, governed store and the data map",
+      "status": "pending"
+    },
+    {
+      "number": "89",
+      "name": "Microsoft 365 connector with one-click connection",
+      "status": "pending"
+    },
+    {
+      "number": "90",
+      "name": "Google Workspace connector with one-click connection",
+      "status": "pending"
+    },
+    {
+      "number": "91",
+      "name": "Endpoint collectors, file shares and simple install",
+      "status": "pending"
+    },
+    {
+      "number": "92",
+      "name": "Extraction pipeline",
+      "status": "pending"
+    },
+    {
+      "number": "93",
+      "name": "Classification, labels, privacy assessment and exceptions",
+      "status": "pending"
+    },
+    {
+      "number": "94",
+      "name": "Lifecycle, erasure and the personal mark",
+      "status": "pending"
+    },
+    {
+      "number": "95",
+      "name": "Legal holds and access requests",
+      "status": "pending"
+    },
+    {
+      "number": "96",
+      "name": "Search, context graph, entity pages and ask",
+      "status": "pending"
+    },
+    {
+      "number": "97",
+      "name": "Analytics, reports, insights and views",
+      "status": "pending"
+    },
+    {
+      "number": "98",
+      "name": "Model factory v1, first specialist from chat and run logs",
+      "status": "pending"
+    },
+    {
+      "number": "99",
+      "name": "Opportunity agent, data-gap planning and specialists from organization data",
+      "status": "pending"
+    },
+    {
+      "number": "100",
+      "name": "Easy sources: catalog, manifest connectors, agent-written connectors, databases",
+      "status": "pending"
+    },
+    {
+      "number": "101",
+      "name": "End-to-end hardening and release",
       "status": "pending"
     },
     {
@@ -80,7 +275,7 @@
     },
     {
       "number": "80",
-      "name": "Command surface, run lifecycle and request-bound signed approvals",
+      "name": "Command surface, run lifecycle and signed approvals",
       "status": "pending"
     },
     {
@@ -105,14 +300,14 @@
     },
     {
       "number": "25",
-      "name": "Cybersecurity harness (v0.8.0, deferred by the owner to the end)",
-      "status": "deferred"
+      "name": "Cybersecurity harness (v0.8.0)",
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd-execute-phase 70",
-    "label": "Execute Phase 70 (gate with a floor) after the planning PR merges",
-    "reason": "Phase 70 planned 2026-11-16: 28 plans over four code PRs (18 requirements; CLAS-08 added by the owner)"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 3 of 9 · 11% · executing"
   },
-  "updated_at": "2026-11-16T14:29:02.000Z"
+  "updated_at": "2026-11-24T16:12:41.221Z"
 }
