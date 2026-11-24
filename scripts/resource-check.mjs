@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REGISTER_FILE = 'compliance/resources.json';
-export const PACKAGE_FILES = Object.freeze(['package.json', 'relay/package.json', 'hub/package.json', 'docs-site/package.json', 'compliance/package.json']);
+export const PACKAGE_FILES = Object.freeze(['package.json', 'relay/package.json', 'hub/package.json', 'docs-site/package.json', 'compliance/package.json', 'workbench/package.json']);
 export const IMAGE_FILES = Object.freeze(['hub/Dockerfile', 'relay/Dockerfile', 'relay/compose.yaml', 'workbench/Dockerfile']);
 export const WORKFLOW_DIR = '.github/workflows';
 export const VENDOR_SCRIPT = 'scripts/vendor-libs.mjs';

@@ -1,11 +1,11 @@
 // The compliance fit check (scripts/resource-check.mjs): every third-party resource needs a reviewed register entry before it is used.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { check, discover, knownIds, main } from '../resource-check.mjs';
+import { IMAGE_FILES, check, discover, knownIds, main } from '../resource-check.mjs';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -114,6 +114,32 @@ test('a Containerfile base under deploy/images is discovered; its stage names an
   const files = { ...REPO, [file]: `FROM registry.access.redhat.com/ubi9/ubi:9.9@${DIGEST} AS softhsm-build\nARG OPENBAO_IMAGE\nFROM \${OPENBAO_IMAGE}\nCOPY --from=softhsm-build /usr/lib64 /usr/lib64\nFROM softhsm-build\n` };
   assert.deepEqual(run(files, CLEAN), [`image:registry.access.redhat.com/ubi9/ubi (used in ${file}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
   assert.deepEqual(run(files, [...CLEAN, entry('image:registry.access.redhat.com/ubi9/ubi', 'image', [file], { component: 'openbao' })]), []);
+});
+
+test('workbench: the package manifest and the Dockerfile beside it are both read; stage names are not images', () => {
+  const files = {
+    'workbench/package.json': { dependencies: { '@theia/core': '1.77.0' }, devDependencies: { '@theia/cli': '1.77.0' } },
+    'workbench/Dockerfile': `FROM a/b:1@${DIGEST} AS node\nFROM c/d:2@${DIGEST} AS build\nFROM build AS runtime\nCOPY --from=node /usr/local/bin/node /usr/local/bin/node\n`,
+  };
+  const { resources, problems } = discover(fixture(files));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(resources.get('npm:@theia/core'), { id: 'npm:@theia/core', kind: 'npm', where: ['workbench/package.json'], runtime: true });
+  assert.deepEqual(resources.get('npm:@theia/cli'), { id: 'npm:@theia/cli', kind: 'npm', where: ['workbench/package.json'] });
+  assert.deepEqual(resources.get('image:a/b')?.where, ['workbench/Dockerfile']);
+  assert.deepEqual(resources.get('image:c/d')?.where, ['workbench/Dockerfile']);
+  for (const stage of ['node', 'build', 'runtime']) assert.equal(resources.has(`image:${stage}`), false, `${stage} is a stage, not an image`);
+});
+
+// discover() skips a `FROM ${...}` line, so a base image given through a build argument would escape the pin check and the register.
+const argFromFiles = (root, files) => files.filter((file) => /Dockerfile$/.test(file) && existsSync(path.join(root, file)))
+  .filter((file) => /^\s*FROM\s+(?:--\S+\s+)*\$\{/im.test(readFileSync(path.join(root, file), 'utf8')));
+
+test('workbench: no Dockerfile the fit check reads names its base image through a build argument', () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  assert.ok(IMAGE_FILES.includes('workbench/Dockerfile'));
+  assert.deepEqual(argFromFiles(repo, IMAGE_FILES), []);
+  const root = fixture({ 'workbench/Dockerfile': `ARG BASE\nFROM --platform=linux/amd64 \${BASE} AS build\n`, 'hub/Dockerfile': `FROM a/b:1@${DIGEST}\n` });
+  assert.deepEqual(argFromFiles(root, IMAGE_FILES), ['workbench/Dockerfile']);
 });
 
 test('the repository itself passes the check, against the real catalogues and components', () => {
