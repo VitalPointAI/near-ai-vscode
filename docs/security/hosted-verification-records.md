@@ -53,7 +53,7 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 25 | ingress | HAProxy is FIPS only when linked against a validated OpenSSL provider on a FIPS host | deployment observation (image base, host FIPS mode) | sc-13, sc-08 | gap G340 |
 | 26 | ingress | RKE2 Traefik: a FIPS build from RKE2 | document record | sc-13 | gap G325 |
 | 27 | ingress | RKE2 Traefik works with Theia Cloud only through explicit annotations (untested) | rig experiment record | sc-08 | gap G325 |
-| 28 | ingress | No ingress-nginx (archived, no further patches) | test rule (rendered production profile) | cm-07 | gap G340 |
+| 28 | ingress | No ingress-nginx (archived, no further patches) | test rule (rendered production profile) | cm-07 | rule ingress.cm-07.no-ingress-nginx |
 | 29 | image-registry | Harbor: signature-enforced import and admission | deployment observation (admission enforcing, unsigned images admitted counted), test rule | si-07 | gap G341 |
 | 30 | image-registry | Harbor: scanning | deployment observation | ra-05 | gap G341 |
 | 31 | image-registry | Harbor: SBOM storage | deployment observation | cm-08 | gap G341 |

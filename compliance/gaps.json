@@ -4254,8 +4254,7 @@
       "closesInPhase": "48",
       "controls": [
         "sc-13",
-        "sc-08",
-        "cm-07"
+        "sc-08"
       ],
       "id": "G340",
       "ownerRole": "maintainers",
@@ -4264,8 +4263,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add ingress statements with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode) and no ingress-nginx (test rule on the rendered production profile).",
-      "title": "The ingress has no statements for its section 10 conditions"
+      "remediation": "Add the ingress statement with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode).",
+      "title": "The ingress has no statement for its HAProxy FIPS condition"
     },
     {
       "closesInPhase": "48",
