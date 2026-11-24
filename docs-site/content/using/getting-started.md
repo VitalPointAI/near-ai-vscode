@@ -64,10 +64,14 @@ that can read the repository's packages.
 3. Open [http://localhost:3000/](http://localhost:3000/). Use `localhost`, so the workbench can give
    each page of the extension its own origin.
 
-The workbench opens the Sterling Get Started page for the Canadian Defence Edition. From the right
+The workbench opens the Sterling Get Started page for the Canadian Defence Edition, or the page of
+the work area you open. Get Started has **Set up Sterling**, **Open Chat** and **Explore a sample
+agent team**, which opens read-only Team Studio samples, and a card for each Defence work area:
+Capability Development, Exercises & Training, Planning and Resource Management. From the right
 sidebar you can open:
 
-- **Get Started**, including **Explore a sample team**, which opens read-only Team Studio samples;
+- **Get Started**, **Portfolio**, **Team Studio**, **Agent Activity** and **Governance**;
+- **Chat**, which slides the chat drawer open and closed;
 - **Documentation**, the guides bundled with the image, which you can search without a network;
 - **Compliance**, which shows control states only from an evidence bundle checked for the same
   release. The image starts without one, so the view says so until you give it one.
