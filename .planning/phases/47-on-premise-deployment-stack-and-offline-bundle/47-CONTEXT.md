@@ -3,6 +3,7 @@
 **Gathered:** 2026-11-23
 **Status:** Ready for planning. Decided on the owner's behalf from the accepted hosting design; nobody could be asked questions during planning. The owner's decisions D1 to D11 and the defaults O2 to O6 (DESIGN.md sections 2 and 14) were accepted on 2026-11-23 and are binding here. Points the design leaves open are decided below with the recommended default and listed at the end under "For the owner to confirm".
 **Source:** written by hand from `.planning/research/multiuser-hosting/DESIGN.md` sections 2, 4 to 8, 10, 11 and 14 and `RESEARCH.md` beside it. The GSD ADR ingest (`--ingest ... --ingest-format narrative`) parsed DESIGN.md but found **0 decisions** (the decisions are in tables), so the express path would have fallen back to discuss-phase; the coordinator approved writing this file by hand instead. Also read: the Phase 47 entry in `.planning/ROADMAP.md`, `compliance/README.md` ("Adding a resource"), `compliance/resources.json` and `compliance/schemas/resources.schema.json`, `scripts/resource-check.mjs`, `relay/compose.yaml`, `hub/Dockerfile`, and `.planning/research/multiuser-sync/DESIGN.md` section 10 (the sync hub).
+**Revised:** 2026-11-24 (owner): D-02. The first goal is one HQ with about 400 concurrent people, not thousands. No plan's values change: every size is a per-site value.
 
 <domain>
 ## Phase Boundary
@@ -30,7 +31,7 @@ Not in this phase:
 
 ### Accepted owner decisions that bind this phase (owner, 2026-11-23)
 - **D-01 (owner, D2):** On-premise only, including fully air-gapped sites. Hosting, sign-in, secrets and session management never depend on the internet. Commercial cloud only for what your organization's signed policy allows (for example an approved model endpoint), never for the stack itself.
-- **D-02 (owner, D3):** Hundreds to thousands of concurrent people per site, connected HQ and disconnected edge. Charts are sized by per-site values; no capacity figure is stated until Phase 48 measures it.
+- **D-02 (owner, D3; revised 2026-11-24, owner):** The first goal is one connected HQ with about 400 concurrent people (was hundreds to thousands per site). Edge sites stay disconnected and smaller. The design still grows beyond 400 later, so nothing in the charts caps a site at 400: charts are sized by per-site values, and no capacity figure is stated until Phase 48 measures it. The HQ choices (Harbor, 3-node OpenBao, several hubs) stay as planned. Phase 48 tests 400 concurrent sessions with start bursts of 200 (48-CONTEXT.md D-02).
 - **D-03 (owner, D4):** Self-hosted Eclipse Theia Cloud is the session orchestrator, one session per person (`sessionsPerUser: 1`).
 - **D-04 (owner, D5):** OpenBao (MPL-2.0), never HashiCorp Vault (BUSL-1.1). One OpenBao cluster per site, no cross-site replication.
 - **D-05 (owner, D6; amended 2026-11-23, see D-57):** Sign-in by passkeys or hardware security keys only, as the site's `signInKeys` policy sets, through Keycloak WebAuthn passwordless. No password or OTP authenticator in any flow at either level. PKI smart cards are an optional hardware flow.
