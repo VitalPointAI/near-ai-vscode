@@ -24,6 +24,10 @@ import {
   parseAgentsSection, parseExportControlSection, parseLabelsSection, parseLimitsSection, parseOnboardingSection, parseReservedSection, parseResidencySection
 } from './sections';
 import type { AgentsSection, ExportControlSection, LabelsSection, LimitsSection, OnboardingSection, ReservedSection, ResidencySection } from './sections';
+import { parseCredentialsSection } from './credentialsSection';
+import type { CredentialsSection } from './credentialsSection';
+import { parseAgreementsSection } from './agreementsSection';
+import type { AgreementsSection } from './agreementsSection';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
@@ -75,10 +79,16 @@ export interface PolicyDocument {
   readonly reserved?: ReservedSection;
   /** Export-controlled technical data (D-60), report mode: parsed and signed, read by nothing that decides in this phase. */
   readonly exportControl?: ExportControlSection;
+  /** Trusted issuers, status lists, freshness and sensitivity requirements (Phase 71, D-12). With it, the reserved statusLists and maxOfflineAge are empty. */
+  readonly credentials?: CredentialsSection;
+  /** Agreements with other organizations (Phase 71, D-12). */
+  readonly agreements?: AgreementsSection;
 }
 
 const ENVELOPE_REQUIRED = ['bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'requires', 'labels', 'agents'] as const;
-const ENVELOPE_OPTIONAL = ['parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl'] as const;
+const ENVELOPE_OPTIONAL = [
+  'parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements'
+] as const;
 
 function has(value: Fields, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -217,6 +227,16 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     if (!people.ok) return people;
     out['people'] = people.value;
   }
+  if (has(value, 'credentials')) {
+    const credentials = parseCredentialsSection(ownValue(value, 'credentials'), scales, childPath(path, 'credentials'));
+    if (!credentials.ok) return credentials;
+    out['credentials'] = credentials.value;
+  }
+  if (has(value, 'agreements')) {
+    const agreements = parseAgreementsSection(ownValue(value, 'agreements'), scales, childPath(path, 'agreements'));
+    if (!agreements.ok) return agreements;
+    out['agreements'] = agreements.value;
+  }
   if (has(value, 'onboarding')) {
     const onboarding = parseOnboardingSection(ownValue(value, 'onboarding'), scales, childPath(path, 'onboarding'));
     if (!onboarding.ok) return onboarding;
@@ -237,7 +257,19 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     if (!exportControl.ok) return exportControl;
     out['exportControl'] = exportControl.value;
   }
-  return checkLegalBasis(out, path);
+  return checkReservedSlots(out, path) ?? checkLegalBasis(out, path);
+}
+
+/**
+ * D-12: with a credentials section, the reserved v1 slots for status lists and offline ages must be empty, so each is set in one place (Phase 70's
+ * OFFL-03 slot is filled by credentials@1).
+ */
+function checkReservedSlots(out: Readonly<Record<string, unknown>>, path: string): Refusal | undefined {
+  const reserved = out['reserved'] as ReservedSection | undefined;
+  if (out['credentials'] === undefined || reserved === undefined) return undefined;
+  if (reserved.statusLists.length > 0) return refused('not-allowed-here', childPath(childPath(path, 'reserved'), 'statusLists'));
+  if (Object.keys(reserved.maxOfflineAge).length > 0) return refused('not-allowed-here', childPath(childPath(path, 'reserved'), 'maxOfflineAge'));
+  return undefined;
 }
 
 /**

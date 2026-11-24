@@ -81,7 +81,9 @@ const SECTION_TITLES: Readonly<Record<PolicySectionName, string>> = Object.freez
   onboarding: 'Setup and discovery',
   limits: 'Limits',
   reserved: 'Stored values',
-  exportControl: 'Export-controlled work'
+  exportControl: 'Export-controlled work',
+  credentials: 'Who may issue credentials',
+  agreements: 'Agreements with other organizations'
 });
 
 const REGION_WORDS: Readonly<Record<string, string>> = Object.freeze({ CA: 'Canada', EU: 'the European Union', US: 'the United States' });

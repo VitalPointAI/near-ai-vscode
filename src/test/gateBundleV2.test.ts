@@ -176,10 +176,13 @@ test('D-08: a fraction anywhere in a v2 document is wrong-type, before anything 
   assert.equal(reasonOf(v2((d) => { d.reserved.maxOfflineAge = { 'org/Restricted': -1 }; })), 'wrong-type');
 });
 
-test('features: KNOWN_BUNDLE_FEATURES is FEATURE_IDS, every section but reserved has its feature, and the list is the D-06 list plus export-control@1', () => {
+test('features: KNOWN_BUNDLE_FEATURES is FEATURE_IDS, every section but reserved has its feature, and the list is the D-06 list plus export-control@1, credentials@1 and agreements@1', () => {
   assert.deepEqual([...KNOWN_BUNDLE_FEATURES], [...FEATURE_IDS]);
-  assert.deepEqual([...FEATURE_IDS], ['labels@1', 'endpoints@1', 'authorizations@1', 'residency@1', 'models@1', 'agents@1', 'people@1', 'onboarding@1', 'limits@1', 'layers@1', 'export-control@1']);
-  assert.deepEqual([...POLICY_SECTIONS], ['labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl']);
+  assert.deepEqual([...FEATURE_IDS], [
+    'labels@1', 'endpoints@1', 'authorizations@1', 'residency@1', 'models@1', 'agents@1', 'people@1', 'onboarding@1', 'limits@1', 'layers@1', 'export-control@1',
+    'credentials@1', 'agreements@1'
+  ]);
+  assert.deepEqual([...POLICY_SECTIONS], ['labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements']);
   assert.equal(featureForSection('reserved'), undefined);
   assert.equal(featureForSection('exportControl'), 'export-control@1');
   for (const section of POLICY_SECTIONS) {
@@ -358,6 +361,16 @@ test('D-08: limits are whole numbers with the unit in the key; vaultHoursPerDay 
 test('every section: the full document round-trips, and each section without its feature in requires is malformed', () => {
   const key = issuerKey();
   const full = fullDocumentFor(key) as Loose;
+  // Phase 71 (D-12): the credentials and agreements sections too. With credentials@1, the reserved status lists and offline ages are set there instead.
+  full.reserved = { ...full.reserved, statusLists: [], maxOfflineAge: {} };
+  full.credentials = {
+    v: 1, root: { did: 'did:webvh:QmUy89VrfryQ254CeHZzQfmcKqByPoKNGqYykP3SeXuegQ:hq.example.org:org', scid: 'QmUy89VrfryQ254CeHZzQfmcKqByPoKNGqYykP3SeXuegQ' },
+    issuance: { ClearanceCredential: { role: 'IssuerRoleCredential', ceiling: { scale: 'ca-classified', upTo: 'Secret' } } }, suites: ['eddsa-jcs-2022'],
+    didMethods: ['did:webvh'], statusLists: [{ uri: 'https://status.example.org/list', purpose: 'revocation', key: 'z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK' }],
+    statusTtl: 900, maxOfflineAge: { 'org/Restricted': 86400 }, requiredBySensitivity: { 'ca-classified/Secret': ['ClearanceCredential'] }
+  };
+  full.agreements = { v: 1, items: [{ id: 'agreement-1', partner: 'Example Partner Organization', tokens: ['GBR'], levelCeiling: 'org/Restricted', compartments: [], until: '2027-11-24T00:00:00.000Z' }] };
+  full.requires = [...full.requires, 'agreements@1', 'credentials@1'].sort();
   const parsed = parsePolicyDocument(full);
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
   if (!parsed.ok) return;
