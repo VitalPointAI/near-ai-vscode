@@ -24,3 +24,7 @@ service:
 
 landingPage:
   imagePullPolicy: IfNotPresent
+
+# Every Theia Cloud Ingress certificate comes from the site PKI (D-16, 47-13); the chart default letsencrypt-prod is an ACME issuer name.
+ingress:
+  clusterIssuer: site-pki

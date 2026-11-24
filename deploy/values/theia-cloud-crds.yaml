@@ -3,4 +3,7 @@
 #
 # Pull policy: the chart's conversion webhook template has no imagePullPolicy setting, so none can be set here. The image is referenced by
 # digest and not tagged latest, so Kubernetes defaults its pull policy to IfNotPresent (D-20). 47-15's carried chart patch may make it explicit.
-{}
+
+# The conversion webhook's certificate comes from the site PKI (D-16, 47-13). The chart default, theia-cloud-selfsigned-issuer, is a CA
+# issuer whose CA certificate nothing issues once the base chart's self-signing issuer is off, so the webhook would never get a certificate.
+clusterIssuer: site-pki
