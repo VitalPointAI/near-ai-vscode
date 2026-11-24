@@ -1,0 +1,22 @@
+# Per-site Theia Cloud settings, written by the site's operator from this example (the release descriptor names this file as its site file).
+hosts:
+  configuration:
+    # Host name prefixes under the site domain: the start page (sessions.<domain>, which the realm's redirectUris name, 47-08), the
+    # service API and the sessions.
+    landing: sessions
+    service: sessions-api
+    instance: ws
+sterling:
+  # The addresses oauth2-proxy in each session trusts to set X-Forwarded-* headers: where the HAProxy controllers reach sessions from. The
+  # controllers are ordinary pods, so this is the pod network unless the site pins them to known addresses; a session accepts connections
+  # only from HAProxy and the operator (sterling-sessions' NetworkPolicy), and HAProxy replaces any client-supplied forwarded header. Required:
+  # an empty list, 0.0.0.0/0 or ::/0 stops the render.
+  trustedProxyIps:
+    - "${site.clusterCidrs.pod}"
+landingPage:
+  # Texts of the start page. The refusal at capacity is the service's own text ("... has max instances reached."), not a value here
+  # (owner-confirm item 9: a Phase 46 or upstream item). The 1.2.0 start page shows text only, so a linked edge site's "Sign in through
+  # HQ" is the link https://<instance host>/oauth2/start?kc_idp_hint=hq, which oauth2-proxy passes on to Keycloak (47-14's broker).
+  infoTitle: "Sterling workbench"
+  infoText: "Sign in with your passkey or security key to open your workbench. Your files stay on your own workspace volume."
+  loadingText: "Starting your workbench..."

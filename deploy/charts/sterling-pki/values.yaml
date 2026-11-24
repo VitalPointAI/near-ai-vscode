@@ -1,0 +1,51 @@
+# The site PKI (D-16 as amended by owner-confirm E2, D-50). Our values are deploy/values/sterling-pki.yaml and the per-site file
+# deploy/values/site.example/sterling-pki.yaml.
+
+# OpenBao, which holds the site intermediate pki_int (signed offline by your organization's HQ root, 47-14).
+openbao:
+  server: https://openbao.sterling-openbao.svc:8200
+  namespace: sterling-openbao
+  release: openbao
+
+# cert-manager's login to OpenBao (deploy/openbao/apply.mjs CERT_MANAGER): the issuers ask Kubernetes for a short token of the dedicated
+# service account below, with this audience, and log in to auth/kubernetes role cert-manager.
+auth:
+  role: cert-manager
+  mountPath: /v1/auth/kubernetes
+  serviceAccount: openbao-issuer
+  audience: sterling-openbao-pki
+  # The cert-manager controller's own service account, the only one allowed to request tokens for the issuer account.
+  controllerServiceAccount: cert-manager
+
+# One vault-type ClusterIssuer per pki_int role (deploy/openbao/apply.mjs): ingress for the site's host names and in-cluster services, hub
+# for the sync hubs (47-11). There is no other issuer and no ACME issuer anywhere (D-16).
+issuers:
+  - name: site-pki
+    role: ingress
+  - name: site-pki-hub
+    role: hub
+
+# The site CA chain (PEM text): your organization's HQ offline root and this site's intermediate, written from 47-14's import-intermediate
+# --chain-out. Empty means nothing verifies (fails closed).
+siteCaChain: ""
+# The bootstrap CA certificate (PEM text, no key) while OpenBao and the registry still serve their bootstrap certificates; the install script
+# empties it at retire-bootstrap and re-applies this release, so the bootstrap CA is trusted nowhere afterwards.
+bootstrapCaCertificate: ""
+# The same chain as a password-less PKCS12 (base64), made by the install script from siteCaChain for Java clients.
+siteCaTruststore: ""
+
+# The site's settings (deploy/values/sterling-pki.yaml fills them from the site file).
+domain: ""
+registry: ""
+registryKind: ""
+
+# The namespaces that get ConfigMap sterling-site-ca.
+trust:
+  namespaces: []
+  # The namespaces that get the same chain as Secret sterling-site-ca (key tls.crt) for HAProxy's backend checks.
+  backendNamespaces: []
+
+# Server certificates from site-pki: 90 days, renewed 30 days before (the pki_int roles allow at most 90 days).
+certificates:
+  duration: 2160h
+  renewBefore: 720h

@@ -371,6 +371,31 @@ Plans:
 
 **Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 12 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR. Observer positions (POST-09, criterion 6, D-27 to D-35) were added by the owner on 2026-11-24, and the same day the owner decided that observers receive no roster: staff release chosen versions into each observer's own stream. Outside observers are not usable on a real site until Phase 47 guest accounts (planned) ship (D-33).
 
+### Phase 33.2: Post-quantum cell keys (cell-wrap/v2) (INSERTED)
+**Goal**: Every cell key shared with a device is wrapped with a hybrid of P-256 and ML-KEM-768, both listed by the Cyber Centre for Protected B, so shared work stays protected against future quantum computers; projects switch through `roster.require`, each cell moves at its next epoch, nobody is left without keys, and no Protected B work is ever wrapped the old way.
+**Inserted**: 2026-11-24 from the owner's decision O3 ("PQC if acceptable, else P-256"; a PQC option is acceptable), `.planning/research/data-centric-access/RESEARCH.md` section 10. The research placed it in Phase 71 (core); it is its own phase next to the cells it changes (33.2-CONTEXT.md D-01).
+**Depends on**: Phase 33 merged (33-03 `roster.require`, 33-18 feature registry, 33-21 to 33-23 session keys and the hosted envelope, 33-24 and 33-26 the native engine and Staff Room). It edits the roster and wrap files that Phase 33.1 also edits, so it merges between 33.1's wave 7 and wave 8, or after 33.1 if that window has passed. **It must be on `main` before any site holds Protected B data**; until then 48.1-09 lists the X25519 cell wrap as an open crypto condition.
+**Requirements**: WRAP-01, WRAP-02, WRAP-03, WRAP-04, WRAP-05
+**Success Criteria** (what must be TRUE):
+  1. An epoch key wrapped with `near-ai/cell-wrap/v2` (P-256 ECDH and ML-KEM-768, HKDF-SHA256, AES-256-GCM) opens only on the device it names, for the cell and epoch it names; frozen vectors pass; old wraps stay readable. (WRAP-01)
+  2. Every device, hosted person and hub publishes its post-quantum keys bound to its Ed25519 key, the safety words cover them, and the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file. (WRAP-02)
+  3. A grant for hundreds or thousands of devices fits in signed pages committed by one roster entry, and a missing page recovers like any missing blob. (WRAP-03)
+  4. New shared work starts switched; a lead switches an existing project in one step, each cell moves at its next epoch, late computers get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap. (WRAP-04)
+  5. A Protected B cell is never wrapped with X25519; a CI check fails if any wrap path bypasses the one entry point; SECURITY.md says which wrap protects shared work, and ML-KEM-1024 with P-384 is reserved for Protected C and classified work. (WRAP-05)
+**Undo cost**: High. The wire format, `device.kem` and grant pages are permanent in shared logs; they are settled at 33.2-01's checkpoint.
+**Plans:** 8 plans in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
+**UI hint**: yes
+
+Plans:
+- [ ] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
+- [ ] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
+- [ ] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
+- [ ] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
+- [ ] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
+- [ ] 33.2-06-PLAN.md: Wave 5. Every wrap path through one entry point; the Protected B rule; the CI check; SECURITY.md
+- [ ] 33.2-07-PLAN.md: Wave 6. The Switch, Move and Give keys cards in the native Staff Room
+- [ ] 33.2-08-PLAN.md: Wave 7. Close-out on the built image, the full suites once, the integration PR after the owner's gate approval
+
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
 **Depends on**: Phase 33
@@ -720,6 +745,39 @@ Design: `.planning/research/compliance-dashboard/CGP-ITAR.md`. Owner request of 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 45 to break down)
 
+### Phase 45.1: NATO and Five Eyes exchange, part 1: labels, binding, adapter and base TDF (INSERTED)
+**Goal**: Your organization can send released work to allies and receive theirs at the release boundary, with labels a NATO system can read, bound to their content by a signature; nothing leaves without the same credential check as any release, and nothing received reaches work until a person accepts it. Our own cells stay the storage format.
+**Inserted**: 2026-11-24 from the owner's decision O1 and NATO direction ("ensure NATO interoperability as soon as practicable with the ZTDF adapter if that's the best option"), `.planning/research/data-centric-access/RESEARCH.md` sections 2.2, 2.4 and 11 (research row I). Part 2 is Phase 45.2.
+**Depends on**: Phase 71 (core): 71-03 (the profile signer), 71-06 (`agreements@1`), 71-07 (`mayRelease`); Phase 33.1-21 (the release act) for 45.1-04. Phase 45 only for export-controlled content, which is refused until Phase 45 ships. L5 is not needed for file exchange. Runs beside Phase 33.1's later waves.
+**Requirements**: XCHG-01, XCHG-02, XCHG-03, XCHG-04
+**Success Criteria** (what must be TRUE):
+  1. Your organization's signed policy maps each label to a NATO-readable form (STANAG 4774 categories) that its security officer confirms; a label with no mapping is refused for export; mapping out and back gives the same label. (XCHG-01)
+  2. Every release copy and every export carries a signed label binding (4778-style) over the label, the mapping version and the content hash, signed by a staff session key or your organization's release key and never naming a person, and a changed label or content is refused. (XCHG-02)
+  3. A release authority exports a released version to a partner through the same `mayRelease` check as any release, against the partner's agreement, after a passkey step-up, and the export is recorded; a received object is verified, mapped and held until a person accepts it. (XCHG-03)
+  4. Base TDF objects from the public OpenTDF specification go out to a partner's key and come in through our own non-exportable receiving key in OpenBao. (XCHG-04)
+**Research flags**: (1) Never design the ZTDF half from vendor descriptions (research pitfall 13). (2) Not a cross-domain guard and not accreditation (pitfall 14). (3) The OAEP hash partners accept (45.1-02).
+**Undo cost**: Medium. The label table is policy data; the exchange records are permanent in shared logs (settled at 45.1-03's checkpoint).
+**Plans:** 5 plans in 5 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-10 and four owner items in `45.1-CONTEXT.md`)
+**UI hint**: yes
+
+Plans:
+- [ ] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop@1` table and the signed label binding
+- [ ] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
+- [ ] 45.1-03-PLAN.md: Wave 3. The exchange adapter at the release boundary, with the exchange record shapes checkpoint
+- [ ] 45.1-04-PLAN.md: Wave 4. The binding on every release copy; Export for a partner and Received objects in the workbench
+- [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
+
+### Phase 45.2: NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts (INSERTED)
+**Goal**: Your organization exchanges ZTDF objects with allies, with labels and bindings written exactly as ADatP-4774 and 4778 define them, and key access to a partner's key access server.
+**Inserted**: 2026-11-24 as a stub (research row J). **Trigger**: your organization receives ACP-240 Ed A with its ZTDF specification, and ADatP-4774, 4778 and 4778.2, through DND (research 11.1). The trigger is the texts, not a date.
+**Depends on**: Phase 45.1; the texts.
+**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08 (drafts until the texts arrive)
+**Scope when triggered** (research 11.3): the ADatP-4774 XML serializer and parser; the ADatP-4778 binding object; ZTDF assertions and label placement; key access to a partner key access server; XML canonicalization only if the 4778 binding needs XML signatures (prefer our own narrow implementation; any library gets a compliance fit entry); conformance against allied or vendor sample objects and a trial with a partner's test key server.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 45.2 to break down once the texts arrive)
+
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
 **Depends on**: the hosting design (`.planning/research/multiuser-hosting/DESIGN.md`, owner decisions D1 to D11, 2026-11-23); the Theia spike (`.planning/spikes/theia-team-studio/`, PR #162); the compliance fit check (`compliance/resources.json`, PR #164). Runs beside Phase 47 from day one.
@@ -756,7 +814,7 @@ Plans:
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
   7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account. It uses a passkey or hardware key only, is created at the lead's request (with the security contact's approval for allied military and industry), has its own OpenBao entity and keys, and never holds an administrator role. At its end date the account is disabled, its sessions are stopped and its entity is disabled without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
-**Plans:** 12/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
+**Plans:** 15/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -771,9 +829,9 @@ Plans:
 - [x] 47-10-PLAN.md: Wave 4. Encrypted storage class, OpenSearch with Fluent Bit, Prometheus, Harbor values
 - [x] 47-11-PLAN.md: Wave 4. Sync hubs as single-writer StatefulSets; Keycloak's Postgres
 - [x] 47-12-PLAN.md: Wave 4. Workbench AppDefinition, site environment ConfigMap, session environment policy
-- [ ] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
-- [ ] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
-- [ ] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
+- [x] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
+- [x] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
+- [x] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
 - [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
 - [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
 - [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
@@ -1099,28 +1157,61 @@ Plans:
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
 
-### Phase 71: Identities, credentials and delegation that only narrows
-**Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
-**Depends on**: Phase 70 (and Phase 69's signer and key status)
-**Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07
+### Phase 71: Identities and verified credentials (core), pulled forward
+**Goal**: Verified credentials are the only source of access attributes. Every person, agent and machine acts under its own standard DID. Clearance, compartments, nationality, affiliation, how a person serves, export eligibility, agreements and the authority to issue arrive only as signed credentials that can be revoked. Data decides who may open it from its own label, through one pure check that the fold, your organization's server, the key-wrap preparers and the session all call. Keycloak only signs people in.
+**Re-scoped 2026-11-24** (the owner's data-centric access direction, `.planning/research/data-centric-access/RESEARCH.md`, decisions O1 to O11 accepted): the identity and credential core is pulled forward and runs now beside Phase 33, Phase 33.1's waves 1 to 3, Phase 46 and 47-13 to 47-18 (research rows B and E). Agent delegation (DLGT-02 to DLGT-08) moves to Phase 71.1, which stays in Stage 1. The hybrid cell wrap the research put here moves to Phase 33.2, next to the cells it changes (71-CONTEXT.md D-02). Plan, requirement and API ids for other planners: `.planning/research/data-centric-access/PLAN-IDS.md`.
+**Depends on**: Phase 70 (labels, dominance, the signed policy) and Phase 69 (the signer and key status). Plans 71-01 to 71-08 need nothing else. 71-10, 71-12 and 71-13 need 46-02 and 46-07 on `main` (47-07 is on `main`). 71-09 and 71-13 need Phase 33's hub and native Staff Room plans (33-22 to 33-26).
+**Requirements**: DLGT-01, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07, DCAC-01, DCAC-02, DCAC-03, DCAC-04, DCAC-05, DCAC-06
 **From the portfolio design (2026-11-20)**: positions and portfolio publishers become verified credentials here, so a posting and a publication can be checked against a person's credential, not only the device key (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
-**Builds on Phase 69 (unchanged, executing)**: the payload signer accepts any Ed25519 signer object (69 D-20) and every check honours one key-status lookup (69 D-09, D-21). The `eddsa-jcs-2022` proof is a second proof format beside Phase 69's signed-payload envelope, using the same signer object, the same raw key and the same canonical JSON, so there is still one signer (69 D-10); the envelope keeps signing policy bundles and approval answers, its `grant` purpose stays reserved, and grants become delegation credentials. Phase 69's device key becomes the device's `did:key` with no key change; 69 D-06's wording about a `did:near` identity is superseded by decision 10; 69-CONTEXT.md D-06 carries a note saying so. Phase 69's build is unaffected: it creates the Ed25519 device key that becomes a `did:key`.
-**Research step (first, before the other plans are written)**: (a) JCS conformance: run the existing canonical JSON and our `eddsa-jcs-2022` signing input against the W3C test vectors and Digital Bazaar's cryptosuite, confirm the integer-only subset equals RFC 8785 for every input the profile allows (research risk 12), and confirm a Data Integrity signing input (two SHA-256 digests) can never equal a Phase 69 signed-payload or team-event input. (b) `did:webvh` hosting and caching: until HQ hosts logs (L4), where people's and your organization's logs live and how they travel (candidates: beside the policy bundle, or over Phase 69's coordination transport); how a log verifies from a cached copy and resumes from cached verified state; the SCID and domain in the identifier; pre-rotation with an offline root key; witnesses. (c) Status list sizing: the 131,072-entry minimum, compressed size, random index allocation, lists per issuer, `validUntil` and cache lifetime, and how a solo install publishes and refreshes its own list.
+**From the AI-classification research (coordinator, 2026-11-24)**: `ClassificationAuthorityCredential { scale, upTo, scope }` joins the credential types, and agents and devices can never issue: the checker refuses it structurally, with a property test (71-CONTEXT.md D-06, D-07).
+**Builds on Phase 69 (unchanged)**: the payload signer accepts any Ed25519 signer object (69 D-20) and every check honours one key-status lookup (69 D-09, D-21). The `eddsa-jcs-2022` proof is a second proof format beside Phase 69's signed-payload envelope, using the same signer object, the same raw key and the same canonical JSON, so there is still one signer (69 D-10). Phase 69's device key becomes the device's `did:key` with no key change; 69 D-06's wording about a `did:near` identity is superseded by decision 10.
+**Research step (first: plans 71-01 and 71-02)**: (a) JCS conformance: our `eddsa-jcs-2022` signing input against the W3C vectors and Digital Bazaar's cryptosuite both ways, the integer-only subset equal to RFC 8785 for every input the profile allows, and domain separation from Phase 69's inputs (71-01, the tracer). (b) `did:webvh` hosting and caching: SCID, verifying from a cached copy, pre-rotation with an offline root, hosting on the sync hub behind the site's ingress, HQ as witness, the DIF vectors. (c) Status list sizing, time to live and the per-level maximum offline age (O6). (O8) The FIPS posture for Ed25519 with `did:webvh`, with `ecdsa-jcs-2019` and P-256 officer keys as the ready fallback for a strict-FIPS site (71-02). Each item ends with a verdict; a FALLBACK verdict applies the accepted fallback (O9) to the plans that depend on it.
 **Success Criteria** (what must be TRUE):
-  1. Every person, agent and machine acts under its own DID: agents and machines under `did:key` from their Ed25519 key (Phase 69's device identity maps to it unchanged), people and your organization's root under `did:webvh`; each DID document holds only the identifier, verification methods, controller and services and validates as DID Core 1.0; no agent uses another agent's key or a shared credential pool. (DLGT-01)
-  2. A delegation gives a member the intersection of the lead's grant, the member's `tools:` line and the task's request; a property test shows no delegation ever widens, and the gate enforces it, not the prompt. (DLGT-02)
-  3. Each grant is a delegation credential signed by its delegator, with an expiry, a budget, a level cap, roles, compartments and a depth limit, recorded in the signed log; the gate refuses an expired, unsigned or tampered grant. (DLGT-03)
-  4. A tree deeper than the limit (default: the lead plus members; members spawn only when marked as orchestrators) or wider than its fan-out caps is refused with a plain reason, and leaves never get spawning, scheduling, outbound messages, skill or memory writes, or tool and policy changes unless their grant names them. (DLGT-04, DLGT-05)
-  5. A member asked for a declared result shape returns it or gets one correction turn, a restart reports an unfinished result as unknown rather than guessing, and the Agent Activity view shows for each agent what it may do in plain words, the level, roles and compartments it holds, and its DID for anyone who wants to inspect it. (DLGT-06, DLGT-07)
-  6. Authority, clearance, roles and compartments arrive only as credentials in our narrow VC 2.0 profile (`eddsa-jcs-2022`, no new runtime dependency) that pass the W3C test vectors and cross-verify both ways with Digital Bazaar's libraries in tests; revoking or suspending a credential in its status list takes effect at the next check, a lost device is cut off by revoking its binding, and a holder shows only the atomic or threshold credentials a check asks for. (VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06)
-  7. The gate builds each actor's clearance only from verified, unrevoked credentials; a chain that widens level, roles, compartments, expiry or depth at any link, or holds a revoked or suspended credential anywhere, is refused with a plain reason; a person with no organization issues their own credentials from their device DID, so a fresh install still works. (VCRD-07, DLGT-08)
-**Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`, whose name two incompatible specifications already hold (research risk 4). The spike's draft DID (`openshell-spike/did/`, an `agentGuardrails` member with `authority` and `sandbox` sections) is replaced: authority moves into credentials and the sandbox policy hash into the grant (ANCH-04). The NEAR implicit account stays derivable offline from the same key, but nothing uses it on chain. (2) Identity lifetime: decided (persistent per member, per-run grants); work out rotation (`did:webvh` pre-rotation for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (3) Spend in grants needs a running total held by the parent, not a static comparison of amounts and periods (spike finding). (4) Existing teams that nest deeper than the new default get a clear message, not a silent failure. (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a revoked credential keeps working until the cached list's `validUntil`, so list lifetimes are set deliberately; the per-level offline age is L5 (risk 5). (7) Not post-quantum: Ed25519 proofs will need a migration, so every proof names its cryptosuite and a second suite can sit beside it (risk 10). (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens (risk 8). (9) On-chain keys come in L4 (owner, 2026-11-16, PROJECT.md decision 14; ANCH-14): each is a dedicated key bound to an agent's or node's DID by a credential, never the device key, so keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods, and L4 needs no profile change.
-**Undo cost**: High. The DID methods, the credential profile, the status list format and the grant format are what edge devices hold offline and what the anchoring milestone's roots commit to; only roots go on chain.
-**Plans:** 0 plans
+  1. Every person, agent and machine acts under its own DID: agents and machines under `did:key` from their Ed25519 key (Phase 69's device identity maps to it unchanged), people and your organization's root under `did:webvh`, made by the person's own backend at first sign-in and by an offline ceremony for the root; each DID document holds only the identifier, verification methods, controller and services and validates as DID Core 1.0; a computer is bound to its person by a credential and cut off by revoking it. (DLGT-01, VCRD-06)
+  2. Every access attribute arrives only as a credential in our narrow VC 2.0 profile (`eddsa-jcs-2022`, second suite `ecdsa-jcs-2019`, no new runtime dependency) that passes the W3C vectors and cross-verifies both ways with Digital Bazaar's libraries in tests; revoking or suspending it in its status list takes effect at the next check; a holder shows only the atomic or threshold credentials a check asks for. (VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05)
+  3. Your organization's signed policy names, in `credentials@1`, the root DID and what each role may issue, the status lists, the time to live, the maximum offline age per level and the credentials required by sensitivity (only ever tightened), and in `agreements@1` its organization-to-organization agreements; only people with a role credential from the root can issue, and an agent or device key never can. (DCAC-01)
+  4. An entry that relies on a person's attribute cites its evidence by hash, and every replica gives the same answer whatever list it holds; one `mayRelease` decides every wrap, release and serve with the full dominance for every holder, observers included, and releasability for everyone. (DCAC-02, DCAC-03)
+  5. Your organization's server refuses an append built on stale evidence and stops serving a member whose credential was revoked, and the lead rekeys in one action; the session refuses protected actions when its credential check is stale, with Retry; an epoch key opens in a session only while the person's fresh credentials allow it; an edge refuses past the level's maximum offline age. (DCAC-04)
+  6. Inside your organization the gate's clearance comes only from verified credentials; on a computer with no organization, the person's declared clearances work as today and are shown as declared, not verified. (VCRD-07)
+  7. Officers issue, revoke and suspend credentials from their own session with their person key after a passkey step-up; status lists are signed by the HQ status-list key in OpenBao, each signature authorized only by an officer's step-up; your organization's server serves the DID logs and status lists, and a trust export carries them to a disconnected edge. (DCAC-05, DCAC-06)
+**Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`. (2) Identity lifetime: persistent per person; rotation (`did:webvh` pre-rotation for the root, 71-02's verdict for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a device holding keys offline is trusted until its next contact, bounded by the per-level maximum offline age, now set in this phase (O6), and by rekeying. (7) Not post-quantum: every proof names its cryptosuite so a second suite can sit beside it. (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens. (9) On-chain keys come in L4: keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods. Flags 3 and 4 (spend in grants, nesting) moved to Phase 71.1.
+**Undo cost**: High. The DID methods, the credential profile, the status list format and the evidence citation shape are what edge devices hold offline and what shared logs cite; settle them before they ship.
+**Plans:** 14 plans in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 71 to break down)
+- [ ] 71-01-PLAN.md: Wave 1. Tracer and research item (a): one clearance credential through our `eddsa-jcs-2022` profile, cross-verified with Digital Bazaar and the W3C vectors (package check first)
+- [ ] 71-02-PLAN.md: Wave 1. Research items (b), (c) and O8: `did:webvh` hosting and caching, status list sizing and lifetimes, the FIPS posture with the fallback ready
+- [ ] 71-03-PLAN.md: Wave 2. The narrow VC 2.0 profile, every credential type, the second suite `ecdsa-jcs-2019`
+- [ ] 71-04-PLAN.md: Wave 2. `did:key` for devices from Phase 69 keys; `did:webvh` log verification from a cached copy
+- [ ] 71-05-PLAN.md: Wave 3. Bitstring Status List: build, sign, verify, staple, cite by hash
+- [ ] 71-06-PLAN.md: Wave 3. Trusted issuers in the signed policy (`credentials@1`, `agreements@1`), the issuer authority chain, agents and devices never issue
+- [ ] 71-07-PLAN.md: Wave 4. The credential checker: evidence cited by hash, `mayRelease`, freshness and offline age, the gate's clearance
+- [ ] 71-08-PLAN.md: Wave 5. The person's wallet, the gate's clearance from credentials in your organization, the command-line verifier
+- [ ] 71-09-PLAN.md: Wave 5. Your organization's server serves logs and status lists, checks cited evidence on append and serve, and tells the lead when a holder is revoked
+- [ ] 71-10-PLAN.md: Wave 6. Identities in use: a person's `did:webvh` at first sign-in, your organization's root DID and role credentials offline, binding a computer
+- [ ] 71-11-PLAN.md: Wave 6. The trust export carries logs, status lists and the issuer section to edges
+- [ ] 71-12-PLAN.md: Wave 7. Issuance from the officer's own session: the Issue credential card, the status-list key in OpenBao, revoke and suspend
+- [ ] 71-13-PLAN.md: Wave 8. Freshness in the session: the credential state, key release in hosted sessions, sign-in tokens that only authenticate
+- [ ] 71-14-PLAN.md: Wave 9. SECURITY.md and README, the full suites once, the verification record, the integration PR after the owner's gate approval
+
+### Phase 71.1: Agent delegation that only narrows (INSERTED)
+**Goal**: An agent can never hold more than it was delegated: a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
+**Split from Phase 71 on 2026-11-24** (data-centric access research, section 5.2): the identity and credential core was pulled forward as Phase 71; agent delegation stays in Stage 1, before Phase 72, in the order of the milestone. **Naming trap:** records dated before 2026-11-15 that say "Phase 71.1" mean the messaging setup view, now Phase 78.
+**Depends on**: Phase 71 (credentials, the checker, `did:key` for agents); 33.1-04's `mayDelegate` (the one delegation rule).
+**Requirements**: DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08
+**Success Criteria** (what must be TRUE):
+  1. A delegation gives a member the intersection of the lead's grant, the member's `tools:` line and the task's request; a property test shows no delegation ever widens, and the gate enforces it, not the prompt. (DLGT-02)
+  2. Each grant is a delegation credential signed by its delegator, with an expiry, a budget, a level cap, roles, compartments and a depth limit, recorded in the signed log; the gate refuses an expired, unsigned or tampered grant. (DLGT-03)
+  3. A tree deeper than the limit or wider than its fan-out caps is refused with a plain reason, and leaves never get spawning, scheduling, outbound messages, skill or memory writes, or tool and policy changes unless their grant names them. (DLGT-04, DLGT-05)
+  4. A member asked for a declared result shape returns it or gets one correction turn, a restart reports an unfinished result as unknown, and the Agent Activity view shows for each agent what it may do, the level, roles and compartments it holds, and its DID. (DLGT-06, DLGT-07)
+  5. A chain that widens level, roles, compartments, expiry or depth at any link, or holds a revoked or suspended credential anywhere, is refused with a plain reason. (DLGT-08)
+**Research flags**: (3) Spend in grants needs a running total held by the parent, not a static comparison of amounts and periods (spike finding). (4) Existing teams that nest deeper than the new default get a clear message, not a silent failure. Agents act under a raise-only delegation for labels (AI-classification research 6.4).
+**Undo cost**: High. The grant format is what edge devices hold offline.
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 71.1 to break down)
 
 ### Phase 72: Execution backends on a copy, with a guarded apply
 **Goal**: An agent's commands can run behind a real boundary: on a copy of the project inside a container or an OpenShell sandbox where protected folders are simply absent, with the changes brought back through an apply step that treats them as untrusted, shows the person the diff first and refuses anything that could reach outside the copy; the person always sees which boundary a run has.
@@ -1935,6 +2026,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
@@ -1949,13 +2041,16 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
+| 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
+| 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/TBD | Stub (trigger: your organization receives ACP-240 Ed A and ADatP-4774 and 4778) | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 12/18 | In Progress 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
-| 71. Identities, credentials and delegation that only narrows | 0/TBD | Not started (opens with a research step) | - |
+| 71. Identities and verified credentials (core), pulled forward | 0/14 | Planned 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
+| 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |
 | 74. Run contracts | 0/TBD | Not started | - |
