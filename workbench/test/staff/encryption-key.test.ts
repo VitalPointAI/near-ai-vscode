@@ -4,7 +4,7 @@
 // runs unchanged over the key store's SecretStorageLike, so epoch keys and join secrets follow the person; plain private keys are refused there.
 // Fictional exercise data only.
 import assert from 'node:assert/strict';
-import { diffieHellman, generateKeyPairSync, randomBytes, type KeyObject } from 'node:crypto';
+import { createPublicKey, diffieHellman, generateKeyPairSync, randomBytes, sign as edSign, verify as edVerify, type KeyObject } from 'node:crypto';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -18,7 +18,9 @@ import { createKeyService } from '../../extension/src/node/key-service.ts';
 import { createOpenBaoKeyStore, type KeyStore } from '../../extension/src/node/key-stores.ts';
 import { createOpenBaoClient } from '../../extension/src/node/openbao-client.ts';
 import type { ActiveSession } from '../../extension/src/node/session-identity.ts';
-import { ENCRYPTION_ENVELOPE_SECRET, ENCRYPTION_KEY_TEXT, openEncryptionKey } from '../../extension/src/node/staff/encryption-key.ts';
+import { ENCRYPTION_ENVELOPE_SECRET, ENCRYPTION_KEY_TEXT, openEncryptionKey, type KemEngine, type OpenedKemKeys } from '../../extension/src/node/staff/encryption-key.ts';
+import { publishPersonKem } from '../../extension/src/node/staff/person-kem.ts';
+import { personSigner } from '../../extension/src/node/staff/person-signer.ts';
 import { KEY_STORE_SECRETS_TEXT, STAFF_SECRET_SERVICE, keyStoreSecrets } from '../../extension/src/node/staff/keystore-secrets.ts';
 import { SESSION_KEY_TEXT, startSessionKeys } from '../../extension/src/node/staff/session-keys.ts';
 import { loadStaffEngine } from '../../extension/src/node/staff/staff-engine.ts';
@@ -264,4 +266,117 @@ test('the opened key is dropped with the session key when the session stops', as
   keys.value.stop();
   assert.equal(key.privateKey, undefined);
   assert.throws(() => keys.value.sessionSigner.sign(Buffer.from('after the end')), { message: SESSION_KEY_TEXT.ended });
+});
+
+// ---- 33.2-04 Task 2 (D-03): the person's post-quantum keys in the same envelope ----------------------------------------------------------------
+
+async function openedWithKem(s: Session, kem: KemEngine = engine) {
+  const result = await openEncryptionKey(s.keyService, keyStoreSecrets(s.store, STAFF_SECRET_SERVICE), kem);
+  assert.equal(result.kind, 'ok', JSON.stringify(result));
+  if (result.kind !== 'ok') throw new Error('unreachable');
+  return result.value;
+}
+
+/** Every text form a post-quantum seed could be written in: the P-256 scalar and the ML-KEM seed (the last 64 bytes of its seed-form PKCS8). */
+function kemForms(keys: { p256: KeyObject; mlkem768: KeyObject }): string[] {
+  const scalar = Buffer.from(keys.p256.export({ format: 'jwk' }).d as string, 'base64url');
+  const seed = keys.mlkem768.export({ format: 'der', type: 'pkcs8' }).subarray(-64);
+  const forms = [scalar, seed].flatMap((bytes) => [bytes.toString('base64url'), bytes.toString('base64'), bytes.toString('hex')]);
+  privateTexts.push(...forms);
+  return forms;
+}
+
+test('with the engine, the first session seals the X25519 key and the post-quantum keys in one envelope; a new session opens the same keys', async () => {
+  const where = await site();
+  const first = await openedWithKem(session(where));
+  assert.ok(first.kem !== undefined);
+  assert.equal(Buffer.from(first.kem.publicKeys.p256, 'base64url').length, 65);
+  assert.equal(Buffer.from(first.kem.publicKeys.mlkem768, 'base64url').length, 1184);
+  assert.equal(where.kv.size, 1, 'one envelope, one Transit-wrapped data key');
+  const second = await openedWithKem(session(where));
+  assert.equal(second.publicKey, first.publicKey);
+  assert.deepEqual(second.kem?.publicKeys, first.kem.publicKeys);
+  for (const value of where.kv.values()) for (const form of kemForms(first.kem.privateKeys as { p256: KeyObject; mlkem768: KeyObject })) assert.ok(!value.includes(form), 'no plain seed in the key store');
+});
+
+test('an envelope written before this change opens, and the post-quantum keys are added at the next session start under the same wrapped key', async () => {
+  const where = await site();
+  const old = await opened(session(where));
+  assert.equal(old.kem, undefined, 'a v1 envelope holds no post-quantum keys');
+  const [[name, before]] = [...where.kv];
+  const upgraded = await openedWithKem(session(where));
+  assert.equal(upgraded.publicKey, old.publicKey, 'the X25519 key is unchanged');
+  assert.ok(upgraded.kem !== undefined);
+  const after = where.kv.get(name) as string;
+  assert.notEqual(after, before);
+  assert.equal((JSON.parse(after) as { wrappedKey: string }).wrappedKey, (JSON.parse(before) as { wrappedKey: string }).wrappedKey, 'no new data key');
+  const again = await openedWithKem(session(where));
+  assert.deepEqual(again.kem?.publicKeys, upgraded.kem.publicKeys);
+  assert.equal((await opened(session(where))).publicKey, old.publicKey, 'a session without the engine still opens the upgraded envelope');
+});
+
+test('where the probe fails nothing post-quantum is made; drop() releases the post-quantum private keys with the X25519 key', async () => {
+  const where = await site();
+  const noProbe = await openedWithKem(session(where), { ...engine, probeWrapV2: () => false });
+  assert.equal(noProbe.kem, undefined);
+  const s = session(where);
+  const key = await openedWithKem(s);
+  assert.ok(key.kem?.privateKeys !== undefined);
+  key.drop();
+  assert.equal(key.privateKey, undefined);
+  assert.equal(key.kem?.privateKeys, undefined);
+});
+
+/** A person signer over a local Ed25519 key, or one whose every signature needs a fresh confirmation. */
+function personOf(stepUp: boolean) {
+  const pair = generateKeyPairSync('ed25519');
+  const publicKey = Buffer.from(pair.publicKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64url');
+  const keyService = {
+    sign: async (messageBase64: string) => (stepUp
+      ? { kind: 'refused' as const, reason: KEY_SERVICE_TEXT.stepUpNeeded }
+      : { kind: 'ok' as const, value: { signature: edSign(null, Buffer.from(messageBase64, 'base64'), pair.privateKey).toString('base64') } }),
+  };
+  return personSigner(keyService as never, publicKey);
+}
+
+/** A project stand-in: an empty roster, and every append recorded. */
+function target() {
+  const written: Array<{ kind: string; data: Record<string, string> }> = [];
+  const roster = { kems: new Map<string, unknown>(), members: { devices: new Map<string, unknown>() } };
+  return {
+    written,
+    roster,
+    state: async () => ({ roster }),
+    appendOwn: async (kind: string, data: unknown) => {
+      written.push({ kind, data: data as Record<string, string> });
+      return { ok: true as const };
+    },
+  };
+}
+
+test('the person key signs the binding and the device.kem once; the binding verifies; with the keys in the roster nothing more is signed', async () => {
+  const where = await site();
+  const key = await openedWithKem(session(where));
+  const person = personOf(false);
+  const project = target();
+  assert.deepEqual(await publishPersonKem(project, person, key.kem as OpenedKemKeys, engine), { kind: 'ok', value: 'published' });
+  assert.equal(project.written.length, 1);
+  const [{ kind, data }] = project.written;
+  assert.equal(kind, 'device.kem');
+  const writer = engine.writerIdOf(person.publicKey);
+  assert.equal(data.device, writer);
+  const raw = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(person.publicKey, 'base64url')]), format: 'der', type: 'spki' });
+  assert.equal(edVerify(null, engine.kemBindingBytes(key.kem?.publicKeys as never, writer), raw, Buffer.from(data.sig, 'base64url')), true);
+  project.roster.kems.set(writer, { p256: data.p256, mlkem768: data.mlkem768 });
+  assert.deepEqual(await publishPersonKem(project, person, key.kem as OpenedKemKeys, engine), { kind: 'ok', value: 'present' });
+  assert.equal(project.written.length, 1);
+});
+
+test('a refused confirmation publishes nothing, says to confirm with a passkey or security key, and leaves the keys made in the envelope', async () => {
+  const where = await site();
+  const key = await openedWithKem(session(where));
+  const project = target();
+  assert.deepEqual(await publishPersonKem(project, personOf(true), key.kem as OpenedKemKeys, engine), { kind: 'refused', reason: SESSION_KEY_TEXT.stepUp, fix: KEY_SERVICE_TEXT.confirm });
+  assert.equal(project.written.length, 0);
+  assert.deepEqual((await openedWithKem(session(where))).kem?.publicKeys, key.kem?.publicKeys);
 });

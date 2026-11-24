@@ -6,4 +6,7 @@
 export { certifiedWriter, isPersonKeyKind, PERSON_KEY_KINDS, SESSION_DEFAULT_LIFETIME_MS, SESSION_MAX_LIFETIME_MS, sessionBindingBytes, sessionCertifyData } from '../../src/domain/replica/sessionKeys';
 export { writerIdOf } from '../../src/domain/replica/entry';
 export { x25519BindingBytes } from '../../src/domain/replica/cellKeys';
+// 33.2-04: the person's post-quantum keys in the Transit envelope and their binding (device.kem).
+export { kemPrivateFromSeeds, kemPublicFromSeeds, newKemSeeds, probeWrapV2 } from '../../src/domain/replica/cellWrapV2';
+export { kemBindingBytes, kemKeysAt } from '../../src/domain/replica/deviceKem';
 export { DeviceKeyRing, ENCRYPTION_KEY_SECRET, EPOCH_KEY_SECRET_PREFIX, forgetJoinSecret, JOIN_SECRET_PREFIX, joinSecret, storeJoinSecret } from '../../src/staff/replica/keyring';
