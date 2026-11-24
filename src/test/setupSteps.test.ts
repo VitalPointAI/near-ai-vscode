@@ -3,9 +3,10 @@
 // Mode: where the project is kept, who else works on it) extend without changing the menu.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { SecretStorageLike } from '../services/auth';
 import {
@@ -190,6 +191,8 @@ test('setup texts are plain words: no dashes for punctuation, no developer terms
 
 const executed: unknown[][] = [];
 let webviewPanel: unknown;
+const warnings: string[] = [];
+let confirmation: string | undefined;
 const infos: Array<{ text: string; items: string[] }> = [];
 const picks: Array<{ items: Array<Record<string, unknown>>; options: Record<string, unknown> }> = [];
 const commands = new Map<string, (...args: unknown[]) => unknown>();
@@ -197,23 +200,28 @@ const settings: Record<string, unknown> = {};
 let quickPick: (items: Array<Record<string, unknown>>) => Record<string, unknown> | undefined = () => undefined;
 let infoChoice: string | undefined;
 let inputBoxes: string[] = [];
+const inputRequests: Array<{ title?: string; prompt?: string }> = [];
 
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
   ProgressLocation: { Notification: 15 },
   ViewColumn: { One: 1 },
   workspace: {
-    workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+    workspaceFolders: [] as Array<{ uri: { fsPath: string; scheme?: string }; name?: string }>,
     name: 'Demo',
     getConfiguration: () => ({ get: <T>(key: string, fallback?: T) => (key in settings ? settings[key] : fallback) as T, inspect: () => undefined, update: async () => undefined }),
-    onDidChangeConfiguration: () => ({ dispose() {} })
+    onDidChangeConfiguration: () => ({ dispose() {} }),
+    onDidSaveTextDocument: () => ({ dispose() {} })
   },
   window: {
-    showWarningMessage: async () => undefined,
+    showWarningMessage: async (message: string, _options?: { detail?: string }) => { warnings.push(message); return confirmation; },
     showErrorMessage: async (text: string) => { throw new Error(`unexpected error: ${text}`); },
     showInformationMessage: async (text: string, ...items: string[]) => { infos.push({ text, items }); return infoChoice; },
     showQuickPick: async (items: Array<Record<string, unknown>>, options: Record<string, unknown>) => { picks.push({ items, options }); return quickPick(items); },
-    showInputBox: async () => inputBoxes.shift(),
+    showInputBox: async (options: { title?: string; prompt?: string }) => {
+      inputRequests.push({ title: options?.title, prompt: options?.prompt });
+      return inputBoxes.shift();
+    },
     withProgress: async (_options: unknown, task: () => Promise<unknown>) => task(),
     createWebviewPanel: () => webviewPanel,
     createOutputChannel: () => ({ appendLine() {}, dispose() {} })
@@ -224,7 +232,7 @@ const vscodeStub = {
   },
   env: {},
   UIKind: { Desktop: 1, Web: 2 },
-  Uri: { file: (fsPath: string) => ({ fsPath }), parse: (value: string) => ({ toString: () => value }), joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }) }
+  Uri: { file: (fsPath: string) => ({ fsPath, scheme: 'file', toString: () => pathToFileURL(fsPath).href }), parse: (value: string) => ({ toString: () => value }), joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }) }
 };
 
 function load<T>(id: string): T {
@@ -233,7 +241,7 @@ function load<T>(id: string): T {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try { return require(id) as T; } finally { nodeModule._load = originalLoad; }
 }
-const reset = () => { executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
+const reset = () => { warnings.length = 0; confirmation = undefined; inputRequests.length = 0; executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
 const secrets = new MemorySecrets();
 const context = { subscriptions: [] as unknown[], secrets };
 let chatOnScreen = false;
@@ -267,6 +275,201 @@ test('NEAR AI: Project Setup opens the menu at any time, and runs the step picke
   } finally {
     chatOnScreen = false;
   }
+});
+
+// ---- sterling.workAreas.create: the workbench's "Create …" work-area button ----
+
+function workAreaCommand() {
+  const { registerWorkspaceCommands } = load<typeof import('../services/workspaceCommands')>('../services/workspaceCommands');
+  const subscriptions: Array<{ dispose(): void }> = [];
+  registerWorkspaceCommands({ subscriptions, globalState: {} } as never, () => undefined);
+  const create = commands.get('sterling.workAreas.create');
+  assert.ok(create, 'the workbench can call the registered extension command');
+  return { create, close: () => subscriptions.forEach((item) => item.dispose()) };
+}
+
+test('the work-area command is contributed, hidden from the command palette, and activates the extension', () => {
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as {
+    activationEvents: string[]; contributes: { commands: Array<{ command: string }>; menus: { commandPalette: Array<{ command: string; when?: string }> } };
+  };
+  assert.ok(manifest.contributes.commands.some(({ command }) => command === 'sterling.workAreas.create'));
+  assert.ok(manifest.activationEvents.includes('onCommand:sterling.workAreas.create'), 'a fresh workbench has not activated the extension yet');
+  assert.equal(manifest.contributes.menus.commandPalette.find(({ command }) => command === 'sterling.workAreas.create')?.when, 'false');
+});
+
+test('work-area creation uses the selected root and stores the kind marker inside a new folder only', async () => {
+  reset();
+  const first = await emptyProject();
+  const selected = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [
+    { uri: vscodeStub.Uri.file(first), name: 'First project' },
+    { uri: vscodeStub.Uri.file(selected), name: 'Selected project' }
+  ];
+  quickPick = (items) => items.find((item) => item.label === 'Selected project');
+  inputBoxes = [' Winter exercise '];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    const created = await host.create('training') as { uri: string; title: string };
+    assert.equal(created.title, 'Winter exercise');
+    const folder = fileURLToPath(created.uri);
+    assert.equal(path.dirname(folder), await realpath(selected));
+    assert.match(path.basename(folder), /^work-area-[0-9a-f]{16}$/);
+    assert.deepEqual(JSON.parse(await readFile(path.join(folder, '.planning/.near-ai/work-area.json'), 'utf8')), {
+      version: 1, kind: 'training', title: 'Winter exercise'
+    });
+    assert.equal(await readFile(path.join(folder, '.planning/.near-ai/.gitignore'), 'utf8'), '/work-area.json\n');
+    assert.deepEqual(await readdir(path.join(folder, '.planning/.near-ai')), ['.gitignore', 'work-area.json']);
+    assert.deepEqual(await readdir(selected), [path.basename(folder)], 'nothing else is written in the chosen folder');
+    assert.match(warnings[0], /Winter exercise/, 'the person confirmed before anything was written');
+    assert.deepEqual(await readdir(first), []);
+    assert.deepEqual(executed, [], 'opening the returned folder is the workbench page\'s decision');
+  } finally { host.close(); }
+});
+
+test('each work-area page opens a naming dialog for its kind', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  const host = workAreaCommand();
+  try {
+    for (const kind of ['capability-development', 'training', 'operations', 'resources']) {
+      assert.equal(await host.create(kind), undefined, 'cancel from the naming dialog');
+    }
+    assert.deepEqual(inputRequests, [
+      { title: 'New Capability Development work area', prompt: 'Capability title' },
+      { title: 'New Exercises & Training work area', prompt: 'Exercise or training title' },
+      { title: 'New Planning work area', prompt: 'Plan title' },
+      { title: 'New Resource Management work area', prompt: 'Resource management title' }
+    ]);
+    assert.deepEqual(await readdir(root), []);
+  } finally { host.close(); }
+});
+
+test('a kind that is not on the list, including a path, is refused before any prompt or write', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  confirmation = 'Create';
+  inputBoxes = ['Should never be asked'];
+  const host = workAreaCommand();
+  try {
+    for (const kind of ['../training', 'training/../../outside', '..', '/tmp', 'projects', { kind: 'training' }, undefined]) {
+      assert.equal(await host.create(kind), undefined, `refused: ${JSON.stringify(kind)}`);
+    }
+    assert.deepEqual(inputRequests, []);
+    assert.equal(picks.length, 0);
+    assert.equal(warnings.length, 0);
+    assert.deepEqual(await readdir(root), []);
+    assert.equal((await readdir(path.dirname(root))).includes('outside'), false);
+  } finally { host.close(); }
+});
+
+test('Capability Development saves named components in their entered order', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  const choices = ['Program', 'Product', 'Major capital project', 'Finish adding components'];
+  quickPick = (items) => {
+    const selection = choices.shift();
+    return items.find((item) => item.label === selection);
+  };
+  inputBoxes = [' Defence capability ', 'Readiness programme', 'Resource register', 'Fleet renewal'];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    const created = await host.create('capability-development') as { uri: string; title: string } | undefined;
+    assert.ok(created);
+    assert.equal(created.title, 'Defence capability');
+    const metadata = path.join(fileURLToPath(created.uri), '.planning/.near-ai/work-area.json');
+    assert.deepEqual(JSON.parse(await readFile(metadata, 'utf8')), {
+      version: 1, kind: 'capability-development', title: 'Defence capability', components: [
+        { kind: 'program', title: 'Readiness programme' },
+        { kind: 'product', title: 'Resource register' },
+        { kind: 'major-capital', title: 'Fleet renewal' }
+      ]
+    });
+    assert.equal(picks.length, 4, 'the component picker returns after each named component');
+    assert.deepEqual(picks[0].items.map((item) => item.label), ['Program', 'Major capital project', 'Minor capital project', 'Initiative', 'Product', 'Finish adding components']);
+  } finally { host.close(); }
+});
+
+test('Capability Development cancels the whole draft from the component picker or a component title', async () => {
+  reset();
+  const root = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Defence work' }];
+  confirmation = 'Create';
+  const host = workAreaCommand();
+  try {
+    inputBoxes = ['Cancelled from picker', 'First component'];
+    let chooseFirst = true;
+    quickPick = (items) => {
+      if (!chooseFirst) return undefined;
+      chooseFirst = false;
+      return items[0];
+    };
+    assert.equal(await host.create('capability-development'), undefined);
+    assert.equal(picks.length, 2, 'the second component picker was cancelled');
+    assert.equal(warnings.length, 0, 'cancelling skips confirmation');
+    assert.deepEqual(await readdir(root), []);
+
+    inputBoxes = ['Cancelled from title'];
+    quickPick = (items) => items[0];
+    assert.equal(await host.create('capability-development'), undefined);
+    assert.equal(picks.length, 3, 'cancelling a component title does not reopen its picker');
+    assert.deepEqual(await readdir(root), []);
+  } finally { host.close(); }
+});
+
+test('work-area creation refuses a dismissed confirmation, a changed root, a substituted link, and never overwrites', async () => {
+  reset();
+  const root = await emptyProject();
+  const other = await emptyProject();
+  vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Original' }];
+  const host = workAreaCommand();
+  try {
+    inputBoxes = ['Courseware'];
+    assert.equal(await host.create('training'), undefined, 'confirmation was dismissed');
+    assert.deepEqual(await readdir(root), []);
+
+    confirmation = 'Create';
+    inputBoxes = ['Exercises'];
+    const showWarning = vscodeStub.window.showWarningMessage;
+    vscodeStub.window.showWarningMessage = async (message) => {
+      if (message.includes('Exercises')) vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(other), name: 'Other' }];
+      return showWarning(message);
+    };
+    try { assert.equal(await host.create('training'), undefined, 'a removed root cannot receive new writes'); }
+    finally { vscodeStub.window.showWarningMessage = showWarning; }
+    assert.deepEqual(await readdir(root), []);
+    assert.deepEqual(await readdir(other), []);
+
+    // Something appears at the confirmed location (here a link to another folder) between the confirmation and the write: refused, untouched.
+    await writeFile(path.join(other, 'notes.txt'), 'existing');
+    vscodeStub.workspace.workspaceFolders = [{ uri: vscodeStub.Uri.file(root), name: 'Original' }];
+    inputBoxes = ['Existing area'];
+    vscodeStub.window.showWarningMessage = async (message, options) => {
+      if (message.includes('Existing area')) {
+        const destination = options?.detail?.match(/ at (.*)\.$/)?.[1];
+        assert.ok(destination);
+        await symlink(other, destination, 'junction');
+      }
+      return showWarning(message, options);
+    };
+    try { assert.equal(await host.create('operations'), undefined, 'a substituted link was refused'); }
+    finally { vscodeStub.window.showWarningMessage = showWarning; }
+    assert.equal(await readFile(path.join(other, 'notes.txt'), 'utf8'), 'existing');
+    assert.deepEqual(await readdir(other), ['notes.txt']);
+    assert.match(warnings.at(-1) ?? '', /already exists/);
+
+    inputBoxes = ['Resource register', 'Resource register'];
+    const results = await Promise.all([host.create('resources'), host.create('resources')]) as { uri: string; title: string }[];
+    assert.notEqual(results[0].uri, results[1].uri, 'concurrent creations reserve separate folders');
+    for (const result of results) {
+      const saved = JSON.parse(await readFile(path.join(fileURLToPath(result.uri), '.planning/.near-ai/work-area.json'), 'utf8'));
+      assert.deepEqual(saved, { version: 1, kind: 'resources', title: 'Resource register' });
+    }
+  } finally { host.close(); }
 });
 
 test('a step registered through the extension point shows in the Project Setup menu, reading a registered fact', async () => {
