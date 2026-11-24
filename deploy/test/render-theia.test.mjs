@@ -3,7 +3,8 @@
 // runs one persistent session per person on the site's class and size; every Ingress certificate comes from site-pki; every workload is one
 // of our images and passes Pod Security restricted. Needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -158,4 +159,106 @@ test('no client-supplied header can change the path oauth2-proxy authorizes: tru
   assert.match(policy, /kubernetes\.io\/metadata\.name: haproxy-controller/);
   assert.match(policy, /- podSelector:\n\s+matchLabels:\n\s+app: operator/);
   assert.equal((policy.match(/^ {4}- from:$/gm) ?? []).length, 1, 'one rule: HAProxy or the operator, nothing else');
+});
+
+test('the service and the operator verify TLS with the site chain: both mount sterling-site-ca, and the operator JVM trusts only its truststore', () => {
+  for (const name of ['service-deployment', 'operator-deployment']) {
+    const doc = docs.find((item) => item.kind === 'Deployment' && item.name === name).doc;
+    assert.match(doc, /- name: site-ca\n\s+mountPath: \/etc\/ssl\/site-ca\n\s+readOnly: true/, `${name} mounts the site CA`);
+    assert.match(doc, /- name: site-ca\n\s+configMap:\n\s+name: sterling-site-ca/, `${name} reads ConfigMap sterling-site-ca`);
+  }
+  for (const { release, kind, name, doc } of docs) assert.doesNotMatch(doc, /verification=none|trust-all=true/i, `${release}: ${kind} ${name}`);
+  const operator = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/Containerfile'), 'utf8');
+  const entrypoint = /^ENTRYPOINT (\[.*\])$/m.exec(operator);
+  assert.ok(entrypoint, 'the operator image has an exec-form ENTRYPOINT');
+  const argv = JSON.parse(entrypoint[1]);
+  assert.ok(argv.indexOf('-Djavax.net.ssl.trustStore=/etc/ssl/site-ca/truststore.p12') > 0 && argv.indexOf('-Djavax.net.ssl.trustStore=/etc/ssl/site-ca/truststore.p12') < argv.indexOf('-jar'));
+  assert.ok(argv.includes('-Djavax.net.ssl.trustStoreType=PKCS12'));
+  // The probe edit runs on the upstream source before the operator is compiled.
+  const edit = operator.indexOf('RUN sh /home/default/probe-tls.sh /home/default/build/operator/org.eclipse.theia.cloud.operator/src/main/java/org/eclipse/theia/cloud/operator/handler/AddedHandlerUtil.java');
+  assert.ok(edit > 0 && edit < operator.indexOf('cd /home/default/build/operator/org.eclipse.theia.cloud.operator && mvn'), 'probe-tls.sh runs before the operator build');
+});
+
+test('the operator build removes the session probe\'s trust-all and refuses an upstream it does not recognise', () => {
+  // The upstream lines of AddedHandlerUtil.updateSessionURLAsync at Theia Cloud 1.2.0 (e2d201fd) that probe-tls.sh edits.
+  const upstream = [
+    '                try {',
+    '                    connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);',
+    '                    SSLContext sc = SSLContext.getInstance("SSL");',
+    '                    sc.init(null, new TrustManager[] { TRUST_ALL_MANAGER }, new java.security.SecureRandom());',
+    '                    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());',
+    '                    connection.setSSLSocketFactory(sc.getSocketFactory());',
+    '                    connection.connect();',
+    '',
+  ].join('\n');
+  const script = path.join(ROOT, 'deploy/images/theia-cloud-operator/probe-tls.sh');
+  const scratch = mkdtempSync(path.join(tmpdir(), 'probe-tls-'));
+  try {
+    const file = path.join(scratch, 'AddedHandlerUtil.java');
+    writeFileSync(file, upstream);
+    const run = spawnSync('sh', [script, file], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const edited = readFileSync(file, 'utf8');
+    assert.doesNotMatch(edited, /setHostnameVerifier|setDefaultSSLSocketFactory|TRUST_ALL_MANAGER/);
+    assert.match(edited, /sc\.init\(null, null, new java\.security\.SecureRandom\(\)\);\n\s+connection\.setSSLSocketFactory\(sc\.getSocketFactory\(\)\);\n\s+connection\.connect\(\);/);
+    // A source where a line moved or repeats is refused and left unchanged.
+    for (const changed of [upstream.replace('                    HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());\n', ''),
+      upstream.replace('connection.connect();', 'connection.setHostnameVerifier(ALL_GOOD_HOSTNAME_VERIFIER);')]) {
+      writeFileSync(file, changed);
+      const refused = spawnSync('sh', [script, file], { encoding: 'utf8' });
+      assert.equal(refused.status, 1);
+      assert.match(refused.stderr, /review this script/);
+      assert.equal(readFileSync(file, 'utf8'), changed);
+      assert.ok(!existsSync(`${file}.probe-tls`));
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('the service entrypoint starts only with the site CA, and its OIDC client verifies Keycloak with it', () => {
+  const entrypoint = path.join(ROOT, 'deploy/images/theia-cloud-service/entrypoint.sh');
+  const scratch = mkdtempSync(path.join(tmpdir(), 'service-entrypoint-'));
+  try {
+    // A stand-in java that records its arguments, so the test sees exactly what the image would run.
+    const bin = path.join(scratch, 'bin');
+    const argsFile = path.join(scratch, 'args');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'java'), `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\n`);
+    chmodSync(path.join(bin, 'java'), 0o755);
+    const ca = path.join(scratch, 'ca.crt');
+    writeFileSync(ca, '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n');
+    const base = { PATH: `${bin}:/usr/bin:/bin`, SERVICE_PORT: '8081', KEYCLOAK_ENABLE: 'true', KEYCLOAK_CLIENTID: 'sterling-sessions',
+      KEYCLOAK_ADMIN_GROUP: 'theia-cloud/admin', KEYCLOAK_CLIENTSECRET: 'a-real-secret', KEYCLOAK_SERVERURL: 'https://keycloak.site.example/realms/sterling',
+      STERLING_SITE_CA_FILE: ca };
+    const start = (env) => {
+      rmSync(argsFile, { force: true });
+      return spawnSync('sh', [entrypoint], { env, encoding: 'utf8' });
+    };
+    const ok = start(base);
+    assert.equal(ok.status, 0, ok.stderr);
+    const args = readFileSync(argsFile, 'utf8').trim().split('\n');
+    for (const wanted of [`-Dquarkus.tls.sterling-site.trust-store.pem.certs=${ca}`, '-Dquarkus.tls.sterling-site.trust-all=false',
+      '-Dquarkus.tls.sterling-site.hostname-verification-algorithm=HTTPS', '-Dquarkus.oidc.tls.tls-configuration-name=sterling-site',
+      '-Dquarkus.oidc.tls.verification=required']) {
+      assert.ok(args.indexOf(wanted) >= 0 && args.indexOf(wanted) < args.indexOf('-jar'), `java gets ${wanted} before -jar`);
+    }
+    assert.ok(!args.some((arg) => /verification=none|trust-all=true|a-real-secret/.test(arg)), 'no unverified setting and no secret on the command line');
+    // Upstream's start-up dump of every configuration source (the client secret and the service token with it) is kept out of the logs.
+    assert.ok(args.indexOf('-Dquarkus.log.category."org.eclipse.theia.cloud.service.ApplicationLifecycleListener".level=WARN') >= 0);
+    // No CA file, an empty one, one with no certificate, or a plain-HTTP Keycloak: refused before java runs.
+    const empty = path.join(scratch, 'empty.crt');
+    writeFileSync(empty, '');
+    const text = path.join(scratch, 'text.crt');
+    writeFileSync(text, 'not a certificate\n');
+    for (const [label, env] of [['missing', { ...base, STERLING_SITE_CA_FILE: path.join(scratch, 'none.crt') }], ['empty', { ...base, STERLING_SITE_CA_FILE: empty }],
+      ['no certificate', { ...base, STERLING_SITE_CA_FILE: text }], ['http', { ...base, KEYCLOAK_SERVERURL: 'http://keycloak.site.example/realms/sterling' }]]) {
+      const refused = start(env);
+      assert.equal(refused.status, 1, label);
+      assert.match(refused.stderr, /refusing to start/, label);
+      assert.ok(!existsSync(argsFile), `${label}: java never ran`);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });

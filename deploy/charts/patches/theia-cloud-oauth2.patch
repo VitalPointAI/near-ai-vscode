@@ -11,6 +11,10 @@
 #     It also sets trusted_proxy_ips from the site (render fails without it): with --reverse-proxy and no trusted proxies, v7.15.6 trusts
 #     X-Forwarded-Uri from any caller and matches --skip-auth-route against it, so a spoofed header skipped sign-in (Phase 46 finding).
 #   service.yaml: the service read the same client secret from ConfigMap service-config; it now comes from Secret oauth2-proxy-secrets.
+#     It also mounts ConfigMap sterling-site-ca at /etc/ssl/site-ca: our service image's entrypoint makes that chain the only trust for its
+#     OIDC calls to Keycloak (upstream ships quarkus.oidc.tls.verification=none) and refuses to start without it.
+#   operator.yaml: mounts ConfigMap sterling-site-ca at /etc/ssl/site-ca; our operator image's JVM trusts only its truststore.p12, and our
+#     build removes the session URL probe's trust-all (deploy/images/theia-cloud-operator/probe-tls.sh). The chart has no value for a volume.
 #   landing-page.yaml: the config and logo mounts point at /usr/share/nginx/html, which our UBI 9 nginx image never serves (it serves
 #     /opt/app-root/src), so the start page ran with its built-in demo settings (spike S7); they now go where the page is served.
 #   operator.yaml, service.yaml, landing-page.yaml: no security context, so Pod Security restricted (enforced in theia-cloud, where the
@@ -175,6 +179,30 @@
          image: {{ tpl (.Values.operator.image | toString) . }}
          imagePullPolicy: {{ if .Values.operator.imagePullPolicy }}{{ tpl (.Values.operator.imagePullPolicy | toString) . }}{{ else }}{{ tpl (.Values.imagePullPolicy | toString) . }}{{ end }}
          args:
+@@ -92,14 +101,21 @@
+           {{- end }}
+           - "--ingressPathSuffix"
+           - "{{ include "theiacloud.ingress.pathSuffix" . }}"
+-        {{- if .Values.operator.logging.override }}
++        # Sterling: the site truststore, the JVM's only default trust (our operator image's ENTRYPOINT), for the session URL probe.
+         volumeMounts:
++          - name: site-ca
++            mountPath: /etc/ssl/site-ca
++            readOnly: true
++        {{- if .Values.operator.logging.override }}
+           - name: operator-logging-config
+             mountPath: /log-config/log4j2.xml
+             subPath: log4j2.xml
+         {{- end }}
+-      {{- if .Values.operator.logging.override }}
+       volumes:
++        - name: site-ca
++          configMap:
++            name: sterling-site-ca
++      {{- if .Values.operator.logging.override }}
+         - name: operator-logging-config
+           configMap:
+             name: operator-logging-config
 --- a/theia-cloud/templates/service.yaml
 +++ b/theia-cloud/templates/service.yaml
 @@ -20,8 +20,17 @@
@@ -195,7 +223,7 @@
          image: {{ tpl (.Values.service.image | toString) . }}
          imagePullPolicy: {{ if .Values.service.imagePullPolicy }}{{ tpl (.Values.service.imagePullPolicy | toString) . }}{{ else }}{{ tpl (.Values.imagePullPolicy | toString) . }}{{ end }}
          ports:
-@@ -31,6 +40,13 @@
+@@ -31,6 +40,22 @@
          envFrom:
          - configMapRef:
              name: service-config
@@ -206,6 +234,15 @@
 +            secretKeyRef:
 +              name: oauth2-proxy-secrets
 +              key: client-secret
++        # Sterling: the site CA, the only trust for the service's OIDC calls to Keycloak (entrypoint.sh refuses to start without it).
++        volumeMounts:
++        - name: site-ca
++          mountPath: /etc/ssl/site-ca
++          readOnly: true
++      volumes:
++      - name: site-ca
++        configMap:
++          name: sterling-site-ca
        {{- if .Values.service.imagePullSecret }}
        imagePullSecrets:
          - name: {{ tpl (.Values.service.imagePullSecret | toString) . }}

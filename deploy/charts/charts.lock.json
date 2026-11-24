@@ -126,7 +126,7 @@
       "patch": {
         "file": "deploy/charts/patches/theia-cloud-oauth2.patch",
         "output": "deploy/charts/vendored/theia-cloud-1.2.0-sterling.tgz",
-        "sha256": "a8b834ec6ce60d10005d9753657e516c5c8c7dfd4d59458eaf8bc1fed4a25719"
+        "sha256": "8248b2fb5f2a683687920671127ee3554667235c84aa476570e7c7ad167d3f96"
       },
       "component": "theia-cloud",
       "note": "theia-cloud-helm tag theia-cloud-1.2.0 (D-10, Decision 11; owner-confirm E1). file is the upstream tarball; renders use patch.output, the upstream tarball with the one carried oauth2-proxy patch (D-22, Pattern 2) applied by vendor.mjs."
