@@ -761,22 +761,40 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop@1` table and the signed label binding
+- [ ] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop` table (feature `label-interop@1`) and the signed label binding
 - [ ] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
 - [ ] 45.1-03-PLAN.md: Wave 3. The exchange adapter at the release boundary, with the exchange record shapes checkpoint
 - [ ] 45.1-04-PLAN.md: Wave 4. The binding on every release copy; Export for a partner and Received objects in the workbench
 - [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
 
 ### Phase 45.2: NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts (INSERTED)
-**Goal**: Your organization exchanges ZTDF objects with allies, with labels and bindings written exactly as ADatP-4774 and 4778 define them, and key access to a partner's key access server.
-**Inserted**: 2026-11-24 as a stub (research row J). **Trigger**: your organization receives ACP-240 Ed A with its ZTDF specification, and ADatP-4774, 4778 and 4778.2, through DND (research 11.1). The trigger is the texts, not a date.
-**Depends on**: Phase 45.1; the texts.
-**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08 (drafts until the texts arrive)
-**Scope when triggered** (research 11.3): the ADatP-4774 XML serializer and parser; the ADatP-4778 binding object; ZTDF assertions and label placement; key access to a partner key access server; XML canonicalization only if the 4778 binding needs XML signatures (prefer our own narrow implementation; any library gets a compliance fit entry); conformance against allied or vendor sample objects and a trial with a partner's test key server.
-**Plans:** 0 plans
+**Goal**: Your organization's exports to allies carry labels, a binding and core metadata exactly as ADatP-4774, 4778, 4778.2 and 5636 define them, in the label policy of the information's owner with the provenance of every value shown, conformant to the principles of the AC322 Data Centric Reference Architecture, inside a ZTDF-compatible object built on the public OpenTDF specification whose key access reaches a partner's key access server; partners' objects in those forms are read, checked and held until a person accepts them. ZTDF conformance stays unverified until ACP-240(A) or a partner's KAS with its own samples is available.
+**Inserted**: 2026-11-24 as a stub (research row J); planned 2026-11-24 on `docs/phase-45.2-plan` from the texts the owner provided: AC/322-D(2025)0056 (DCRA v2, used for its principles and not in place of ACP-240(A), which defines ZTDF and is not held), ADatP-4774, ADatP-4778, ADatP-4778.2, ADatP-5636 and 5636.1 (local, gitignored, cited by section only), and the public OpenTDF specification 4.3.0 as the base for a ZTDF-compatible profile; label values not yet verified are drafted as tracked assumptions with provenance (owner, 2026-11-24). Owner defaults confirmed 2026-11-24.
+**Depends on**: Phase 45.1 (45.1-01 for 45.2-01, 45.1-02 for 45.2-05, 45.1-03 for 45.2-06, 45.1-04 for 45.2-07, 45.1-05 for 45.2-08) and, through it, Phase 71 (core); 46-07 for the workbench tasks; PR #191 (gap register fields) for 45.2-08 and 45.2-11. ACP-240(A), verified label policies and partner samples are not prerequisites: each is swapped in by a gap-closure plan when it arrives (`45.2-RESEARCH.md` section 10).
+**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08
+**Success Criteria** (what must be TRUE):
+  1. Every export carries an ADatP-4774 originator label in the information owner's policy and an alternative label in the common partner policy, written from label policy profiles your security officer adopted, each value showing its provenance; an operational export that would use an assumed value is refused unless your security officer records an exception; a partner's labels are mapped in and joined, never lowered, and an unmappable label is refused. (XCHG-05)
+  2. Every export carries an ADatP-4778 binding object with the seven ADatP-5636 mandatory metadata elements, signed by your organization's release key to the ADatP-4778.2 cryptographic artefact profile; partner binding objects and sidecar files are read in every form the texts allow, and a changed label, metadata entry or payload is refused. (XCHG-06)
+  3. A ZTDF-compatible object on OpenTDF 4.3.0 carries the label and the binding as signed assertions, with every point where ZTDF may differ behind one profile; key access reaches partner key access servers listed and pinned in the signed policy, both ways; classical key access is capped at Protected B or its equivalent, recorded, and refused from 2036. (XCHG-07)
+  4. An AC322 conformance matrix cites a passing test for every claim; control statements and the hosted registers carry evidence; our XML is checked against the texts' own schemas; a development round trip runs against the OpenTDF quickstart's KAS, and an acceptance trial with an ally's or vendor's KAS and its own samples is the acceptance check. (XCHG-08)
+**Research flags**: (1) AC322 is an architecture blueprint, not a ZTDF specification; never cite it for ZTDF. (2) No text, schema or example from an ADatP enters the repository; NATO values appear only in the NATO profile file and its test. (3) Signed bindings follow ADatP-4778.2 but are not yet checked with a partner (G384). (4) Not a cross-domain guard. (5) Partners have no post-quantum key access type (G356). (6) The texts' printed examples contain errata (research section 8). (7) The Canadian label policy is assumed and has no OID (G355).
+**Undo cost**: Medium. The label tables, profiles and partner pins are policy data; the exchange record values are permanent (settled at 45.2-07's checkpoint); the ZTDF profile is swappable by design.
+**Plans:** 12 plans in 9 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-23, all owner defaults confirmed 2026-11-24, owner actions and a hand-off ledger in `45.2-CONTEXT.md`)
+**UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 45.2 to break down once the texts arrive)
+- [ ] 45.2-01-PLAN.md: Wave 1. Tracer: our own narrow XML reader and writer (4778.2 normalization); one label out as ADatP-4774 and back
+- [ ] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value
+- [ ] 45.2-02-PLAN.md: Wave 2. The `labelXml` table adopting the profiles, every 4774 structure from the text's examples, labels coming in
+- [ ] 45.2-03-PLAN.md: Wave 2. ADatP-4778 binding objects with the ADatP-5636 mandatory metadata; sidecar files; every binding form read
+- [ ] 45.2-04-PLAN.md: Wave 3. Signed bindings to the ADatP-4778.2 cryptographic artefact profile; the `release-p256-<site>` key and certificate; key inventory rows
+- [ ] 45.2-05-PLAN.md: Wave 3. Part 2b: the ZTDF-compatible profile on OpenTDF 4.3.0, extending 45.1-02
+- [ ] 45.2-06-PLAN.md: Wave 4. Key access to partner key access servers (push and pull); partners, trust anchors and profile overrides in `exchangePartners`; the classical-key cap
+- [ ] 45.2-07-PLAN.md: Wave 5. The record checkpoint, NATO-format export and import with provenance, the native screens
+- [ ] 45.2-08-PLAN.md: Wave 6. AC322 conformance matrix, SECURITY.md, crypto inventory, data flow, control statements, G356 and G384, the exchange register rows
+- [ ] 45.2-09-PLAN.md: Wave 7. Schema and copy checks against the texts, full suites once, the integration PR after the owner's gate approval
+- [ ] 45.2-10-PLAN.md: Wave 8. Conformance harness and the development round trip against the OpenTDF quickstart's KAS (pinned, reviewed, registered first)
+- [ ] 45.2-12-PLAN.md: Wave 9. Acceptance trial with an ally's or vendor's KAS and its own samples (waits for them)
 
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
@@ -814,7 +832,7 @@ Plans:
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
   7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account. It uses a passkey or hardware key only, is created at the lead's request (with the security contact's approval for allied military and industry), has its own OpenBao entity and keys, and never holds an administrator role. At its end date the account is disabled, its sessions are stopped and its entity is disabled without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
-**Plans:** 15/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups)
+**Plans:** 15/33 plans executed in 10 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-69 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 accepted by the owner on 2026-11-24, "accept guest defaults"; 47-32 and 47 D-66 to 47 D-69 added 2026-11-24 for version safety, VSAFE-03; 47-22 to 47-31 and 47-33 are the compliance follow-ups: decisions D-70 to D-83 in `47-COMPLIANCE-CONTEXT.md`, planned 2026-11-24 from a compliance audit (owner: obligations the controls require are planned by us; owner decisions a to d applied: separate release and site keys, 3-2-1 off-site copy, 5-year audit retention, RTO 8 h and RPO 24 h), with amendments to 47-16, 47-17 and 47-18; waves revised so plans that edit the same files never share a wave)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -832,13 +850,24 @@ Plans:
 - [x] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
 - [x] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
 - [x] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
-- [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
-- [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
-- [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
+- [ ] 47-16-PLAN.md: Wave 7 (amended 2026-11-24). Site install script with preflight refusals (now also the time source and the import host clock); node clock files; OpenSearch policies applied; published digests recorded
+- [ ] 47-17-PLAN.md: Wave 7 (amended 2026-11-24). Operator runbooks: install (time source, banner, escrow), update, key ceremony (escrow custody), enrolment, recovery, moves, backup and restore, and the new recovery plan
+- [ ] 47-18-PLAN.md: Wave 8 (amended 2026-11-24). Air-gapped lab end-to-end run from the signed bundle, also proving the clock check, the notice, the escrow and the first restore drill
 - [ ] 47-19-PLAN.md: Wave 6. Guest accounts by hand: the `guests` group and lifecycle attributes only in the realm (no `serves`, `nationality`, `organization`, `security-contacts` group or token claims; approver checked by `SecurityContactCredential`; revised 2026-11-24, owner: credentials), `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
-- [ ] 47-20-PLAN.md: Wave 7. Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path); credentials end on their own at the same date
-- [ ] 47-21-PLAN.md: Wave 7. Guests per site unless named in a signed user export (`--include-guests`, `guests@1`, target-site check); a guest record carries lifecycle fields and the DID only; the guest accounts runbook
+- [ ] 47-20-PLAN.md: Wave 8 (after 47-16 and 47-23). Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path); credentials end on their own at the same date
+- [ ] 47-21-PLAN.md: Wave 8 (after 47-17). Guests per site unless named in a signed user export (`--include-guests`, `guests@1`, target-site check); a guest record carries lifecycle fields and the DID only; the guest accounts runbook
+- [ ] 47-22-PLAN.md: Wave 6. Time for air-gapped sites (AU-8, SC-45): chrony configuration as code, node and import host clock checks
+- [ ] 47-23-PLAN.md: Wave 7. System use notice (AC-8) on every sign-in page, per language, from the realm site file
+- [ ] 47-24-PLAN.md: Wave 7. Scheduled snapshots: OpenBao Raft with a snapshot-only token, the OpenSearch audit store with a proven restore (CP-9, CP-10)
+- [ ] 47-25-PLAN.md: Wave 6. Escrow of the RKE2 token, encryption configuration and longhorn-crypto key, with stale-escrow checks (CP-9)
+- [ ] 47-26-PLAN.md: Wave 6. Gate PR: register entries for grype, syft, RKE2, Longhorn, OpenSearch, OpenBao (owner approval)
+- [ ] 47-27-PLAN.md: Wave 7. Recovery order, RTO and RPO settings, restore-test record and restore drill as code (CP-2, CP-10)
+- [ ] 47-28-PLAN.md: Wave 7. Maintenance checks (drain, upgrade, certificates) and the maintenance runbook (MA-2, MA-6, SI-2)
+- [ ] 47-29-PLAN.md: Wave 8. Bundle SBOMs, Grype scans, offline vulnerability database, change and impact record, signed database refreshes (RA-5, RA-5(2), SI-2, CM-4)
+- [ ] 47-30-PLAN.md: Wave 9. Media handling: markings, outbound check, unlisted-file refusal, transfer records, the media runbook (MP-4, MP-5, MP-7, SI-3, AC-4)
+- [ ] 47-31-PLAN.md: Wave 9. Revocation on disable: OpenBao tokens and Theia sessions ended within the site bound when a person is disabled or removed, sharing the guest-expiry mechanism (AC-2(3), AC-2(4), AC-12, IA-4)
 - [ ] 47-32-PLAN.md: Wave 9. The site's release record from the signed release file, with what its user import reads, mounted live in every session; an update never stops a running session; the user export carries `requires` (47-14 amended; version safety, 47 D-66 to 47 D-69)
+- [ ] 47-33-PLAN.md: Wave 10. Off-site copy, required (3-2-1): daily locked copies of the encrypted backups and the audit archive to a second organization site with a signed, chained manifest; signed media for disconnected sites; quarterly drill from the copy (CP-6, CP-9)
 
 **Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
 
@@ -2079,7 +2108,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
-| 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/TBD | Stub (trigger: your organization receives ACP-240 Ed A and ADatP-4774 and 4778) | - |
+| 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/12 | Planned 2026-11-24 (after 45.1's plans; 45.2-12 waits for a partner's KAS and samples) | - |
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |

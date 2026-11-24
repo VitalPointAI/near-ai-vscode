@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-13",
+    "ia-07"
+  ],
+  "gap": "G363",
+  "id": "g363",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "Keycloak runs in strict FIPS mode on the rig"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Keycloak's FIPS mode was deferred when the stack was built. Turn on strict FIPS mode with a BC-FIPS version that a certificate names (G332), on a FIPS host, and test sign-in with passkeys and smart cards in that mode.",
+  "title": "Keycloak does not run in FIPS mode yet"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-13",
+    "cm-02"
+  ],
+  "gap": "G364",
+  "id": "g364",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory lists the condition with an item for your organization's authorizing official"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The site storage images are not built on a UBI base, and the hosted design does not accept Debian or Alpine bases at Protected B. Record the rebuild path on UBI 9 and its feasibility. Until it lands, your organization's authorizing official decides whether to accept the condition.",
+  "title": "Longhorn's images are not built on UBI"
+}

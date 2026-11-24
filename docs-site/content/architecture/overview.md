@@ -77,6 +77,10 @@ The [component catalogue](./components/index.md) is generated from that register
 component by area, with its exact pinned version or digest, what it provides and why it is needed,
 and explains where to get the full software bill of materials (SBOM) of each release.
 
+The [road to production and higher classification](../security/road-to-production.md) lists every
+known gap and open condition, by the lowest level where it matters and whether it blocks live use.
+It is generated from the gap register, `compliance/gaps.json`, the same way.
+
 ## Hosting for many people (planned, not yet released)
 
 Today the workbench image is a local preview for one person on one computer. It has no sign-in of

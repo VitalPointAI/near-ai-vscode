@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sc-13",
+    "ia-07"
+  ],
+  "gap": "G347",
+  "id": "g347",
+  "milestones": [
+    {
+      "phase": "46",
+      "title": "The workbench runs Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host"
+    },
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory lists the condition with an item for your organization's authorizing official"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays.",
+  "title": "The extension's Node and Electron cryptography does not run in a validated module"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-05",
+    "si-11"
+  ],
+  "gap": "G362",
+  "id": "g362",
+  "milestones": [
+    {
+      "phase": "48",
+      "title": "The load test's start bursts show whether starts at the same moment fail"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Upstream Theia Cloud fails with a NullPointerException when it checks the instance limit while another new session has no status yet. Starts one at a time work, and the start page launches one session for each person. Report it upstream, and check with the load test's start bursts whether different people starting together are affected.",
+  "title": "Starting two sessions at the same moment can fail in Theia Cloud"
+}

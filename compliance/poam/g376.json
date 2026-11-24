@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-10",
+    "sc-05"
+  ],
+  "gap": "G376",
+  "id": "g376",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "Your organization's choice on a second session is recorded"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Each person has one hosted workbench session (plan 33-24), and opening the workbench in a second place uses the same session. Your organization decides whether people need more than one, and the design records the choice.",
+  "title": "A person can have only one hosted session at a time"
+}

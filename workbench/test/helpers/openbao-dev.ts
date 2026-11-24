@@ -22,6 +22,7 @@ path "kv/data/users/{{identity.entity.id}}/*" { capabilities = ["create", "read"
 path "kv/metadata/users/{{identity.entity.id}}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "transit/datakey/wrapped/kek-{{identity.entity.id}}" { capabilities = ["update"] }
 path "transit/decrypt/kek-{{identity.entity.id}}" { capabilities = ["update"] }
+path "transit/keys/person-{{identity.entity.id}}" { capabilities = ["read"] }
 path "auth/token/renew-self" { capabilities = ["update"] }
 path "auth/token/revoke-self" { capabilities = ["update"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }

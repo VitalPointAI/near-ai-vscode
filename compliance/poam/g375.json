@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "cm-07",
+    "cm-08",
+    "sa-04"
+  ],
+  "gap": "G375",
+  "id": "g375",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "The owner has reviewed every waiting role"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Each component in the fit register says why the architecture needs it. Many entries were written by an agent and still wait for the owner to confirm them. The owner reviews each role and its fit, and the reviewer field then names the owner.",
+  "title": "Component roles in the fit register wait for the owner's review"
+}

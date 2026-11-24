@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ia-02",
+    "ia-05.02"
+  ],
+  "gap": "G360",
+  "id": "g360",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "The certificate request is limited to the Keycloak host, or the limit is recorded"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The HAProxy ingress checks client certificates on the whole HTTPS frontend, so with smart cards on, every site address asks for a certificate, not only Keycloak's. Keycloak also reads the certificate from a header, so a site must add the NetworkPolicy that lets only HAProxy reach Keycloak before it turns smart cards on. Limit the request to the Keycloak host, or record the limit for your organization.",
+  "title": "Smart-card sign-in asks for a certificate on every host"
+}

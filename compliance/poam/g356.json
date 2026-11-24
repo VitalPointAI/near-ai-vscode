@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13",
+    "ac-21"
+  ],
+  "gap": "G356",
+  "id": "g356",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Key access types are reviewed against the ACP-240 edition your organization receives"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Partners have no post-quantum key type, so key access at the boundary is classical (RSA or P-256), which a future quantum computer could open from a recording. Each export records the key access algorithm, the export dialog says so, and your organization's security officer can set the highest level a partner may receive that way. The security officer accepts this condition for each partner. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-12 and D-13.",
+  "title": "Partners without post-quantum support get classical key access only"
+}

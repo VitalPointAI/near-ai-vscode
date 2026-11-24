@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-02",
+    "ia-03",
+    "ia-05"
+  ],
+  "gap": "G370",
+  "id": "g370",
+  "milestones": [
+    {
+      "phase": "34",
+      "title": "Offline transports carry roster updates to devices that are not connected"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "A removed device's key stays trusted by people who have not yet received the roster update, and a device that stays offline keeps its key until it next connects. Keep roster updates moving through the hub and the offline transports, and state the limit in the security plan so that your organization's authorizing official can accept it.",
+  "title": "A device key held offline stays trusted until its next contact"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-13",
+    "cm-02"
+  ],
+  "gap": "G366",
+  "id": "g366",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory lists the condition with an item for your organization's authorizing official"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The hub image builds on a Debian base, which the hosted design does not accept at Protected B, and that base is not assessed for hosting. Rebase it on UBI 9 with the OpenSSL FIPS provider. Until then your organization's authorizing official decides whether to accept the condition.",
+  "title": "The sync hub image is on a Debian base"
+}

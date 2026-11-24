@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sc-08",
+    "sc-23",
+    "ia-05"
+  ],
+  "gap": "G359",
+  "id": "g359",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "The three issues are filed with Eclipse Theia Cloud"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Upstream Theia Cloud makes the operator trust every TLS certificate for its session probe, ships the service with OIDC TLS verification set to none, and logs the service's client secret at start. Our images fix all three. File the issues with Eclipse Theia Cloud, and keep the build checks so that a version update cannot bring them back.",
+  "title": "Three Theia Cloud security issues are fixed only in our build"
+}

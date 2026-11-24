@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cm-08",
+    "sc-13"
+  ],
+  "gap": "G383",
+  "id": "g383",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory records the base and its provider certificate"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The upstream openbao-ubi image is built on RHEL 10, while the fit register describes it as UBI 9 and the SoftHSM2 build stage is UBI 9. Correct the register, and record which OpenSSL FIPS provider certificate applies to the UBI 10 base.",
+  "title": "The OpenBao base image is UBI 10, not the UBI 9 the register records"
+}

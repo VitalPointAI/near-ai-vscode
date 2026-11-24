@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-16",
+    "sa-11"
+  ],
+  "gap": "G386",
+  "id": "g386",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "The national security officer's answer is recorded"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "No schema, prose or example from ADatP-4774 or 4778 enters the repository; the test vectors are our own. Whether the schemas may be kept as test data is a question to your organization's national security officer. Until it is answered they stay out of the repository. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-02.",
+  "title": "Whether the NATO schemas may be kept as test data is not answered"
+}
