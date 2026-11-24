@@ -38,6 +38,12 @@ test('a hand-typed memory figure per person is flagged', () => assert.equal(find
 test('a hand-typed CPU figure per user is flagged', () => assert.equal(findCapacityFigures('Each workbench needs 0.5 vCPU per user.').length, 1));
 test('a figure split over two lines of one sentence is flagged on the line it starts', () => assert.deepEqual(findCapacityFigures('Intro.\n\nA session needs\nabout 2 GiB of memory.').map((hit) => hit.line), [3]));
 test('a memory figure in a sentence about neither a session nor a person is not a capacity claim', () => assert.deepEqual(findCapacityFigures('The release image is 2 GiB.'), []));
+// The three sentences the first strict pattern caught in the real tree, kept as the reasons it was narrowed (not an allowlist of figures).
+test('a version before "sessions" and a rate limit naming a session are not capacity claims', () => {
+  assert.deepEqual(findCapacityFigures('| Sync hub | TLS 1.3 sessions bound to the connection |'), []);
+  assert.deepEqual(findCapacityFigures("the hub's per-address limits (120 session openings, 10 join requests a minute)"), []);
+  assert.deepEqual(findCapacityFigures('At most 4 MiB per append, 8 MiB per attachment, and per address 120 session openings a minute.'), []);
+});
 test('figures inside the generated block are not flagged by the scan', () => assert.deepEqual(findCapacityFigures(renderCapacityPage([sealed(makeRun())])), []));
 test('a block naming a dry-run fails', () => {
   const dry = sealed(makeRun({ kind: 'dry-run', id: '20261123T110000Z-rig1' }));
