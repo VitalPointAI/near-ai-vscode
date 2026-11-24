@@ -660,6 +660,7 @@ Conditions:
 - Longhorn images are not rebuilt by us: the Protected B base-image row is open.
 - Host packages (dm\_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).
 - longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods.
+- The longhorn-crypto key, which any backup restore needs once the cluster is gone, is escrowed with the RKE2 keys and checked daily by the sterling-escrow-currency job (47-25).
 
 ## chart:opensearch
 
@@ -678,7 +679,7 @@ Conditions:
 | Cryptography | None |
 | Air gap | Works with no internet access |
 | Compliance fit | Pass with conditions |
-| Controls | AU-2, AU-3, AU-9, AU-12 |
+| Controls | AU-2, AU-3, AU-9, AU-12, CP-9, CP-10 |
 | Security fixes | Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
 
@@ -687,6 +688,7 @@ Conditions:
 - Logs and audit records ship only to the site store; no outbound output is configured.
 - Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.
 - Loki is AGPL and is not used (D-19).
+- audit-\* and logs-\* are snapshotted on a schedule to a filesystem repository on an encrypted volume, without the security index, with a tested restore (47-24). Multi-node sites need the snapshot volume as ReadWriteMany on the encrypted class, confirmed on Phase 48's lab-full rig.
 
 ## chart:prometheus
 
