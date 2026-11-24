@@ -1,0 +1,291 @@
+# Builds the images this repository rebuilds for the on-premise stack (D-23): every deploy/images/<name>/image.json
+# (the contract is deploy/images/README.md; a folder with only a Containerfile is never built).
+#
+#   plan     lists and checks the build definitions; an empty list skips every other job.
+#   build    pull requests only, read-only token, no secrets: builds each image from its pinned base and pinned
+#            upstream commit, writes a CycloneDX SBOM with the pinned syft and records a grype scan (report-only).
+#   publish  release tags (v*.*.*) only, in the protected container-release environment (owner as reviewer,
+#            v*.*.* tags only, no admin bypass), the one environment that holds your organization's cosign key and
+#            the same one the Release workflow uses for the workbench image. It builds the same way, pushes to GHCR
+#            by digest, signs with that key (key mode, empty signing config: no transparency log, never keyless),
+#            verifies the signature, and adds GitHub artifact attestations (provenance and SBOM) as supplementary
+#            provenance, as the Release workflow does for the VSIX.
+#   digests  collects the pushed digests into the built-digests artifact ({ "sterling/<name>": "sha256:..." }),
+#            which the bundle build records in deploy/bundle/images.lock.json.
+#
+# Never runs for a pull request target event, on a schedule or by hand. No job that runs on a pull request names the
+# environment or reads a secret. GitHub values reach run scripts only through env.
+name: Deploy images
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deploy/images/**'
+      - 'hub/**'
+  push:
+    tags: ['v*.*.*']
+
+concurrency:
+  group: deploy-images-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+      count: ${{ steps.list.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # Every value that later reaches a build is checked here: plain repository paths, a full commit SHA for the
+      # upstream source, tools that exist in tool-pins.json, and single-line build arguments.
+      - name: List and check the image build definitions
+        id: list
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const pins = JSON.parse(fs.readFileSync("compliance/ci/tool-pins.json", "utf8"));
+          const PLAIN = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+          const inside = (p) => typeof p === "string" && PLAIN.test(p) && !p.split("/").some((part) => part === "." || part === "..");
+          const images = [];
+          const dirs = fs.readdirSync("deploy/images", { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+          for (const dir of dirs) {
+            const file = path.join("deploy/images", dir, "image.json");
+            if (!fs.existsSync(file)) continue;
+            const fail = (what) => { console.error(`::error file=${file}::${what}`); process.exit(1); };
+            const d = JSON.parse(fs.readFileSync(file, "utf8"));
+            for (const key of Object.keys(d)) if (!["name", "containerfile", "context", "source", "tools", "buildArgs"].includes(key)) fail(`unknown field ${key}`);
+            if (typeof d.name !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(d.name)) fail("name must be a lower-case image name");
+            if (!inside(d.containerfile) || !fs.existsSync(d.containerfile)) fail("containerfile must be an existing repository path");
+            if (d.context !== "." && !inside(d.context)) fail("context must be a repository path");
+            const source = d.source ?? { repository: "", ref: "" };
+            if (d.source !== undefined && (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository ?? "") || !/^[0-9a-f]{40}$/.test(source.ref ?? ""))) fail("source needs owner/repo and a full 40-character commit SHA");
+            const tools = d.tools ?? [];
+            for (const tool of tools) if (!Object.hasOwn(pins, tool?.pin) || !inside(tool?.dir)) fail("each tool names a pin in tool-pins.json and a folder inside the context");
+            const buildArgs = d.buildArgs ?? {};
+            for (const [key, value] of Object.entries(buildArgs)) if (!/^[A-Z][A-Z0-9_]*$/.test(key) || typeof value !== "string" || /[\r\n]/.test(value)) fail("build arguments are NAME: single-line string");
+            images.push({ name: d.name, containerfile: d.containerfile, context: d.context, source: { repository: source.repository, ref: source.ref }, tools: tools.map((t) => ({ pin: t.pin, dir: t.dir })), buildArgs });
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `images=${JSON.stringify(images)}\ncount=${images.length}\n`);
+          console.log(`${images.length} image build definition(s): ${images.map((i) => i.name).join(", ") || "none"}`);
+          '
+
+  build:
+    name: build ${{ matrix.image.name }}
+    needs: plan
+    if: github.event_name == 'pull_request' && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.image.source.repository != ''
+        with:
+          repository: ${{ matrix.image.source.repository }}
+          ref: ${{ matrix.image.source.ref }}
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Fetch the pinned tools the image needs
+        env:
+          IMAGE: ${{ toJSON(matrix.image) }}
+        run: |
+          node -e 'const i = JSON.parse(process.env.IMAGE); for (const t of i.tools) console.log(`${t.pin} ${i.context}/${t.dir}`);' > "$RUNNER_TEMP/tools.txt"
+          while read -r pin dir; do sh compliance/ci/install-tool.sh "$pin" "$dir"; done < "$RUNNER_TEMP/tools.txt"
+      - name: Build the image
+        env:
+          IMAGE: ${{ toJSON(matrix.image) }}
+        run: |
+          field() { node -e 'process.stdout.write(String(JSON.parse(process.env.IMAGE)[process.argv[1]]))' "$1"; }
+          mapfile -t args < <(node -e 'const i = JSON.parse(process.env.IMAGE); for (const [k, v] of Object.entries(i.buildArgs)) console.log(`--build-arg\n${k}=${v}`); if (i.source.repository) console.log(`--build-context\nupstream=${process.env.GITHUB_WORKSPACE}/upstream`);')
+          docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
+      - name: Install pinned Syft and Grype
+        run: |
+          sh compliance/ci/install-tool.sh syft compliance/out/tools
+          sh compliance/ci/install-tool.sh grype compliance/out/tools
+          echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
+      - name: Write the image SBOM
+        env:
+          NAME: ${{ matrix.image.name }}
+        run: |
+          mkdir -p compliance/out/images
+          syft scan "local/$NAME:ci" --output "cyclonedx-json=compliance/out/images/$NAME.sbom.json"
+      - name: Update the Grype database
+        run: grype db update
+      - name: Record fixed high-severity findings
+        continue-on-error: true
+        env:
+          NAME: ${{ matrix.image.name }}
+        run: grype "sbom:compliance/out/images/$NAME.sbom.json" --only-fixed --fail-on high --output "json=compliance/out/images/$NAME.scan.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: image-sbom-${{ matrix.image.name }}
+          path: compliance/out/images/
+          if-no-files-found: warn
+
+  publish:
+    name: publish ${{ matrix.image.name }}
+    needs: plan
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Protected environment: the job waits here until the owner approves it in GitHub. The cosign key's secrets
+    # exist only in this environment.
+    environment: container-release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.image.source.repository != ''
+        with:
+          repository: ${{ matrix.image.source.repository }}
+          ref: ${{ matrix.image.source.ref }}
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check the tag is a release version
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::$GITHUB_REF_NAME is not a v<x.y.z> release tag"; exit 1; fi
+      - name: Fetch the pinned tools the image needs
+        env:
+          IMAGE: ${{ toJSON(matrix.image) }}
+        run: |
+          node -e 'const i = JSON.parse(process.env.IMAGE); for (const t of i.tools) console.log(`${t.pin} ${i.context}/${t.dir}`);' > "$RUNNER_TEMP/tools.txt"
+          while read -r pin dir; do sh compliance/ci/install-tool.sh "$pin" "$dir"; done < "$RUNNER_TEMP/tools.txt"
+      - name: Build the image
+        env:
+          IMAGE: ${{ toJSON(matrix.image) }}
+        run: |
+          field() { node -e 'process.stdout.write(String(JSON.parse(process.env.IMAGE)[process.argv[1]]))' "$1"; }
+          mapfile -t args < <(node -e 'const i = JSON.parse(process.env.IMAGE); for (const [k, v] of Object.entries(i.buildArgs)) console.log(`--build-arg\n${k}=${v}`); if (i.source.repository) console.log(`--build-context\nupstream=${process.env.GITHUB_WORKSPACE}/upstream`);')
+          docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
+      - name: Install pinned cosign and Syft
+        run: |
+          sh compliance/ci/install-tool.sh cosign compliance/out/tools
+          sh compliance/ci/install-tool.sh syft compliance/out/tools
+          echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
+      - name: Push the image to GHCR by digest
+        id: push
+        env:
+          NAME: ${{ matrix.image.name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/sterling/$NAME"
+          docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
+          docker tag "local/$NAME:ci" "$repo:$GITHUB_REF_NAME"
+          docker push "$repo:$GITHUB_REF_NAME"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$repo:$GITHUB_REF_NAME")"
+          digest="${digest##*@}"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then echo "::error::no digest for $repo:$GITHUB_REF_NAME"; exit 1; fi
+          echo "repository=$repo" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # Key mode only (spike S1, 47-01): an empty signing config means no transparency log and no timestamp
+      # authority; the signature is checked with the public key derived from the same key before anything else.
+      - name: Sign the pushed digest with your organization's key and verify it
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          REPOSITORY: ${{ steps.push.outputs.repository }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign signing-config create --out "$RUNNER_TEMP/signing-config.json"
+          cosign sign --key env://COSIGN_PRIVATE_KEY --signing-config "$RUNNER_TEMP/signing-config.json" -y "$REPOSITORY@$DIGEST"
+          cosign public-key --key env://COSIGN_PRIVATE_KEY > "$RUNNER_TEMP/cosign.pub"
+          cosign verify --key "$RUNNER_TEMP/cosign.pub" --insecure-ignore-tlog "$REPOSITORY@$DIGEST" > /dev/null
+      - name: Write the SBOM of the pushed image
+        env:
+          NAME: ${{ matrix.image.name }}
+          REPOSITORY: ${{ steps.push.outputs.repository }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p compliance/out/images
+          syft scan "registry:$REPOSITORY@$DIGEST" --output "cyclonedx-json=compliance/out/images/$NAME.sbom.json"
+          node -e 'require("node:fs").writeFileSync(process.argv[1], JSON.stringify({ [`sterling/${process.env.NAME}`]: process.env.DIGEST }) + "\n")' "compliance/out/images/$NAME.digest.json"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: compliance/out/images/${{ matrix.image.name }}.sbom.json
+          push-to-registry: true
+          create-storage-record: false
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: built-digest-${{ matrix.image.name }}
+          path: |
+            compliance/out/images/${{ matrix.image.name }}.digest.json
+            compliance/out/images/${{ matrix.image.name }}.sbom.json
+          if-no-files-found: error
+
+  digests:
+    name: built digests
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: built-digest-*
+          path: built
+          merge-multiple: true
+      - name: Collect the pushed digests into one file
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const all = {};
+          for (const name of fs.readdirSync("built").filter((n) => n.endsWith(".digest.json")).sort()) Object.assign(all, JSON.parse(fs.readFileSync(`built/${name}`, "utf8")));
+          for (const [name, digest] of Object.entries(all)) if (!/^sterling\/[a-z0-9][a-z0-9._-]*$/.test(name) || !/^sha256:[0-9a-f]{64}$/.test(digest)) { console.error(`::error::bad digest record ${name}`); process.exit(1); }
+          fs.writeFileSync("built-digests.json", JSON.stringify(all, null, 2) + "\n");
+          '
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: built-digests
+          path: built-digests.json
+          if-no-files-found: error

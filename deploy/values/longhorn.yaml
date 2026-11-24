@@ -1,0 +1,7 @@
+# Longhorn 1.13.0 (chart deploy/charts/vendored/longhorn-1.13.0.tgz), the settings that decide which images render. The descriptor sets each
+# image's registry, repository and tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-17, D-20). Besides the image: lines, the chart
+# passes the engine, instance manager, share manager, backing image manager and support bundle images to the manager as arguments and the CSI
+# sidecar images to the driver deployer as environment; all come from the same lock. 47-16 adds the encrypted class and the rest of the
+# settings here and must keep these.
+image:
+  pullPolicy: IfNotPresent

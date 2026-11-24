@@ -36,8 +36,11 @@ const CLEAN = [
 ];
 const run = (files, resources) => {
   const root = fixture(files);
-  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline']) });
+  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'cert-manager', 'offline-bundle', 'openbao']) });
 };
+const CHART_LOCK = 'deploy/charts/charts.lock.json';
+const TOOL_PINS = 'compliance/ci/tool-pins.json';
+const IMAGE_LOCK = 'deploy/bundle/images.lock.json';
 
 test('a clean fixture passes: stage references, local actions and non-uses keys are not resources', () => {
   assert.deepEqual(run(REPO, CLEAN), []);
@@ -79,6 +82,38 @@ test('an action not pinned to a full commit SHA, or an image without a digest, f
   const problems = run(files, CLEAN).join('\n');
   assert.match(problems, /the action actions\/checkout@v7 is not pinned to a full 40-character commit SHA/);
   assert.match(problems, /the image docker.io\/library\/node:26-slim is not pinned by a sha256 digest/);
+});
+
+test('a chart in the chart lock is discovered and needs a register entry', () => {
+  const files = { ...REPO, [CHART_LOCK]: { charts: [{ name: 'cert-manager', version: 'v1.21.3', component: 'cert-manager' }] } };
+  assert.deepEqual(run(files, CLEAN), [`chart:cert-manager (used in ${CHART_LOCK}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
+  assert.deepEqual(run(files, [...CLEAN, entry('chart:cert-manager', 'chart', [CHART_LOCK], { component: 'cert-manager', scope: 'runtime' })]), []);
+});
+
+test('every pinned tool is discovered as a tool resource', () => {
+  const files = { ...REPO, [TOOL_PINS]: { cosign: { version: '3.1.4' }, helm: { version: '4.3.2' } } };
+  assert.match(run(files, CLEAN).join('\n'), /tool:cosign \(used in compliance\/ci\/tool-pins\.json\) has no entry/);
+  const tools = ['tool:cosign', 'tool:helm'].map((id) => entry(id, 'tool', [TOOL_PINS], { component: 'offline-bundle' }));
+  assert.deepEqual(run(files, [...CLEAN, ...tools]), []);
+});
+
+test('lock images are discovered, an unpinned one fails, and built or release images are not third-party resources', () => {
+  const lock = {
+    images: [{ ref: `quay.io/openbao/openbao-ubi:2.7.3@${DIGEST}` }, { ref: 'docker.io/example/loose:1.0' }],
+    built: [{ name: 'sterling/openbao', image: 'deploy/images/openbao/image.json' }],
+    release: [{ name: 'sterling/sterling-workbench' }],
+  };
+  const images = [entry('image:quay.io/openbao/openbao-ubi', 'image', [IMAGE_LOCK], { component: 'openbao' }), entry('image:docker.io/example/loose', 'image', [IMAGE_LOCK])];
+  const problems = run({ ...REPO, [IMAGE_LOCK]: lock }, [...CLEAN, ...images]);
+  assert.deepEqual(problems, [`${IMAGE_LOCK}: the image docker.io/example/loose:1.0 is not pinned by a sha256 digest; pin it (name:tag@sha256:...).`]);
+  assert.match(run({ ...REPO, [IMAGE_LOCK]: '{ not json' }, CLEAN).join('\n'), /deploy\/bundle\/images\.lock\.json: is not valid JSON/);
+});
+
+test('a Containerfile base under deploy/images is discovered; its stage names and ${} references are skipped', () => {
+  const file = 'deploy/images/openbao-softhsm/Containerfile';
+  const files = { ...REPO, [file]: `FROM registry.access.redhat.com/ubi9/ubi:9.9@${DIGEST} AS softhsm-build\nARG OPENBAO_IMAGE\nFROM \${OPENBAO_IMAGE}\nCOPY --from=softhsm-build /usr/lib64 /usr/lib64\nFROM softhsm-build\n` };
+  assert.deepEqual(run(files, CLEAN), [`image:registry.access.redhat.com/ubi9/ubi (used in ${file}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
+  assert.deepEqual(run(files, [...CLEAN, entry('image:registry.access.redhat.com/ubi9/ubi', 'image', [file], { component: 'openbao' })]), []);
 });
 
 test('the repository itself passes the check, against the real catalogues and components', () => {

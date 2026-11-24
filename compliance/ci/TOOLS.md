@@ -80,6 +80,52 @@ The release workflow uses a throwaway Trestle workspace and records import and v
 
 GitHub disables scheduled workflows after 60 days without repository activity. Re-enable the compliance schedule when the Evidence page shows a collector has gone silent.
 
+## Deployment stack pins (Phase 47)
+
+`tool-pins.json` also pins the downloads of the on-premise stack: cosign,
+hauler, helm, RKE2 (with its image archives, checksum file and the
+`rke2-selinux` RPM as `assets`), the OpenBao `kms-pkcs11` plugin, the PGDG
+PostgreSQL RPMs and signing key, and the SoftHSM2 source (test scope only).
+`install-tool.sh <tool> <target-dir>` installs any of them: versions are
+`x.y` or `x.y.z` with an optional `+build` suffix; hosts are Maven Central,
+GitHub, `get.helm.sh` and `download.postgresql.org`; `zip` and `tar.gz` are
+extracted, `binary` is copied to `<target>/<bin>` and made executable, and
+`file` is placed as-is under its address's file name. Each `assets[]` item is
+downloaded, host-checked and hash-checked the same way and placed beside under
+its file name. Every hash is checked before anything is extracted or placed.
+Each tool also has an entry in `compliance/resources.json` (`tool:<name>`).
+
+How each is bumped (always into a fresh temporary directory, then the steps
+under "Updating a pin"):
+
+- cosign, hauler, syft, grype: take the new hash from the release's
+  `*_checksums.txt` and confirm it with `sha256sum` of the download. A new
+  cosign is checked again against the key-mode flags spike S1 proved
+  (`--signing-config` with an empty signing config; `--insecure-ignore-tlog`
+  to verify).
+- helm: `get.helm.sh/helm-v<version>-linux-amd64.tar.gz` and its `.sha256sum`.
+- RKE2: the release's `sha256sum-amd64.txt` lists the tarball and both image
+  archives; the checksum file itself is pinned by its GitHub release asset
+  digest. `rke2-selinux` is the newest EL9 stable release asset, confirmed
+  against its `sha256sum-centos9-noarch.txt`. The `+` of the version is `%2B`
+  in the addresses.
+- kms-pkcs11: `checksums-kms-pkcs11.txt` gives both the tarball hash
+  (`sha256`) and the extracted plugin binary's hash (`binSha256`); re-hash the
+  binary after extracting.
+- postgresql: the RPM hashes come from the PGDG repository's `primary.xml.gz`,
+  whose own hash is in `repodata/repomd.xml`; the signing key is pinned by hash
+  and its `fingerprint` read with `gpg --show-keys`. The image build still
+  checks each RPM's signature against that key.
+- softhsm2: upstream publishes no release tarball or checksum, so the pin is
+  the commit of the `2.7.0` tag (`pinKind: commit`) and its tree. The archive
+  hash is taken on the first download and confirmed against the signed tag:
+  `git fetch --depth 1 https://github.com/softhsm/SoftHSMv2 <commit>`, check
+  that GitHub reports the commit's signature as verified, that
+  `git rev-parse <commit>^{tree}` equals `tree`, and that
+  `git archive --format=tar --prefix=SoftHSMv2-<commit>/ <commit> | sha256sum`
+  equals `tarSha256` and `gzip -dc` of the download. Never re-hash from a
+  download alone.
+
 ## Updating a pin
 
 Download into a fresh temporary directory. Compare the downloaded SHA-256 with

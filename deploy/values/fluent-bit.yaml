@@ -1,0 +1,15 @@
+# Fluent Bit v5.2.0 (chart deploy/charts/vendored/fluent-bit-0.58.3.tgz, which carries 5.1.3), the settings that decide which images render.
+# The descriptor sets image.repository and image.digest from deploy/bundle/images.lock.json (D-19, D-20); the tag is left out ("-") so the
+# reference is <repository>@<digest> and the chart's 5.1.3 default tag never appears. Later plans add the inputs and outputs here and must
+# keep these.
+image:
+  tag: "-"
+  pullPolicy: IfNotPresent
+
+# No helm test pod: it runs a busybox image with pull policy Always.
+testFramework:
+  enabled: false
+
+# No config reloader sidecar (its configmap-reload image is not bundled).
+hotReload:
+  enabled: false

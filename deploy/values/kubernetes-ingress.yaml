@@ -1,0 +1,9 @@
+# HAProxy Kubernetes Ingress 3.4.1 (chart deploy/charts/vendored/kubernetes-ingress-1.57.1.tgz), the settings that decide which images render.
+# The descriptor sets controller.image.repository and controller.image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). The
+# controller image is the only one the chart renders: the CRD job hook runs it too, and chart 1.57.1 has no default backend. Later plans add
+# the rest of the ingress settings here and must keep these.
+controller:
+  image:
+    pullPolicy: IfNotPresent
+  # No init container (the chart's commented sysctl example would add a busybox image).
+  initContainers: []

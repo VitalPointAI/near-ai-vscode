@@ -2,7 +2,7 @@
 // these scripts enforce are unit tested (scripts/test/workflow.test.mjs).
 
 /** CI job names. They are the required status checks on `main`; keep them stable. */
-export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', 'docs']);
+export const CI_CHECKS = Object.freeze(['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', 'docs', 'deploy']);
 /** Commit status set by scripts/agent-review.mjs after the agent review team has run. */
 export const AGENT_REVIEW_CONTEXT = 'agent-review';
 /**

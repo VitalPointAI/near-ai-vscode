@@ -1,0 +1,11 @@
+# The Theia Cloud landing page image (the session start page; owner-confirm E4 default: rebuild it), rebuilt by us from the pinned Theia
+# Cloud source on UBI 9 (D-23, D-12). This file holds only the base stages; the build steps and image.json come with its build definition
+# (deploy/images/README.md), and without image.json it is not built.
+#   build:   ubi9/nodejs-22, builds the static page (build scope only).
+#   runtime: ubi9/nginx-126, serves it at a site.
+# Both are pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read
+# the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
+# that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
+FROM registry.access.redhat.com/ubi9/nodejs-22:9.9@sha256:806f1f15c1a2165203869817094e7a53c2ff493c437e75cec7f87fb57c170a03 AS build
+
+FROM registry.access.redhat.com/ubi9/nginx-126:9.9@sha256:84a9a99efbefa521e343e739883d2ef3c994becd3bb6eecc99f79aa274fa8bea

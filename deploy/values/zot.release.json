@@ -1,0 +1,11 @@
+{
+  "chart": "zot",
+  "namespace": "sterling-registry",
+  "order": 10,
+  "values": ["deploy/values/zot.yaml"],
+  "enabledWhen": { "registryKind": "zot" },
+  "images": [
+    { "lock": "ghcr.io/project-zot/zot", "set": { "image.repository": "name", "image.tag": "tagAtDigest" } }
+  ],
+  "note": "Zot v2.1.23, the site registry of the lab and small sites (D-15, research Decision 8)."
+}

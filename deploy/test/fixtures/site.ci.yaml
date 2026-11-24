@@ -1,0 +1,27 @@
+{
+  "note": "The site file the render tests use: deploy/values/site.example.yaml with every key filled with test values. The public key is a throwaway test key; nothing signed with its private key exists.",
+  "siteName": "ci",
+  "domain": "site.example",
+  "rpId": "site.example",
+  "registry": "registry.site.example",
+  "registryKind": "zot",
+  "clusterCidrs": {
+    "pod": "10.42.0.0/16",
+    "service": "10.43.0.0/16",
+    "nodes": "192.0.2.0/24"
+  },
+  "egressAllow": [],
+  "storageProvider": "longhorn",
+  "storageClass": "sterling-encrypted",
+  "storageEncryptionAtRest": "",
+  "requestedStorage": "10Gi",
+  "sessionTimeoutMinutes": 30,
+  "signInKeys": "passkeys",
+  "acceptableAaguids": [],
+  "organizationPublicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELgccMIMQR1p/dPYJso3uFGVTwvnu\nPcEV4z7RGTCasboXVSpUBmqLHQ4j/R5/dAiRsis//JwnVWczgTbiewaKuQ==\n-----END PUBLIC KEY-----\n",
+  "stepUpAcr": "webauthn-fresh",
+  "stepUpMaxAgeSeconds": 300,
+  "hubs": [
+    { "name": "hub-a" }
+  ]
+}

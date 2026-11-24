@@ -1,0 +1,29 @@
+# Harbor v2.15.5 images on chart 1.19.4 (deploy/charts/vendored/harbor-1.19.4.tgz, which carries 2.15.4), the settings that decide which images
+# render. The descriptor sets each component's image.repository and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20).
+# Later plans add the rest of the Harbor settings here and must keep these.
+imagePullPolicy: IfNotPresent
+
+# Exposed through the HAProxy ingress (D-07), so the chart's bundled nginx proxy image is not rendered. The chart's default ingress annotations
+# name ingress-nginx; they are removed.
+expose:
+  type: ingress
+  ingress:
+    className: haproxy
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: null
+      nginx.ingress.kubernetes.io/proxy-body-size: null
+
+# Trivy off: its vulnerability database is downloaded from the internet, which an air-gapped site cannot reach (T-47-09; a condition on the
+# Harbor entries, 47-04). Scanning happens on the connected side before the bundle is built.
+trivy:
+  enabled: false
+
+# No metrics exporter image.
+metrics:
+  enabled: false
+
+# Harbor's own database and Redis-compatible cache run inside the release.
+database:
+  type: internal
+redis:
+  type: internal
