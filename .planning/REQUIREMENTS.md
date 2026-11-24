@@ -896,6 +896,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-23 from `.planning/research/multiuser-hosting/DESIGN.md` (section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10; decisions D1 to D11), added when Phase 46 was planned. Decisions: `.planning/phases/46-native-theia-foundation/46-CONTEXT.md`.
 **Core value:** The Sterling workbench is a real, tested Theia product that keeps each person's secrets durable and their own, keeps long-term keys out of the session, knows who signed in, and calls nothing outside what your organization lists.
+**Status:** all ten complete 2026-11-24 (Phase 46 complete on `feat/phase-46-wave-1`; on main with the integration PR).
 
 - [x] **FND-T-01**: The workbench lives in the `workbench/` package with its own lockfile, build, tests and CI job; nothing remains only under `.planning/spikes/`; the #162 review fixes are applied (localhost bind by default, no dev dependencies at run time, build writes only inside the package). (P1)
 - [x] **FND-T-02**: Native widgets call engine code in the backend through one shared JSON-RPC service pattern, and refusals cross it as plain data with their reason. (P2)

@@ -722,7 +722,7 @@ Plans:
   4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
   5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
   6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
-**Plans:** 8/8 plans executed in 4 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first)
+**Plans:** 8/8 plans executed in 4 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first). Complete 2026-11-24 on `feat/phase-46-wave-1`: the verification gaps closed (STERLING_MODEL_SERVERS as one JSON array on both sides, the activity tracker answered, the release image's browser egress proof), the Defence preview's Get Started, rail and work-area pages merged in with the work-area creation command ported into the extension, the activity tracker answered on the pod IP (47-15's lab), and main (#182 to #184) merged; one integration PR into main waits for the owner's gate approval.
 
 Plans:
 - [x] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
@@ -1937,7 +1937,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
-| 46. Native Theia foundation | 8/8 | Executed 2026-11-24 on `feat/phase-46-wave-1`; verification and the integration PR (owner gate approval) open | - |
+| 46. Native Theia foundation | 8/8 | Complete 2026-11-24 on `feat/phase-46-wave-1`; the integration PR into main waits for the owner's gate approval | - |
 | 47. On-premise deployment stack and offline bundle | 12/18 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
