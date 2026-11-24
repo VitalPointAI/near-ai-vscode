@@ -538,7 +538,7 @@ test('after setup in a project without a team, nothing opens over the editor: th
   reset();
   await runSetUp(await emptyProject());
   assert.equal(picks.length, 1, 'only "Where should models run?" was asked; no What next? menu');
-  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Your next steps are in the SovAI chat.', items: [] }]);
+  assert.deepEqual(infos, [{ text: 'Models are ready for “Demo (local)”. Open Chat for your next steps.', items: [] }]);
   assert.deepEqual(executed, [], 'no command runs by itself');
 });
 
@@ -549,7 +549,7 @@ test('after setup in a project that has a team, a short ready message offers to 
   infoChoice = 'Review project team';
   await runSetUp(root);
   assert.equal(picks.length, 1, 'only "Where should models run?" was asked');
-  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Pick a model and start chatting.', items: ['Review project team', 'More setup steps'] }]);
+  assert.deepEqual(infos, [{ text: 'Models are ready for “Demo (local)”. Pick a model and start chatting.', items: ['Review project team', 'More setup steps'] }]);
   assert.deepEqual(executed, [['nearAi.manageTeams']]);
   reset();
   infoChoice = 'More setup steps';
@@ -589,7 +589,7 @@ test('a caller with its own next steps (offerNextStep: false) gets only the read
   reset();
   await runSetUp(await emptyProject(), { offerNextStep: false });
   assert.equal(picks.length, 1);
-  assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Pick a model and start chatting.', items: [] }]);
+  assert.deepEqual(infos, [{ text: 'Models are ready for “Demo (local)”. Pick a model and start chatting.', items: [] }]);
   assert.deepEqual(executed, []);
 });
 
@@ -611,7 +611,7 @@ test('SovAI: Set Up a New Profile runs the key setup straight away, then points 
   }
   assert.equal(picks[0].options.placeHolder, 'Where should models run?', 'the key setup, not the welcome page');
   assert.equal(picks.length, 1, 'no What next? menu: the next steps are in the chat');
-  assert.deepEqual(infos.map((info) => info.text), ['NEAR AI is ready for “Demo (local)”. Your next steps are in the SovAI chat.']);
+  assert.deepEqual(infos.map((info) => info.text), ['Models are ready for “Demo (local)”. Open Chat for your next steps.']);
   assert.deepEqual(executed, []);
   const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === 'nearAi.newProfile'), { command: 'nearAi.newProfile', title: 'Set Up a New Profile…', category: 'SovAI' });
@@ -629,20 +629,24 @@ test('Project Setup is a contributed command and a Tools tab command', () => {
   assert.match(tools, /\['Project setup', 'nearAi\.projectSetup'\]/);
 });
 
-test('the onboarding page lists setting up the project team right after connecting NEAR AI, and its button runs it', async () => {
+test('the onboarding page lists setting up the project team right after choosing a provider, and its button runs it', async () => {
   const { onboardingHtml, openOnboarding } = load<typeof import('../services/onboarding')>('../services/onboarding');
   const asWebviewUri = (uri: { fsPath: string }) => ({ toString: () => `vscode-resource:${uri.fsPath}` });
   const extensionUri = { fsPath: ROOT };
   const html = onboardingHtml({ cspSource: 'vscode-resource:', asWebviewUri } as never, extensionUri as never);
   const steps = [...html.matchAll(/<div class="number">(\d+)<\/div><strong>([^<]+)<\/strong>/g)].map((match) => [match[1], match[2]]);
-  assert.deepEqual(steps.slice(1, 3), [['02', 'Connect privately'], ['03', 'Choose your team']]);
+  assert.deepEqual(steps.slice(1, 3), [['02', 'Connect AI'], ['03', 'Choose your team']]);
   assert.deepEqual(steps.map((step) => step[0]), ['01', '02', '03', '04', '05', '06']);
   assert.match(html, /<button data-action="setup-project-team">Set up your project team<\/button>/);
   let receive: ((message: unknown) => Promise<void>) | undefined;
   const panel = { webview: { html: '', cspSource: 'vscode-resource:', asWebviewUri, onDidReceiveMessage: (handler: (message: unknown) => Promise<void>) => { receive = handler; return { dispose() {} }; } } };
   webviewPanel = panel;
   reset();
-  openOnboarding({ subscriptions: [], extensionUri } as never, { openApiKeyPortal: async () => undefined, configureApiKey: async () => undefined, showProgress: async () => undefined });
+  let providerPickerOpened = false;
+  assert.match(html, /<button data-action="configure-api-key">Choose a provider<\/button>/);
+  openOnboarding({ subscriptions: [], extensionUri } as never, { openApiKeyPortal: async () => undefined, configureApiKey: async () => { providerPickerOpened = true; }, showProgress: async () => undefined });
+  await receive!({ type: 'configure-api-key' });
+  assert.equal(providerPickerOpened, true);
   await receive!({ type: 'setup-project-team' });
   assert.deepEqual(executed, [['nearAi.setupProjectTeam']]);
 });

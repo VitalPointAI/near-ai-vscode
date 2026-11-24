@@ -1,4 +1,4 @@
-// The empty chat's welcome: the Connect NEAR AI panel until the project has a working profile,
+// The empty chat's welcome: the provider setup panel until the project has a working profile,
 // and the "no team yet" card at the top of the usual welcome. The host decides when the card shows
 // (a working profile, no project team, not dismissed); this only draws it and reports the click.
 (function (root) {
@@ -165,10 +165,10 @@
 
   /** What the welcome's Connect panel says in each state. */
   const WELCOME = {
-    'no-folder': { title: 'Open a folder to start', body: 'NEAR AI works in a project folder. Open the folder you want to work on, then connect NEAR AI.' },
-    connect: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.' },
-    choose: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.', reason: 'Your saved profile needs its key checked again.' },
-    select: { title: 'Connect NEAR AI to start', body: 'Connect NEAR AI to use private models in this project. Your key stays in VS Code\'s secure storage, never in your project files.', reason: 'Choose which saved profile this project uses.' }
+    'no-folder': { title: 'Open a folder to start', body: 'Open the folder you want to work on, then choose an AI provider.' },
+    connect: { title: 'Connect AI to start', body: 'Choose a model provider for this project. Your choices include local models and NEAR AI Cloud.' },
+    choose: { title: 'Connect AI to start', body: 'Choose a model provider for this project. Your choices include local models and NEAR AI Cloud.', reason: 'Your saved profile needs its key checked again.' },
+    select: { title: 'Connect AI to start', body: 'Choose a model provider for this project. Your choices include local models and NEAR AI Cloud.', reason: 'Choose which saved profile this project uses.' }
   };
 
   /**

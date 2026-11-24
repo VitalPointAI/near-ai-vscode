@@ -1248,7 +1248,7 @@ branches and never pushes to `main`.
   keyboard and in light, dark and high-contrast themes. While sync is off, the
   pick-up card and the first-run screen also offer **Keep this project on your
   other machines**. On a computer that has no AI profile yet it appears
-  only after NEAR AI is connected, so **Connect NEAR AI to start** comes first.
+  only after a model provider is connected, so **Connect AI to start** comes first.
   Dismiss it once and it never comes back.
 - **Turn on** (**SovAI: Turn On Project Sync**). It first shows what your git
   host will and will not be able to see, and only after you agree does it make
@@ -1614,7 +1614,7 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Troubleshooting
 
-- **Chat says "Connect NEAR AI to start":** choose **Set up a new profile**.
+- **Chat says "Connect AI to start":** choose **Set up a new profile**.
   If it also offers **Choose a profile**, pick a saved profile; one whose key
   needs checking again is checked when you pick it. If it says "Open a folder
   to start", open your project folder first.

@@ -7,7 +7,7 @@ import type { GateHost } from '../gate/host';
 import { attachChatToView } from './chat';
 import { layoutProbeAsset, layoutProbeTag, registerLayoutProbe, sharedMedia } from './layoutProbe';
 
-/** The NEAR AI sidebar: a compact chat in the style of VS Code's own chat panels. */
+/** The project chat sidebar: a compact chat in the style of the editor's own chat panels. */
 export class NearAiPanelViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'nearAiChatView';
   private view?: vscode.WebviewView;
@@ -79,7 +79,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${webview.asWebviewUri(vscode.Uri.joinPath(shared, 'base.css')).toString()}">
 <link rel="stylesheet" href="${asset('chat.css')}">
-<title>NEAR AI</title>
+<title>Chat</title>
 </head>
 <body data-commands="${escapeAttribute(commands)}">
 <nav id="conversations" aria-label="Conversations">
@@ -90,8 +90,8 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
 <main id="transcript" aria-label="Conversation" aria-live="off">
   <section id="welcome">
     <div id="welcome-connect" role="region" aria-labelledby="welcome-connect-title" hidden>
-      <h2 id="welcome-connect-title">Connect NEAR AI to start</h2>
-      <p id="welcome-connect-body">Connect NEAR AI to use private models in this project. Your key stays in VS Code's secure storage, never in your project files.</p>
+      <h2 id="welcome-connect-title">Connect AI to start</h2>
+      <p id="welcome-connect-body">Choose a model provider for this project. Your choices include local models and NEAR AI Cloud.</p>
       <p id="welcome-connect-reason" hidden></p>
       <div class="welcome-connect-actions">
         <button id="welcome-new-profile" class="text-button primary" type="button">Set up a new profile</button>
@@ -101,7 +101,7 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     </div>
     <div id="welcome-ready" hidden>
       <h2>Private AI for this project</h2>
-      <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Models marked 🔒 run inside NEAR AI's attested TEE; others are forwarded by NEAR to another provider, and every reply says which.</p>
+      <p>Ask anything about your code, or type <strong>/</strong> for Open-GSD workflows. Use the model picker to see where each model runs; every reply says which.</p>
       <div class="suggestions">
         ${start.map((definition) => `<button type="button" data-command="gsd-${definition.command}">${escapeText(definition.title)}<small>${escapeText(definition.description)}</small></button>`).join('\n        ')}
       </div>
@@ -117,9 +117,9 @@ export function sidebarHtml(webview: Pick<vscode.Webview, 'asWebviewUri' | 'cspS
     <div id="commands" role="listbox" aria-label="Open-GSD commands" hidden></div>
     <div id="policy-menu" role="listbox" aria-label="Approval policy" hidden></div>
     <div id="chips" class="chips" hidden></div>
-    <textarea id="input" rows="1" placeholder="Ask NEAR AI, or type / for commands" aria-label="Message NEAR AI" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>
+    <textarea id="input" rows="1" placeholder="Ask a question or type / for commands" aria-label="Chat message" aria-controls="commands" aria-autocomplete="list" aria-expanded="false"></textarea>
     <div class="bar">
-      <button id="profile" class="chip" type="button" data-must-read title="Choose the NEAR AI profile for this project">Set up</button>
+      <button id="profile" class="chip" type="button" data-must-read title="Choose the AI profile for this project">Set up</button>
       <button id="sync" class="chip" type="button" data-must-read data-state="off" aria-label="Project sync: off. Choose to turn on." title="Keep this project on your other machines. Choose to turn on project sync.">Sync off · Turn on</button>
       <span id="sync-live" class="visually-hidden" role="status" aria-live="polite"></span>
       <p id="sync-detail" class="sync-detail" data-must-read hidden></p>
