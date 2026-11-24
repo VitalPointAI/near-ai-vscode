@@ -1,0 +1,21 @@
+{
+  "description": "OS packages the deploy tools need on the machine that runs them, installed from the OS vendor's signed package archive (or the site's mirror of it). One list: deploy/keys/new-dev-site-key.sh reads the package names from it, and the fit check reads it as host resources (48.1-06). Keep each package's packageNames and usedBy on one line each; the script reads them with awk.",
+  "packages": [
+    {
+      "name": "softhsm2",
+      "purpose": "SoftHSM2, a software PKCS#11 token that holds the organization site key during development (owner decision a, 2026-11-24); a production site uses its own HSM instead and refuses a SoftHSM2 signing token",
+      "packageNames": { "apt": "softhsm2", "dnf": "softhsm" },
+      "licence": "BSD-2-Clause",
+      "source": "https://github.com/softhsm/SoftHSMv2",
+      "usedBy": ["deploy/keys/new-dev-site-key.sh", "48.1-17 site signing in development"]
+    },
+    {
+      "name": "opensc",
+      "purpose": "OpenSC's pkcs11-tool, which makes the site key inside the token and runs the private-key operation (C_Sign) on its PKCS#11 URI; cosign does the payload, attach and verify steps",
+      "packageNames": { "apt": "opensc", "dnf": "opensc" },
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://github.com/OpenSC/OpenSC",
+      "usedBy": ["deploy/keys/new-dev-site-key.sh", "48.1-17 site signing"]
+    }
+  ]
+}
