@@ -125,7 +125,7 @@ jobs:
         run: |
           field() { node -e 'process.stdout.write(String(JSON.parse(process.env.IMAGE)[process.argv[1]]))' "$1"; }
           mapfile -t args < <(node -e 'const i = JSON.parse(process.env.IMAGE); for (const [k, v] of Object.entries(i.buildArgs)) console.log(`--build-arg\n${k}=${v}`); if (i.source.repository) console.log(`--build-context\nupstream=${process.env.GITHUB_WORKSPACE}/upstream`);')
-          docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
+          bash .github/retry-registry-auth.sh docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
       - name: Install pinned Syft and Grype
         run: |
           sh compliance/ci/install-tool.sh syft compliance/out/tools
@@ -198,7 +198,7 @@ jobs:
         run: |
           field() { node -e 'process.stdout.write(String(JSON.parse(process.env.IMAGE)[process.argv[1]]))' "$1"; }
           mapfile -t args < <(node -e 'const i = JSON.parse(process.env.IMAGE); for (const [k, v] of Object.entries(i.buildArgs)) console.log(`--build-arg\n${k}=${v}`); if (i.source.repository) console.log(`--build-context\nupstream=${process.env.GITHUB_WORKSPACE}/upstream`);')
-          docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
+          bash .github/retry-registry-auth.sh docker build --provenance=false --sbom=false -f "$(field containerfile)" -t "local/$(field name):ci" "${args[@]}" "$(field context)"
       - name: Install pinned cosign and Syft
         run: |
           sh compliance/ci/install-tool.sh cosign compliance/out/tools

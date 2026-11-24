@@ -130,7 +130,7 @@ Not a credential: the organization-to-organization agreement is a record in the 
 - `release.copy` gains an optional `binding` (the SHA-256 of a `LabelBinding` blob, 45.1-01).
 - `project.mode` cites the policy hash whose `credentials@1` section names the issuance rules (replaces `signers`).
 - Rekey after a credential revocation uses the existing reason `clearance-lowered` (no new value in `CELL_REKEY_REASONS`).
-- Replica features (Phase 33's `roster.require`): `wrap@2` (33.2-05), `exchange@1` (45.1-03). A project-level `credentials@1` requirement for O11 is 33.1's to register; the rule it switches on is `declaredClearanceCounts`.
+- Replica features (Phase 33's `roster.require`): `wrap@2` (33.2-05), `exchange@1` (45.1-03), `model-provenance@1` (74.1-14: the optional `model { id, artifactHash?, passportHash }` on `version.propose` and the staff product header keys `model`, `model_artifact`, `passport` in shared projects; an older client stops with `UPDATE_SENTENCE` through `missingFeatures`; permanent once written; added 2026-11-24 by the Phase 74.1 planning). A project-level `credentials@1` requirement for O11 is 33.1's to register; the rule it switches on is `declaredClearanceCounts`.
 - Wrap v2 constants (33.2-01, permanent after its checkpoint): info `near-ai/cell-wrap/v2`, binding domain `near-ai-vscode/device-kem/v2`, kind `device.kem`, wire version byte 2; version byte 3 reserved for ML-KEM-1024 + P-384.
 
 ## New owner items raised by planning
