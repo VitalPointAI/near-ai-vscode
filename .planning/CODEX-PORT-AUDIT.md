@@ -105,6 +105,25 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 4. **CAF catalogue files.** Keep the provisional public-source CAF catalogue snapshot and the historical vehicle index (`b968c8b6`, about 3,700 lines) out of `main` until Phase 88's governed store, or add them as demo data with their provenance?
 5. **Phase 88 plans and the digital twin.** Take Codex's eight Phase 88 plans (`9225afe1`) and the digital twin research note (`174da11d`) into `main` for a re-check against #188 to #196, or leave them on their branches?
 
+## Ported on `feat/codex-port`
+
+| Codex commit | Port | How |
+|---|---|---|
+| `637bff5c` | `feat(sterling): name the product SovAI; NEAR AI is only the provider` | By hand (the Codex diff was made on the spike layout and an older main); adds copy lint rule 8 and the documentation check |
+| `3b9f071b` | `feat(sterling): make chat and setup provider neutral` | By hand on top of the rename |
+| `e7fc76c7` | `fix(chat): prompt to reconnect when a saved credential is missing` | `cherry-pick -x`, one conflict in `media/chat/chat.js` resolved to the Codex version |
+| `f73bc988` | `fix(setup): discard choices after switching projects` | `cherry-pick -x`, test file conflict kept both sides |
+| `c85c42af` | `fix(setup): use host-neutral proxy advice` | `cherry-pick -x`, clean |
+| `b42b5fb1` (part) | `feat(chat): closing the last conversation hides the workbench chat drawer` | By hand, in a new `src/services/chatDrawer.ts` so the frozen `chat.ts` does not grow; the close button hint change is left out (wrong in other hosts) |
+| `4b96f4ad` (part) | `feat(theia): download SA&A archives from the workbench` | By hand, both sides (extension offer and workbench command) |
+| (follow-up) | `test(e2e): the end-to-end specs follow the SovAI names` | The browser egress spec ran "NEAR AI: Open Chat" and looked for "Message NEAR AI" |
+| (follow-up) | `fix(sterling): keep NEAR AI in recorded and fingerprinted texts` | The focused tests found three texts whose words are recorded or compared (see Left over) |
+
 ## Left over
 
+- Three product sentences still say NEAR AI because their words are recorded or compared:
+  - `LABELS_NOT_ACCREDITATION_TEXT` ("They check what NEAR AI itself sends", also twice in SECURITY.md): the J2 and J4 staff guidance embeds it, so new words need new staff template versions (`node scripts/template-history.mjs` adds 289 lines), and `src/agent/teamTemplateHistory.ts` is frozen at 2,335 lines. Split that file first, then rename.
+  - The scaffolded research verifiers' README (`src/gsd/verifierScaffold.ts`), a hashed verifier file: new words would mark it edited in projects scaffolded without a manifest. It still names "NEAR AI: Trust Research Verifiers"; the palette search still finds the command.
+  - The team coordination commits' git author ("NEAR AI Team", `src/team/runGit.ts`).
+- A comment in `scripts/verify-release-content.mjs` (a gate file) still says "NEAR AI: Load Staff Exercise Scenario"; left to avoid a second gate file for a comment.
 - A Playwright spec for Chat in the release image (streamed reply with a fake model server, history after reload, Stop), replacing the Puppeteer tool of `01a9f155` and `5a04d3d3`. It needs the release image with the bundled VSIX, like `get-started.spec.ts`'s create test.
