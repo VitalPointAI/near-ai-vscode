@@ -1,0 +1,116 @@
+{{- /*
+One sync hub (D-42, D-43, MUS 10.1 and 10.9): a StatefulSet of exactly one replica with its own volume, because the hub's SQLite store must
+never have two writers (research Pitfall 10); no autoscaler, and a rolling update of one replica stops the old pod before the new one starts.
+The pod has the same hardening as the Compose service in relay/compose.yaml. The hub ends TLS itself; its four secret files come read-only
+from Secret hub-<name>-tls (cert-manager, site-pki-hub) and Secret hub-<name>-keys (the hub's own --generate-key output, kept in OpenBao
+kv/apps/hubs/<name> and written by the install script).
+*/ -}}
+{{- $i := .Values.instance -}}
+{{- if not $i.name }}{{ fail "instance.name is not set" }}{{ end -}}
+{{- if not $i.publicAddress }}{{ fail (printf "hub %s: publicAddress is not set in the site file" $i.name) }}{{ end -}}
+{{- if not $i.storage }}{{ fail (printf "hub %s: storage is not set in the site file" $i.name) }}{{ end -}}
+{{- if not .Values.image }}{{ fail "image is not set" }}{{ end -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hub-{{ $i.name }}
+  labels:
+    app.kubernetes.io/name: sterling-hub
+    app.kubernetes.io/instance: hub-{{ $i.name }}
+spec:
+  replicas: 1
+  serviceName: hub-{{ $i.name }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: hub-{{ $i.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sterling-hub
+        app.kubernetes.io/instance: hub-{{ $i.name }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hub
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["/app/bin.mjs"]
+          ports:
+            - name: hub
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - { name: HUB_HOST, value: "0.0.0.0" }
+            - { name: HUB_PORT, value: "8443" }
+            - { name: HUB_STATE_DIR, value: /var/lib/near-ai-hub }
+            - { name: HUB_PUBLIC_ADDRESS, value: {{ $i.publicAddress | quote }} }
+            - { name: HUB_TLS_CERT_FILE, value: /run/secrets/hub/tls.crt }
+            - { name: HUB_TLS_KEY_FILE, value: /run/secrets/hub/tls.key }
+            - { name: HUB_SIGNING_KEY_FILE, value: /run/secrets/hub/signing.key }
+            - { name: HUB_ENCRYPTION_KEY_FILE, value: /run/secrets/hub/encryption.key }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["/nodejs/bin/node", "/app/bin.mjs", "--healthcheck"]
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command: ["/nodejs/bin/node", "/app/bin.mjs", "--healthcheck"]
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/near-ai-hub }
+            - { name: secrets, mountPath: /run/secrets/hub, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        # 0440, not 0400: projected files are owned by root with the pod's fsGroup (65532) as their group, so owner-only 0400 would leave
+        # the hub (uid 65532) unable to read them; group read keeps them to this pod's user.
+        - name: secrets
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: hub-{{ $i.name }}-tls
+                  items:
+                    - { key: tls.crt, path: tls.crt }
+                    - { key: tls.key, path: tls.key }
+              - secret:
+                  name: hub-{{ $i.name }}-keys
+                  items:
+                    - { key: signing, path: signing.key }
+                    - { key: encryption, path: encryption.key }
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ $i.storage | quote }}

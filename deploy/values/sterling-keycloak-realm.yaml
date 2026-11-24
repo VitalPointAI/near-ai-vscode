@@ -1,0 +1,2 @@
+# The realm applier (deploy/charts/sterling-keycloak-realm). The realm itself comes from deploy/keycloak/realm.json through apply.mjs.
+keycloakUrl: "https://keycloakx-http.sterling-identity.svc:8443"

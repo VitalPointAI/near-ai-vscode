@@ -1,0 +1,23 @@
+{
+  "note": {
+    "about": "Per-site realm settings, written by the site's operator from this example. JSON syntax (valid YAML) so deploy/keycloak/apply.mjs reads it without a YAML library; it may name site globals as ${site.<key>}. apply.mjs fills the realm's ${site.realm.<key>} tokens from it.",
+    "eventsExpirationSeconds": "How long Keycloak keeps login events in its own database; the site log store keeps them longer (D-35).",
+    "smtp": "The site's own mail server, which carries the passwordless registration link an administrator sends (D-33). A person can also enrol in person.",
+    "redirectUris": "Where the sterling-sessions client may return after sign-in: the oauth2-proxy callback of every session host and the landing page.",
+    "x509": "The optional smart-card sign-in (D-32), off by default. When enabled it becomes the browser flow; revocation is checked by a local OCSP responder or a CRL file refreshed on a schedule. webauthnRequired says whether the card is followed by a WebAuthn ceremony. The ingress must request and forward client certificates (47-13). The step-up level is not in this flow, so signing is refused while it is the browser flow."
+  },
+  "eventsExpirationSeconds": 7776000,
+  "smtp": {
+    "host": "mail.${site.domain}",
+    "port": 587,
+    "from": "sterling@${site.domain}"
+  },
+  "redirectUris": ["https://*.${site.domain}/oauth2/callback", "https://sessions.${site.domain}/*"],
+  "x509": {
+    "enabled": false,
+    "revocation": "ocsp",
+    "ocspResponderUri": "",
+    "crlPath": "",
+    "webauthnRequired": true
+  }
+}

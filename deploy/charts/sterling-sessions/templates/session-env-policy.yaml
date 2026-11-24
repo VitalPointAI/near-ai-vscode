@@ -1,0 +1,55 @@
+{{- /*
+Hardening item 13 (D-29, research Pitfall 3): a signed-in person can call the launch request and ask for env.fromSecrets or env.fromConfigMaps,
+which would put any Secret of the theia-cloud namespace into their own session. This policy makes that harmless: a session Deployment or Pod
+(label sterling-session, set by our operator template, 47-09) may take environment only from ConfigMap sterling-site-env and the names the
+operator template sets, never a Secret or another ConfigMap, and the only Secret volume is oauth2-proxy-secrets, mounted only into the
+oauth2-proxy sidecar. Failing closed; a refused session Deployment makes the session fail with a reason instead of waiting (starting ->
+failed). The operator, service and landing page pods carry no sterling-session label and are not affected.
+*/ -}}
+{{- $allowed := concat .Values.sessionEnv.operatorNames (.Values.sessionEnv.allowedNames | default list) -}}
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: sterling-session-env
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments]
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace }}
+    objectSelector:
+      matchLabels:
+        sterling-session: "true"
+  variables:
+    - name: spec
+      expression: "object.kind == 'Deployment' ? object.spec.template.spec : object.spec"
+    - name: containers
+      expression: "variables.spec.containers + (has(variables.spec.initContainers) ? variables.spec.initContainers : [])"
+    - name: allowedNames
+      expression: {{ $allowed | toJson | quote }}
+    - name: secretVolumes
+      expression: "(has(variables.spec.volumes) ? variables.spec.volumes : []).filter(v, has(v.secret)).map(v, v.name)"
+  validations:
+    - expression: "variables.containers.all(c, !has(c.envFrom) || c.envFrom.all(e, has(e.configMapRef) && e.configMapRef.name == 'sterling-site-env'))"
+      message: "A session may take environment only from ConfigMap sterling-site-env."
+    - expression: "variables.containers.all(c, !has(c.env) || c.env.all(v, !has(v.valueFrom) || (!has(v.valueFrom.secretKeyRef) && !has(v.valueFrom.configMapKeyRef))))"
+      message: "A session may not read a Secret or a ConfigMap key into its environment."
+    - expression: "variables.containers.all(c, !has(c.env) || c.env.all(v, v.name in variables.allowedNames))"
+      message: "A session may carry only the environment names the operator sets."
+    - expression: "(has(variables.spec.volumes) ? variables.spec.volumes : []).all(v, (!has(v.secret) || v.secret.secretName == 'oauth2-proxy-secrets') && (!has(v.projected) || v.projected.sources.all(s, !has(s.secret))))"
+      message: "The only Secret a session may mount is oauth2-proxy-secrets."
+    - expression: "variables.containers.all(c, c.name == 'oauth2-proxy' || !has(c.volumeMounts) || c.volumeMounts.all(m, !(m.name in variables.secretVolumes)))"
+      message: "Only the oauth2-proxy sidecar may mount the oauth2-proxy secrets."

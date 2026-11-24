@@ -6,5 +6,20 @@
 # the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
 # that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
 FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:678acf0a00bb4a0d986b8397f472531aa2fe8d2b068f360c96f835889cac44c3 AS build
+# The upstream conversion webhook build (dockerfiles/conversion-webhook/Dockerfile at 1.2.0) as a Quarkus uber-jar.
+COPY --from=upstream --chown=185:0 java/common /home/default/build/common
+RUN cd /home/default/build/common/maven-conf && mvn -B clean install --no-transfer-progress \
+ && cd /home/default/build/common/org.eclipse.theia.cloud.common && mvn -B clean install --no-transfer-progress
+COPY --from=upstream --chown=185:0 java/conversion /home/default/build/conversion
+RUN cd /home/default/build/conversion/org.eclipse.theia.cloud.conversion \
+ && mvn -B clean package -Dmaven.test.skip=true -Dquarkus.package.type=uber-jar --no-transfer-progress
+
 
 FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.24@sha256:7fc9128f130fe28d913ac4ad1659f764675a8382bffaf42eb8c8f8cfbd17865f
+USER root
+RUN mkdir -p /conversion
+COPY --from=build --chown=0:0 --chmod=0444 /home/default/build/conversion/org.eclipse.theia.cloud.conversion/target/conversion-webhook-1.2.0-runner.jar /conversion/
+USER 185
+WORKDIR /conversion
+ENV CERT_RELOAD_PERIOD=604800
+ENTRYPOINT ["java", "-Dquarkus.http.ssl.certificate.reload-period=604800", "-jar", "/conversion/conversion-webhook-1.2.0-runner.jar"]

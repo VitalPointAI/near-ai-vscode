@@ -1,0 +1,196 @@
+#!/usr/bin/env node
+// Realm sterling as code (D-05, D-08, D-28 to D-35, D-57). Reads deploy/keycloak/realm.json, fills it from the site file and the per-site
+// realm file, checks every passwordless-only rule (checkRealm), and only then installs the applier release, which runs keycloak-config-cli
+// with the checked realm. The same script runs at install and on every update.
+//
+//   node deploy/keycloak/apply.mjs --site <site file> [--realm-site <per-site realm file>] [--keycloakx-site <per-site keycloakx file>] [--dry-run]
+//
+// The sign-in level comes from the site's signInKeys (D-57):
+//   passkeys       attestation none and no AAGUID allowlist: any WebAuthn passkey (phone, synced or device-bound) or a hardware key;
+//   hardware-only  attestation direct (or enterprise, keycloakx site file sterling.attestation), the site's acceptableAaguids (refused when
+//                  empty: an empty allowlist accepts every authenticator, self-attestation included) and the vendor attestation roots
+//                  ConfigMap (keycloakx site file sterling.attestationRootsConfigMap) from the bundled FIDO MDS snapshot.
+// Both levels: no password, OTP or recovery code anywhere; user verification and resident keys required; the one shared rpId (D-08).
+// --dry-run prints the checked realm's summary and installs nothing. Node built-ins only; helm from $HELM or PATH.
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { imageSets, listReleases, loadSite, substituteSite } from '../bundle/lib/render.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+export const REALM_FILE = 'deploy/keycloak/realm.json';
+export const RELEASE = 'sterling-keycloak-realm';
+export const SIGN_IN_KEYS = Object.freeze(['passkeys', 'hardware-only']);
+/** Authenticators that ask for something other than a WebAuthn key: never in any flow (D-05, D-31). */
+export const FORBIDDEN_AUTHENTICATOR = /password(?!less)|otp|recovery|reset-credential|kerberos|spnego|http-basic/i;
+const BINDINGS = ['browserFlow', 'directGrantFlow', 'resetCredentialsFlow', 'firstBrokerLoginFlow', 'dockerAuthenticationFlow'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+
+/**
+ * The site values the realm's tokens name, derived from signInKeys and the per-site files: webAuthnAttestation, acceptableAaguids and
+ * realm.* (strings, so Keycloak's string maps take them). Refuses a missing or unknown signInKeys.
+ */
+export function realmSettings(site, realmSite, keycloakxSite = {}) {
+  if (!SIGN_IN_KEYS.includes(site.signInKeys)) throw new Error(`signInKeys must be ${SIGN_IN_KEYS.join(' or ')}, not ${JSON.stringify(site.signInKeys)} (D-57).`);
+  const hardware = site.signInKeys === 'hardware-only';
+  const x509 = realmSite.x509 ?? {};
+  const orNotSet = (value) => (typeof value === 'string' && value.trim() ? value : 'not-set');
+  return {
+    ...site,
+    webAuthnAttestation: hardware ? (keycloakxSite.sterling?.attestation || 'direct') : 'none',
+    acceptableAaguids: hardware ? (site.acceptableAaguids ?? []) : (site.acceptableAaguids ?? []),
+    attestationRootsConfigMap: hardware ? (keycloakxSite.sterling?.attestationRootsConfigMap ?? '') : '',
+    realm: {
+      eventsExpirationSeconds: realmSite.eventsExpirationSeconds,
+      smtp: { host: realmSite.smtp?.host, port: String(realmSite.smtp?.port ?? ''), from: realmSite.smtp?.from },
+      redirectUris: realmSite.redirectUris,
+      x509: {
+        enabled: x509.enabled === true,
+        webauthnRequirement: x509.webauthnRequired === false ? 'DISABLED' : 'REQUIRED',
+        ocspCheckingEnabled: String(x509.enabled === true && x509.revocation === 'ocsp'),
+        crlCheckingEnabled: String(x509.enabled === true && x509.revocation === 'crl'),
+        ocspResponderUri: orNotSet(x509.ocspResponderUri),
+        crlPath: orNotSet(x509.crlPath)
+      }
+    }
+  };
+}
+
+/** The realm with the site settings substituted, authenticator config values as strings, and the X.509 flow bound when the site turns it on. */
+export function substitutedRealm(text, settings) {
+  const realm = JSON.parse(substituteSite(text, settings, REALM_FILE));
+  for (const entry of realm.authenticatorConfig ?? []) entry.config = Object.fromEntries(Object.entries(entry.config ?? {}).map(([key, value]) => [key, String(value)]));
+  if (realm.smtpServer) realm.smtpServer = Object.fromEntries(Object.entries(realm.smtpServer).map(([key, value]) => [key, String(value)]));
+  if (settings.realm.x509.enabled) realm.browserFlow = 'sterling-x509';
+  return realm;
+}
+
+/** Every rule the realm must keep (see the top of this file). Returns a list of plain problems; empty means the realm may be applied. */
+export function checkRealm(realm, settings) {
+  const problems = [];
+  const need = (condition, problem) => { if (!condition) problems.push(problem); };
+  const hardware = settings.signInKeys === 'hardware-only';
+  need(SIGN_IN_KEYS.includes(settings.signInKeys), `signInKeys must be ${SIGN_IN_KEYS.join(' or ')}`);
+  const rpId = realm.webAuthnPolicyPasswordlessRpId;
+  need(typeof rpId === 'string' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(rpId), `the relying-party id must be your organization's one shared parent domain, not ${JSON.stringify(rpId)} (D-08)`);
+  // The passwordless policy, the same at both levels.
+  need(realm.webAuthnPolicyPasswordlessUserVerificationRequirement === 'required', 'user verification must be required');
+  // RequireResidentKey is the field keycloak-config-cli 6.5.1 (Keycloak 26.5 model) accepts; Keycloak 26.8 maps it to residentKey required (spike S6).
+  need(realm.webAuthnPolicyPasswordlessRequireResidentKey === 'Yes' && [undefined, 'required'].includes(realm.webAuthnPolicyPasswordlessResidentKey), 'resident keys (discoverable credentials) must be required');
+  need(realm.webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister === true, 'the same authenticator must not be registered twice (two real keys)');
+  const attestation = realm.webAuthnPolicyPasswordlessAttestationConveyancePreference;
+  const aaguids = realm.webAuthnPolicyPasswordlessAcceptableAaguids;
+  if (hardware) {
+    need(['direct', 'enterprise'].includes(attestation), `under hardware-only attestation must be direct or enterprise, not ${JSON.stringify(attestation)}`);
+    need(Array.isArray(aaguids) && aaguids.length > 0, 'under hardware-only the acceptableAaguids allowlist is empty, which would accept every authenticator including self-attestation; list the approved hardware key models');
+    need(Array.isArray(aaguids) && aaguids.every((id) => UUID.test(String(id))), 'every acceptable AAGUID must be a lowercase UUID');
+    need(Boolean(settings.attestationRootsConfigMap), 'under hardware-only the vendor attestation roots ConfigMap (keycloakx site file sterling.attestationRootsConfigMap) must be named');
+  } else {
+    need(attestation === 'none', `under passkeys attestation must be none, not ${JSON.stringify(attestation)}`);
+    need(Array.isArray(aaguids) && aaguids.length === 0, 'under passkeys the acceptableAaguids allowlist must be empty (a list would refuse phone passkeys); use signInKeys hardware-only to restrict models');
+  }
+  // Flows: none asks for a password, OTP or recovery code, and every binding names one of ours.
+  const flows = new Map((realm.authenticationFlows ?? []).map((flow) => [flow.alias, flow]));
+  for (const flow of flows.values()) {
+    for (const execution of flow.authenticationExecutions ?? []) {
+      need(!FORBIDDEN_AUTHENTICATOR.test(execution.authenticator ?? ''), `flow ${flow.alias} uses ${execution.authenticator}, which is not a WebAuthn step`);
+      if (execution.authenticatorFlow) need(flows.has(execution.flowAlias), `flow ${flow.alias} names the subflow ${execution.flowAlias}, which realm.json does not define`);
+    }
+  }
+  for (const binding of BINDINGS) need(flows.has(realm[binding]) && flows.get(realm[binding]).topLevel, `${binding} must name a top-level flow defined in realm.json, not ${JSON.stringify(realm[binding])} (a built-in flow has password steps)`);
+  const empty = flows.get('sterling-no-credentials');
+  need(Boolean(empty) && (empty.authenticationExecutions ?? []).length === 0, 'flow sterling-no-credentials must have no step');
+  for (const binding of ['directGrantFlow', 'resetCredentialsFlow', 'firstBrokerLoginFlow', 'dockerAuthenticationFlow']) need(realm[binding] === 'sterling-no-credentials', `${binding} must be sterling-no-credentials`);
+  need(realm.browserFlow === (settings.realm?.x509?.enabled ? 'sterling-x509' : 'sterling-browser'), 'the browser flow is sterling-browser, or sterling-x509 when the site turns smart cards on');
+  need(flows.has('sterling-x509'), 'the optional smart-card flow sterling-x509 must exist (D-32)');
+  // Required actions.
+  const actions = new Map((realm.requiredActions ?? []).map((action) => [action.alias, action]));
+  for (const alias of ['UPDATE_PASSWORD', 'CONFIGURE_TOTP', 'CONFIGURE_RECOVERY_AUTHN_CODES']) need(actions.get(alias)?.enabled === false, `required action ${alias} must be listed and disabled`);
+  need(actions.get('webauthn-register-passwordless')?.enabled === true, 'required action webauthn-register-passwordless must be enabled (D-33)');
+  // People and email (D-28).
+  for (const key of ['duplicateEmailsAllowed', 'editUsernameAllowed', 'resetPasswordAllowed', 'registrationAllowed']) need(realm[key] === false, `${key} must be false`);
+  need(realm.bruteForceProtected === true, 'brute-force protection must be on');
+  const profile = (realm.components?.['org.keycloak.userprofile.UserProfileProvider'] ?? [])[0];
+  let email;
+  try { email = JSON.parse(profile?.config?.['kc.user.profile.config']?.[0] ?? '{}').attributes?.find((attribute) => attribute.name === 'email'); } catch { email = undefined; }
+  need(JSON.stringify(email?.permissions?.edit) === JSON.stringify(['admin']), 'the user profile must let only administrators edit email');
+  // Step-up levels (D-34): two levels, the step-up acr at level 2, its max age the site window.
+  let loa = {};
+  try { loa = JSON.parse(realm.attributes?.['acr.loa.map'] ?? '{}'); } catch { loa = {}; }
+  need(Object.keys(loa).length === 2 && Number(loa.webauthn) === 1 && Number(loa[settings.stepUpAcr]) === 2, `acr.loa.map must map webauthn to 1 and ${settings.stepUpAcr} to 2`);
+  const configs = new Map((realm.authenticatorConfig ?? []).map((entry) => [entry.alias, entry.config ?? {}]));
+  need(configs.get('sterling loa 2')?.['loa-condition-level'] === '2' && configs.get('sterling loa 2')?.['loa-max-age'] === String(settings.stepUpMaxAgeSeconds), 'level 2 must be valid only for the site step-up window (stepUpMaxAgeSeconds)');
+  need(configs.get('sterling loa 1')?.['loa-condition-level'] === '1', 'level 1 must exist');
+  // Events (D-35).
+  need(realm.eventsEnabled === true && realm.adminEventsEnabled === true && realm.adminEventsDetailsEnabled === true, 'login and admin events (with details) must be on');
+  need((realm.eventsListeners ?? []).includes('jboss-logging'), 'events must go to the log (jboss-logging), which Fluent Bit ships');
+  // Clients.
+  for (const client of realm.clients ?? []) need(client.directAccessGrantsEnabled === false, `client ${client.clientId} must not allow direct grants (a password grant)`);
+  const sessions = (realm.clients ?? []).find((client) => client.clientId === 'sterling-sessions');
+  need(Boolean(sessions), 'client sterling-sessions must exist');
+  if (sessions) {
+    need(sessions.publicClient === false && sessions.standardFlowEnabled === true && sessions.implicitFlowEnabled === false && sessions.serviceAccountsEnabled === false,
+      'sterling-sessions must be confidential with the standard flow only');
+    need(/^\$\(env:[A-Z0-9_]+\)$/.test(sessions.secret ?? ''), 'the sterling-sessions secret must come from the applier Job environment, never be written in realm.json');
+    const mapper = (type, check) => (sessions.protocolMappers ?? []).some((entry) => entry.protocolMapper === type && check(entry.config ?? {}));
+    need(mapper('oidc-audience-mapper', (config) => config['included.client.audience'] === 'sterling-sessions' && config['access.token.claim'] === 'true'), 'sterling-sessions must add its own audience to the access token (OpenBao bound_audiences)');
+    need(mapper('oidc-acr-mapper', (config) => config['access.token.claim'] === 'true'), 'acr must be in the access token');
+    need(mapper('oidc-usersessionmodel-note-mapper', (config) => config['user.session.note'] === 'AUTH_TIME' && config['claim.name'] === 'auth_time' && config['access.token.claim'] === 'true'), 'auth_time must be in the access token');
+    need(Array.isArray(sessions.redirectUris) && sessions.redirectUris.length > 0 && sessions.redirectUris.every((uri) => String(uri).startsWith('https://')), 'sterling-sessions needs https redirect URIs from the site file');
+  }
+  return problems;
+}
+
+/** Reads, fills and checks the realm for a site. Returns { realm, settings, problems }. */
+export function prepareRealm({ site, realmSite, keycloakxSite }) {
+  const fill = (value) => JSON.parse(substituteSite(JSON.stringify(value), site, 'the per-site realm file'));
+  const settings = realmSettings(site, fill(realmSite), keycloakxSite);
+  const realm = substitutedRealm(readFileSync(path.join(ROOT, REALM_FILE), 'utf8'), settings);
+  return { realm, settings, problems: checkRealm(realm, settings) };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const argv = process.argv.slice(2);
+  const option = (flag) => { const index = argv.indexOf(flag); return index < 0 ? undefined : argv[index + 1]; };
+  const usage = 'usage: apply.mjs --site <site file> [--realm-site <file>] [--keycloakx-site <file>] [--dry-run]';
+  if (argv.includes('--help')) { console.log(usage); process.exit(0); }
+  try {
+    if (!option('--site')) throw new Error(usage);
+    const site = loadSite(option('--site'));
+    const release = listReleases(ROOT).find((entry) => entry.name === RELEASE);
+    const realmSite = readJson(option('--realm-site') ?? path.join(ROOT, release.site));
+    const keycloakxSite = readJson(option('--keycloakx-site') ?? path.join(ROOT, 'deploy/values/site.example/keycloakx.yaml'));
+    const { realm, settings, problems } = prepareRealm({ site, realmSite, keycloakxSite });
+    if (problems.length) {
+      console.error('refused: the realm breaks these rules; nothing was applied:');
+      for (const problem of problems) console.error(`  - ${problem}`);
+      process.exit(1);
+    }
+    const summary = `realm ${realm.realm} checked: signInKeys ${settings.signInKeys}, attestation ${realm.webAuthnPolicyPasswordlessAttestationConveyancePreference}, `
+      + `${realm.webAuthnPolicyPasswordlessAcceptableAaguids.length} acceptable AAGUIDs, rpId ${realm.webAuthnPolicyPasswordlessRpId}, browser flow ${realm.browserFlow}`;
+    if (argv.includes('--dry-run')) { console.log(summary); process.exit(0); }
+    const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-realm-'));
+    try {
+      const realmFile = path.join(scratch, 'realm.json');
+      writeFileSync(realmFile, JSON.stringify(realm, null, 2), { mode: 0o600 });
+      const valueFiles = [...release.values, release.site].map((file, index) => {
+        const copy = path.join(scratch, `${index}.yaml`);
+        writeFileSync(copy, substituteSite(readFileSync(path.join(ROOT, file), 'utf8'), site, file));
+        return copy;
+      });
+      const run = spawnSync(process.env.HELM || 'helm', ['upgrade', '--install', RELEASE, path.join(ROOT, release.chart.slice('path:'.length)), '--namespace', release.namespace,
+        ...valueFiles.flatMap((file) => ['-f', file]), ...imageSets(ROOT, release, site), '--set-file', `realm=${realmFile}`, '--wait', '--wait-for-jobs', '--timeout', '15m'], { stdio: 'inherit' });
+      if (run.status !== 0) throw new Error(`helm upgrade --install ${RELEASE} failed`);
+      console.log(`applied: ${summary}`);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+}

@@ -1,0 +1,141 @@
+#!/usr/bin/env node
+// OpenBao as code (D-37 to D-41): mounts, the jwt auth bound to the site's Keycloak, the session and step-up roles, the policies, the PKI
+// intermediate's mount and roles and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
+// through the API ("use declarative, config-based audit device management", spike S5), so it is an audit stanza in the server configuration
+// (deploy/values/openbao.yaml). Run at install and again on every update; a second run
+// changes nothing (each write is compared with what OpenBao already holds and skipped when equal).
+//
+//   node deploy/openbao/apply.mjs --addr <https://openbao:8200> --ca-file <site CA pem> --token-file <file> --site <site file>
+//        [--jwt-pubkey <pem>] [--dry-run]
+//
+// The token comes from a file, never an argument. --jwt-pubkey replaces Keycloak discovery with a fixed public key (spikes and tests only).
+// --dry-run prints the operations as JSON and calls nothing. Node built-ins only; every call is node:https with the site CA.
+import { readFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadSite } from '../bundle/lib/render.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+/** The policies written from deploy/openbao/policies/<name>.hcl. */
+export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install']);
+/** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
+export const AUDIENCE = 'sterling-sessions';
+export const REALM = 'sterling';
+/** Base session token: 15 minutes, renewable to a working day. */
+export const BASE_TTL = Object.freeze({ token_ttl: 900, token_max_ttl: 28800 });
+
+const policyText = (name) => readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8');
+
+/**
+ * The operations for a site, in order: { what, read?, write, body, compare? }. `read` is the path whose current value decides whether the
+ * write is needed; `compare(current, body)` says whether they already agree (default: every body field equal).
+ */
+export function planApply(site, { jwtPubkey, caPem } = {}) {
+  const stepUpAcr = site.stepUpAcr;
+  const window = Number(site.stepUpMaxAgeSeconds);
+  if (!stepUpAcr || !Number.isInteger(window) || window <= 0) throw new Error('the site file needs stepUpAcr and a positive whole stepUpMaxAgeSeconds.');
+  const mount = (where, type, options) => ({ what: `mount ${where}/ (${type})`, read: 'sys/mounts', write: `sys/mounts/${where}`, body: { type, ...(options ? { options } : {}) },
+    compare: (mounts) => mounts?.[`${where}/`]?.type === type });
+  const role = (name, extra) => ({ what: `jwt role ${name}`, read: `auth/jwt/role/${name}`, write: `auth/jwt/role/${name}`, body: {
+    role_type: 'jwt', bound_audiences: [AUDIENCE], user_claim: 'sub', token_no_default_policy: true, ...extra } });
+  return [
+    mount('kv', 'kv', { version: '2' }),
+    mount('transit', 'transit'),
+    { ...mount('pki_int', 'pki'), body: { type: 'pki', config: { max_lease_ttl: '43800h' } } },
+    { what: 'auth jwt/', read: 'sys/auth', write: 'sys/auth/jwt', body: { type: 'jwt' }, compare: (auths) => auths?.['jwt/']?.type === 'jwt' },
+    { what: 'jwt config (the site Keycloak)', read: 'auth/jwt/config', write: 'auth/jwt/config', body: jwtPubkey
+      ? { jwt_validation_pubkeys: [jwtPubkey], bound_issuer: '' }
+      : { oidc_discovery_url: `https://keycloak.${site.domain}/realms/${REALM}`, oidc_discovery_ca_pem: caPem ?? '' } },
+    ...POLICIES.map((name) => ({ what: `policy ${name}`, read: `sys/policies/acl/${name}`, write: `sys/policies/acl/${name}`, body: { policy: policyText(name) } })),
+    role('sterling-workbench', { ...BASE_TTL, token_policies: ['sterling-workbench'] }),
+    // The only way to sign (D-34, D-39): the same audience and sub (so the same entity), the step-up acr required, and a token that cannot
+    // outlive the step-up window.
+    role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
+      token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
+    // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before.
+    { what: 'PKI role ingress', read: 'pki_int/roles/ingress', write: 'pki_int/roles/ingress', body: { allowed_domains: [site.domain], allow_subdomains: true,
+      allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: false, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
+    { what: 'PKI role hub', read: 'pki_int/roles/hub', write: 'pki_int/roles/hub', body: { allowed_domains: [site.domain, 'sterling-hubs.svc', 'sterling-hubs.svc.cluster.local'],
+      allow_subdomains: true, allow_bare_domains: false, allow_localhost: false, allow_ip_sans: false, server_flag: true, client_flag: false, key_type: 'ec', key_bits: 256, max_ttl: 7776000 } },
+    // The approvers of key moves between sites (key-move.hcl); members are added at the key ceremony and never by this script.
+    { what: 'identity group key-custodians', read: 'identity/group/name/key-custodians', write: 'identity/group/name/key-custodians', body: { type: 'internal', policies: [] },
+      compare: (group) => group?.type === 'internal' }
+  ];
+}
+
+// OpenBao returns durations in seconds and PEM text without its last newline, so values are compared as trimmed strings (lists sorted).
+const normalise = (value) => (Array.isArray(value) ? [...value].map((item) => String(item).trim()).sort() : value && typeof value === 'object' ? value : String(value ?? '').trim());
+/** Whether the current value already holds every field of the body. */
+export function sameFields(current, body) {
+  if (!current) return false;
+  return Object.entries(body).every(([key, value]) => {
+    if (key === 'policy') return typeof current.policy === 'string' && current.policy.trim() === String(value).trim();
+    if (value && typeof value === 'object' && !Array.isArray(value)) return JSON.stringify(current[key] ?? {}) === JSON.stringify(value);
+    return JSON.stringify(normalise(current[key])) === JSON.stringify(normalise(value));
+  });
+}
+
+/** A minimal OpenBao HTTP client: request(method, path, body) -> { status, data }. */
+export function openbaoClient({ addr, token, caPem }) {
+  const base = new URL(addr);
+  const transport = base.protocol === 'https:' ? https : http;
+  return (method, apiPath, body) => new Promise((resolve, reject) => {
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const request = transport.request(new URL(`/v1/${apiPath}`, base), { method, ca: caPem, headers: { 'X-Vault-Token': token, ...(payload ? { 'content-type': 'application/json' } : {}) } }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => {
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+        resolve({ status: response.statusCode, data });
+      });
+    });
+    request.on('error', reject);
+    if (payload) request.write(payload);
+    request.end();
+  });
+}
+
+/** Applies the plan; returns [{ what, result: 'written' | 'unchanged' }]. Throws on any refusal. */
+export async function applyPlan(request, operations) {
+  const results = [];
+  for (const operation of operations) {
+    let current = null;
+    if (operation.read) {
+      const read = await request('GET', operation.read);
+      if (read.status === 200) current = read.data?.data ?? read.data;
+    }
+    const agrees = operation.compare ? operation.compare(current, operation.body) : sameFields(current, operation.body);
+    if (agrees) { results.push({ what: operation.what, result: 'unchanged' }); continue; }
+    const write = await request('POST', operation.write, operation.body);
+    if (write.status >= 300) throw new Error(`${operation.what}: OpenBao answered ${write.status} ${JSON.stringify(write.data?.errors ?? write.data)}`);
+    results.push({ what: operation.what, result: 'written' });
+  }
+  return results;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const argv = process.argv.slice(2);
+  const option = (flag) => { const index = argv.indexOf(flag); return index < 0 ? undefined : argv[index + 1]; };
+  const usage = 'usage: apply.mjs --addr <url> --ca-file <pem> --token-file <file> --site <site file> [--jwt-pubkey <pem>] [--dry-run]';
+  if (argv.includes('--help')) { console.log(usage); process.exit(0); }
+  try {
+    if (!option('--site')) throw new Error(usage);
+    const site = loadSite(option('--site'));
+    const caPem = option('--ca-file') ? readFileSync(option('--ca-file'), 'utf8') : undefined;
+    const jwtPubkey = option('--jwt-pubkey') ? readFileSync(option('--jwt-pubkey'), 'utf8') : undefined;
+    const operations = planApply(site, { jwtPubkey, caPem });
+    if (argv.includes('--dry-run')) {
+      console.log(JSON.stringify(operations.map(({ what, write, body }) => ({ what, write, body })), null, 2));
+    } else {
+      if (!option('--addr') || !option('--token-file')) throw new Error(usage);
+      const request = openbaoClient({ addr: option('--addr'), token: readFileSync(option('--token-file'), 'utf8').trim(), caPem });
+      for (const { what, result } of await applyPlan(request, operations)) console.log(`${result}: ${what}`);
+    }
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
+}

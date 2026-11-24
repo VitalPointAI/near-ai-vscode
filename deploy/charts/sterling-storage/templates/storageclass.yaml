@@ -1,0 +1,34 @@
+{{- /*
+The reference encrypted storage class (D-17, research Decision 3): every Longhorn volume on it is a LUKS volume. The key is one class-level
+Secret, longhorn-crypto in longhorn-system, written by the install script (47-16) from OpenBao kv/apps/storage; a per-volume key is not
+possible because the Theia Cloud operator creates the workspace PVCs itself (a recorded condition on the site-storage entry). Volumes are
+kept when released (a stopped session keeps its workspace, DESIGN section 7) and can grow.
+*/ -}}
+{{- if not .Values.storageClass }}{{ fail "storageClass (the site setting) is not set" }}{{ end }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClass }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: {{ .Values.replicas | quote }}
+  staleReplicaTimeout: "2880"
+  fsType: ext4
+  dataLocality: disabled
+  encrypted: "true"
+  # The LUKS key for every volume of this class.
+  csi.storage.k8s.io/provisioner-secret-name: longhorn-crypto
+  csi.storage.k8s.io/provisioner-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-publish-secret-name: longhorn-crypto
+  csi.storage.k8s.io/node-publish-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-stage-secret-name: longhorn-crypto
+  csi.storage.k8s.io/node-stage-secret-namespace: longhorn-system
+  csi.storage.k8s.io/node-expand-secret-name: longhorn-crypto
+  csi.storage.k8s.io/node-expand-secret-namespace: longhorn-system
+  # New volumes join the default group, which the recurring jobs below cover.
+  recurringJobSelector: '[{"name":"default","isGroup":true}]'

@@ -1,0 +1,23 @@
+{{- /*
+The site environment every session gets (D-29, Phase 46 interface item 4), through envFrom in our operator template (47-09). Exactly these
+ten names and no secret (D-41: a person's secrets come from OpenBao after sign-in). The step-up pair is the same site setting that sets the
+realm's level-2 max age (47-08) and OpenBao's step-up role (47-07), and the same at both signInKeys levels, because the step-up acr means a
+fresh WebAuthn ceremony, not a hardware key (D-57); so no signInKeys value is here.
+*/ -}}
+{{- $e := .Values.siteEnv -}}
+{{- range $key := list "openbaoAddr" "stepUpAcr" "openVsxUrl" }}{{ if not (index $e $key) }}{{ fail (printf "siteEnv.%s is not set" $key) }}{{ end }}{{ end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sterling-site-env
+data:
+  STERLING_OPENBAO_ADDR: {{ $e.openbaoAddr | quote }}
+  STERLING_OPENBAO_CA_FILE: /etc/ssl/site-ca/ca.crt
+  STERLING_OPENBAO_JWT_MOUNT: jwt
+  STERLING_OPENBAO_JWT_ROLE: sterling-workbench
+  STERLING_OPENBAO_KV_MOUNT: kv
+  STERLING_OPENBAO_TRANSIT_MOUNT: transit
+  STERLING_STEPUP_ACR: {{ $e.stepUpAcr | quote }}
+  STERLING_STEPUP_MAX_AGE_SECONDS: {{ $e.stepUpMaxAgeSeconds | int | quote }}
+  STERLING_OPEN_VSX_URL: {{ $e.openVsxUrl | quote }}
+  STERLING_MODEL_SERVERS: {{ $e.modelServers | toJson | quote }}

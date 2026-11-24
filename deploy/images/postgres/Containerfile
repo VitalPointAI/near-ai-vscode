@@ -1,8 +1,27 @@
 # The PostgreSQL image for Keycloak, built by us on UBI 9 minimal from the PGDG EL-9 RPMs pinned as "postgresql" in
 # compliance/ci/tool-pins.json, with RPM signature checking enforced against the PGDG key (D-18, research Decision 2; spike S3 proved
-# PostgreSQL 18.7 installs and runs this way, 47-01-SUMMARY.md). One stage. This file holds only the base; the build steps and image.json come
-# with its build definition (deploy/images/README.md), and without image.json it is not built.
+# PostgreSQL 18.7 installs and runs this way, 47-01-SUMMARY.md). One stage. The RPMs and the PGDG key come into the context folder rpms/ through
+# image.json (install-tool.sh checks every SHA-256 before the build).
 # Pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1). To re-pin, read the tag's index with an
 # anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check that the bytes fetched by
 # that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9@sha256:2cb89feabb136a960f3e6d34f4bbcdff72404f3a18f43f01920e4a26ef389f18
+# The PGDG key is imported only after its fingerprint is the one pinned (D4BF 08AE 67A0 B4C7 A1DB CCD2 40BC A2B4 08B4 0D20, spike S3); then
+# every RPM's signature is checked and the install refuses an unsigned or wrongly signed package (_pkgverify_level all). tzdata: initdb
+# needs the zone files (S3). systemd comes only as a package dependency of the server RPM; it is never run.
+COPY rpms/ /tmp/pgdg/
+COPY --chmod=0555 entrypoint.sh /usr/local/bin/sterling-postgres
+RUN microdnf install -y --nodocs --setopt=install_weak_deps=0 \
+      glibc openssl-libs krb5-libs openldap libicu liburing lz4-libs libzstd libxml2 numactl-libs pam readline zlib \
+      systemd-libs systemd util-linux shadow-utils alternatives tzdata gnupg2 \
+ && test "$(gpg --quiet --with-colons --import-options show-only --import /tmp/pgdg/PGDG-RPM-GPG-KEY-RHEL 2>/dev/null | awk -F: '/^fpr:/ {print $10; exit}')" = D4BF08AE67A0B4C7A1DBCCD240BCA2B408B40D20 \
+ && rpm --import /tmp/pgdg/PGDG-RPM-GPG-KEY-RHEL \
+ && rpm -K /tmp/pgdg/*.rpm \
+ && rpm -ivh --define '_pkgverify_level all' /tmp/pgdg/postgresql18-libs-18.7-1PGDG.rhel9.9.x86_64.rpm /tmp/pgdg/postgresql18-18.7-1PGDG.rhel9.9.x86_64.rpm \
+      /tmp/pgdg/postgresql18-server-18.7-1PGDG.rhel9.9.x86_64.rpm \
+ && microdnf clean all && rm -rf /tmp/pgdg \
+ && mkdir -p /var/lib/pgsql/data /run/postgresql && chown postgres:postgres /var/lib/pgsql/data /run/postgresql && chmod 0700 /var/lib/pgsql/data
+ENV PATH=/usr/pgsql-18/bin:$PATH PGDATA=/var/lib/pgsql/data/pgdata
+USER 26:26
+EXPOSE 5432
+ENTRYPOINT ["/usr/local/bin/sterling-postgres"]

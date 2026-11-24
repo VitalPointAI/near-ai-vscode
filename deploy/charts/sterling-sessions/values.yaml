@@ -1,0 +1,51 @@
+appDefinition:
+  # Phase 46's sterling-workbench image by digest (set from deploy/bundle/images.lock.json `release`).
+  image: ""
+  # The lab runs the pinned placeholder until Phase 46's image is published (D-55).
+  usePlaceholder: false
+  # Phase 46 interface item 1: user 10001, HTTP port 3000.
+  uid: 10001
+  port: 3000
+  # Must be the instances ingress the theia-cloud chart creates (ingress.instances.name; render-sessions.test.mjs checks they agree).
+  ingressName: theia-cloud-demo-ws-ingress
+  # The site's session capacity and the lifecycle values; per site (deploy/values/site.example/sterling-sessions.yaml).
+  maxInstances: null
+  # Theia Cloud's AppDefinition timeout is minutes since the session was created, whatever the activity (BasicTheiaCloudOperator
+  # isSessionTimedOut at 1.2.0); 0 means no limit. The idle stop is the activity tracker's timeoutAfter.
+  maxSessionMinutes: 0
+  notifyAfterMinutes: 25
+  timeoutAfterMinutes: 30
+  mountPath: /home/sterling/workspace
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "4Gi" }
+labPlaceholder:
+  image: ""
+  uid: 1001
+  port: 8080
+siteEnv:
+  openbaoAddr: ""
+  stepUpAcr: ""
+  stepUpMaxAgeSeconds: 300
+  openVsxUrl: ""
+  # The model servers your organization's policy lists, as a list of URLs; the workbench reads them as JSON.
+  modelServers: []
+sessionEnv:
+  # The names the operator template sets (java/operator/.../templateDeployment.yaml at Theia Cloud 1.2.0, e2d201fd; our copy in
+  # deploy/images/theia-cloud-operator/templates). STERLING_LISTEN_HOST and THEIA_HOSTS are not set by our template (47-09), so not here.
+  operatorNames:
+    - THEIACLOUD_SERVICE_AUTH_TOKEN
+    - THEIACLOUD_APP_ID
+    - THEIACLOUD_SERVICE_URL
+    - THEIACLOUD_SESSION_UID
+    - THEIACLOUD_SESSION_NAME
+    - THEIACLOUD_SESSION_USER
+    - THEIACLOUD_SESSION_URL
+    - THEIACLOUD_SESSION_SECRET
+    - THEIACLOUD_MONITOR_ENABLE_ACTIVITY_TRACKER
+    - THEIACLOUD_MONITOR_PORT
+    - THEIACLOUD_KEYCLOAK_URL
+    - THEIACLOUD_KEYCLOAK_REALM
+    - THEIACLOUD_KEYCLOAK_CLIENT_ID
+  # Extra environment names a session pod may carry beyond the operator's own and the site ConfigMap. Empty: a launch request adds nothing.
+  allowedNames: []

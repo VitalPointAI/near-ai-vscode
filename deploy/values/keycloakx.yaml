@@ -1,6 +1,9 @@
-# Keycloak 26.8.2 (chart deploy/charts/vendored/keycloakx-7.4.0.tgz, which carries 26.8.1), the settings that decide which images render. The
-# descriptor sets image.repository and image.digest to the official quay.io/keycloak/keycloak image from deploy/bundle/images.lock.json
-# (D-20, D-30). 47-08 adds the rest of the Keycloak settings here and must keep these.
+# Keycloak 26.8.2 (chart deploy/charts/vendored/keycloakx-7.4.0.tgz, which carries 26.8.1) on the official image (D-30, research Decision 10).
+# The descriptor sets image.repository and image.digest to the official quay.io/keycloak/keycloak image from deploy/bundle/images.lock.json
+# (D-20). It runs against the site Postgres (47-11) over verified TLS, serves HTTPS itself with a certificate from the site PKI (47-13), sits
+# behind HAProxy, and writes JSON logs (events included) for the site log store (D-35). The realm itself is code (deploy/keycloak, 47-08).
+# FIPS strict mode with BC-FIPS is not configured in Phase 47 (owner item E6, a condition on the register entry). Per-site settings are in
+# deploy/values/site.example/keycloakx.yaml.
 image:
   # Only the app.kubernetes.io/version label reads the tag; the image itself is pinned by digest.
   tag: "26.8.2"
@@ -13,3 +16,96 @@ dbchecker:
 # No helm test pod (it runs a Selenium Chromium image).
 test:
   enabled: false
+
+command: ["/opt/keycloak/bin/kc.sh"]
+args: ["start"]
+
+# Pod Security restricted (sterling-identity is not exempt). The root filesystem stays writable: kc.sh start builds into /opt/keycloak.
+podSecurityContext:
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  runAsUser: 1000
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+# URLs at the root (https://keycloak.<domain>/realms/sterling, the issuer OpenBao's jwt auth discovers, 47-07).
+http:
+  relativePath: "/"
+  internalScheme: HTTPS
+
+# Behind HAProxy: X-Forwarded-* headers, and no plain HTTP listener on the pod.
+proxy:
+  enabled: true
+  mode: xforwarded
+  http:
+    enabled: false
+
+database:
+  vendor: postgres
+  hostname: sterling-postgres.sterling-identity.svc
+  port: 5432
+  database: keycloak
+  username: keycloak
+  existingSecret: keycloak-db
+  existingSecretKey: password
+
+metrics:
+  enabled: true
+health:
+  enabled: true
+
+# signInKeys decides whether the vendor attestation roots are trusted (hardware-only) or not mounted (passkeys).
+sterling:
+  signInKeys: "${site.signInKeys}"
+  attestationRootsConfigMap: ""
+
+extraEnv: |
+  - name: KC_HOSTNAME
+    value: "https://keycloak.${site.domain}"
+  - name: KC_HTTPS_CERTIFICATE_FILE
+    value: /opt/keycloak/tls/tls.crt
+  - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+    value: /opt/keycloak/tls/tls.key
+  - name: KC_DB_URL_PROPERTIES
+    value: "?sslmode=verify-full&sslrootcert=/opt/keycloak/site-ca/ca.crt"
+  - name: KC_LOG_CONSOLE_OUTPUT
+    value: json
+  - name: KC_TRUSTSTORE_PATHS
+    value: "/opt/keycloak/site-ca/ca.crt{{ if eq .Values.sterling.signInKeys "hardware-only" }},/opt/keycloak/attestation-roots{{ end }}"
+  - name: KC_BOOTSTRAP_ADMIN_USERNAME
+    valueFrom:
+      secretKeyRef: { name: keycloak-admin-bootstrap, key: username, optional: true }
+  - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+    valueFrom:
+      secretKeyRef: { name: keycloak-admin-bootstrap, key: password, optional: true }
+
+extraVolumes: |
+  - name: site-ca
+    configMap:
+      name: sterling-site-ca
+  - name: tls
+    secret:
+      secretName: keycloak-tls
+      defaultMode: 0400
+  {{- if eq .Values.sterling.signInKeys "hardware-only" }}
+  - name: attestation-roots
+    configMap:
+      name: {{ required "under signInKeys hardware-only, sterling.attestationRootsConfigMap (the vendor attestation roots from the bundled FIDO MDS snapshot) is required" .Values.sterling.attestationRootsConfigMap }}
+  {{- end }}
+
+extraVolumeMounts: |
+  - name: site-ca
+    mountPath: /opt/keycloak/site-ca
+    readOnly: true
+  - name: tls
+    mountPath: /opt/keycloak/tls
+    readOnly: true
+  {{- if eq .Values.sterling.signInKeys "hardware-only" }}
+  - name: attestation-roots
+    mountPath: /opt/keycloak/attestation-roots
+    readOnly: true
+  {{- end }}

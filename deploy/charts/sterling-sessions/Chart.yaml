@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-sessions
+description: The workbench AppDefinition, the site environment of every session, and the session environment policy (D-25, D-29, hardening 13).
+type: application
+version: 0.1.0

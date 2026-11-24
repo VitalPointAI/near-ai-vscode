@@ -1,9 +1,16 @@
 # Prometheus v3.16.0 (chart deploy/charts/vendored/prometheus-30.0.0.tgz with its bundled subcharts), the settings that decide which images
 # render. The descriptor sets the server, config reloader, kube-state-metrics and node-exporter images by digest from
 # deploy/bundle/images.lock.json (D-19, D-20). Later plans add the rest of the metrics settings here and must keep these.
+# Site-local metrics only (D-19, D-01): the chart's in-cluster scrape jobs, no remote write or read anywhere, data on the site's encrypted class.
+# Retention and size per site (deploy/values/site.example/prometheus.yaml).
 server:
   image:
     pullPolicy: IfNotPresent
+  remoteWrite: []
+  remoteRead: []
+  persistentVolume:
+    enabled: true
+    storageClass: "${site.storageClass}"
 configmapReload:
   prometheus:
     enabled: true

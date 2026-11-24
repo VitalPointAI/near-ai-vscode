@@ -1,10 +1,30 @@
-# The Theia Cloud operator image, rebuilt by us from the pinned Theia Cloud source on UBI 9 (D-23, D-12). This file holds only the base
-# stages; the build steps and image.json come with its build definition (deploy/images/README.md), and without image.json it is not built.
+# The Theia Cloud operator image, rebuilt by us from the pinned Theia Cloud source on UBI 9 (D-23, D-12). The source is the pinned
+# Theia Cloud 1.2.0 commit in image.json, given to the build as the named build context upstream (deploy/images/README.md).
 #   build:   ubi9/openjdk-21, the JDK and Maven stage (build scope only).
 #   runtime: ubi9/openjdk-21-runtime, the image that runs at a site.
 # Both are pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read
 # the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
 # that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
 FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:678acf0a00bb4a0d986b8397f472531aa2fe8d2b068f360c96f835889cac44c3 AS build
+# The upstream operator build (dockerfiles/operator/Dockerfile at 1.2.0): Maven from the builder image, dependencies fetched on the connected side.
+COPY --from=upstream --chown=185:0 java/common /home/default/build/common
+RUN cd /home/default/build/common/maven-conf && mvn -B clean install --no-transfer-progress \
+ && cd /home/default/build/common/org.eclipse.theia.cloud.common && mvn -B clean install --no-transfer-progress
+COPY --from=upstream --chown=185:0 java/operator /home/default/build/operator
+RUN cd /home/default/build/operator/org.eclipse.theia.cloud.operator && mvn -B clean install --no-transfer-progress \
+ && cd /home/default/build/operator/org.eclipse.theia.cloud.defaultoperator && mvn -B clean verify --no-transfer-progress
+
 
 FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.24@sha256:7fc9128f130fe28d913ac4ad1659f764675a8382bffaf42eb8c8f8cfbd17865f
+# The jar, its log configuration, and our hardened session pod template in /templates, the upstream-documented override the operator loads
+# instead of its built-in template (restricted security context, IfNotPresent, the site CA, the sidecar's secret files, the site
+# environment; 47-09). Everything is root-owned and read-only; the image's own non-root user (185) runs it.
+USER root
+RUN mkdir -p /templates /log-config /operator
+COPY --from=upstream --chown=0:0 --chmod=0444 java/operator/org.eclipse.theia.cloud.defaultoperator/log4j2.xml /log-config/log4j2.xml
+COPY --from=build --chown=0:0 --chmod=0444 /home/default/build/operator/org.eclipse.theia.cloud.defaultoperator/target/defaultoperator-1.2.0-jar-with-dependencies.jar /operator/
+COPY --chown=0:0 --chmod=0444 templates/templateDeployment.yaml /templates/templateDeployment.yaml
+USER 185
+WORKDIR /operator
+ENTRYPOINT ["java", "-Dlog4j2.configurationFile=/log-config/log4j2.xml", "-jar", "/operator/defaultoperator-1.2.0-jar-with-dependencies.jar"]
+CMD [""]

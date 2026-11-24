@@ -1,11 +1,24 @@
 # The oauth2-proxy session sidecar image, rebuilt by us from the pinned oauth2-proxy source with the Go FIPS 140-3 module on UBI 9 (D-23,
-# D-12). This file holds only the base stages; the build steps and image.json come with its build definition (deploy/images/README.md), and
-# without image.json it is not built.
+# D-12). The source is the pinned commit in image.json, given to the build as the named build context upstream (deploy/images/README.md).
 #   build:   ubi9/go-toolset 1.27 (Go 1.27.3 by the image's version label; GOFIPS140 needs Go 1.24 or later, research A16), build scope only.
 #   runtime: ubi9/ubi-minimal, the image that runs at a site.
 # Both are pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To re-pin, read
 # the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's digest, check
 # that the bytes fetched by that digest hash to it, and replace the line. The same base carries the same digest in every Containerfile here.
 FROM registry.access.redhat.com/ubi9/go-toolset:1.27@sha256:ecfbfea4a8c479a9ae9655ef6bdb692fcdd2d1bdfcea86ad7b168de147a852a2 AS build
+# The upstream build (Makefile target build) with the Go Cryptographic Module v1.0.0 selected at build time (GOFIPS140), static, reproducible
+# paths, and the version stamped as upstream stamps it. Modules are fetched here, on the connected side; the SBOM records them.
+# Not VERSION: the go-toolset image sets VERSION in its environment (its own Go version), which would win over a build argument of that name.
+ARG OAUTH2_PROXY_VERSION=v7.15.6
+WORKDIR /opt/app-root/src/oauth2-proxy
+COPY --from=upstream --chown=1001:0 . .
+ENV GOTOOLCHAIN=local GOFLAGS=-mod=mod GOFIPS140=v1.0.0 CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+RUN go mod download \
+ && go build -trimpath -ldflags="-X github.com/oauth2-proxy/oauth2-proxy/v7/pkg/version.VERSION=${OAUTH2_PROXY_VERSION}" -o /tmp/oauth2-proxy github.com/oauth2-proxy/oauth2-proxy/v7 \
+ && go version -m /tmp/oauth2-proxy | tee /tmp/go-version-m.txt | grep -q "GOFIPS140=v1.0.0"
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9@sha256:2cb89feabb136a960f3e6d34f4bbcdff72404f3a18f43f01920e4a26ef389f18
+# Only the binary, owned by root and not writable by the user it runs as; no shell step at run time.
+COPY --from=build --chown=0:0 --chmod=0555 /tmp/oauth2-proxy /bin/oauth2-proxy
+USER 65532:65532
+ENTRYPOINT ["/bin/oauth2-proxy"]

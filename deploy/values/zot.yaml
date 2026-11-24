@@ -1,9 +1,77 @@
-# Zot v2.1.23 (chart deploy/charts/vendored/zot-0.1.135.tgz), the settings that decide which images render. The descriptor sets image.repository
-# and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). Later plans add the registry configuration here (it needs
-# http.compat ["docker2s2"] so Red Hat images keep their digests, spike S1) and must keep these.
+# Zot v2.1.23 (chart deploy/charts/vendored/zot-0.1.135.tgz), the site registry of the lab and small sites (D-15, research Decision 8). The
+# descriptor sets image.repository and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). Zot's own image cannot be pulled
+# before the registry exists, so install-node.sh loads it into containerd from an image archive in the bundle (research Pitfall 8) and the
+# pull policy IfNotPresent finds it there.
 replicaCount: 1
 image:
   pullPolicy: IfNotPresent
 # No helm test pods: they run an alpine image.
 test:
   enabled: false
+
+# The registry must serve before the ingress exists, so it is reached on a node port (the port is a site value, site.example/zot.yaml).
+service:
+  type: NodePort
+  port: 5000
+
+# TLS from Secret zot-tls (issued from the bootstrap CA by the install script, 47-13 and 47-16) and the import account's htpasswd from Secret
+# zot-htpasswd (written by the install script from OpenBao kv/apps/registry). Neither is a chart value.
+mountConfig: true
+mountSecret: false
+externalSecrets:
+  - secretName: zot-tls
+    mountPath: /etc/zot/tls
+  - secretName: zot-htpasswd
+    mountPath: /etc/zot/auth
+httpGet:
+  scheme: HTTPS
+  port: 5000
+# Read by everyone (nodes and Kyverno pull anonymously; the images are not secret, their signatures are what is trusted); written only by the
+# import account. compat docker2s2 keeps Red Hat's Docker media-type images unchanged, so their digests survive (spike S1); distSpecVersion
+# 1.1.1 serves the OCI referrers that carry the cosign signatures (Pitfall 16).
+configFiles:
+  config.json: |-
+    {
+      "distSpecVersion": "1.1.1",
+      "storage": { "rootDirectory": "/var/lib/registry", "dedupe": true, "gc": false },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000",
+        "compat": ["docker2s2"],
+        "tls": { "cert": "/etc/zot/tls/tls.crt", "key": "/etc/zot/tls/tls.key" },
+        "auth": { "htpasswd": { "path": "/etc/zot/auth/htpasswd" }, "failDelay": 5 },
+        "accessControl": {
+          "repositories": {
+            "**": {
+              "anonymousPolicy": ["read"],
+              "policies": [{ "users": ["import"], "actions": ["read", "create", "update"] }],
+              "defaultPolicy": ["read"]
+            }
+          }
+        }
+      },
+      "log": { "level": "info" }
+    }
+
+# Storage on a PVC of the site's encrypted class (D-17); size and class are site values (site.example/zot.yaml).
+persistence: true
+pvc:
+  create: true
+  accessModes: ["ReadWriteOnce"]
+
+# Pod Security restricted (the sterling-registry namespace is not exempt).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+resources:
+  limits:
+    memory: 512Mi

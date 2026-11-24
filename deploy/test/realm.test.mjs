@@ -1,0 +1,160 @@
+// Realm sterling as code (D-05, D-08, D-28 to D-35, D-57): the passwordless-only rules hold in deploy/keycloak/realm.json at both signInKeys
+// levels, and checkRealm refuses a realm or site that breaks one, before anything is applied. Reads files and substitutes the CI site; no
+// Keycloak is needed.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+import { FORBIDDEN_AUTHENTICATOR, checkRealm, prepareRealm, realmSettings, substitutedRealm } from '../keycloak/apply.mjs';
+import { listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
+import { readImagesLock, resolveImage } from '../bundle/lib/locks.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const readJson = (file) => JSON.parse(readFileSync(path.join(ROOT, file), 'utf8'));
+const RAW = readFileSync(path.join(ROOT, 'deploy/keycloak/realm.json'), 'utf8');
+const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+const REALM_SITE = readJson('deploy/values/site.example/sterling-keycloak-realm.yaml');
+const KEYCLOAKX_SITE = readJson('deploy/values/site.example/keycloakx.yaml');
+const AAGUID = 'ee882879-721c-4913-9775-3dfcce97072a';
+const HARDWARE = { ...SITE, signInKeys: 'hardware-only', acceptableAaguids: [AAGUID] };
+const HARDWARE_KEYCLOAKX = { ...KEYCLOAKX_SITE, sterling: { ...KEYCLOAKX_SITE.sterling, attestationRootsConfigMap: 'keycloak-attestation-roots' } };
+const prepare = (site = SITE, keycloakxSite = KEYCLOAKX_SITE, realmSite = REALM_SITE) => prepareRealm({ site, realmSite, keycloakxSite });
+const passkeys = () => prepare();
+const hardware = () => prepare(HARDWARE, HARDWARE_KEYCLOAKX);
+/** checkRealm on a changed copy of the passkeys realm; returns its problems. */
+const broken = (change) => {
+  const { realm, settings } = passkeys();
+  const copy = structuredClone(realm);
+  change(copy);
+  return checkRealm(copy, settings);
+};
+
+test('the realm as shipped passes at both levels', () => {
+  assert.deepEqual(passkeys().problems, []);
+  assert.deepEqual(hardware().problems, []);
+});
+
+test('no flow has a password, OTP or recovery-code step, every binding is one of ours, and no client allows direct grants', () => {
+  const { realm } = passkeys();
+  for (const flow of realm.authenticationFlows) {
+    for (const execution of flow.authenticationExecutions) assert.doesNotMatch(execution.authenticator ?? '', FORBIDDEN_AUTHENTICATOR, `${flow.alias}: ${execution.authenticator}`);
+  }
+  const ours = new Set(realm.authenticationFlows.map((flow) => flow.alias));
+  for (const binding of ['browserFlow', 'directGrantFlow', 'resetCredentialsFlow', 'firstBrokerLoginFlow', 'dockerAuthenticationFlow']) assert.ok(ours.has(realm[binding]), binding);
+  for (const client of realm.clients) assert.equal(client.directAccessGrantsEnabled, false, client.clientId);
+  assert.match(broken((copy) => copy.authenticationFlows[0].authenticationExecutions.push({ authenticator: 'auth-username-password-form', requirement: 'REQUIRED' })).join('\n'), /uses auth-username-password-form/);
+  assert.match(broken((copy) => { copy.authenticationFlows.find((flow) => flow.alias === 'sterling-no-credentials').authenticationExecutions.push({ authenticator: 'direct-grant-validate-otp' }); }).join('\n'), /direct-grant-validate-otp/);
+  assert.match(broken((copy) => { copy.directGrantFlow = 'direct grant'; }).join('\n'), /directGrantFlow must name a top-level flow defined in realm\.json/);
+  assert.match(broken((copy) => { copy.clients[0].directAccessGrantsEnabled = true; }).join('\n'), /must not allow direct grants/);
+});
+
+test('the password, OTP and recovery-code actions are off and passwordless registration is on', () => {
+  const actions = new Map(passkeys().realm.requiredActions.map((action) => [action.alias, action.enabled]));
+  assert.deepEqual([actions.get('UPDATE_PASSWORD'), actions.get('CONFIGURE_TOTP'), actions.get('CONFIGURE_RECOVERY_AUTHN_CODES'), actions.get('webauthn-register-passwordless')], [false, false, false, true]);
+  assert.match(broken((copy) => { copy.requiredActions.find((action) => action.alias === 'CONFIGURE_TOTP').enabled = true; }).join('\n'), /CONFIGURE_TOTP must be listed and disabled/);
+  assert.match(broken((copy) => { copy.requiredActions = copy.requiredActions.filter((action) => action.alias !== 'webauthn-register-passwordless'); }).join('\n'), /webauthn-register-passwordless must be enabled/);
+});
+
+test('emails are unique and only administrators may change them; no self-registration or password reset', () => {
+  const { realm } = passkeys();
+  for (const key of ['duplicateEmailsAllowed', 'editUsernameAllowed', 'resetPasswordAllowed', 'registrationAllowed']) assert.equal(realm[key], false, key);
+  const profile = JSON.parse(realm.components['org.keycloak.userprofile.UserProfileProvider'][0].config['kc.user.profile.config'][0]);
+  assert.deepEqual(profile.attributes.find((attribute) => attribute.name === 'email').permissions.edit, ['admin']);
+  assert.match(broken((copy) => { copy.duplicateEmailsAllowed = true; }).join('\n'), /duplicateEmailsAllowed must be false/);
+  assert.match(broken((copy) => {
+    const component = copy.components['org.keycloak.userprofile.UserProfileProvider'][0];
+    const config = JSON.parse(component.config['kc.user.profile.config'][0]);
+    config.attributes.find((attribute) => attribute.name === 'email').permissions.edit = ['admin', 'user'];
+    component.config['kc.user.profile.config'] = [JSON.stringify(config)];
+  }).join('\n'), /only administrators edit email/);
+});
+
+test('at both levels the passwordless policy requires user verification and resident keys, on the one shared rpId token', () => {
+  assert.match(RAW, /"webAuthnPolicyPasswordlessRpId": "\$\{site\.rpId\}"/);
+  for (const { realm } of [passkeys(), hardware()]) {
+    assert.equal(realm.webAuthnPolicyPasswordlessRpId, SITE.rpId);
+    assert.equal(realm.webAuthnPolicyPasswordlessUserVerificationRequirement, 'required');
+    assert.ok([undefined, 'required'].includes(realm.webAuthnPolicyPasswordlessResidentKey));
+    assert.equal(realm.webAuthnPolicyPasswordlessRequireResidentKey, 'Yes');
+    assert.equal(realm.webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister, true);
+  }
+  assert.match(broken((copy) => { copy.webAuthnPolicyPasswordlessUserVerificationRequirement = 'preferred'; }).join('\n'), /user verification must be required/);
+  assert.throws(() => prepare({ ...SITE, rpId: '' }), /rpId\} is empty in the site file/);
+  assert.match(prepare({ ...SITE, rpId: 'https://site.example' }).problems.join('\n'), /relying-party id must be your organization's one shared parent domain/);
+});
+
+test('signInKeys selects the level: passkeys has attestation none and no allowlist, hardware-only attestation direct and the site allowlist', () => {
+  assert.match(RAW, /"webAuthnPolicyPasswordlessAttestationConveyancePreference": "\$\{site\.webAuthnAttestation\}"/);
+  assert.match(RAW, /"webAuthnPolicyPasswordlessAcceptableAaguids": "\$\{site\.acceptableAaguids\}"/);
+  const soft = passkeys().realm;
+  assert.equal(soft.webAuthnPolicyPasswordlessAttestationConveyancePreference, 'none');
+  assert.deepEqual(soft.webAuthnPolicyPasswordlessAcceptableAaguids, []);
+  const hard = hardware().realm;
+  assert.equal(hard.webAuthnPolicyPasswordlessAttestationConveyancePreference, 'direct');
+  assert.deepEqual(hard.webAuthnPolicyPasswordlessAcceptableAaguids, [AAGUID]);
+  const enterprise = prepare(HARDWARE, { ...HARDWARE_KEYCLOAKX, sterling: { ...HARDWARE_KEYCLOAKX.sterling, attestation: 'enterprise' } });
+  assert.equal(enterprise.realm.webAuthnPolicyPasswordlessAttestationConveyancePreference, 'enterprise');
+  // Refusals.
+  assert.throws(() => realmSettings({ ...SITE, signInKeys: undefined }, REALM_SITE), /signInKeys must be passkeys or hardware-only/);
+  assert.throws(() => realmSettings({ ...SITE, signInKeys: 'hardware' }, REALM_SITE), /signInKeys must be passkeys or hardware-only/);
+  assert.match(prepare({ ...HARDWARE, acceptableAaguids: [] }, HARDWARE_KEYCLOAKX).problems.join('\n'), /acceptableAaguids allowlist is empty, which would accept every authenticator/);
+  assert.match(prepare(HARDWARE, KEYCLOAKX_SITE).problems.join('\n'), /attestation roots ConfigMap/);
+  assert.match(prepare({ ...SITE, acceptableAaguids: [AAGUID] }).problems.join('\n'), /under passkeys the acceptableAaguids allowlist must be empty/);
+  const { realm, settings } = hardware();
+  assert.match(checkRealm({ ...realm, webAuthnPolicyPasswordlessAttestationConveyancePreference: 'none' }, settings).join('\n'), /under hardware-only attestation must be direct or enterprise/);
+});
+
+test('the step-up levels are the same at both sign-in levels: acr means a fresh WebAuthn ceremony, not hardware', () => {
+  const pick = ({ realm }) => JSON.stringify({ flows: realm.authenticationFlows, configs: realm.authenticatorConfig, loa: realm.attributes['acr.loa.map'] });
+  assert.equal(pick(passkeys()), pick(hardware()));
+});
+
+test('acr.loa.map has two levels, level 2 lasts the site step-up window (a site token, never a literal), and events are recorded', () => {
+  assert.match(RAW, /"loa-max-age": "\$\{site\.stepUpMaxAgeSeconds\}"/);
+  assert.match(RAW, /\\"\$\{site\.stepUpAcr\}\\":2/);
+  const { realm } = passkeys();
+  assert.deepEqual(JSON.parse(realm.attributes['acr.loa.map']), { webauthn: 1, [SITE.stepUpAcr]: 2 });
+  const level2 = realm.authenticatorConfig.find((entry) => entry.alias === 'sterling loa 2').config;
+  assert.deepEqual(level2, { 'loa-condition-level': '2', 'loa-max-age': String(SITE.stepUpMaxAgeSeconds) });
+  assert.deepEqual([realm.eventsEnabled, realm.adminEventsEnabled, realm.adminEventsDetailsEnabled, realm.eventsListeners], [true, true, true, ['jboss-logging']]);
+  assert.match(broken((copy) => { copy.authenticatorConfig.find((entry) => entry.alias === 'sterling loa 2').config['loa-max-age'] = '36000'; }).join('\n'), /level 2 must be valid only for the site step-up window/);
+  assert.match(broken((copy) => { copy.adminEventsEnabled = false; }).join('\n'), /login and admin events/);
+});
+
+test('client sterling-sessions is confidential, standard flow only, and puts its audience, acr and auth_time in the access token', () => {
+  const sessions = passkeys().realm.clients.find((client) => client.clientId === 'sterling-sessions');
+  assert.deepEqual([sessions.publicClient, sessions.standardFlowEnabled, sessions.implicitFlowEnabled, sessions.serviceAccountsEnabled], [false, true, false, false]);
+  assert.equal(sessions.secret, '$(env:STERLING_SESSIONS_CLIENT_SECRET)');
+  assert.deepEqual(sessions.redirectUris, [`https://*.${SITE.domain}/oauth2/callback`, `https://sessions.${SITE.domain}/*`]);
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers = copy.clients[0].protocolMappers.filter((entry) => entry.protocolMapper !== 'oidc-audience-mapper'); }).join('\n'), /add its own audience/);
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers.find((entry) => entry.name === 'auth_time').config['access.token.claim'] = 'false'; }).join('\n'), /auth_time must be in the access token/);
+  assert.match(broken((copy) => { copy.clients[0].secret = 'a-literal-secret'; }).join('\n'), /must come from the applier Job environment/);
+});
+
+test('the smart-card flow exists but is bound only when the site turns it on', () => {
+  assert.equal(passkeys().realm.browserFlow, 'sterling-browser');
+  const on = prepare(SITE, KEYCLOAKX_SITE, { ...REALM_SITE, x509: { ...REALM_SITE.x509, enabled: true, ocspResponderUri: 'http://ocsp.site.example' } });
+  assert.deepEqual(on.problems, []);
+  assert.equal(on.realm.browserFlow, 'sterling-x509');
+  const config = on.realm.authenticatorConfig.find((entry) => entry.alias === 'sterling x509').config;
+  assert.equal(config['x509-cert-auth.ocsp-checking-enabled'], 'true');
+  assert.equal(config['x509-cert-auth.ocsp-responder-uri'], 'http://ocsp.site.example');
+  assert.deepEqual(substitutedRealm(RAW, realmSettings(SITE, REALM_SITE)).authenticationFlows.map((flow) => flow.alias).filter((alias) => alias.startsWith('sterling-x509')), ['sterling-x509', 'sterling-x509 forms']);
+});
+
+const HELM = process.env.HELM || 'helm';
+const keycloakx = () => listReleases(ROOT).find((release) => release.name === 'keycloakx');
+
+test('Keycloak renders from the locked official image, reaches Postgres with verify-full TLS and writes JSON logs (needs helm)', () => {
+  const yaml = renderRelease(ROOT, keycloakx(), { site: SITE, helm: HELM });
+  const image = resolveImage(readImagesLock(ROOT), 'quay.io/keycloak/keycloak', SITE.registry);
+  assert.ok(yaml.includes(`image: "${image.registry}/${image.repository}@${image.digest}"`), 'the image is the lock entry by digest');
+  assert.match(yaml, /value: "\?sslmode=verify-full&sslrootcert=\/opt\/keycloak\/site-ca\/ca\.crt"/);
+  assert.match(yaml, /name: KC_LOG_CONSOLE_OUTPUT\n\s+value: json/);
+  assert.match(yaml, /name: KC_HOSTNAME\n\s+value: "https:\/\/keycloak\.site\.example"/);
+  assert.match(yaml, /name: KC_PROXY_HEADERS\n\s+value: xforwarded/);
+  assert.doesNotMatch(yaml, /name: KC_HTTP_ENABLED\n\s+value: "true"/, 'no plain HTTP listener on the pod');
+  assert.doesNotMatch(yaml, /attestation-roots/, 'no attestation roots under passkeys');
+  assert.throws(() => renderRelease(ROOT, keycloakx(), { site: HARDWARE, helm: HELM }), /sterling\.attestationRootsConfigMap .* is required/);
+});

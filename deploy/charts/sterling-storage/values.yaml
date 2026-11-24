@@ -1,0 +1,11 @@
+# The class every workspace, hub, Postgres and data volume uses (the site setting storageClass).
+storageClass: ""
+# Longhorn replicas of each volume.
+replicas: 3
+# Recurring jobs over every volume in the default group (the class adds each new volume to it).
+snapshot:
+  cron: "0 1 * * *"
+  retain: 7
+backup:
+  cron: "0 2 * * *"
+  retain: 14

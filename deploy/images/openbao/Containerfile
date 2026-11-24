@@ -5,3 +5,12 @@
 # tag's index with an anonymous manifest request (quay.io needs an anonymous pull token; or podman manifest inspect <image>:<tag>), take the
 # linux/amd64 entry's digest, check that the bytes fetched by that digest hash to it, and replace the line.
 FROM quay.io/openbao/openbao-ubi:2.7.3@sha256:bb94f6b1f1a3fbb7538d17d1c0509a13f1c2b382ebc1a67b99286b12c9628f71
+
+# The kms-pkcs11 plugin (D-38), fetched by the pin "kms-pkcs11" into the context folder plugins/ and hash-checked by install-tool.sh before the
+# build. OpenBao requires the plugin directory to be a real folder that only root can write (not a symbolic link); the seal's plugin stanza
+# carries the binary's SHA-256 too (deploy/values/openbao.yaml). The production HSM's PKCS#11 library comes from the site by volume; nothing
+# site-specific is in this image. Upstream's user and entrypoint are kept.
+USER root
+RUN mkdir -p /openbao/plugins && chmod 0755 /openbao/plugins
+COPY --chown=0:0 --chmod=0755 plugins/openbao-plugin-kms-pkcs11_linux_amd64_v1 /openbao/plugins/openbao-plugin-kms-pkcs11
+USER openbao
