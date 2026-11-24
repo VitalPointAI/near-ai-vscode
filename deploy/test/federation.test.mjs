@@ -1,7 +1,8 @@
 // HQ and edge federation by signed file (D-08, D-36, D-49, D-50): people with their passwordless keys, the site intermediate and revocation
 // lists cross between sites only as files signed with your organization's key, and every import checks the signature (and the format and
 // relying-party id, or the chain to the HQ root) before any Keycloak or OpenBao call or file write. Keycloak and OpenBao are fakes that count
-// their calls. Needs the pinned cosign ($COSIGN or PATH) and openssl; fails, never skips, without them.
+// their calls. The optional HQ broker (D-36) renders off unless the realm site file turns it on, and only links people who exist. Needs the
+// pinned cosign ($COSIGN or PATH) and openssl; fails, never skips, without them.
 // Run: env COSIGN=compliance/out/tools/cosign node scripts/run-tests.mjs deploy/test/federation.test.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -10,8 +11,11 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { cosignBinary } from '../bundle/lib/cosign.mjs';
+import { loadSite } from '../bundle/lib/render.mjs';
 import { signFile, verifySignedFile } from '../bundle/signed-file.mjs';
+import { HQ_BROKER, HQ_FIRST_LOGIN_FLOW, HQ_SECRET_ENV, checkRealm, prepareRealm } from '../keycloak/apply.mjs';
 import { FORMAT, PASSWORDLESS, STORED_FIELDS, exportUsers, importUsers } from '../keycloak/users.mjs';
 import { MOUNT, exportCrl, importCrl, importIntermediate, pemBlocks, requestIntermediate } from '../openbao/pki-files.mjs';
 
@@ -277,4 +281,51 @@ test('import-crl places a verified revocation list at every path and writes noth
     assert.equal(result.ok, false, refused);
     assert.deepEqual(written, []);
   }
+});
+
+// --- Optional HQ brokering ------------------------------------------------------------------------------------------------------------
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const readRepoJson = (file) => JSON.parse(readFileSync(path.join(ROOT, file), 'utf8'));
+const CI_SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+const REALM_SITE = readRepoJson('deploy/values/site.example/sterling-keycloak-realm.yaml');
+const LINKED = { enabled: true, issuer: 'https://keycloak.hq.example/realms/sterling/', clientId: 'edge-1' };
+const realmFor = (hqBroker) => prepareRealm({ site: CI_SITE, realmSite: hqBroker ? { ...REALM_SITE, hqBroker } : REALM_SITE, keycloakxSite: readRepoJson('deploy/values/site.example/keycloakx.yaml') });
+const hqOf = ({ realm }) => realm.identityProviders.find((provider) => provider.alias === HQ_BROKER);
+const stepsOf = ({ realm }, alias) => realm.authenticationFlows.find((flow) => flow.alias === alias).authenticationExecutions.map((execution) => [execution.authenticator, execution.requirement]);
+
+test('the HQ broker renders off for the CI site and on, linking only, when the realm site file turns it on', () => {
+  const off = realmFor();
+  assert.deepEqual(off.problems, []);
+  assert.equal(hqOf(off).enabled, false);
+  assert.equal(hqOf(off).config.clientSecret, 'not-set', 'no secret is asked of a site without the broker');
+  const on = realmFor(LINKED);
+  assert.deepEqual(on.problems, []);
+  const hq = hqOf(on);
+  assert.deepEqual([hq.enabled, hq.authenticateByDefault, hq.config.issuer, hq.config.clientId, hq.config.clientSecret, hq.config.syncMode],
+    [true, false, 'https://keycloak.hq.example/realms/sterling', 'edge-1', `$(env:${HQ_SECRET_ENV})`, 'IMPORT']);
+  assert.equal(hq.firstBrokerLoginFlowAlias, HQ_FIRST_LOGIN_FLOW);
+  assert.deepEqual(stepsOf(on, HQ_FIRST_LOGIN_FLOW), [['idp-detect-existing-broker-user', 'REQUIRED'], ['idp-auto-link', 'REQUIRED']], 'links an existing person, never creates one');
+  assert.equal(on.realm.firstBrokerLoginFlow, 'sterling-no-credentials');
+  // Local sign-in is unchanged: the redirector only follows an explicit request, and the WebAuthn subflow stays an alternative.
+  assert.deepEqual(stepsOf(on, 'sterling-browser'), [['auth-cookie', 'ALTERNATIVE'], ['identity-provider-redirector', 'ALTERNATIVE'], [undefined, 'ALTERNATIVE']]);
+});
+
+test('checkRealm refuses a broker that would create people, ask for a password, be the default or overwrite local people', () => {
+  const broken = (change, hqBroker = LINKED) => {
+    const { realm, settings } = realmFor(hqBroker);
+    const copy = structuredClone(realm);
+    change(copy);
+    return checkRealm(copy, settings).join('\n');
+  };
+  const firstLogin = (copy) => copy.authenticationFlows.find((flow) => flow.alias === HQ_FIRST_LOGIN_FLOW).authenticationExecutions;
+  assert.match(broken((copy) => { firstLogin(copy)[1].authenticator = 'idp-create-user-if-unique'; }), /creates people from an identity provider/);
+  assert.match(broken((copy) => { firstLogin(copy).push({ authenticator: 'idp-username-password-form', requirement: 'REQUIRED' }); }), /uses idp-username-password-form, which is not a WebAuthn step/);
+  assert.match(broken((copy) => { copy.identityProviders[0].firstBrokerLoginFlowAlias = 'first broker login'; }), /first sign-in must be sterling-hq-first-login/);
+  assert.match(broken((copy) => { copy.authenticationFlows[0].authenticationExecutions[1].authenticatorConfig = 'redirect to hq'; }), /must name no default provider/);
+  assert.match(broken((copy) => { copy.identityProviders[0].authenticateByDefault = true; }), /must not be the default/);
+  assert.match(broken((copy) => { copy.identityProviders[0].config.syncMode = 'FORCE'; }), /syncMode IMPORT/);
+  assert.match(broken((copy) => { copy.identityProviders[0].config.clientSecret = 'a-literal-secret'; }), /client secret must come from the applier Job environment/);
+  assert.match(broken(() => {}, { enabled: true, issuer: '', clientId: '' }), /hqBroker needs the https issuer of HQ's realm and the client id/);
+  assert.match(broken((copy) => { copy.identityProviders[0].enabled = true; }, null), /must be on exactly when the realm site file turns hqBroker on/);
 });
