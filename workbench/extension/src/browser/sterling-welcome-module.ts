@@ -269,9 +269,19 @@ class SterlingWelcomeContribution extends AbstractViewContribution<SterlingWelco
   }
 
   async onDidInitializeLayout(app: FrontendApplication): Promise<void> {
-    // Move the editor's Outline on both fresh and restored layouts, so the right-hand drawer holds Chat.
-    const outline = app.shell.getWidgets('right').find(widget => widget.id === 'outline-view');
-    if (outline) await app.shell.addWidget(outline, { area: 'left', rank: 500 });
+    // The right-hand drawer holds Chat, so the editor's Outline moves to the left, on fresh and restored layouts. It moves only once Chat is
+    // in the drawer: Theia hides an empty side bar, and the rail of shortcuts with it. Chat arrives after the layout when the plugin starts.
+    const moveOutline = async (): Promise<void> => {
+      const right = app.shell.getWidgets('right');
+      const outline = right.find(widget => widget.id === 'outline-view');
+      if (outline && right.some(widget => widget.id === chatContainerId)) await app.shell.addWidget(outline, { area: 'left', rank: 500 });
+    };
+    app.shell.onDidAddWidget(widget => {
+      if (widget.id === chatContainerId || widget.id === 'outline-view') {
+        void moveOutline().catch(error => console.warn('Sterling could not move the Outline.', error));
+      }
+    });
+    await moveOutline();
   }
 
   private chatIsOpen(): boolean {
