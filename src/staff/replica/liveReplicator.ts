@@ -66,6 +66,8 @@ export interface LiveReplicatorOptions {
   onRoster?: (frame: Record<string, unknown>) => void;
   /** One short line per step, for logs and tests. Never holds project text. */
   log?: (line: string) => void;
+  /** A hosted session's session.certify entry for `signer` (Phase 33 D-62), passed to the transport. */
+  certificate?: HubTransportOptions['certificate'];
 }
 
 export interface LiveStatus {
@@ -314,7 +316,7 @@ export class LiveReplicator {
     const local = this.options.local;
     const settings: HubTransportOptions = {
       address, project: local.project, hub: hub.writer, trust: { pin: hub.certPin }, signer: this.options.signer, now: this.now,
-      blobsCitedBy: (hashes) => local.blobsCitedBy(hashes)
+      blobsCitedBy: (hashes) => local.blobsCitedBy(hashes), ...(this.options.certificate === undefined ? {} : { certificate: this.options.certificate })
     };
     this.transport = this.options.open === undefined ? new HubTransport(settings) : this.options.open(settings);
     return this.transport;

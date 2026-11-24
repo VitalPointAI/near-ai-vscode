@@ -144,6 +144,9 @@ export interface ReplicaProjectDeps {
   /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). Off until every wrap path writes
    *  cell-wrap/v2 (33.2-06): before that, a switched project would refuse the X25519 grants today's paths still write. */
   wrapV2AtCreation?: boolean;
+  /** A hosted session (Phase 33 D-61): the person key is this device (its writer), the opened X25519 key decrypts grants, and the session key signs the
+   *  store's marks and owns its files. No device key is made or read; needs sessionSigner, personSigner and keyStatus. */
+  hosted?: { personPublicKey: string; encryption: DeviceEncryptionKey };
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -159,6 +162,8 @@ export interface LocalDevice {
 interface DeviceKeys { identity: DeviceIdentity; writer: string; encryption: DeviceEncryptionKey }
 
 async function deviceKeys(deps: ReplicaProjectDeps): Promise<DeviceKeys> {
+  if (deps.hosted !== undefined && deps.sessionSigner !== undefined) return { identity: deps.sessionSigner, writer: writerIdOf(deps.hosted.personPublicKey), encryption: deps.hosted.encryption };
+  if (deps.hosted !== undefined) throw new Error('A hosted session opens a shared project only with its session key.');
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
   const { identity } = await loadOrCreateDeviceIdentity(deps.secrets, { identityDir: dir, ...(deps.now === undefined ? {} : { now: deps.now }) });
   const encryption = await loadOrCreateEncryptionKey(deps.secrets, { identityDir: dir, identity });
@@ -489,7 +494,7 @@ export class ReplicaProject {
           if (refused !== undefined) return refused;
         }
         // Another key's entry (a session or person key, D-60) is stored as received; it is this device's own only when this device signed it.
-        const result = built.entry.header.writer === this.device.writer ? await this.store.appendOwn([built], expected) : await this.storeSigned(built);
+        const result = built.entry.header.writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected) : await this.storeSigned(built);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
@@ -693,8 +698,9 @@ export class ReplicaProject {
   /** The blobs that entries waiting for a blob cite and this computer does not hold. */
   public wantedBlobs(): Promise<string[]> {
     return this.exclusive(async () => {
-      await this.foldNow();
-      const waiting = new Set(this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash));
+      const { fold } = await this.foldNow();
+      // Entries the decode check waits on for a blob, and entries the fold holds for one (a proposal's text, a compaction's state).
+      const waiting = new Set([...this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash), ...fold.held.flatMap((item) => (item.reason === 'missing-blob' && item.hash !== undefined ? [item.hash] : []))]);
       const wanted = new Set<string>();
       for (const entry of this.store.rosterEntries()) {
         if (!waiting.has(entryHash(entry.header))) continue;
@@ -881,6 +887,7 @@ export class ReplicaProject {
     const found: string[] = [];
     if (typeof body.blob === 'string' && HASH_PATTERN.test(body.blob)) found.push(body.blob);
     if (body.kind === 'doc.compact' && isRecord(body.data) && typeof body.data.stateBlob === 'string' && HASH_PATTERN.test(body.data.stateBlob)) found.push(body.data.stateBlob);
+    if (body.kind === 'version.propose' && isRecord(body.data) && typeof body.data.textBlob === 'string' && HASH_PATTERN.test(body.data.textBlob)) found.push(body.data.textBlob);
     return found;
   }
 
