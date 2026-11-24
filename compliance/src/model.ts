@@ -108,7 +108,7 @@ export const SOURCE_DIRS = Object.freeze([
 ] as const);
 
 /** The source files at the top of compliance/. */
-export const SOURCE_FILES = Object.freeze(['sources.json', 'gaps.json', 'levels.json'] as const);
+export const SOURCE_FILES = Object.freeze(['sources.json', 'gaps.json', 'levels.json', 'resources.json'] as const);
 
 /** Key and prop names no source file may use (D-17). */
 export const FORBIDDEN_STATUS_NAMES = Object.freeze(['status', 'state', 'met'] as const);

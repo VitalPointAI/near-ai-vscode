@@ -1,0 +1,1310 @@
+{
+  "note": "The compliance fit register: one reviewed entry per third-party resource the repository uses. scripts/resource-check.mjs (the lint CI job) fails when a resource has no entry, an entry is stale or fails, or a field is missing. See \"Adding a resource\" in compliance/README.md.",
+  "resources": [
+    {
+      "id": "npm:@jsquash/jpeg",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Encodes JPEG images for the offline globe tiles and environment packs built by scripts/build-globe-tiles.mjs and scripts/generate-env-pack.mjs.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@jsquash/webp",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Encodes WebP images for the offline globe tiles and environment packs (scripts/lib/webp.mjs).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@modelcontextprotocol/sdk",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored MCP client (see vendor:@modelcontextprotocol/sdk); not shipped from node_modules.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@resvg/resvg-wasm",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored SVG renderer (see vendor:@resvg/resvg-wasm).",
+      "licence": "MPL-2.0",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@types/node",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json",
+        "hub/package.json",
+        "package.json",
+        "relay/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub and compliance package.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Type-check results of the lint, relay and hub CI jobs.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@types/vscode",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Type definitions for the VS Code extension API, used by the type check.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Type-check result of the lint CI job.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@vscode/test-electron",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "Downloads a VS Code build and runs the end-to-end tests in it.",
+      "licence": "MIT",
+      "controls": [
+        "sa-11",
+        "sr-03"
+      ],
+      "evidence": "The e2e CI job result.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "needs-mirror:the VS Code test build download (update.code.visualstudio.com), cached by the e2e job",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@vscode/vsce",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Packages the extension as a VSIX (--no-dependencies).",
+      "licence": "MIT",
+      "controls": [
+        "cm-14",
+        "sa-10",
+        "sr-03"
+      ],
+      "evidence": "Builds the VSIX whose SBOM and GitHub attestation are release evidence.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:dejavu-fonts-ttf",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored DejaVu fonts (see vendor:dejavu-fonts-ttf).",
+      "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:esbuild",
+      "kind": "npm",
+      "where": [
+        "hub/package.json",
+        "package.json",
+        "relay/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Bundles the relay and hub, and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03",
+        "si-07"
+      ],
+      "evidence": "Its version and the Yjs build hash are pinned in scripts/crdt-vendor.json, which vendor-libs refuses to build against when they differ.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:imagetracerjs",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored image tracer (see vendor:imagetracerjs).",
+      "licence": "Unlicense",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:lib0",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Yjs helper library, bundled into vendor/yjs/yjs.cjs with Yjs (hash-pinned in scripts/crdt-vendor.json).",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:pdfjs-dist",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored PDF reader (see vendor:pdfjs-dist).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:pptxgenjs",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored PowerPoint writer (see vendor:pptxgenjs).",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:typescript",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json",
+        "hub/package.json",
+        "package.json",
+        "relay/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Type-checks and compiles the extension, relay, hub and compliance package.",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Type-check results of the lint, relay, hub and compliance CI jobs.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:yjs",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Source of the vendored shared-text library (see vendor:yjs).",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:jose",
+      "kind": "npm",
+      "where": [
+        "relay/package.json"
+      ],
+      "component": "relay",
+      "scope": "runtime",
+      "purpose": "Signs and verifies the relay's JSON Web Tokens; bundled into the relay image.",
+      "licence": "MIT",
+      "controls": [
+        "ia-05",
+        "sc-13",
+        "sr-03"
+      ],
+      "evidence": "Relay CI test report; listed in the relay image SBOM (relay-image-scan job).",
+      "crypto": "uses-platform",
+      "cveResponse": "Blocking: the CI relay job runs npm audit --omit=dev --audit-level=high; the built relay image is scanned by grype in relay-image-scan; also recorded daily.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@docusaurus/core",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Builds the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@docusaurus/plugin-content-docs",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Docs content plugin for the documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@docusaurus/theme-classic",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Theme of the documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@docusaurus/theme-mermaid",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Renders Mermaid diagrams in the documentation site, in the browser, without a remote service.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@easyops-cn/docusaurus-search-local",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Offline search index for the documentation site (no hosted search service).",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@mdx-js/react",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "MDX runtime bundled into the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:clsx",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Class-name helper bundled into the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:prism-react-renderer",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Code highlighting bundled into the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:react",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "UI library bundled into the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:react-dom",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "UI library bundled into the static documentation site.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:sirv",
+      "kind": "npm",
+      "where": [
+        "docs-site/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "runtime",
+      "purpose": "Serves the built documentation site on the documentation host (docs-site/scripts/serve.mjs).",
+      "licence": "MIT",
+      "controls": [
+        "sc-07",
+        "sr-03"
+      ],
+      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
+      "crypto": "none",
+      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:ajv",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Validates OSCAL documents and the compliance package's own JSON sources against their schemas.",
+      "licence": "MIT",
+      "controls": [
+        "ca-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Validation result of the compliance validate command in the compliance CI job.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the compliance lockfile; advisories are recorded by the daily npm audit of compliance/ (report-only). Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:ajv-formats",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "String formats (dates, URIs) for the ajv validation.",
+      "licence": "MIT",
+      "controls": [
+        "ca-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Validation result of the compliance validate command.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the compliance lockfile; advisories are recorded by the daily npm audit of compliance/ (report-only). Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:parse5",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Parses the published Cyber Centre and other control-catalogue HTML when importing catalogues.",
+      "licence": "MIT",
+      "controls": [
+        "ca-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "Import reports under compliance/import-reports/.",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the compliance lockfile; advisories are recorded by the daily npm audit of compliance/ (report-only). Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:yaml",
+      "kind": "npm",
+      "where": [
+        "compliance/package.json"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Reads YAML sources (workflow files and imported data) in the compliance tooling.",
+      "licence": "ISC",
+      "controls": [
+        "ca-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the compliance lockfile; advisories are recorded by the daily npm audit of compliance/ (report-only). Bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "image:docker.io/library/node",
+      "kind": "image",
+      "where": [
+        "hub/Dockerfile",
+        "relay/Dockerfile"
+      ],
+      "component": "relay",
+      "scope": "build",
+      "purpose": "Build stage of the relay and hub images: installs the locked packages with scripts off and compiles them; nothing from it but the built files reaches the final image.",
+      "licence": "MIT (Node.js); Debian packages under their own licences",
+      "controls": [
+        "cm-02",
+        "sr-03",
+        "sr-11",
+        "si-07"
+      ],
+      "evidence": "Pinned by sha256 digest; the hub and relay container suites fail if a pin is missing or the Node is too old.",
+      "crypto": "none",
+      "cveResponse": "Pinned by digest; re-pinned by hand in a reviewed change (no Dependabot). Build stage only, so its vulnerabilities do not ship; the final image is scanned by grype in relay-image-scan.",
+      "airGap": "needs-mirror:the pinned docker.io/library/node digest and an npm registry mirror holding the relay's and hub's locked packages",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "A site that builds the relay or hub image without internet must mirror this image digest and an npm registry with the locked packages, or build the images elsewhere and import them."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "image:gcr.io/distroless/nodejs26-debian13",
+      "kind": "image",
+      "where": [
+        "hub/Dockerfile",
+        "relay/Dockerfile"
+      ],
+      "component": "relay",
+      "scope": "runtime",
+      "purpose": "Final base image of the relay and hub: Node 26 as a non-root user, with no shell or package manager.",
+      "licence": "Apache-2.0 (distroless); Node.js MIT and Debian packages under their own licences",
+      "controls": [
+        "cm-02",
+        "cm-07",
+        "sc-13",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "Relay image SBOM (syft) and vulnerability scan (grype) from the relay-image-scan CI job, carried in the evidence bundle.",
+      "crypto": "unvalidated",
+      "cveResponse": "grype scans the built relay image in the relay-image-scan CI job and fails it on a high fixed vulnerability (a reporting job, not a required check); the digest is re-pinned by hand when Google publishes a fixed image.",
+      "airGap": "needs-mirror:the pinned gcr.io/distroless/nodejs26-debian13 digest in a local registry",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Air-gapped and on-premise sites must mirror this exact digest into a local registry (gcr.io is a commercial-cloud registry).",
+        "The hub's TLS and the relay's token signing run on the Node.js OpenSSL in this image, which is not a FIPS 140 validated module (gap X8): a Protected B deployment needs its authorizing official to accept the comparable-strength basis, or a validated provider.",
+        "Act on the relay-image-scan result before each release; it does not block a merge."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "image:docker.io/bbernhard/signal-cli-rest-api",
+      "kind": "image",
+      "where": [
+        "relay/compose.yaml"
+      ],
+      "component": "relay",
+      "scope": "runtime",
+      "purpose": "Optional Signal sidecar for the relay (Compose profile \"signal\", off by default); it relays messages through the Signal service.",
+      "licence": "MIT (signal-cli-rest-api); bundles signal-cli (GPL-3.0) and libsignal (AGPL-3.0), run as a separate unmodified container",
+      "controls": [
+        "ac-20",
+        "sa-09",
+        "sc-07",
+        "sc-13",
+        "sr-03"
+      ],
+      "evidence": "none",
+      "crypto": "unvalidated",
+      "cveResponse": "Third-party single-maintainer image pinned by digest; not scanned in CI. signal-cli stops working about three months after release, so the pin lapses about 2026-12-10 (owner decision 2026-11-18: left to lapse until Phase 82).",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Off by default; do not start the \"signal\" profile until Phase 82 re-pins it to a current release and re-reviews this entry.",
+        "It sends messages through the Signal service on the public internet (a commercial service outside your organization): use it only where your organization's policy allows, and never for Protected B, Controlled Goods or ITAR information.",
+        "It cannot work at an air-gapped site.",
+        "Its cryptography (the Signal protocol in signal-cli) is not a FIPS 140 validated module.",
+        "Add it to the image vulnerability scan before it is first used."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/checkout",
+      "kind": "action",
+      "where": [
+        ".github/workflows/agent-review.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/codeql.yml",
+        ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Checks out the repository in every workflow job (persist-credentials: false).",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/setup-node",
+      "kind": "action",
+      "where": [
+        ".github/workflows/agent-review.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Installs the pinned Node.js version in workflow jobs.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/upload-artifact",
+      "kind": "action",
+      "where": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Stores test reports, SBOMs, the VSIX and the evidence bundle between jobs and for retention.",
+      "licence": "MIT",
+      "controls": [
+        "au-09",
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "Carries the per-test reports, SBOMs and evidence bundle the compliance collectors read.",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/download-artifact",
+      "kind": "action",
+      "where": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Fetches artifacts uploaded by earlier jobs in the same run.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "Delivers the reports the compliance job collects.",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/cache",
+      "kind": "action",
+      "where": [
+        ".github/workflows/ci.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Caches the VS Code test download for the e2e job.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/setup-java",
+      "kind": "action",
+      "where": [
+        ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Installs Java for the OSCAL tooling in the release and daily evidence workflows.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/setup-python",
+      "kind": "action",
+      "where": [
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Installs Python for the Compliance Trestle import check in the release workflow.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "none",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:actions/attest",
+      "kind": "action",
+      "where": [
+        ".github/workflows/release.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "build",
+      "purpose": "Creates GitHub artifact attestations (build provenance) for the VSIX and the compliance package.",
+      "licence": "MIT",
+      "controls": [
+        "sa-10",
+        "si-07",
+        "sr-04",
+        "sr-11"
+      ],
+      "evidence": "GitHub artifact attestations, verifiable with gh attestation verify.",
+      "crypto": "unvalidated",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Attestations are signed through GitHub's Sigstore service (commercial cloud, not a FIPS 140 validated module): treat them as supplementary provenance beside the release SHA-256 checksum, and download the attestation bundle with the release for offline verification at an air-gapped site."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:github/codeql-action/init",
+      "kind": "action",
+      "where": [
+        ".github/workflows/codeql.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "test",
+      "purpose": "Starts CodeQL code scanning.",
+      "licence": "MIT",
+      "controls": [
+        "ra-05",
+        "sa-11",
+        "sr-03"
+      ],
+      "evidence": "Code scanning alerts, read by the code-scanning compliance collector.",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "action:github/codeql-action/analyze",
+      "kind": "action",
+      "where": [
+        ".github/workflows/codeql.yml"
+      ],
+      "component": "release-pipeline",
+      "scope": "test",
+      "purpose": "Runs the CodeQL analysis and uploads its alerts.",
+      "licence": "MIT",
+      "controls": [
+        "ra-05",
+        "sa-11",
+        "sr-03"
+      ],
+      "evidence": "Code scanning alerts, read by the code-scanning compliance collector.",
+      "crypto": "none",
+      "cveResponse": "Pinned to a full commit SHA, so a moved tag cannot change what runs. No Dependabot or advisory alert is configured for actions: maintainers bump the pin by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:pdfjs-dist",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Reads PDF files the user adds (vendor/pdfjs).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "cm-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "unvalidated",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+        "Its built-in PDF decryption only opens password-protected PDFs the user supplies; it is not relied on to protect information (SC-13)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:@resvg/resvg-wasm",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Renders SVG to images (vendor/resvg).",
+      "licence": "MPL-2.0",
+      "controls": [
+        "cm-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "none",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:imagetracerjs",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Traces raster images into SVG (vendor/imagetracer).",
+      "licence": "Unlicense",
+      "controls": [
+        "cm-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "none",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:dejavu-fonts-ttf",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Fonts for rendered images (vendor/fonts).",
+      "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
+      "controls": [
+        "cm-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "none",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:pptxgenjs",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Writes PowerPoint files (vendor/pptxgenjs, bundled with its dependencies).",
+      "licence": "MIT; bundled dependencies listed with their licences in vendor/pptxgenjs/LICENSES.txt",
+      "controls": [
+        "cm-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "none",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:@modelcontextprotocol/sdk",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "MCP client only (vendor/mcp), connecting to the MCP servers the user configures.",
+      "licence": "MIT; bundled dependencies listed with their licences in vendor/mcp/LICENSES.txt",
+      "controls": [
+        "cm-08",
+        "sc-08",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "uses-platform",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:yjs",
+      "kind": "vendored",
+      "where": [
+        "scripts/vendor-libs.mjs"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Shared-text merge library for shared staff projects (vendor/yjs, with lib0), hash-pinned in scripts/crdt-vendor.json.",
+      "licence": "MIT",
+      "controls": [
+        "cm-08",
+        "si-07",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "A row in vendor/manifest.json and the VSIX SBOM (scripts/extension-sbom.mjs), carried in the release evidence bundle.",
+      "crypto": "none",
+      "cveResponse": "Pinned devDependency copied or bundled by scripts/vendor-libs.mjs at compile time. Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Advisories for it are recorded only by the daily full npm audit (report-only); the blocking CI audit runs with --omit=dev and does not cover it. Check the latest daily audit for this package before each release, and re-vendor a fixed version before shipping when a high or critical advisory applies."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:maplibre-gl",
+      "kind": "vendored",
+      "where": [
+        "media/vendor/VENDORED.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Map and globe rendering on the COP map page (media/vendor/maplibre-gl).",
+      "licence": "BSD-3-Clause",
+      "controls": [
+        "cm-08",
+        "si-07",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "Hashes in media/vendor/VENDORED.json, checked by src/test/staffCopSymbols.test.ts and verify:release; a row in the VSIX SBOM.",
+      "crypto": "none",
+      "cveResponse": "Committed byte-for-byte copy at an exact version; it is in no package.json, so no npm audit covers it.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "No automated advisory check covers it: check the GitHub advisories for maplibre-gl before each release and when re-vendoring."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "vendor:milsymbol",
+      "kind": "vendored",
+      "where": [
+        "media/vendor/VENDORED.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Military symbols on the COP map page (media/vendor/milsymbol).",
+      "licence": "MIT",
+      "controls": [
+        "cm-08",
+        "si-07",
+        "sr-03",
+        "sr-04",
+        "si-02"
+      ],
+      "evidence": "Hashes in media/vendor/VENDORED.json, checked by src/test/staffCopSymbols.test.ts and verify:release; a row in the VSIX SBOM.",
+      "crypto": "none",
+      "cveResponse": "Committed byte-for-byte copy at an exact version; it is in no package.json, so no npm audit covers it.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "No automated advisory check covers it: check the GitHub advisories for milsymbol before each release and when re-vendoring."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-23"
+    }
+  ]
+}

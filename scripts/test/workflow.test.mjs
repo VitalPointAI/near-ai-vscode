@@ -324,9 +324,9 @@ test('tagging main is not blocked by another PR\'s failed agent review, which la
   assert.match(gate(tagged, { required: CI_CHECKS, exactCommitCi: true }).problems.join('\n'), /"codeql" failed/);
 });
 
-test('a change to the gate tests or the vendor step is a gate change', () => {
-  assert.deepEqual(gateFileChanges(['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'src/extension.ts', 'scripts/compare-models.mjs', 'package.json']),
-    ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs']);
+test('a change to the gate tests, the vendor step or the compliance fit check is a gate change', () => {
+  assert.deepEqual(gateFileChanges(['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'scripts/resource-check.mjs', 'src/extension.ts', 'scripts/compare-models.mjs', 'package.json']),
+    ['scripts/test/workflow.test.mjs', 'scripts/vendor-libs.mjs', 'scripts/resource-check.mjs']);
 });
 
 // Phase 44 (DESIGN section 9, pitfall 2): the compliance trust roots wait for the owner. Tailoring decides what is Not applicable, the catalogues
@@ -344,6 +344,7 @@ const COMPLIANCE_TRUST_ROOTS = [
   'compliance/responsibility/families.json',
   'compliance/profiles/protected-b.json',
   'compliance/levels.json',
+  'compliance/resources.json',
 ];
 
 test('a change to a compliance trust root (tailoring, sources, catalogues, attestations, engine, statements, rules, responsibility, scope) is a gate change', () => {
