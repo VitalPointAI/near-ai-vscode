@@ -1,12 +1,13 @@
 # Incident response plan
 
-Last reviewed: 2026-11-21
+Last reviewed: 2026-11-24
 
 This plan says what the maintainers of NEAR AI for VS Code do when someone reports a security
 problem in the product, from the first report to telling users, and what stays with your
-organization. It covers the extension, the messaging relay (`relay/`) and the sync hub (`hub/`)
-in this repository, and the pipeline that releases them. It does not cover NEAR AI Cloud, other
-model providers, GitHub or the Visual Studio Marketplace, which run their own processes.
+organization. It covers the extension, the Sterling workbench image that ships it, the messaging
+relay (`relay/`) and the sync hub (`hub/`) in this repository, and the pipeline that releases
+them. It does not cover NEAR AI Cloud, other model providers, GitHub or its Container Registry, or
+the Visual Studio Marketplace that hosts versions before 0.4.37, which run their own processes.
 
 The response times below are the maintainers' commitment for the supported versions listed in
 the [security policy](../../SECURITY.md#supported-versions). They are a published commitment, not a
@@ -72,19 +73,24 @@ contract.
 
 ## Rolling back a release
 
-- **No release is changed in place.** The Marketplace never lets a version number be reused or
-  overwritten, and release tags are never moved, reused or deleted. A bad release is replaced by
-  the next patch version: a fix, or a revert of the change that caused the problem.
+- **No release is changed in place.** Release tags are never moved, reused or deleted, and the
+  Release workflow refuses to push a different image under a version that is already in the
+  registry. A bad release is replaced by the next patch version: a fix, or a revert of the change
+  that caused the problem.
 - **What the release workflow allows.** A tag on a reviewed commit of `main`, or on the head of
-  `hotfix/<version>`, starts the Release workflow. It builds the VSIX, attaches it to a GitHub
-  release with its SHA-256 checksum, and then waits. Publishing to the Marketplace runs only after
-  the owner approves it in the protected `marketplace` environment.
-- **What needs the owner.** Approving the Marketplace publication, and removing a version from
-  the Marketplace through the publisher's management page when that is needed, are the owner's
-  steps. Agents and the repository's scripts never take them.
-- **What a user can do at once.** In VS Code's Extensions view, a user can install an earlier
-  version with **Install Specific Version** and turn off automatic updates for the extension
-  until the fixed version is out. The advisory names the version to go back to.
+  `hotfix/<version>`, starts the Release workflow. It builds the VSIX, builds the Sterling
+  workbench image with that VSIX inside, starts the image and checks it, and then waits. Pushing
+  the image to the GitHub Container Registry runs only after the owner approves it in the
+  protected `container-release` environment. The GitHub release then records the image digest
+  beside the VSIX, its SHA-256 checksum and the assessor package.
+- **What needs the owner.** Approving the image publication, and removing an image version from
+  the GitHub Container Registry when that is needed, are the owner's steps. Agents and the
+  repository's scripts never take them.
+- **What a user can do at once.** Stop the container and start the earlier release's image by the
+  digest its GitHub release records. In VS Code, install the earlier release's VSIX with
+  **Extensions: Install from VSIX...**. For versions before 0.4.37, which came from the Visual
+  Studio Marketplace, **Install Specific Version** in the Extensions view still works. The
+  advisory names the version to go back to.
 - **The relay and the hub.** Your organization builds and runs these from this repository. To go
   back, its operator checks out the earlier release, rebuilds and restarts the service, following
   the upgrade and restore steps in the [operator guide](../../relay/README.md). The hub refuses a
