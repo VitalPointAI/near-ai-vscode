@@ -314,6 +314,8 @@ Sequential because of real dependencies: (b) and (c) need (a)'s service pattern 
 
 ## 14. Owner decisions still open
 
+Owner, 2026-11-23: the defaults for O2 to O6 are accepted as listed (HAProxy until Traefik is tested; one shared parent domain for passkeys; re-enrolment only where policy says hardware only; pin Theia Cloud upstream and fork only if needed; volume size and idle timeout set per site after the load test). O1 is decided in section 9.1 except the Defence Team words (O1b), which are confirmed when that mode is planned.
+
 | # | Question | Default |
 |---|---|---|
 | O1 | Confirm the remaining naming defaults in section 9.1 (Get Started vs Set up Sterling, the SovAI category). What a work area holds and the Defence Team mode were decided on 2026-11-23. | As listed |
