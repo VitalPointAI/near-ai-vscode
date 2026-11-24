@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { gapStates, loadGaps, loadPoam } from '../src/gaps.ts';
+import type { Gap, Poam } from '../src/gaps.ts';
+import { reviewedAt } from '../src/collectors/documents.ts';
+import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { validateOurs } from '../src/validate.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -196,4 +200,119 @@ test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation pa
   const cpcsc = { level: 'cpcsc-level-1', control, state: 'met' } as const;
   assert.equal(stateFor('G305', [cpcsc]).state, 'planned');
   assert.equal(stateFor('G305', [cpcsc, { level: 'itsp-10-171', control, state: 'met' }]).state, 'closed');
+});
+
+// Hosted verification records (48-05, VER-08, VER-09, D-24): every register row and section 10 row names a reference that
+// resolves. A record is a `## ` heading with a Source address and a Checked date; an open item is a gap with an owner role and a
+// POA&M target date; a decided item names a gap that closes in Phase 48 until its evidence rule exists.
+const RECORDS_FILE = path.resolve(root, '..', 'docs', 'security', 'hosted-verification-records.md');
+const ruleIds = new Set(loadEvidenceRules(path.join(root, 'evidence-rules')).map((rule) => rule.id));
+interface RecordsContext { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly ruleIds: ReadonlySet<string> }
+const realContext: RecordsContext = { gaps, poam, ruleIds };
+
+/** The body rows of the first Markdown table under a `## ` heading. */
+function tableUnder(text: string, heading: string): string[][] {
+  const lines = text.split(/\r?\n/);
+  const start = lines.indexOf(`## ${heading}`);
+  if (start < 0) return [];
+  const rows: string[][] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('## ')) break;
+    if (!line.startsWith('|')) { if (rows.length > 0) break; continue; }
+    rows.push(line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim()));
+  }
+  return rows.slice(2);
+}
+
+function sectionOf(text: string, heading: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  const start = lines.indexOf(`## ${heading}`);
+  if (start < 0) return undefined;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith('## '));
+  return lines.slice(start + 1, end < 0 ? undefined : end).join('\n');
+}
+
+interface References { records: string[]; gaps: string[]; rules: string[]; none: boolean; unknown: string[] }
+function referencesIn(cell: string): References {
+  const parsed: References = { records: [], gaps: [], rules: [], none: false, unknown: [] };
+  for (const part of cell.split(';').map((item) => item.trim()).filter((item) => item !== '')) {
+    const record = /^Record: (.+)$/.exec(part); const gap = /^gap ([GX][0-9]+)$/.exec(part); const rule = /^rule ([a-z0-9][a-z0-9.-]*)$/.exec(part);
+    if (record) parsed.records.push(record[1]);
+    else if (gap) parsed.gaps.push(gap[1]);
+    else if (rule) parsed.rules.push(rule[1]);
+    else if (part === 'none') parsed.none = true;
+    else parsed.unknown.push(part);
+  }
+  return parsed;
+}
+
+function recordProblems(text: string, heading: string): string[] {
+  const section = sectionOf(text, heading);
+  if (section === undefined) return [`record "${heading}" has no heading`];
+  const problems: string[] = [];
+  if (!/^Source: https:\/\/\S+$/m.test(section)) problems.push(`record "${heading}" has no Source line`);
+  const checked = /^Checked: ([0-9]{4}-[0-9]{2}-[0-9]{2})$/m.exec(section);
+  if (!checked || reviewedAt(checked[1]) === undefined) problems.push(`record "${heading}" has no valid Checked date`);
+  return problems;
+}
+
+function datedGapProblems(id: string, context: RecordsContext): string[] {
+  const gap = context.gaps.find((item) => item.id === id);
+  if (!gap) return [`gap ${id} does not exist`];
+  if (gap.ownerRole === '') return [`gap ${id} has no owner role`];
+  const item = context.poam.find((candidate) => candidate.id === gap.poam);
+  return item?.milestones.some((milestone) => milestone.targetDate !== undefined) ? [] : [`gap ${id} has no POA&M target date`];
+}
+
+interface RegisterRow { readonly number: number; readonly item: string; readonly state: string; readonly references: References }
+function registerRows(text: string): RegisterRow[] {
+  return tableUnder(text, 'Verification register').map(([number, item, state, reference]) => ({ number: Number(number), item, state, references: referencesIn(reference ?? '') }));
+}
+
+function registerProblems(text: string, context: RecordsContext): string[] {
+  const problems: string[] = [];
+  for (const row of registerRows(text)) {
+    const { records, gaps: gapIds, rules, unknown } = row.references;
+    const at = `register row ${row.number}`;
+    for (const part of unknown) problems.push(`${at}: unknown reference "${part}"`);
+    for (const rule of rules) if (!context.ruleIds.has(rule)) problems.push(`${at}: rule ${rule} does not exist`);
+    for (const heading of records) problems.push(...recordProblems(text, heading).map((problem) => `${at}: ${problem}`));
+    if (row.state === 'closed' || row.state === 'open') {
+      if (row.state === 'closed' && records.length === 0) problems.push(`${at}: closed without a record`);
+      if (row.state === 'open' && gapIds.length === 0) problems.push(`${at}: open without a gap`);
+      for (const id of gapIds) problems.push(...datedGapProblems(id, context).map((problem) => `${at}: ${problem}`));
+    } else if (row.state === 'decided') {
+      if (gapIds.length + rules.length === 0) problems.push(`${at}: decided without a gap or rule`);
+      for (const id of gapIds) {
+        const gap = context.gaps.find((item) => item.id === id);
+        if (!gap) problems.push(`${at}: gap ${id} does not exist`);
+        else if (gap.ownerRole === '' || gap.closesInPhase !== '48') problems.push(`${at}: gap ${id} does not close in Phase 48 with an owner role`);
+      }
+    } else problems.push(`${at}: unknown state "${row.state}"`);
+  }
+  return problems;
+}
+
+const recordsText = (): string => readFileSync(RECORDS_FILE, 'utf8');
+
+test('every hosted verification register row resolves to a dated record, a dated gap or a decided gap', () => {
+  const text = recordsText();
+  assert.ok(registerRows(text).length > 0);
+  assert.deepEqual(registerProblems(text, realContext), []);
+});
+test('a closed register row whose record has no Source line fails', () => {
+  const text = recordsText();
+  const [closed] = registerRows(text).filter((row) => row.state === 'closed');
+  const heading = closed.references.records[0];
+  const section = sectionOf(text, heading)!;
+  const withoutSource = text.replace(section, section.replace(/^Source: .*$/gm, ''));
+  assert.ok(registerProblems(withoutSource, realContext).includes(`register row ${closed.number}: record "${heading}" has no Source line`));
+});
+test('an open register row whose gap has no POA&M target date fails', () => {
+  const text = ['## Verification register', '', '| # | Item | State | Reference |', '|---|---|---|---|', '| 1 | Rig item | open | gap G9001 |', ''].join('\n');
+  const gap: Gap = { id: 'G9001', title: 'Rig item', controls: ['sc-05'], remediation: 'Run it.', ownerRole: 'owner', poam: 'g9001' };
+  const undated: Poam = { id: 'g9001', gap: 'G9001', controls: ['sc-05'], milestones: [{ phase: '48', title: 'Run it' }] };
+  assert.deepEqual(registerProblems(text, { gaps: [gap], poam: [undated], ruleIds }), ['register row 1: gap G9001 has no POA&M target date']);
+  const dated: Poam = { ...undated, milestones: [{ phase: '48', targetDate: '2027-03-31', title: 'Run it' }] };
+  assert.deepEqual(registerProblems(text, { gaps: [gap], poam: [dated], ruleIds }), []);
 });

@@ -69,3 +69,20 @@ test('every required document in the real repository produces a publishable obse
   assert.deepEqual(observations.map(redactObservation).map((observation) => observation.subject),
     REQUIRED_DOCUMENTS.map((document) => document.path.toLowerCase()));
 });
+
+test('the hosted verification records are a reviewed required document whose register and record headings are present', async () => {
+  // 48-05 (D-24): the desk records are evidence only while reviewed within the window; judged on their own review date.
+  const document = REQUIRED_DOCUMENTS.find((entry) => entry.path === 'docs/security/hosted-verification-records.md');
+  assert.ok(document?.reviewRequired);
+  assert.ok(document.headings.includes('Verification register'));
+  assert.ok(document.headings.includes('Keycloak CVE-2026-6856 fix version'));
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const text = await readFile(path.join(repoRoot, document.path), 'utf8');
+  const reviewed = reviewedAt(LAST_REVIEWED_PATTERN.exec(text)?.[1] ?? '');
+  assert.ok(reviewed);
+  const observations = await documentsCollector.collect({ repoRoot }, { now: reviewed, commit: COMMIT, readFile: (file) => readFile(file, 'utf8') });
+  assert.deepEqual(observations.find((observation) => observation.subject === document.path), {
+    collector: 'documents', subject: document.path, passed: true, collectedAt: reviewed.toISOString(), commit: COMMIT,
+    counts: { missing: 0, 'missing-headings': 0, 'missing-review': 0, 'stale-review': 0 }
+  });
+});
