@@ -69,7 +69,7 @@ created: "2026-11-23"
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Step-up sign-in through a real Keycloak and oauth2-proxy refreshes `acr` and `auth_time` | FND-T-05 | Needs the Phase 47 stack | In the Phase 47 end-to-end run: sign, see the refusal, confirm with the security key, sign again |
+| Step-up sign-in through a real Keycloak and oauth2-proxy refreshes `acr` and `auth_time` | FND-T-05 | Needs the Phase 47 stack | In the Phase 47 end-to-end run: sign, see the refusal, confirm with the passkey or security key, sign again |
 
 ---
 
