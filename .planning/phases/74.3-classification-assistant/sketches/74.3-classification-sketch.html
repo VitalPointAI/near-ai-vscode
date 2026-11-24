@@ -2,147 +2,141 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>74.3 Classification assistant: UI sketch in the Sterling design language (not shipped)</title>
+<title>74.3 Classification assistant: UI sketch, original theme with lifted cards (not shipped)</title>
 <!--
-  Throwaway sketch for the owner's design review of 74.3-UI-SPEC.md and .planning/design/STERLING-DESIGN-LANGUAGE.md (SDL).
-  Not product code. Self-contained: no external requests, no fonts, no images.
-  The .dark and .light blocks stand in for Theia theme variables, so every other rule uses --theia-* names only.
-  Icons are inline SVG stand-ins for the codicons named in the spec (the sketch cannot load the codicon font).
-  Type: 11px captions and stamps, 13px body, 16px headings, 20px page title; weights 400 and 600.
-  Spacing: 4, 8, 16, 24, 32, 48 only. Radius 0, 2px on controls. No shadows, no pills, no accent rails.
-  Fictional people and items only (Example Organization, Exercise NORTHERN EXAMPLE).
+  Throwaway sketch for the owner's review of 74.3-UI-SPEC.md. Not product code. Self-contained: no external requests.
+  Original 74.3 theme (rounded cards, the label block with its accent bar, badges) plus the owner's 2026-11-24 ask:
+  the cards inside each panel or page look lifted (the spec's "Elevation" tokens).
+  The .dark and .light blocks stand in for Theia theme variables, so every other rule uses --theia-* names and the
+  --sterling-* elevation tokens derived from them. Icons are inline SVG stand-ins for the codicons the spec names.
+  Sizes 13, 16, 20px; weights 400 and 600; spacing 4, 8, 16, 24, 32, 48. Fictional people and items only.
 -->
 <style>
 .dark {
   --theia-ui-font-family: system-ui, sans-serif;
-  --theia-editor-font-family: ui-monospace, monospace;
-  --theia-sideBar-background: #1e1f22;
-  --theia-editor-background: #18191b;
-  --theia-editorWidget-background: #26272b;
-  --theia-panel-border: #44464d;
-  --theia-foreground: #dcdcd6;
-  --theia-descriptionForeground: #a3a39c;
+  --theia-sideBar-background: #1f2228;
+  --theia-editor-background: #181a1f;
+  --theia-editorWidget-background: #252830;
+  --theia-panel-border: #3a3f4b;
+  --theia-foreground: #d7dae0;
+  --theia-descriptionForeground: #9aa2b1;
   --theia-focusBorder: #ee7887;
   --theia-button-background: #a62031;
   --theia-button-foreground: #ffffff;
-  --theia-button-secondaryBackground: #34353a;
-  --theia-button-secondaryForeground: #dcdcd6;
-  --theia-textLink-foreground: #8cb8ff;
-  --theia-editorInfo-foreground: #8cb8ff;
-  --theia-editorWarning-foreground: #e2b55a;
-  --theia-errorForeground: #f08a7a;
+  --theia-button-secondaryBackground: #343a46;
+  --theia-button-secondaryForeground: #d7dae0;
+  --theia-textLink-foreground: #6cb6ff;
+  --theia-editorInfo-foreground: #6cb6ff;
+  --theia-editorWarning-foreground: #e5b95c;
+  --theia-errorForeground: #f48771;
   --theia-testing-iconPassed: #73c991;
-  --theia-input-background: #1a1b1d;
-  --theia-input-border: #5a5c63;
+  --theia-input-background: #1b1e24;
+  --theia-input-border: #4a5060;
+  --theia-widget-shadow: rgba(0, 0, 0, .55);
+  /* elevation tokens, dark: card a little lighter than the panel, with a 1px top highlight */
+  --sterling-card-surface: color-mix(in srgb, var(--theia-editorWidget-background) 94%, var(--theia-foreground) 6%);
+  --sterling-card-highlight: inset 0 1px 0 color-mix(in srgb, var(--theia-foreground) 10%, transparent);
 }
 .light {
   --theia-ui-font-family: system-ui, sans-serif;
-  --theia-editor-font-family: ui-monospace, monospace;
-  --theia-sideBar-background: #f6f5f1;
+  --theia-sideBar-background: #f3f3f3;
   --theia-editor-background: #ffffff;
-  --theia-editorWidget-background: #ecebe5;
-  --theia-panel-border: #b9b7ae;
-  --theia-foreground: #1d1d1b;
-  --theia-descriptionForeground: #55554f;
+  --theia-editorWidget-background: #f8f8f8;
+  --theia-panel-border: #d4d4d4;
+  --theia-foreground: #1f1f1f;
+  --theia-descriptionForeground: #5f5f5f;
   --theia-focusBorder: #a62031;
   --theia-button-background: #a62031;
   --theia-button-foreground: #ffffff;
-  --theia-button-secondaryBackground: #e2e0d8;
-  --theia-button-secondaryForeground: #1d1d1b;
-  --theia-textLink-foreground: #0b5cad;
-  --theia-editorInfo-foreground: #1660a8;
-  --theia-editorWarning-foreground: #7d5300;
+  --theia-button-secondaryBackground: #e4e4e4;
+  --theia-button-secondaryForeground: #1f1f1f;
+  --theia-textLink-foreground: #005fb8;
+  --theia-editorInfo-foreground: #1a73c6;
+  --theia-editorWarning-foreground: #8a5a00;
   --theia-errorForeground: #b3261e;
   --theia-testing-iconPassed: #2f7d32;
   --theia-input-background: #ffffff;
-  --theia-input-border: #807e75;
+  --theia-input-border: #8a8a8a;
+  --theia-widget-shadow: rgba(0, 0, 0, .16);
+  /* elevation tokens, light: card is the editor white on the grey panel; no highlight edge */
+  --sterling-card-surface: var(--theia-editor-background);
+  --sterling-card-highlight: inset 0 0 0 transparent;
+}
+body {
+  --sterling-elevation-1: 0 1px 2px var(--theia-widget-shadow), 0 4px 12px color-mix(in srgb, var(--theia-widget-shadow) 50%, transparent);
+  --sterling-elevation-2: 0 2px 4px var(--theia-widget-shadow), 0 8px 24px color-mix(in srgb, var(--theia-widget-shadow) 60%, transparent);
+  --sterling-lift-motion: box-shadow 120ms ease-out, transform 120ms ease-out;
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 32px; background: var(--theia-editor-background); color: var(--theia-foreground); font: 13px/1.5 var(--theia-ui-font-family); }
 .ic { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
-.sk-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 24px; border-block-end: 1px solid var(--theia-panel-border); padding-block-end: 16px; }
+.sk-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .sk-head h1 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 0; }
 .sk-head p { margin: 4px 0 0; color: var(--theia-descriptionForeground); max-width: 80ch; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, 300px); gap: 24px; align-items: start; }
-.cap, .caption { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--theia-descriptionForeground); }
-.cap { margin: 0 0 8px; }
+.cap { color: var(--theia-descriptionForeground); margin: 0 0 8px; }
 
-/* SDL 5: the panel is one sheet */
-.panel { width: 300px; background: var(--theia-sideBar-background); border: 1px solid var(--theia-panel-border); display: grid; gap: 16px; padding: 0 0 8px; }
-.panel > .body { display: grid; gap: 16px; padding: 0 8px; }
-.viewtitle { padding: 4px 8px; border-block-end: 1px solid var(--theia-panel-border); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--theia-descriptionForeground); }
+/* the lifted card (spec "Elevation") */
+.card { background: var(--sterling-card-surface); border: 1px solid var(--theia-panel-border); box-shadow: var(--sterling-card-highlight), var(--sterling-elevation-1); }
+.card.interactive { transition: var(--sterling-lift-motion); }
+.card.interactive:hover, .card.interactive[aria-pressed=true] { box-shadow: var(--sterling-card-highlight), var(--sterling-elevation-2); transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) {
+  .card.interactive { transition: none; }
+  .card.interactive:hover, .card.interactive[aria-pressed=true] { transform: none; }
+}
+@media (forced-colors: active) { .card { box-shadow: none; } }
 
-/* SDL 1: marking strip */
-.strip { display: flex; justify-content: center; padding: 4px 8px; border-block: 1px solid var(--theia-foreground); background: var(--theia-editorWidget-background); font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; text-align: center; margin: 0; }
-.strip[data-line=provisional] { border-block-end-style: dashed; }
-.strip[data-line=final] { border-block-end: 3px double var(--theia-foreground); }
-.strip[data-line=stopped] { border-color: var(--theia-errorForeground); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--theia-errorForeground) 24%, transparent) 0 1px, transparent 1px 6px); }
-.strip[data-line=stopped] > span { background: var(--theia-editorWidget-background); padding: 0 8px; }
-
-/* SDL 3: stamps */
-.stamps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.stamp { display: inline-flex; gap: 4px; align-items: center; padding: 0 4px; border: 1px solid var(--theia-foreground); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; line-height: 1.6; }
-.stamp[data-line=provisional] { border-style: dashed; }
-.stamp[data-line=waiting] { border-style: dotted; }
-.stamp[data-line=final] { border: 3px double var(--theia-foreground); }
-.stamp[data-line=stopped] { border: 2px solid var(--theia-errorForeground); padding: 4px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--theia-errorForeground) 24%, transparent) 0 1px, transparent 1px 6px); }
-.stamp[data-line=stopped] > span { display: inline-flex; gap: 4px; align-items: center; background: var(--theia-sideBar-background); padding: 0 4px; }
-.inf { color: var(--theia-editorInfo-foreground); } .warn { color: var(--theia-editorWarning-foreground); } .err { color: var(--theia-errorForeground); } .ok { color: var(--theia-testing-iconPassed); }
-
-.item { color: var(--theia-descriptionForeground); display: flex; gap: 4px; align-items: start; }
-.sentence { margin: 0; }
-.notice { display: flex; gap: 8px; padding: 8px; border: 1px solid var(--theia-panel-border); }
-.notice.stopped { border: 2px solid var(--theia-errorForeground); padding: 4px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--theia-errorForeground) 24%, transparent) 0 1px, transparent 1px 6px); }
-.notice.stopped > div { display: flex; gap: 8px; background: var(--theia-sideBar-background); padding: 4px 8px; }
-
-/* SDL 4 and 5: captions with rules, registers, form blocks */
-.sec > .caption { display: block; padding-block-end: 4px; margin-block-end: 8px; border-block-end: 1px solid var(--theia-panel-border); }
-ul.register { list-style: none; margin: 0; padding: 0; }
-ul.register li { display: flex; gap: 4px; padding: 4px 0; border-block-end: 1px solid var(--theia-panel-border); }
-ul.register li:last-child { border-block-end: 0; }
-dl.form { display: grid; gap: 8px; margin: 0; }
-dl.form.two { grid-template-columns: 1fr 1fr; gap: 8px 16px; }
-dl.form > div { display: grid; gap: 4px; }
-dl.form dt { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--theia-descriptionForeground); }
-dl.form dd { margin: 0; font-variant-numeric: tabular-nums; }
-.control { border-block: 1px solid var(--theia-foreground); padding: 8px 0; }
-
+.panel { width: 300px; background: var(--theia-sideBar-background); border: 1px solid var(--theia-panel-border); padding: 16px 16px 32px; display: grid; gap: 16px; }
+.viewtitle { font-weight: 600; color: var(--theia-descriptionForeground); }
+.item { display: flex; justify-content: space-between; gap: 8px; color: var(--theia-descriptionForeground); }
+.badge { border: 1px solid currentColor; border-radius: 12px; padding: 0 8px; white-space: nowrap; height: fit-content; display: inline-flex; gap: 4px; align-items: center; }
+.label { border-inline-start: 3px solid var(--theia-focusBorder); border-radius: 8px; padding: 8px; display: grid; gap: 4px; margin: 0; }
+.label dt { color: var(--theia-descriptionForeground); }
+.label dd { margin: 0; }
+.label .lv { font-size: 20px; font-weight: 600; line-height: 1.25; }
+.label .state { display: flex; gap: 4px; }
+.chip { justify-self: start; color: var(--theia-editorInfo-foreground); border: 1px solid currentColor; border-radius: 12px; padding: 0 8px; display: inline-flex; gap: 4px; align-items: center; }
+.notice { display: flex; gap: 8px; padding: 8px; border-radius: 8px; }
+.notice[data-tone=info] .i { color: var(--theia-editorInfo-foreground); }
+.notice[data-tone=error] { border-color: var(--theia-errorForeground); }
+.notice[data-tone=error] .i { color: var(--theia-errorForeground); }
+h2 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0 0 8px; }
+ul.bases { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+ul.bases li { display: flex; gap: 4px; }
+.suggestion { display: grid; gap: 8px; padding: 8px; border-radius: 8px; }
 a { color: var(--theia-textLink-foreground); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-button { font: inherit; min-height: 32px; padding: 4px 16px; border-radius: 2px; border: 1px solid var(--theia-panel-border); background: var(--theia-button-secondaryBackground); color: var(--theia-button-secondaryForeground); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
-button.primary { background: var(--theia-button-background); color: var(--theia-button-foreground); border-color: var(--theia-button-background); font-weight: 600; }
-button.linkish { background: transparent; border: 0; color: var(--theia-textLink-foreground); padding: 4px 0; min-height: 24px; }
+button { font: inherit; min-height: 32px; padding: 4px 16px; border-radius: 5px; border: 1px solid transparent; background: var(--theia-button-secondaryBackground); color: var(--theia-button-secondaryForeground); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+button.primary { background: var(--theia-button-background); color: var(--theia-button-foreground); }
+button.linkish { background: transparent; color: var(--theia-textLink-foreground); padding: 4px 0; min-height: 24px; }
 button[aria-disabled=true] { opacity: .55; cursor: default; }
 button:focus-visible, a:focus-visible { outline: 2px solid var(--theia-focusBorder); outline-offset: 2px; }
-.muted { color: var(--theia-descriptionForeground); }
-.empty { display: grid; gap: 8px; justify-items: start; padding-top: 32px; }
-.empty h2 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0; }
-
-.dialog { width: 512px; background: var(--theia-editorWidget-background); border: 1px solid var(--theia-foreground); display: grid; gap: 16px; padding: 0 0 16px; }
-.dialog > .body { display: grid; gap: 16px; padding: 0 16px; }
-.dialog h2 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0; padding: 8px 16px; border-block-end: 1px solid var(--theia-panel-border); }
-.dialog .buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; border-block-start: 1px solid var(--theia-panel-border); padding-block-start: 16px; }
-.who { border: 1px solid var(--theia-panel-border); padding: 8px; }
+.muted, .why-disabled, .trust, .record, .hint { color: var(--theia-descriptionForeground); }
+.why-disabled { margin: 4px 0 0; }
+.ok { color: var(--theia-testing-iconPassed); } .warn { color: var(--theia-editorWarning-foreground); } .err { color: var(--theia-errorForeground); } .inf { color: var(--theia-editorInfo-foreground); }
+.empty { text-align: center; padding-top: 32px; display: grid; gap: 8px; justify-items: center; }
+.dialog { width: 512px; background: var(--theia-editorWidget-background); border: 1px solid var(--theia-panel-border); border-radius: 8px; padding: 16px; display: grid; gap: 16px; box-shadow: var(--sterling-card-highlight), var(--sterling-elevation-2); }
+.dialog .preview { border-radius: 5px; padding: 8px 16px; }
+.dialog .buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.who { border-inline-start: 3px solid var(--theia-focusBorder); border-radius: 5px; padding: 8px 16px; }
 fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
-legend { padding: 0; margin-bottom: 4px; }
-textarea { width: 100%; font: inherit; background: var(--theia-input-background); color: var(--theia-foreground); border: 1px solid var(--theia-input-border); border-radius: 2px; padding: 8px; resize: vertical; }
-
+legend { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+textarea { width: 100%; font: inherit; background: var(--theia-input-background); color: var(--theia-foreground); border: 1px solid var(--theia-input-border); border-radius: 5px; padding: 8px; resize: vertical; }
+.stage { padding: 24px; background: var(--theia-editor-background); border: 1px dashed var(--theia-panel-border); }
 .reviews { grid-column: 1 / -1; background: var(--theia-editor-background); border: 1px solid var(--theia-panel-border); padding: 32px 24px 48px; display: grid; gap: 16px; }
 .reviews h1 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 0; }
-.tabs { display: flex; gap: 0; border-block-end: 1px solid var(--theia-panel-border); }
-.tabs [role=tab] { background: transparent; border: 0; border-radius: 0; border-block-end: 2px solid transparent; }
-.tabs [aria-selected=true] { border-block-end-color: var(--theia-focusBorder); font-weight: 600; }
+.tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--theia-panel-border); }
+.tabs [role=tab] { background: transparent; border-radius: 0; border-bottom: 2px solid transparent; }
+.tabs [aria-selected=true] { border-bottom-color: var(--theia-focusBorder); font-weight: 600; }
 .layout { display: grid; grid-template-columns: 5fr 3fr; gap: 24px; align-items: start; }
-.reg { border: 1px solid var(--theia-panel-border); }
-.reg-head { padding: 8px; border-block-end: 1px solid var(--theia-panel-border); display: flex; justify-content: space-between; gap: 8px; }
-.row { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; width: 100%; padding: 8px; text-align: start; background: transparent; border: 0; border-block-end: 1px solid var(--theia-panel-border); border-radius: 0; color: var(--theia-foreground); }
-.row:last-child { border-block-end: 0; }
-.row[aria-pressed=true] { outline: 1px solid var(--theia-focusBorder); outline-offset: -1px; }
+.section { border-radius: 12px; padding: 16px; display: grid; gap: 16px; align-content: start; }
+.list { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; width: 100%; padding: 8px; text-align: start; border-radius: 5px; color: var(--theia-foreground); }
+.row[aria-pressed=true] { border-color: var(--theia-focusBorder); }
 .row .muted { grid-column: 1; }
-.id { font-family: var(--theia-editor-font-family); font-weight: 600; }
-.detail { border: 1px solid var(--theia-panel-border); display: grid; gap: 16px; padding-block-end: 16px; }
-.detail > .body { display: grid; gap: 16px; padding: 0 16px; }
-.detail h2 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0; }
+dl.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0; }
+dl.facts dt { color: var(--theia-descriptionForeground); }
+dl.facts dd { margin: 0; }
 </style>
 </head>
 <body class="dark">
@@ -163,220 +157,175 @@ textarea { width: 100%; font: inherit; background: var(--theia-input-background)
   <symbol id="i-book" viewBox="0 0 16 16"><path d="M1.5 3H6a2 2 0 0 1 2 2v9a1.5 1.5 0 0 0-1.5-1.5h-5z"/><path d="M14.5 3H10a2 2 0 0 0-2 2v9a1.5 1.5 0 0 1 1.5-1.5h5z"/></symbol>
   <symbol id="i-gotofile" viewBox="0 0 16 16"><path d="M6 1.5h4l3 3v10H6"/><path d="M10 1.5v3h3"/><path d="M1.5 9h6"/><path d="M5.5 7l2 2-2 2"/></symbol>
   <symbol id="i-warning" viewBox="0 0 16 16"><path d="M8 1.5l6.5 12.5h-13z"/><path d="M8 6v4"/><path d="M8 12v.5"/></symbol>
-  <symbol id="i-edit" viewBox="0 0 16 16"><path d="M2 14l1-3.5 8-8 2.5 2.5-8 8z"/></symbol>
   <symbol id="i-marking" viewBox="0 0 16 16"><path d="M2 3.5h12v9H2z"/><path d="M2 6h12"/></symbol>
 </svg>
 
 <header class="sk-head">
   <div>
-    <h1>Classification panel and reviews: Sterling design language sketch</h1>
-    <p>Static sketch for 74.3-UI-SPEC.md and STERLING-DESIGN-LANGUAGE.md. Exact contract copy. The colours stand in for Theia's dark and light themes; the icons stand in for codicons.</p>
+    <h1>Phase 74.3: Classification panel and reviews, original theme with lifted cards</h1>
+    <p>Static sketch for 74.3-UI-SPEC.md. Exact contract copy. The colours stand in for Theia's dark and light themes; the icons stand in for codicons. Hover a request row on the Reviews page to see the extra lift.</p>
   </div>
   <button type="button" id="theme"><span>Switch to light theme</span></button>
 </header>
 
 <div class="grid">
 
-<section aria-label="Proposed"><p class="cap">Proposed</p>
+<section aria-label="Proposed"><p class="cap">Proposed (assistant ran)</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Classified: Secret">Canada, Classified: Secret</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>brigade-move-order.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="provisional"><svg class="ic inf" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed</span></div>
-    <p class="sentence">Proposed. Read what it is based on, then affirm the label.</p>
-    <div class="sec"><span class="caption">Based on</span><ul class="register">
-      <li><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg><a href="#">Your organization's guide, entry SCG 4.2</a></li>
-      <li><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed by the assistant: it found a unit, a location and a future date.</li>
-    </ul></div>
-    <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
-    <div class="sec"><span class="caption">Assisted by</span>Proposed with gpt-oss-20b · Runs on your organization's server<br><button class="linkish" aria-expanded="false">Show trust details</button></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> brigade-move-order.md</span><span class="badge inf"><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Secret</dd>
+    <dd class="state"><svg class="ic inf" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed. Read why, then affirm the label.</dd></dl>
+  <div><h2>Why</h2><ul class="bases">
+    <li><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg><a href="#">Your organization's guide, entry SCG 4.2</a></li>
+    <li><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed by the assistant: it found a unit, a location and a future date.</li>
+  </ul></div>
+  <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
+  <div class="trust">Proposed with gpt-oss-20b · Runs on your organization's server<br><button class="linkish" aria-expanded="false">Show trust details</button></div>
 </div></section>
 
 <section aria-label="Raised"><p class="cap">Raised, with notice</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Classified: Secret">Canada, Classified: Secret</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>exercise-brief.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="provisional"><svg class="ic inf" aria-hidden="true"><use href="#i-arrow-up"/></svg>Raised</span></div>
-    <p class="sentence">Raised to Canada, Classified: Secret. Read what it is based on, then affirm the label.</p>
-    <div class="notice" role="status"><svg class="ic inf" aria-hidden="true"><use href="#i-arrow-up"/></svg><span>The label was raised to Canada, Classified: Secret because a marking was found. This is wrong? <a href="#">Request a lower label</a></span></div>
-    <div class="sec"><span class="caption">Based on</span><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-marking"/></svg>Marking found: SECRET banner</li></ul></div>
-    <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> exercise-brief.md</span><span class="badge inf"><svg class="ic" aria-hidden="true"><use href="#i-arrow-up"/></svg>Raised</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Secret</dd>
+    <dd class="state"><svg class="ic inf" aria-hidden="true"><use href="#i-arrow-up"/></svg>Raised to Canada, Classified: Secret. Read why, then affirm the label.</dd></dl>
+  <div class="notice card" data-tone="info" role="status"><svg class="ic i" aria-hidden="true"><use href="#i-arrow-up"/></svg><span>The label was raised to Canada, Classified: Secret because a marking was found. This is wrong? <a href="#">Request a lower label</a></span></div>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-marking"/></svg>Marking found: SECRET banner</li></ul></div>
+  <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
+  <div class="trust">Proposed with gpt-oss-20b · Runs on your organization's server</div>
 </div></section>
 
 <section aria-label="Checking"><p class="cap">Checking</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Protected: Protected B">Canada, Protected: Protected B</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>logistics-annex.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="provisional"><svg class="ic inf" aria-hidden="true"><use href="#i-sync"/></svg>Checking</span></div>
-    <p class="sentence">Checking the label after your last save. You can keep working.</p>
-    <div class="sec"><span class="caption">Based on</span><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from: Exercise NORTHERN EXAMPLE logistics plan</li></ul></div>
-    <div><div class="actions"><button class="primary" aria-disabled="true" aria-describedby="d1">Affirm label</button><button>Raise label</button></div>
-    <p class="muted" id="d1" style="margin:4px 0 0">The label is being checked. Affirm when the check finishes.</p></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> logistics-annex.md</span><span class="badge inf"><svg class="ic" aria-hidden="true"><use href="#i-sync"/></svg>Checking</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Protected: Protected B</dd>
+    <dd class="state"><svg class="ic inf" aria-hidden="true"><use href="#i-sync"/></svg>Checking the label after your last save. You can keep working.</dd></dl>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from: Exercise NORTHERN EXAMPLE logistics plan</li></ul></div>
+  <div><div class="actions"><button class="primary" aria-disabled="true" aria-describedby="d1">Affirm label</button><button>Raise label</button></div>
+  <p class="why-disabled" id="d1">The label is being checked. Affirm when the check finishes.</p></div>
 </div></section>
 
-<section aria-label="Rules only"><p class="cap">Rules only</p>
+<section aria-label="Rules only"><p class="cap">Rules only (unassessed)</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Organization: Internal">Organization: Internal</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>notes.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="provisional"><svg class="ic warn" aria-hidden="true"><use href="#i-checklist"/></svg>Rules only</span></div>
-    <p class="sentence">Your organization's rules were applied. No model checked this.</p>
-    <div class="sec"><span class="caption">Based on</span><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from a source labelled Organization: Internal</li></ul></div>
-    <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
-    <div class="sec"><span class="caption">Assisted by</span>Rules only: no model server your organization lists can be reached. Checked again when a model is available.</div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> notes.md</span><span class="badge warn"><svg class="ic" aria-hidden="true"><use href="#i-checklist"/></svg>Rules only</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Organization: Internal</dd>
+    <dd class="state"><svg class="ic warn" aria-hidden="true"><use href="#i-checklist"/></svg>Your organization's rules were applied. No model checked this.</dd></dl>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from a source labelled Organization: Internal</li></ul></div>
+  <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button><button>Request a lower label</button></div>
+  <div class="trust">Rules only: no model server your organization lists can be reached. Checked again when a model is available.</div>
 </div></section>
 
 <section aria-label="Trial"><p class="cap">Trial suggestion</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Classified: Confidential">Canada, Classified: Confidential</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>site-survey.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="provisional"><svg class="ic inf" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed</span><span class="stamp" data-line="provisional"><svg class="ic inf" aria-hidden="true"><use href="#i-beaker"/></svg>Trial</span></div>
-    <p class="sentence">Proposed. Read what it is based on, then affirm the label. Trial at Secret: suggestions only.</p>
-    <div class="sec"><span class="caption">Based on</span><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from a source labelled Canada, Classified: Confidential</li></ul></div>
-    <div class="sec"><span class="caption">Suggestions</span><ul class="register"><li style="display:grid;gap:8px">Suggested: Canada, Classified: Secret. The assistant is in its trial period at Secret, so it only suggests.<button style="justify-self:start">Accept label</button></li></ul></div>
-    <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> site-survey.md</span><span class="badge inf"><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Confidential</dd>
+    <dd class="state"><svg class="ic inf" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed. Read why, then affirm the label.</dd>
+    <dd><span class="chip"><svg class="ic" aria-hidden="true"><use href="#i-beaker"/></svg>Trial at Secret: suggestions only.</span></dd></dl>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-gotofile"/></svg>Built from a source labelled Canada, Classified: Confidential</li></ul></div>
+  <div><h2>Suggestions</h2><div class="suggestion card">Suggested: Canada, Classified: Secret. The assistant is in its trial period at Secret, so it only suggests.<button style="justify-self:start">Accept label</button></div></div>
+  <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button></div>
 </div></section>
 
 <section aria-label="Under review"><p class="cap">Under review</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="final" aria-label="Label: Canada, Classified: Secret">Canada, Classified: Secret</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>training-schedule.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="waiting"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>Under review</span></div>
-    <p class="sentence">You asked for a lower label. The label stays Canada, Classified: Secret until a classification authority decides.</p>
-    <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> training-schedule.md</span><span class="badge"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>Under review</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Secret</dd>
+    <dd class="state"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>You asked for a lower label. The label stays Canada, Classified: Secret until a classification authority decides.</dd></dl>
+  <div class="actions"><button class="primary">Affirm label</button><button>Raise label</button></div>
+  <div class="record">Classified by Alex Example, J2 Operations Officer. Assisted by gpt-oss-20b.<br>Affirmed 24 Nov 2026 14:02 UTC</div>
 </div></section>
 
-<section aria-label="Possible spill"><p class="cap">Possible spill</p>
+<section aria-label="Possible spill"><p class="cap">Possible spill (frozen)</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="stopped" aria-label="Label: Canada, Protected: Protected B, Keep on this system, No agent tools"><span>Canada, Protected: Protected B · Keep on this system · No agent tools</span></p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>imported-report.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="stopped"><span><svg class="ic err" aria-hidden="true"><use href="#i-stop"/></svg>Possible spill</span></span></div>
-    <p class="sentence">Sharing is stopped.</p>
-    <div class="notice stopped" role="alert"><div><svg class="ic err" aria-hidden="true"><use href="#i-stop"/></svg><span>This may not belong on this system. Your organization's security officer has been told. Do not copy or share it.</span></div></div>
-    <div class="sec"><span class="caption">Based on</span><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-marking"/></svg>Marking found: SECRET banner</li></ul></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> imported-report.md</span><span class="badge err"><svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>Possible spill</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Protected: Protected B</dd><dd>Keep on this system · No agent tools</dd>
+    <dd class="state"><svg class="ic err" aria-hidden="true"><use href="#i-stop"/></svg>Sharing is stopped.</dd></dl>
+  <div class="notice card" data-tone="error" role="alert"><svg class="ic i" aria-hidden="true"><use href="#i-stop"/></svg><span>This may not belong on this system. Your organization's security officer has been told. Do not copy or share it.</span></div>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-marking"/></svg>Marking found: SECRET banner</li></ul></div>
 </div></section>
 
-<section aria-label="Out of date"><p class="cap">Out of date</p>
+<section aria-label="Out of date"><p class="cap">Out of date (edited after affirming)</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Classified: Secret">Canada, Classified: Secret</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>brigade-move-order.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="neutral"><svg class="ic warn" aria-hidden="true"><use href="#i-history"/></svg>Out of date</span></div>
-    <p class="sentence">Edited since you affirmed it. The label stays Canada, Classified: Secret. Affirm again before you submit or release.</p>
-    <div class="actions"><button>Raise label</button></div>
-  </div>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> brigade-move-order.md</span><span class="badge warn"><svg class="ic" aria-hidden="true"><use href="#i-history"/></svg>Out of date</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Secret</dd>
+    <dd class="state"><svg class="ic warn" aria-hidden="true"><use href="#i-history"/></svg>Edited since you affirmed it. The label stays Canada, Classified: Secret. Affirm again before you submit or release.</dd></dl>
+  <div class="actions"><button>Raise label</button></div>
 </div></section>
 
-<section aria-label="Affirmed"><p class="cap">Affirmed, with control block and foot strip</p>
+<section aria-label="Affirmed"><p class="cap">Affirmed</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <p class="strip" data-line="final" aria-label="Label: Canada, Classified: Secret, ITAR">Canada, Classified: Secret · ITAR</p>
-  <div class="body">
-    <div class="item"><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg><span>brigade-move-order.md</span></div>
-    <div class="stamps"><span class="stamp" data-line="final"><svg class="ic ok" aria-hidden="true"><use href="#i-pass"/></svg>Affirmed</span></div>
-    <p class="sentence">Affirmed by you.</p>
-    <div class="actions"><button>Raise label</button><button>Request a lower label</button></div>
-    <dl class="form control">
-      <div><dt>Classified by</dt><dd>Alex Example, J2 Operations Officer</dd></div>
-      <div><dt>Based on</dt><dd>Your organization's guide, entry SCG 4.2, the assistant's proposal</dd></div>
-      <div><dt>Assisted by</dt><dd>gpt-oss-20b</dd></div>
-      <div><dt>Affirmed</dt><dd><time datetime="2026-11-24T14:02:00Z">24 Nov 2026 14:02 UTC</time></dd></div>
-    </dl>
-  </div>
-  <p class="strip" data-line="final" aria-hidden="true">Canada, Classified: Secret · ITAR</p>
+  <div class="item"><span><svg class="ic" aria-hidden="true"><use href="#i-file"/></svg> brigade-move-order.md</span><span class="badge"><svg class="ic ok" aria-hidden="true"><use href="#i-pass"/></svg>Affirmed</span></div>
+  <dl class="label card"><dt>Label</dt><dd class="lv">Canada, Classified: Secret</dd>
+    <dd class="state"><svg class="ic ok" aria-hidden="true"><use href="#i-pass"/></svg>Affirmed by you.</dd></dl>
+  <div class="actions"><button>Raise label</button><button>Request a lower label</button></div>
+  <div class="record">Classified by Alex Example, J2 Operations Officer. Assisted by gpt-oss-20b.<br>Affirmed <time datetime="2026-11-24T14:02:00Z">24 Nov 2026 14:02 UTC</time></div>
 </div></section>
 
-<section aria-label="Assistant off"><p class="cap">Assistant off</p>
+<section aria-label="Assistant off"><p class="cap">Assistant off (no organization policy)</p>
 <div class="panel">
   <div class="viewtitle">Classification</div>
-  <div class="body">
-    <div class="empty"><svg class="ic muted" style="width:32px;height:32px" aria-hidden="true"><use href="#i-slash"/></svg><h2>Classification assistant is off</h2>
-    <p style="margin:0">Your organization's rules do not turn on the classification assistant here, so nothing is proposed. Labels work as before.</p>
-    <button><svg class="ic" aria-hidden="true"><use href="#i-tag"/></svg>Set Label</button></div>
-  </div>
+  <div class="empty"><svg class="ic muted" style="width:32px;height:32px" aria-hidden="true"><use href="#i-slash"/></svg><h2>Classification assistant is off</h2>
+  <p style="margin:0">Your organization's rules do not turn on the classification assistant here, so nothing is proposed. Labels work as before.</p>
+  <button><svg class="ic" aria-hidden="true"><use href="#i-tag"/></svg>Set Label</button></div>
 </div></section>
 
-<section aria-label="Affirm dialog" style="grid-column: span 2"><p class="cap">Affirm dialog, from Submit (a numbered form)</p>
+<section aria-label="Affirm dialog" style="grid-column: span 2"><p class="cap">Affirm dialog, from Submit (elevation-2, with an elevation-1 record preview)</p>
+<div class="stage">
 <div class="dialog" role="dialog" aria-labelledby="dt">
   <h2 id="dt">Affirm the label</h2>
-  <p class="strip" data-line="provisional" aria-label="Label: Canada, Classified: Secret" style="margin-top:-16px">Canada, Classified: Secret</p>
-  <div class="body">
-    <p style="margin:0">You are about to affirm this label. You will be recorded as the person who classified it.</p>
-    <dl class="form two">
-      <div><dt>1 Item</dt><dd>brigade-move-order.md</dd></div>
-      <div><dt>2 Label</dt><dd>Canada, Classified: Secret</dd></div>
-      <div style="grid-column:1/-1"><dt>3 Based on</dt><dd><ul class="register"><li><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg>Your organization's guide, entry SCG 4.2</li><li><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed by the assistant: it found a unit, a location and a future date.</li></ul></dd></div>
-      <div><dt>4 Assisted by</dt><dd>Proposed with gpt-oss-20b · Runs on your organization's server</dd></div>
-      <div><dt>5 Classified by</dt><dd>Alex Example, J2 Operations Officer<br><span class="muted">This is what the record will say.</span></dd></div>
-    </dl>
-    <p class="muted" style="margin:0">To choose a higher label, cancel and use Raise label.</p>
-    <div class="buttons"><button>Close without affirming</button><button class="primary">Affirm and submit</button></div>
-  </div>
+  <p style="margin:0">You are about to affirm this label. You will be recorded as the person who classified it.</p>
+  <div><div class="hint">brigade-move-order.md</div><div class="hint">Label</div><div style="font-size:20px;font-weight:600;line-height:1.25">Canada, Classified: Secret</div></div>
+  <div><h2>Why</h2><ul class="bases"><li><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg>Your organization's guide, entry SCG 4.2</li><li><svg class="ic" aria-hidden="true"><use href="#i-lightbulb"/></svg>Proposed by the assistant: it found a unit, a location and a future date.</li></ul></div>
+  <div class="trust">Proposed with gpt-oss-20b · Runs on your organization's server</div>
+  <div class="preview card">The record will read: Classified by Alex Example, J2 Operations Officer. Assisted by gpt-oss-20b.</div>
+  <div class="hint">To choose a higher label, cancel and use Raise label.</div>
+  <div class="buttons"><button>Close without affirming</button><button class="primary">Affirm and submit</button></div>
+</div>
 </div></section>
 
-<section aria-label="Request dialog" style="grid-column: span 2"><p class="cap">Request a lower label (a numbered form)</p>
+<section aria-label="Request dialog" style="grid-column: span 2"><p class="cap">Request a lower label dialog</p>
+<div class="stage">
 <div class="dialog" role="dialog" aria-labelledby="rt">
   <h2 id="rt">Request a lower label</h2>
-  <p class="strip" data-line="final" aria-label="Label: Canada, Classified: Secret, ITAR, No agent tools" style="margin-top:-16px">Canada, Classified: Secret · ITAR · No agent tools</p>
-  <div class="body">
-    <dl class="form"><div><dt>1 Current label</dt><dd>Canada, Classified: Secret · ITAR · No agent tools</dd></div></dl>
-    <fieldset><legend class="caption">2 Lower label</legend>
-      <label><input type="radio" name="l" checked> Canada, Classified: Confidential</label>
-    </fieldset>
-    <fieldset><legend class="caption">3 Remove</legend>
-      <label><input type="checkbox"> No agent tools</label>
-      <label><input type="checkbox" disabled aria-describedby="itar"> ITAR</label>
-      <span class="muted" id="itar">Removing ITAR is not available here yet. Ask your organization's security officer.</span>
-    </fieldset>
-    <div class="who"><span class="caption">4 Who must approve</span><br>A classification authority whose authority covers this item and reaches Canada, Classified: Secret. Your request goes to your organization's classification authorities.</div>
-    <label style="display:grid;gap:4px"><span class="caption">5 Reason</span><span class="muted">Say why the lower label is right. Your reason stays with this item and is shown only to people who can open it.</span><textarea rows="4"></textarea><span class="muted">0 of 500 characters</span></label>
-    <div class="buttons"><button>Close without sending</button><button class="primary">Send request</button></div>
-  </div>
+  <div>Current label: Canada, Classified: Secret · ITAR · No agent tools</div>
+  <fieldset><legend>Lower label</legend>
+    <label><input type="radio" name="l" checked> Canada, Classified: Confidential</label>
+  </fieldset>
+  <fieldset><legend>Remove</legend>
+    <label><input type="checkbox"> No agent tools</label>
+    <label><input type="checkbox" disabled aria-describedby="itar"> ITAR</label>
+    <span class="hint" id="itar">Removing ITAR is not available here yet. Ask your organization's security officer.</span>
+  </fieldset>
+  <div class="who card">Who must approve: a classification authority whose authority covers this item and reaches Canada, Classified: Secret. Your request goes to your organization's classification authorities.</div>
+  <label style="display:grid;gap:4px"><strong>Reason</strong><span class="hint">Say why the lower label is right. Your reason stays with this item and is shown only to people who can open it.</span><textarea rows="4"></textarea><span class="hint">0 of 500 characters</span></label>
+  <div class="buttons"><button>Close without sending</button><button class="primary">Send request</button></div>
+</div>
 </div></section>
 
-<section class="reviews" aria-label="Classification Reviews"><p class="cap" style="margin:0">Classification Reviews (main area), Requests section after confirming. Register lines show scale name plus level only.</p>
+<section class="reviews" aria-label="Classification Reviews"><p class="cap" style="margin:0">Classification Reviews page (main area), Requests section after confirming. Lists show scale name plus level only. Hover a row to see it lift.</p>
   <h1>Classification Reviews</h1>
   <div class="tabs" role="tablist"><button role="tab" aria-selected="true">Requests for a lower label</button><button role="tab" aria-selected="false" tabindex="-1">Possible spills</button><button role="tab" aria-selected="false" tabindex="-1">Model evaluation</button><button role="tab" aria-selected="false" tabindex="-1">Blind audit</button></div>
   <div class="layout">
-    <div class="reg">
-      <div class="reg-head"><span class="caption">Requests for a lower label</span><span class="muted" role="status">2 requests, 1 overdue</span></div>
-      <button class="row" aria-pressed="true"><span><span class="id">7F3A-21C9</span> · Canada, Classified: Secret to Canada, Classified: Confidential</span><span class="stamp" data-line="waiting"><svg class="ic warn" aria-hidden="true"><use href="#i-warning"/></svg>Overdue</span><span class="muted">Alex Example, J2 Operations Officer · <span title="15 Nov 2026 09:40 UTC">9 days ago</span></span></button>
-      <button class="row" aria-pressed="false"><span><span class="id">0B91-4D2E</span> · Canada, Protected: Protected B to Organization: Internal</span><span></span><span class="muted">Blake Example, J4 Plans Officer · <span title="23 Nov 2026 16:15 UTC">1 day ago</span></span></button>
-    </div>
-    <div class="detail">
-      <p class="strip" data-line="final" aria-label="Label: Canada, Classified: Secret, ITAR">Canada, Classified: Secret · ITAR</p>
-      <div class="body">
-        <h2>Request <span class="id">7F3A-21C9</span></h2>
-        <dl class="form two">
-          <div><dt>Current label</dt><dd>Canada, Classified: Secret · ITAR</dd></div>
-          <div><dt>Asked for</dt><dd>Canada, Classified: Confidential · ITAR</dd></div>
-          <div><dt>Asked by</dt><dd>Alex Example, J2 Operations Officer</dd></div>
-          <div><dt>Asked</dt><dd><time datetime="2026-11-15T09:40:00Z">15 Nov 2026 09:40 UTC</time></dd></div>
-          <div style="grid-column:1/-1"><dt>Reason</dt><dd>Reason kept with the item.</dd></div>
-        </dl>
-        <p class="muted" style="margin:0">Your authority covers this: up to Canada, Classified: Top Secret, your organization.</p>
-        <div class="actions"><button class="primary">Approve lower label</button><button>Refuse request</button></div>
+    <div class="section card"><h2 style="margin:0">Requests for a lower label</h2><div class="hint" role="status">2 requests, 1 overdue</div>
+      <div class="list">
+      <button class="row card interactive" aria-pressed="true"><span>Request 7F3A-21C9 · Canada, Classified: Secret to Canada, Classified: Confidential</span><span class="badge warn"><svg class="ic" aria-hidden="true"><use href="#i-warning"/></svg>Overdue</span><span class="muted">Alex Example, J2 Operations Officer · <span title="15 Nov 2026 09:40 UTC">9 days ago</span></span></button>
+      <button class="row card interactive" aria-pressed="false"><span>Request 0B91-4D2E · Canada, Protected: Protected B to Organization: Internal</span><span></span><span class="muted">Blake Example, J4 Plans Officer · <span title="23 Nov 2026 16:15 UTC">1 day ago</span></span></button>
       </div>
+    </div>
+    <div class="section card"><h2 style="margin:0">Request 7F3A-21C9</h2>
+      <dl class="facts"><div><dt>Current label</dt><dd>Canada, Classified: Secret · ITAR</dd></div><div><dt>Asked for</dt><dd>Canada, Classified: Confidential · ITAR</dd></div>
+      <div><dt>Asked by</dt><dd>Alex Example, J2 Operations Officer</dd></div><div><dt>Asked</dt><dd><time datetime="2026-11-15T09:40:00Z">15 Nov 2026 09:40 UTC</time></dd></div></dl>
+      <div><div class="hint">Reason</div><p style="margin:0">Reason kept with the item.</p></div>
+      <div class="hint">Your authority covers this: up to Canada, Classified: Top Secret, your organization.</div>
+      <div class="actions"><button class="primary">Approve lower label</button><button>Refuse request</button></div>
     </div>
   </div>
 </section>
