@@ -7,11 +7,11 @@ import type { TeamPreviewProject, TeamPreviewResult, TeamPreviewService, TeamPre
 const projects: readonly (TeamPreviewProject & { readonly fixture?: string })[] = [
   { id: 'orchard', title: 'Orchard sample', fixture: 'orchard.md' },
   { id: 'lighthouse', title: 'Lighthouse sample', fixture: 'lighthouse.md' },
-  { id: 'empty', title: 'Sample without a team' },
-  { id: 'invalid', title: 'Sample with an invalid team', fixture: 'invalid.md' }
+  { id: 'empty', title: 'Sample without an agent team' },
+  { id: 'invalid', title: 'Sample with an invalid agent team', fixture: 'invalid.md' }
 ];
 
-const UNAVAILABLE: TeamPreviewResult = { kind: 'missing', message: 'The shipped team sample is unavailable.' };
+const UNAVAILABLE: TeamPreviewResult = { kind: 'missing', message: 'The shipped agent team sample is unavailable.' };
 
 type ParseTeam = (text: string, file: string) => TeamPreviewTeam;
 
@@ -49,7 +49,7 @@ export function createTeamPreviewReader(options: { readonly appRoot?: string } =
   async function readProject(id: string): Promise<TeamPreviewResult> {
     const project = projects.find(candidate => candidate.id === id);
     if (!project?.fixture) {
-      return { kind: 'missing', message: 'This sample has no team file.' };
+      return { kind: 'missing', message: 'This sample has no agent team file.' };
     }
 
     let content: string;
@@ -80,7 +80,7 @@ export function createTeamPreviewReader(options: { readonly appRoot?: string } =
     } catch (error) {
       return {
         kind: 'invalid',
-        message: error instanceof Error ? error.message : 'The team sample could not be parsed.'
+        message: error instanceof Error ? error.message : 'The agent team sample could not be parsed.'
       };
     }
   }

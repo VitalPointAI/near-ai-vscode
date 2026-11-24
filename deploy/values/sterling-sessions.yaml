@@ -1,0 +1,9 @@
+# The workbench sessions (deploy/charts/sterling-sessions). The step-up pair and the idle timeout come from the site file, the one source
+# shared with the realm (47-08) and OpenBao (47-07).
+appDefinition:
+  # The site setting sessionTimeoutMinutes is the idle stop (provisional until Phase 48, D-11).
+  timeoutAfterMinutes: "${site.sessionTimeoutMinutes}"
+siteEnv:
+  openbaoAddr: "https://openbao.sterling-openbao.svc:8200"
+  stepUpAcr: "${site.stepUpAcr}"
+  stepUpMaxAgeSeconds: "${site.stepUpMaxAgeSeconds}"

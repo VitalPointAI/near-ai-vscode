@@ -1,0 +1,9 @@
+# The namespaces, each { name, create, podSecurity }; set in deploy/values/sterling-network.yaml.
+namespaces: []
+# The cluster's pod and service ranges and the site's node network.
+cidrs:
+  pod: ""
+  service: ""
+  nodes: ""
+# The only outside addresses pods may reach (CIDRs), each allowed by your organization's signed policy.
+egressAllow: []

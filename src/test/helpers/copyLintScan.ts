@@ -93,6 +93,12 @@ export function extractPackage(manifest: unknown): CopyText[] {
 
 /** The Sterling workbench's user copy sources (D-33): its browser pages and the common modules they share with the backend. */
 export const WORKBENCH_SOURCES: readonly string[] = Object.freeze(['workbench/extension/src/browser', 'workbench/extension/src/common']);
+/**
+ * The workbench backend (Phase 46 verification W3). Most of it is not copy (start errors name settings for an administrator), so only the
+ * strings it sends to the browser are read, found by rule rather than by a file list: text constants (TEXT_CONSTANT, exported or not), the
+ * values of the result fields an RPC result carries to the browser (RESULT_COPY_KEYS), and the arguments of refused().
+ */
+export const WORKBENCH_BACKEND = 'workbench/extension/src/node';
 
 /** Files no rule ever scans: the mode table is where the mode words live (D-40), and term() is its only reader. */
 export const NEVER_SCANNED: readonly string[] = Object.freeze(['src/domain/org/modes.ts', 'src/domain/org/terms.ts']);
@@ -307,6 +313,20 @@ function isPageName(node: ts.Node): boolean {
   return false;
 }
 
+/** The fields of an RPC result that carry words to the browser: ServiceResult's reason and fix, a result's message, a listed item's title. */
+const RESULT_COPY_KEYS = new Set(['message', 'reason', 'fix', 'title', 'label', 'description', 'detail']);
+
+/** The workbench backend: text constants, the values of result copy fields, and refused() arguments (see WORKBENCH_BACKEND). */
+function walkBackend(file: ts.SourceFile, collector: Collector): void {
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && TEXT_CONSTANT.test(node.name.text)) collector.gather(node.initializer, false);
+    if (ts.isPropertyAssignment(node) && RESULT_COPY_KEYS.has(propertyName(node.name))) collector.gather(node.initializer, false);
+    if (ts.isCallExpression(node) && calleeName(node) === 'refused') for (const argument of node.arguments) collector.gather(argument, false);
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+}
+
 /** A page script: every string that holds words, and the text of HTML it builds. A workbench page also knows its own name positions. */
 function walkPage(file: ts.SourceFile, collector: Collector, workbench = false): void {
   const classNames = workbench ? classNameParameters(file) : new Map<string, number>();
@@ -327,7 +347,8 @@ export function extractCopy(source: string, file: string): CopyText[] {
   const workbench = WORKBENCH_SOURCES.some((folder) => file.startsWith(`${folder}/`));
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, page ? ts.ScriptKind.JS : ts.ScriptKind.TS);
   const collector = new Collector();
-  if (page || workbench) walkPage(parsed, collector, workbench);
+  if (file.startsWith(`${WORKBENCH_BACKEND}/`)) walkBackend(parsed, collector);
+  else if (page || workbench) walkPage(parsed, collector, workbench);
   else walkHost(parsed, collector, file.startsWith('src/services/'));
   return collector.out;
 }
@@ -341,15 +362,15 @@ function listFiles(root: string, folder: string, keep: (file: string) => boolean
 }
 
 /**
- * Every copy source under `root`, sorted: package.json, src/**\/*.ts outside src/test, media/**\/*.js and *.html outside media/vendor, and the Sterling
- * workbench's browser and common sources (D-33).
+ * Every copy source under `root`, sorted: package.json, src/**\/*.ts outside src/test, media/**\/*.js and *.html outside media/vendor, the Sterling
+ * workbench's browser and common sources (D-33), and its backend sources, read only for what they send to the browser (WORKBENCH_BACKEND).
  */
 export function copySourceFiles(root: string = REPO_ROOT): string[] {
   const out = ['package.json'];
   const typescript = (file: string): boolean => file.endsWith('.ts') && !file.endsWith('.d.ts');
   listFiles(root, 'src', (file) => typescript(file) && !file.startsWith('src/test/') && !NEVER_SCANNED.includes(file), out);
   listFiles(root, 'media', (file) => (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.html')) && !file.startsWith('media/vendor/'), out);
-  for (const folder of WORKBENCH_SOURCES) listFiles(root, folder, typescript, out);
+  for (const folder of [...WORKBENCH_SOURCES, WORKBENCH_BACKEND]) listFiles(root, folder, typescript, out);
   return out.sort();
 }
 

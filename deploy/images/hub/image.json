@@ -1,0 +1,5 @@
+{
+  "name": "near-ai-hub",
+  "containerfile": "hub/Dockerfile",
+  "context": "."
+}

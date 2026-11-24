@@ -1007,9 +1007,10 @@
       ],
       "component": "extension",
       "scope": "runtime",
-      "purpose": "The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services; this repository's own code in workbench/extension.",
+      "purpose": "The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services, including the answer to Theia Cloud's activity tracker for idle stop (GET /monitor/activity/lastActivity and POST /monitor/activity/popup, only with the session secret, nothing about the person); this repository's own code in workbench/extension.",
       "licence": "MIT (this repository)",
       "controls": [
+        "ac-12",
         "sa-11",
         "sa-15",
         "sr-03"

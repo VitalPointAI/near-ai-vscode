@@ -1,0 +1,20 @@
+# Per-site session settings, written by the site's operator from this example. Sized for an HQ of about 400 people, with sessions started in
+# bursts of about 200; every number here is provisional until Phase 48 measures it (D-11), and none is a stated capacity.
+appDefinition:
+  # The most sessions that may run at once; at the limit Theia Cloud refuses new sessions (requested -> refused).
+  maxInstances: 400
+  # Minutes of no activity before the warning (idle-warned) and before the session stops (stopping); the stop is the site setting
+  # sessionTimeoutMinutes. A stopped session keeps its workspace volume.
+  notifyAfterMinutes: 25
+  # A hard limit on a session's life whatever its activity; 0 means none (sign-in lifetimes are Keycloak's).
+  maxSessionMinutes: 0
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "2", memory: "4Gi" }
+  # true only in the lab before Phase 46's image is published (D-55).
+  usePlaceholder: false
+siteEnv:
+  # The site's Open VSX mirror; sessions fetch extensions only from here.
+  openVsxUrl: "https://open-vsx.${site.domain}"
+  # The model servers your organization's signed policy lists (an approved endpoint, or local).
+  modelServers: []

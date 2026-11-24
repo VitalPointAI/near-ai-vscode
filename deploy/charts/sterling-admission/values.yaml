@@ -1,0 +1,10 @@
+# The site registry host (and port); every image must be under it.
+registry: ""
+# The PEM text of your organization's cosign public key: the only key a signature is checked against.
+organizationPublicKey: ""
+admission:
+  # Audit reports and admits; Deny refuses. Deny is the setting a site runs with (deploy/values/sterling-admission.yaml).
+  mode: Deny
+  timeoutSeconds: 15
+# Namespaces the policies never apply to: RKE2's own (images preloaded from its tarballs) and Kyverno's (so admission can always start).
+excludedNamespaces: [kube-system, kyverno]

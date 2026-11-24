@@ -15,9 +15,88 @@ majorVersion: "3"
 # 47-16, checks it) and no chown of the data volume (the chart's pod fsGroup 1000 gives the volume its group).
 sysctlInit:
   enabled: false
-persistence:
-  enableInitChown: false
 
-# The security plugin stays on: TLS, roles and the audit log of access to the store (research Decision 4).
+# The security plugin stays on: TLS, roles and the audit log of access to the store (research Decision 4). Users and their password hashes come
+# from Secret opensearch-internal-users (written by the install script, 47-16, with the admin and the writer account); roles and their
+# mapping are here. audit-writer may only create indices and add documents to audit-* and logs-* (Fluent Bit); auditor may only read them.
+# Tamper-evidence of the audit indices stays gap G2 (a condition on the site-logging entry), not solved here.
 securityConfig:
   enabled: true
+  internalUsersSecret: opensearch-internal-users
+  config:
+    dataComplete: false
+    data:
+      roles.yml: |-
+        _meta:
+          type: "roles"
+          config_version: 2
+        audit-writer:
+          cluster_permissions: ["cluster_monitor", "indices:admin/template/get", "indices:data/write/bulk"]
+          index_permissions:
+            - index_patterns: ["audit-*", "logs-*"]
+              allowed_actions: ["create_index", "index", "indices:admin/mapping/put"]
+        auditor:
+          cluster_permissions: ["cluster_monitor"]
+          index_permissions:
+            - index_patterns: ["audit-*", "logs-*"]
+              allowed_actions: ["read", "search"]
+      roles_mapping.yml: |-
+        _meta:
+          type: "rolesmapping"
+          config_version: 2
+        all_access:
+          users: ["admin"]
+        audit-writer:
+          users: ["fluent-bit"]
+        auditor:
+          backend_roles: ["auditor"]
+
+# TLS on the transport and HTTP layers with the certificate from Secret opensearch-tls (issued by site-pki, 47-13); the site CA verifies peers.
+secretMounts:
+  - name: opensearch-tls
+    secretName: opensearch-tls
+    path: /usr/share/opensearch/config/certs
+config:
+  opensearch.yml: |
+    cluster.name: opensearch-cluster
+    network.host: 0.0.0.0
+    plugins.security.ssl.transport.pemcert_filepath: certs/tls.crt
+    plugins.security.ssl.transport.pemkey_filepath: certs/tls.key
+    plugins.security.ssl.transport.pemtrustedcas_filepath: certs/ca.crt
+    plugins.security.ssl.transport.enforce_hostname_verification: true
+    plugins.security.ssl.http.enabled: true
+    plugins.security.ssl.http.pemcert_filepath: certs/tls.crt
+    plugins.security.ssl.http.pemkey_filepath: certs/tls.key
+    plugins.security.ssl.http.pemtrustedcas_filepath: certs/ca.crt
+    plugins.security.allow_default_init_securityindex: true
+    plugins.security.nodes_dn: ["CN=opensearch-cluster-master.sterling-logging.svc"]
+    plugins.security.audit.type: internal_opensearch
+    plugins.security.restapi.roles_enabled: ["all_access"]
+
+# Data on the site's encrypted class (D-17); size, heap and node count per site (deploy/values/site.example/opensearch.yaml).
+persistence:
+  enableInitChown: false
+  storageClass: "${site.storageClass}"
+
+# Retention (D-35): the install script (47-16) applies this index state management policy through the API (ISM policies are not files); it
+# deletes audit-* and logs-* indices after the per-site retention.
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: opensearch-retention-policy
+    data:
+      policy.json: |
+        {
+          "policy": {
+            "description": "Delete site log and audit indices after the site retention",
+            "default_state": "hot",
+            "states": [
+              { "name": "hot", "actions": [], "transitions": [{ "state_name": "delete", "conditions": { "min_index_age": "{{ .Values.sterling.retentionDays }}d" } }] },
+              { "name": "delete", "actions": [{ "delete": {} }], "transitions": [] }
+            ],
+            "ism_template": [{ "index_patterns": ["audit-*", "logs-*"], "priority": 100 }]
+          }
+        }
+sterling:
+  retentionDays: 365

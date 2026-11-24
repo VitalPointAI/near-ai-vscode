@@ -2,12 +2,34 @@
 # the base stages; the build steps and image.json come with its build definition (deploy/images/README.md), and without image.json it is not
 # built.
 #   softhsm-build: ubi9/ubi, compiles SoftHSM2 from the source pinned as "softhsm2" in compliance/ci/tool-pins.json.
-#   final:         our own OpenBao image (deploy/images/openbao), passed in by digest as OPENBAO_IMAGE. The checker skips `${` references
-#                  as images this repository builds. The ARG sits before the first FROM because only a global ARG can name a later stage.
+#   final:         the same digest-pinned upstream OpenBao base as deploy/images/openbao, passed in as OPENBAO_IMAGE by image.json, with
+#                  the same kms-pkcs11 plugin copied in the same way, plus SoftHSM2. It does not build on our sterling/openbao image, because
+#                  deploy-images.yml builds every image in parallel from image.json alone (47-07). The checker skips `${` references; the
+#                  value is the base already in the register. The ARG sits before the first FROM because only a global ARG can name a later stage.
 # The pulled base is pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To
 # re-pin, read the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's
 # digest, check that the bytes fetched by that digest hash to it, and replace the line.
 ARG OPENBAO_IMAGE
 FROM registry.access.redhat.com/ubi9/ubi:9.9@sha256:5a8bf48617eb65228e6ed828995ad896492915918632ccce7233a840a5aba664 AS softhsm-build
+# The SoftHSM2 2.7.0 source is the GitHub archive of commit 13e6e86b (pin "softhsm2", fetched into the context folder softhsm/ and hash-checked
+# by install-tool.sh before the build). Build packages come from the UBI 9 repositories only.
+RUN dnf install -y --nodocs --setopt=install_weak_deps=0 gcc-c++ make autoconf automake libtool openssl-devel pkgconf-pkg-config \
+ && dnf clean all
+COPY softhsm/13e6e86b83748fef74046dbf0c91f664b7acc1c3.tar.gz /src/softhsm.tar.gz
+RUN mkdir -p /src/softhsm && tar -xzf /src/softhsm.tar.gz -C /src/softhsm --strip-components=1 \
+ && cd /src/softhsm && sh autogen.sh \
+ && ./configure --prefix=/usr/local --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var --with-crypto-backend=openssl --disable-gost --disable-static \
+ && make -j"$(nproc)" && make install-strip DESTDIR=/out
 
 FROM ${OPENBAO_IMAGE}
+# Only the PKCS#11 library, its tool and a configuration whose token folder is /var/lib/softhsm/tokens: that folder must be a persistent
+# volume, because losing the token loses the root key and with it the whole OpenBao data set (research Pitfall 14). The AES-256 root key is
+# imported with softhsm2-util --import <32 random bytes> --import-type aes (OpenBao creates no key material); no OpenSC is needed.
+USER root
+RUN mkdir -p /openbao/plugins && chmod 0755 /openbao/plugins
+COPY --chown=0:0 --chmod=0755 plugins/openbao-plugin-kms-pkcs11_linux_amd64_v1 /openbao/plugins/openbao-plugin-kms-pkcs11
+COPY --from=softhsm-build --chown=0:0 /out/usr/lib64/softhsm/libsofthsm2.so /usr/lib64/softhsm/libsofthsm2.so
+COPY --from=softhsm-build --chown=0:0 /out/usr/local/bin/softhsm2-util /usr/local/bin/softhsm2-util
+RUN printf 'directories.tokendir = /var/lib/softhsm/tokens/\nobjectstore.backend = file\nlog.level = INFO\nslots.removable = false\n' > /etc/softhsm2.conf \
+ && chmod 0644 /etc/softhsm2.conf && mkdir -p /var/lib/softhsm/tokens && chown openbao:openbao /var/lib/softhsm/tokens && chmod 0700 /var/lib/softhsm/tokens
+USER openbao

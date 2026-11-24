@@ -1,0 +1,6 @@
+{
+  "name": "theia-cloud-service",
+  "containerfile": "deploy/images/theia-cloud-service/Containerfile",
+  "context": "deploy/images/theia-cloud-service",
+  "source": { "repository": "eclipse-theia/theia-cloud", "ref": "e2d201fd0a1ce3e9581174f42bfd23d855dfa1a3" }
+}

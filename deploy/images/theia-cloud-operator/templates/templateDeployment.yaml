@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placeholder-depname
+  namespace: placeholder-namespace
+  labels:
+    sterling-session: "true"
+  ownerReferences:
+    - apiVersion: theia.cloud/v1beta9
+      kind: AppDefinition
+      name: placeholder
+      uid: placeholder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: placeholder-app
+  template:
+    metadata:
+      labels:
+        app: placeholder-app
+        sterling-session: "true"
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: oauth2-proxy
+          image: placeholder-oauth2-proxy-version
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config=/etc/oauth2-proxy.cfg
+            - --alpha-config=/etc/oauth2-proxy-alpha.yaml
+            - --authenticated-emails-file=/emails/authenticated-emails-list
+            - --gcp-healthchecks
+            - --reverse-proxy
+            - --skip-auth-route=^/monitor/activity/(lastActivity|popup)$
+          ports:
+            - containerPort: 5000
+              name: web
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: oauth2-proxy-config
+              mountPath: /etc/oauth2-proxy.cfg
+              subPath: oauth2-proxy.cfg
+            - name: oauth2-proxy-config
+              mountPath: /etc/oauth2-proxy-alpha.yaml
+              subPath: oauth2-proxy-alpha.yaml
+            - name: oauth2-templates
+              mountPath: /templates
+            - name: oauth2-emails
+              mountPath: /emails
+            - name: oauth2-proxy-secrets
+              mountPath: /etc/oauth2-proxy-secrets
+              readOnly: true
+            - name: site-ca
+              mountPath: /etc/ssl/site-ca
+              readOnly: true
+        - name: placeholder-definitionname
+          image: placeholder-image
+          imagePullPolicy: placeholder-pull-policy
+          ports:
+            - containerPort: placeholder-port
+              name: application
+            placeholder-monitor-port
+          resources:
+            limits:
+              cpu: placeholder-cpu-limits
+              memory: placeholder-memory-limits
+            requests:
+              cpu: placeholder-cpu-requests
+              memory: placeholder-memory-requests
+          envFrom:
+            - configMapRef:
+                name: sterling-site-env
+          env:
+          - name: THEIACLOUD_SERVICE_AUTH_TOKEN
+            value: placeholder-env-service-auth-token
+          - name: THEIACLOUD_APP_ID
+            value: placeholder-env-app-id
+          - name: THEIACLOUD_SERVICE_URL
+            value: placeholder-env-service-url
+          - name: THEIACLOUD_SESSION_UID
+            value: placeholder-env-session-uid
+          - name: THEIACLOUD_SESSION_NAME
+            value: placeholder-env-session-name
+          - name: THEIACLOUD_SESSION_USER
+            value: placeholder-env-session-user
+          - name: THEIACLOUD_SESSION_URL
+            value: placeholder-env-session-url
+          - name: THEIACLOUD_SESSION_SECRET
+            value: placeholder-env-session-secret
+          - name: THEIACLOUD_MONITOR_ENABLE_ACTIVITY_TRACKER
+            value: placeholder-enable-activity-tracker
+          - name: THEIACLOUD_MONITOR_PORT
+            value: placeholder-monitor-env-port
+          - name: THEIACLOUD_KEYCLOAK_URL
+            value: placeholder-keycloak-env-url
+          - name: THEIACLOUD_KEYCLOAK_REALM
+            value: placeholder-keycloak-env-realm
+          - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
+            value: placeholder-keycloak-env-clientid
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: placeholder-uid
+            runAsGroup: placeholder-uid
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: site-ca
+              mountPath: /etc/ssl/site-ca
+              readOnly: true
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: placeholder-uid
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: oauth2-proxy-config
+          configMap:
+            name: placeholder-configname
+        - name: oauth2-templates
+          configMap:
+            name: oauth2-templates
+        - name: oauth2-emails
+          configMap:
+            name: placeholder-emailsconfigname
+        # The OIDC client secret and cookie secret, read only by the oauth2-proxy container (owner root, group the pod's fsGroup, 0440: the
+        # sidecar runs as 65532 and reads them through the fsGroup supplemental group; the Theia container does not mount this volume).
+        - name: oauth2-proxy-secrets
+          secret:
+            secretName: oauth2-proxy-secrets
+            defaultMode: 0440
+        - name: site-ca
+          configMap:
+            name: sterling-site-ca

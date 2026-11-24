@@ -1,0 +1,14 @@
+# One hub per release (the descriptor's instances: hubs). Each site hub item arrives as `instance`: name, publicAddress (the host name, with an
+# optional :port, members' computers use), nodePort (the TCP port on every node) and storage (the state volume size).
+instance: {}
+# The hub image, set by digest from deploy/bundle/images.lock.json (sterling/near-ai-hub, the unchanged hub/Dockerfile, D-45).
+image: ""
+# The site's encrypted storage class (D-17).
+storageClass: ""
+# The Compose limits (relay/compose.yaml): memory 512 MiB.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

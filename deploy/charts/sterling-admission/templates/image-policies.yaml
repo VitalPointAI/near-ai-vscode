@@ -1,0 +1,85 @@
+{{- /*
+Admission (D-15, D-48, research Decision 1): only images signed with your organization's cosign key and served by the site registry run.
+site-images-signed checks the signature of every image the pod names under the site registry against the one static key (no keyless
+signing, no transparency log: signatures are made with an empty signing config, spike S1). site-registry-only refuses any image outside the
+site registry, so an off-registry name cannot slip past the first policy's image glob. Both fail closed and exclude only kube-system (RKE2's
+own images, preloaded from its tarballs) and Kyverno's own namespace (so Kyverno can always start).
+*/ -}}
+{{- $mode := .Values.admission.mode -}}
+{{- if not (has $mode (list "Audit" "Deny")) }}{{ fail "admission.mode must be Audit or Deny" }}{{ end -}}
+{{- if not .Values.registry }}{{ fail "registry (the site registry host) is not set" }}{{ end -}}
+{{- if not (contains "BEGIN PUBLIC KEY" .Values.organizationPublicKey) }}{{ fail "organizationPublicKey must be the PEM text of your organization's cosign public key" }}{{ end -}}
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: site-images-signed
+spec:
+  validationActions: [{{ $mode }}]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  webhookConfiguration:
+    timeoutSeconds: {{ .Values.admission.timeoutSeconds }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: {{ toJson .Values.excludedNamespaces }}
+  matchImageReferences:
+    - glob: {{ printf "%s/*" .Values.registry | quote }}
+  validationConfigurations:
+    required: true
+    verifyDigest: true
+    mutateDigest: false
+  attestors:
+    - name: organization
+      cosign:
+        key:
+          data: |
+            {{- .Values.organizationPublicKey | trim | nindent 12 }}
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        images.containers.map(image, verifyImageSignatures(image, [attestors.organization])).all(e, e > 0)
+        && images.initContainers.map(image, verifyImageSignatures(image, [attestors.organization])).all(e, e > 0)
+      message: "An image is not signed with your organization's key. Only signed images from the site registry may run."
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: site-registry-only
+spec:
+  validationActions: [{{ $mode }}]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: {{ toJson .Values.excludedNamespaces }}
+  variables:
+    - name: images
+      expression: >-
+        object.spec.containers.map(c, c.image)
+        + (has(object.spec.initContainers) ? object.spec.initContainers.map(c, c.image) : [])
+        + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers.map(c, c.image) : [])
+  validations:
+    - expression: {{ printf "variables.images.all(image, image.startsWith('%s/'))" .Values.registry | quote }}
+      message: {{ printf "Every image must come from the site registry %s." .Values.registry | quote }}
