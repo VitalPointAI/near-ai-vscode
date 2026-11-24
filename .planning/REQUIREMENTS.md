@@ -840,7 +840,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 ## Version safety requirements (Phases 32.1, 46, 47 and 48)
 
-**Defined:** 2026-11-24, approved by the owner ("go"), from the owner's principle "the application should always keep itself up to date". People never update anything. An administrator updates a site by importing a signed bundle, so a disconnected edge site can briefly run an older release than HQ. Decisions D-60 to D-69 in `.planning/phases/32.1-guided-setup-with-viable-options-and-a-plain-recommendation/32.1-CONTEXT.md`.
+**Defined:** 2026-11-24, approved by the owner ("go"), from the owner's principle "the application should always keep itself up to date". People never update anything. An administrator updates a site by importing a signed bundle, so a disconnected edge site can briefly run an older release than HQ. Decisions 32.1 D-60 to 32.1 D-69 in `.planning/phases/32.1-guided-setup-with-viable-options-and-a-plain-recommendation/32.1-CONTEXT.md`.
 **Core value:** a site never applies part of something it cannot read, nobody is asked to update anything, and every session follows its site's release on its own.
 
 - [ ] **VSAFE-01**: The tool your organization uses to write and sign its rules refuses to sign rules that use a feature some target site cannot read yet, and names each such site and the release it needs. Site releases come from the signed site evidence exports; a site with no recent export counts as unknown and is refused unless the author excludes it, with the reason recorded in the signed rules. Every policy feature has a `name@N` id in one registry, named by what a document uses.
