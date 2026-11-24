@@ -33,7 +33,7 @@ import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobByte
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
 import type { FoldResult, FoldState } from '../../domain/replica/fold';
-import { WELCOME_MAX_BYTES, buildWelcome, readWelcome } from '../../domain/replica/invite';
+import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
@@ -54,6 +54,7 @@ import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
 import type { SyncLocal } from './hubSync';
+import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGate';
 
 /** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
 export const GENESIS_PIN_FOLDER = 'staff-replica';
@@ -70,7 +71,8 @@ export const PROJECT_REFUSALS_HOST = {
   'no-key': 'This computer does not hold the key for this part of the shared project, so nothing was written. Ask your staff lead to give this device access.',
   'pin-damaged': 'The record of which shared project this folder belongs to cannot be read, so the project was not opened. Nothing was changed. Ask your staff lead for help.',
   'already-shared': 'This project folder already holds a shared staff project, so a second one was not made. Nothing was changed.',
-  'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.'
+  'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.',
+  'needs-update': UPDATE_SENTENCE
 } as const;
 export type ProjectRefusal = keyof typeof PROJECT_REFUSALS_HOST;
 /** A refusal; `store` names the store's own reason when the store refused. */
@@ -129,6 +131,8 @@ export interface ReplicaProjectDeps {
   cellOrder?: (roster: RosterState, keys: DeviceKeyRing) => ReplicaContext['cellOrder'];
   /** The memory-capped decode worker entries from outside pass (D-05); the project makes its own on first need when absent, and close() ends it. */
   decodeHost?: DecodeHost;
+  /** The features this build folds; KNOWN_REPLICA_FEATURES when absent. Tests set it to stand in for a newer version (POST-01). */
+  knownFeatures?: readonly string[];
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -238,18 +242,6 @@ function parseJson(bytes: Buffer): unknown {
   }
 }
 
-/** The project a welcome file names (its genesis stream), read only to find the pin; readWelcome checks everything else. */
-function welcomeProject(file: unknown): string | undefined {
-  try {
-    const value: unknown = typeof file === 'string' ? (Buffer.byteLength(file, 'utf8') <= WELCOME_MAX_BYTES ? JSON.parse(file) : undefined) : file;
-    if (!isRecord(value) || !isRecord(value.genesis) || !isRecord(value.genesis.header)) return undefined;
-    const stream = value.genesis.header.stream;
-    return typeof stream === 'string' && STREAM_ID_PATTERN.test(stream) ? stream : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 const PASS = { ok: true as const };
 const AWAITING_KEY: CheckVerdict = { ok: false, awaiting: 'key' };
 const AWAITING_BLOB: CheckVerdict = { ok: false, awaiting: 'blob' };
@@ -339,7 +331,7 @@ export class ReplicaProject {
   /**
    * Makes a new shared project in `root` with this device's person as the lead (D-07): a base cell key at epoch 1, its founding grant wrapped to
    * this device, and the genesis that commits to it. Written in this order: the key (SecretStorage), the pin (extension storage), the grant, the
-   * genesis, project.json. When the store already holds a genesis this device wrote and pinned (a crash before project.json), that one is used
+   * genesis, project.json, then roster.require { require@1 } so the feature check is armed from the start (Phase 33 D-08). When the store already holds a genesis this device wrote and pinned (a crash before project.json), that one is used
    * again instead of building a second (Pitfall 4). A folder that already holds a shared project made by this device returns it; one made by
    * another lead is refused already-shared.
    */
@@ -363,7 +355,9 @@ export class ReplicaProject {
       if (pin.kind !== 'anchor' || pin.anchor.genesisHash !== entryHash(entry.header) || pin.anchor.lead.writer !== device.writer) continue;
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
       const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-      return new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+      const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+      const rearmed = await ensureRequireArmed(reused);
+      return isProjectRefused(rearmed) ? rearmed : reused;
     }
 
     const now = deps.now?.() ?? new Date();
@@ -398,7 +392,8 @@ export class ReplicaProject {
     if (!(await writeAnchorFile(projectFile(root), anchor))) return refuse('pin-damaged');
     const created = new ReplicaProject(path.resolve(root), anchor, deps, store, ring, device);
     created.lamports.set(genesis.hash, 1);
-    return created;
+    const armed = await ensureRequireArmed(created);
+    return isProjectRefused(armed) ? armed : created;
   }
 
   /**
@@ -441,7 +436,7 @@ export class ReplicaProject {
    * is refused pin-mismatch.
    */
   public static async joinFromWelcome(root: string, deps: ReplicaProjectDeps, welcome: unknown, anchor?: RosterAnchor): Promise<ReplicaProject | ProjectRefused> {
-    const project = anchor?.project ?? welcomeProject(welcome);
+    const project = anchor?.project ?? welcomeProjectOf(welcome);
     if (project === undefined || !STREAM_ID_PATTERN.test(project)) return refuse('welcome-refused');
     const pinFile = genesisPinFile(deps.globalStorageDir, project);
     const pin = await readAnchorFile(pinFile);
@@ -942,6 +937,8 @@ export class ReplicaProject {
       this.rosterState = await this.foldRosterAndKeys(rosterEntries);
       this.rosterKey = rosterKey();
     }
+    // POST-01 (D-06): a required feature this build lacks stops the project here, before any other family is folded. The store keeps every entry.
+    if (requireProblem(this.rosterState, this.deps.knownFeatures) !== undefined) throw new ReplicaProjectError(refuse('needs-update'));
     await this.recheckWaiting();
     const entries = this.store.entries();
     const roster = this.rosterState;

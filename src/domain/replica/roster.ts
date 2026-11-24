@@ -20,7 +20,7 @@
 //    grant equal to its commitment).
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
-// kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose), and rosterView builds every answer from query
+// kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
 // functions those modules export.
 import { GENESIS_PREV, parseHeaderShape, entryHash } from './entry';
 import type { SealedBlob } from './entry';
@@ -42,7 +42,7 @@ export interface RosterAnchor { genesisHash: string; project: string; lead: { me
 
 export type RosterKindOwner = 'members' | 'cells' | 'roster';
 
-// Every roster kind (18) and project.genesis, each routed to exactly one owner module.
+// Every roster kind (19) and project.genesis, each routed to exactly one owner module.
 export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Object.freeze({
   'project.genesis': 'roster',
   'member.invite': 'members',
@@ -62,7 +62,8 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'cell.rekey': 'cells',
   'lead.handover': 'roster',
   'roster.choose': 'roster',
-  'deputy.name': 'roster'
+  'deputy.name': 'roster',
+  'roster.require': 'roster'
 });
 
 export const ROSTER_REFUSALS = {
@@ -118,6 +119,9 @@ export interface RosterState {
   // Splits a person chose: the roster.choose took the position after the split point and the chosen branch the one after it; the other branches stay
   // unapplied and are listed here.
   choices: Array<{ at: string; branches: string[]; chosen: string; choose: string }>;
+  // The features the project requires (POST-01, D-04): the sorted union of every applied roster.require. It never shrinks. Whether this build knows
+  // them is the host's question (requireGate.ts against KNOWN_REPLICA_FEATURES), never the fold's.
+  required: readonly string[];
   // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
   notChosen: Set<string>;
   refused: RosterRefused[];
@@ -135,6 +139,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     deputies: [],
     pending: [],
     choices: [],
+    required: Object.freeze([]),
     notChosen: new Set(),
     refused: [],
     held: []
@@ -293,6 +298,15 @@ function applyHandover(state: RosterState, entry: VerifiedEntry, position: numbe
   return { status: 'applied' };
 }
 
+// roster.require (POST-01, D-04): the driver already allowed only a lead device and a person. The required set grows by the union and never shrinks; an
+// entry whose features are all required already applies as a no-op and keeps its place in the line, so two leads arming at once never conflict.
+function applyRequire(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+  // The closed schema checked the ids (name@N, distinct, sorted) at verification.
+  const features = (entry.data as { features: readonly string[] }).features;
+  state.required = Object.freeze([...new Set([...state.required, ...features])].sort());
+  return { status: 'applied' };
+}
+
 function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
@@ -305,6 +319,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
+  if (entry.body.kind === 'roster.require') return applyRequire(state, entry);
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }

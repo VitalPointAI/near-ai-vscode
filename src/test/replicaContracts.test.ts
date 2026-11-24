@@ -20,7 +20,7 @@ const PRODUCT = 'intel-estimate';
 // family schema, so the contract is now: an empty data object still fails closed for every non-doc kind, with a real schema reason.
 test('every known kind except the doc kinds fails closed on empty data with its family schema reason, not the pending stub', () => {
   const others = REPLICA_KINDS.filter((kind) => !kind.startsWith('doc.'));
-  assert.equal(others.length, 48);
+  assert.equal(others.length, 49, 'roster.require, Phase 33 POST-01');
   for (const kind of others) {
     const check = validateData(kind, {});
     assert.equal(check.ok, false, kind);

@@ -213,7 +213,7 @@ function project(value: ReplicaProject | ProjectRefused | undefined): ReplicaPro
 test('tracer: Start Again killed between the two renames leaves the project shared, and the next open finishes it with the roster it had', async () => {
   const world = await sharedWorld('tracer');
   const { roster: before } = await world.project.state();
-  assert.equal(before.positions.length, 3, 'origin, genesis and the roster entry');
+  assert.equal(before.positions.length, 4, 'origin, genesis, its roster.require (Phase 33 D-08) and the roster entry');
   await world.project.close();
   // This device's mark no longer verifies: the store is refused mark-unverified, which Start Again resolves.
   await new FileSecrets(world.secretsFile).store(markKey(path.join(world.root, REPLICA_DIR)), 'not json');
@@ -234,7 +234,7 @@ test('tracer: Start Again killed between the two renames leaves the project shar
     assert.ok(existsSync(path.join(staff, SET_ASIDE, 'project.json')), 'the old store is set aside whole');
     const next = await reopened.appendOwn('member.invite', { invite: 'inv-sam', name: 'Sam Analyst', seat: 'j2-ops', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(newJoinSecret()) });
     assert.ok('ok' in next, 'the next own entry is written');
-    assert.equal(next.built.entry.header.seq, 2, 'it follows the roster entry at seq 1: no fork');
+    assert.equal(next.built.entry.header.seq, 3, 'it follows the roster entry at seq 2 (seq 1 is the roster.require, Phase 33 D-08): no fork');
   } finally {
     await reopened.close();
   }
@@ -503,7 +503,8 @@ test('an older version\'s leftover (store gone, a folder set aside and a tempora
   assert.deepEqual(isProjectRefused(refused) ? [refused.refused, refused.store] : refused, ['store-refused', 'rolled-back']);
   assert.equal(existsSync(dir), false, 'nothing is made');
   const started = await ReplicaProject.startHistoryAgain(world.root, world.deps);
-  assert.deepEqual(started, { ok: true, setAside: null, carried: 2, carriedFrom: '.planning/staff/replica.set-aside-20261119-090000' });
+  // Carried: the genesis, its roster.require (Phase 33 D-08) and the roster entry.
+  assert.deepEqual(started, { ok: true, setAside: null, carried: 3, carriedFrom: '.planning/staff/replica.set-aside-20261119-090000' });
   assert.ok(existsSync(path.join(world.root, ...REPLICA_PROJECT_FILE.split('/'))), 'project.json is carried');
   const reopened = project(await ReplicaProject.open(world.root, world.deps));
   try {

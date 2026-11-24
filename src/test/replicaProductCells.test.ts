@@ -253,8 +253,8 @@ test('project.import scope: the fold lists a scopeless import as whole and a cel
 
 // ---- Task 2: the base cell (D-15, D-16, D-22 revised) -------------------------------------------------------------------------------------------
 
-test('baseCellAllows: every roster kind, project.genesis and the integrity kinds; never a product, text or import kind, and the closed list stays at 51', () => {
-  assert.equal(REPLICA_KINDS.length, 51);
+test('baseCellAllows: every roster kind, project.genesis and the integrity kinds; never a product, text or import kind, and the closed list stays at 52', () => {
+  assert.equal(REPLICA_KINDS.length, 52, 'roster.require, Phase 33 POST-01');
   for (const kind of REPLICA_KINDS) {
     const family = kindFamily(kind);
     if (family === 'roster' || family === 'integrity') assert.equal(baseCellAllows(kind), true, kind);

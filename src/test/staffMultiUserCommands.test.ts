@@ -891,7 +891,7 @@ test('start this computer\'s shared history again: a project that opens is left 
   const streamDir = path.join(first.root, '.planning', 'staff', 'replica', 'streams', project);
   const [ownFile] = readdirSync(streamDir);
   const lines = readFileSync(path.join(streamDir, ownFile), 'utf8').split('\n');
-  assert.equal(lines.length, 3, 'the genesis and the invitation');
+  assert.equal(lines.length, 4, 'the genesis, its roster.require (Phase 33 D-08) and the invitation');
   await writeFile(path.join(streamDir, ownFile), `${lines[0]}\n`);
   await run(C.invite);
   assert.equal(lastNotification().level, 'warn');

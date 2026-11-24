@@ -21,7 +21,7 @@ export { SCHEMA_PENDING };
 
 const KINDS_BY_FAMILY = {
   project: ['project.genesis', 'project.import'],
-  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void'],
+  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require'],
   doc: ['doc.client', 'doc.update', 'doc.compact'],
   versions: ['product.create', 'product.owner', 'version.propose', 'version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'],
   registers: ['register.row', 'pir.decide', 'watch.decide'],
@@ -35,7 +35,7 @@ export type KindFamily = keyof typeof KINDS_BY_FAMILY;
 export type ReplicaKind = typeof KINDS_BY_FAMILY[KindFamily][number];
 
 // The closed list: DESIGN 4.3 plus deputy.name (DESIGN 7.1), so a deputy lead can be honoured without a format change (D-27), plus the roster kind that
-// voids an open invite (D-17, D-49): 51 kinds.
+// voids an open invite (D-17, D-49), plus roster.require (the feature check, POST-01): 52 kinds.
 export const REPLICA_KINDS: readonly ReplicaKind[] = (Object.values(KINDS_BY_FAMILY) as ReadonlyArray<readonly ReplicaKind[]>).flat();
 
 // A Map, because a kind is chosen by whoever wrote the entry.
