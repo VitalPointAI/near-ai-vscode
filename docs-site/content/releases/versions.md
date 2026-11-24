@@ -15,14 +15,17 @@ What changed in each release is in the [Changelog](./changelog.synced.md).
 
 ## How each version is released
 
-Version 0.4.37 is the first release shipped as a container image instead of through the Visual
-Studio Marketplace. Earlier versions were published on the Marketplace; no later version is.
+Releases are no longer published to the Visual Studio Marketplace. Versions before 0.4.37 were
+published there; no later version is.
 
-From 0.4.37 on, each version is a Sterling workbench container image, with that version's extension
-inside it, on the GitHub Container Registry as `ghcr.io/vitalpointai/near-ai-vscode:vX.Y.Z`. The
-image is pushed only after the owner approves it in the protected `container-release` environment.
-The GitHub release for the version records the image digest beside the extension package (VSIX),
-its checksum and the assessor package.
+Each version is a Sterling workbench container image, with that version's extension inside it, on
+the GitHub Container Registry as `ghcr.io/vitalpointai/near-ai-vscode:vX.Y.Z`. Images are tagged
+this way from 0.4.37. An image is pushed only after the owner approves it in the protected
+`container-release` environment.
+
+Releases from 0.4.38 on also have a GitHub release, which records the image digest beside the
+extension package (VSIX), its checksum and the assessor package. Version 0.4.37's image is on the
+registry, but the release stopped after the push, so 0.4.37 has no GitHub release.
 
 How to install the extension package or run the image is in [Getting started](../using/getting-started.md).
 How a release is built is in the [Architecture overview](../architecture/overview.md#how-a-release-is-shipped).

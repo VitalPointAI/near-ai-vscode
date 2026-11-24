@@ -15,8 +15,8 @@ Until it ships, the steps below and in the README are the way in:
 
 ## Where each release is
 
-Releases are no longer published to the Visual Studio Marketplace. Each release, from 0.4.37 on,
-is on the repository's [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases)
+Releases are no longer published to the Visual Studio Marketplace. Each release from 0.4.38 on is
+on the repository's [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases)
 with:
 
 - the extension package, `near-ai-vscode-X.Y.Z.vsix`, and its SHA-256 checksum;

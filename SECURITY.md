@@ -2472,17 +2472,22 @@ pull request merges, CI type checks it, runs the unit tests and the end-to-end t
 VS Code, packages and inspects the VSIX, runs `npm audit` on runtime dependencies, and scans the
 files and every commit for secrets, and a security and code review must pass. Releases are
 built by GitHub Actions from a tagged commit on `main` (or, for an urgent fix to an older
-release, the reviewed head of its hotfix branch) and attached to a GitHub release with a SHA-256
-checksum. Publishing to the Marketplace waits for an approval in GitHub, which is the owner's
-decision. Every GitHub Action is pinned to a full commit hash.
+release, the reviewed head of its hotfix branch). Each release is a Sterling workbench container
+image with the release's VSIX inside it. The Release workflow builds the image from the checked
+VSIX, starts it and checks it, and pushes it to the GitHub Container Registry only after the
+owner approves the push in the protected `container-release` environment. The GitHub release
+then records the image's registry digest beside the VSIX, its SHA-256 checksum and the assessor
+package. Releases are no longer published to the Visual Studio Marketplace. Every GitHub Action
+is pinned to a full commit hash.
 
-The checksum ties the published VSIX to the build output. The build job disables dependency
-install scripts and runs the lockfile-pinned build tools and tests. A compromised tool can
-still change the VSIX before its checksum is taken.
+The checksum ties the VSIX in the image and on the GitHub release to the build output, and the
+recorded digest names exactly the image that was checked and pushed. The build job disables
+dependency install scripts and runs the lockfile-pinned build tools and tests. A compromised
+tool can still change the VSIX before its checksum is taken.
 
 AI agents do much of this work, and they act through the owner's GitHub account, which is a
-repository and organization admin. The Marketplace approval and the repository settings are
-therefore kept by policy: the agents are instructed never to take those steps, the scripts they
+repository and organization admin. The image publication approval and the repository settings
+are therefore kept by policy: the agents are instructed never to take those steps, the scripts they
 use never do, and the approval is given by the owner in person.
 
 The review result is not taken from the owner's account. It comes from a separate reviewer
@@ -2517,8 +2522,9 @@ identity, `near-ai-reviewer`, through `.github/workflows/agent-review.yml`:
   `agent-review-gates` environment, whose only reviewer is the owner and which holds no secrets.
 
 GitHub enforces these rules through repository settings (branch protection on `main`, a ruleset
-that keeps release tags from being moved or deleted, and the protected `marketplace`,
-`agent-review` and `agent-review-gates` environments).
+that keeps release tags from being moved or deleted, and the protected `container-release`,
+`agent-review` and `agent-review-gates` environments; the older `marketplace` environment
+still exists but no release uses it).
 They are listed, with the commands that apply them, in
 [docs/development-workflow.md](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs/development-workflow.md)
 (section 8), which also describes the whole process. A rule is in force only once its setting is

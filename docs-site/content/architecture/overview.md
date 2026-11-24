@@ -36,8 +36,9 @@ documentation and a Compliance view.
 ## How a release is shipped
 
 Each release is a versioned container image of the Sterling workbench, with the release's extension
-inside it. Releases are no longer published to the Visual Studio Marketplace; version 0.4.37 is the
-first release shipped this way.
+inside it. Releases are no longer published to the Visual Studio Marketplace. Releases from 0.4.38
+on carry the full GitHub release described below; version 0.4.37's image is on the registry, but
+it has no GitHub release.
 
 ```mermaid
 flowchart LR
@@ -80,6 +81,10 @@ its own, so it must only be published on `127.0.0.1`.
 The decided direction is that your organization hosts the workbench at its own sites: on-premise,
 connected or fully air-gapped. Each person gets their own workbench session. The full design is in
 [Hosting Sterling for many people](./design/multiuser-hosting/DESIGN.synced.md).
+
+The first deployment is planned for one HQ site. The design can grow later, to more people and to
+edge sites. How many people a site can serve is stated only on the [Capacity](../using/reference/hosting/capacity.synced.md)
+page, from load runs on our own hardware, and no run has been recorded yet.
 
 ```mermaid
 flowchart LR
