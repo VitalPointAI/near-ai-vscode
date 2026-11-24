@@ -3532,7 +3532,8 @@
         "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
         "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
         "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
-        "longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods."
+        "longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods.",
+        "The longhorn-crypto key, which any backup restore needs once the cluster is gone, is escrowed with the RKE2 keys and checked daily by the sterling-escrow-currency job (47-25)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3567,7 +3568,8 @@
         "Seal keys are held in a validated site HSM through the kms-pkcs11 plugin, or by Shamir shares under the key ceremony.",
         "The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.",
         "The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.",
-        "Never HashiCorp Vault (D-04)."
+        "Never HashiCorp Vault (D-04).",
+        "Raft snapshots run on a schedule by a job whose token reads only sys/storage/raft/snapshot, onto an encrypted volume; a snapshot restores only with the HSM or the Shamir shares (47-24)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3724,7 +3726,9 @@
         "au-02",
         "au-03",
         "au-09",
-        "au-12"
+        "au-12",
+        "cp-09",
+        "cp-10"
       ],
       "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
       "crypto": "none",
@@ -3734,7 +3738,8 @@
       "conditions": [
         "Logs and audit records ship only to the site store; no outbound output is configured.",
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
-        "Loki is AGPL and is not used (D-19)."
+        "Loki is AGPL and is not used (D-19).",
+        "audit-* and logs-* are snapshotted on a schedule to a filesystem repository on an encrypted volume, without the security index, with a tested restore (47-24). Multi-node sites need the snapshot volume as ReadWriteMany on the encrypted class, confirmed on Phase 48's lab-full rig."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3838,7 +3843,7 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.",
+      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, of the Sterling release image the Release workflow attests, and of every image in each offline bundle, made on the connected build host (47-29).",
       "role": "Writes the CycloneDX SBOM of the relay image, of every rebuilt deployment image and of the Sterling workbench image, the one the Release workflow attests. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it.",
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
@@ -3865,9 +3870,9 @@
       "where": [
         "compliance/ci/tool-pins.json"
       ],
-      "component": "release-pipeline",
-      "scope": "build",
-      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.",
+      "component": "offline-bundle",
+      "scope": "runtime",
+      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job; the offline bundle build scans the SBOM of every image it carries, and sites rescan offline from the bundle's SBOMs on the import host, as cosign runs there (47-29).",
       "role": "Scans the SBOMs, including the workbench image's in CI and in the Release workflow, for known vulnerabilities that have a fix, so they are seen before a release.",
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
@@ -3878,13 +3883,21 @@
         "ra-05",
         "si-02",
         "sr-04",
-        "sr-11"
+        "sr-11",
+        "ra-05.02",
+        "cm-04"
       ],
       "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
       "crypto": "unvalidated",
       "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
-      "airGap": "needs-mirror:the Grype vulnerability database (grype db import of a downloaded archive)",
-      "fit": "pass",
+      "airGap": "needs-mirror:the vulnerability database, downloaded on the connected build host and shipped in the signed bundle or a signed database file",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "The vulnerability database is fetched only on the connected build host, from Anchore's listing at grype.anchore.io, with the listing's checksum verified, and reaches sites only inside the signed bundle or as a file signed with your organization's key.",
+        "At sites grype runs with database auto-update, age validation and application update checks off, against a private cache, and reports the database's build date.",
+        "Scans are report-only; the site change board decides.",
+        "Go cryptography in grype is not FIPS-validated and protects nothing here."
+      ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
     },
@@ -4047,7 +4060,11 @@
         "sc-13",
         "sc-28",
         "si-02",
-        "sr-11"
+        "sr-11",
+        "au-08",
+        "au-08.01",
+        "sc-45",
+        "cp-09"
       ],
       "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
       "crypto": "unvalidated",
@@ -4058,7 +4075,9 @@
         "Production sites run the RKE2 FIPS build with Canal as the only CNI (the only CNI RKE2 rebuilds for FIPS), on hosts in FIPS mode.",
         "RKE2 runs with profile: cis and the DISA STIG settings, an audit policy that records Theia Cloud resources at Request and Secrets at Metadata only, and secrets-encryption on.",
         "k3s is for the lab and demos only and never appears in production values (D-14).",
-        "SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here."
+        "SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here.",
+        "Every node and the import host run chrony from the site's own OS repository, configured only with the site's on-site authoritative time source (a GNSS-disciplined NTP appliance or a stratum-1 server). The node install refuses a clock that is unsynchronised, on its local clock, or beyond time.maxClockErrorMs (D-71, 47-22).",
+        "The server token, which any etcd restore needs, and the secrets-encryption configuration are escrowed on custody media held by two key custodians apart from the backups; escrow-node.sh check finds a stale escrow after a rotation (D-73, 47-25)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -4124,7 +4143,8 @@
         "SoftHSM2 is test scope only and never appears in production values (D-38).",
         "The site HSM must hold a FIPS 140-3 Level 3 certificate and run in its approved mode.",
         "HSM hardware is export-controlled: it follows your organization's Controlled Goods and ITAR procedures.",
-        "Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit."
+        "Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit.",
+        "It holds the development site signing key and the lab seal through the same PKCS#11 path the production HSM uses; the production preflight refuses it (D-80, 47-16)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
