@@ -8,7 +8,15 @@
 // retries at its back-off time, and Sync Now or a network change retries at once. Leaving the connected states closes the connection and the event
 // stream; a connection that never answered is closed by the give-up, and whatever it was doing is ignored (each connection has a generation). An
 // event stream that ends while live runs one exchange (which finds a server that went away: offline) and opens again after the server's retry wait,
-// REOPEN_MS at least. A stream that cannot open is a lost link. Finding ids stay ids here; 33-09 turns them into sentences.
+// REOPEN_MS at least. A stream that cannot open is a lost link. Finding ids stay ids here; liveSentences.ts (33-09) turns them into sentences.
+//
+// 33-09 completes it: every frame is read through readLiveFrame (hubLive.ts) before use; a join-request reaches onJoinRequest only on a lead
+// device; roster, checkpoint and equivocation frames each run one exchange. A synced exchange that met an injected change, a corrupt attachment or
+// withheld changes is attention; delayed and replayed stay live with the finding listed. A project that needs a feature this build lacks
+// (needs-update, from the exchange or from the local fold) stops until updated(). Attention and refused wait for the lead, so the replicator looks
+// again every LEAD_PROBE_MS (the lead's hub.readmit or admission reaches it that way). A gap of more than resumeGapMs between ticks (sleep, a
+// hidden tab) counts as a lost link and reconnects at once; a networkProbe, when given, retries at once when its answer changes (D-09 as amended:
+// the session backend has none, so production code passes none).
 //
 // Node I/O only, no editor API, and no value import that loads Yjs or the fold (only hubSync and hubTransport, which the hub's tests bundle), so
 // hub/test can bundle this file with a memory replica. The connection state is the pure machine of src/domain/replica/syncMachine.ts.
@@ -17,6 +25,8 @@ import type { SyncEvent, SyncMachineState, SyncState } from '../../domain/replic
 import type { PayloadSigner } from '../../domain/team/signedPayload';
 import { syncOnce } from './hubSync';
 import type { HubMemory, SyncLocal, SyncReport, SyncTransport } from './hubSync';
+import { readLiveFrame } from './hubLive';
+import type { PresenceFrame } from './hubLive';
 import { HubTransport, HubTransportError } from './hubTransport';
 import type { EventReader, HubTransportOptions } from './hubTransport';
 
@@ -42,8 +52,14 @@ export interface LiveReplicatorOptions {
   timers?: LiveTimers;
   /** How long connecting may take before it gives up to offline (CONNECT_GIVE_UP_MS). */
   giveUpMs?: number;
-  /** Called on a join-request frame (D-12: the lead's and deputy's devices fetch the requests). */
-  onJoinRequest?: () => void;
+  /** Called on a join-request frame with the invitation's id, on a lead device only (D-12: the lead's and deputy's devices fetch the requests). */
+  onJoinRequest?: (invite?: string) => void;
+  /** Whether this device may write the roster (a lead or deputy device); join-request frames reach onJoinRequest only when it says yes. */
+  isLeadDevice?: () => boolean | Promise<boolean>;
+  /** The network as a comparable value; when its answer changes, an offline project tries again at once. None in the session backend (D-09). */
+  networkProbe?: () => string;
+  /** A gap longer than this between two ticks is a lost link that reconnects at once (Pitfall 9). RESUME_GAP_MS when absent. */
+  resumeGapMs?: number;
   /** The presence frame's data as the hub sent it ({ project, cell, devices, left }). */
   onPresence?: (frame: Record<string, unknown>) => void;
   onCheckpoint?: (frame: Record<string, unknown>) => void;
@@ -70,13 +86,21 @@ export interface LiveStatus {
 export const COALESCE_MS = 250;
 /** The least wait before an ended event stream is opened again; the server's own retry wait is used when it is longer. */
 export const REOPEN_MS = 1000;
+/** A gap between ticks longer than this is a lost link (sleep, a hidden tab), Pitfall 9. */
+export const RESUME_GAP_MS = 30_000;
+/** How often the resume tick and the network probe run. */
+export const TICK_MS = 5000;
+/** How often attention and refused look again for the lead's action. */
+export const LEAD_PROBE_MS = 60_000;
+/** Findings that turn a synced exchange into attention (D-13). delayed and replayed stay live with a detail line. */
+export const ESCALATING_FINDINGS: ReadonlySet<string> = new Set(['injected', 'corrupt-blob', 'withheld']);
 
 const REAL_TIMERS: LiveTimers = {
   setTimeout: (run, ms) => setTimeout(run, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
 };
 
-type Wake = 'start' | 'heads' | 'local' | 'sync-now' | 'stream-open' | 'stream-end' | 'resync' | 'roster';
+type Wake = 'start' | 'heads' | 'local' | 'sync-now' | 'stream-open' | 'stream-end' | 'resync' | 'roster' | 'checkpoint' | 'equivocation';
 /** The states in which this device holds a connection to the server. Leaving them closes it. */
 const CONNECTED: ReadonlySet<SyncState> = new Set(['connecting', 'authenticating', 'catching-up', 'live']);
 
@@ -100,11 +124,16 @@ export class LiveReplicator {
   private inFlight: Promise<void> | undefined;
   private again: Wake | undefined;
   private readonly work = new Set<Promise<unknown>>();
+  private tickTimer: unknown;
+  private lastTick = 0;
+  private network: string | undefined;
+  private readonly resumeGapMs: number;
 
   public constructor(private readonly options: LiveReplicatorOptions) {
     this.timers = options.timers ?? REAL_TIMERS;
     this.now = options.now ?? ((): Date => new Date());
     this.giveUpMs = options.giveUpMs ?? CONNECT_GIVE_UP_MS;
+    this.resumeGapMs = options.resumeGapMs ?? RESUME_GAP_MS;
     this.machine = initialSyncState(this.now().getTime());
   }
 
@@ -129,6 +158,9 @@ export class LiveReplicator {
     const address = this.options.hub === undefined ? undefined : await this.options.address();
     if (!this.started) return;
     this.fire({ kind: 'start', hasHub: this.options.hub !== undefined && address !== undefined });
+    this.lastTick = this.now().getTime();
+    this.network = this.options.networkProbe?.();
+    this.armTick();
   }
 
   /** Stops every timer, the event stream and the connection, and ends in single-machine once the work in flight has finished. */
@@ -137,6 +169,7 @@ export class LiveReplicator {
     this.disconnect();
     this.fire({ kind: 'stop' });
     this.clearTimer('stateTimer');
+    this.clearTimer('tickTimer');
     await Promise.allSettled([...this.work]);
   }
 
@@ -149,6 +182,11 @@ export class LiveReplicator {
   /** The network changed (a new address, back from sleep): an offline project tries again at once. */
   public networkChanged(): void {
     this.fire({ kind: 'network-change' });
+  }
+
+  /** This build now folds the features the shared work requires (an update): a project in needs-update connects again. */
+  public updated(): void {
+    this.fire({ kind: 'updated' });
   }
 
   /** The editor wrote to the store: push it with the next exchange. While not live it waits in the store for the next connection. */
@@ -168,7 +206,35 @@ export class LiveReplicator {
     void settled.finally(() => this.work.delete(settled));
   }
 
-  private clearTimer(which: 'stateTimer' | 'reopenTimer'): void {
+  /**
+   * The tick: a gap since the last one longer than resumeGapMs means this computer slept or the tab was hidden, so the link is treated as lost and
+   * reconnects at once; a changed network answer retries at once too.
+   */
+  private armTick(): void {
+    this.clearTimer('tickTimer');
+    if (!this.started) return;
+    this.tickTimer = this.timers.setTimeout(() => {
+      this.tickTimer = undefined;
+      if (!this.started) return;
+      const now = this.now().getTime();
+      const gap = now - this.lastTick;
+      this.lastTick = now;
+      if (gap > this.resumeGapMs && this.machine.state !== 'single-machine' && this.machine.state !== 'needs-update') {
+        this.log(`resume gap ${Math.round(gap / 1000)} s`);
+        if (CONNECTED.has(this.machine.state)) this.fire({ kind: 'lost' });
+        this.fire({ kind: 'sync-now' });
+      }
+      const network = this.options.networkProbe?.();
+      if (network !== undefined && network !== this.network) {
+        this.network = network;
+        this.log('network changed');
+        this.networkChanged();
+      }
+      this.armTick();
+    }, TICK_MS);
+  }
+
+  private clearTimer(which: 'stateTimer' | 'reopenTimer' | 'tickTimer'): void {
     const handle = this[which];
     if (handle === undefined) return;
     this.timers.clearTimeout(handle);
@@ -194,9 +260,17 @@ export class LiveReplicator {
   private armStateTimer(): void {
     this.clearTimer('stateTimer');
     if (!this.started) return;
+    const machine = this.machine;
+    if (machine.state === 'attention' || machine.state === 'refused') {
+      // These wait for the lead; looking again now and then is how the lead's action (a hub.readmit, an admission) reaches this device.
+      this.stateTimer = this.timers.setTimeout(() => {
+        this.stateTimer = undefined;
+        if (this.machine === machine) this.fire({ kind: 'lead-acted' });
+      }, LEAD_PROBE_MS);
+      return;
+    }
     const timer = syncTimerOf(this.machine, this.giveUpMs);
     if (timer === undefined) return;
-    const machine = this.machine;
     this.stateTimer = this.timers.setTimeout(() => {
       this.stateTimer = undefined;
       if (this.machine === machine) this.fire({ kind: timer.event });
@@ -303,17 +377,24 @@ export class LiveReplicator {
       try {
         report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now });
       } catch (error) {
-        // The local replica failed (syncOnce throws only for that): this device cannot sync until a person looks.
+        // The local replica failed (syncOnce throws only for that). A fold stopped for a feature this build lacks is needs-update (D-06); anything
+        // else means this device cannot sync until a person looks.
         this.log(`exchange failed locally: ${error instanceof Error ? error.name : 'error'}`);
-        if (generation === this.generation) this.fire({ kind: 'exchange', outcome: 'attention', reason: 'local-replica', findings: [] });
+        const refusal = (error as { refusal?: { refused?: unknown } } | undefined)?.refusal;
+        if (generation !== this.generation) return;
+        if (refusal?.refused === 'needs-update') this.fire({ kind: 'exchange', outcome: 'needs-update', reason: 'needs-update', findings: [] });
+        else this.fire({ kind: 'exchange', outcome: 'attention', reason: 'local-replica', findings: [] });
         return;
       }
       if (generation !== this.generation) return;
       this.pulled += report.pulled;
       this.pushed += report.pushed;
       if (report.outcome === 'synced') this.lastSyncedAt = this.now().getTime();
-      const event: SyncEvent = { kind: 'exchange', outcome: report.outcome, findings: report.findings.map((finding) => finding.kind) };
-      if (report.reason !== undefined) event.reason = report.reason;
+      const findings = report.findings.map((finding) => finding.kind);
+      const escalated = report.outcome === 'synced' ? findings.find((kind) => ESCALATING_FINDINGS.has(kind)) : undefined;
+      const event: SyncEvent = { kind: 'exchange', outcome: escalated === undefined ? report.outcome : 'attention', findings };
+      if (escalated !== undefined) event.reason = escalated;
+      else if (report.reason !== undefined) event.reason = report.reason;
       if (report.retryAfterSeconds !== undefined) event.retryAfterMs = report.retryAfterSeconds * 1000;
       this.log(`exchange ${wake} done ${report.outcome}`);
       this.fire(event);
@@ -329,6 +410,12 @@ export class LiveReplicator {
         if (next !== undefined && generation === this.generation && this.machine.state === 'live') this.schedule(next);
       }
     }
+  }
+
+  /** A join-request frame reaches onJoinRequest only on a lead device (the hub already sends it only to roster writers; this checks again). */
+  private async joinRequest(invite: string): Promise<void> {
+    const lead = this.options.isLeadDevice === undefined ? true : await this.options.isLeadDevice();
+    if (lead) this.options.onJoinRequest?.(invite);
   }
 
   /**
@@ -354,18 +441,27 @@ export class LiveReplicator {
       if (report.kind === 'gap') { ended = 'gap'; break; }
       if (report.kind === 'resync') { this.schedule('resync'); continue; }
       if (report.kind !== 'frame') { ended = report.kind; continue; }
-      if (report.event === 'heads') {
+      const read = readLiveFrame(report, transport.project);
+      if (!read.ok) {
+        this.log(`frame ${report.event} ${read.reason}`);
+        continue;
+      }
+      const frame = read.frame;
+      if (frame.event === 'heads') {
         this.log('wake heads');
         this.schedule('heads');
-      } else if (report.event === 'join-request') {
-        this.options.onJoinRequest?.();
-      } else if (report.event === 'presence') {
-        this.options.onPresence?.(report.data);
-      } else if (report.event === 'checkpoint') {
+      } else if (frame.event === 'join-request') {
+        this.track(this.joinRequest(frame.invite));
+      } else if (frame.event === 'presence') {
+        this.options.onPresence?.(presenceData(transport.project, frame));
+      } else if (frame.event === 'checkpoint') {
         this.options.onCheckpoint?.(report.data);
-      } else if (report.event === 'roster') {
+        this.schedule('checkpoint');
+      } else if (frame.event === 'roster') {
         this.options.onRoster?.(report.data);
         this.schedule('roster');
+      } else {
+        this.schedule('equivocation');
       }
     }
     reader.close();
@@ -379,4 +475,9 @@ export class LiveReplicator {
       if (generation === this.generation && this.machine.state === 'live') this.track(this.readEvents(transport, generation));
     }, Math.max(reader.retryMs ?? 0, REOPEN_MS));
   }
+}
+
+/** A presence frame as the 33-01 hook receives it, rebuilt from the checked frame: { project, cell, devices, left }. */
+function presenceData(project: string, frame: PresenceFrame): Record<string, unknown> {
+  return { project, cell: frame.cell, devices: frame.devices.map((device) => ({ ...device })), left: [...frame.left] };
 }
