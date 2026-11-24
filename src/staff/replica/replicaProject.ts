@@ -29,7 +29,10 @@ import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { AsyncPayloadSigner, PayloadSigner } from '../../domain/team/signedPayload';
 import { isPersonKeyKind } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrant, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { newEpochKey, openLabel } from '../../domain/replica/cellKeys';
+import type { KemPrivateKeys, KemPublicKeys } from '../../domain/replica/cellWrapV2';
+import { signKemBinding } from '../../domain/replica/deviceKem';
+import { buildGrantPages, wrapsFor } from '../../domain/replica/grantPages';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, buildEntryAsync, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
@@ -51,7 +54,7 @@ import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from './keyring';
 import * as kemPublish from './kemPublish';
-import type { DeviceEncryptionKey } from './keyring';
+import type { DeviceEncryptionKey, KeyRingDevice } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
 import type { SyncLocal } from './hubSync';
@@ -141,8 +144,7 @@ export interface ReplicaProjectDeps {
   /** Publish this computer's post-quantum keys at open (33.2 D-05). Off unless set: the host sets it where a project opens for live work, not for a
    *  command's short open, whose flows promise to write nothing. A hosted session publishes through its own step-up instead. */
   publishKem?: boolean;
-  /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). Off until every wrap path writes
-   *  cell-wrap/v2 (33.2-06): before that, a switched project would refuse the X25519 grants today's paths still write. */
+  /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). On unless set false. */
   wrapV2AtCreation?: boolean;
 }
 
@@ -154,19 +156,31 @@ export interface LocalDevice {
   /** The raw X25519 public key as base64url, and the device's signature binding it to the writer (D-19). */
   x25519: string;
   x25519Sig: string;
+  /** This computer's post-quantum public keys where it knows wrap@2 (33.2 D-03): a join request carries them when the invitation asks. */
+  kem?: KemPublicKeys;
 }
 
-interface DeviceKeys { identity: DeviceIdentity; writer: string; encryption: DeviceEncryptionKey }
+interface DeviceKeys { identity: DeviceIdentity; writer: string; encryption: DeviceEncryptionKey; kem?: KemPublicKeys; kemPrivate?: KemPrivateKeys }
+
+/** This computer knows wrap@2 (its features say so: the probe passed, or a test says it does). */
+const knowsWrapV2 = (deps: ReplicaProjectDeps): boolean => (deps.knownFeatures ?? clientReplicaFeatures()).includes(WRAP_V2_FEATURE);
 
 async function deviceKeys(deps: ReplicaProjectDeps): Promise<DeviceKeys> {
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
   const { identity } = await loadOrCreateDeviceIdentity(deps.secrets, { identityDir: dir, ...(deps.now === undefined ? {} : { now: deps.now }) });
   const encryption = await loadOrCreateEncryptionKey(deps.secrets, { identityDir: dir, identity });
-  return { identity, writer: writerIdOf(identity.publicKey), encryption };
+  const keys: DeviceKeys = { identity, writer: writerIdOf(identity.publicKey), encryption };
+  // The post-quantum keys, wherever this computer knows wrap@2: published at creation and joining, and opening v2 wraps (33.2 D-03).
+  // Keys that cannot be read are left as they are (never replaced): the project opens, reads what is wrapped the older way, and is not made switched.
+  const kem = knowsWrapV2(deps) ? await loadOrCreateKemKeys(deps.secrets, { identityDir: dir }).catch(() => undefined) : undefined;
+  return kem === undefined ? keys : { ...keys, kem: kem.publicKeys, kemPrivate: kem.privateKeys };
 }
 
-/** Whether a project made shared now requires wrap@2 from the start: asked for, and known on this computer (its probe passed). */
-const wrapV2AtCreation = (deps: ReplicaProjectDeps): boolean => deps.wrapV2AtCreation === true && (deps.knownFeatures ?? clientReplicaFeatures()).includes(WRAP_V2_FEATURE);
+/** The device a key ring opens grants for: its X25519 key and, where it has them, its post-quantum keys. */
+const ringDevice = (device: DeviceKeys): KeyRingDevice => ({ writer: device.writer, privateKey: device.encryption.privateKey, ...(device.kemPrivate === undefined ? {} : { kem: device.kemPrivate }) });
+
+/** Whether a project made shared now requires wrap@2 from the start (33.2 D-05): unless the host turns it off, wherever this computer knows wrap@2. */
+const wrapV2AtCreation = (deps: ReplicaProjectDeps): boolean => deps.wrapV2AtCreation !== false && knowsWrapV2(deps);
 
 function storeDeps(deps: ReplicaProjectDeps, identity: DeviceIdentity): ReplicaStoreDeps {
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
@@ -252,7 +266,7 @@ export class ReplicaProject {
   /** This device's signing identity, X25519 public key and binding, made on first need (D-19). */
   public static async localDevice(deps: ReplicaProjectDeps): Promise<LocalDevice> {
     const keys = await deviceKeys(deps);
-    return { signer: keys.identity, writer: keys.writer, publicKey: keys.identity.publicKey, x25519: keys.encryption.publicKey, x25519Sig: keys.encryption.binding };
+    return { signer: keys.identity, writer: keys.writer, publicKey: keys.identity.publicKey, x25519: keys.encryption.publicKey, x25519Sig: keys.encryption.binding, ...(keys.kem === undefined ? {} : { kem: keys.kem }) };
   }
 
   /**
@@ -274,7 +288,7 @@ export class ReplicaProject {
     const device = await deviceKeys(deps);
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
-    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, ringDevice(device));
     const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
     // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
     if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
@@ -309,20 +323,27 @@ export class ReplicaProject {
       const pin = await readAnchorFile(genesisPinFile(deps.globalStorageDir, entry.header.stream));
       if (pin.kind !== 'anchor' || pin.anchor.genesisHash !== entryHash(entry.header) || pin.anchor.lead.writer !== device.writer) continue;
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
-      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, ringDevice(device));
       const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
-      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) });
+      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) && device.kem !== undefined });
       return isProjectRefused(rearmed) ? rearmed : reused;
     }
 
     const now = deps.now?.() ?? new Date();
     const project = randomBytes(16).toString('hex');
     const baseKey = newEpochKey();
-    const founding = buildGrant(device.identity, {
+    // New shared work starts post-quantum (33.2 D-05): the lead's device names its post-quantum keys in the genesis, bound by its own key, and the
+    // base cell's first key is wrapped with cell-wrap/v2. Where this computer does not know wrap@2, the project starts as before.
+    const kem = wrapV2AtCreation(deps) ? device.kem : undefined;
+    const pages = buildGrantPages(device.identity, {
       cell: project, epoch: 1, roster: ORIGIN_ROSTER, labelSealed: '',
-      wraps: [{ writer: device.writer, wrap: wrapEpochKey({ cell: project, epoch: 1, writer: device.writer, recipient: device.encryption.publicKey, epochKey: baseKey }) }]
+      wraps: wrapsFor({ format: kem === undefined ? 1 : 2, cell: project, epoch: 1, epochKey: baseKey, devices: [{ writer: device.writer, x25519: device.encryption.publicKey, ...(kem === undefined ? {} : { kem }) }] }).wraps
     });
-    const lead = { writer: device.writer, publicKey: device.identity.publicKey, x25519: device.encryption.publicKey, x25519Sig: device.encryption.binding, slot: 1 };
+    const founding = pages[0];
+    const lead = {
+      writer: device.writer, publicKey: device.identity.publicKey, x25519: device.encryption.publicKey, x25519Sig: device.encryption.binding, slot: 1,
+      ...(kem === undefined ? {} : { kem: signKemBinding(kem, device.writer, (bytes) => device.identity.sign(bytes)) })
+    };
     const data: Record<string, unknown> = {
       project, name: input.name, profile: input.profile, labelMapHash: input.labelMapHash,
       lead: { member: input.lead.member, writer: device.writer, device: lead },
@@ -337,18 +358,20 @@ export class ReplicaProject {
     });
     const anchor: RosterAnchor = { genesisHash: genesis.hash, project, lead: { member: input.lead.member, writer: device.writer, publicKey: device.identity.publicKey, x25519: device.encryption.publicKey } };
 
-    const ring = await DeviceKeyRing.load(deps.secrets, project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, project, ringDevice(device));
     await ring.addOwn(project, 1, baseKey, grantHash(founding));
     if (!(await writeAnchorFile(genesisPinFile(deps.globalStorageDir, project), anchor))) return refuse('pin-damaged');
-    const grant = await store.putGrant(project, 1, founding);
-    if (!('ok' in grant)) return storeRefused(grant);
+    for (const page of pages) {
+      const grant = await store.putGrant(project, 1, page);
+      if (!('ok' in grant)) return storeRefused(grant);
+    }
     const appended = await store.appendOwn([genesis]);
     if (!('ok' in appended)) return storeRefused(appended);
     if (!(await writeAnchorFile(projectFile(root), anchor))) return refuse('pin-damaged');
     const created = new ReplicaProject(path.resolve(root), anchor, deps, store, ring, device);
     created.lamports.set(genesis.hash, 1);
     // New shared work requires wrap@2 from the start where this computer knows it (33.2 D-05).
-    const armed = await ensureRequireArmed(created, { withWrapV2: wrapV2AtCreation(deps) });
+    const armed = await ensureRequireArmed(created, { withWrapV2: kem !== undefined });
     return isProjectRefused(armed) ? armed : created;
   }
 
@@ -407,7 +430,7 @@ export class ReplicaProject {
     if (local.kind === 'damaged') return refuse('pin-damaged');
     if (local.kind === 'anchor' && !sameAnchor(local.anchor, pinned)) return refuse('pin-mismatch');
     // Every check has passed; from here on the join writes.
-    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, ringDevice(device));
     if (pin.kind === 'missing' && !(await writeAnchorFile(pinFile, pinned))) return refuse('pin-mismatch');
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
@@ -628,7 +651,8 @@ export class ReplicaProject {
       const blobs = new Map<string, SealedBlob>();
       for (const entry of own) {
         const opened = await this.openEntry(entry);
-        if (opened === undefined || ROSTER_KIND_OWNER[opened.kind] === undefined) continue;
+        // The roster line, and each device's post-quantum keys (33.2 D-03), which a device needs to wrap keys to the others.
+        if (opened === undefined || (ROSTER_KIND_OWNER[opened.kind] === undefined && opened.kind !== 'device.kem')) continue;
         roster.push(entry);
         if (opened.blob === undefined) continue;
         const blob = this.blobCache.get(opened.blob) ?? await this.store.blob(opened.blob);

@@ -25,7 +25,10 @@
 // secret (reviewJoinRequest, admitJoinRequest) and the six words before anyone is admitted. When the hub cannot be told or reached, everything still
 // works by file, and the sentence says so.
 import { parseClearance } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, earlierEpochGrants } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT } from '../../domain/replica/cellKeys';
+import { earlierEpochGrants } from '../../domain/replica/grantPages';
+import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
+import type { WrapCell } from './wrapPlan';
 import { HUB_FILE_REFUSALS, isHubAddress, readHubFile } from '../../domain/replica/hubFile';
 import { INVITE_REFUSALS, buildHubJoin, buildInvite, checkJoinRequest, hubJoinCheckKey, hubJoinMac, inviteSafetyCode, joinRequestHash, readInvite } from '../../domain/replica/invite';
 import type { InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
@@ -138,17 +141,23 @@ function missingEpochs(roster: RosterState, cell: string, writer: string, positi
 }
 
 /**
- * Signs and stores one grant per epoch of the cell to the hub's X25519 key, each at the roster that gave the hub the cell (or the epoch's own founding
- * entry when that came later, since a grant may not name a roster before its epoch). The keys are checked by the caller before anything is written.
+ * Signs and stores one grant per epoch of the cell to the hub, each at the roster that gave the hub the cell (or the epoch's own founding entry when
+ * that came later, since a grant may not name a roster before its epoch), in the format wrapPlan.formatFor gives the epoch with the hub's keys as the
+ * roster names them (33.2 D-05): a hub without post-quantum keys gets no wrap of an epoch that needs them. The keys are checked by the caller before
+ * anything is written.
  */
-async function grantEpochs(shared: SharedProjectHost, input: { cell: string; epochs: ReadonlyArray<{ epoch: number; from: number; key: Buffer }>; roster: RosterState; grantedAt: number; hub: { writer: string; x25519: string }; label?: unknown }): Promise<HubMembershipResult | undefined> {
-  const byRoster = new Map<number, Array<{ epoch: number; key: Buffer }>>();
+async function grantEpochs(shared: SharedProjectHost, input: { cell: string; info: WrapCell; epochs: ReadonlyArray<{ epoch: number; from: number; key: Buffer }>; roster: RosterState; grantedAt: number; hub: { writer: string }; label?: unknown }): Promise<HubMembershipResult | undefined> {
+  const device = wrapDeviceAt(input.roster, input.hub.writer, input.roster.positions.length - 1);
+  const byRoster = new Map<number, Array<{ epoch: number; key: Buffer; format: 1 | 2 }>>();
   for (const item of input.epochs) {
+    const choice = formatFor(input.roster, input.info, item.from, shared.routing);
+    if (choice === 'switch-first') continue;
     const at = Math.max(input.grantedAt, item.from);
-    byRoster.set(at, [...(byRoster.get(at) ?? []), { epoch: item.epoch, key: item.key }]);
+    byRoster.set(at, [...(byRoster.get(at) ?? []), { epoch: item.epoch, key: item.key, format: formatForDevice(choice, device) }]);
   }
   const grants = [...byRoster.entries()].flatMap(([at, epochs]) => earlierEpochGrants(shared.project.signer, {
-    cell: input.cell, epochs, roster: input.roster.positions[at], writer: input.hub.writer, recipient: input.hub.x25519, ...(input.label === undefined ? {} : { label: input.label })
+    cell: input.cell, epochs, roster: input.roster.positions[at], writer: input.hub.writer, ...(device.x25519 === undefined ? {} : { recipient: device.x25519 }),
+    ...(device.kem === undefined ? {} : { kem: device.kem }), ...(input.label === undefined ? {} : { label: input.label })
   }));
   if (grants.length === 0) return undefined;
   const stored = await shared.project.putGrants(grants);
@@ -215,7 +224,7 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
     // Everything is decided before the first write. A hub the roster has already is an admission stopped part way (resumed: only what is missing is
     // written, and its ceiling stays as the roster has it), one fully admitted, or one revoked.
     const existing = before.members.hubs.has(file.hub) ? hubOf(before, at.position, file.hub) : undefined;
-    let device: { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot: number } | undefined;
+    let device: { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot: number; kem?: { p256: string; mlkem768: string; sig: string } } | undefined;
     let ceiling: unknown;
     if (existing !== undefined) {
       if (isResult(existing)) return existing;
@@ -227,7 +236,8 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
       if (ceiling === undefined) return refuse('ceiling-invalid');
       const slot = freeSlot(before);
       if (slot === undefined) return refused('device-limit', MEMBER_REFUSALS['device-limit']);
-      device = { writer: file.writer, publicKey: file.publicKey, x25519: file.x25519, x25519Sig: file.x25519Sig, slot };
+      // The hub's post-quantum keys and their binding come from its hub file when it has a kem key (33.2 D-03).
+      device = { writer: file.writer, publicKey: file.publicKey, x25519: file.x25519, x25519Sig: file.x25519Sig, slot, ...(file.kem === undefined ? {} : { kem: { ...file.kem } }) };
     }
     // Every base cell key is checked before the first write, so a device that cannot give the hub the roster writes nothing.
     if (epochKeys(shared, base, missingEpochs(before, base, file.writer, at.position)) === undefined) return refuseMembership('no-grant-key');
@@ -246,7 +256,7 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
     }
     const missing = epochKeys(shared, base, missingEpochs(roster, base, file.writer, headOf(roster).position));
     if (missing === undefined) return refuseMembership('no-grant-key');
-    const stored = await grantEpochs(shared, { cell: base, epochs: missing, roster, grantedAt, hub: file });
+    const stored = await grantEpochs(shared, { cell: base, info: { base: true }, epochs: missing, roster, grantedAt, hub: file });
     if (stored !== undefined) return stored;
     const first = existing === undefined ? '' : 'The admission of the hub left unfinished is now finished. ';
     return done(`${first}${hubName(file)} was admitted. It can read the roster, so it can check every change sent to it, and nothing else until you give it a part of the project.`, { hub: file.hub, writer: file.writer });
@@ -318,7 +328,7 @@ export function grantCellToHub(shared: SharedProjectHost, input: GrantCellToHubI
     }
     const missing = epochKeys(shared, info.cell, missingEpochs(current, info.cell, hub.writer, headOf(current).position));
     if (missing === undefined || grantedAt === undefined) return refuseMembership('no-grant-key');
-    const stored = await grantEpochs(shared, { cell: info.cell, epochs: missing, roster: current, grantedAt, hub, ...(info.base ? {} : { label: info.raw }) });
+    const stored = await grantEpochs(shared, { cell: info.cell, info, epochs: missing, roster: current, grantedAt, hub, ...(info.base ? {} : { label: info.raw }) });
     if (stored !== undefined) return stored;
     return done(`The hub (${hub.hub}) can now read this part of the project, and every new key it gets.`, {
       notices: [...multiUserNoticeLines(), HUB_GRANT_TRADE_OFF], granted: [info.cell], hub: hub.hub, writer: hub.writer
@@ -474,7 +484,7 @@ export function inviteThroughHub(shared: SharedProjectHost, input: InviteInput, 
       genesisHash: payload.genesisHash, project: payload.project, name: payload.name,
       lead: { member: payload.lead.member, x25519: payload.lead.x25519, publicKey: payload.lead.publicKey },
       inviter: { member: payload.inviter.member, x25519: payload.inviter.x25519 }, invite: payload.invite, secret, expiresAt: payload.expiresAt, now: now(shared),
-      ...(payload.forMember === undefined ? {} : { forMember: payload.forMember }),
+      ...(payload.forMember === undefined ? {} : { forMember: payload.forMember }), ...(payload.requires === undefined ? {} : { requires: payload.requires }),
       hub: { address: endpoint.address, certPin: found.certPin, writer: found.hub.writer }
     });
     return done(`${what} Your organization's hub knows it, so their join request can come back through the hub. ${rest}`, {

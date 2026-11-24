@@ -28,7 +28,8 @@ function install(label: string): Install {
   const base = mkdtempSync(path.join(tmpdir(), `near-ai-kem-${label}-`));
   const secrets = new MemorySecrets();
   const global = path.join(base, 'global');
-  return { base, root: path.join(base, 'project'), global, secrets, deps: { secrets, globalStorageDir: global, now: () => new Date(NOW), publishKem: true } };
+  // An existing project made before the switch (wrapV2AtCreation false): the case where a device publishes its keys at its next open (D-05).
+  return { base, root: path.join(base, 'project'), global, secrets, deps: { secrets, globalStorageDir: global, now: () => new Date(NOW), publishKem: true, wrapV2AtCreation: false } };
 }
 
 function opened(value: ReplicaProject | ProjectRefused | undefined): ReplicaProject {
@@ -70,10 +71,11 @@ test('loadOrCreateKemKeys makes the keys once and returns the same keys after; t
 
 test('a stored value that does not read is refused and never replaced, and the project still opens without publishing', async () => {
   const at = install('damaged');
+  // Making the project shared needs readable keys (33.2-06: the genesis names them), so the stored value is damaged after that.
+  await sharedProject(at);
   at.secrets.values.set(KEM_KEY_SECRET, '{"p256":"short","mlkem768":"short"}');
   await assert.rejects(() => loadOrCreateKemKeys(at.secrets, { identityDir: identityDir(at.global) }), /could not be read/);
   assert.equal(at.secrets.values.get(KEM_KEY_SECRET), '{"p256":"short","mlkem768":"short"}');
-  await sharedProject(at);
   const project = opened(await ReplicaProject.open(at.root, at.deps));
   assert.equal(await kemEntries(project), 0);
   assert.equal(at.secrets.values.get(KEM_KEY_SECRET), '{"p256":"short","mlkem768":"short"}');
@@ -126,4 +128,16 @@ test('no file under the project folder or the identity folder holds either seed'
       for (const text of [seed.toString('base64url'), seed.toString('base64'), seed.toString('hex')]) assert.equal(bytes.includes(Buffer.from(text)), false, `${file} holds a seed as text`);
     }
   }
+});
+
+test('a project made shared with wrap@2 names the lead device\'s keys in its genesis, so opening it publishes nothing more', async () => {
+  const at = install('switched');
+  at.deps.wrapV2AtCreation = true;
+  await sharedProject(at);
+  const project = opened(await ReplicaProject.open(at.root, at.deps));
+  const { roster } = await project.state();
+  const keys = await loadOrCreateKemKeys(at.secrets, { identityDir: identityDir(at.global) });
+  assert.deepEqual(kemKeysAt(roster, project.deviceWriter), keys.publicKeys);
+  assert.equal(roster.kems.size, 0, 'no device.kem was needed');
+  await project.close();
 });

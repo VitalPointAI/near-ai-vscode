@@ -5,8 +5,10 @@
 // The founding entry (genesis cells, cell.create, cell.rekey) commits to the founding page by grantHash, and the founding page commits to every other
 // page, so the one hash the roster holds covers every wrap. A grant with only v1 wraps that fits one grant is built exactly as buildGrant builds it.
 // Hub-side and pure: node:crypto and src/domain only, no clock, no I/O.
-import { GRANT_MAX_BYTES, MAX_GRANT_PAGES, MAX_GRANT_WRAPS, MAX_LABEL_SEALED_CHARS, WRAP_BYTES, buildGrant, grantHash, readGrant } from './cellKeys';
+import { GRANT_MAX_BYTES, MAX_GRANT_PAGES, MAX_GRANT_WRAPS, MAX_LABEL_SEALED_CHARS, WRAP_BYTES, buildGrant, grantHash, readGrant, sealLabel } from './cellKeys';
 import type { CellGrant, GrantWrap } from './cellKeys';
+import { wrapForDevice } from './cellWrapV2';
+import type { KemPublicKeys } from './cellWrapV2';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 
 // One v2 wrap in a page's canonical JSON: {"wrap":"<1,619 base64url characters>","writer":"<64 hex>"} and its comma (1,707 bytes).
@@ -34,7 +36,7 @@ export function buildGrantPages(signer: PayloadSigner, input: CellGrant): Array<
 export const GRANT_PAGE_REFUSALS = {
   'founding-malformed': 'The first page of this cell grant is not in a shape this version can read, or its signature does not match.',
   'page-bad-signature': 'A page of this cell grant was changed or was not made by the key it names.',
-  'page-other-epoch': 'A page of this cell grant is for another cell, epoch or roster, or was signed by someone else.',
+  'page-other-epoch': 'A page of this cell grant belongs to another part of the project or another key, or was signed by someone else.',
   'page-not-listed': 'A page given with this cell grant is not one its first page lists.',
   'page-missing': 'A page of this cell grant has not arrived yet.',
   'page-repeats-device': 'A device is named on more than one page of this cell grant.'
@@ -69,4 +71,58 @@ export function readGrantPages(founding: unknown, pages: readonly unknown[]): Gr
   if (new Set(wraps.map((item) => item.writer)).size !== wraps.length || wraps.length > MAX_GRANT_WRAPS) return { ok: false, reason: 'page-repeats-device' };
   const grant: CellGrant = { cell: head.grant.cell, epoch: head.grant.epoch, roster: head.grant.roster, labelSealed: head.grant.labelSealed, wraps, pages: [...head.grant.pages] };
   return { ok: true, grant, hash: head.hash, pageHashes: [...head.grant.pages], signer: head.signer };
+}
+
+// ---- wraps through the one entry point (33.2 D-05, D-09) ----
+
+/** A receiving device as the roster names it: its writer id, its X25519 key (v1) and its device.kem or descriptor keys (v2), whichever it has. */
+export interface WrapDevice { writer: string; x25519?: string; kem?: KemPublicKeys }
+
+/**
+ * The wraps of one epoch key to each device, in the format asked for, through wrapForDevice. A device that has no keys of that format gets no wrap
+ * and is listed in waiting (D-05: it is given the key later, never the older format instead).
+ */
+export function wrapsFor(input: { format: 1 | 2; cell: string; epoch: number; epochKey: Buffer; devices: readonly WrapDevice[] }): { wraps: GrantWrap[]; waiting: string[] } {
+  const wraps: GrantWrap[] = [];
+  const waiting: string[] = [];
+  for (const device of input.devices) {
+    const recipient = { ...(device.x25519 === undefined ? {} : { x25519: device.x25519 }), ...(device.kem === undefined ? {} : { kem: device.kem }) };
+    const made = wrapForDevice({ format: input.format, cell: input.cell, epoch: input.epoch, writer: device.writer, epochKey: input.epochKey, recipient });
+    if (made.ok) wraps.push({ writer: device.writer, wrap: made.wrap });
+    else waiting.push(device.writer);
+  }
+  return { wraps, waiting };
+}
+
+export interface EarlierEpochInput {
+  cell: string;
+  // Every epoch of the cell the device is cleared for, with its key and the format its wrap must use (wrapFormat.ts), oldest first.
+  epochs: ReadonlyArray<{ epoch: number; key: Buffer; format?: 1 | 2 }>;
+  // The roster the grants are valid at: normally the one that admitted the device. It must not be the roster an epoch's founding entry cites
+  // (only the founding grant is valid there); when the current epoch was founded at the admission roster, put the device in the founding grant.
+  roster: string;
+  // The receiving device's writer id and keys: recipient is its X25519 key (v1), kem its v2 keys.
+  writer: string;
+  recipient?: string;
+  kem?: KemPublicKeys;
+  // The cell's label, sealed into each grant under that epoch's key, when given.
+  label?: unknown;
+}
+
+// One signed grant per epoch, each wrapping that epoch's key to the one device through wrapForDevice, so a device admitted later can open the cell's
+// history (D-45). An epoch whose format the device has no keys for is left out (the device waits for it). The roster fold accepts each grant when the
+// signer is a roster writer at the named roster and the device is admitted there. Throws on a bad key, cell, epoch, roster or recipient, and on an
+// empty or repeated epoch list.
+export function earlierEpochGrants(signer: PayloadSigner, input: EarlierEpochInput): Array<SignedPayload<CellGrant>> {
+  if (input.epochs.length === 0) throw new Error('Name at least one epoch to grant.');
+  const seen = new Set<number>();
+  const device: WrapDevice = { writer: input.writer, ...(input.recipient === undefined ? {} : { x25519: input.recipient }), ...(input.kem === undefined ? {} : { kem: input.kem }) };
+  return input.epochs.flatMap(({ epoch, key, format }) => {
+    if (seen.has(epoch)) throw new Error('Each epoch is granted once.');
+    seen.add(epoch);
+    const { wraps } = wrapsFor({ format: format ?? 1, cell: input.cell, epoch, epochKey: key, devices: [device] });
+    if (wraps.length === 0) return [];
+    const labelSealed = input.label === undefined ? '' : sealLabel(key, input.cell, epoch, input.label);
+    return buildGrantPages(signer, { cell: input.cell, epoch, roster: input.roster, labelSealed, wraps });
+  });
 }
