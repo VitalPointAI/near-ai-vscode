@@ -130,6 +130,14 @@ test('each of the sixteen checks passes on the compliant export and fails when o
   assert.equal(KEYCLOAK_MIN_FIXED, '26.8.0');
 });
 
+test('the Keycloak minimum fixed version equals the dated desk record (D-24)', () => {
+  const records = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs', 'security', 'hosted-verification-records.md'), 'utf8');
+  const section = /^## Keycloak CVE-2026-6856 fix version\n([\s\S]*?)(?=^## )/m.exec(records)?.[1];
+  assert.ok(section, 'the records document has the Keycloak heading');
+  const stated = [...section.matchAll(/^Minimum upstream version: (\S+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(stated, [KEYCLOAK_MIN_FIXED], 'one Minimum upstream version line, equal to the collector constant');
+});
+
 test('every way an export can be wrong rejects with a reason code and returns no observation', async () => {
   const key = freshKey();
   const stranger = freshKey();
