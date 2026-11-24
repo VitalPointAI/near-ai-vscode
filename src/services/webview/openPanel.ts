@@ -33,6 +33,25 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/**
+ * A command handler that opens a page (D-12, the #162 reviews). It returns undefined, so the page's panel never goes back to the command's caller, and a
+ * failure to open, thrown or (should an opener become async) rejected, is told to the person in one sentence instead of being lost.
+ */
+export function panelCommand(open: () => unknown, what: string): () => undefined {
+  const report = (error: unknown): void => {
+    void vscode.window.showErrorMessage(`${what} could not open: ${error instanceof Error ? error.message : String(error)}`);
+  };
+  return () => {
+    try {
+      const opened = open();
+      if (opened instanceof Promise) opened.catch(report);
+    } catch (error) {
+      report(error);
+    }
+    return undefined;
+  };
+}
+
 /** Opens one webview page. Throws for a branded title, a programming error, before any panel is made. */
 export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: PanelSpec): vscode.WebviewPanel {
   if (BRANDED_TITLE.test(spec.title)) throw new Error(`The panel title "${spec.title}" has a brand prefix; say what the page is.`);
