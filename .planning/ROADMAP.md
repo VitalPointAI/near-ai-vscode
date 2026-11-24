@@ -730,10 +730,10 @@ Plans:
 **Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`)
 
 Plans:
-- [ ] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
-- [ ] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
-- [ ] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
-- [ ] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
+- [x] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
+- [x] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
+- [x] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
+- [x] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
 - [ ] 48-04-PLAN.md: Wave 2. Hub load driver and a browser sample with a WebAuthn virtual authenticator (needs Phase 46's workbench package)
 - [ ] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
 - [ ] 48-07-PLAN.md: Wave 3. Phase 46 components: workbench statements and evidence rules, release pipeline re-assessed for the image; gate PR 2
@@ -1885,7 +1885,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
 | 47. On-premise deployment stack and offline bundle | 0/18 | Planned 2026-11-23 (beside 46) | - |
-| 48. Load and accreditation verification | 0/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
+| 48. Load and accreditation verification | 4/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
