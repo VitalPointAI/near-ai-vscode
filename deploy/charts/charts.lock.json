@@ -10,6 +10,149 @@
       "sha256": "9ec67938b2981d8b333af61b3fcf53e26b4f6f5deb7ccda3de4ea116bb373a17",
       "file": "deploy/charts/vendored/cert-manager-v1.21.3.tgz",
       "component": "cert-manager"
+    },
+    {
+      "name": "kubernetes-ingress",
+      "version": "1.57.1",
+      "appVersion": "3.4.1",
+      "repository": "https://haproxytech.github.io/helm-charts",
+      "url": "https://github.com/haproxytech/helm-charts/releases/download/kubernetes-ingress-1.57.1/kubernetes-ingress-1.57.1.tgz",
+      "sha256": "daedaa6bd3dae9ae9d735f8e1321bb89d3340893237273f0792a547cd91a4cbb",
+      "file": "deploy/charts/vendored/kubernetes-ingress-1.57.1.tgz",
+      "component": "ingress",
+      "note": "HAProxy Kubernetes Ingress controller 3.4.1 (D-07); the chart version differs from the controller version."
+    },
+    {
+      "name": "kyverno",
+      "version": "3.10.0",
+      "appVersion": "v1.20.0",
+      "repository": "https://kyverno.github.io/kyverno",
+      "url": "https://kyverno.github.io/kyverno/kyverno-3.10.0.tgz",
+      "sha256": "55961392dc0821eb367323f0e9585c061dd4407ef7ada921bd56ea1642c2a301",
+      "file": "deploy/charts/vendored/kyverno-3.10.0.tgz",
+      "component": "image-registry",
+      "note": "Kyverno v1.20.0, the admission signature check (D-15, Decision 1); the chart version differs from the Kyverno version."
+    },
+    {
+      "name": "zot",
+      "version": "0.1.135",
+      "appVersion": "v2.1.23",
+      "repository": "https://zotregistry.dev/helm-charts",
+      "url": "https://github.com/project-zot/helm-charts/releases/download/zot-0.1.135/zot-0.1.135.tgz",
+      "sha256": "75b20fa291d4e9a99057324e1ed3e244771aa56e8bd6b65620728761d2498493",
+      "file": "deploy/charts/vendored/zot-0.1.135.tgz",
+      "component": "image-registry",
+      "note": "Zot v2.1.23 (Decision 8). Chart versions 0.1.130 to 0.1.135 all carry appVersion v2.1.23; the newest, 0.1.135, is pinned."
+    },
+    {
+      "name": "harbor",
+      "version": "1.19.4",
+      "appVersion": "2.15.4",
+      "repository": "https://helm.goharbor.io",
+      "url": "https://helm.goharbor.io/harbor-1.19.4.tgz",
+      "sha256": "759872bbabaf05524268096b9d551a480d3f6814d13ed08723036e2673859182",
+      "file": "deploy/charts/vendored/harbor-1.19.4.tgz",
+      "component": "image-registry",
+      "note": "Harbor for HQ and large sites (Decision 8, second wave). No published chart carries Harbor v2.15.5 (checked 2026-11-23: the repository index and the goharbor/harbor-helm releases end at chart 1.19.4, appVersion 2.15.4); this chart is pinned and the images are set to the v2.15.5 digests in deploy/bundle/images.lock.json when the Harbor values are written."
+    },
+    {
+      "name": "longhorn",
+      "version": "1.13.0",
+      "appVersion": "v1.13.0",
+      "repository": "https://charts.longhorn.io",
+      "url": "https://github.com/longhorn/charts/releases/download/longhorn-1.13.0/longhorn-1.13.0.tgz",
+      "sha256": "e57f010d2a8bcf0da5b8b03ffecf49c5bc35ddc2663588ce8f22b7567b6133ed",
+      "file": "deploy/charts/vendored/longhorn-1.13.0.tgz",
+      "component": "site-storage",
+      "note": "Reference encrypted storage class (D-17, Decision 3)."
+    },
+    {
+      "name": "openbao",
+      "version": "0.30.8",
+      "appVersion": "v2.7.3",
+      "repository": "https://openbao.github.io/openbao-helm",
+      "url": "https://github.com/openbao/openbao-helm/releases/download/openbao-0.30.8/openbao-0.30.8.tgz",
+      "sha256": "a1a202d6300de36b3be9d924d52ba7dd24c6a1c7cd5b660b9bbda975f725f02b",
+      "file": "deploy/charts/vendored/openbao-0.30.8.tgz",
+      "component": "openbao",
+      "note": "openbao-helm chart openbao-0.30.8 for OpenBao v2.7.3."
+    },
+    {
+      "name": "keycloakx",
+      "version": "7.4.0",
+      "appVersion": "26.8.1",
+      "repository": "https://codecentric.github.io/helm-charts",
+      "url": "https://github.com/codecentric/helm-charts/releases/download/keycloakx-7.4.0/keycloakx-7.4.0.tgz",
+      "sha256": "9adcfc34dadced0c788e6cac0715bc9e9914c05304062e970fd6da3b8da46f1e",
+      "file": "deploy/charts/vendored/keycloakx-7.4.0.tgz",
+      "component": "keycloak",
+      "note": "codecentric keycloakx 7.4.0, whose appVersion is Keycloak 26.8.1; the image is set to the official quay.io/keycloak/keycloak:26.8.2 by digest (Decision 10)."
+    },
+    {
+      "name": "theia-cloud-base",
+      "version": "1.2.0",
+      "appVersion": "1.2.0",
+      "repository": "https://eclipse-theia.github.io/theia-cloud-helm",
+      "url": "https://github.com/eclipse-theia/theia-cloud-helm/releases/download/theia-cloud-base-1.2.0/theia-cloud-base-1.2.0.tgz",
+      "sha256": "9c264e0bd2d34ac3f4830df30e703ca0ecdc19b15c53d553c76ecafd7b9a664a",
+      "file": "deploy/charts/vendored/theia-cloud-base-1.2.0.tgz",
+      "component": "theia-cloud",
+      "note": "theia-cloud-helm tag theia-cloud-1.2.0, an assessed release, never a -next pre-release (D-10, Decision 11; owner-confirm E1)."
+    },
+    {
+      "name": "theia-cloud-crds",
+      "version": "1.2.0",
+      "appVersion": "1.2.0",
+      "repository": "https://eclipse-theia.github.io/theia-cloud-helm",
+      "url": "https://github.com/eclipse-theia/theia-cloud-helm/releases/download/theia-cloud-crds-1.2.0/theia-cloud-crds-1.2.0.tgz",
+      "sha256": "45979ac926c2f000173af343bcb81afd6526d402571c6d6c3a7c9f62c1cd5f57",
+      "file": "deploy/charts/vendored/theia-cloud-crds-1.2.0.tgz",
+      "component": "theia-cloud",
+      "note": "theia-cloud-helm tag theia-cloud-1.2.0 (D-10, Decision 11; owner-confirm E1)."
+    },
+    {
+      "name": "theia-cloud",
+      "version": "1.2.0",
+      "appVersion": "1.2.0",
+      "repository": "https://eclipse-theia.github.io/theia-cloud-helm",
+      "url": "https://github.com/eclipse-theia/theia-cloud-helm/releases/download/theia-cloud-1.2.0/theia-cloud-1.2.0.tgz",
+      "sha256": "e904574fbf22342b6cd59d9349d3ae6aabf268d121cfcff62f43cc179a8574ad",
+      "file": "deploy/charts/vendored/theia-cloud-1.2.0.tgz",
+      "component": "theia-cloud",
+      "note": "theia-cloud-helm tag theia-cloud-1.2.0 (D-10, Decision 11; owner-confirm E1). This is the upstream tarball; the carried oauth2 patch (Pattern 2) is recorded beside it when it lands."
+    },
+    {
+      "name": "opensearch",
+      "version": "3.10.0",
+      "appVersion": "3.10.0",
+      "repository": "https://opensearch-project.github.io/helm-charts",
+      "url": "https://github.com/opensearch-project/helm-charts/releases/download/opensearch-3.10.0/opensearch-3.10.0.tgz",
+      "sha256": "e42d5084e3e440c61dceb19def26b28a5586a6693a57229081e4caee70a4356b",
+      "file": "deploy/charts/vendored/opensearch-3.10.0.tgz",
+      "component": "site-logging",
+      "note": "The site log store (D-19, Decision 4)."
+    },
+    {
+      "name": "fluent-bit",
+      "version": "0.58.3",
+      "appVersion": "5.1.3",
+      "repository": "https://fluent.github.io/helm-charts",
+      "url": "https://github.com/fluent/helm-charts/releases/download/fluent-bit-0.58.3/fluent-bit-0.58.3.tgz",
+      "sha256": "99e025e461fa080e68dcfe65b8bc0bf64dd74d2c04b87cb910f9192fbf954f20",
+      "file": "deploy/charts/vendored/fluent-bit-0.58.3.tgz",
+      "component": "site-logging",
+      "note": "Log shipper (D-19, Decision 4). No published chart carries Fluent Bit v5.2.0 (checked 2026-11-23: the repository index ends at chart 0.58.3, appVersion 5.1.3); this chart is pinned and the image is set to the v5.2.0 digest in deploy/bundle/images.lock.json when the Fluent Bit values are written."
+    },
+    {
+      "name": "prometheus",
+      "version": "30.0.0",
+      "appVersion": "v3.16.0",
+      "repository": "https://prometheus-community.github.io/helm-charts",
+      "url": "https://github.com/prometheus-community/helm-charts/releases/download/prometheus-30.0.0/prometheus-30.0.0.tgz",
+      "sha256": "2e76e9b3c3f770f9c320220500874ce88a9c3c8b2264f42a97cb5d68909b1816",
+      "file": "deploy/charts/vendored/prometheus-30.0.0.tgz",
+      "component": "site-logging",
+      "note": "prometheus-community chart 30.0.0 for Prometheus v3.16.0 (Decision 4)."
     }
   ]
 }

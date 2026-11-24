@@ -4,12 +4,14 @@
 // it fails, never skips, when helm is missing. Run: env HELM=compliance/out/tools/linux-amd64/helm node scripts/run-tests.mjs deploy/test/*.test.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { checkVendored } from '../charts/vendor.mjs';
 import { DIGEST, UNPUBLISHED_DIGEST, allImages, readImagesLock, splitRef } from '../bundle/lib/locks.mjs';
-import { loadSite, renderSite, splitDocs } from '../bundle/lib/render.mjs';
+import { listReleases, loadSite, renderRelease, renderSite, splitDocs, substituteSite } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
@@ -60,4 +62,52 @@ test('every rendered release meets the global invariants', (t) => {
     }
   }
   assert.ok(checked > 0, 'no image: line was found in the rendered output');
+});
+
+function fixture(files) {
+  const root = mkdtempSync(path.join(tmpdir(), 'render-fixture-'));
+  for (const [file, content] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    writeFileSync(path.join(root, file), typeof content === 'string' ? content : JSON.stringify(content));
+  }
+  return root;
+}
+
+const DIGEST_A = `sha256:${'a'.repeat(64)}`;
+const LOCKS = {
+  'deploy/charts/charts.lock.json': { charts: [] },
+  'deploy/bundle/images.lock.json': { images: [{ ref: `quay.io/example/app:1.0@${DIGEST_A}`, component: 'cert-manager' }], built: [], release: [] },
+  'deploy/charts/local/Chart.yaml': 'apiVersion: v2\nname: local\nversion: 0.1.0\n',
+  'deploy/charts/local/templates/pod.yaml': 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: {{ .Release.Name }}\n  annotations:\n    greeting: {{ .Values.greeting | quote }}\n    instance: {{ .Values.instance.name | default "none" | quote }}\nspec:\n  containers:\n    - name: app\n      image: {{ .Values.image | quote }}\n',
+  'deploy/values/local.yaml': 'greeting: "${site.siteName}"\nlist: ${site.egressAllow}\n'
+};
+const release = (extra) => ({ chart: 'path:deploy/charts/local', namespace: 'apps', order: 10, values: ['deploy/values/local.yaml'], images: [{ lock: 'quay.io/example/app', set: { image: 'ref' } }], ...extra });
+
+test('the harness refuses descriptor mistakes before helm can render an upstream default', () => {
+  const site = { siteName: 'ci', registry: 'registry.site.example', egressAllow: [], hubs: [{ name: 'a' }, { name: 'a' }] };
+  const refuses = (files, pattern, render = (root) => renderSite(root, { site, helm: HELM, all: true })) => assert.throws(() => render(fixture({ ...LOCKS, ...files })), pattern);
+  refuses({ 'deploy/values/app.release.json': release({ chart: 'no-such-chart' }) }, /chart no-such-chart is not in deploy\/charts\/charts\.lock\.json/);
+  refuses({ 'deploy/values/app.release.json': release({ chart: 'path:deploy/charts/missing' }) }, /chart path:deploy\/charts\/missing is not a local chart directory/);
+  refuses({ 'deploy/values/app.release.json': release({ images: [{ lock: 'quay.io/example/typo', set: { image: 'ref' } }] }) }, /release app maps the image quay\.io\/example\/typo, which is not in deploy\/bundle\/images\.lock\.json/);
+  refuses({ 'deploy/values/app.release.json': release({ namespace: undefined }) }, /app\.release\.json: it has no namespace/, listReleases);
+  refuses({ 'deploy/values/app.release.json': release({ image: [] }) }, /unknown field image/, listReleases);
+  refuses({ 'deploy/values/hub.release.json': release({ instances: 'hubs' }) }, /names a twice; two releases would have the same name/);
+  refuses({ 'deploy/values/hub.release.json': release({ instances: 'hubs' }), 'deploy/values/hub-a.release.json': release() }, /both render a release named hub-a/,
+    (root) => renderSite(root, { site: { ...site, hubs: [{ name: 'a' }] }, helm: HELM, all: true }));
+  refuses({ 'deploy/values/app.release.json': release(), 'deploy/values/local.yaml': 'greeting: "${site.missingKey}"\n' }, /deploy\/values\/local\.yaml: \$\{site\.missingKey\} is not set in the site file/);
+  refuses({ 'deploy/values/app.release.json': release({ enabledWhen: { registryKnd: 'zot' } }) }, /enabledWhen names \$\{site\.registryKnd\}, which is not set/);
+});
+
+test('site substitution keeps JSON valid and a local chart renders once per instance with the image from the lock', () => {
+  const json = substituteSite('{"a": "${site.x}", "b": "${site.n}", "c": ${site.list}, "d": "https://${site.h}/"}', { x: 'q"y', n: 30, list: ['p', 'q'], h: 'host' }, 'f.json');
+  assert.deepEqual(JSON.parse(json), { a: 'q"y', b: 30, c: ['p', 'q'], d: 'https://host/' });
+  assert.ok(helmFound(), `helm was not found (${HELM}).`);
+  const root = fixture({ ...LOCKS, 'deploy/values/hub.release.json': release({ instances: 'hubs' }) });
+  const yaml = renderRelease(root, 'hub', { site: { siteName: 'ci', registry: 'registry.site.example', egressAllow: [], hubs: [{ name: 'a' }, { name: 'b' }] }, helm: HELM });
+  const pods = splitDocs(yaml);
+  assert.deepEqual(pods.map((doc) => /^  name: (\S+)/m.exec(doc)[1]), ['hub-a', 'hub-b']);
+  for (const doc of pods) {
+    assert.match(doc, /greeting: "ci"/);
+    assert.match(doc, new RegExp(`image: "registry\\.site\\.example/example/app@${DIGEST_A}"`));
+  }
 });
