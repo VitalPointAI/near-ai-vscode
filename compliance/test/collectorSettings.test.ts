@@ -9,7 +9,7 @@ const sha = 'a'.repeat(40);
 const flag = (enabled: boolean) => ({ enabled });
 
 function protection(docs = true) {
-  const checks = ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', ...(docs ? ['docs'] : [])]
+  const checks = ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', ...(docs ? ['docs'] : []), 'deploy']
     .map((context) => ({ context, app_id: 15368 }));
   return {
     required_status_checks: { strict: true, checks: [...checks, { context: 'agent-review', app_id: -1 }] },

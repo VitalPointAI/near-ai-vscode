@@ -24,7 +24,7 @@ test('collects one result per known CI job plus docs, with only success passing'
   assert.deepEqual(observations.map((observation) => [observation.subject, observation.passed]), [
     ['lint', true], ['test', false], ['e2e', false], ['secret-scan', false], ['docs', true]
   ]);
-  assert.deepEqual(CI_OBSERVATION_JOBS, ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', 'docs']);
+  assert.deepEqual(CI_OBSERVATION_JOBS, ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'relay', 'hub', 'docs', 'deploy']);
 });
 
 test('does not create evidence for a job missing from needs or an unrelated job', async () => {
