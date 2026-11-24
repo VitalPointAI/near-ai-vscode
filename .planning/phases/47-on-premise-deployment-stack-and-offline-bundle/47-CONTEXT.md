@@ -199,6 +199,8 @@ Not assumed: session sub-keys and hub roster changes (P6, P7) are not needed for
 
 ## For the owner to confirm
 
+**Accepted by the owner, 2026-11-23:** every default below is accepted as written ("defaults are fine"). Items stay listed for traceability; none is open.
+
 Each has the default the plans use. (The log store was decided by the owner on 2026-11-23: non-AGPL, not Loki; research chose OpenSearch with Fluent Bit, D-19 and 47-RESEARCH.md Decision 4.)
 1. **Gate approval** for the one gate PR (checker, schema, component files, fit entries, CI jobs; D-52, D-53).
 2. **E1 Theia Cloud pin:** the 1.2.0 release (2026-04-09), not a main commit.

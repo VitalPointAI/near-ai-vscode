@@ -142,6 +142,8 @@ Not in this phase: building the product changes (Phase 46: P1 to P5, P8, P9, P11
 
 ## For the owner to confirm
 
+**Accepted by the owner, 2026-11-23:** every default below is accepted as written ("defaults are fine"). Items stay listed for traceability; none is open.
+
 1. **Test-rig hardware.** Default: our own rack sized from the design estimate for the top stage (DESIGN 7: about 1 to 2 GiB and 0.25 to 1 vCPU per session, so roughly 1.2 to 2.2 TiB worker memory and 300 to 1,000 vCPU for 1,000 sessions, plus platform overhead), 3 control-plane nodes with fast local disks for etcd, an encrypted storage class, and one HSM if available. Until that exists, run the stages the available hardware reaches and record the rest as not reached (D-10).
 2. **Hosted scope in `levels.json` (D-18).** Default: separate hosted-deployment entries; alternative: add hosted components to the existing levels.
 3. **Reference site as the public evidence source (D-15).** Default: the rig is the public reference site; customer sites only in local overlays.
