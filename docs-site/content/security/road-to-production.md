@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 409 items, 391 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 410 items, 392 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -23,7 +23,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 
 | Level | Blocks production | Does not block production |
 | --- | --- | --- |
-| [Now, at every level](#now) | 74 | 8 |
+| [Now, at every level](#now) | 75 | 8 |
 | [From Protected A](#protected-a) | 301 | 1 |
 | [From Protected B](#protected-b) | 12 | 3 |
 | [From Protected C](#protected-c) | 0 | 1 |
@@ -100,6 +100,7 @@ These matter today, at every level, including unclassified work.
 - **G378. Model licences limit which models a site may run.** Nemotron models are under the NVIDIA Open Model License. Command A+ may be used only through Cohere Model Vault or under a commercial licence from Cohere. Record each model's licence in its passport, and refuse a model whose licence does not allow your organization's use. Controls: CM-10, SA-4. Owner role: shared. Planned in Phase 74.1.
 - **G380. Label confidence is not calibrated on quantized models.** Labels are proposed by local models that run quantized. Quantization can shift a model's confidence, so thresholds set on the full model may be wrong. Calibrate each quantized model's confidence on your organization's audit sample, level by level, before its labels apply. Controls: AC-16, SA-11. Owner role: maintainers. Planned in Phase 93.
 - **G381. Classification throughput is not measured.** How many items the local models can label in an hour on your organization's hardware is not measured. Measure it on the target hardware before sizing a site, and state no figure until a recorded run gives one. Controls: CP-2(2), SC-5. Owner role: maintainers. Planned in Phase 85.
+- **G421. The credential context address is not registered yet.** Every verified credential names the context https://w3id.org/sterling/credentials/v1 (Phase 71, D-05). Our own verifiers never fetch it, but a partner's verifier that expands JSON-LD would, and an address nobody controls could be claimed and serve other meanings. Register the address with w3id.org, pointing at the frozen context document in the code, before the first real credential is issued (owner item 3 of the Phase 71 context), or choose an address under your organization's own domain instead. Controls: SI-7, SA-8. Owner role: owner. Planned in Phase 71.
 - **X1. The CGP, ITAR and EAR compartments have no fixed meaning that ties them to a regime.** Give the three reserved compartments their fixed meaning through the exportControl section of the signed policy, with the words shown for each, and enforce it. Controls: AC-16, CGP-37-2, ITAR-120.56-A. Owner role: maintainers. Tracked as POA&M item x01; first milestone: Fixed meaning and enforcement of the reserved export compartments (Phase 45).
 - **X2. Clearances are self-declared; there is no signed person decision for export regimes.** Let only a signed export-person decision from the regime's official give a person a reserved compartment, and later issue those decisions as verifiable credentials. Controls: AC-3, AC-21, CGP-13, CGP-37-2, ITAR-120.56-A, ITAR-126.5. Owner role: maintainers. Tracked as POA&M item x02; first milestone: Signed export-person decisions decide who may hold a reserved compartment (Phase 45).
 - **X3. Endpoints carry a highest label and a region, but no export eligibility.** Refuse every send of controlled content to an endpoint that no signed export-endpoint decision covers, in the route check. Controls: AC-4, SA-9, CGP-37-2, ITAR-120.56-A. Owner role: maintainers. Tracked as POA&M item x03; first milestone: Export-endpoint decisions enforced in the route check (Phase 45).

@@ -6039,6 +6039,19 @@
       ],
       "remediation": "Signing is restricted to the archive job's account, but a cluster administrator could sign that day's manifest; a day already archived on write-once storage cannot be changed. Detect a second signature with the daily signature watch, then record the authorizing official's acceptance of the residual risk, or design a manifest signer outside the cluster's administration.",
       "title": "A cluster administrator can sign the current day's audit archive manifest"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "si-07",
+        "sa-08"
+      ],
+      "id": "G421",
+      "ownerRole": "owner",
+      "remediation": "Every verified credential names the context https://w3id.org/sterling/credentials/v1 (Phase 71, D-05). Our own verifiers never fetch it, but a partner's verifier that expands JSON-LD would, and an address nobody controls could be claimed and serve other meanings. Register the address with w3id.org, pointing at the frozen context document in the code, before the first real credential is issued (owner item 3 of the Phase 71 context), or choose an address under your organization's own domain instead.",
+      "title": "The credential context address is not registered yet"
     }
   ]
 }
