@@ -666,7 +666,7 @@ Plans:
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
 **Depends on**: the hosting design (`.planning/research/multiuser-hosting/DESIGN.md`, owner decisions D1 to D11, 2026-11-23); the Theia spike (`.planning/spikes/theia-team-studio/`, PR #162); the compliance fit check (`compliance/resources.json`, PR #164). Runs beside Phase 47 from day one.
-**Requirements**: FND-T-01 to FND-T-nn (defined when planned, from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10)
+**Requirements**: FND-T-01, FND-T-02, FND-T-03, FND-T-04, FND-T-05, FND-T-06, FND-T-07, FND-T-08, FND-T-09, FND-T-10 (from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10)
 **Success Criteria** (what must be TRUE):
   1. The workbench builds, tests and runs from a workspace package in CI, in a browser test against the built container; nothing remains only under `.planning/spikes/`.
   2. A native widget calls engine code in the backend through one JSON-RPC service pattern, with the same refusals the extension host gives.
