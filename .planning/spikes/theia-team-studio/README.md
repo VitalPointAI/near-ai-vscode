@@ -1,6 +1,6 @@
-# Team Studio in Eclipse Theia
+# Sterling in Eclipse Theia
 
-Can a native Theia view reuse the existing Team Studio data model in a browser container? This preview uses a native Theia widget and RPC service with the extension's existing team parser. It reads four packaged sample projects.
+The local workbench opens to Sterling Sovereign AI Canadian Defence Edition. Get Started shows the Sterling logo for the active theme and opens a native Team Studio preview with four packaged samples.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Team Studio](http://127.0.0.1:18771/). If you close the tab inside the workbench, run **NEAR AI: Open Team Studio Preview** from the command palette. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/) and select **Explore a sample team**. Reopen the page with the home icon at the top of the right sidebar or **SovAI: Get Started** in the command palette. **SovAI: Open Team Studio Preview** also opens the sample. Use the sample picker to switch between two valid teams, a sample without a team, and a sample with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
@@ -41,6 +41,18 @@ docker run --detach --name near-ai-theia-vsix \
 ```
 
 Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. From the command palette choose **NEAR AI: Set Up**, **NEAR AI: Team Studio**, or **NEAR AI: Open Chat**. The compatibility container is for synthetic projects and has an in-memory credential store.
+
+## Documentation and Compliance
+
+The right sidebar opens both views in Theia. Documentation search uses the guides packaged in the image. Links to included topics open in place. Other links open in your browser.
+
+The Compliance view displays an evidence bundle's recorded states and source, with filters for level, state and control. The image starts without evidence. From a trusted checkout, run `npm --prefix docs-site run compliance:refresh` to verify the evidence manifest and write the public dashboard projection. Add the following read-only bind mount when starting the local container.
+
+```sh
+--mount "type=bind,source=$PWD/docs-site/static/compliance,target=/repo/.planning/spikes/theia-team-studio/lib/frontend/compliance,readonly"
+```
+
+Mount only the public projection written by the [documentation site's evidence refresh](../../../docs-site/README.md). The container's `node` user must be able to read its dashboard, `refresh.json` and public control text. The view shows states only when `refresh.json` records a verified manifest for the same commit as the dashboard. It reports missing, invalid, unverified or old bundles, and shows no evidence counts until a verified projection is available. The view shows the states the bundle recorded when it was built; it does not recompute them.
 
 ## Research
 
