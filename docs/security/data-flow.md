@@ -1,6 +1,6 @@
 # Data flows
 
-Last reviewed: 2026-11-21
+Last reviewed: 2026-11-24
 
 One diagram per component shows what data crosses which boundary and whether it is encrypted on
 the way. Dashed lines are boundaries the data crosses encrypted end to end, so the other side holds
@@ -87,17 +87,22 @@ model credential.
 
 ```mermaid
 flowchart LR
-  DEV["Pull request"] -- "CI, secret scan, agent review" --> MAIN["main on GitHub"]
+  DEV["Pull request"] -- "CI, secret scan, compliance fit check, agent review" --> MAIN["main on GitHub"]
   MAIN -- "release tag, protected" --> BUILD["Release workflow: tests, build, SBOM, VSIX checks"]
-  BUILD -- "VSIX and SHA-256 checksum" --> GHR["GitHub release"]
-  GHR -- "same VSIX, checksum checked" --> PUB["Publish job, waits for the owner's approval"]
-  PUB -- "HTTPS, publisher token held only in that environment" --> MKT["Visual Studio Marketplace"]
-  MKT -- "signed extension over HTTPS" --> USER["VS Code on each computer"]
+  BUILD -- "VSIX, checksum checked" --> IMG["Image job: builds the workbench image with that VSIX, starts it and checks it"]
+  IMG -- "image archive, checksum checked" --> PUB["Publish job, waits for the owner's approval"]
+  PUB -- "HTTPS, short-lived workflow token" --> GHCR["GitHub Container Registry"]
+  PUB -- "image digest" --> GHR["GitHub release: digest, VSIX, checksums, assessor package"]
+  GHCR -- "image pulled by digest over HTTPS" --> USER["Container runtime on each computer"]
+  GHR -- "VSIX and checksum over HTTPS" --> VSC["VS Code on each computer"]
 ```
 
-Every change reaches `main` through a pull request and its gates, and the VSIX that is published is
-the one the build job made, checked by its checksum. The Marketplace signs the extension and VS Code
-checks that signature when it installs it.
+Every change reaches `main` through a pull request and its gates. The VSIX inside the image and on
+the GitHub release is the one the build job made, checked by its checksum, and the image that is
+pushed is the one the image job started and checked. The publish job runs only after the owner
+approves it in the protected `container-release` environment. The GitHub release records the
+image's registry digest, so pulling by that digest gets exactly the pushed image. Releases are no
+longer published to the Visual Studio Marketplace.
 
 ## Model endpoints
 

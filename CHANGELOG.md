@@ -1,10 +1,73 @@
 # Changelog
 
-## Unreleased
+## 0.4.38
 
-- **Generate an SA&A package on demand.** Choose a published release in **NEAR AI: Generate SA&A Package…**. The ZIP includes an editable sponsor Word draft, a control and evidence workbook, verified release records, and administrative forms.
-- **Follow the evidence for each finding.** OSCAL keeps partially met controls open and links each finding to its evidence in the bundle. Protected A has scoped product evidence for gate audit warnings, timestamps, and permissions on new POSIX log files.
-- **Verify Marketplace publication.** The export includes a checksummed approval receipt when GitHub confirms the approval for the selected release.
+This is the first complete container release. 0.4.37's image reached the registry, but its last
+publication check failed, so it has no GitHub release and no assessor package. 0.4.38 carries
+the same product with that fixed.
+
+### Released as a container image
+
+- **Each release now finishes with its GitHub release and assessor package.** Before, the step
+  that confirms the pushed image is the tested one compared the wrong digest on newer Docker
+  versions and stopped the release after the image was already published. It now accepts the
+  registry copy only when it is exactly the tested image, under either way Docker reports an
+  image's identity.
+- **The OSCAL import check runs again.** The check that imports the assessor package into
+  Compliance Trestle unpacked it inside Trestle's own workspace, which Trestle refuses. It now
+  unpacks beside it, so the import and validation results appear in each release run.
+
+### Compliance and documentation
+
+- **The hosted compliance views show their first evidence.** For the planned on-premise
+  deployment, three statements now rest on a checked test of the site stack: it renders no k3s
+  and no ingress-nginx, and no certificate issuer uses a public ACME service. Everything else
+  in those views still shows No statement yet or a dated gap, never Met without evidence.
+- **The documentation matches how Sterling ships.** Getting started covers both the extension
+  and the workbench image, and the architecture, release and security pages describe the
+  approved container publication and the planned hosting for your organization's own sites.
+
+## 0.4.37
+
+This is the first release shipped as a Sterling container image instead of a Marketplace
+extension. It also adds an editable Security Assessment and Authorization (SA&A) package and
+makes the compliance dashboard stricter about what it shows as met.
+
+### Released as a container image
+
+- **One versioned image per release.** Each release publishes the Sterling workbench image to
+  the GitHub Container Registry after the owner's approval. The GitHub release records the
+  exact image digest beside the extension package, its checksum and the assessor package. The
+  extension is no longer published to the Visual Studio Marketplace.
+- **The Sterling workbench in your browser.** The image opens the Sterling Get Started page,
+  with the Canadian Defence Edition, read-only Team Studio samples, the bundled documentation,
+  and a Compliance view that shows control states only from an evidence bundle whose hashes
+  were checked for the same release.
+- **Local preview only, for now.** The image has no sign-in of its own. It refuses to start
+  until you confirm you publish it on `127.0.0.1` only. Sign-in for many people at your own
+  sites comes in later releases.
+
+### SA&A package on demand
+
+- **Generate an SA&A package.** Choose a published release in **NEAR AI: Generate SA&A
+  Package…**. The ZIP includes an editable sponsor Word draft, a control and evidence workbook,
+  verified release records, and administrative forms.
+- **Follow the evidence for each finding.** OSCAL keeps partially met controls open and links
+  each finding to its evidence in the bundle.
+- **See who approved the release.** The export includes a checksummed receipt of the
+  publication approval when GitHub confirms it for the selected release, for container
+  releases and for earlier Marketplace releases.
+
+### Compliance and security
+
+- **No control shows as met while part of the system says nothing about it.** A control is
+  now Partly met until every component in scope has a statement or a reviewed exclusion.
+- **Release integrity evidence works again.** The release check follows each release tag to
+  its commit and checks the published checksum against GitHub's recorded asset digests.
+- **Nothing new is used without a compliance check.** Every dependency, base image, workflow
+  action and bundled library now needs a reviewed entry before it can be used.
+- **Two pages or replies can no longer freeze the editor.** The reader for fetched web pages
+  and the usage line under chat replies now take linear time on any input.
 
 ## 0.4.36
 
