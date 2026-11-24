@@ -446,7 +446,7 @@ jobs:
       - name: Build the workbench image
         if: steps.has_workbench.outputs.present == 'true'
         working-directory: .
-        run: docker build -f workbench/Dockerfile -t sterling-workbench:ci .
+        run: bash .github/retry-registry-auth.sh docker build -f workbench/Dockerfile -t sterling-workbench:ci .
       # The image's supply-chain record (D-31), with the relay image scan's pinned tools: a CycloneDX SBOM, a Grype scan (report-only)
       # and the image ID, written before the tests so a failing test still leaves them.
       - name: Install pinned Syft and Grype
@@ -535,7 +535,7 @@ jobs:
           echo "present=false" >> "$GITHUB_OUTPUT"
       - name: Build the relay image
         if: steps.has_relay_scan.outputs.present == 'true'
-        run: docker build -f relay/Dockerfile -t near-ai-relay:scan .
+        run: bash .github/retry-registry-auth.sh docker build -f relay/Dockerfile -t near-ai-relay:scan .
       - name: Install pinned Syft and Grype
         if: steps.has_relay_scan.outputs.present == 'true'
         run: |
