@@ -296,6 +296,8 @@ Plans:
 
 **Note (2026-11-20)**: plan POST-01 into this phase: a generic `roster.require` feature check, so a client that lacks a feature a project needs refuses to fold it instead of ignoring entries it does not know. It must be in the field before Phase 33.1 ships positions, because an older client that ignored a relief would keep accepting the relieved holder's writes (`.planning/research/portfolio-and-assignment/DESIGN.md`, 3.9).
 
+**Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer: a Monaco co-editing binding, native presence and cursors, a native Staff Room, and Share with people on the Sterling work-area page. Each person gets their own Theia Cloud session; secrets and long-term keys move to OpenBao through the native Theia foundation, which this phase now depends on. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.2 and 13.
+
 ### Phase 33.1: Assigned positions and handover (INSERTED)
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
@@ -430,6 +432,8 @@ Plans:
 - [ ] 32.1-18-PLAN.md: Wave 5. Chat welcome: one Get Started button
 - [ ] 32.1-19-PLAN.md: Wave 5. SECURITY.md, README, docs site, CHANGELOG
 - [ ] 32.1-20-PLAN.md: Wave 6. Close-out: First Project page removed, end-to-end scenario, baselines tightened, full suite once, UAT and verification
+
+**Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer. The guide is what "Set up Sterling" opens from the Sterling Get Started page; its checklist becomes a section of that page; plan 17's walkthrough and title-bar entry are dropped, and there is no second home page. Hosted sessions offer only servers your organization's policy lists. Executed engine plans carry over; it now depends on the native Theia foundation. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.1 and 13.
 
 ### Phase 32.2: Local model manager (INSERTED)
 **Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
