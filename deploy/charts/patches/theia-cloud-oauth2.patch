@@ -1,0 +1,211 @@
+# The carried patch of the Theia Cloud 1.2.0 chart (D-22, research Pattern 2), applied by deploy/charts/vendor.mjs to the hash-checked
+# upstream tarball (deploy/charts/vendored/theia-cloud-1.2.0.tgz) to make deploy/charts/vendored/theia-cloud-1.2.0-sterling.tgz, whose SHA-256
+# is in deploy/charts/charts.lock.json. A Helm post-renderer is not used: Helm 4 only runs one as a plugin, and RKE2's chart controller
+# would skip it. Values cannot express any of this:
+#   oauth2-configmap-oauth2proxy-keycloak.yaml: the chart hard-codes ssl_insecure_skip_verify=true and cookie_secure="false" and renders the
+#     client and cookie secrets as plain text (the public sample values by default). The patch verifies TLS to Keycloak with the site CA,
+#     sets secure cookies, reads both secrets from files of Secret oauth2-proxy-secrets, and adds the alpha configuration Phase 46 needs
+#     (46 D-38): the step-up parameters max_age, acr_values and prompt from /oauth2/start, the forwarded access token and the
+#     X-Auth-Request-User and X-Auth-Request-Email headers. oauth2-proxy v7.15.6 refuses legacy options (provider, client_*, upstreams,
+#     pass_access_token, set_xauthrequest) in the configuration file once --alpha-config is given, so those settings live in the alpha part.
+#     It also sets trusted_proxy_ips from the site (render fails without it): with --reverse-proxy and no trusted proxies, v7.15.6 trusts
+#     X-Forwarded-Uri from any caller and matches --skip-auth-route against it, so a spoofed header skipped sign-in (Phase 46 finding).
+#   service.yaml: the service read the same client secret from ConfigMap service-config; it now comes from Secret oauth2-proxy-secrets.
+#   landing-page.yaml: the config and logo mounts point at /usr/share/nginx/html, which our UBI 9 nginx image never serves (it serves
+#     /opt/app-root/src), so the start page ran with its built-in demo settings (spike S7); they now go where the page is served.
+#   operator.yaml, service.yaml, landing-page.yaml: no security context, so Pod Security restricted (enforced in theia-cloud, where the
+#     sessions run) refused every one of them; each gets the restricted pod and container settings.
+# The session pod template (deploy/images/theia-cloud-operator/templates/templateDeployment.yaml) mounts the two ConfigMap keys and the
+# Secret files.
+--- a/theia-cloud/templates/landing-page.yaml
++++ b/theia-cloud/templates/landing-page.yaml
+@@ -20,8 +20,17 @@
+         checksum/config: {{ include (print $.Template.BasePath "/landing-page-config-map.yaml") . | sha256sum }}
+     spec:
+       automountServiceAccountToken: false
++      # Sterling (deploy/charts/patches): Pod Security restricted, which the theia-cloud namespace enforces.
++      securityContext:
++        runAsNonRoot: true
++        seccompProfile:
++          type: RuntimeDefault
+       containers:
+         - name: landing-page-container
++          securityContext:
++            allowPrivilegeEscalation: false
++            capabilities:
++              drop: [ALL]
+           image: {{ tpl (.Values.landingPage.image | toString) . }}
+           imagePullPolicy: {{ if .Values.landingPage.imagePullPolicy }}{{ tpl (.Values.landingPage.imagePullPolicy | toString) . }}{{ else }}{{ tpl (.Values.imagePullPolicy | toString) . }}{{ end }}
+           ports:
+@@ -36,10 +45,11 @@
+             periodSeconds: 5
+           volumeMounts:
+             - name: landing-page-config
+-              mountPath: /usr/share/nginx/html/config.js
++              # Sterling: our UBI 9 nginx image serves /opt/app-root/src (47-09); the upstream path was never read (spike S7).
++              mountPath: /opt/app-root/src/config.js
+               subPath: config.js
+             - name: landing-page-config
+-              mountPath: {{ printf "/usr/share/nginx/html/%s" $logoFileName }}
++              mountPath: {{ printf "/opt/app-root/src/%s" $logoFileName }}
+               subPath: {{ $logoFileName }}
+       {{- if .Values.landingPage.imagePullSecret }}
+       imagePullSecrets:
+--- a/theia-cloud/templates/oauth2-configmap-oauth2proxy-keycloak.yaml
++++ b/theia-cloud/templates/oauth2-configmap-oauth2proxy-keycloak.yaml
+@@ -12,25 +12,26 @@
+   namespace: {{ .Release.Namespace }}
+ data:
+   oauth2-proxy.cfg: |+
+-    # Provider config
+-    provider="keycloak-oidc"
++    # Sterling (deploy/charts/patches/theia-cloud-oauth2.patch): the session pod runs oauth2-proxy with --alpha-config, so this file holds only
++    # oauth2-proxy's core options; v7.15.6 refuses legacy ones beside alpha configuration. The provider, client, upstream and the headers
++    # that pass_access_token and set_xauthrequest would set are in oauth2-proxy-alpha.yaml below. No secret is in this ConfigMap.
+     redirect_url="https://placeholder/oauth2/callback"
+-    oidc_issuer_url="{{ $keycloakUrl }}realms/{{ tpl (.Values.keycloak.realm | toString) . }}"
+-    ssl_insecure_skip_verify=true
+-    # Client config
+-    client_id="{{ tpl (.Values.keycloak.clientId | toString) . }}"
+-    client_secret="{{ tpl (.Values.keycloak.clientSecret | toString) . }}"
+-    cookie_secret="{{ tpl (.Values.keycloak.cookieSecret | toString) . }}"
+-    cookie_secure="false"
++    ssl_insecure_skip_verify=false
++    cookie_secret_file="/etc/oauth2-proxy-secrets/cookie-secret"
++    cookie_secure="true"
+     #proxy_prefix=""
+-    # Upstream config
+-    http_address="0.0.0.0:5000"
+-    upstreams="http://127.0.0.1:placeholder-port/"
+     # Proxy Config
+     #user_id_claim="preferred_username"
+     skip_auth_routes=["/health.*"]
+     skip_provider_button="true"
+     reverse_proxy="true"
++    # Sterling: X-Forwarded-* headers (and the X-Forwarded-Uri the sign-in exemptions are matched against) are trusted only from the
++    # ingress controllers' addresses (sterling.trustedProxyIps, per site); HAProxy replaces any client-supplied value, and a session
++    # accepts connections only from HAProxy and the operator (sterling-sessions' NetworkPolicy).
++    {{- $trusted := .Values.sterling.trustedProxyIps | default (list) }}
++    {{- if not $trusted }}{{ fail "sterling.trustedProxyIps (the addresses the ingress controllers reach sessions from) is required" }}{{ end }}
++    {{- range $trusted }}{{ if or (not .) (eq . "0.0.0.0/0") (eq . "::/0") }}{{ fail (printf "sterling.trustedProxyIps entry %q is empty or trusts everyone" .) }}{{ end }}{{ end }}
++    trusted_proxy_ips={{ toJson $trusted }}
+     # email_domains=["*"]
+     {{- $cookieDomains := .Values.oauth2Proxy.cookieDomains | default (list) }}
+     {{- $whitelistDomains := .Values.oauth2Proxy.whitelistDomains | default (list) }}
+@@ -58,3 +59,62 @@
+       {{- end }}
+     {{- end }}
+     custom_templates_dir="/templates"
++  oauth2-proxy-alpha.yaml: |
++    # Sterling: oauth2-proxy's alpha configuration (Phase 46 interface item 3, 46 D-38). TLS to Keycloak is verified with the site CA only;
++    # the client secret is a file from Secret oauth2-proxy-secrets. /oauth2/start passes max_age, acr_values and prompt on to Keycloak only
++    # with the values allowed below, so the workbench's step-up reaches Keycloak. The workbench receives the access token and the
++    # signed-in person in request headers oauth2-proxy sets itself (a value a browser sends in these headers is removed).
++    server:
++      bindAddress: "0.0.0.0:5000"
++    upstreamConfig:
++      upstreams:
++        - id: workbench
++          path: /
++          uri: "http://127.0.0.1:{{ required "sterling.workbenchPort (the workbench's port, the AppDefinition port) is required" .Values.sterling.workbenchPort }}/"
++          passHostHeader: true
++          proxyWebSockets: true
++    injectRequestHeaders:
++      - name: X-Forwarded-Access-Token
++        preserveRequestValue: false
++        values:
++          - claimSource:
++              claim: access_token
++      - name: X-Auth-Request-User
++        preserveRequestValue: false
++        values:
++          - claimSource:
++              claim: user
++      - name: X-Auth-Request-Email
++        preserveRequestValue: false
++        values:
++          - claimSource:
++              claim: email
++    providers:
++      - id: keycloak
++        provider: keycloak-oidc
++        clientID: "{{ tpl (.Values.keycloak.clientId | toString) . }}"
++        clientSecretFile: /etc/oauth2-proxy-secrets/client-secret
++        caFiles:
++          - /etc/ssl/site-ca/ca.crt
++        useSystemTrustStore: false
++        code_challenge_method: S256
++        oidcConfig:
++          issuerURL: "{{ $keycloakUrl }}realms/{{ tpl (.Values.keycloak.realm | toString) . }}"
++          emailClaim: email
++          audienceClaims:
++            - aud
++        loginURLParameters:
++          - name: max_age
++            allow:
++              - pattern: '^[0-9]+$'
++          - name: acr_values
++            allow:
++              - value: "{{ required "sterling.stepUpAcr (the site's step-up level) is required" .Values.sterling.stepUpAcr }}"
++          - name: prompt
++            allow:
++              - value: login
++          # "Sign in through HQ" at a linked edge site (/oauth2/start?kc_idp_hint=hq): Keycloak goes straight to the HQ broker (47-14, off by
++          # default; Keycloak ignores the hint when no such broker exists).
++          - name: kc_idp_hint
++            allow:
++              - value: hq
+--- a/theia-cloud/templates/operator.yaml
++++ b/theia-cloud/templates/operator.yaml
+@@ -22,8 +22,17 @@
+       # we need to be able to create and read operators
+       automountServiceAccountToken: true
+       serviceAccountName: operator-api-service-account
++      # Sterling (deploy/charts/patches): Pod Security restricted, which the theia-cloud namespace enforces.
++      securityContext:
++        runAsNonRoot: true
++        seccompProfile:
++          type: RuntimeDefault
+       containers:
+       - name: operator-container
++        securityContext:
++          allowPrivilegeEscalation: false
++          capabilities:
++            drop: [ALL]
+         image: {{ tpl (.Values.operator.image | toString) . }}
+         imagePullPolicy: {{ if .Values.operator.imagePullPolicy }}{{ tpl (.Values.operator.imagePullPolicy | toString) . }}{{ else }}{{ tpl (.Values.imagePullPolicy | toString) . }}{{ end }}
+         args:
+--- a/theia-cloud/templates/service.yaml
++++ b/theia-cloud/templates/service.yaml
+@@ -20,8 +20,17 @@
+       # we need to be able to create and read sessions
+       automountServiceAccountToken: true
+       serviceAccountName: service-api-service-account
++      # Sterling (deploy/charts/patches): Pod Security restricted, which the theia-cloud namespace enforces.
++      securityContext:
++        runAsNonRoot: true
++        seccompProfile:
++          type: RuntimeDefault
+       containers:
+       - name: service-container
++        securityContext:
++          allowPrivilegeEscalation: false
++          capabilities:
++            drop: [ALL]
+         image: {{ tpl (.Values.service.image | toString) . }}
+         imagePullPolicy: {{ if .Values.service.imagePullPolicy }}{{ tpl (.Values.service.imagePullPolicy | toString) . }}{{ else }}{{ tpl (.Values.imagePullPolicy | toString) . }}{{ end }}
+         ports:
+@@ -31,6 +40,13 @@
+         envFrom:
+         - configMapRef:
+             name: service-config
++        # Sterling: the OIDC client secret from Secret oauth2-proxy-secrets, never from ConfigMap service-config (D-22, D-41).
++        env:
++        - name: KEYCLOAK_CLIENTSECRET
++          valueFrom:
++            secretKeyRef:
++              name: oauth2-proxy-secrets
++              key: client-secret
+       {{- if .Values.service.imagePullSecret }}
+       imagePullSecrets:
+         - name: {{ tpl (.Values.service.imagePullSecret | toString) . }}

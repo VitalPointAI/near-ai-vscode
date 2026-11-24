@@ -49,3 +49,6 @@ sessionEnv:
     - THEIACLOUD_KEYCLOAK_CLIENT_ID
   # Extra environment names a session pod may carry beyond the operator's own and the site ConfigMap. Empty: a launch request adds nothing.
   allowedNames: []
+# Who may connect to a session pod (templates/session-network-policy.yaml): the HAProxy controllers' namespace and the operator.
+sessionAccess:
+  ingressNamespace: haproxy-controller

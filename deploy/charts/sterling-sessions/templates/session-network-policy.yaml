@@ -1,0 +1,24 @@
+{{- /*
+Who may connect to a person's session (Phase 46 finding, workbench/README.md "What Phase 47 closes"; 47-15). oauth2-proxy in each session
+trusts X-Forwarded-* headers from the pod network (theia-cloud's sterling.trustedProxyIps), so only the HAProxy controllers and the Theia
+Cloud operator (its activity monitor) may reach a session pod. Another person's session, or any other pod, cannot connect to it at all, so it
+cannot send a forged X-Forwarded-Uri past oauth2-proxy's sign-in. Kubelet probes come from the node and are not affected.
+*/ -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sterling-session-ingress
+spec:
+  podSelector:
+    matchLabels:
+      sterling-session: "true"
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.sessionAccess.ingressNamespace }}
+        - podSelector:
+            matchLabels:
+              app: operator
