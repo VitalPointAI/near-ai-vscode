@@ -83,6 +83,27 @@ Never bare `node --test` and never an uncapped `npm test`.
 
 ---
 
+## Re-aim to native Theia (2026-11-23)
+
+The rows above give the original plan numbers. Where a plan is superseded (33-10, 33-11, 33-13, 33-20, and 33-19 as the product path), the behaviour moves to the native plan named below. Workbench tests run with `npm --prefix workbench test` inside the same memory wrapper. The container and Playwright suite runs only in 33-30 and the close-out (D-65).
+
+| Req | Behaviour | Plan | Test type | Automated command (file) | File exists |
+|-----|-----------|------|-----------|--------------------------|-------------|
+| MUS-09 | `session.certify` fold, person-key kinds refused from session keys, revocation, slots, no clock | 33-21 | unit | `dist/test/replicaSessionCertify.test.js`, `staffPersonKeySigning.test.js` | W0 |
+| MUS-09 | Hub accepts certified session keys, `session-expired`, `person-key-required`, certificate limit | 33-22 | hub and real-hub client | `hub: sessionCertify`, `dist/test/staffHubSessionKey.test.js` | W0 |
+| MUS-09 | Session key and certificate through KeyService, X25519 envelope, key-store secrets, keys dropped at stop | 33-23 | workbench unit | `workbench/test/staff/session-keys.test.ts`, `encryption-key.test.ts` | W0 |
+| MUS-09, POST-01 | Native engine: one replicator per project per session, every 33-10 hook, client fan-out, bundle boundary | 33-24 | workbench unit and real hub | `workbench/test/staff/staff-live-engine.test.ts`, `backend-service-client.test.ts` | W0 |
+| MUS-09 | Monaco binding: no echo, version guard, hash resync, own undo by every path, header, take or restore, one editing tab | 33-25 | workbench unit | `remote-bound-document.test.ts`, `monaco-bound-document.test.ts`, `bound-undo.test.ts` | W0 |
+| MUS-09 | Native Staff Room: people, sentence, banner, contested, stamp and step-up, cards and rows | 33-26 | unit and workbench unit | `dist/test/staffRoomLive.test.js`, `staff-room-service.test.ts`, `staff-room-widget.test.ts` | W0 |
+| MUS-09 | Share with people native, re-admit with twelve words, invitation open handler, extension stands back in the image | 33-27 | workbench unit and unit | `share-service.test.ts`, `dist/test/staffHubReadmit.test.js`, `staffMultiUserCommands.test.js` | partly |
+| MUS-09 | Sterling status entry: word, sentence, warning look, nothing identifying | 33-28 | workbench unit | `staff-sync-status.test.ts` | W0 |
+| MUS-09 | Native cursors with names as plain text, rate and expiry, Show Who Wrote This | 33-29 | workbench unit | `remote-cursors.test.ts`, `who-wrote-this.test.ts` | W0 |
+| MUS-09 | Two people in two browsers: co-edit, cursor names, own undo, status; **blocking:** step-up decision, contested, changed while deciding, nothing secret on the wire | 33-30 | Playwright against built containers | `npm --prefix workbench run test:container` (`workbench/test/e2e/staff-live.spec.ts`) | W0 |
+
+The manual check "two VS Code installs" above becomes two Sterling sessions on the lab stack, recorded in 33-UAT.md. The focused browser check of the decision paths is now the blocking part of 33-30.
+
+---
+
 ## Validation Sign-Off
 
 - [ ] All tasks have `<automated>` verify or Wave 0 dependencies
