@@ -1418,7 +1418,9 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Get started in two minutes
 
-1. Install **NEAR AI for VS Code** and open a project folder.
+1. Install **NEAR AI for VS Code** and open a project folder. From 0.4.37 each release also ships
+   as the Sterling workbench container image on the GitHub Container Registry, recorded by digest
+   on the GitHub release; the image has no sign-in of its own, so run it on `127.0.0.1` only.
 2. Open the **NEAR AI** chat and choose **Set up a new profile** (or run
    **NEAR AI: Set Up a New Profile** from the Command Palette). A profile is
    your NEAR AI key or local runtime for this project; it is working once the
@@ -1442,8 +1444,9 @@ where to save the ZIP. The extension checks the published evidence archive again
 its release digest and builds a consolidated editable sponsor Word draft and a
 control-to-evidence workbook alongside the assessment documents and blank
 administrative forms. The command downloads public release files from GitHub
-and verified privacy forms from Canada.ca. It includes a Marketplace approval
-receipt when GitHub can verify it for the selected release. The evidence index
+and verified privacy forms from Canada.ca. It includes a publication approval
+receipt when GitHub can verify it for the selected release: the container image approval from
+0.4.37, the Marketplace approval for earlier releases. The evidence index
 records missing and partial coverage. Your organization completes deployment
 scope, findings, and approvals through its own review process.
 

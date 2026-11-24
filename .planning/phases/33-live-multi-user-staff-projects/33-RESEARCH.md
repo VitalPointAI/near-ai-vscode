@@ -791,3 +791,103 @@ Rules: plans in one wave own disjoint files (D-02); the first task of every plan
 
 
 
+
+
+---
+
+## Native Theia re-aim (2026-11-23)
+
+**Scope:** only what the re-aim adds: the Monaco and Yjs binding inside Theia, the Theia JSON-RPC push for document changes, presence decorations in Monaco, and session-key certification with OpenBao Transit. The engine findings above (F1 to F14) still apply. Decisions: `33-CONTEXT.md`, "Re-aim to native Theia" (D-50 to D-68).
+**Marking:** **[verified]** means read in source or docs during this research. **[verify]** means the executor confirms it against Theia 1.77.0's installed sources before relying on it.
+
+### N1. What carries over unchanged
+
+- These files are host-neutral and need no change for Theia: `src/staff/replica/*`, `src/domain/replica/*`, `src/domain/staff/*`, `staffHost.ts`, `versionActs.ts`, `contested.ts`, `hubAddress.ts`, `compactor.ts`, and `src/services/staffSyncStatus.ts`. Only `staffEditorBinding.ts` and `staffMultiUserCommands.ts` import `vscode`.
+- The 33-04 `BoundDocument` (`editorBinding.ts` lines 11 to 25) has four members: `version`, `getText()`, `applyEdits(edits, expectedText, baseVersion, lineEndings?) => Promise<boolean>` and `onDidChange(listener)`. Its changes carry `edits`, `text`, `version` and an optional `reason: 'undo' | 'redo'`.
+- Because `applyEdits` is asynchronous and checked against a version, the core already tolerates a document that lives across a process boundary. That is what makes D-53 possible without changing the core.
+- `PayloadSigner.sign(bytes)` is synchronous (`src/domain/team/signedPayload.ts:58`). Transit signing is an HTTP call, so the person-key path needs an asynchronous variant (D-60). Session keys keep the synchronous path.
+- Yjs client ids are `clientIdOf(slot, counter)` with a 12-bit slot and a 20-bit counter, and `nextClientId(slot, used)` avoids ids already in use (`clientIds.ts`). Session writers can therefore take their certifying device's slot from `session.certify` and stay collision-free, as long as `used` is built from the folded document.
+
+### N2. The Yjs pattern, from y-monaco (MIT; pattern only, no code copied)
+
+- **[verified]** y-monaco listens to `monacoModel.onDidChangeContent`. It sorts the changes right to left by `rangeOffset` and applies delete `rangeLength` then insert `text` inside one Yjs transaction.
+- Remote changes come from a `ytext.observe` delta and are applied with `monacoModel.applyEdits`, never `pushEditOperations`, so they add no undo stop. A non-reentrant mutex suppresses the echo.
+- Selections are saved as Yjs relative positions before remote transactions and restored with `setSelection` afterwards.
+- Remote cursors are decorations with `className` for the selection, and `afterContentClassName` or `beforeContentClassName` for the caret, refreshed with `deltaDecorations`.
+- The 33-04 core already follows all of this with an origin object in place of a mutex, in the backend. The frontend half only has to forward Monaco's change events faithfully and apply edits without undo stops.
+
+### N3. Monaco inside Theia 1.77
+
+- **[verified, master]** `MonacoEditorModel` (`@theia/monaco/lib/browser/monaco-editor-model`) exposes:
+  - `onDidChangeContent` with `contentChanges: { range, rangeOffset, rangeLength, text }[]`;
+  - `get version()` returning `model.getVersionId()`;
+  - `get textEditorModel()`, the Monaco `ITextModel`;
+  - `readOnly` and `onDidChangeReadOnly` from the resource, and `save()`, `onModelWillSaveModel` and `onDidSaveModel`.
+- Its own `applyEdits` is protected. Use `textEditorModel.applyEdits(...)` directly. Theia's change event has no `isUndoing` or `isRedoing`, but Monaco's own `ITextModel.onDidChangeContent` carries `isUndoing` and `isRedoing`, so `MonacoBoundDocument` listens on `textEditorModel` **[verify in 1.77]**.
+- **Save:** a bound product's text equals `Y.Text` after a flush, so Theia's save writes what the projection would write. The live projector (33-06) treats a file equal to the last bound text as projected, so a save is never a conflict. `onModelWillSaveModel` flushes the binding before saving (D-17).
+- **Opening:** the frontend watches `EditorManager.onCreated` and asks the backend whether the editor's URI is a product of an open shared project. Only then does it attach. Models that are not bound are left alone (MUS-06 parity).
+
+### N4. Undo and redo in Theia
+
+- **[verified, master]** `CommandRegistry.registerHandler` puts a new handler first (`handlers.unshift(handler)`; "the given handler is registered as more specific, and has higher priority"). `getActiveHandler` returns the first enabled handler.
+- A Sterling handler for `core.undo` and `core.redo`, enabled only when the focused editor's model is bound, therefore wins over Theia's. The keyboard path goes through Monaco's own `undo` and `redo` keybindings inside the editor, so the frontend also adds a Monaco editor action or a keybinding override with a context key, `sterlingStaffBoundEditor`, for the focused bound editor **[verify which path Theia 1.77 uses for Ctrl+Z inside Monaco]**.
+- The test asserts that native undo of a bound model never runs, whichever path the key takes.
+
+### N5. Pushing document changes over Theia JSON-RPC
+
+- **[verified, master]** `RpcProxyFactory.isNotification` treats any method whose name starts with `notify` or `on` as a notification, so no reply is awaited.
+- `RpcConnectionHandler(path, proxy => target)` hands the backend a proxy of the frontend's client object. The frontend's `ServiceConnectionProvider.createProxy(path, client)` sets that client (`setClient`).
+- Phase 46-01's `bindBackendService(bind, id, path, make)` builds `new RpcConnectionHandler(path, () => ctx.container.get(id))` and ignores the client. D-52 adds one optional `withClient(service, client)` callback to that helper, and the service keeps a set of clients, so no second helper is built.
+- The channel's methods:
+  - Backend to frontend: `onApplyEdits(docId, edits, baseVersion, requestId)`, `onPresence(docId, cursors)`, `onAttribution(docId, ranges)`, `onStatus(status)`, `onNotice(text)`.
+  - Frontend to backend: `attach(uri)`, `changed(docId, edits, version, textHash, reason?)`, `applied(requestId, ok)`, `fullText(docId, text, version)`, `undo(docId)`, `redo(docId)`, `selection(docId, ranges)`, `detach(docId)`.
+- The protocol sends a hash, not the text, on each change (D-53): the backend mirror applies the edits to its copy and checks a SHA-256. On a mismatch it requests `fullText` once.
+- A dropped connection detaches that client's documents. On reconnect the frontend calls `attach` again, and the backend answers with the full current text. This is the binding's resync path, logged once.
+
+### N6. Presence decorations
+
+- Monaco `IModelDecorationOptions` offers `className`, `beforeContentClassName`, `afterContentClassName`, `hoverMessage`, `linesDecorationsClassName` and injected text (`before` and `after`, whose `content` is plain text) **[verify that the Monaco build in Theia 1.77 has injected text; if not, the name is shown only in `hoverMessage` and the Staff Room people list]**.
+- Colours come from 8 fixed CSS classes using theme variables. A person's slot is their index among the product's people. No name or colour value is generated into CSS (T-33-N3).
+- The send and receive limits from D-18 (at most 10 per second, never stored) run in the backend `livePresence` (33-12). The frontend only draws what it is sent.
+
+### N7. Session keys certified through OpenBao Transit (P6, P7)
+
+**[verified]** OpenBao Transit API (`website/content/docs/api/secret/transit.mdx`):
+- `POST transit/sign/:name` takes `input` (base64), an optional `key_version` and `batch_input`. Ed25519 ignores `hash_algorithm`.
+- Signatures come back as `vault:v<version>:<base64>`. 46-07 already strips the prefix.
+- The key types are AES-GCM, ChaCha20-Poly1305, XChaCha20-Poly1305, ed25519, ECDSA P-256/384/521, RSA, ML-DSA 44/65/87, hmac and external keys. There is **no X25519 or ECDH** (D-61).
+- Rotation makes a new key version with new key material. A rotated person key is therefore a new public key, so Phase 47's rotation runbook must be followed by `device.rotate` in each project. Owner note: rotation stays an operator action. The workbench never rotates keys (46-07).
+- `transit/sign` with step-up runs through the `sterling-workbench-stepup` jwt role (46-07, 47-07). Every person-key signature therefore needs `auth_time` inside the step-up window.
+  - **At session start** the sign-in has just happened, so certifying the session key needs no extra prompt.
+  - **For decisions** the decision dialog starts the step-up if the window has passed (46-02 `stepUpUrl`). The Staff Room says "Confirm with your passkey or security key" and acts after the person returns.
+
+**The certificate** (D-62):
+- `session.certify` is an entry. It is not a header field, because the header format is permanent and verified by every hub and client.
+- It sits in the project stream in the roster cell, which the hub can read. The hub folds it into its roster cache next to the roster line, but it never advances the line.
+- Its writer is the person device, through Transit. Its data is `{ member, device, sessionKey, slot, notAfter }`, and `sessionKey` becomes a writer id with its own chains.
+- **Fold:** verify the entry's header signature with the certified key, then check the certificate's signer against the roster at the entry's cited roster hash. The fold uses no clock.
+- **Hub:** on append and on session auth, refuse a session writer without a known certificate (`unknown-writer`, held as today) or with `notAfter` in the past (new refusal `session-expired`, not retryable, with "Your session key has ended. Sign in again."). Refuse a person-key kind from a session writer (`person-key-required`).
+
+**Threats this closes:**
+- A stolen session key works only until `notAfter` at the hub, and never for decisions or roster changes.
+- A session key cannot change the roster.
+- Revoking the person device ends every session key it certified.
+- Long-term private keys never enter the session. The X25519 key and opened epoch keys do enter backend memory (unavoidable without ECDH in Transit), but they are never written to the volume in plain form.
+
+### N8. Pitfalls added by the re-aim
+
+1. **Two binders on one document:** the compatibility host runs the VSIX in the same image. If the extension ever attached its 33-19 adapter, two bindings would write the same product. D-64 adds a guard and a test.
+2. **Version races across the process boundary:** a frontend edit can arrive between the backend's `applyEdits` request and its application. The version check in `MonacoBoundDocument.applyEdits` returns `false`, and the core retries. Never apply against a different version.
+3. **Multiple tabs:** two tabs of one session have two Monaco models of the same product. `EditorBinding.open(document, product, hooks)` binds exactly one document, and each binding opens its own `ProductEditor` (checked on the integration branch). Two bindings of one product in one backend would compete for client ids under one writer. So the backend keeps **one binding per product per session**. The first tab to attach edits. Another tab's model is set read-only with the notice "This product is open for editing in another tab of your session.", and it takes over when the first tab detaches. The same rule covers two editors of one product in one tab.
+4. **Step-up inside a modal:** step-up leaves the page through the identity provider. The decision dialog keeps its stamp (D-24) in the backend for the step-up window, so returning to the page resumes the same decision or refuses with the "changed while deciding" sentence.
+5. **Bundle bloat:** the engine bundle is backend-only. A test asserts that no `yjs` and no `src/staff/replica` module reaches the frontend bundle (D-51).
+
+### N9. Validation for the native plans
+
+| Behaviour | Test | Where |
+|---|---|---|
+| Remote edits apply without an undo stop and only at the expected version | unit with a Monaco `ITextModel` created headless (`monaco-editor-core` from Theia's deps) or a fake that matches the interface | `workbench/test/staff/monaco-bound-document.test.ts` |
+| Channel hash mismatch asks for the full text once | unit, backend mirror | `workbench/test/staff/remote-bound-document.test.ts` |
+| Bound undo never runs native undo | unit, command registry with both handlers | `workbench/test/staff/bound-undo.test.ts` |
+| A session key cannot write a person-key kind; revocation stops session writers; expired at the hub | engine unit and hub test | `src/test/replicaSessionCertify.test.ts`, `hub/test/sessionCertify.test.ts` |
+| Two people in two browsers co-edit, see names, decide with step-up, see contested | Playwright against two built containers, one hub, dev OpenBao | `workbench/test/e2e/staff-live.spec.ts` (33-30) |

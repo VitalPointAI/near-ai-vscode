@@ -15,7 +15,7 @@
 
 ### Accepted from the design (owner)
 - **D-01 (owner, D2):** On-premise only. The load test runs on our own hardware; no commercial cloud, no managed Kubernetes, no cloud load generator.
-- **D-02 (owner, D3):** Target is 1,000 or more concurrent sessions per site, with start bursts of 500+.
+- **D-02 (owner, D3; revised 2026-11-24, owner):** The first goal is one HQ with about 400 concurrent people: 400 concurrent sessions with start bursts of 200 (Claude defaults; was 1,000 or more with bursts of 500+). See 48-CONTEXT.md.
 - **D-03 (owner, D4):** One session per person (`sessionsPerUser: 1`), one pod per session; the test exercises that configuration, not a denser one.
 - **D-04 (owner, D9):** Nothing counts toward any claim until it is in `compliance/` and assessed. Section 10 verdicts are starting points, not results.
 - **D-05 (owner, O2):** HAProxy is the ingress until Traefik is tested. The Traefik test is in this phase; its result changes the default only if the owner then chooses to.
@@ -45,7 +45,7 @@
 
 ### Load test
 - **D-19:** The load test is code in this repository, in its own folder with its own lockfile and exact versions, and every new tool has a compliance fit entry. It drives sessions through Theia Cloud's service API with tokens from a load-test-only Keycloak client in a test realm on the rig, and opens a sampled share of sessions in a real browser through a WebAuthn virtual authenticator to measure time to a usable workbench. The production realm keeps passwords and every non-WebAuthn flow off; the test realm is never in the offline bundle.
-- **D-20:** Stages: 50, 250, 500, 1,000, then above 1,000 while the rig allows. Each stage holds steady state long enough to measure per-person use, then a burst of 500+ starts. The run file records every stage reached.
+- **D-20 (revised 2026-11-24, owner):** Stages: 50, 100, 200, 400, then beyond 400 while the rig allows, as headroom, never a claim. Each stage holds steady state long enough to measure per-person use, then a burst of 200 starts. The run file records every stage reached.
 - **D-21:** Load per person is a scripted, versioned activity profile (open files, edit, run a terminal command, an idle share). An empty idle session is reported separately and never presented as the per-person figure.
 - **D-22:** Metrics come from the site's own metrics store and the Kubernetes API, not the load generator's estimates; the run file stores the queries used.
 - **D-23:** The sync hub is measured under the same run against its 150-people-per-hub target (MUS 10.9), with several hubs per site.
@@ -74,7 +74,7 @@
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| VER-01 | A repeatable load test, kept as code, runs on our own hardware against the Phase 47 stack and the Phase 46 image by digest, in stages to 1,000 or more concurrent sessions with start bursts of 500+. | Service API drives sessions (section "Load test: how to drive Theia Cloud"); zero-dependency Node orchestrator plus one Playwright browser sample; stage controller; hardware is the schedule risk (Environment Availability). |
+| VER-01 | A repeatable load test, kept as code, runs on our own hardware against the Phase 47 stack and the Phase 46 image by digest, in stages to the HQ target of 400 concurrent sessions with start bursts of 200, then beyond while the rig allows (revised 2026-11-24, owner). | Service API drives sessions (section "Load test: how to drive Theia Cloud"); zero-dependency Node orchestrator plus one Playwright browser sample; stage controller; hardware is the schedule risk (Environment Availability). |
 | VER-02 | Each run writes one hashed run file with inputs, hardware, image digests and chart versions, and per stage: session start time (p50, p95, p99; cold, and warm if a pool is tested), steady-state CPU and memory per person under the activity profile, operator reconcile throughput, shared Ingress object size and ingress reload time, etcd size and load per session, and load per hub. | Run-file outline; every metric derived from Kubernetes objects, Prometheus and the shared Ingress object (section "Measurement sources"); the operator exposes no metrics, so reconcile throughput is derived from object timestamps. |
 | VER-03 | Capacity figures in docs and the per-site sizing defaults (volume size, idle timeout, memory per person) are read from a run file; a check refuses a capacity figure without one; a stage not reached is reported as not reached. | Generated `docs/hosting/capacity.md` plus a docs test in `docs-site/test/` (not a gate path); no false positives found in today's docs. |
 | VER-04 | Every component of Phases 46 and 47 has an OSCAL component definition with one responsibility per implemented requirement and statements only for behaviour that exists. | A component file with no statements loads and validates (run in scratch); loader enforces exactly one responsibility per implemented requirement; existing `components.test.ts` hard-codes the six ids and must be edited. |
@@ -179,7 +179,7 @@ No other npm package is recommended. Tools that run only on the rig (kubectl, Pr
 ```
  TRACK 1  LOAD TEST (rig)                                     TRACK 2  EVIDENCE (compliance)
  ------------------------                                     -------------------------------
- stage plan (50,250,500,1000,..)                              site (rig) --export script--> signed envelope
+ stage plan (50,100,200,400,..)                               site (rig) --export script--> signed envelope
         |                                                           (facts: ids, counts, hashes,
         v                                                            versions, generatedAt)
  test-realm Keycloak  --token per user-->  Theia Cloud service           |
@@ -395,10 +395,12 @@ Chromium only: Playwright reaches the authenticator through a CDP session (`WebA
 
 ### Rig dimensions the plan must not forget
 
-- Kubernetes' stated large-cluster envelope is "No more than 110 pods per node" `[VERIFIED: kubernetes.io/docs/setup/best-practices/cluster-large]`; 1,000 session pods plus platform pods need at least ten worker nodes or a raised kubelet `maxPods` (a recorded setting, not a silent default).
-- Design estimate: about 1 to 2 GiB and 0.25 to 1 vCPU per session `[CITED: DESIGN.md section 7, "Capacity [estimate]"]`, so roughly 1 to 2 TiB of worker memory at 1,000 sessions. Keep this marked as an estimate until a run replaces it (D-09).
-- 1,000 PVCs on the encrypted storage class: record provisioning time inside the cold-start figure; the storage class is Phase 47's choice.
-- Stages (D-20): 50, 250, 500, 1,000, above while the rig allows. A stage not reached is recorded with the reason; the capacity page prints "not reached", never an extrapolation.
+Revised 2026-11-24 (owner): the target is now one HQ at 400 concurrent sessions (D-02). The figures below were recomputed for it from the same sources.
+
+- Kubernetes' stated large-cluster envelope is "No more than 110 pods per node" `[VERIFIED: kubernetes.io/docs/setup/best-practices/cluster-large]`; 400 session pods, plus the burst of 200 on top (600 at peak), plus platform pods need at least six worker nodes or a raised kubelet `maxPods` (a recorded setting, not a silent default).
+- Design estimate: about 1 to 2 GiB and 0.25 to 1 vCPU per session `[CITED: DESIGN.md section 7, "Capacity [estimate]"]`, so roughly 0.4 to 0.8 TiB of worker memory and 100 to 400 vCPU at 400 sessions. Keep this marked as an estimate until a run replaces it (D-09).
+- 400 PVCs (600 during the burst) on the encrypted storage class: record provisioning time inside the cold-start figure; the storage class is Phase 47's choice.
+- Stages (D-20): 50, 100, 200, 400, then beyond while the rig allows, as headroom. A stage not reached is recorded with the reason; the capacity page prints "not reached", never an extrapolation.
 
 ## Compliance machinery: answers to the research questions
 
@@ -616,10 +618,10 @@ Not a rename or migration phase. Omitted. One related note for Phase 46's `exten
 | Prometheus, Harbor, Keycloak, OpenBao, Theia Cloud | the run | no (Phase 47 stack on the rig) | — | none: the load test needs the stack |
 | `oras`, `skopeo`, `cosign`, `syft`, `grype` | image evidence | no on this machine | — | Phase 46 and 47 pin their own copies in CI |
 | Compliance package dependencies | collector tests | not installed in the worktree | `npm --prefix compliance ci --ignore-scripts` works (ran in scratch: 12 packages) | — |
-| Test rig hardware | VER-01 stages | unknown | — | **Blocking for the 1,000 stage.** This machine has 16 cores and 28 GiB. Record stages not reached (D-10). |
+| Test rig hardware | VER-01 stages | unknown | — | **Blocking for the 400 stage** (revised 2026-11-24, owner; was the 1,000 stage). This machine has 16 cores and 28 GiB. Record stages not reached (D-10). |
 | HSM | `kms-pkcs11` experiment | no | — | SoftHSM2 proves wiring only; certificate item stays a gap |
 
-**Missing with no fallback:** the rig itself (1,000-session stage, hub-under-load, Traefik, prewarm, step-up, CRL experiments).
+**Missing with no fallback:** the rig itself (400-session stage, hub-under-load, Traefik, prewarm, step-up, CRL experiments).
 **Missing with fallback:** local lab tools (install on demand); HSM (SoftHSM2 wiring test).
 
 ## Validation Architecture

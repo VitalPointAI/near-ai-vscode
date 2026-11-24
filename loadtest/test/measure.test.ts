@@ -128,14 +128,22 @@ test('sizing defaults per site size class come from the run, and a class whose s
   const idle = { sessions: 20, cpuMillicores: ascending(20, 5, 1), memoryBytes: ascending(20, 300 * mib, mib) };
   const perPerson = { active, idle };
   const run = makeRun({
-    stages: [stage(250, { perPerson }), stage(500, { perPerson, start: { ...stage(500).start, readyMs: { cold: ascending(20, 40_000, 100), warm: [] } } }), notReached(1_000, 'pods Pending past the limit')],
-    inputs: { ...makeRun().inputs, stages: [250, 500, 1_000], idleTimeoutMinutes: 45 }
+    stages: [stage(100, { perPerson }), stage(200, { perPerson, start: { ...stage(200).start, readyMs: { cold: ascending(20, 40_000, 100), warm: [] } } }), notReached(400, 'pods Pending past the limit')],
+    inputs: { ...makeRun().inputs, stages: [100, 200, 400], idleTimeoutMinutes: 45 }
   });
   const block = renderCapacity([{ ...run, hash: hashRun(run) }]);
   const rows = block.split('\n').filter((line) => line.startsWith('| Up to '));
   assert.equal(rows.length, 3, block);
   // p95 of 1000..1019 MiB is 1018 MiB, rounded up to 1,024 MiB; p95 volume is 1 GiB + 180 MiB, doubled and rounded up to 3 GiB.
-  assert.equal(rows[0], `| Up to 250 people | ${run.id} | 1,024 MiB | 3 GiB | 45 minutes | 318 MiB | 12,370 ms |`);
-  assert.match(rows[1], /^\| Up to 500 people \| .* \| 45 minutes \| 318 MiB \| 41,800 ms \|$/);
-  assert.equal(rows[2], '| Up to 1,000 people | not measured | | | | | |');
+  assert.equal(rows[0], `| Up to 100 people | ${run.id} | 1,024 MiB | 3 GiB | 45 minutes | 318 MiB | 10,940 ms |`);
+  assert.match(rows[1], /^\| Up to 200 people \| .* \| 45 minutes \| 318 MiB \| 41,800 ms \|$/);
+  assert.equal(rows[2], '| Up to 400 people | not measured | | | | | |');
+});
+
+test('a reached stage above the HQ target is headroom: no size class of its own, and the stage table marks it', () => {
+  const run = makeRun({ stages: [stage(400), stage(600)], inputs: { ...makeRun().inputs, stages: [400, 600] } });
+  const block = renderCapacity([{ ...run, hash: hashRun(run) }]);
+  assert.ok(!block.includes('| Up to 600 people'), block);
+  assert.ok(block.split('\n').some((line) => line.startsWith('| 400 | reached |')), block);
+  assert.ok(block.split('\n').some((line) => line.startsWith('| 600 | reached (headroom) |')), block);
 });

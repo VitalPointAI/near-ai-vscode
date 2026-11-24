@@ -529,10 +529,12 @@ test('the view follows the other editor run, and one that goes quiet is shown as
     marker.activeAt = new Date(Date.now() - FOREIGN_LIVE_MS - MINUTE).toISOString();
     // Written the way the product writes markers (a temporary file renamed over it): a plain write truncates the file first, and a follow check that
     // read it torn saw no marker at all, stopped following and never showed the cut-off run.
+    // Cleared before the marker changes: the follow check runs every 20 ms, so clearing after the rename could wipe the cut-off message it had
+    // already posted, and the wait below would never see it.
+    second.posted.length = 0;
     const temporary = `${saved.file}.test.tmp`;
     await writeFileAsync(temporary, `${JSON.stringify(marker)}\n`);
     await rename(temporary, saved.file);
-    second.posted.length = 0;
     await waitUntil(() => second.posted.some((message) => message.type === 'run-interrupted'), 'the cut-off run is shown');
     const cut = second.posted.find((message) => message.type === 'run-interrupted');
     assert.ok(cut, 'the reloaded conversation shows the run-interrupted message');
