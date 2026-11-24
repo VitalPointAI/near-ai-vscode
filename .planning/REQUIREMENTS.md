@@ -775,7 +775,14 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
 - [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.
 - [ ] **MUS-12**: Standing watches on the hub under draft-only, rate, spend, route and kill-switch guards.
-- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1; POST-02 to POST-08 are added when Phase 33.1 is planned).
+- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1).
+- [ ] **POST-02**: Positions as roster objects with title, section, shift, decision roles, required clearance, key groups, acting and dual-hat flags and the ways of serving they are open to; history answers who held what when.
+- [ ] **POST-03**: Signed authority to post: held by the lead position, delegated with scope, kinds, expiry and depth under the one pure delegation rule (`mayDelegate`, shared with Phase 71); every posting records who ordered it, under whose authority, and when, derived from the verified signer.
+- [ ] **POST-04**: Posting machine (portfolio DESIGN 3.8): ordered, device proven, unable reported, decided (confirm, defer, reassign), in effect, overdue, away, relieved, cancelled; no decline path in assignment modes, enforced by the fold from the shared project's signed mode.
+- [ ] **POST-05**: Device proof by safety code as key delivery, with the "not consent" sentence, by posting file or your organization's server; in a hosted session the device is the person's key in your organization's key store; expired secrets never cancel a posting.
+- [ ] **POST-06**: Atomic handover: authority switches at the incoming's report entry; staged key changes activate at the same point; stale staging refused and restaged; writes held until the staged epoch is folded; a client or server without the positions feature stops.
+- [ ] **POST-07**: Acting, temporary and dual-hatted postings with the single-authority invariant, decisions that name their position, and separation-of-duty checks.
+- [ ] **POST-08**: Personnel key group for report-unable reasons and order references; migration from seats with parity; silent positions per seat in invitation mode; team files name positions, never people; Staff Room screens in the mode's words and, in the Defence Team mode, the words that follow how a person serves.
 
 | Requirement | Phase |
 |-------------|-------|
@@ -783,6 +790,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-04 … MUS-06 | Phase 31 |
 | MUS-07, MUS-08 | Phase 32 |
 | MUS-09, POST-01 | Phase 33 |
+| POST-02 … POST-08 | Phase 33.1 |
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
