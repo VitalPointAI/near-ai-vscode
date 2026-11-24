@@ -682,7 +682,7 @@ Plans:
 ### Phase 47: On-premise deployment stack and offline bundle
 **Goal**: Your organization can install and run the Sterling workbench for many people at a site it owns, connected or fully disconnected: RKE2, a local image registry, HAProxy ingress, cert-manager with an OpenBao CA, Keycloak with sign-in by passkeys or hardware keys only, self-hosted Theia Cloud (one session per person), OpenBao with HSM unseal, and the sync hub, all from a signed offline bundle with no outbound calls.
 **Depends on**: the hosting design (DESIGN.md sections 4 to 7, 10, 11; decisions O2 to O6 accepted 2026-11-23); the compliance fit check (every component needs a passing entry); Phase 46's image only for the end-to-end run. Runs beside Phase 46 from day one.
-**Requirements**: DEP-01 to DEP-nn (defined when planned, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list)
+**Requirements**: DEP-01 to DEP-12 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list)
 **Success Criteria** (what must be TRUE):
   1. A site installs from one signed offline bundle (images, vendored charts, realm and policy as code) on air-gapped hardware, and nothing in the running stack calls out.
   2. A person signs in with a hardware security key or a device-bound passkey, never a password; a lost key is replaced by administrator-attested re-enrolment; two keys are registered per person.
@@ -690,10 +690,27 @@ Plans:
   4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
-**Plans:** 0 plans
+**Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-56 in `47-CONTEXT.md`)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 47 to break down)
+- [ ] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
+- [ ] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
+- [ ] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
+- [ ] 47-04-PLAN.md: Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
+- [ ] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
+- [ ] 47-06-PLAN.md: Wave 4. Signed offline bundle build, check and import; signed-file mechanism
+- [ ] 47-07-PLAN.md: Wave 4. OpenBao as code: PKCS#11 seal, sterling-workbench and step-up roles, policies, two-key enrolment
+- [ ] 47-08-PLAN.md: Wave 4. Keycloak realm as code: passwordless WebAuthn only, shared rpId, step-up acr levels
+- [ ] 47-09-PLAN.md: Wave 4. Rebuilt Theia Cloud and oauth2-proxy images; hardened session pod template
+- [ ] 47-10-PLAN.md: Wave 4. Encrypted storage class, OpenSearch with Fluent Bit, Prometheus, Harbor values
+- [ ] 47-11-PLAN.md: Wave 4. Sync hubs as single-writer StatefulSets; Keycloak's Postgres
+- [ ] 47-12-PLAN.md: Wave 4. Workbench AppDefinition, site environment ConfigMap, session environment policy
+- [ ] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
+- [ ] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
+- [ ] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
+- [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
+- [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
+- [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
 
 ### Phase 48: Load and accreditation verification
 **Goal**: Before any capacity or compliance claim is made for the hosted workbench, we measure it: a load test on our own hardware to the target number of concurrent sessions, and OSCAL components and evidence rules for every component of Phases 46 and 47 so the compliance dashboard shows the hosted deployment's real state.
@@ -1851,7 +1868,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/TBD | Planning 2026-11-23 (beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 0/TBD | Planning 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 0/18 | Planned 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 0/TBD | Planning 2026-11-23 (after 46 and 47) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
