@@ -741,6 +741,8 @@ The knowledge base of the paused former v0.5.0 knowledge-base plan returns here 
 | 23 Forecasting | Deferred, intelligence projects only | none |
 | 24 Hardening and release | Carries, extended to the database, caches and model server logs | 101 |
 
+**UI design references (owner, 2026-11-22):** Review [knowledge.mp4](../docs/specs/knowledge.mp4) and [knowledge 2.mp4](<../docs/specs/knowledge 2.mp4>) before designing the data management and data map UI (Phase 88), knowledge and context graph UI (Phase 96), and related views (Phase 97). Use both videos as interface references. In particular, show data being ingested and settling into the graph as in the first video, and use the rotating brain-shaped cloud in the second video as the visual reference for the graph itself.
+
 ### Stage A: host and spikes (Phases 85-87)
 
 ### Phase 85: Host and local inference on Strix Halo (L1a), measured
