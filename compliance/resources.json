@@ -1331,7 +1331,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1365,7 +1365,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1399,7 +1399,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1434,7 +1434,8 @@
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1)."
+        "Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1).",
+        "Its own pod is admitted by its exact pinned digest rather than by signature (the signature lives in this registry, which is down while it restarts); the digest is the one the signed bundle's import verified, preloaded on each node."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3243,6 +3244,7 @@
       "conditions": [
         "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
         "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Upstream turns TLS verification off in the service (quarkus.oidc.tls.verification=none) and in the operator's session probe (a trust-all JVM default). Our service entrypoint and operator build turn both back on against the site chain only (ConfigMap sterling-site-ca), and the service no longer logs its secrets at start; recorded as upstream issues.",
         "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
         "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed."
       ],
