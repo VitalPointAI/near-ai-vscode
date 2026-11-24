@@ -1,0 +1,16 @@
+{
+  "request_id": "5d0d6a4e-9a54-4d0c-8d61-0a7f0f7b1c22",
+  "lease_id": "",
+  "lease_duration": 0,
+  "renewable": false,
+  "data": {
+    "socket/": {
+      "type": "socket",
+      "description": "Audit stream to the site log store",
+      "options": { "address": "fluent-bit.fixture-logging.svc:5170", "socket_type": "tcp" },
+      "local": false,
+      "path": "socket/"
+    }
+  },
+  "warnings": null
+}

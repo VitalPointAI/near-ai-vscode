@@ -1,0 +1,37 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "policies.kyverno.io/v1",
+      "kind": "ImageValidatingPolicy",
+      "metadata": { "name": "sterling-signed-images" },
+      "spec": {
+        "validationActions": ["Deny"],
+        "failurePolicy": "Fail",
+        "matchConstraints": { "resourceRules": [{ "apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["pods"] }] },
+        "matchImageReferences": [{ "glob": "registry.fixture-site.example/*" }],
+        "attestors": [{ "name": "organization-key", "cosign": { "key": { "data": "-----BEGIN PUBLIC KEY-----\nfixture-public-key-text\n-----END PUBLIC KEY-----" } } }],
+        "validations": [{ "expression": "images.containers.map(image, verifyImageSignatures(image, [attestors.organization-key])).all(e, e > 0)", "message": "every image must be signed by your organization" }]
+      }
+    },
+    {
+      "apiVersion": "kyverno.io/v1",
+      "kind": "ClusterPolicy",
+      "metadata": { "name": "audit-only-image-check" },
+      "spec": {
+        "validationFailureAction": "Audit",
+        "rules": [{ "name": "check", "match": { "any": [{ "resources": { "kinds": ["Pod"] } }] }, "verifyImages": [{ "imageReferences": ["*"], "attestors": [] }] }]
+      }
+    },
+    {
+      "apiVersion": "kyverno.io/v1",
+      "kind": "ClusterPolicy",
+      "metadata": { "name": "require-labels" },
+      "spec": {
+        "validationFailureAction": "Enforce",
+        "rules": [{ "name": "check-labels", "match": { "any": [{ "resources": { "kinds": ["Pod"] } }] }, "validate": { "message": "label required", "pattern": { "metadata": { "labels": { "app": "?*" } } } } }]
+      }
+    }
+  ]
+}

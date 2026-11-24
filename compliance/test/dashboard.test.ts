@@ -2,13 +2,16 @@
 // the same file. One test runs both sides, so the producer and the pages cannot drift apart.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { buildDashboard, countStates, fillReason, type DashboardBuildInput } from '../src/dashboard.ts';
 import { validateOurs } from '../src/validate.ts';
 import { NS, REASONS, STATES, STATE_WORDS, type ComponentInput, type EvidenceRule, type TestReportRow } from '../src/model.ts';
 import { levelCounts, parseDashboard, STATE_WORDS as VIEW_STATE_WORDS } from '../../docs-site/src/compliance/lib.mjs';
+import { deploymentCollector } from '../src/collectors/deployment.ts';
+import { buildUnsignedExport, signExport } from '../src/siteExport.ts';
+import { compliantFacts, fileContext, freshKey, signersText, tempDir } from './fixtures/collectors/deployment/helpers.ts';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const TRACER = path.join(TEST_DIR, 'fixtures', 'tracer');
@@ -251,4 +254,32 @@ test('the control text, bundle manifest, refresh record and organization overlay
   assert.equal(validateOurs({ schemaVersion: 1, createdAt: '2026-11-21T00:00:00Z', commit: COMMIT, files: [{ path: 'dashboard.json', sha256: 'b'.repeat(64), bytes: 1 }] }, 'bundle-manifest').ok, true);
   assert.equal(validateOurs({ source: 'main', commit: COMMIT, fetchedAt: '2026-11-21T00:00:00Z', manifest: 'verified', attestation: 'not-checked' }, 'refresh').ok, true);
   assert.equal(validateOurs(readJson(path.join(TEST_DIR, 'fixtures', 'overlay', 'answers.json')), 'overlay').ok, true);
+});
+
+/** The tracer control decided by one observation rule on the deployment collector, fed by an export the collector verified (48-02). */
+async function deploymentDashboard(signedAgoMs: number) {
+  const key = freshKey();
+  const dir = tempDir();
+  const signedAt = new Date(NOW.getTime() - signedAgoMs).toISOString();
+  writeFileSync(path.join(dir, 'export.json'), JSON.stringify(signExport(buildUnsignedExport('fixture-site', signedAt, compliantFacts(), key.publicKey), key.privateKeyPem)));
+  writeFileSync(path.join(dir, 'site-signers.json'), signersText(key));
+  const observations = await deploymentCollector.collect({ file: path.join(dir, 'export.json'), signersFile: path.join(dir, 'site-signers.json') }, fileContext(NOW, COMMIT));
+  const rules: EvidenceRule[] = [{ id: 'tracer-fixture.tr-01.deployment', component: 'tracer-fixture', control: 'tr-01', statement: 'tr-01_smt', kind: 'observation', observation: { collector: 'deployment', subject: 'keycloak/no-password-authenticator' } }];
+  return buildDashboard(tracerInput({ rules, testRows: [], observations }));
+}
+
+test('a deployment export signed an hour ago makes its control Met', async () => {
+  const dashboard = await deploymentDashboard(60 * 60 * 1000);
+  assert.equal(dashboard.rows[0].state, 'met');
+  assert.equal(validateOurs(JSON.parse(JSON.stringify(dashboard)), 'dashboard').ok, true);
+});
+
+test('a deployment export signed 7 days and an hour ago makes its control Stale', async () => {
+  const dashboard = await deploymentDashboard(7 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000);
+  assert.equal(dashboard.rows[0].state, 'stale');
+});
+
+test('a deployment export exactly 7 days old is still fresh and one a millisecond older is Stale', async () => {
+  assert.equal((await deploymentDashboard(7 * 24 * 60 * 60 * 1000)).rows[0].state, 'met');
+  assert.equal((await deploymentDashboard(7 * 24 * 60 * 60 * 1000 + 1)).rows[0].state, 'stale');
 });

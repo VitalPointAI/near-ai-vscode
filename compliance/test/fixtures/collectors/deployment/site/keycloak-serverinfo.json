@@ -1,0 +1,22 @@
+{
+  "systemInfo": {
+    "version": "26.8.2",
+    "serverTime": "Sat Nov 21 11:00:00 UTC 2026",
+    "uptime": "3 days, 2 hours, 10 minutes, 4 seconds",
+    "uptimeMillis": 266004000,
+    "javaVersion": "21.0.5",
+    "javaVendor": "Red Hat, Inc.",
+    "javaVm": "OpenJDK 64-Bit Server VM",
+    "osName": "Linux",
+    "userName": "keycloak",
+    "userDir": "/opt/keycloak",
+    "fileEncoding": "UTF-8"
+  },
+  "cryptoInfo": {
+    "cryptoProvider": "Fips1402StrictCryptoProvider",
+    "supportedKeystoreTypes": ["BCFKS"],
+    "clientSignatureSymmetricAlgorithms": ["HS256", "HS384", "HS512"],
+    "clientSignatureAsymmetricAlgorithms": ["ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "RS256", "RS384", "RS512"]
+  },
+  "profileInfo": { "name": "community", "disabledFeatures": [], "previewFeatures": [], "experimentalFeatures": [] }
+}

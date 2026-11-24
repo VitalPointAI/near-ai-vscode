@@ -72,6 +72,25 @@ Releases with compliance sources attach `compliance-package-<version>.tar.gz` an
 
 A main release can include settings and review observations from a verified daily evidence run for the same commit. The package retains the CI test evidence, the installer inventory, and the collection-run links. The release summary records when it uses the CI bundle alone. The package flags expired settings evidence as stale.
 
+## Hosted deployment evidence
+
+A running site proves its hosted controls through a signed deployment evidence export, which the `deployment` collector (`src/collectors/deployment.ts`) reads offline. CI never connects to a site.
+
+What the export holds: the site id, the time it was made, and a fixed list of facts. The facts are counts (enabled password or one-time-code authenticators in the realm's bound flows, `loadtest-` clients, audit events shipped to the log store in the last day, nodes and nodes in FIPS mode, images in the lock list and images whose signature, SBOM and provenance verified, sampled sessions and sessions with the FIPS provider on), true or false values (user and admin events on, Session and Workspace records audited), a few named values (Keycloak build, Keycloak FIPS mode, OpenBao seal type, registry product), the Keycloak and OpenBao versions, and the SHA-256 of the Kubernetes audit policy. What it never holds: realm or client names, user names, emails, tokens, passwords, keys, log lines or policy text. The collector refuses an export with any fact outside that list, so a site cannot add one, and it decides every pass itself under thresholds in its source. The export carries no pass field. Observations keep only the check name, pass or fail, counts, the audit policy hash and the signed time.
+
+The export is signed in the extension's signed-payload format for the purpose `site-evidence-export`. Only a key in `attestations/site-signers.json` (a gate file) makes a reference export count. The list ships empty until the owner adds the reference site's operator key, a key held by the site operator, never one held by the OpenBao instance the export describes. An export signed by any other key, for another purpose, with a time in the future, with a changed fact, or that is missing, unreadable or larger than 256 KiB stops the collector. Every rule on it then reads as a missing result, never Met.
+
+Each observation is dated at the export's signed time and judged on the 7-day settings window. An export older than 7 days reads Stale, whatever CI ran since.
+
+Making an export on a site takes two steps, both run by the site operator:
+
+1. `compliance/site-export/collect.sh --out <empty folder>` collects the raw outputs. It only reads: `kubectl get`, `kcadm.sh get`, `bao status` and `bao read`, `cosign verify` and `cosign verify-attestation` for each digest in the image lock list, a count query to the log store, `/proc/sys/crypto/fips_enabled` on each node over SSH, and `node -p "crypto.getFips()"` in a sample of session pods. It starts no pod and changes nothing. Its settings and the tools it needs are listed at the top of the script; credentials come from the operator's environment. The folder holds raw site data, so it stays on the site.
+2. `node compliance/src/cli.ts site-export --sources <folder> --site <id> --key <pkcs8.pem> --out <export.json>` reads only the files it knows from that folder, keeps only the facts, and signs. For a key in an HSM or other external signer, run it with `--public-key <key> --emit-signing-input <file> --out <unsigned.json>`, sign the bytes of that file with Ed25519, then run `site-export --unsigned <unsigned.json> --attach-signature <signature> --out <export.json>`. The command checks the signature before it writes. It stops without writing when a source file is missing, too large or unreadable, or when the repository's secret scan flags any text in the export.
+
+The reference site's export reaches the public dashboard as a committed file under `compliance/site-evidence/`, signed by the owner-approved key.
+
+Your organization's own sites stay in your organization's local view and are never uploaded. Give the bundle your own export and your own trust list as the `deployment` collector input, `{ "deployment": { "file": "<your export>", "signersFile": "<your trust list>" } }` in the inputs file of `node compliance/src/cli.ts bundle --inputs <file> --out <bundle>`, then show it with `npm --prefix docs-site run compliance:refresh -- --from-dir <bundle>`. The public trust list refuses your export. The organization overlay cannot carry this evidence: it only changes rows that are your organization's responsibility.
+
 ## Owner steps
 
 These settings and outside contacts cannot be changed by this code. They may be completed later; the Evidence and Gaps pages continue to show what remains open.

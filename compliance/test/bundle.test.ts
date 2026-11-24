@@ -49,7 +49,7 @@ test('manifest rejects symlinks rather than following them', () => {
 
 test('runBundle writes the evidence layout even when no collector was selected', async () => {
   const dir = folder(); const result = await runBundle({ repository: 'owner/repo', commit, kind: 'main', repoRoot: process.cwd(), collectors: {} }, dir, { now: new Date('2026-11-21T00:00:00.000Z') });
-  assert.equal(result.collectors.length, 12);
+  assert.equal(result.collectors.length, 13);
   for (const file of ['observations.json', 'test-rows.json', 'collectors.json', 'dashboard/dashboard.json', 'manifest.json']) assert.ok(readFileSync(path.join(dir, file), 'utf8').length > 0, file);
   assert.equal(verifyManifest(dir).ok, true);
 });
