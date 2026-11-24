@@ -23,7 +23,12 @@ writeFileSync(path.join(root, 'docs/marketplace/shot.png'), Buffer.concat([PNG, 
 
 /** No source syntax may reach the page as visible text. */
 function assertNoRawSyntax(html) {
-  const visible = html.replace(/<[^>]*>/g, '');
+  // Tags are stripped until nothing changes, so markup that a single pass would rebuild (`<<b>script>`) cannot pass for visible text.
+  let visible = html;
+  for (let previous; visible !== previous;) {
+    previous = visible;
+    visible = visible.replace(/<[^>]*>/g, '');
+  }
   for (const raw of ['![', '&lt;figure', '&lt;img', '```', 'flowchart LR', '&lt;Figure']) {
     assert.ok(!visible.includes(raw), `visible text holds ${raw}:\n${visible}`);
   }

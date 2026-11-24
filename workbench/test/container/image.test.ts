@@ -5,7 +5,7 @@
 // a pod IP in STERLING_LISTEN_HOST carries that tracker only while the workbench stays on loopback; it runs Node 26,
 // the hub's major; and every FROM line of its Dockerfile is literal and pinned by digest. Hygiene as in test/helpers/docker.ts. Run it with `npm run test:container`; it is not part of `npm test`.
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -158,7 +158,7 @@ test('hosted, with the pod IP in STERLING_LISTEN_HOST: the tracker answers on th
   const network = `sterling-podip-${randomBytes(4).toString('hex')}`;
   let podIp = '';
   for (let attempt = 0; attempt < 5 && !podIp; attempt++) {
-    const prefix = `10.${200 + (randomBytes(1)[0] % 50)}.${randomBytes(1)[0]}`;
+    const prefix = `10.${randomInt(200, 250)}.${randomInt(0, 256)}`;
     // A subnet another network already uses is refused; try another.
     if ((await run('docker', ['network', 'create', '--internal', '--subnet', `${prefix}.0/24`, network])).code === 0) podIp = `${prefix}.10`;
   }

@@ -44,6 +44,9 @@ const decodeEntities = (text) => text.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot
 /** Plain text of a fragment of HTML or JSX: tags removed, entities decoded, whitespace folded. */
 const textOf = (markup) => decodeEntities(markup.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 
+/** Text matched literally inside a regular expression: every character with a meaning there is escaped, the backslash included. */
+const escapeRegExp = (text) => text.replace(/[\\^$.*+?()[\]{}|/-]/g, '\\$&');
+
 /** The attributes of one HTML or JSX tag: name="v", name='v', name={"v"}, name={require('v').default} and name={useBaseUrl('v')}. */
 export function tagAttributes(tag) {
   const attributes = {};
@@ -193,8 +196,8 @@ export function createDocumentationRenderer({ root }) {
       // Inline elements (<img>, <b>, <a> ...) at a line start belong to a paragraph; the inline rule below converts them.
       if (!component && (!HTML_BLOCK_TAGS.has(name.toLowerCase()) || INLINE_TAGS.has(name.toLowerCase()))) return false;
       if (silent) return true;
-      const open = new RegExp(`<${name.replace(/\./g, '\\.')}(?=[\\s/>]|$)(?:[^>{]|\\{[^}]*\\})*?(/?)>`, 'g');
-      const close = new RegExp(`</${name.replace(/\./g, '\\.')}\\s*>`, 'g');
+      const open = new RegExp(`<${escapeRegExp(name)}(?=[\\s/>]|$)(?:[^>{]|\\{[^}]*\\})*?(/?)>`, 'g');
+      const close = new RegExp(`</${escapeRegExp(name)}\\s*>`, 'g');
       // The block ends on the line that closes the element it opens; an element left open ends at the first blank line instead.
       const isVoid = ['img', 'br', 'hr', 'source'].includes(name.toLowerCase());
       let depth = 0;
