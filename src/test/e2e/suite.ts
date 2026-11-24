@@ -722,7 +722,7 @@ async function waitUntil(condition: () => boolean | Promise<boolean>, timeoutMs:
   return condition();
 }
 
-// The NEAR AI Team output channel is written to a log file under the window's user data; a failure in it explains a missing team.json.
+// The SovAI Team output channel is written to a log file under the window's user data; a failure in it explains a missing team.json.
 async function teamLogTail(): Promise<string> {
   const userData = process.env.NEAR_AI_E2E_USER_DATA;
   if (userData === undefined) return '';
@@ -808,8 +808,8 @@ function teamProjectTests(getApi: () => NearAiTestApi): Array<[string, () => Pro
         await waitUntil(enabled, 10_000);
       }
       const tail = await teamLogTail();
-      assert.ok(existsSync(teamFilePath), `${existsSync(path.join(workspace, '.git')) ? NO_TEAM_JSON_SIGNAL : 'the scratch repository is missing'}. If no prompt ever opened this is also ${A3_SIGNAL}. NEAR AI Team log:\n${tail}`);
-      assert.equal(commitSubject(), ENABLE_COMMIT_MESSAGE, `the Enable commit was not made. NEAR AI Team log:\n${tail}`);
+      assert.ok(existsSync(teamFilePath), `${existsSync(path.join(workspace, '.git')) ? NO_TEAM_JSON_SIGNAL : 'the scratch repository is missing'}. If no prompt ever opened this is also ${A3_SIGNAL}. SovAI Team log:\n${tail}`);
+      assert.equal(commitSubject(), ENABLE_COMMIT_MESSAGE, `the Enable commit was not made. SovAI Team log:\n${tail}`);
       assert.deepEqual(git(workspace, ['diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD']).split('\n'), [TEAM_FILE_PATH.split(path.sep).join('/')], 'HEAD holds only team.json');
       const teamFile = JSON.parse(await readFile(teamFilePath, 'utf8')) as { coordination: { ref: string }; genesis: { ownerDevice: { fingerprint: string } } };
       assert.equal(teamFile.coordination.ref, DEFAULT_COORDINATION_REF);
