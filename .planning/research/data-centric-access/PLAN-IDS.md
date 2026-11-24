@@ -8,8 +8,8 @@ Written 2026-11-24 on `docs/phase-71-core-plan`, from `RESEARCH.md` in this fold
 |---|---|---|
 | 71 | Identities and verified credentials (core), pulled forward | 14 plans in 9 waves. Keeps the ROADMAP number; re-scoped |
 | 71.1 | Agent delegation that only narrows | Stub, 0 plans. DLGT-02 to DLGT-08 move here. Stays in Stage 1, before Phase 72 |
-| 33.2 | Post-quantum cell keys (`cell-wrap/v2`) | 7 plans in 6 waves. Must merge before any site holds Protected B data |
-| 45.1 | NATO and Five Eyes exchange, part 1: labels, binding, adapter, base TDF | 4 plans in 4 waves |
+| 33.2 | Post-quantum cell keys (`cell-wrap/v2`) | 8 plans in 7 waves. Must merge before any site holds Protected B data |
+| 45.1 | NATO and Five Eyes exchange, part 1: labels, binding, adapter, base TDF | 5 plans in 5 waves |
 | 45.2 | NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts | Stub, 0 plans. Trigger: your organization receives ACP-240 Ed A and ADatP-4774/4778 |
 
 Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-13; the wrap (research plan 6) is Phase 33.2; I is 45.1; J is 45.2. The research's "plans 1 to 5" (verifier, `mayRelease`) are 71-03 to 71-07.
@@ -24,7 +24,7 @@ Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-
 | 71-04 | 2 | `did:key` for devices (Phase 69 keys unchanged), `did:webvh` log verification from a cached copy | |
 | 71-05 | 3 | Bitstring Status List: build, sign, verify, staple, cite by hash | |
 | 71-06 | 3 | `credentials@1` and `agreements@1` policy sections; issuer authority chain; agents and devices never issue | 33.1-03 (`project.mode` cites the policy hash), 33.1-20 (`agreements[]`), 48.1-05 |
-| 71-07 | 4 | The credential checker (API below) | 33.1-04, 33.1-19, 33.1-20, 33.1-23, 33.2-04, 45.1-03 |
+| 71-07 | 4 | The credential checker (API below) | 33.1-04, 33.1-19, 33.1-20, 33.1-23, 45.1-03 |
 | 71-08 | 5 | The person's wallet, the gate's clearance from credentials, the verifier tool `scripts/credential-check.mjs` | 47-19 (`guests.mjs create --approved-by`), 47-20 |
 | 71-09 | 5 | Sync hub: serves logs and status lists, checks cited evidence on append and serve, revocation watch | 33.1-24 (observer server view), 33.1 observer waves |
 | 71-10 | 6 | A person's `did:webvh` at first sign-in, your organization's root DID and role credentials (offline), binding a computer | |
@@ -32,17 +32,19 @@ Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-
 | 71-12 | 7 | Issuance from the officer's own session (Issue credential card), status-list key in OpenBao, revoke and suspend, the wallet inbox | 33.1 observer waves (33.1-18 to 33.1-25), 47-20 (early end revokes) |
 | 71-13 | 8 | Credential cache state in the session (`fresh`, `stale`, `unavailable`), key release in hosted sessions, tokens authenticate only | |
 | 71-14 | 9 | SECURITY.md and docs, full suites once, verification record, integration PR | 48.1 statements (48 D-11: only what is on main) |
-| 33.2-01 | 1 | Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; research confirmations; permanent shapes checkpoint | |
-| 33.2-02 | 2 | Second device key binding: `device.kem`, the descriptor's `kem` | |
+| 33.2-01 | 1 | Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; permanent shapes checkpoint | |
+| 33.2-02 | 2 | Second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, hub check | |
 | 33.2-03 | 2 | Grant pages | |
-| 33.2-04 | 3 | `wrap@2` through `roster.require`, cutover rule in fold and hub, Protected B rule, CI check, SECURITY.md | 48.1-09 (X25519 open condition closes when this is on main) |
-| 33.2-05 | 4 | Where the new private keys live: keyring, Transit envelope, hub | |
-| 33.2-06 | 5 | Native Switch and Give keys cards; scheduled rekey per cell | |
-| 33.2-07 | 6 | Close-out on the built image, integration PR | |
-| 45.1-01 | 1 | Tracer: `labelInterop@1` table and the signed label binding | 33.1-21 (release copies carry the binding) |
-| 45.1-02 | 2 | Base TDF manifest from the public OpenTDF spec; partner key access; receive key in OpenBao | |
-| 45.1-03 | 3 | The exchange adapter at the release boundary; export record checkpoint | |
-| 45.1-04 | 4 | Binding on every release copy and export; SECURITY.md; close-out | |
+| 33.2-04 | 3 | Where the new private keys live (keyring, Transit envelope, hub) and publishing `device.kem` at open | |
+| 33.2-05 | 4 | `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in fold and hub | |
+| 33.2-06 | 5 | Every wrap path through `wrapForDevice`; the Protected B rule; the CI check; SECURITY.md | 33.1-19 and 33.1-23 (wrap paths must call `wrapForDevice`); 48.1-09 (X25519 open condition closes when 33.2 is on main) |
+| 33.2-07 | 6 | Native Switch, Move and Give keys cards; scheduled rekey per cell | |
+| 33.2-08 | 7 | Close-out on the built image, integration PR | |
+| 45.1-01 | 1 | Tracer: `labelInterop@1` table and the signed label binding | 33.1-01 (reserve `release.copy` `binding`), 33.1-21 |
+| 45.1-02 | 2 | Base TDF manifest from the public OpenTDF spec; partner key access; receiving key in OpenBao | |
+| 45.1-03 | 3 | The exchange adapter at the release boundary; `exchange.export` and `exchange.import` shapes checkpoint | |
+| 45.1-04 | 4 | Binding on every release copy; Export for a partner and Received objects in the workbench | |
+| 45.1-05 | 5 | SECURITY.md, full suites once, verification record, integration PR | |
 
 ## Requirement ids (added to REQUIREMENTS.md on this branch)
 
@@ -107,7 +109,7 @@ Not a credential: the organization-to-organization agreement is a record in the 
 | `credentialClock(entrySignedAt, witnessAt?, bundleTime?, counter?)` | `clock.ts` | One clock helper (Phase 74 tightens it) |
 | `node scripts/credential-check.mjs --holder <did> --type <Type> [--scope <s>]` | 71-08 | Command-line verifier for `deploy/` tools (47-19) |
 | `bindLabel(signer, binding)`, `verifyLabelBinding(value, content)` | `src/domain/exchange/labelBinding.ts` (45.1-01) | Signed label binding (4778-style) |
-| `wrapForDevice(input)`, `unwrapEpochKeyV2(input)` | `src/domain/replica/cellWrapV2.ts` (33.2-01) | Every wrap path calls `wrapForDevice`, which picks the format |
+| `wrapForDevice(input)`, `unwrapEpochKeyV2(input)` | `src/domain/replica/cellWrapV2.ts` (33.2-01) | Every wrap path calls `wrapForDevice`, which picks the format; an architecture test (33.2-06) refuses a direct `wrapEpochKey` call |
 
 ## Shapes other plans should reserve (proposed; 33.1-01's checkpoint settles the 33.1 ones)
 
@@ -115,7 +117,7 @@ Not a credential: the organization-to-organization agreement is a record in the 
 - `release.copy` gains an optional `binding` (the SHA-256 of a `LabelBinding` blob, 45.1-01).
 - `project.mode` cites the policy hash whose `credentials@1` section names the issuance rules (replaces `signers`).
 - Rekey after a credential revocation uses the existing reason `clearance-lowered` (no new value in `CELL_REKEY_REASONS`).
-- Replica features (Phase 33's `roster.require`): `wrap@2` (33.2-04). A project-level `credentials@1` requirement for O11 is 33.1's to register; the rule it switches on is `declaredClearanceCounts`.
+- Replica features (Phase 33's `roster.require`): `wrap@2` (33.2-05), `exchange@1` (45.1-03). A project-level `credentials@1` requirement for O11 is 33.1's to register; the rule it switches on is `declaredClearanceCounts`.
 - Wrap v2 constants (33.2-01, permanent after its checkpoint): info `near-ai/cell-wrap/v2`, binding domain `near-ai-vscode/device-kem/v2`, kind `device.kem`, wire version byte 2; version byte 3 reserved for ML-KEM-1024 + P-384.
 
 ## New owner items raised by planning
@@ -123,3 +125,11 @@ Not a credential: the organization-to-organization agreement is a record in the 
 1. **Solo installs (VCRD-07 against "devices never issue").** VCRD-07 says a person with no organization issues their own credentials from their device DID. The new rule forbids device keys as issuers. Default in the plans: with no organization policy in force, the gate keeps the person's own declared clearances on their own computer, shown as "declared, not verified"; they are never credentials and never satisfy a check in a shared project, a hub, a wrap or your organization's policy.
 2. **The fallback (O9) and "devices never issue".** O9's fallback names `did:key` officers as issuers. Default: under the fallback only an officer's Transit person key that the signed policy names as a person key may issue; device and agent keys stay refused.
 3. **Our credential context URL** (written into every credential). Default `https://w3id.org/sterling/credentials/v1`, registered with w3id.org before the first real credential; verification never fetches it.
+
+Owner items for Phase 33.2 (the wrap as its own phase; Protected B never wrapped the old way; late computers never removed) and Phase 45.1 (exports from staff releases only; an RSA receiving key; no shipped NATO label values; the request for the NATO texts) are listed at the end of their CONTEXT files.
+
+## Rules other planners should know
+
+- **Protected B and the wrap (33.2 D-07).** From 33.2-06 on, a cell whose label routes `local-only` or `deny` (by default Protected B, Protected C and every classified level) is never wrapped with X25519. In a project that has not switched to `wrap@2`, such a cell cannot be shared until the lead switches.
+- **One wrap entry point (33.2 D-09).** Every wrap path calls `wrapForDevice`; the architecture test refuses a direct `wrapEpochKey` call outside `cellKeys.ts` and `cellWrapV2.ts`. 33.1's later wrap paths (33.1-19, 33.1-23) follow it.
+- **Trust export (71-11).** `.near-trust-export` is its own file beside 47-14's signed user export; 47-14's runbook names it; no change to `deploy/keycloak/users.mjs`.
