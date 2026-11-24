@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { applyUpdate, createFoldDoc, docText, snapshotOf } from '../../domain/replica/doc';
-import { MAX_DEPS } from '../../domain/replica/entry';
+import { MAX_DEPS, writerIdOf } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import type { FoldResult } from '../../domain/replica/fold';
 import { MAX_DECISIONS_SEEN, validateVersionsData } from '../../domain/replica/kindSchemas/versions';
@@ -32,7 +32,8 @@ export const VERSION_ACT_WORDS = {
   'text-incomplete': 'The text of this product is not complete on this computer yet, so no version was made. Sync, then try again.',
   unchanged: 'The product has not changed since its current version.',
   'header-missing': 'Say what kind of product this is before its first version is proposed.',
-  'pin-unknown': 'A product this version depends on has no such version in the shared record.'
+  'pin-unknown': 'A product this version depends on has no such version in the shared record.',
+  'signer-refused': 'Your key did not sign this change, so nothing was written.'
 } as const;
 
 type VersionTarget = { product: string; hash: string };
@@ -199,6 +200,9 @@ export class VersionActs {
   private async write(kind: VersionAction, data: VersionTarget & Record<string, unknown>, options: DecisionOptions = {}): Promise<Written | Refused> {
     const actor = { ...this.actor };
     const observed = OBSERVED_ACTIONS[kind];
+    // The person key signs a decision when the project has a person signer (D-60: isPersonKeyKind in signerOf); its own earlier acts are on its chain.
+    const signer = this.project.signerOf(kind);
+    const signing = writerIdOf(signer.publicKey);
     try {
       const written = await this.project.appendChecked<Refused>(({ fold }) => {
         const candidates = namedProducts(fold, this.project.projectId, data.product);
@@ -252,15 +256,16 @@ export class VersionActs {
         // A release observes approvals, and a supersession observes both releases. Those actions already cite their gates and submissions.
         // This writer's stream head already cites its own actions on the version.
         const prior = version.acts.filter((act) =>
-          (observed.includes(act.kind) || seen.has(act.entry)) && !refused.has(act.entry) && act.writer !== this.project.deviceWriter);
+          (observed.includes(act.kind) || seen.has(act.entry)) && !refused.has(act.entry) && act.writer !== signing);
         const deps = [...new Set([version.entry, ...prior.map((act) => act.entry), ...additionalDeps])];
         if (deps.length > MAX_DEPS) return refuse('too-many-dependencies');
         return {
-          kind, data: writesDecisionsSeen ? { ...data, decisionsSeen } : data, options: { stream: product.stream, actor, deps },
+          kind, data: writesDecisionsSeen ? { ...data, decisionsSeen } : data, options: { stream: product.stream, actor, deps, signer },
           check: (preview, hash) => checkWrite(preview, product.stream, product.product, hash)
         };
       });
-      if ('refused' in written) return refuse('cannot-write');
+      // A refusal from the person's key store (a step-up that did not happen) reaches the person in its own words.
+      if ('refused' in written) return written.refused === 'signer-refused' ? { ok: false, reason: 'signer-refused', message: written.message } : refuse('cannot-write');
       if (!written.ok) return written;
       return { ok: true, hash: written.hash, stream: written.built.entry.header.stream };
     } catch (error) {
