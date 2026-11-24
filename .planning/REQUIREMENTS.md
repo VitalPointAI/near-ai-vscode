@@ -58,7 +58,7 @@
 - [ ] **OFFL-03**: The bundle carries a version, expiry, issuer and reserved fields for anchor roots with inclusion proofs, status list references and a maximum offline age per level, so the anchoring and edge milestones (L4, L5) add freshness without a format change. *(Revised 2026-11-15; was: reserved fields for chain anchoring and revocation lists.)*
 - [ ] **OFFL-04**: Run admission (a contract and its chain of grants and credentials up to the person's signed policy, with status checked from cached status lists) needs no network, and anything the local copy cannot cover fails closed. *(Revised 2026-11-15 to name credentials and status lists.)*
 
-### Delegation (Phase 71)
+### Delegation (Phase 71: DLGT-01; Phase 71.1: DLGT-02 to DLGT-08, split 2026-11-24)
 
 - [ ] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
 - [ ] **DLGT-02**: A child's capabilities are the intersection of the parent's grant, the member's declared tools and the task's request, enforced in the gate, never in the prompt, and a property test shows no delegation widens.
@@ -77,7 +77,18 @@
 - [ ] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
 - [ ] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
 - [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
-- [ ] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). A person with no organization issues their own credentials from their device DID, so a fresh install works with no HQ; in your organization the issuer is your organization's DID.
+- [ ] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). A person with no organization issues their own credentials from their device DID, so a fresh install works with no HQ; in your organization the issuer is your organization's DID. *(2026-11-24, pending owner item 1 of `71-CONTEXT.md`: agents and devices can never issue (coordinator, AI-classification research), so the default is that a person with no organization keeps their own declared clearances on their own computer, shown as declared, not verified; they are never credentials and count nowhere else. This sentence changes once the owner confirms.)*
+
+### Data-centric access control (Phase 71, added 2026-11-24)
+
+From the owner's data-centric access direction (`.planning/research/data-centric-access/RESEARCH.md`, decisions O1 to O11 accepted 2026-11-24): verified credentials are the only source of access attributes, data decides access from its own label, zero trust throughout, Keycloak for authentication only.
+
+- [ ] **DCAC-01**: Trusted issuers are in the signed policy: `credentials@1` pins your organization's root DID and names, for each credential type, the role credential an issuer must hold and the ceiling it may issue, with the status lists, the status time to live, the maximum offline age per level and the credentials required by sensitivity (only ever tightened); `agreements@1` holds organization-to-organization agreements. Only people with a role credential from the root can issue; an agent or device key never can, whatever the policy says.
+- [ ] **DCAC-02**: An entry that relies on a person's attribute cites its evidence by hash (the credentials and the status lists checked); the fold checks only the cited evidence at the entry's signed time, so every replica gives the same answer whatever list it holds.
+- [ ] **DCAC-03**: One pure `mayRelease` decides every key wrap, release and serve from verified credential facts and the data's own label: level on the scale or an approved mapping, every compartment, releasability for every holder of a marked cell, export eligibility for CGP, ITAR and EAR, and the credentials required by sensitivity; a position's required clearance and ways of serving are checked the same way.
+- [ ] **DCAC-04**: The enforcement points check freshness at the moment of action: your organization's server refuses an append that cites a stale status list and stops serving a member whose credential is revoked, the wrap preparer and the session refuse stale evidence with a plain reason and Retry, an edge refuses past the level's maximum offline age, and a later revocation leads to a rekey.
+- [ ] **DCAC-05**: Credentials are issued, revoked and suspended only from an officer's own session, signed by their person key after a passkey step-up, under a role credential from your organization's root; status lists are signed by the HQ status-list key in OpenBao Transit, each signature authorized only by an officer's step-up (O4); no new runtime service.
+- [ ] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
 
 ### Execution backends (Phases 72 and 77)
 
@@ -254,21 +265,27 @@
 | CLAS-06 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-07 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-08 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
-| DLGT-01 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-02 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-03 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-04 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-05 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-06 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-07 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| DLGT-08 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-01 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-02 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-03 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-04 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-05 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-06 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
-| VCRD-07 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| DLGT-01 | Phase 71: Identities and verified credentials (core) | Pending |
+| DLGT-02 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-03 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-04 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-05 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-06 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-07 | Phase 71.1: Agent delegation that only narrows | Pending |
+| DLGT-08 | Phase 71.1: Agent delegation that only narrows | Pending |
+| VCRD-01 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-02 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-03 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-04 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-05 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-06 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-07 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-01 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-02 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-03 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-04 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-05 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-06 | Phase 71: Identities and verified credentials (core) | Pending |
 | EXEC-01 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-02 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-03 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
@@ -362,7 +379,7 @@
 | OPS-06 | Phase 84: Ops, onboarding and release | Pending |
 | OPS-07 | Phase 84: Ops, onboarding and release | Pending |
 
-Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84).
+Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84). Amended 2026-11-24 with the data-centric access direction: Phase 71 is re-scoped as "Identities and verified credentials (core)", pulled forward, and keeps DLGT-01 and VCRD-01 … VCRD-07; DLGT-02 … DLGT-08 move to the new Phase 71.1 (agent delegation, still in Stage 1); DCAC-01 … DCAC-06 are added to Phase 71 (134 to 140).
 
 ## Milestone v0.6.0: Data platform (Phases 85-101)
 
@@ -795,6 +812,20 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
+## Phase 33.2 requirements: Post-quantum cell keys (0.4.x)
+
+**Defined:** 2026-11-24 from the owner's decision O3 (`.planning/research/data-centric-access/RESEARCH.md` section 10), when Phase 33.2 was planned.
+
+- [ ] **WRAP-01**: Cell epoch keys are wrapped with `near-ai/cell-wrap/v2`: P-256 ECDH and ML-KEM-768 joined by HKDF-SHA256 (the SP 800-56C two-step KDF) and AES-256-GCM, bound to the cell, the epoch, the device and both recipient keys, with frozen test vectors; version 1 wraps stay readable.
+- [ ] **WRAP-02**: Every device, hosted person and hub publishes a P-256 key and an ML-KEM-768 key bound to its Ed25519 key (`device.kem`, or `kem` in its descriptor); the safety words cover them; the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file.
+- [ ] **WRAP-03**: An epoch grant may span several signed pages, each within the grant size limit, all committed by the founding roster entry.
+- [ ] **WRAP-04**: The `wrap@2` feature goes through `roster.require`: new shared projects require it at creation, a lead switches an existing project in one step, each cell moves at its next epoch, late devices get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap.
+- [ ] **WRAP-05**: A cell whose label routes local-only or nowhere (by default Protected B, Protected C and every classified level) is never wrapped with X25519; a required CI check fails if any wrap path bypasses the one entry point; ML-KEM-1024 with P-384 is reserved for Protected C and classified work.
+
+| Requirement | Phase |
+|-------------|-------|
+| WRAP-01 … WRAP-05 | Phase 33.2 |
+
 ## Phase 41 requirements: One foundation (organization policy foundation, 0.4.x)
 
 **Defined:** 2026-11-20 from `.planning/research/coherence/REVIEW.md` (section 9.2), added when Phase 41 was planned.
@@ -837,6 +868,23 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | GUIDE-01 … GUIDE-08 | Phase 32.1: planned |
 | ORG-01 … ORG-03 | Phase 41: complete (FND-07); success criterion 7 of Phase 32.1 checks them on screen |
 | ORG-04 | Phase 32.1: planned |
+
+## Version safety requirements (Phases 32.1, 46, 47 and 48)
+
+**Defined:** 2026-11-24, approved by the owner ("go"), from the owner's principle "the application should always keep itself up to date". People never update anything. An administrator updates a site by importing a signed bundle, so a disconnected edge site can briefly run an older release than HQ. Decisions 32.1 D-60 to 32.1 D-69 in `.planning/phases/32.1-guided-setup-with-viable-options-and-a-plain-recommendation/32.1-CONTEXT.md`.
+**Core value:** a site never applies part of something it cannot read, nobody is asked to update anything, and every session follows its site's release on its own.
+
+- [ ] **VSAFE-01**: The tool your organization uses to write and sign its rules refuses to sign rules that use a feature some target site cannot read yet, and names each such site and the release it needs. Site releases come from the signed site evidence exports; a site with no recent export counts as unknown and is refused unless the author excludes it, with the reason recorded in the signed rules. Every policy feature has a `name@N` id in one registry, named by what a document uses.
+- [ ] **VSAFE-02**: A release that receives rules needing a feature it does not read refuses the whole file and keeps enforcing the last good signed rules, never no rules; a refused update applies itself after the site is updated. People see one plain status line that asks their administrator to update the site; the administrator sees the missing features. No user text tells a person to update the extension or Sterling, for any shared, signed format.
+- [ ] **VSAFE-03**: When a site's image is updated, running sessions show "A new version of Sterling is ready. Save your work; it will reload when you're idle" and move to the new image at the next idle stop or sign-in, never mid-work without warning.
+- [ ] **VSAFE-04**: The signed site evidence export carries the site's Sterling release and the features it reads.
+
+| Requirement | Phase |
+|-------------|-------|
+| VSAFE-01 | Phase 32.1: planned (32.1-30) |
+| VSAFE-02 | Phase 32.1: planned (32.1-31, 32.1-32) |
+| VSAFE-03 | Phases 46 and 47: planned (46-09, 47-32) |
+| VSAFE-04 | Phase 48: planned (48-11) |
 
 ## Phase 32.2 requirements: Local model manager (0.4.x)
 
@@ -892,21 +940,40 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | ACCR-13 | Phase 44 | 44-06, 44-13, 44-15, 44-16, 44-18 |
 | ACCR-14 | Phase 44 | 44-03, 44-04, 44-05, 44-13, 44-18 |
 
+## Phases 45.1 and 45.2 requirements: NATO and Five Eyes exchange
+
+**Defined:** 2026-11-24 from the owner's decision O1 and NATO direction (`.planning/research/data-centric-access/RESEARCH.md` sections 2.2 and 11), when Phase 45.1 was planned. XCHG-05 … XCHG-08 are drafts until your organization receives the NATO texts (Phase 45.2's trigger).
+
+- [ ] **XCHG-01**: Your organization's signed policy maps each label to a NATO-readable form (`labelInterop@1`: policy identifier, classification value, restrictive and permissive categories) that its security officer confirms; a label with no mapping is refused for export; mapping out and back gives the same label.
+- [ ] **XCHG-02**: Every release copy and export carries a signed label binding (4778-style) over the label, the mapping version and the content hash, signed by the certified staff session key (release copies) or your organization's release key (exports), never with a person key and never naming a person; a changed label or content is refused.
+- [ ] **XCHG-03**: An export is a release to a partner: the same `mayRelease` check against the partner's agreement, a release authority credential, a passkey step-up and a recorded entry; export-controlled content is refused until Phase 45; a received object is verified, mapped and held until a person accepts it.
+- [ ] **XCHG-04**: Base TDF objects from the public OpenTDF specification are written to a partner's key and read through our own non-exportable receiving key in OpenBao.
+- [ ] **XCHG-05** (draft): ADatP-4774 XML labels written and read exactly as the text defines.
+- [ ] **XCHG-06** (draft): ADatP-4778 binding objects written and checked exactly as the text and its profiles define.
+- [ ] **XCHG-07** (draft): ZTDF objects with their assertions and label placement, and key access to a partner's key access server.
+- [ ] **XCHG-08** (draft): Conformance against allied or vendor sample objects, and an exchange trial with a partner's test key server.
+
+| Requirement | Phase |
+|-------------|-------|
+| XCHG-01 … XCHG-04 | Phase 45.1 |
+| XCHG-05 … XCHG-08 | Phase 45.2 |
+
 ## Phase 46 requirements: Native Theia foundation
 
 **Defined:** 2026-11-23 from `.planning/research/multiuser-hosting/DESIGN.md` (section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10; decisions D1 to D11), added when Phase 46 was planned. Decisions: `.planning/phases/46-native-theia-foundation/46-CONTEXT.md`.
 **Core value:** The Sterling workbench is a real, tested Theia product that keeps each person's secrets durable and their own, keeps long-term keys out of the session, knows who signed in, and calls nothing outside what your organization lists.
+**Status:** all ten complete 2026-11-24 with 46-01 to 46-08 on `feat/phase-46-wave-1` (on main with the integration PR); 46-09 (VSAFE-03, version safety) extends FND-T-09 and is not executed yet.
 
-- [ ] **FND-T-01**: The workbench lives in the `workbench/` package with its own lockfile, build, tests and CI job; nothing remains only under `.planning/spikes/`; the #162 review fixes are applied (localhost bind by default, no dev dependencies at run time, build writes only inside the package). (P1)
-- [ ] **FND-T-02**: Native widgets call engine code in the backend through one shared JSON-RPC service pattern, and refusals cross it as plain data with their reason. (P2)
-- [ ] **FND-T-03**: Secrets saved through Theia's `KeyStoreService` (VSIX `SecretStorage` and Theia AI credentials) are stored per person in OpenBao KV, or the OS keyring on a single machine, survive a restart, and are never held only in memory. (P3)
-- [ ] **FND-T-04**: `KeyService` signs, makes wrapped data keys and unwraps through OpenBao Transit; private keys never enter the session; signing is refused without a fresh `acr` and `auth_time`. (P4)
-- [ ] **FND-T-05**: The session identifies the person from the forwarded sign-in token and `THEIACLOUD_SESSION_USER`, logs in to OpenBao with jwt auth, renews and revokes its token with the session, shows `failed` with a reason and Retry, and can start a step-up sign-in. (P5)
-- [ ] **FND-T-06**: Open VSX and model server addresses come from configuration; telemetry and every update check are off; the running image makes no outbound connection outside the configured addresses, proven by a container test. (P8)
-- [ ] **FND-T-07**: A Playwright browser harness runs against the built container in CI. (P9)
-- [ ] **FND-T-08**: The workbench image and the hub use one Node major. (P11)
-- [ ] **FND-T-09**: CI builds the workbench image on a digest-pinned UBI 9 base, writes a CycloneDX SBOM, scans it, and signs it with your organization's key on `main` (no keyless signing). (P10, image build)
-- [ ] **FND-T-10**: Every resource the phase adds has a passing entry in `compliance/resources.json` and the fit check covers the workbench manifests; the copy lint accepts the Sterling edition names and scans the workbench's user strings. (D9; DESIGN section 15)
+- [x] **FND-T-01**: The workbench lives in the `workbench/` package with its own lockfile, build, tests and CI job; nothing remains only under `.planning/spikes/`; the #162 review fixes are applied (localhost bind by default, no dev dependencies at run time, build writes only inside the package). (P1)
+- [x] **FND-T-02**: Native widgets call engine code in the backend through one shared JSON-RPC service pattern, and refusals cross it as plain data with their reason. (P2)
+- [x] **FND-T-03**: Secrets saved through Theia's `KeyStoreService` (VSIX `SecretStorage` and Theia AI credentials) are stored per person in OpenBao KV, or the OS keyring on a single machine, survive a restart, and are never held only in memory. (P3)
+- [x] **FND-T-04**: `KeyService` signs, makes wrapped data keys and unwraps through OpenBao Transit; private keys never enter the session; signing is refused without a fresh `acr` and `auth_time`. (P4)
+- [x] **FND-T-05**: The session identifies the person from the forwarded sign-in token and `THEIACLOUD_SESSION_USER`, logs in to OpenBao with jwt auth, renews and revokes its token with the session, shows `failed` with a reason and Retry, and can start a step-up sign-in. (P5)
+- [x] **FND-T-06**: Open VSX and model server addresses come from configuration; telemetry and every update check are off; the running image makes no outbound connection outside the configured addresses, proven by a container test. (P8)
+- [x] **FND-T-07**: A Playwright browser harness runs against the built container in CI. (P9)
+- [x] **FND-T-08**: The workbench image and the hub use one Node major. (P11)
+- [x] **FND-T-09**: CI builds the workbench image on a digest-pinned UBI 9 base, writes a CycloneDX SBOM, scans it, and signs it with your organization's key on `main` (no keyless signing). (P10, image build)
+- [x] **FND-T-10**: Every resource the phase adds has a passing entry in `compliance/resources.json` and the fit check covers the workbench manifests; the copy lint accepts the Sterling edition names and scans the workbench's user strings. (D9; DESIGN section 15)
 
 ## Later milestones: draft requirements (not mapped to phases yet)
 

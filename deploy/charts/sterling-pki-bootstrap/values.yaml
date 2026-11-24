@@ -1,0 +1,13 @@
+# The bootstrap CA (D-16, research Decision 12). Secret site-bootstrap-ca (tls.crt, tls.key) in the cert-manager namespace is made by the
+# install script with the host's openssl (90 days) before anything else, because the registry needs its first certificate before
+# cert-manager's own images can be pulled (47-16). This chart only names it. It issues OpenBao's first TLS certificate; the registry's first
+# certificate is made by the install script with the same CA. Both are re-issued from the site PKI by deploy/charts/sterling-pki, and the
+# install script then removes this release and the CA Secret (retire-bootstrap).
+caSecretName: site-bootstrap-ca
+openbao:
+  # The openbao release (deploy/values/openbao.release.json): its namespace, its services and its Raft peers' names.
+  namespace: sterling-openbao
+  release: openbao
+  # Short on purpose: the certificate only has to last until the site PKI re-issues it.
+  duration: 720h
+  renewBefore: 240h

@@ -70,6 +70,11 @@ export const WORDS_NOT_CONFIRMED_TEXT = 'Nothing was changed: the twelve words w
 const NOT_ORGANIZATION_FILE_TEXT = 'This is not a file from your organization that this version of NEAR AI can read. Ask your organization\'s security contact for a new one.';
 const MISSING_LAYER_TEXT = 'Your organization\'s rules file is missing from this computer, so only reading and planning run.';
 const SECRET_UNREADABLE_TEXT = 'NEAR AI could not read its record of your organization\'s key in this computer\'s secret storage, so only reading and planning run.';
+/**
+ * The same failure where nothing from your organization was ever saved on this computer (a fresh Sterling workbench in local mode has no secret
+ * storage at all): it still fails closed, but it does not speak of a record of your organization's key that this computer never had.
+ */
+export const NO_SECRET_STORAGE_TEXT = 'This computer\'s secret storage is not available to NEAR AI, so only reading and planning run. No rules from your organization are set up here.';
 const PIN_NOT_SAVED_TEXT = 'Nothing was changed: NEAR AI could not update its record of your organization\'s key in this computer\'s secret storage.';
 const FILES_NOT_SAVED_TEXT = 'Nothing was changed: your organization\'s rules could not be saved and read back in this extension\'s storage folder.';
 
@@ -517,7 +522,9 @@ export class OrganizationStore {
       if (!Number.isFinite(effective)) return failedOrganization('clock-behind', 'clock-behind', ORGANIZATION_LAYER_REFUSALS['clock-behind'], false);
       return await this.loadAt(effective);
     } catch {
-      return failedOrganization('unavailable', 'identity-unavailable', SECRET_UNREADABLE_TEXT, false);
+      // Still failed closed either way; only the words differ. Files of your organization on this computer mean a record of its key was kept.
+      const neverEnrolled = await this.folderHoldsFiles().then((holds) => !holds, () => false);
+      return failedOrganization('unavailable', 'identity-unavailable', neverEnrolled ? NO_SECRET_STORAGE_TEXT : SECRET_UNREADABLE_TEXT, false);
     }
   }
 

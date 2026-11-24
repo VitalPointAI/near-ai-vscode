@@ -1,11 +1,11 @@
 // The compliance fit check (scripts/resource-check.mjs): every third-party resource needs a reviewed register entry before it is used.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { check, discover, knownIds, main } from '../resource-check.mjs';
+import { IMAGE_FILES, check, discover, knownIds, main } from '../resource-check.mjs';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -20,7 +20,7 @@ function fixture(files) {
 }
 
 const entry = (id, kind, where, extra = {}) => ({
-  id, kind, where, component: 'extension', scope: 'build', purpose: 'p', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
+  id, kind, where, component: 'extension', scope: 'build', purpose: 'p', role: 'r', architectureArea: 'build-and-test', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
   cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', ...extra
 });
 
@@ -36,7 +36,7 @@ const CLEAN = [
 ];
 const run = (files, resources) => {
   const root = fixture(files);
-  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'cert-manager', 'offline-bundle', 'openbao']) });
+  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'cert-manager', 'offline-bundle', 'openbao']), areas: new Set(['build-and-test', 'workbench']) });
 };
 const CHART_LOCK = 'deploy/charts/charts.lock.json';
 const TOOL_PINS = 'compliance/ci/tool-pins.json';
@@ -77,6 +77,28 @@ test('missing or invalid fields, unknown controls and components, and an out-of-
   }
 });
 
+test('an entry without a role or an architecture area fails closed, and an area outside the fixed set fails', () => {
+  const { role, architectureArea, ...bare } = CLEAN[0];
+  assert.ok(role && architectureArea);
+  const problems = run(REPO, [bare, ...CLEAN.slice(1)]).join('\n');
+  assert.match(problems, /npm:typescript: needs a role/);
+  assert.match(problems, /npm:typescript: needs an architectureArea/);
+  assert.match(run(REPO, [{ ...CLEAN[0], role: ' ' }, ...CLEAN.slice(1)]).join('\n'), /npm:typescript: needs a role/);
+  assert.match(run(REPO, [{ ...CLEAN[0], role: 'p' }, ...CLEAN.slice(1)]).join('\n'), /role repeats purpose/);
+  assert.match(run(REPO, [{ ...CLEAN[0], architectureArea: 'somewhere' }, ...CLEAN.slice(1)]).join('\n'), /architectureArea "somewhere" is not one of build-and-test, workbench/);
+  assert.match(run(REPO, [{ ...CLEAN[0], roleNeedsReview: false }, ...CLEAN.slice(1)]).join('\n'), /roleNeedsReview is true when present/);
+  assert.deepEqual(run(REPO, [{ ...CLEAN[0], roleNeedsReview: true }, ...CLEAN.slice(1)]), []);
+});
+
+test('the check fails when the architecture area list is missing', () => {
+  const root = fixture({ ...REPO, 'compliance/resources.json': { resources: CLEAN } });
+  const errors = [];
+  const write = process.stderr.write;
+  process.stderr.write = (text) => { errors.push(text); return true; };
+  try { assert.equal(main([], root), 1); } finally { process.stderr.write = write; }
+  assert.match(errors.join(''), /compliance\/architecture-areas\.json is missing or lists no areas/);
+});
+
 test('an action not pinned to a full commit SHA, or an image without a digest, fails', () => {
   const files = { ...REPO, '.github/workflows/ci.yml': 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v7\n', 'relay/Dockerfile': 'FROM docker.io/library/node:26-slim\n' };
   const problems = run(files, CLEAN).join('\n');
@@ -114,6 +136,32 @@ test('a Containerfile base under deploy/images is discovered; its stage names an
   const files = { ...REPO, [file]: `FROM registry.access.redhat.com/ubi9/ubi:9.9@${DIGEST} AS softhsm-build\nARG OPENBAO_IMAGE\nFROM \${OPENBAO_IMAGE}\nCOPY --from=softhsm-build /usr/lib64 /usr/lib64\nFROM softhsm-build\n` };
   assert.deepEqual(run(files, CLEAN), [`image:registry.access.redhat.com/ubi9/ubi (used in ${file}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
   assert.deepEqual(run(files, [...CLEAN, entry('image:registry.access.redhat.com/ubi9/ubi', 'image', [file], { component: 'openbao' })]), []);
+});
+
+test('workbench: the package manifest and the Dockerfile beside it are both read; stage names are not images', () => {
+  const files = {
+    'workbench/package.json': { dependencies: { '@theia/core': '1.77.0' }, devDependencies: { '@theia/cli': '1.77.0' } },
+    'workbench/Dockerfile': `FROM a/b:1@${DIGEST} AS node\nFROM c/d:2@${DIGEST} AS build\nFROM build AS runtime\nCOPY --from=node /usr/local/bin/node /usr/local/bin/node\n`,
+  };
+  const { resources, problems } = discover(fixture(files));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(resources.get('npm:@theia/core'), { id: 'npm:@theia/core', kind: 'npm', where: ['workbench/package.json'], runtime: true });
+  assert.deepEqual(resources.get('npm:@theia/cli'), { id: 'npm:@theia/cli', kind: 'npm', where: ['workbench/package.json'] });
+  assert.deepEqual(resources.get('image:a/b')?.where, ['workbench/Dockerfile']);
+  assert.deepEqual(resources.get('image:c/d')?.where, ['workbench/Dockerfile']);
+  for (const stage of ['node', 'build', 'runtime']) assert.equal(resources.has(`image:${stage}`), false, `${stage} is a stage, not an image`);
+});
+
+// discover() skips a `FROM ${...}` line, so a base image given through a build argument would escape the pin check and the register.
+const argFromFiles = (root, files) => files.filter((file) => /Dockerfile$/.test(file) && existsSync(path.join(root, file)))
+  .filter((file) => /^\s*FROM\s+(?:--\S+\s+)*\$\{/im.test(readFileSync(path.join(root, file), 'utf8')));
+
+test('workbench: no Dockerfile the fit check reads names its base image through a build argument', () => {
+  const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  assert.ok(IMAGE_FILES.includes('workbench/Dockerfile'));
+  assert.deepEqual(argFromFiles(repo, IMAGE_FILES), []);
+  const root = fixture({ 'workbench/Dockerfile': `ARG BASE\nFROM --platform=linux/amd64 \${BASE} AS build\n`, 'hub/Dockerfile': `FROM a/b:1@${DIGEST}\n` });
+  assert.deepEqual(argFromFiles(root, IMAGE_FILES), ['workbench/Dockerfile']);
 });
 
 test('the repository itself passes the check, against the real catalogues and components', () => {

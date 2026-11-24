@@ -1,0 +1,56 @@
+{{- /*
+The server certificates of the site's own services, from site-pki (D-16). openbao-tls re-issues OpenBao's bootstrap certificate in place
+(the install script removes the sterling-pki-bootstrap release first, then restarts OpenBao); the registry's certificate re-issues the one the
+install script made with the bootstrap CA (zot-tls at a Zot site; Harbor's harbor-tls comes from its Ingress annotation, which names
+site-pki, 47-10). keycloak-tls and opensearch-tls are the certificates Keycloak and OpenSearch serve themselves. Every name is a site
+host name or one of the cluster service names the ingress role allows (deploy/openbao/apply.mjs SERVICE_DOMAINS). The hubs' and
+Postgres's certificates live with their charts (47-11).
+*/ -}}
+{{- $o := .Values.openbao -}}
+{{- $registryHost := index (splitList ":" (required "registry (the site registry host and port) is required" .Values.registry)) 0 -}}
+{{- $certs := list -}}
+{{- $openbaoNames := list -}}
+{{- range $service := list $o.release (printf "%s-active" $o.release) (printf "%s-standby" $o.release) -}}
+{{- $openbaoNames = concat $openbaoNames (list (printf "%s.%s.svc" $service $o.namespace) (printf "%s.%s.svc.cluster.local" $service $o.namespace)) -}}
+{{- end -}}
+{{- $openbaoNames = concat $openbaoNames (list (printf "*.%s-internal" $o.release) (printf "*.%s-internal.%s.svc" $o.release $o.namespace) (printf "*.%s-internal.%s.svc.cluster.local" $o.release $o.namespace)) -}}
+{{- $certs = append $certs (dict "name" "openbao-tls" "namespace" $o.namespace "commonName" (printf "%s.%s.svc" $o.release $o.namespace) "dnsNames" $openbaoNames "client" false) -}}
+{{- if eq .Values.registryKind "zot" -}}
+{{- $certs = append $certs (dict "name" "zot-tls" "namespace" "sterling-registry" "commonName" $registryHost "dnsNames" (list $registryHost "zot.sterling-registry.svc" "zot.sterling-registry.svc.cluster.local") "client" false) -}}
+{{- end -}}
+{{- $keycloakHost := printf "keycloak.%s" (required "domain is required" .Values.domain) -}}
+{{- $certs = append $certs (dict "name" "keycloak-tls" "namespace" "sterling-identity" "commonName" $keycloakHost "dnsNames" (list $keycloakHost "keycloakx-http.sterling-identity.svc" "keycloakx-http.sterling-identity.svc.cluster.local") "client" false) -}}
+{{- $os := "opensearch-cluster-master" -}}
+{{- $certs = append $certs (dict "name" "opensearch-tls" "namespace" "sterling-logging" "commonName" (printf "%s.sterling-logging.svc" $os) "dnsNames" (list (printf "%s.sterling-logging.svc" $os) (printf "%s.sterling-logging.svc.cluster.local" $os) (printf "%s-headless.sterling-logging.svc" $os) (printf "*.%s-headless.sterling-logging.svc" $os) (printf "*.%s-headless.sterling-logging.svc.cluster.local" $os)) "client" true) -}}
+{{- range $certs }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace }}
+spec:
+  secretName: {{ .name }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: site-pki
+  commonName: {{ .commonName | quote }}
+  dnsNames:
+    {{- range .dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  usages:
+    - server auth
+    {{- if .client }}
+    # OpenSearch's nodes present this certificate to each other on the transport layer (plugins.security.nodes_dn).
+    - client auth
+    {{- end }}
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: {{ $.Values.certificates.duration }}
+  renewBefore: {{ $.Values.certificates.renewBefore }}
+{{- end }}

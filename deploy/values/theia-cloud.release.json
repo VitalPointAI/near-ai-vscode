@@ -3,10 +3,12 @@
   "namespace": "theia-cloud",
   "order": 62,
   "values": ["deploy/values/theia-cloud.yaml"],
+  "site": "deploy/values/site.example/theia-cloud.yaml",
   "images": [
     { "lock": "sterling/theia-cloud-operator", "set": { "operator.image": "ref" } },
     { "lock": "sterling/theia-cloud-service", "set": { "service.image": "ref" } },
-    { "lock": "sterling/theia-cloud-landing-page", "set": { "landingPage.image": "ref" } }
+    { "lock": "sterling/theia-cloud-landing-page", "set": { "landingPage.image": "ref" } },
+    { "lock": "sterling/oauth2-proxy", "set": { "operator.oAuth2ProxyVersion": "ref" } }
   ],
-  "note": "Theia Cloud 1.2.0 (E1). Every image is one we rebuild on UBI 9 (D-23); each renders with the reserved unpublished digest until the deploy-images job publishes it."
+  "note": "Theia Cloud 1.2.0 (E1) from the patched chart (D-22). Every image is one we rebuild on UBI 9 (D-23); each renders with the reserved unpublished digest until the deploy-images job publishes it. operator.oAuth2ProxyVersion carries the whole oauth2-proxy reference, which the operator writes into the session template's image line (47-09)."
 }

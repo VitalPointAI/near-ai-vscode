@@ -30,6 +30,8 @@ eval-*.json
 
 # Repository workflow files (CI, PR template, contributor docs)
 .github/**
+# The Sterling Theia workbench is its own package with its own lockfile and never ships in the extension (Phase 46, D-10).
+workbench/**
 CONTRIBUTING.md
 docs/development-workflow.md
 # The messaging relay is its own service with its own lockfile and never ships in the extension.

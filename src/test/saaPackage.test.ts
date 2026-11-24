@@ -117,6 +117,26 @@ test('exports the original release, editable forms and traceability with deploym
   }
 });
 
+test('the release component inventory becomes a workbook sheet and an evidence index row; a malformed one is refused', async () => {
+  const original = release();
+  const csv = '"Resource","Why it is needed"\r\n"npm:yjs","Merges ""shared"" edits, without conflicts"\r\n"vendor:x","\'=1+1"\r\n';
+  const evidence = { ...original, files: new Map(original.files).set('readable/component-inventory.csv', Buffer.from(csv)) };
+  const result = readZip(await buildSaaPackage(evidence, formsDir, new Map()), 'inventory export');
+  assert.match(result.get('evidence/evidence-index.csv')!().toString(), /"EV-REL-08","Third-party component inventory","release-package\/readable\/component-inventory\.csv"/);
+  assert.match(result.get('evidence/component-inventory.csv')!().toString(), /"npm:yjs","Merges ""shared"" edits, without conflicts"/);
+  const workbook = readZip(result.get(workbookPath)!(), 'inventory workbook');
+  assert.match(workbook.get('xl/workbook.xml')!().toString(), /<sheet name="Component inventory" sheetId="6"/);
+  const sheet = workbook.get('xl/worksheets/sheet6.xml')!().toString();
+  assert.match(sheet, /Merges "shared" edits, without conflicts|Merges &quot;shared&quot; edits, without conflicts/);
+  assert.doesNotMatch(sheet, /<f[ >]/);
+  const without = readZip(await buildSaaPackage(release(), formsDir, new Map()), 'export without inventory');
+  assert.equal(without.has('evidence/component-inventory.csv'), false);
+  for (const bad of ['"a","b"\r\n"c"\r\n', '"a"x,"b"\r\n', '"a,"b"\r\n']) {
+    const broken = { ...original, files: new Map(original.files).set('readable/component-inventory.csv', Buffer.from(bad)) };
+    await assert.rejects(buildSaaPackage(broken, formsDir, new Map()), /component inventory is not a well-formed CSV/, bad);
+  }
+});
+
 test('a verified receipt is supplemental, checksummed and tied to the selected release', async () => {
   const evidence = release();
   const approval = {

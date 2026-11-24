@@ -54,6 +54,7 @@ Every command runs under the memory cap above. Render checks are split per area 
 | DEP-10 | Checker finds charts, tools, lock-file images and Containerfile `FROM`; unpinned image is a problem | unit | `node scripts/run-tests.mjs scripts/test/resource-check.test.mjs` and `node scripts/resource-check.mjs` | extend existing |
 | DEP-11 | Runbooks exist and cover each ceremony | document review | n/a | n/a |
 | DEP-12 | Air-gapped lab install with zero egress; sign-in once Phase 46's image exists | lab, scripted | `deploy/lab/run.sh` | ❌ W0 |
+| DEP-13 | Guest rules refuse before any write; `guests` carries no role; a guest's entity is `guest-<id>` under the staff policies; end disables both sides and deletes nothing; `guest-expiry` only disables guest entities; the CronJob renders only with guests on, with a sessions-only Role; guests leave a site only when named, with `guests@1` and the target-site check; Keycloak holds lifecycle attributes only, no `security-contacts` group and no attribute or group claims in tokens; the approver passes the `SecurityContactCredential` check; an early end writes one create-only `sterling-revocation-request/1` (reason `guest-ended`, 71 D-22) that 71-12's card shows to the issuing officers; guests turn on only with 71-12 (revised 2026-11-24, owner: credentials) | unit with fakes + render + OpenBao and Keycloak in podman | `deploy/test/guests.test.mjs` (47-19, 47-20), `realm.test.mjs`, `openbao.test.mjs`, `federation.test.mjs` (47-21) | ❌ W0 |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -75,6 +76,7 @@ Every command runs under the memory cap above. Render checks are split per area 
 | Runbooks are usable by an operator | DEP-11 | Document review | Walk through each runbook during the lab run |
 | Hardware-key sign-in with a real key | DEP-04, DEP-12 | Needs physical hardware | Enrol two keys in the lab realm; sign in; lose one; re-enrol by administrator |
 | Real HSM unseal | DEP-05 | Site hardware | Site acceptance; SoftHSM2 covers dev and CI |
+| Guest automatic end in a cluster (Session stop, RBAC) | DEP-13 | Needs a running cluster | In the phase verification lab run, set `guests.maxDays` in a copy of the lab realm site file, enrol a guest whose end is a few minutes away, and check: the CronJob ends it, its Session is stopped, and its Workspace and volume are kept |
 
 ---
 

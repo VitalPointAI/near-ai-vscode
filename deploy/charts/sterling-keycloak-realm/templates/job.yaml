@@ -2,8 +2,9 @@
 The realm applier (D-30, research Decision 10): keycloak-config-cli applies realm sterling from code at install and on every update, and
 leaves what already agrees unchanged. Installed only by deploy/keycloak/apply.mjs, which checks the substituted realm first (checkRealm) and
 passes it in with --set-file realm=...; the realm value is empty in a plain render. The applier signs in as a master-realm service-account
-client (Secret keycloak-realm-applier), never as a person, and the sterling-sessions client secret reaches the realm only through the Job's
-environment ($(env:STERLING_SESSIONS_CLIENT_SECRET) in the realm, keycloak-config-cli variable substitution), never through this chart.
+client (Secret keycloak-realm-applier), never as a person, and the sterling-sessions client secret (and the HQ broker's, when a site turns it
+on) reaches the realm only through the Job's environment ($(env:STERLING_SESSIONS_CLIENT_SECRET) in the realm, keycloak-config-cli variable
+substitution), never through this chart.
 */ -}}
 apiVersion: v1
 kind: ConfigMap
@@ -73,6 +74,10 @@ spec:
             - name: STERLING_SESSIONS_CLIENT_SECRET
               valueFrom:
                 secretKeyRef: { name: oauth2-proxy-secrets, key: client-secret }
+            # The client secret HQ issued for this site's broker; only a realm with hqBroker on names it, and that run fails when it is missing.
+            - name: STERLING_HQ_BROKER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: keycloak-hq-broker, key: client-secret, optional: true }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

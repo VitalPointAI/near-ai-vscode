@@ -136,6 +136,8 @@ const forbiddenPatterns = [
   /^extension\/relay(?:\/|$)/,
   /^extension\/hub(?:\/|$)/,
   /^extension\/docs-site(?:\/|$)/,
+  // The Sterling workbench is its own package and image and never ships in the extension (Phase 46).
+  /^extension\/workbench(?:\/|$)/,
   // The compliance package and the security documents never ship in the extension (D-48).
   /^extension\/compliance(?:\/|$)/,
   /^extension\/docs\/security(?:\/|$)/,

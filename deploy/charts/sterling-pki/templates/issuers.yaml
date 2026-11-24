@@ -1,0 +1,61 @@
+{{- /*
+The site's issuers (D-16): ClusterIssuers of type vault on OpenBao's pki_int, one per signing role. cert-manager posts each certificate
+signing request to pki_int/sign/<role>; the intermediate's private key never leaves OpenBao, and no Kubernetes Secret holds it. cert-manager
+logs in with a short token of the dedicated service account openbao-issuer (audience below), which only the controller may request; OpenBao
+checks it with the TokenReview API and grants policy cert-manager (the two sign paths only, deploy/openbao/policies/cert-manager.hcl).
+The issuers trust OpenBao's TLS through the site CA chain, plus the bootstrap CA only while OpenBao still serves its bootstrap certificate.
+*/ -}}
+{{- $bundle := include "sterling-pki.trustBundle" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.auth.serviceAccount }}
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Values.auth.serviceAccount }}-token
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: [{{ .Values.auth.serviceAccount | quote }}]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Values.auth.serviceAccount }}-token
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Values.auth.serviceAccount }}-token
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.auth.controllerServiceAccount }}
+    namespace: {{ .Release.Namespace }}
+{{- range .Values.issuers }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .name }}
+spec:
+  vault:
+    server: {{ $.Values.openbao.server }}
+    path: pki_int/sign/{{ .role }}
+    {{- if $bundle }}
+    caBundle: {{ $bundle | b64enc }}
+    {{- end }}
+    auth:
+      kubernetes:
+        role: {{ $.Values.auth.role }}
+        mountPath: {{ $.Values.auth.mountPath }}
+        serviceAccountRef:
+          name: {{ $.Values.auth.serviceAccount }}
+          audiences:
+            - {{ $.Values.auth.audience }}
+{{- end }}

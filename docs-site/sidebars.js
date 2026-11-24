@@ -35,6 +35,7 @@ export default {
       label: 'Architecture',
       items: [
         'architecture/overview',
+        ...folder('Component catalogue', 'architecture/components'),
         ...folder('Codebase', 'architecture/codebase'),
         ...folder('Design documents', 'architecture/design'),
         ...folder('Decision records', 'architecture/decisions')

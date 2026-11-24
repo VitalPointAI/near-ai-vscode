@@ -123,9 +123,16 @@
           "userSetupAllowed": false
         },
         {
-          "authenticatorFlow": true,
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
           "requirement": "ALTERNATIVE",
           "priority": 1,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 2,
           "flowAlias": "sterling-browser webauthn",
           "userSetupAllowed": false
         }
@@ -209,6 +216,29 @@
       "topLevel": true,
       "builtIn": false,
       "authenticationExecutions": []
+    },
+    {
+      "alias": "sterling-hq-first-login",
+      "description": "First sign-in through HQ (D-36): finds the local person with the same email and links them; never creates a person and asks for nothing",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-detect-existing-broker-user",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 0,
+          "userSetupAllowed": false
+        },
+        {
+          "authenticator": "idp-auto-link",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 1,
+          "userSetupAllowed": false
+        }
+      ]
     },
     {
       "alias": "sterling-x509",
@@ -301,6 +331,38 @@
       }
     ]
   },
+  "identityProviders": [
+    {
+      "alias": "hq",
+      "displayName": "Sign in through HQ",
+      "providerId": "oidc",
+      "enabled": "${site.realm.hq.enabled}",
+      "trustEmail": false,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "sterling-hq-first-login",
+      "config": {
+        "issuer": "${site.realm.hq.issuer}",
+        "authorizationUrl": "${site.realm.hq.issuer}/protocol/openid-connect/auth",
+        "tokenUrl": "${site.realm.hq.issuer}/protocol/openid-connect/token",
+        "userInfoUrl": "${site.realm.hq.issuer}/protocol/openid-connect/userinfo",
+        "jwksUrl": "${site.realm.hq.issuer}/protocol/openid-connect/certs",
+        "logoutUrl": "${site.realm.hq.issuer}/protocol/openid-connect/logout",
+        "useJwksUrl": "true",
+        "validateSignature": "true",
+        "clientId": "${site.realm.hq.clientId}",
+        "clientSecret": "${site.realm.hq.clientSecret}",
+        "clientAuthMethod": "client_secret_post",
+        "pkceEnabled": "true",
+        "pkceMethod": "S256",
+        "defaultScope": "openid email profile",
+        "syncMode": "IMPORT",
+        "backchannelSupported": "false"
+      }
+    }
+  ],
   "clients": [
     {
       "clientId": "sterling-sessions",

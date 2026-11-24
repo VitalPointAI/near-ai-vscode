@@ -1,0 +1,46 @@
+{{- /*
+ClusterIssuer site-bootstrap-ca (CA type, D-16) on the install script's Secret, and the one certificate it issues: OpenBao's first TLS
+certificate, for its services and its Raft peers (retry_join names <release>-<n>.<release>-internal, deploy/values/openbao.yaml). OpenBao
+cannot hold the site PKI before it runs with TLS, so this certificate comes first; deploy/charts/sterling-pki re-issues it from site-pki.
+Both releases declare Certificate openbao-tls, so the install script removes this release just before it installs sterling-pki (the
+Secret stays and is re-issued in place; nothing else names the bootstrap issuer).
+*/ -}}
+{{- $ns := .Values.openbao.namespace -}}
+{{- $rel := .Values.openbao.release -}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: site-bootstrap-ca
+spec:
+  ca:
+    secretName: {{ .Values.caSecretName }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls
+  namespace: {{ $ns }}
+spec:
+  secretName: openbao-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: site-bootstrap-ca
+  commonName: {{ $rel }}.{{ $ns }}.svc
+  dnsNames:
+    {{- range $service := list $rel (printf "%s-active" $rel) (printf "%s-standby" $rel) }}
+    - {{ $service }}.{{ $ns }}.svc
+    - {{ $service }}.{{ $ns }}.svc.cluster.local
+    {{- end }}
+    - "*.{{ $rel }}-internal"
+    - "*.{{ $rel }}-internal.{{ $ns }}.svc"
+    - "*.{{ $rel }}-internal.{{ $ns }}.svc.cluster.local"
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  duration: {{ .Values.openbao.duration }}
+  renewBefore: {{ .Values.openbao.renewBefore }}

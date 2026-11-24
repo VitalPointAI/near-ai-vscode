@@ -1,0 +1,10 @@
+# A site file for sterling-sessions with two model servers, one with a comma in its path (render-sessions.test.mjs renders it for the
+# site-env contract fixture, workbench/test/fixtures/site-env.rendered.json).
+appDefinition:
+  maxInstances: 5
+  notifyAfterMinutes: 25
+  maxSessionMinutes: 0
+  usePlaceholder: false
+siteEnv:
+  openVsxUrl: "https://open-vsx.${site.domain}"
+  modelServers: ["https://models.${site.domain}:8443/v1", "https://inference.${site.domain}/v1,beta"]

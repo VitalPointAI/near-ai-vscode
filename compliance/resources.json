@@ -10,6 +10,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Encodes JPEG images for the offline globe tiles and environment packs built by scripts/build-globe-tiles.mjs and scripts/generate-env-pack.mjs.",
+      "role": "Decodes the source world image when a developer rebuilds the COP map's bundled globe tiles (scripts/build-globe-tiles.mjs). Without it the tile builder would need a native image tool on the developer's machine. Nothing from it ships; only the tiles it helps make.",
+      "architectureArea": "build-and-test",
       "licence": "Apache-2.0",
       "controls": [
         "sa-15",
@@ -32,6 +34,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Encodes WebP images for the offline globe tiles and environment packs (scripts/lib/webp.mjs).",
+      "role": "Encodes the WebP map tiles that ship with the COP map: the bundled globe tiles and the environment pack tiles (scripts/lib/webp.mjs). These tiles let the map work offline. Without it the tiles would need a native encoder on the build machine. It runs only when a developer rebuilds tiles; the encoder never ships.",
+      "architectureArea": "build-and-test",
       "licence": "Apache-2.0",
       "controls": [
         "sa-15",
@@ -54,6 +58,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored MCP client (see vendor:@modelcontextprotocol/sdk); not shipped from node_modules.",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:@modelcontextprotocol/sdk). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:@modelcontextprotocol/sdk for why the MCP client is needed.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -76,6 +82,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored SVG renderer (see vendor:@resvg/resvg-wasm).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:@resvg/resvg-wasm). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:@resvg/resvg-wasm for why the SVG renderer is needed.",
+      "architectureArea": "workbench",
       "licence": "MPL-2.0",
       "controls": [
         "sa-15",
@@ -96,17 +104,21 @@
         "compliance/package.json",
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub and compliance package.",
+      "purpose": "Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub, compliance package and workbench.",
+      "role": "Lets the TypeScript type check understand the Node.js APIs used by the extension, relay, hub, compliance package and workbench. Without it the type check fails on every Node.js import, and type errors would only show up when the code runs. Types only: nothing ships.",
+      "architectureArea": "build-and-test",
+      "roleNeedsReview": true,
       "licence": "MIT",
       "controls": [
         "sa-15",
         "sr-03"
       ],
-      "evidence": "Type-check results of the lint, relay and hub CI jobs.",
+      "evidence": "Type-check results of the lint, relay, hub and workbench CI jobs.",
       "crypto": "none",
       "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
       "airGap": "ok",
@@ -123,6 +135,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Type definitions for the VS Code extension API, used by the type check.",
+      "role": "Describes the VS Code extension API to the type check. Without it the compiler cannot check the extension's calls into the editor. Types only: nothing ships.",
+      "architectureArea": "build-and-test",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -145,6 +159,8 @@
       "component": "extension",
       "scope": "test",
       "purpose": "Downloads a VS Code build and runs the end-to-end tests in it.",
+      "role": "Downloads a real VS Code build and runs the end-to-end tests inside it (the e2e CI job). Without it the extension could only be tested outside the editor, and faults in how it works with the editor would first appear for users.",
+      "architectureArea": "build-and-test",
       "licence": "MIT",
       "controls": [
         "sa-11",
@@ -167,6 +183,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Packages the extension as a VSIX (--no-dependencies).",
+      "role": "Packages the compiled extension as the VSIX file that each release records with its checksum and puts inside the workbench image. It is the editor maker's own packager; without it we would write and maintain our own VSIX packer.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "cm-14",
@@ -190,6 +208,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored DejaVu fonts (see vendor:dejavu-fonts-ttf).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:dejavu-fonts-ttf). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:dejavu-fonts-ttf for why the fonts is needed.",
+      "architectureArea": "workbench",
       "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
       "controls": [
         "sa-15",
@@ -209,11 +229,15 @@
       "where": [
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Bundles the relay and hub, and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.",
+      "purpose": "Bundles the relay, the hub, the workbench engine bundle and test build (workbench/tools/build-engine.mjs, workbench/scripts/build.mjs), and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.",
+      "role": "Bundles the relay and hub into single files for their images, the engine code the workbench backend reuses (the team parser) and the workbench test build, and pptxgenjs, the MCP client and Yjs into the extension's vendor/ folder. Bundling lets the extension and the images ship without extra node_modules, which keeps the shipped files few and reviewable.",
+      "architectureArea": "build-and-test",
+      "roleNeedsReview": true,
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -237,6 +261,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored image tracer (see vendor:imagetracerjs).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:imagetracerjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:imagetracerjs for why the image tracer is needed.",
+      "architectureArea": "workbench",
       "licence": "Unlicense",
       "controls": [
         "sa-15",
@@ -259,6 +285,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Yjs helper library, bundled into vendor/yjs/yjs.cjs with Yjs (hash-pinned in scripts/crdt-vendor.json).",
+      "role": "Helper library that Yjs is built on. It is bundled with Yjs into the extension's vendor/yjs/yjs.cjs and hash-pinned in scripts/crdt-vendor.json. Yjs does not work without it.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -281,6 +309,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored PDF reader (see vendor:pdfjs-dist).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:pdfjs-dist). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:pdfjs-dist for why the PDF reader is needed.",
+      "architectureArea": "workbench",
       "licence": "Apache-2.0",
       "controls": [
         "sa-15",
@@ -303,6 +333,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored PowerPoint writer (see vendor:pptxgenjs).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:pptxgenjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:pptxgenjs for why the PowerPoint writer is needed.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -323,17 +355,21 @@
         "compliance/package.json",
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Type-checks and compiles the extension, relay, hub and compliance package.",
+      "purpose": "Type-checks and compiles the extension, relay, hub, compliance package and the Sterling workbench extension. In the workbench image it also stays as a runtime dependency of @theia/filesystem (through opfs-worker).",
+      "role": "Type-checks and compiles the extension, relay, hub, compliance package and the workbench extension. All of the product's own code is TypeScript, so nothing can be built without it. In the workbench image it also stays as a runtime dependency of @theia/filesystem.",
+      "architectureArea": "build-and-test",
+      "roleNeedsReview": true,
       "licence": "Apache-2.0",
       "controls": [
         "sa-15",
         "sr-03"
       ],
-      "evidence": "Type-check results of the lint, relay, hub and compliance CI jobs.",
+      "evidence": "Type-check results of the lint, relay, hub, compliance and workbench CI jobs.",
       "crypto": "none",
       "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
       "airGap": "ok",
@@ -350,6 +386,8 @@
       "component": "extension",
       "scope": "build",
       "purpose": "Source of the vendored shared-text library (see vendor:yjs).",
+      "role": "The source that scripts/vendor-libs.mjs copies into the extension's vendor/ folder (vendor:yjs). The extension ships no node_modules, so this package is needed only to rebuild that reviewed copy; see vendor:yjs for why the shared-text merge library is needed.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -372,6 +410,8 @@
       "component": "relay",
       "scope": "runtime",
       "purpose": "Signs and verifies the relay's JSON Web Tokens; bundled into the relay image.",
+      "role": "The relay's planned library for signing and verifying its JSON Web Tokens, and its only runtime dependency: the relay workspace test (relay/test/workspace.test.ts) requires exactly this dependency. No relay source imports it yet; the relay channel phases are the first to use it, for token checks. Without it the relay would need its own JWT code.",
+      "architectureArea": "sync-and-relay",
       "licence": "MIT",
       "controls": [
         "ia-05",
@@ -395,6 +435,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Builds the static documentation site.",
+      "role": "Builds this documentation site into static pages that need no code running on a server. Without it we would need another site generator.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -417,6 +459,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Docs content plugin for the documentation site.",
+      "role": "Turns the Markdown pages under docs-site/content, and the repository documents copied in at build time, into the site's pages and menu. Docusaurus cannot render documentation pages without it.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -439,6 +483,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Theme of the documentation site.",
+      "role": "The page layout, menu, search box and styles of the site. Docusaurus needs a theme to render any page.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -461,6 +507,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Renders Mermaid diagrams in the documentation site, in the browser, without a remote service.",
+      "role": "Draws the diagrams in these pages, such as the architecture diagrams, from text, in the browser. Without it diagrams would be images kept up to date by hand, or drawn by a remote service that an air-gapped site cannot reach.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -483,6 +531,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Offline search index for the documentation site (no hosted search service).",
+      "role": "Builds the search index with the site, so search works offline and sends nothing anywhere. A hosted search service would not work at an air-gapped site.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -505,28 +555,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "MDX runtime bundled into the static documentation site.",
-      "licence": "MIT",
-      "controls": [
-        "sa-15",
-        "sr-03"
-      ],
-      "evidence": "Builds the documentation site that carries the Accreditation pages; the docs CI job result.",
-      "crypto": "none",
-      "cveResponse": "Blocking: the CI docs job runs npm audit --audit-level=high over the docs-site lockfile (dev dependencies included); also recorded daily. Bumped by hand in a reviewed PR.",
-      "airGap": "ok",
-      "fit": "pass",
-      "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
-    },
-    {
-      "id": "npm:clsx",
-      "kind": "npm",
-      "where": [
-        "docs-site/package.json"
-      ],
-      "component": "release-pipeline",
-      "scope": "build",
-      "purpose": "Class-name helper bundled into the static documentation site.",
+      "role": "Renders MDX pages, the pages that embed live components, such as the Accreditation pages. Docusaurus requires it as a peer package.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -549,6 +579,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Code highlighting bundled into the static documentation site.",
+      "role": "Highlights code blocks; the site configuration takes its colour theme from it (docs-site/docusaurus.config.js). Without it code examples would show as plain text.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -571,6 +603,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "UI library bundled into the static documentation site.",
+      "role": "Docusaurus is built on React, and the site's own components, such as the Accreditation tables, are React components. The site cannot be built without it.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -593,6 +627,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "UI library bundled into the static documentation site.",
+      "role": "Renders the React components into the site's pages, at build time and in the browser. React needs it on the web.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -615,6 +651,8 @@
       "component": "release-pipeline",
       "scope": "runtime",
       "purpose": "Serves the built documentation site on the documentation host (docs-site/scripts/serve.mjs).",
+      "role": "Serves the built site from disk on the documentation host (docs-site/scripts/serve.mjs). It is a small static file server; without it we would write our own or run a separate web server.",
+      "architectureArea": "documentation-site",
       "licence": "MIT",
       "controls": [
         "sc-07",
@@ -637,6 +675,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Validates OSCAL documents and the compliance package's own JSON sources against their schemas.",
+      "role": "Checks every OSCAL document, and the compliance package's own JSON files, against their schemas, offline. Without it a malformed control document could reach an assessor package. A JSON Schema validator of our own would be large and easy to get wrong.",
+      "architectureArea": "compliance-tooling",
       "licence": "MIT",
       "controls": [
         "ca-07",
@@ -660,6 +700,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "String formats (dates, URIs) for the ajv validation.",
+      "role": "Adds the date, date-time and URI checks the OSCAL schema uses. Without it ajv would skip those checks.",
+      "architectureArea": "compliance-tooling",
       "licence": "MIT",
       "controls": [
         "ca-07",
@@ -683,6 +725,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Parses the published Cyber Centre and other control-catalogue HTML when importing catalogues.",
+      "role": "Parses the published control catalogue web pages, such as the Cyber Centre's ITSG-33 pages, when the catalogues are imported. A parser that follows the HTML standard avoids fragile pattern matching on web pages.",
+      "architectureArea": "compliance-tooling",
       "licence": "MIT",
       "controls": [
         "ca-07",
@@ -706,6 +750,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Reads YAML sources (workflow files and imported data) in the compliance tooling.",
+      "role": "Reads YAML in the compliance tooling: workflow files and imported data such as the CISO Assistant cross-check. Node.js has no YAML parser built in.",
+      "architectureArea": "compliance-tooling",
       "licence": "ISC",
       "controls": [
         "ca-07",
@@ -721,17 +767,439 @@
       "reviewedAt": "2026-11-23"
     },
     {
-      "id": "image:docker.io/library/node",
-      "kind": "image",
+      "id": "npm:@theia/core",
+      "kind": "npm",
       "where": [
-        ".planning/spikes/theia-team-studio/Dockerfile",
-        "hub/Dockerfile",
-        "relay/Dockerfile"
+        "workbench/package.json"
       ],
       "component": "extension",
       "scope": "runtime",
-      "purpose": "Base of the Sterling Theia workbench image (node:24 bookworm-slim, build and runtime stages; the release image published to GHCR), and build stage of the relay and hub images.",
-      "licence": "MIT (Node.js); Debian packages under their own licences",
+      "purpose": "The Theia application framework the workbench runs on: the browser shell, the backend, JSON-RPC between them, the connection token and the preferences and command services every Sterling page uses.",
+      "role": "The application framework the Sterling workbench is built on. Every Sterling page (Get Started, the work-area pages, Documentation, Compliance, Portfolio, the Team preview) is a Theia widget, and every call from a page to the backend (session identity, saved secrets, signing, the team preview) goes through its JSON-RPC connection. Without it there is no workbench.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "cm-07",
+        "sa-15",
+        "sc-08",
+        "sc-13",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "uses-platform",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Its tree holds jschardet 2.3.0 (LGPL-2.1+, unmodified): keep its licence notice and offer its source with the image; the owner confirms the LGPL terms for a bundled JavaScript library before the first hosted release.",
+        "Its tree holds @vscode/codicons 0.0.45 (CC-BY-4.0 icon font: keep the attribution in the image notices).",
+        "The lockfile records no licence for fuzzy 0.1.3 and xmlhttprequest-ssl 2.1.2 (through @theia/core and socket.io-client); confirm each package's own licence file before the first release that ships it.",
+        "Its cryptography (connection token, TLS on the backend) is the upstream Node OpenSSL, not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B."
+      ]
+    },
+    {
+      "id": "npm:@theia/editor",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The editor framework the workbench opens files in (text editors, editor navigation).",
+      "role": "Opens files in editors inside the workbench, so a person can read and change the files of a work area. The Monaco editor plugs into it.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/filesystem",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The file tree service, file upload and download, and file dialogs over the workspace folder in the container.",
+      "role": "Reads and writes the workspace folder for the workbench. The work-area pages list work areas and read their markers through its file service, and linking a resource writes through it. Without it no page could see the folder.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "The lockfile records no licence for busboy 1.6.0 and streamsearch 1.1.0 (through @theia/filesystem and multer, for file upload); confirm each package's own licence file before the first release that ships it."
+      ]
+    },
+    {
+      "id": "npm:@theia/monaco",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The Monaco editor integration: syntax colouring, search and the editing widgets of the workbench.",
+      "role": "The text editor of the workbench: syntax colouring, search and editing, the same editor VS Code uses. The Sterling extension (the VSIX) needs it for its editors and inputs.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/navigator",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The file explorer view of the workspace folder.",
+      "role": "The file explorer, so a person can see and open the files of the open work area.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/plugin-ext-vscode",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Runs VS Code extensions in the workbench; the Sterling extension (the VSIX) runs through it in the release image.",
+      "role": "Runs the Sterling VS Code extension (the VSIX bundled into the release image) inside the workbench: the NEAR AI chat, Team Studio, Agent Activity and the commands the Sterling pages call, such as creating a work area. Without it the release image would have the Sterling pages but none of the agent features.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "cm-07",
+        "cm-11",
+        "sa-15",
+        "sc-07",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one.",
+        "npm audit --omit=dev in the workbench job is report-only until Theia ships a fix: on 2026-11-24 it reports one high advisory, zod 3.25.x below 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory exhaustion validating oversized collections), through @theia/plugin-ext > @theia/ai-mcp > @modelcontextprotocol/sdk; it validates MCP messages, and MCP traffic exists only when a person adds an MCP server."
+      ]
+    },
+    {
+      "id": "npm:@theia/preferences",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The settings service and settings editor; the workbench ships telemetry off as a default preference.",
+      "role": "The settings service and editor. The workbench ships telemetry off as a default preference through it, so the image sends no usage data.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/terminal",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The terminal view of the workbench (a shell inside the container).",
+      "role": "The terminal view, a shell inside the person's own session container, for work the pages do not cover.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "ac-17",
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Gives a shell to whoever reaches the workbench; hosted sites put it behind sign-in (Phase 47) and the image binds 127.0.0.1 by default."
+      ]
+    },
+    {
+      "id": "npm:@theia/workspace",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Opens the workspace folder (/home/sterling/workspace) and keeps the recent-workspace and trust state.",
+      "role": "Opens the workspace folder and switches to a work area when a page opens one. The work-area pages read the open folders and its trust state through it, and refuse to link resources in a folder that is not trusted.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/cli",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "theia build: generates and bundles the workbench frontend and backend in the image build stage; never in the runtime image.",
+      "role": "Runs theia build in the image build stage: it generates and bundles the workbench frontend and backend from workbench/package.json. Build only: nothing of it reaches the runtime image.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; the container suite checks the runtime image holds no @theia/cli",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "The lockfile records no licence for buffers 0.1.1 and union 0.5.0 (build-only, through @theia/ffmpeg and http-server); confirm each package's own licence file before the first release that ships it.",
+        "Installed with --ignore-scripts, so it downloads no browser or ffmpeg build; build stage only."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:beautiful-mermaid",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Draws the guides' Mermaid diagrams to static SVG in the workbench image build (workbench/tools/documentation-render.mjs), without a DOM or a browser, so the Documentation view shows each diagram instead of its source.",
+      "role": "Draws the guides' Mermaid diagrams as static SVG while the image is built (workbench/tools/documentation-render.mjs), so the Documentation view shows the diagram and the image needs no diagram library or browser script at run time. Build only.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "MIT (its tree: elkjs 0.11.1 EPL-2.0 and entities 7.0.1 BSD-2-Clause, build stage only; none of them reaches the runtime image)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "sc-18",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 1.1.3 in workbench/package-lock.json; workbench/test/documentation-render.test.mjs draws the architecture overview's three diagrams and checks the SVG; the container suite's Documentation browser test",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job; bumped by hand in a reviewed change after re-reading the renderer's output",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Build stage only: npm prune --omit=dev removes it and elkjs before the runtime stage; only the SVG it draws ships.",
+        "Its SVG carries a <style> block that @imports Google Fonts: documentation-render.mjs removes the block, keeps only the colour variables, and stops the build if any style, script, foreignObject, image, use, link, event handler or remote address is left. The Documentation view sanitizes the SVG again with DOMPurify.",
+        "A young project from one company (Craft Docs, first released in 2026): re-review its output before each bump. If it is abandoned, the fallback is a local Mermaid bundle with its own entry."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:markdown-it",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Turns the bundled guides into HTML in the workbench image build (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view never shows Markdown, MDX or HTML source as text. The same version @theia/core already ships for its own Markdown rendering.",
+      "role": "Turns the bundled guides into HTML while the image is built (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view shows formatted pages and never Markdown source. Build only.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "si-10",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 14.3.3 in workbench/package-lock.json, the version @theia/core resolves; workbench/test/documentation-render.test.mjs",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan (it is also in the runtime tree through @theia/core); bumped together with @theia/core in a reviewed change",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@near-ai/sterling-workbench-extension",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services, including the answer to Theia Cloud's activity tracker for idle stop (GET /monitor/activity/lastActivity and POST /monitor/activity/popup, only with the session secret, nothing about the person); this repository's own code in workbench/extension.",
+      "role": "Our own code in workbench/extension: the Sterling pages, the session identity and key services that keep secrets in your organization's OpenBao or the keyring, the outbound address allow list, and the answer to Theia Cloud's activity tracker for idle stop. It is what makes the Theia application the Sterling workbench.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "MIT (this repository)",
+      "controls": [
+        "ac-12",
+        "sa-11",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "workbench CI job lint, unit, container and browser tests; image SBOM and scan",
+      "crypto": "uses-platform",
+      "cveResponse": "First-party code: fixed in a reviewed change; its dependencies are the pinned @theia/* packages.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@playwright/test",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "Drives the built workbench image in Chromium for the browser tests (owner-approved at 1.65.0, 2026-11-24).",
+      "role": "Drives the built workbench image in Chromium for the container tests (Get Started, Documentation, secrets, session and egress), so the image that ships is the one the browser tests ran against. Test only: nothing ships.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-11",
+        "sr-03"
+      ],
+      "evidence": "exact pin 1.65.0 in workbench/package-lock.json with npm provenance from github.com/microsoft/playwright; the workbench CI job browser test result",
+      "crypto": "none",
+      "cveResponse": "Exact pin; npm audit in the workbench job; bumped by hand in a reviewed change.",
+      "airGap": "needs-mirror:Playwright browser builds (downloaded from the Playwright CDN at test time; air-gapped runs use PLAYWRIGHT_BROWSERS_PATH)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Test only; never in the image. Air-gapped test runs point PLAYWRIGHT_BROWSERS_PATH at a mirrored browser build of the pinned release."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:docker.io/library/node",
+      "kind": "image",
+      "where": [
+        "hub/Dockerfile",
+        "relay/Dockerfile",
+        "workbench/Dockerfile"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Build stage of the relay and hub images, and the workbench's `node` stage: its Node 26.13.1 binary and headers are copied into the workbench's UBI 9 build and runtime stages (Red Hat publishes no Node 26 for UBI 9); nothing else of this Debian image reaches the workbench image.",
+      "role": "Supplies the pinned Node.js 26 binary the workbench runs on, since Eclipse Theia is a Node.js application and Red Hat publishes no Node.js 26 for UBI 9: only the binary and its headers are copied into the UBI 9 build and runtime stages. It is also the build stage of the relay and hub images, so they run the same Node.js major.",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "MIT (Node.js); Debian packages under their own licences (only the Node binary, headers and npm are copied out)",
       "controls": [
         "cm-02",
         "cm-07",
@@ -741,19 +1209,18 @@
         "sr-03",
         "sr-11"
       ],
-      "evidence": "Pinned by sha256 digest in every Dockerfile; the Release workflow smoke-tests the workbench image and records its GHCR digest on the GitHub release; the hub and relay container suites fail if a pin is missing.",
+      "evidence": "Pinned by sha256 digest in every Dockerfile; the workbench container suite checks the runtime prints a v26 Node and loads its native addons; the workbench CI job writes the image SBOM, a Grype scan and the image digest on every PR; the Release workflow smoke-tests the release image, attests its SBOM and signs its GHCR digest with your organization's key, verifies both, and records the digest on the GitHub release; the hub and relay container suites fail if a pin is missing.",
       "crypto": "unvalidated",
-      "cveResponse": "Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). The workbench image is not yet scanned in CI; the relay and hub final images are scanned by grype in relay-image-scan.",
-      "airGap": "needs-mirror:the pinned docker.io/library/node digests, Debian package mirrors and an npm registry mirror holding the locked packages",
+      "cveResponse": "Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). Grype scans the workbench image in the workbench CI job and the release image in the Release workflow (report-only); the relay and hub final images are scanned by grype in relay-image-scan.",
+      "airGap": "needs-mirror:the pinned docker.io/library/node digest through the builder's registry-mirror setting, and an npm registry mirror holding the locked packages (NPM_REGISTRY)",
       "fit": "pass-with-conditions",
       "conditions": [
-        "A site that builds these images without internet must mirror the pinned image digests, Debian packages and an npm registry with the locked packages, or build elsewhere and import the signed image.",
-        "The workbench image uses Debian's OpenSSL, which is not a validated cryptographic module: it is not for Protected B until Phase 46 moves it to UBI 9 in FIPS mode (hosting design #163, section 10).",
-        "The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (the entrypoint refuses to start otherwise).",
-        "The workbench image is not yet signed or scanned in CI; signing with your organization's key and an SBOM are Phase 46 items."
+        "A site that builds these images without internet must mirror the pinned image digests and an npm registry with the locked packages, or build elsewhere and import the signed image.",
+        "The upstream Node OpenSSL in the workbench runtime is not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B.",
+        "The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (it binds 127.0.0.1 by default and refuses a non-loopback local bind without STERLING_PREVIEW_NO_SIGN_IN=accept)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
+      "reviewedAt": "2026-11-24"
     },
     {
       "id": "image:gcr.io/distroless/nodejs26-debian13",
@@ -765,6 +1232,8 @@
       "component": "relay",
       "scope": "runtime",
       "purpose": "Final base image of the relay and hub: Node 26 as a non-root user, with no shell or package manager.",
+      "role": "The final, minimal base of the relay and hub images: Node.js as a non-root user, with no shell or package manager. This removes most of the attack surface a full operating system image would add.",
+      "architectureArea": "sync-and-relay",
       "licence": "Apache-2.0 (distroless); Node.js MIT and Debian packages under their own licences",
       "controls": [
         "cm-02",
@@ -798,6 +1267,8 @@
       "component": "relay",
       "scope": "runtime",
       "purpose": "Optional Signal sidecar for the relay (Compose profile \"signal\", off by default); it relays messages through the Signal service.",
+      "role": "The planned Signal channel sidecar for the relay (Phase 82). It is off by default and is not started until Phase 82 re-pins it to a current release and re-reviews this entry; the relay does not send or receive Signal messages yet. Without it the relay would need its own Signal client.",
+      "architectureArea": "sync-and-relay",
       "licence": "MIT (signal-cli-rest-api); bundles signal-cli (GPL-3.0) and libsignal (AGPL-3.0), run as a separate unmodified container",
       "controls": [
         "ac-20",
@@ -830,6 +1301,8 @@
       "component": "oauth2-proxy",
       "scope": "build",
       "purpose": "Build stage of our oauth2-proxy image: compiles it from pinned source with the Go FIPS module (Go 1.27.3).",
+      "role": "Compiles our own oauth2-proxy from pinned source with the Go FIPS module. Building it ourselves, instead of using the upstream image, is what puts the session sign-in proxy on a UBI 9 base. Build stage only: just the compiled program reaches the final image.",
+      "architectureArea": "identity",
       "licence": "Red Hat UBI EULA (redistributable); Go BSD-3-Clause",
       "controls": [
         "ia-02",
@@ -856,11 +1329,15 @@
       "kind": "image",
       "where": [
         "deploy/images/oauth2-proxy/Containerfile",
-        "deploy/images/postgres/Containerfile"
+        "deploy/images/postgres/Containerfile",
+        "workbench/Dockerfile"
       ],
       "component": "oauth2-proxy",
       "scope": "runtime",
-      "purpose": "Runtime base of our oauth2-proxy and Postgres images.",
+      "purpose": "Runtime base of our oauth2-proxy and Postgres images, and the build and runtime base of the Sterling workbench image (Node 26 binary copied in, native addons built on it).",
+      "role": "The small Red Hat UBI 9 base of our oauth2-proxy and PostgreSQL images and of the Sterling workbench image. UBI 9 carries the RHEL OpenSSL FIPS provider, the base the hosting design asks for at Protected B on a host in FIPS mode.",
+      "architectureArea": "identity",
+      "roleNeedsReview": true,
       "licence": "Red Hat UBI EULA (redistributable); RHEL packages under their own licences",
       "controls": [
         "ia-02",
@@ -869,7 +1346,7 @@
         "sc-13",
         "sc-23"
       ],
-      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it. The workbench pins the multi-arch index digest sha256:08d4c70f..., whose linux/amd64 manifest is the sha256:2cb89fea... the deploy images pin; its container suite checks the image starts, loads drivelist and node-pty and opens Get Started.",
       "crypto": "unvalidated",
       "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
       "airGap": "ok",
@@ -878,7 +1355,8 @@
         "Rebuilt from pinned source with the Go FIPS module (GOFIPS140); the module's CMVP status is unverified.",
         "Runs with TLS verification on, secure cookies, real generated secrets and token forwarding (D-22); the render invariants check each.",
         "UBI 9 base: its RHEL OpenSSL FIPS provider is the validated-module path only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
-        "Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing."
+        "Built only into images this repository rebuilds (deploy/images, D-23): each is signed with your organization's one cosign key in the container-release environment, with a CycloneDX SBOM and an attestation; no keyless signing.",
+        "Workbench: mirror the pinned digest in a local registry through the builder's registry-mirror setting (D-39); FIPS mode is a host property (Phase 47); swap to Red Hat's Node 26 minimal image when it is published."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -892,6 +1370,8 @@
       "component": "hsm",
       "scope": "test",
       "purpose": "Build stage of the SoftHSM2 library for the test-only openbao-softhsm image.",
+      "role": "Build stage of the test-only image that adds SoftHSM2 to OpenBao, so the lab and CI can test HSM sealing without a hardware HSM. It never reaches production.",
+      "architectureArea": "secrets-and-keys",
       "licence": "Red Hat UBI EULA (redistributable)",
       "controls": [
         "sc-12",
@@ -920,6 +1400,8 @@
       "component": "openbao",
       "scope": "runtime",
       "purpose": "Base of our OpenBao image (OpenBao 2.7.3 on UBI), which adds the pinned kms-pkcs11 plugin.",
+      "role": "The OpenBao server, on UBI 9, that our OpenBao image extends with the kms-pkcs11 plugin. OpenBao holds each site's secrets, the internal certificate authority and each person's keys. Without it the site would need another secrets manager; HashiCorp Vault is excluded (D-04).",
+      "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0 (OpenBao); Red Hat UBI EULA (base)",
       "controls": [
         "sc-12",
@@ -947,6 +1429,35 @@
       "reviewedAt": "2026-11-24"
     },
     {
+      "id": "image:docker.io/openbao/openbao",
+      "kind": "image",
+      "where": [
+        "workbench/Dockerfile"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "Dev-mode OpenBao 2.7.3 for the workbench container tests only (stage openbao-test, never built into the workbench image). Phase 47 owns production OpenBao (quay.io/openbao/openbao-ubi).",
+      "role": "A development-mode OpenBao for the workbench container tests (the Dockerfile's openbao-test stage), so the per-person secret paths and the step-up signing are proven against a real OpenBao. Test only: never part of the workbench image; production OpenBao is the site's own (Phase 47).",
+      "architectureArea": "workbench",
+      "roleNeedsReview": true,
+      "licence": "MPL-2.0",
+      "controls": [
+        "sc-12",
+        "sc-28",
+        "ia-05"
+      ],
+      "evidence": "Pinned by sha256 digest on a FROM line the fit check reads; the container tests take the reference from that line and start it in dev mode on an internal network.",
+      "crypto": "unvalidated",
+      "cveResponse": "Test scope only: re-pinned by hand in a reviewed change when OpenBao publishes a fix that affects the tests.",
+      "airGap": "needs-mirror:the pinned digest in a local registry for an offline test run",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Dev mode, in-memory storage and a known root token: test scope only, never deployed and never in production values."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
       "id": "image:registry.access.redhat.com/ubi9/openjdk-21",
       "kind": "image",
       "where": [
@@ -957,6 +1468,8 @@
       "component": "theia-cloud",
       "scope": "build",
       "purpose": "Build stage of our Theia Cloud operator, service and conversion webhook images (Maven build of the 1.2.0 source).",
+      "role": "Build stage (Maven) of our rebuilds of the Theia Cloud operator, service and conversion webhook from the 1.2.0 source. We rebuild them because the upstream images do not meet the Protected B base-image requirement.",
+      "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
       "controls": [
         "ac-03",
@@ -991,6 +1504,8 @@
       "component": "theia-cloud",
       "scope": "runtime",
       "purpose": "Runtime base of our Theia Cloud operator, service and conversion webhook images.",
+      "role": "Java runtime base of our rebuilt Theia Cloud operator, service and conversion webhook. These start, track and stop each person's workbench session; without them there are no sessions.",
+      "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); OpenJDK GPL-2.0 with Classpath Exception",
       "controls": [
         "ac-03",
@@ -1025,6 +1540,8 @@
       "component": "theia-cloud",
       "scope": "build",
       "purpose": "Build stage of our Theia Cloud landing page image.",
+      "role": "Build stage of our rebuilt Theia Cloud landing page. Build stage only.",
+      "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); Node.js MIT",
       "controls": [
         "ac-03",
@@ -1058,6 +1575,8 @@
       "component": "theia-cloud",
       "scope": "runtime",
       "purpose": "Runtime base of our Theia Cloud landing page image, and the lab session image until Phase 46 publishes the workbench (D-55).",
+      "role": "Serves our rebuilt Theia Cloud landing page, where a signed-in person opens their workbench. Until Phase 46 publishes the workbench image it is also the lab stand-in session image.",
+      "architectureArea": "workbench",
       "licence": "Red Hat UBI EULA (redistributable); nginx BSD-2-Clause",
       "controls": [
         "ac-03",
@@ -1091,6 +1610,8 @@
       "component": "cert-manager",
       "scope": "runtime",
       "purpose": "cert-manager controller: issues and renews site certificates.",
+      "role": "Issues and renews every TLS certificate at the site from the site's own certificate authority, with no ACME or internet certificate authority. Without it certificates would be issued and rotated by hand, and an expired certificate would stop sign-in and sessions.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-08",
@@ -1121,6 +1642,8 @@
       "component": "cert-manager",
       "scope": "runtime",
       "purpose": "cert-manager admission webhook for its resources.",
+      "role": "Checks cert-manager's own resources when they are created or changed. cert-manager does not run without it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-08",
@@ -1151,6 +1674,8 @@
       "component": "cert-manager",
       "scope": "runtime",
       "purpose": "cert-manager CA injector: writes CA bundles into webhook configurations.",
+      "role": "Writes certificate authority bundles into webhook configurations, so the Kubernetes API trusts the site's in-cluster webhooks. cert-manager does not run without it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-08",
@@ -1181,6 +1706,8 @@
       "component": "cert-manager",
       "scope": "runtime",
       "purpose": "cert-manager install-time check that its API answers (a Job, runs once).",
+      "role": "Runs once at install and waits until cert-manager's API answers, so the install steps that create certificates do not fail.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-08",
@@ -1211,6 +1738,8 @@
       "component": "ingress",
       "scope": "runtime",
       "purpose": "HAProxy Kubernetes Ingress controller 3.4.1: the site ingress (D-07).",
+      "role": "The site ingress: the one entry point that terminates TLS and routes people to sign-in, the landing page and their own workbench session. Without an ingress nobody could reach the site. ingress-nginx is archived and is not used (D-07).",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0 (controller); HAProxy under its own GPL-2.0 licence, run unmodified",
       "controls": [
         "sc-07",
@@ -1240,6 +1769,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Kyverno 1.20.0 admission controller: refuses any image not signed with your organization's key (D-15, Decision 1).",
+      "role": "The admission controller that refuses to start any container image not signed with your organization's key. It is the second check after the import check, so an unsigned or swapped image cannot run even if it reaches the registry.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1257,7 +1788,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1272,6 +1803,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Kyverno init container that prepares the admission controller.",
+      "role": "Init container that prepares Kyverno before the admission controller starts. Kyverno needs it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1289,7 +1822,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1304,6 +1837,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Kyverno chart test pods and the pre-delete webhook cleanup hook.",
+      "role": "Used by the Kyverno chart's test pods and by its pre-delete hook, which removes Kyverno's webhooks on uninstall so the cluster is not left refusing changes.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1321,7 +1856,7 @@
       "conditions": [
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
-        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.",
+        "The admission policy fails closed (failurePolicy: Fail, validationActions: [Deny]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
@@ -1336,6 +1871,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Zot v2.1.23: the site registry for the lab and small sites (Decision 8).",
+      "role": "The site's own image registry for the lab and small sites. Every image runs from the site registry, with its signature stored beside it, so nothing is pulled from the internet.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1354,7 +1891,8 @@
         "Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.",
         "Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1)."
+        "Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1).",
+        "Its own pod is admitted by its exact pinned digest rather than by signature (the signature lives in this registry, which is down while it restarts); the digest is the one the signed bundle's import verified, preloaded on each node."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -1368,6 +1906,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor core API (HQ and large sites, second wave).",
+      "role": "Harbor's API: projects, access and the registry's audit log. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1400,6 +1940,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor web portal (HQ and large sites).",
+      "role": "Harbor's web screen for registry administrators. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1432,6 +1974,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor job service (replication and retention jobs).",
+      "role": "Runs Harbor's background jobs, such as replication and retention. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1464,6 +2008,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor's distribution registry.",
+      "role": "The registry inside Harbor that stores and serves the images. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1496,6 +2042,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor registry controller.",
+      "role": "Controls Harbor's registry, for example its storage clean-up. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -1528,6 +2076,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor internal Postgres database (Harbor sites only).",
+      "role": "Harbor's own PostgreSQL database. Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0 (Harbor packaging); PostgreSQL Licence",
       "controls": [
         "cm-07",
@@ -1560,6 +2110,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor internal Redis-compatible cache (Harbor sites only).",
+      "role": "Harbor's cache and job queue (Redis-compatible). Harbor is the registry for HQ and large sites (second wave); small sites use Zot and do not run it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0 (Harbor packaging); Valkey BSD-3-Clause",
       "controls": [
         "cm-07",
@@ -1592,6 +2144,8 @@
       "component": "keycloak",
       "scope": "runtime",
       "purpose": "Keycloak 26.8.2: passkey sign-in for the site (D-30), on the official ubi9-micro image.",
+      "role": "Signs people in at the site with passkeys or hardware security keys only, with no passwords. The session sign-in proxy and the parts behind it trust the identity Keycloak issues. Without it each part would need its own sign-in.",
+      "architectureArea": "identity",
       "licence": "Apache-2.0",
       "controls": [
         "ia-02",
@@ -1626,6 +2180,8 @@
       "component": "keycloak",
       "scope": "runtime",
       "purpose": "keycloak-config-cli 6.5.1: applies the site realm as code at install and on every update, as a Kubernetes Job (Decision 10).",
+      "role": "Applies the site's sign-in settings (flows, clients and policies) from the repository at install and on every update, as a one-off Job. The settings are reviewed like code and cannot drift through hand changes.",
+      "architectureArea": "identity",
       "licence": "Apache-2.0",
       "controls": [
         "ia-02",
@@ -1661,6 +2217,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn manager: the reference encrypted storage class (Decision 3).",
+      "role": "Runs Longhorn, the reference storage at the site: encrypted volumes for each person's workspace and for the databases and the log store. Without it the site would depend on whatever storage the cluster has, with no encryption check.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1690,6 +2248,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn volume engine.",
+      "role": "The engine that serves each Longhorn volume and keeps its copies on other nodes in step. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1719,6 +2279,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn instance manager for engine and replica processes.",
+      "role": "Runs the engine and replica processes on each node. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1748,6 +2310,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn share manager (RWX volumes).",
+      "role": "Serves volumes that several pods use at the same time (ReadWriteMany). Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1777,6 +2341,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn backing image manager.",
+      "role": "Manages backing images, the base disk images a volume can start from. Longhorn installs it as part of its storage system; the site cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1806,6 +2372,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn administration UI.",
+      "role": "The storage administration screen, reachable only from the site administration network. Operators use it to see and repair volumes.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1836,6 +2404,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn support bundle collector.",
+      "role": "Collects Longhorn's logs and state into a support bundle when an operator asks for one, to troubleshoot storage.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1865,6 +2435,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI attacher sidecar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that attaches Longhorn volumes to the node where a pod runs. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1894,6 +2466,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI provisioner sidecar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that creates and deletes Longhorn volumes when a workload asks for storage. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1923,6 +2497,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI node driver registrar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that registers the Longhorn driver with Kubernetes on each node. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1952,6 +2528,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI resizer sidecar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that grows Longhorn volumes when a workload asks for more space. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -1981,6 +2559,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI snapshotter sidecar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that takes Longhorn volume snapshots, used for restores. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -2010,6 +2590,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Kubernetes CSI liveness probe sidecar, as Longhorn ships it.",
+      "role": "Standard Kubernetes CSI sidecar, as Longhorn ships it, that reports whether the Longhorn driver is healthy, so Kubernetes restarts it if it hangs. Kubernetes cannot use Longhorn volumes without it.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -2039,6 +2621,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "OpenSearch 3.10.0: the site log and audit store (Decision 4).",
+      "role": "The site's log and audit store. Container logs, Keycloak events, the OpenBao audit device and the Kubernetes audit log all land here, at the site. Audit records are what an investigation reads after an incident. Loki is not used (AGPL).",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2070,6 +2654,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Fluent Bit 5.2.0: ships container logs, Keycloak events, the OpenBao audit device and the RKE2 audit log to the site store.",
+      "role": "Collects logs and audit records on every node and sends them to OpenSearch at the site. Without it logs would stay on each node and be lost when a pod or node goes away.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2100,6 +2686,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Prometheus 3.16.0: site metrics, needed by Phase 48's load test.",
+      "role": "Collects metrics about the site's nodes and Kubernetes objects. The Phase 48 load tests read them to measure a site. Alertmanager is off.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2131,6 +2719,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Reloads the Prometheus configuration when it changes.",
+      "role": "Reloads Prometheus when its configuration changes, without a restart.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2162,6 +2752,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "kube-state-metrics: Kubernetes object metrics for Prometheus.",
+      "role": "Turns the state of Kubernetes objects (pods, deployments, volumes) into metrics for Prometheus.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2193,6 +2785,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "node-exporter: host metrics for Prometheus.",
+      "role": "Reports host metrics (processor, memory, disk) from every node to Prometheus.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -2230,6 +2824,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Checks out the repository in every workflow job (persist-credentials: false).",
+      "role": "Checks out the repository at the exact commit in every CI and release job, without keeping credentials. Every workflow job starts with it.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2257,6 +2853,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Installs the pinned Node.js version in workflow jobs.",
+      "role": "Installs the pinned Node.js version in CI and release jobs, so tests and builds run on a known Node.js version.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2283,6 +2881,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Stores test reports, SBOMs, the VSIX and the evidence bundle between jobs and for retention.",
+      "role": "Keeps test reports, SBOMs, the VSIX and the evidence bundle between jobs and for the retention period. The release and the compliance package are assembled from these files; without it each job would have to rebuild what an earlier job made and checked.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "au-09",
@@ -2309,6 +2909,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Fetches artifacts uploaded by earlier jobs in the same run.",
+      "role": "Fetches what earlier jobs uploaded, so the release publishes exactly the files the build job made and checked.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2332,6 +2934,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Caches the VS Code test download for the e2e job.",
+      "role": "Caches the VS Code download for the e2e job, so the end-to-end tests do not download the editor on every run.",
+      "architectureArea": "build-and-test",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2356,6 +2960,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Installs Java for the OSCAL tooling in the release and daily evidence workflows.",
+      "role": "Installs Java for oscal-cli, which validates and resolves the OSCAL documents in the release and daily evidence workflows.",
+      "architectureArea": "compliance-tooling",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2379,6 +2985,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Installs Python for the Compliance Trestle import check in the release workflow.",
+      "role": "Installs Python for the Compliance Trestle import check in the release workflow, which shows that the assessor package opens in a second OSCAL tool.",
+      "architectureArea": "compliance-tooling",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2403,6 +3011,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Creates GitHub artifact attestations: build provenance for the VSIX and the compliance package, and provenance and SBOM attestations for the rebuilt deployment images (deploy-images, tag-triggered).",
+      "role": "Creates signed build provenance for the VSIX and the compliance package, and provenance and SBOM attestations for the rebuilt deployment images. Anyone can then check with gh attestation verify that a file came from this repository's workflow. It adds to the SHA-256 checksums; it does not replace them.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2430,6 +3040,8 @@
       "component": "release-pipeline",
       "scope": "test",
       "purpose": "Starts CodeQL code scanning.",
+      "role": "Starts CodeQL code scanning, which looks for security flaws in the code of every change. Its alerts are part of the code-scanning evidence.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "ra-05",
@@ -2453,6 +3065,8 @@
       "component": "release-pipeline",
       "scope": "test",
       "purpose": "Runs the CodeQL analysis and uploads its alerts.",
+      "role": "Runs the CodeQL analysis started by init and uploads its alerts to GitHub code scanning.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "MIT",
       "controls": [
         "ra-05",
@@ -2476,6 +3090,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Reads PDF files the user adds (vendor/pdfjs).",
+      "role": "Reads the text of PDF files a person gives the agent, inside the extension and with no network. Without it the agent could not read PDFs, or the file would have to go to an outside service.",
+      "architectureArea": "workbench",
       "licence": "Apache-2.0",
       "controls": [
         "cm-08",
@@ -2504,6 +3120,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Renders SVG to images (vendor/resvg).",
+      "role": "Draws SVG to PNG and decodes raster images inside the extension, for the agent's graphics tools and document images. Its WebAssembly build has no file access, so an SVG cannot pull in local files. Without it the extension would need a native image library for each platform.",
+      "architectureArea": "workbench",
       "licence": "MPL-2.0",
       "controls": [
         "cm-08",
@@ -2531,6 +3149,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Traces raster images into SVG (vendor/imagetracer).",
+      "role": "Traces a raster image into an SVG drawing for the agent's graphics tools, on the person's machine with no network.",
+      "architectureArea": "workbench",
       "licence": "Unlicense",
       "controls": [
         "cm-08",
@@ -2558,6 +3178,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Fonts for rendered images (vendor/fonts).",
+      "role": "Fonts that the SVG renderer (resvg) uses to draw text. The WebAssembly renderer cannot read the computer's fonts, so without these, text in rendered images would be missing.",
+      "architectureArea": "workbench",
       "licence": "Bitstream-Vera AND LicenseRef-Arev-Fonts",
       "controls": [
         "cm-08",
@@ -2585,6 +3207,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Writes PowerPoint files (vendor/pptxgenjs, bundled with its dependencies).",
+      "role": "Writes PowerPoint (.pptx) slide decks for the agent's slide tool, on the person's machine. Without it the extension would have to write the Office file format itself.",
+      "architectureArea": "workbench",
       "licence": "MIT; bundled dependencies listed with their licences in vendor/pptxgenjs/LICENSES.txt",
       "controls": [
         "cm-08",
@@ -2612,6 +3236,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "MCP client only (vendor/mcp), connecting to the MCP servers the user configures.",
+      "role": "The MCP client that connects the agent to the MCP tool servers a person or your organization sets up. MCP is the standard protocol for such tools; without the client the extension would implement the protocol itself. Only the client is shipped.",
+      "architectureArea": "workbench",
       "licence": "MIT; bundled dependencies listed with their licences in vendor/mcp/LICENSES.txt",
       "controls": [
         "cm-08",
@@ -2640,6 +3266,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Shared-text merge library for shared staff projects (vendor/yjs, with lib0), hash-pinned in scripts/crdt-vendor.json.",
+      "role": "Merges edits that several people make to shared staff project text, without conflicts. Without it edits made at the same time would overwrite each other, or need a merge algorithm of our own.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "cm-08",
@@ -2668,6 +3296,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Map and globe rendering on the COP map page (media/vendor/maplibre-gl).",
+      "role": "Draws the COP map and globe in the Staff Room, from the bundled offline tiles. Without it we would write a map renderer.",
+      "architectureArea": "workbench",
       "licence": "BSD-3-Clause",
       "controls": [
         "cm-08",
@@ -2696,6 +3326,8 @@
       "component": "extension",
       "scope": "runtime",
       "purpose": "Military symbols on the COP map page (media/vendor/milsymbol).",
+      "role": "Draws standard military symbols for units and features on the COP map.",
+      "architectureArea": "workbench",
       "licence": "MIT",
       "controls": [
         "cm-08",
@@ -2724,6 +3356,8 @@
       "component": "cert-manager",
       "scope": "runtime",
       "purpose": "cert-manager v1.21.3 Helm chart.",
+      "role": "Installs cert-manager, which issues the site's certificates at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-08",
@@ -2753,6 +3387,8 @@
       "component": "ingress",
       "scope": "runtime",
       "purpose": "HAProxy Kubernetes Ingress controller Helm chart 1.57.1 (controller 3.4.1).",
+      "role": "Installs the HAProxy ingress controller, the site's one entry point at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "sc-07",
@@ -2781,6 +3417,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Kyverno Helm chart 3.10.0 (Kyverno v1.20.0); admission controller only.",
+      "role": "Installs the Kyverno admission controller (only the admission controller) at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -2812,6 +3450,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Zot Helm chart 0.1.135 (Zot v2.1.23).",
+      "role": "Installs the Zot registry at the lab and small sites at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -2842,6 +3482,8 @@
       "component": "image-registry",
       "scope": "runtime",
       "purpose": "Harbor Helm chart 1.19.4 (HQ and large sites, second wave), with the images set to the v2.15.5 digests.",
+      "role": "Installs the Harbor registry at HQ and large sites (second wave) at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-07",
@@ -2873,6 +3515,8 @@
       "component": "site-storage",
       "scope": "runtime",
       "purpose": "Longhorn Helm chart 1.13.0.",
+      "role": "Installs Longhorn, the site's encrypted storage at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "sc-28",
@@ -2902,6 +3546,8 @@
       "component": "openbao",
       "scope": "runtime",
       "purpose": "OpenBao Helm chart 0.30.8, rendered with our rebuilt OpenBao image.",
+      "role": "Installs OpenBao, with our rebuilt OpenBao image at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0",
       "controls": [
         "sc-12",
@@ -2935,6 +3581,8 @@
       "component": "keycloak",
       "scope": "runtime",
       "purpose": "codecentric keycloakx Helm chart 7.4.0, rendered with the official Keycloak 26.8.2 image (Decision 10).",
+      "role": "Installs Keycloak, with the official Keycloak image at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "identity",
       "licence": "Apache-2.0",
       "controls": [
         "ia-02",
@@ -2969,6 +3617,8 @@
       "component": "theia-cloud",
       "scope": "runtime",
       "purpose": "Theia Cloud base chart 1.2.0 (cluster-wide prerequisites); its self-signed CA and letsencrypt-prod issuers are switched off.",
+      "role": "Installs the cluster-wide pieces Theia Cloud needs at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "workbench",
       "licence": "EPL-2.0",
       "controls": [
         "ac-03",
@@ -3000,6 +3650,8 @@
       "component": "theia-cloud",
       "scope": "runtime",
       "purpose": "Theia Cloud custom resource definitions chart 1.2.0, with our rebuilt conversion webhook.",
+      "role": "Installs the Theia Cloud resource types (sessions, workspaces and app definitions) and our rebuilt conversion webhook at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "workbench",
       "licence": "EPL-2.0",
       "controls": [
         "ac-03",
@@ -3031,6 +3683,8 @@
       "component": "theia-cloud",
       "scope": "runtime",
       "purpose": "Theia Cloud chart 1.2.0: operator, service and landing page, rendered with our rebuilt images.",
+      "role": "Installs the Theia Cloud operator, service and landing page, which start one workbench session per person at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "workbench",
       "licence": "EPL-2.0",
       "controls": [
         "ac-03",
@@ -3047,6 +3701,7 @@
       "conditions": [
         "Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.",
         "Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.",
+        "Upstream turns TLS verification off in the service (quarkus.oidc.tls.verification=none) and in the operator's session probe (a trust-all JVM default). Our service entrypoint and operator build turn both back on against the site chain only (ConfigMap sterling-site-ca), and the service no longer logs its secrets at start; recorded as upstream issues.",
         "Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.",
         "The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed."
       ],
@@ -3062,6 +3717,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "OpenSearch Helm chart 3.10.0.",
+      "role": "Installs OpenSearch, the site's log and audit store at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -3091,6 +3748,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Fluent Bit Helm chart 0.58.3, rendered with the Fluent Bit 5.2.0 image from the lock.",
+      "role": "Installs Fluent Bit, which sends logs to the site store at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -3121,6 +3780,8 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "prometheus-community Prometheus Helm chart 30.0.0 (server, kube-state-metrics, node-exporter; alertmanager off).",
+      "role": "Installs Prometheus with kube-state-metrics and node-exporter at the site from the vendored, hash-checked chart tarball, with our settings. Its images come from the pinned image lock. Without the chart we would write and maintain the Kubernetes manifests ourselves.",
+      "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
         "au-02",
@@ -3150,6 +3811,8 @@
       "component": "release-pipeline",
       "scope": "build",
       "purpose": "Validates and resolves the OSCAL content in CI and the release package (owner-approved 2026-11-21).",
+      "role": "The reference OSCAL tool. It validates every OSCAL document and resolves the profiles, in CI and for the release package. It is an independent second check, beside ajv, that the assessor package is valid OSCAL.",
+      "architectureArea": "compliance-tooling",
       "licence": "CC0-1.0 per the metaschema-framework project (confirm at the next bump)",
       "controls": [
         "sa-10",
@@ -3175,7 +3838,10 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Writes CycloneDX SBOMs of the relay image and of every rebuilt deployment image.",
+      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.",
+      "role": "Writes the CycloneDX SBOM of the relay image, of every rebuilt deployment image and of the Sterling workbench image, the one the Release workflow attests. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it.",
+      "architectureArea": "release-and-supply-chain",
+      "roleNeedsReview": true,
       "licence": "Apache-2.0",
       "controls": [
         "sa-10",
@@ -3201,7 +3867,10 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI.",
+      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.",
+      "role": "Scans the SBOMs, including the workbench image's in CI and in the Release workflow, for known vulnerabilities that have a fix, so they are seen before a release.",
+      "architectureArea": "release-and-supply-chain",
+      "roleNeedsReview": true,
       "licence": "Apache-2.0",
       "controls": [
         "sa-10",
@@ -3227,7 +3896,10 @@
       ],
       "component": "offline-bundle",
       "scope": "runtime",
-      "purpose": "Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1).",
+      "purpose": "Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1); signs the Sterling workbench image the Release workflow publishes and attests its CycloneDX SBOM, verifying both in the same job (Phase 46).",
+      "role": "Signs our rebuilt images, the offline bundle and the Sterling workbench image with your organization's key, and verifies every signature: at a site when a bundle is imported, and in the Release workflow right after signing. These signatures are what the registry import and the Kyverno admission check rely on.",
+      "architectureArea": "release-and-supply-chain",
+      "roleNeedsReview": true,
       "licence": "Apache-2.0",
       "controls": [
         "si-07",
@@ -3236,7 +3908,7 @@
         "cm-14",
         "sc-13"
       ],
-      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed. The Release workflow's image job installs it the same way and its publish job checks that hash again before signing; scripts/test/workflow-files.test.mjs holds the key-mode flags.",
       "crypto": "unvalidated",
       "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
       "airGap": "ok",
@@ -3258,6 +3930,8 @@
       "component": "offline-bundle",
       "scope": "runtime",
       "purpose": "Collects images, charts and files into one store, saves it as the offline bundle and loads it into the site registry (spike S1).",
+      "role": "Packs images, charts and files into one offline bundle, and loads the bundle into the site registry. This is how an air-gapped site receives software without internet access.",
+      "architectureArea": "release-and-supply-chain",
       "licence": "Apache-2.0",
       "controls": [
         "si-07",
@@ -3289,6 +3963,8 @@
       "component": "keycloak",
       "scope": "runtime",
       "purpose": "PostgreSQL 18.7 RPMs from PGDG with their signing key, installed into our Postgres image for Keycloak (Decision 2, spike S3).",
+      "role": "Keycloak's database: user records and passkey public credentials, kept across restarts. We build it ourselves on UBI 9 from signed packages. Keycloak cannot keep its users without a database.",
+      "architectureArea": "identity",
       "licence": "PostgreSQL Licence",
       "controls": [
         "ia-02",
@@ -3325,6 +4001,8 @@
       "component": "offline-bundle",
       "scope": "runtime",
       "purpose": "Renders every chart offline in CI (helm template) and installs the vendored tarballs at the site.",
+      "role": "Renders every chart offline in CI to check the site settings, and installs the vendored chart tarballs at the site. Every site part is installed through it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "si-07",
@@ -3355,6 +4033,8 @@
       "component": "rke2",
       "scope": "runtime",
       "purpose": "RKE2 1.37.2+rke2r1 release tarball, image archives (core and Canal) and the rke2-selinux RPM for the air-gapped tarball install.",
+      "role": "The Kubernetes every site runs, installed from the air-gap tarball in its FIPS build, with the CIS profile, an audit policy and secrets encryption. Every other site part runs on it.",
+      "architectureArea": "site-platform",
       "licence": "Apache-2.0",
       "controls": [
         "cm-02",
@@ -3392,6 +4072,8 @@
       "component": "openbao",
       "scope": "runtime",
       "purpose": "OpenBao kms-pkcs11 plugin 0.3.0: seals OpenBao with a key held in the site HSM.",
+      "role": "OpenBao plugin that seals OpenBao with a key held in the site HSM, so the key that unlocks OpenBao never sits on disk. Shamir key shares are the fallback.",
+      "architectureArea": "secrets-and-keys",
       "licence": "MPL-2.0",
       "controls": [
         "sc-12",
@@ -3426,6 +4108,8 @@
       "component": "hsm",
       "scope": "test",
       "purpose": "SoftHSM2 2.7.0 source, built into the test-only openbao-softhsm image for the lab and CI.",
+      "role": "A software HSM built into the test-only OpenBao image, so the lab and CI can test HSM sealing without hardware. It never reaches production.",
+      "architectureArea": "secrets-and-keys",
       "licence": "BSD-2-Clause",
       "controls": [
         "sc-12",

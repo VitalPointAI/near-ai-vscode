@@ -4,11 +4,26 @@ site-images-signed checks the signature of every image the pod names under the s
 signing, no transparency log: signatures are made with an empty signing config, spike S1). site-registry-only refuses any image outside the
 site registry, so an off-registry name cannot slip past the first policy's image glob. Both fail closed and exclude only kube-system (RKE2's
 own images, preloaded from its tarballs) and Kyverno's own namespace (so Kyverno can always start).
+The one other exception is the Zot registry's own pod (47-13 lab finding): its signature lives in the registry it is about to start, so under
+Deny a restarted or rescheduled zot-0 could never be admitted and the site lost its registry. On a Zot site, site-images-signed skips a pod
+only when it is in the registry namespace and every container is exactly the pinned Zot reference (tag and digest from the image lock, the
+digest the bundle import verified against the signed bundle; install-node.sh preloads that image). Any other image, namespace, init or
+ephemeral container keeps the signature check. Harbor sites get no exception (see the 47-15 summary's integration notes).
 */ -}}
 {{- $mode := .Values.admission.mode -}}
 {{- if not (has $mode (list "Audit" "Deny")) }}{{ fail "admission.mode must be Audit or Deny" }}{{ end -}}
 {{- if not .Values.registry }}{{ fail "registry (the site registry host) is not set" }}{{ end -}}
 {{- if not (contains "BEGIN PUBLIC KEY" .Values.organizationPublicKey) }}{{ fail "organizationPublicKey must be the PEM text of your organization's cosign public key" }}{{ end -}}
+{{- if not (has .Values.registryKind (list "zot" "harbor")) }}{{ fail "registryKind must be zot or harbor" }}{{ end -}}
+{{- $registryPod := "" -}}
+{{- if eq .Values.registryKind "zot" -}}
+{{- $ref := printf "%s:%s" .Values.registryPod.image.name .Values.registryPod.image.tagAtDigest -}}
+{{- if not (regexMatch "^[a-z0-9.:-]+(/[a-z0-9._-]+)+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$" $ref) }}{{ fail "registryPod.image must be the Zot image as <name>:<tag>@sha256:<64 hex> (from the image lock)" }}{{ end -}}
+{{- if not (hasPrefix (printf "%s/" .Values.registry) $ref) }}{{ fail "registryPod.image must be served by the site registry" }}{{ end -}}
+{{- $ns := .Values.registryPod.namespace -}}
+{{- if or (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $ns)) (has $ns .Values.excludedNamespaces) }}{{ fail "registryPod.namespace must be one namespace name" }}{{ end -}}
+{{- $registryPod = printf "!(request.namespace == '%s' && object.spec.containers.all(c, c.image == '%s') && (!has(object.spec.initContainers) || size(object.spec.initContainers) == 0) && (!has(object.spec.ephemeralContainers) || size(object.spec.ephemeralContainers) == 0))" $ns $ref -}}
+{{- end -}}
 apiVersion: policies.kyverno.io/v1
 kind: ImageValidatingPolicy
 metadata:
@@ -32,6 +47,11 @@ spec:
         - key: kubernetes.io/metadata.name
           operator: NotIn
           values: {{ toJson .Values.excludedNamespaces }}
+  {{- if $registryPod }}
+  matchConditions:
+    - name: not-the-pinned-registry-pod
+      expression: {{ $registryPod | quote }}
+  {{- end }}
   matchImageReferences:
     - glob: {{ printf "%s/*" .Values.registry | quote }}
   validationConfigurations:

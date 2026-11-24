@@ -3,8 +3,9 @@
   "namespace": "haproxy-controller",
   "order": 35,
   "values": ["deploy/values/kubernetes-ingress.yaml"],
+  "site": "deploy/values/site.example/kubernetes-ingress.yaml",
   "images": [
     { "lock": "docker.io/haproxytech/kubernetes-ingress", "set": { "controller.image.repository": "name", "controller.image.tag": "tagAtDigest" } }
   ],
-  "note": "HAProxy Kubernetes Ingress controller 3.4.1 (D-07). The controller image also runs the chart's CRD job hook."
+  "note": "HAProxy Kubernetes Ingress controller 3.4.1 (D-07), the site's only ingress, on node ports; the smart-card switch is in its site file (D-32). The controller image also runs the chart's CRD job hook."
 }

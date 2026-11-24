@@ -345,6 +345,8 @@ const COMPLIANCE_TRUST_ROOTS = [
   'compliance/profiles/protected-b.json',
   'compliance/levels.json',
   'compliance/resources.json',
+  'compliance/architecture-areas.json',
+  'compliance/schemas/resources.schema.json',
 ];
 
 test('a change to a compliance trust root (tailoring, sources, catalogues, attestations, engine, statements, rules, responsibility, scope) is a gate change', () => {
@@ -358,6 +360,8 @@ test('other compliance files are not gate changes, and the trust-root patterns r
     'compliance/test/status.test.ts',
     'compliance/levels.json.bak',
     'compliance/sources.json.bak',
+    'compliance/schemas/dashboard.schema.json',
+    'compliance/architecture-areas.json.bak',
     'docs/security/threat-model.md',
     'src/compliance/tailoring/x.json',
   ];

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-pki-bootstrap
+description: The short-lived bootstrap CA issuer and OpenBao's first TLS certificate, used only until the site PKI exists (D-16).
+type: application
+version: 0.1.0

@@ -71,7 +71,11 @@ Each entry says what the resource is for, its licence, which controls it touches
 cryptography and security fixes, whether it works without the internet, and whether it fits.
 [`scripts/resource-check.mjs`](https://github.com/VitalPointAI/near-ai-vscode/blob/main/scripts/resource-check.mjs)
 finds every resource the repository uses and fails the required `lint` CI job when one has no
-entry.
+entry. Each entry also says why the architecture needs the resource, and which area it serves.
+
+The [component catalogue](./components/index.md) is generated from that register. It lists every
+component by area, with its exact pinned version or digest, what it provides and why it is needed,
+and explains where to get the full software bill of materials (SBOM) of each release.
 
 ## Hosting for many people (planned, not yet released)
 
@@ -121,6 +125,7 @@ What exists today, and what does not:
 
 | Topic | Document |
 | --- | --- |
+| Every third-party component, its pin and why it is needed | [Component catalogue](./components/index.md) |
 | How the code is organized today | [Architecture](./codebase/ARCHITECTURE.synced.md), [Structure](./codebase/STRUCTURE.synced.md), [Integrations](./codebase/INTEGRATIONS.synced.md) |
 | Hosting the workbench for many people at your organization's sites | [Multi-user hosting design](./design/multiuser-hosting/DESIGN.synced.md) |
 | Platform direction: our own engine, sandbox and identity | [Platform direction research](./design/platform-direction/README.synced.md) |
