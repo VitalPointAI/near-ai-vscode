@@ -518,3 +518,125 @@ test('new workflow shell scripts receive GitHub values only through env', () => 
     }
   }
 });
+
+test('the workbench job builds, tests and drives its image in a browser on Node 26, and is not a required check', async () => {
+  const all = jobs(read('ci.yml'));
+  const job = all.get('workbench');
+  assert.ok(job, 'ci.yml has a workbench job');
+  assert.match(job, /permissions:\s*\n\s*contents: read/);
+  const list = steps(job);
+  const presence = list.findIndex((step) => /id: has_workbench/.test(step));
+  assert.ok(presence > 0, 'the presence check follows the checkout');
+  assert.match(list[presence], /\[ -f workbench\/package\.json \]/);
+  assert.ok(list[presence].includes('^hotfix/[0-9]+'), 'the hub\'s hotfix rule');
+  assert.ok(list[presence].includes('BRANCH: ${{ github.head_ref || github.ref_name }}'), 'the branch reaches the script through env');
+  for (const step of list.slice(presence + 1)) assert.match(step, /if: steps\.has_workbench\.outputs\.present == 'true'/, `guarded: ${step.trim().split('\n')[0]}`);
+  assert.match(job, /node-version: '26\.13\.1'/);
+  assert.match(job, /cache-dependency-path: workbench\/package-lock\.json/);
+  assert.doesNotMatch(job, /npm ci(?! --ignore-scripts)/);
+  // In order: install without scripts, audit, lint, unit tests with the report, the image, the browser, the container suite against that image.
+  const order = [/npm ci --ignore-scripts/, /npm audit --omit=dev --audit-level=high/, /npm run lint/, /NEAR_AI_TEST_REPORT: test-report-workbench\.ndjson[\s\S]*npm test/,
+    /docker build -f workbench\/Dockerfile -t sterling-workbench:ci \./, /playwright install --with-deps chromium/, /WORKBENCH_TEST_IMAGE: sterling-workbench:ci[\s\S]*npm run test:container/];
+  let at = presence;
+  for (const pattern of order) {
+    const next = list.findIndex((step, index) => index > at && pattern.test(step));
+    assert.ok(next > at, `${pattern} comes after the step before it`);
+    at = next;
+  }
+  const build = list.find((step) => /docker build -f workbench\/Dockerfile/.test(step));
+  assert.match(build, /working-directory: \./, 'the image builds from the repository root (the engine bundle reads src/)');
+  assert.doesNotMatch(build, /--target/, 'CI tests the default (development) target');
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  assert.ok(!CI_CHECKS.includes('workbench'), 'workbench is not a required check');
+  assert.doesNotMatch(/needs:\s*\[([^\]]*)\]/.exec(all.get('compliance'))?.[1] ?? '', /\bworkbench\b/);
+});
+
+test('the workbench job records the SBOM, scan and digest of the image it tested, and pushes and signs nothing', () => {
+  const job = jobs(read('ci.yml')).get('workbench');
+  const list = steps(job);
+  const build = list.findIndex((step) => /docker build -f workbench\/Dockerfile -t sterling-workbench:ci/.test(step));
+  const later = (pattern) => list.findIndex((step, index) => index > build && pattern.test(step));
+  assert.ok(later(/install-tool\.sh syft/) > build && later(/install-tool\.sh grype/) > build);
+  const sbom = later(/syft scan sterling-workbench:ci --output cyclonedx-json=compliance\/out\/workbench-image-sbom\.json/);
+  assert.ok(sbom > build, 'the SBOM is of the image the job built');
+  assert.ok(later(/grype db update/) > sbom);
+  const scan = list[later(/grype sbom:compliance\/out\/workbench-image-sbom\.json --only-fixed --fail-on high --output json=compliance\/out\/workbench-image-scan\.json/)];
+  assert.match(scan ?? '', /continue-on-error:\s*true/, 'findings are report-only');
+  const digest = list[later(/docker image inspect --format '\{\{\.Id\}\}' sterling-workbench:ci/)];
+  assert.match(digest ?? '', /compliance\/out\/workbench-image-digest\.txt/);
+  assert.match(digest ?? '', /GITHUB_STEP_SUMMARY/);
+  for (const name of ['workbench-image-sbom', 'workbench-image-scan', 'workbench-image-digest']) {
+    const upload = list.find((step) => step.includes(`name: ${name}\n`));
+    assert.ok(upload, `${name} is uploaded`);
+    assert.match(upload, /actions\/upload-artifact@[0-9a-f]{40}/);
+    assert.ok(upload.includes("if: steps.has_workbench.outputs.present == 'true' && always()"), `${name} is uploaded even when a later step fails`);
+  }
+  assert.doesNotMatch(job, /cosign|docker push|docker login|packages:\s*write|id-token|secrets\./, 'CI never publishes or signs the workbench image');
+});
+
+test('the release image job writes the release image SBOM and hands publish a hash-checked cosign, read-only', () => {
+  const image = jobs(read('release.yml')).get('image');
+  const list = steps(image);
+  const archived = list.findIndex((step) => /name: sterling-image\n/.test(step));
+  assert.ok(archived > 0, 'the image archive upload is found');
+  const after = list.slice(archived + 1).join('\n');
+  // #165's build, smoke and archive steps keep their order; the SBOM work comes after them.
+  assert.doesNotMatch(list.slice(0, archived + 1).join('\n').replace(/^\s*#.*$/gm, ''), /syft|grype|cosign/);
+  assert.match(after, /sh compliance\/ci\/install-tool\.sh syft /);
+  assert.match(after, /sh compliance\/ci\/install-tool\.sh grype /);
+  assert.match(after, /sh compliance\/ci\/install-tool\.sh cosign /);
+  assert.ok(after.includes('syft scan "sterling-release:$TAG" --output cyclonedx-json=sterling-image-sbom.cdx.json'));
+  const scan = list.find((step) => /grype sbom:sterling-image-sbom\.cdx\.json --only-fixed --fail-on high/.test(step));
+  assert.match(scan ?? '', /continue-on-error:\s*true/, 'the release scan is report-only');
+  const handOff = list.find((step) => /id: cosign\n/.test(step));
+  assert.ok(handOff?.includes('require("./compliance/ci/tool-pins.json").cosign.sha256'), 'the cosign hash is the repository pin');
+  assert.match(handOff ?? '', /sha256sum --check --strict/);
+  assert.match(image, /sbom_sha256: \$\{\{ steps\.sbom\.outputs\.sha256 \}\}/);
+  assert.match(image, /cosign_sha256: \$\{\{ steps\.cosign\.outputs\.sha256 \}\}/);
+  for (const name of ['sterling-image-sbom', 'release-cosign']) assert.ok(list.some((step) => step.includes(`name: ${name}\n`) && /if-no-files-found: error/.test(step)), `${name} is uploaded`);
+  assert.match(image, /permissions:\s*\n\s*contents: read\n(?!\s+\w+: write)/);
+  assert.doesNotMatch(image, /secrets\.|COSIGN_PRIVATE_KEY/);
+});
+
+test('publish signs and attests the published digest with your organization\'s key after #165\'s push, and verifies both, never keyless', () => {
+  const text = read('release.yml');
+  const publish = jobs(text).get('publish');
+  const list = steps(publish);
+  // #165's download and push stay the first two steps (their own test checks their content).
+  assert.match(list[0], /name: sterling-image$/m);
+  assert.match(list[1], /id: push\n/);
+  const rest = list.slice(2);
+  assert.match(rest[0], /actions\/download-artifact@[0-9a-f]{40}[\s\S]*name: sterling-image-sbom\n/);
+  assert.match(rest[1], /actions\/download-artifact@[0-9a-f]{40}[\s\S]*name: release-cosign\n/);
+  assert.match(rest[2], /SBOM_SHA256: \$\{\{ needs\.image\.outputs\.sbom_sha256 \}\}/);
+  assert.match(rest[2], /COSIGN_SHA256: \$\{\{ needs\.image\.outputs\.cosign_sha256 \}\}/);
+  assert.match(rest[2], /sha256sum --check --strict/);
+  const sign = rest[3];
+  assert.ok(sign, 'a signing step follows the checks');
+  assert.equal(rest.length, 4, 'nothing runs after the signing step');
+  const env = /\n\s+env:\n([\s\S]*?)\n\s+run:/.exec(sign)?.[1] ?? '';
+  assert.match(env, /COSIGN_PRIVATE_KEY: \$\{\{ secrets\.COSIGN_PRIVATE_KEY \}\}/);
+  assert.match(env, /COSIGN_PASSWORD: \$\{\{ secrets\.COSIGN_PASSWORD \}\}/);
+  assert.match(env, /GHCR_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(env, /IMAGE: \$\{\{ steps\.push\.outputs\.image \}\}/);
+  // The key and its password reach this step only.
+  assert.equal((text.match(/secrets\.COSIGN_(?:PRIVATE_KEY|PASSWORD)/g) ?? []).length, 2);
+  const run = /\n\s+run: \|\n([\s\S]*)$/.exec(sign)?.[1] ?? '';
+  const order = [/\^refs\/tags\/v\[0-9\]\+/, /if \[ -z "\$COSIGN_PRIVATE_KEY" \]; then echo "::error::[^"]*container-release[^"]*COSIGN_PRIVATE_KEY[^"]*"; exit 1/,
+    /docker login ghcr\.io/, /cosign signing-config create --out "\$RUNNER_TEMP\/signing-config\.json"/,
+    /cosign sign --key env:\/\/COSIGN_PRIVATE_KEY --signing-config "\$RUNNER_TEMP\/signing-config\.json" -y "\$IMAGE"/,
+    /cosign attest --key env:\/\/COSIGN_PRIVATE_KEY --signing-config "\$RUNNER_TEMP\/signing-config\.json" --type cyclonedx --predicate sbom\/sterling-image-sbom\.cdx\.json -y "\$IMAGE"/,
+    /cosign public-key --key env:\/\/COSIGN_PRIVATE_KEY > "\$RUNNER_TEMP\/cosign\.pub"/,
+    /cosign verify --key "\$RUNNER_TEMP\/cosign\.pub" --insecure-ignore-tlog "\$IMAGE"/,
+    /cosign verify-attestation --key "\$RUNNER_TEMP\/cosign\.pub" --insecure-ignore-tlog --type cyclonedx "\$IMAGE"/, /GITHUB_STEP_SUMMARY/];
+  let at = -1;
+  for (const pattern of order) {
+    const match = pattern.exec(run.slice(at + 1));
+    assert.ok(match, `${pattern} follows the line before it`);
+    at += 1 + match.index;
+  }
+  assert.match(run, /trap 'docker logout ghcr\.io >\/dev\/null' EXIT/);
+  assert.match(publish, /permissions:\s*\n\s*packages: write\n\s*environment:/, 'publish holds packages write and nothing else');
+  assert.doesNotMatch(publish, /id-token|npm |actions\/checkout/);
+  assert.doesNotMatch(text, /--identity-token|--oidc-|COSIGN_EXPERIMENTAL|--tlog-upload=true|--fulcio|--rekor/);
+});

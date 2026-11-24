@@ -422,6 +422,8 @@ jobs:
     outputs:
       archive_sha256: ${{ steps.archive.outputs.sha256 }}
       image_id: ${{ steps.archive.outputs.image_id }}
+      sbom_sha256: ${{ steps.sbom.outputs.sha256 }}
+      cosign_sha256: ${{ steps.cosign.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -473,6 +475,47 @@ jobs:
           path: sterling-image.tar.gz
           compression-level: 0
           retention-days: 90
+          if-no-files-found: error
+      # The release image's supply-chain record (D-31): its CycloneDX SBOM, which publish attests, and a Grype scan (report-only).
+      # cosign is installed here, hash-checked against the repository pin, because publish holds a write token and checks out no code.
+      - name: Install pinned Syft, Grype and cosign
+        run: |
+          sh compliance/ci/install-tool.sh syft compliance/out/tools
+          sh compliance/ci/install-tool.sh grype compliance/out/tools
+          sh compliance/ci/install-tool.sh cosign release-cosign
+          echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
+      - name: Write the release image SBOM and record its checksum
+        id: sbom
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          syft scan "sterling-release:$TAG" --output cyclonedx-json=sterling-image-sbom.cdx.json
+          echo "sha256=$(sha256sum sterling-image-sbom.cdx.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Update the Grype database (report-only)
+        continue-on-error: true
+        run: grype db update
+      - name: Record fixed high-severity findings in the release image (report-only)
+        continue-on-error: true
+        run: grype sbom:sterling-image-sbom.cdx.json --only-fixed --fail-on high --output json=sterling-image-scan.json
+      - name: Record the pinned cosign for the publish job
+        id: cosign
+        run: |
+          sum="$(node -p 'require("./compliance/ci/tool-pins.json").cosign.sha256')"
+          printf '%s  %s\n' "$sum" release-cosign/cosign | sha256sum --check --strict
+          echo "sha256=$sum" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sterling-image-sbom
+          path: |
+            sterling-image-sbom.cdx.json
+            sterling-image-scan.json
+          retention-days: 90
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-cosign
+          path: release-cosign/cosign
+          retention-days: 1
           if-no-files-found: error
 
   publish:
@@ -529,3 +572,42 @@ jobs:
           [[ "$digest" == "$repository"@sha256:* && "${digest##*@sha256:}" =~ ^[a-f0-9]{64}$ ]]
           docker manifest inspect "$digest" | jq -e --arg id "$IMAGE_ID" '.config.digest == $id'
           echo "image=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sterling-image-sbom
+          path: sbom
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-cosign
+          path: cosign-bin
+      - name: Check the SBOM and cosign are the ones the image job recorded
+        env:
+          SBOM_SHA256: ${{ needs.image.outputs.sbom_sha256 }}
+          COSIGN_SHA256: ${{ needs.image.outputs.cosign_sha256 }}
+        run: |
+          printf '%s  %s\n%s  %s\n' "$SBOM_SHA256" sbom/sterling-image-sbom.cdx.json "$COSIGN_SHA256" cosign-bin/cosign | sha256sum --check --strict
+          chmod +x cosign-bin/cosign
+          echo "$PWD/cosign-bin" >> "$GITHUB_PATH"
+      # Key mode only (D-31, D-40; the flags in compliance/ci/TOOLS.md): your organization's key from this protected environment, an
+      # empty signing config (no transparency log, no timestamp authority), never keyless. The key and its password reach this step only.
+      - name: Sign the published digest and attest its SBOM with your organization's key, then verify both
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          GHCR_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.push.outputs.image }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::Only a v<x.y.z> release tag signs the Sterling image; this run is for $GITHUB_REF."; exit 1; fi
+          if [ -z "$COSIGN_PRIVATE_KEY" ]; then echo "::error::The container-release environment has no COSIGN_PRIVATE_KEY secret. Add your organization's cosign private key and its COSIGN_PASSWORD there, then re-run this job (the push above is reused)."; exit 1; fi
+          [[ "$IMAGE" =~ ^ghcr[.]io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          cosign signing-config create --out "$RUNNER_TEMP/signing-config.json"
+          cosign sign --key env://COSIGN_PRIVATE_KEY --signing-config "$RUNNER_TEMP/signing-config.json" -y "$IMAGE"
+          cosign attest --key env://COSIGN_PRIVATE_KEY --signing-config "$RUNNER_TEMP/signing-config.json" --type cyclonedx --predicate sbom/sterling-image-sbom.cdx.json -y "$IMAGE"
+          cosign public-key --key env://COSIGN_PRIVATE_KEY > "$RUNNER_TEMP/cosign.pub"
+          cosign verify --key "$RUNNER_TEMP/cosign.pub" --insecure-ignore-tlog "$IMAGE" > /dev/null
+          cosign verify-attestation --key "$RUNNER_TEMP/cosign.pub" --insecure-ignore-tlog --type cyclonedx "$IMAGE" > /dev/null
+          fingerprint="$(openssl pkey -pubin -in "$RUNNER_TEMP/cosign.pub" -outform DER | sha256sum | cut -d ' ' -f 1)"
+          printf '%s\n' '' '## Sterling image signed' '' "\`$IMAGE\`" '' "Signed, and its CycloneDX SBOM attested, with your organization's key (public key SHA-256 \`$fingerprint\`). Both verified." >> "$GITHUB_STEP_SUMMARY"

@@ -126,6 +126,36 @@ under "Updating a pin"):
   equals `tarSha256` and `gzip -dc` of the download. Never re-hash from a
   download alone.
 
+## cosign 3.1.4 for the Sterling workbench image (Phase 46)
+
+The Release workflow also uses the same cosign pin, the bare `cosign-linux-amd64` binary
+`424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa`. Only its `publish` job
+signs, in the protected `container-release` environment, with your organization's key. That
+job holds a write token, so it checks out no code. The read-only `image` job installs cosign
+with `install-tool.sh`, which checks the binary against the repository SHA-256. It hands
+`publish` the binary with that hash, and `publish` checks the hash again before running it.
+cosign never runs keyless and never uploads to a public transparency log. The owner's
+approval of this use is requested in the Phase 46 PR.
+
+Confirmed on 2026-11-24 from the 3.1.4 binary's own help (`cosign sign --help`,
+`cosign attest --help`, `cosign verify --help`, `cosign verify-attestation --help`,
+`cosign signing-config create --help`). They were then run once against a throwaway local
+registry, with every outbound HTTPS request sent to a dead proxy. Signing, attesting and
+both verifications passed, so none of them needs the internet:
+
+```sh
+cosign signing-config create --out signing-config.json   # no services: no transparency log, no timestamp authority
+cosign sign --key env://COSIGN_PRIVATE_KEY --signing-config signing-config.json -y <image@digest>
+cosign attest --key env://COSIGN_PRIVATE_KEY --signing-config signing-config.json --type cyclonedx --predicate <sbom> -y <image@digest>
+cosign public-key --key env://COSIGN_PRIVATE_KEY > cosign.pub
+cosign verify --key cosign.pub --insecure-ignore-tlog <image@digest>
+cosign verify-attestation --key cosign.pub --insecure-ignore-tlog --type cyclonedx <image@digest>
+```
+
+In 3.1.4, `--tlog-upload=false` survives only as a help example. The empty signing config is
+what keeps key mode off every public service, as spike S1 found. Never use
+`--identity-token`, any `--oidc-*` flag or `COSIGN_EXPERIMENTAL`.
+
 ## Updating a pin
 
 Download into a fresh temporary directory. Compare the downloaded SHA-256 with
