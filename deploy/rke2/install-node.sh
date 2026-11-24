@@ -13,6 +13,9 @@
 #                                    before it exists, research Pitfall 8); each must be listed in pins.sha256
 #   config.yaml registries.yaml audit-policy.yaml psa.yaml site-ca.crt   already site-substituted on the admin host with
 #                                    node deploy/bundle/lib/render.mjs --site <site> --substitute <file>
+#   chrony.conf clock.env check-time.sh   the node clock files written on the admin host with
+#                                    node deploy/bundle/lib/clock.mjs --site <site> --out <folder> (D-71): chrony.conf names only the site's own
+#                                    time sources; the node must follow them within time.maxClockErrorMs before RKE2 is installed
 #
 # Every artifact's SHA-256 is checked against pins.sha256 before it is used; a file that is missing from the list, or does not match,
 # stops the install before anything on the node changes.
@@ -56,6 +59,19 @@ for name in config.yaml registries.yaml audit-policy.yaml psa.yaml site-ca.crt; 
   [ -f "$DIR/$name" ] || fail "$DIR/$name is missing"
   if grep -q '${site\.' "$DIR/$name"; then fail "$name still names a \${site.<key>} setting; substitute it on the admin host first"; fi
 done
+for name in chrony.conf clock.env check-time.sh; do
+  [ -f "$DIR/$name" ] || fail "$DIR/$name is missing; write the node clock files with deploy/bundle/lib/clock.mjs on the admin host"
+done
+
+# The node clock (D-71; AU-8, SC-45): chrony from the site's own OS repository, following only the site's time sources. A node whose clock is
+# not synchronised, follows its own local clock or is beyond the site limit stops here, before the etcd user, the RPM or RKE2 touch the node.
+command -v chronyd >/dev/null 2>&1 || [ -x /usr/sbin/chronyd ] || fail "chrony is not installed; install it from the site's own OS repository"
+install -m 0644 "$DIR/chrony.conf" /etc/chrony.conf
+# The site CA for NTS (ntstrustedcerts, when the site turns nts on): a public certificate the chrony user must be able to read.
+install -m 0644 "$DIR/site-ca.crt" /etc/chrony-site-ca.crt
+systemctl enable chronyd >/dev/null 2>&1 || fail "chronyd could not be enabled"
+systemctl restart chronyd || fail "chronyd did not start with the site's chrony.conf; see journalctl -u chronyd"
+sh "$DIR/check-time.sh" "$DIR" || fail "the node clock does not follow the site's time source within the limit; RKE2 was not installed"
 
 # CIS profile host requirements (research, RKE2 answers): the etcd user and group, and the kernel parameters.
 id etcd >/dev/null 2>&1 || useradd -r -c "etcd user" -s /sbin/nologin -M etcd -U
