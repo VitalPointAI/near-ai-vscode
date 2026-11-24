@@ -61,5 +61,56 @@
         "fingerprint": "D4BF08AE67A0B4C7A1DBCCD240BCA2B408B40D20"
       }
     ]
+  },
+  "helm": {
+    "version": "4.3.2",
+    "url": "https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz",
+    "sha256": "d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983",
+    "checksumUrl": "https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz.sha256sum",
+    "archive": "tar.gz",
+    "bin": "linux-amd64/helm"
+  },
+  "rke2": {
+    "version": "1.37.2+rke2r1",
+    "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2.linux-amd64.tar.gz",
+    "sha256": "0568f48d772c7feff7056062225d5ba82fb3f73ea7acaea63862fe601dae6d92",
+    "checksumUrl": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/sha256sum-amd64.txt",
+    "archive": "tar.gz",
+    "bin": "bin/rke2",
+    "assets": [
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2-images-core.linux-amd64.tar.zst",
+        "sha256": "e517534d66ec29cd67eca8e16b4eb6f9838378e50a55569ecac2c420101aabd6"
+      },
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/rke2-images-canal.linux-amd64.tar.zst",
+        "sha256": "18728448092a4578358910a818ad10f9eb3c1f2e45abd1cdc301633c2d011ee6"
+      },
+      {
+        "url": "https://github.com/rancher/rke2/releases/download/v1.37.2%2Brke2r1/sha256sum-amd64.txt",
+        "sha256": "c924bec113c104ab28f576586e5e49d9004d1e6e3cac9c7efcb8ac45d43492c3"
+      },
+      {
+        "url": "https://github.com/rancher/rke2-selinux/releases/download/v0.24.stable.1/rke2-selinux-0.24-1.el9.noarch.rpm",
+        "sha256": "f220147db3e6ea745ffd68ccfbcd36c8215b546da20363be52386aa510d5a45d",
+        "checksumUrl": "https://github.com/rancher/rke2-selinux/releases/download/v0.24.stable.1/sha256sum-centos9-noarch.txt"
+      }
+    ]
+  },
+  "kms-pkcs11": {
+    "version": "0.3.0",
+    "url": "https://github.com/openbao/openbao-plugins/releases/download/kms-pkcs11-v0.3.0/openbao-plugin-kms-pkcs11_linux_amd64_v1.tar.gz",
+    "sha256": "c112c670e1bcca7a7b7625b13c0ecf1a43a62cd2651d29bf23befb2ad47c49bf",
+    "checksumUrl": "https://github.com/openbao/openbao-plugins/releases/download/kms-pkcs11-v0.3.0/checksums-kms-pkcs11.txt",
+    "archive": "tar.gz",
+    "bin": "openbao-plugin-kms-pkcs11_linux_amd64_v1",
+    "binSha256": "96fefa80e721551725ea01be79b0dae0f3951f15f01291fd87846d5e45475be6"
+  },
+  "softhsm2": {
+    "version": "2.7.0",
+    "url": "https://github.com/softhsm/SoftHSMv2/archive/refs/tags/2.7.0.tar.gz",
+    "sha256": "be14a5820ec457eac5154462ffae51ba5d8a643f6760514d4b4b83a77be91573",
+    "archive": "file",
+    "commit": "13e6e86b83748fef74046dbf0c91f664b7acc1c3"
   }
 }
