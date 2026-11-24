@@ -1223,6 +1223,27 @@ Plans:
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
 
+### Phase 70.1: Classification engine (INSERTED)
+**Goal**: One pure engine decides what any classification proposal may do to a label, under your organization's signed policy, and records what it did: automatic steps only raise or keep, everything lower goes to a person with the authority, and content above what the system may hold is a possible spill.
+**Inserted**: 2026-11-24 from the AI classification research (`.planning/research/ai-classification/RESEARCH.md`, section 7.1). Owner decision D1 (AI proposes data attributes only) is accepted; D2 to D6 and D8 to D14 are planned at the research defaults, owner to confirm (`70.1-CONTEXT.md`).
+**Depends on**: Phase 70 (all 32 plans merged: PR 4b #85 writes labels to disk, PR 4c #87 the session mark) and Phase 41 (the v2 policy document). No model and no network. Runs beside Phase 71 (core) and Phase 33.
+**Requirements**: CLSF-01, CLSF-02, CLSF-03, CLSF-04, CLSF-05
+**Success Criteria** (what must be TRUE):
+  1. Every proposal is one closed record with its bases, confidence, model and prompt hashes and a rationale labelled at the item's label, with no field for any person attribute; the decision log holds hashes and ids only. (CLSF-01)
+  2. A proposal starts from the labels the content inherits and can only raise or keep them; seeded property tests and the model-free red-team set show that no text, visible or hidden, lowers any field or suppresses a floor, and a result for older content changes nothing. (CLSF-02)
+  3. Raise thresholds come from cost ratios in the signed policy with raise, suggest and nothing bands; markings, guide rules, detectors, compilation rules and source labels are floors; a model judgement alone raises only the level; shadow mode only suggests; a recall drop tightens a threshold; a large raise also goes to review. (CLSF-03)
+  4. Your organization's guide and compilation rules, code words, fact types, model roles and enforcing levels live in the signed `classification@1` section, are evaluated by pure code over typed facts and a session's running fact set, and newer or lower layers can only tighten them. (CLSF-04)
+  5. `label.auto-raised`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower` and `label.affirmed` are named and recorded, and anything above the system-high gives a possible spill: raised to the system-high with `local-only` and `no-agent-tools`, frozen and queued. (CLSF-05)
+**Undo cost**: High. The proposal record, the event ids, the basis kinds and the section keys are permanent once shipped; 70.1-01 ends with the owner's shapes checkpoint.
+**Plans:** 5 plans in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner items in `70.1-CONTEXT.md`)
+
+Plans:
+- [ ] 70.1-01-PLAN.md: Wave 1. Tracer: a marking raises a label through `classification@1`, the engine and the record; record v1, the five events, the owner's shapes checkpoint
+- [ ] 70.1-02-PLAN.md: Wave 2. The asymmetric rule: thresholds and bands, judgements, shadow, review, stale results, the possible spill, property tests
+- [ ] 70.1-03-PLAN.md: Wave 2. Guide and compilation rules, code words and fact types in the signed section; lower layers only tighten; Show Policy words
+- [ ] 70.1-04-PLAN.md: Wave 3. `assess()`, the hidden-instruction detector and the model-free red-team set
+- [ ] 70.1-05-PLAN.md: Wave 4. The full suite once, the verification record, the integration PR after the owner's gate approval
+
 ### Phase 71: Identities and verified credentials (core), pulled forward
 **Goal**: Verified credentials are the only source of access attributes. Every person, agent and machine acts under its own standard DID. Clearance, compartments, nationality, affiliation, how a person serves, export eligibility, agreements and the authority to issue arrive only as signed credentials that can be revoked. Data decides who may open it from its own label, through one pure check that the fold, your organization's server, the key-wrap preparers and the session all call. Keycloak only signs people in.
 **Re-scoped 2026-11-24** (the owner's data-centric access direction, `.planning/research/data-centric-access/RESEARCH.md`, decisions O1 to O11 accepted): the identity and credential core is pulled forward and runs now beside Phase 33, Phase 33.1's waves 1 to 3, Phase 46 and 47-13 to 47-18 (research rows B and E). Agent delegation (DLGT-02 to DLGT-08) moves to Phase 71.1, which stays in Stage 1. The hybrid cell wrap the research put here moves to Phase 33.2, next to the cells it changes (71-CONTEXT.md D-02). Plan, requirement and API ids for other planners: `.planning/research/data-centric-access/PLAN-IDS.md`.
@@ -1369,6 +1390,42 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 74.2 to break down)
+
+### Phase 74.3: Classification assistant (INSERTED)
+**Goal**: A local Western model proposes labels with their bases as people write; the originator affirms the label in one signed step when they submit or release; only a person holding a `ClassificationAuthorityCredential` lowers it; content above what the system may hold is frozen and reported. AI proposes data attributes only, never person attributes.
+**Inserted**: 2026-11-24 from the AI classification research (section 7.1). Owner decision D1 is accepted and D7 is revised: gpt-oss (20b primary, 120b at HQ), Nemotron 3 Nano, IBM Granite including Granite Guardian, and Command A+ only through the approved Cohere Model Vault endpoint or under a commercial licence; each model gets a role only after evaluation and red-team at that level; no PRC models. The other owner decisions are planned at the research defaults, owner to confirm (`74.3-CONTEXT.md`).
+**Depends on**: Phase 70.1; Phase 74.1 (passports enforced, use tiers, the family rule; 0 plans today, the critical dependency); Phase 71 (core) 71-03, 71-05 to 71-08, 71-12 and 71-13 (the research's "plans 1 to 5 and 7", mapped through `PLAN-IDS.md`); Phase 46 (46-01 to 46-08, `KeyService` and step-up in 46-07); Phase 33 (33-21 `session.certify` and the version acts, 33-23 the engine entry); Phase 33.1's marking plans 33.1-01 and 33.1-18 to 33.1-21 (74.3-13 only); a model server your organization lists (Phase 85's host or its own; Phase 74.2 for `org-tee`; Phase 36 for Command A+ through Model Vault).
+**Requirements**: CLSF-06, CLSF-07, CLSF-08, CLSF-09, CLSF-10, CLSF-11, CLSF-12, CLSF-13, CLSF-14
+**Success Criteria** (what must be TRUE):
+  1. Content is classified only on a model server your organization's policy lists, at the system-high of its security domain and never on a commercial cloud, by a Western model whose passport covers the checking job and whose family differs from the writer's, with a second family at the levels the policy marks; any failure leaves the item unassessed with its rules, never lower. (CLSF-06)
+  2. Every candidate model has a licence check and a compliance fit entry the resource check enforces, and gets a role at a level only after a signed evaluation report (per-level recall, over-classification, override rate, review load and time; red-team gate) passes there; model raises begin only after the shadow period and the blind audit's recall target. (CLSF-07)
+  3. A native Classification panel beside the editor shows the label, each basis in plain words and the model and passport, offers only upward actions, and moves each item through six states, none of which waits on the network or a model. (CLSF-08)
+  4. Submitting or releasing an item, including to an observer, needs the originator's one-step signed affirmation; the record names the person who classified it and the model that assisted. (CLSF-09)
+  5. A label comes down, by any path, only with the signed approval of a person whose verified `ClassificationAuthorityCredential` covers the level and scope, after a passkey step; agents and devices never lower; a request is never dropped. (CLSF-10)
+  6. A possible spill is frozen for sharing and reported, without its content, to your organization's security officer, who resolves it. (CLSF-11)
+  7. Every output an agent writes, sends or summarizes is classified and raises the chat's label, including compilations spread over a conversation. (CLSF-12)
+  8. A raise on a shared cell narrows its marking with its basis and leaves out holders `mayRelease` no longer allows at the next key; a lower marking needs an authority's `marking.approve`; observers never see proposals, rationales or bases. (CLSF-13)
+  9. Proposals arrive a few seconds after edits settle and never block typing; the sizing estimates for an HQ of about 400 people are recorded as estimates until Phase 85 measures them, and the operator guide states no capacity figure. (CLSF-14)
+**Research flags**: (1) llama.cpp token probabilities under grammar-constrained output on quantized gpt-oss (74.3-01; agreement signals are the fallback). (2) Command A+'s exact licence id and the Granite and Granite Guardian model ids (74.3-02). (3) Phase 85's throughput numbers. (4) Your organization's security classification guide format.
+**Undo cost**: Medium to high. The affirmation, lowering approval, evaluation report and request formats are signed and stored; each is settled in its plan.
+**Plans:** 14 plans in 9 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-30 and six owner items in `74.3-CONTEXT.md`)
+**UI hint**: yes
+
+Plans:
+- [ ] 74.3-01-PLAN.md: Wave 1. Tracer: one item through a policy-listed model server to a recorded proposal; the closed answer, the confidence signal, fail closed
+- [ ] 74.3-02-PLAN.md: Wave 1. The candidate models, their licence checks and compliance fit entries enforced by the resource check
+- [ ] 74.3-03-PLAN.md: Wave 2. The runner at system-high: server and passport choice, two families, hidden text, the queue
+- [ ] 74.3-04-PLAN.md: Wave 2. Evaluation and red-team: per-level metrics, calibration, the signed report, the shipped sets
+- [ ] 74.3-05-PLAN.md: Wave 2. The native Classification panel and the item's state machine
+- [ ] 74.3-08-PLAN.md: Wave 2. Lowering only through `ClassificationAuthorityCredential`: the rule, the signed approval, the chat judge, the OpenBao inbox
+- [ ] 74.3-06-PLAN.md: Wave 3. Signed affirmation before submit and release
+- [ ] 74.3-07-PLAN.md: Wave 3. Agent outputs and chats
+- [ ] 74.3-09-PLAN.md: Wave 4. Request a lower label, the authority's card, approvals applied, Set Label's lower path
+- [ ] 74.3-10-PLAN.md: Wave 5. The spill alert and the security officer's card
+- [ ] 74.3-11-PLAN.md: Wave 6. Roles and the shadow period; the security officer's evaluation card
+- [ ] 74.3-12-PLAN.md: Wave 7. The blind audit and the audit windows every session reads
+- [ ] 74.3-13-PLAN.md: Wave 8. Cells: raise to the next key, lowering through `marking.approve`, observer release needs affirmation
+- [ ] 74.3-14-PLAN.md: Wave 9. Sizing estimates, the operator guide, SECURITY.md, controls, full suites, integration PR
 
 **Stage gate (after Phase 74):** Phases 69-74 are verified and merged before the data platform reads your organization's data (Phase 88 on) and before Phase 77 lets the relay run tools; Phase 77 also waits for the data platform gate (owner, 2026-11-18). The extension's releases carry each Stage 1 phase as it lands. v0.8.0 waits until everything else is finished (owner, 2026-11-15).
 
@@ -2116,11 +2173,13 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
+| 70.1. Classification engine | 0/5 | Planned 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
 | 71. Identities and verified credentials (core), pulled forward | 0/14 | Planned 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |
 | 74. Run contracts | 0/TBD | Not started | - |
+| 74.3. Classification assistant | 0/14 | Planned 2026-11-24 (after 70.1 and 74.1; lowering after Phase 71 core 71-12 and 71-13; cells after 33.1's marking plans) | - |
 | 85. Host and local inference on Strix Halo (L1a), measured | 0/TBD | Not started (v0.6.0 Data platform; may start during Phases 72 to 74) | - |
 | 86. Microsoft 365 connector spike | 0/TBD | Not started (may start during Phases 72 to 74) | - |
 | 87. Extraction and OCR throughput spike | 0/TBD | Not started | - |
