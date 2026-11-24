@@ -29,3 +29,10 @@ test('hosted level pages open with the organization decision and use the shared 
 test('the matrix component uses the safe CSV helper', () => assert.match(readFileSync(new URL('../src/components/accreditation/ResponsibilityMatrix.jsx', import.meta.url), 'utf8'), /toCsv/));
 test('the package page explains release verification', () => assert.match(readFileSync(new URL('../src/components/accreditation/PackageInfo.jsx', import.meta.url), 'utf8'), /gh attestation verify/));
 test('the README describes the local refresh', () => assert.match(readFileSync(new URL('../README.md', import.meta.url), 'utf8'), /compliance:refresh/));
+
+test('every level page asks for a level that exists, so no page silently shows no rows', () => {
+  const levels = new Set(JSON.parse(readFileSync(new URL('../../compliance/levels.json', import.meta.url), 'utf8')).levels.map(({ id }) => id));
+  for (const name of expected) {
+    for (const [, id] of readFileSync(join(pages, name), 'utf8').matchAll(/levelId="([^"]+)"/g)) assert.ok(levels.has(id), `${name} asks for level ${id}, which compliance/levels.json does not define`);
+  }
+});
