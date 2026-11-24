@@ -1,0 +1,13 @@
+# The OpenBao image with SoftHSM2 for development, CI and the lab only (test scope, never in production values; D-38). This file holds only
+# the base stages; the build steps and image.json come with its build definition (deploy/images/README.md), and without image.json it is not
+# built.
+#   softhsm-build: ubi9/ubi, compiles SoftHSM2 from the source pinned as "softhsm2" in compliance/ci/tool-pins.json.
+#   final:         our own OpenBao image (deploy/images/openbao), passed in by digest as OPENBAO_IMAGE. The checker skips `${` references
+#                  as images this repository builds. The ARG sits before the first FROM because only a global ARG can name a later stage.
+# The pulled base is pinned to the linux/amd64 image manifest digest, the form that survives the bundle copy (spike S1, 47-01-SUMMARY.md). To
+# re-pin, read the tag's index with an anonymous manifest request (or podman manifest inspect <image>:<tag>), take the linux/amd64 entry's
+# digest, check that the bytes fetched by that digest hash to it, and replace the line.
+ARG OPENBAO_IMAGE
+FROM registry.access.redhat.com/ubi9/ubi:9.9@sha256:5a8bf48617eb65228e6ed828995ad896492915918632ccce7233a840a5aba664 AS softhsm-build
+
+FROM ${OPENBAO_IMAGE}
