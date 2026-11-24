@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { readZip } from '../agent/zip';
@@ -291,4 +292,53 @@ test('the export command writes a browser-selected ZIP through its original clie
   assert.equal(writes[0].uri, target);
   assert.ok(readZip(Buffer.from(writes[0].content), 'client export').has('SA-and-A-sponsor-draft.docx'));
   assert.match(stub.notifications.at(-1)?.message ?? '', /^Saved chosen-name\./);
+});
+
+test('in the Sterling workbench a ZIP saved on the workbench side is offered as a download, and only when that command exists', async (t) => {
+  const stub = createVscodeStub();
+  const restore = installVscodeStub(stub);
+  t.after(restore);
+  const vscode = stub.vscode as typeof import('vscode');
+  const folder = await mkdtemp(path.join(tmpdir(), 'near-ai-saa-download-'));
+  const files = require('../services/saaReleaseEvidence') as typeof import('../services/saaReleaseEvidence');
+  t.mock.method(files, 'loadSaaReleaseEvidence', async () => release());
+  t.mock.method(files, 'loadSaaOfficialPrivacyForms', async () => new Map());
+  t.mock.method(files, 'loadSaaMarketplaceApproval', async () => undefined);
+  let saveAs = 'first';
+  Object.assign(vscode.window, {
+    showSaveDialog: async () => vscode.Uri.file(path.join(folder, saveAs)),
+    withProgress: async (_options: unknown, task: Parameters<typeof vscode.window.withProgress>[1]) =>
+      task({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) })
+  });
+  const available: string[] = [];
+  Object.assign(vscode.commands, { getCommands: async () => available });
+  const downloads: unknown[] = [];
+  const { registerSaaExport, GENERATE_SAA_PACKAGE_COMMAND, DOWNLOAD_SAA_PACKAGE_COMMAND } =
+    require('../services/saaExportCommand') as typeof import('../services/saaExportCommand');
+  registerSaaExport({ extension: { packageJSON: { version: '0.4.36' } }, subscriptions: [], asAbsolutePath: () => formsDir } as unknown as import('vscode').ExtensionContext);
+
+  // Another host has no download command: the plain saved message, with no button.
+  stub.inputAnswers.push('0.4.36');
+  await stub.commands.get(GENERATE_SAA_PACKAGE_COMMAND)?.();
+  assert.match(stub.notifications.at(-1)?.message ?? '', /^Saved first\.zip\./);
+  assert.deepEqual(stub.notificationActions.at(-1), []);
+
+  // The workbench: the person chooses Download ZIP, and the saved file goes to the workbench's command by its file URI.
+  available.push(DOWNLOAD_SAA_PACKAGE_COMMAND);
+  stub.commands.set(DOWNLOAD_SAA_PACKAGE_COMMAND, (uri: unknown) => { downloads.push(uri); });
+  saveAs = 'second.zip';
+  stub.inputAnswers.push('0.4.36');
+  stub.messageAnswers.push('Download ZIP');
+  await stub.commands.get(GENERATE_SAA_PACKAGE_COMMAND)?.();
+  assert.deepEqual(stub.notificationActions.at(-1), ['Download ZIP']);
+  assert.deepEqual(downloads, [vscode.Uri.file(path.join(folder, 'second.zip')).toString()]);
+  assert.ok(readZip(await readFile(path.join(folder, 'second.zip')), 'saved export').has('SA-and-A-sponsor-draft.docx'));
+
+  // A failed download says the ZIP is still saved.
+  stub.commands.set(DOWNLOAD_SAA_PACKAGE_COMMAND, () => { throw new Error('no browser'); });
+  saveAs = 'third.zip';
+  stub.inputAnswers.push('0.4.36');
+  stub.messageAnswers.push('Download ZIP');
+  await stub.commands.get(GENERATE_SAA_PACKAGE_COMMAND)?.();
+  assert.deepEqual(stub.notifications.at(-1), { level: 'error', message: 'Could not download the SA&A package. The ZIP is still saved in the workbench.' });
 });

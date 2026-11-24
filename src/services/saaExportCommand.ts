@@ -7,6 +7,9 @@ import { buildSaaPackage } from './saaPackage';
 import { loadSaaMarketplaceApproval, loadSaaOfficialPrivacyForms, loadSaaReleaseEvidence, SAA_RELEASE_VERSION } from './saaReleaseEvidence';
 
 export const GENERATE_SAA_PACKAGE_COMMAND = 'nearAi.generateSaaPackage';
+/** The Sterling workbench's command that sends a ZIP saved on the workbench's side to the person's browser (sterling-compliance-module.ts). */
+export const DOWNLOAD_SAA_PACKAGE_COMMAND = 'sterling.compliance.downloadPackage';
+const DOWNLOAD_ZIP = 'Download ZIP';
 
 async function generateSaaPackage(context: vscode.ExtensionContext): Promise<void> {
   const installed: unknown = context.extension.packageJSON.version;
@@ -78,7 +81,18 @@ async function generateSaaPackage(context: vscode.ExtensionContext): Promise<voi
     return;
   }
 
-  void vscode.window.showInformationMessage(`Saved ${basename(destination)}. The assessment and approval forms are ready for your organization to complete.`);
+  const saved = `Saved ${basename(destination)}. The assessment and approval forms are ready for your organization to complete.`;
+  // In the browser workbench the ZIP is saved where the workbench runs, out of the person's reach, so it offers to send it to their browser.
+  if (clientFile || !(await vscode.commands.getCommands(true)).includes(DOWNLOAD_SAA_PACKAGE_COMMAND)) {
+    void vscode.window.showInformationMessage(saved);
+    return;
+  }
+  if (await vscode.window.showInformationMessage(saved, DOWNLOAD_ZIP) !== DOWNLOAD_ZIP) return;
+  try {
+    await vscode.commands.executeCommand(DOWNLOAD_SAA_PACKAGE_COMMAND, vscode.Uri.file(destination).toString());
+  } catch {
+    void vscode.window.showErrorMessage('Could not download the SA&A package. The ZIP is still saved in the workbench.');
+  }
 }
 
 export function registerSaaExport(context: vscode.ExtensionContext): void {
