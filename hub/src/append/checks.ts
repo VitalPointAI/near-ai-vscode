@@ -35,9 +35,11 @@ import { GENESIS_PREV, entryHash, openBlob, openBody, parseHeaderShape, sha256He
 import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { canonicalProof, proofHash } from '@ext/domain/replica/equivocation';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
+import { DEVICE_KEM_REFUSALS, deviceKemContext, deviceKemProblem } from '@ext/domain/replica/deviceKem';
+import type { DeviceKemData } from '@ext/domain/replica/deviceKem';
 import { missingFeatures } from '@ext/domain/replica/features';
-import { validateBody } from '@ext/domain/replica/kinds';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
+import { validateBody, validateData } from '@ext/domain/replica/kinds';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, isRosterWriterAt } from '@ext/domain/replica/roster';
 import { SESSION_REFUSALS, isPersonKeyKind } from '@ext/domain/replica/sessionKeys';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
@@ -74,7 +76,9 @@ export const APPEND_REFUSALS = {
   // Phase 33 D-60, D-62: a person's session key.
   'session-expired': 'Your session key has ended. Sign in again.',
   'person-key-required': SESSION_REFUSALS['person-key-required'],
-  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.'
+  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.',
+  // 33.2 D-03: a device's post-quantum key binding, checked with the fold's own function.
+  ...DEVICE_KEM_REFUSALS
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -467,6 +471,21 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         // A certificate takes no roster position, but the overlay folds it, so the session key's own entries later in this batch are judged with it.
         if (roster.liveSessionsOf(header.writer, now) >= LIMITS.liveSessionKeysPerDevice) {
           refuse('too-many-sessions', hash);
+          continue;
+        }
+        baseEntries.push({ header, body: raw.body as string });
+        dirty = true;
+      } else if (read.opened.kind === 'device.kem') {
+        // A device's post-quantum keys (33.2 D-03): judged at the roster the entry cites with the fold's deviceKemProblem. A cited roster the hub's
+        // line does not hold is stored, like a roster entry: the fold judges it once that roster applies.
+        const state = roster.state;
+        const problem = !validateData('device.kem', read.opened.data).ok
+          ? 'kem-binding-invalid'
+          : state.positionOf.has(read.opened.roster)
+            ? deviceKemProblem({ signer: header.writer, roster: read.opened.roster, data: read.opened.data as DeviceKemData }, deviceKemContext(state, (writer, position) => isRosterWriterAt(state, writer, position)))
+            : undefined;
+        if (problem !== undefined) {
+          refuse(problem, hash);
           continue;
         }
         baseEntries.push({ header, body: raw.body as string });

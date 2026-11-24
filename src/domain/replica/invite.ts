@@ -31,6 +31,11 @@ import { isRecord } from '../team/validate';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, entryHash, parseHeaderShape, writerIdOf } from './entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from './entry';
 import { X25519_KEY_BYTES, readGrant, x25519BindingBytes } from './cellKeys';
+import type { KemPublicKeys } from './cellWrapV2';
+import { kemBindingHolds, signKemBinding } from './deviceKem';
+import type { KemBinding } from './deviceKem';
+import { MAX_FEATURES, isReplicaFeature } from './features';
+import { kemProblem } from './kindSchemas/device';
 import type { RosterAnchor } from './roster';
 import { safetyCode } from './safetyCode';
 import { isHubAddress } from './hubFile';
@@ -47,6 +52,8 @@ const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_NAME_CHARS = 120;
 const INVITE_KEYS = ['genesisHash', 'project', 'name', 'lead', 'invite', 'secret', 'expiresAt'] as const;
 const JOIN_KEYS = ['invite', 'genesisHash', 'name', 'publicKey', 'x25519', 'x25519Sig', 'nonce', 'mac'] as const;
+/** The feature that lets a join request carry post-quantum keys (33.2 D-03): only an invitation that lists it among the project's required features. */
+export const KEM_JOIN_FEATURE = 'wrap@2';
 /** The bytes of the joining device's nonce (an input of the safety code). */
 export const JOIN_NONCE_BYTES = 16;
 
@@ -57,8 +64,10 @@ export interface InviteHub { address: string; certPin: string; writer: string }
  * lead is the project's anchor (the founding lead); inviter is the device that signed the invitation (equal to lead for an invitation without one);
  * hub is present only for a project on a sync hub.
  */
-export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; inviter: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string; hub?: InviteHub }
-export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; nonce: string; mac: string; member?: string }
+/** requires: the project's required features when the invitation was made (roster.require), sorted; absent when there are none (33.2 D-03). */
+export interface InvitePayload { genesisHash: string; project: string; name: string; lead: InviteLead; inviter: InviteLead; invite: string; secret: string; expiresAt: string; forMember?: string; hub?: InviteHub; requires?: string[] }
+/** kem: the joining device's post-quantum keys with their binding, only when the invitation requires wrap@2 (33.2 D-03). */
+export interface JoinRequestPayload { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; x25519Sig: string; nonce: string; mac: string; member?: string; kem?: KemBinding }
 export interface JoinMacFields { invite: string; genesisHash: string; name: string; publicKey: string; x25519: string; nonce: string; member?: string }
 
 export const INVITE_REFUSALS = {
@@ -143,14 +152,24 @@ function inviteHubOf(value: unknown): InviteHub | undefined {
   return { address, certPin, writer };
 }
 
+// A required feature list: 1 to MAX_FEATURES ids, distinct and sorted, as roster.require writes them. A fresh copy.
+function requiresOf(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_FEATURES) return undefined;
+  for (let index = 0; index < value.length; index += 1) if (!isReplicaFeature(value[index]) || (index > 0 && !((value[index - 1] as string) < (value[index] as string)))) return undefined;
+  return [...(value as string[])];
+}
+
 function invitePayloadOf(value: unknown): InvitePayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember', 'inviter', 'hub'])) return undefined;
+  if (!isRecord(value) || !hasKeys(value, INVITE_KEYS, ['forMember', 'inviter', 'hub', 'requires'])) return undefined;
   const [genesisHash, project, name, leadIn, invite, secret, expiresAt] = INVITE_KEYS.map((key) => own(value, key));
   const forMember = own(value, 'forMember');
   const inviterIn = own(value, 'inviter');
   const hubIn = own(value, 'hub');
   const hub = hubIn === undefined ? undefined : inviteHubOf(hubIn);
   if (hubIn !== undefined && hub === undefined) return undefined;
+  const requiresIn = own(value, 'requires');
+  const requires = requiresIn === undefined ? undefined : requiresOf(requiresIn);
+  if (requiresIn !== undefined && requires === undefined) return undefined;
   if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash)) return undefined;
   if (typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
   if (!isLine(name) || typeof invite !== 'string' || !SLUG.test(invite) || !isKey(secret, JOIN_SECRET_BYTES) || !isTime(expiresAt)) return undefined;
@@ -162,11 +181,12 @@ function invitePayloadOf(value: unknown): InvitePayload | undefined {
   const payload: InvitePayload = { genesisHash, project, name, lead, inviter: { ...inviter }, invite, secret, expiresAt };
   if (forMember !== undefined) payload.forMember = forMember;
   if (hub !== undefined) payload.hub = hub;
+  if (requires !== undefined) payload.requires = requires;
   return payload;
 }
 
 function joinPayloadOf(value: unknown): JoinRequestPayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, JOIN_KEYS, ['member'])) return undefined;
+  if (!isRecord(value) || !hasKeys(value, JOIN_KEYS, ['member', 'kem'])) return undefined;
   const [invite, genesisHash, name, publicKey, x25519, x25519Sig, nonce, mac] = JOIN_KEYS.map((key) => own(value, key));
   const member = own(value, 'member');
   if (member !== undefined && (typeof member !== 'string' || !SLUG.test(member))) return undefined;
@@ -174,8 +194,14 @@ function joinPayloadOf(value: unknown): JoinRequestPayload | undefined {
   if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash)) return undefined;
   if (!isLine(name) || !isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES)) return undefined;
   if (!isKey(x25519Sig, ED25519_SIGNATURE_BYTES) || !isKey(nonce, JOIN_NONCE_BYTES) || !isKey(mac, MAC_BYTES)) return undefined;
+  const kemIn = own(value, 'kem');
+  if (kemIn !== undefined && kemProblem(kemIn, 'kem') !== undefined) return undefined;
   const payload: JoinRequestPayload = { invite, genesisHash, name, publicKey, x25519, x25519Sig, nonce, mac };
   if (member !== undefined) payload.member = member;
+  if (kemIn !== undefined) {
+    const kem = kemIn as Record<string, string>;
+    payload.kem = { p256: kem.p256, mlkem768: kem.mlkem768, sig: kem.sig };
+  }
   return payload;
 }
 
@@ -199,6 +225,8 @@ export interface BuildInviteInput {
   forMember?: string;
   /** The project's sync hub (D-47). Only its address, certPin and writer are copied. */
   hub?: InviteHub;
+  /** The project's required features (its folded roster.require), so a joining device knows to send post-quantum keys (33.2 D-03). */
+  requires?: readonly string[];
 }
 
 // Signs an invite with the inviting device (the founding lead's, or any device of the lead or the deputy, MJ-05). With forMember it is the short
@@ -220,6 +248,7 @@ export function buildInvite(signer: PayloadSigner, input: BuildInviteInput): Sig
     expiresAt: input.expiresAt
   };
   if (input.forMember !== undefined) payload.forMember = input.forMember;
+  if (input.requires !== undefined && input.requires.length > 0) payload.requires = [...input.requires];
   if (input.hub !== undefined) {
     const hub: unknown = input.hub;
     if (!isRecord(hub)) throw new Error('The invitation was not made: the hub must name an address, a certificate pin and a writer id.');
@@ -253,7 +282,8 @@ export function readInvite(file: unknown, now: Date): InviteRead {
 
 // member: the member this machine belongs to. It defaults to the invite's forMember, so a person's other machine names its member and a new person's
 // machine names none.
-export interface BuildJoinRequestInput { name: string; x25519: string; now: Date; member?: string }
+// kem: the joining device's post-quantum public keys; the request carries them, bound by the same signer, only when the invitation requires wrap@2.
+export interface BuildJoinRequestInput { name: string; x25519: string; now: Date; member?: string; kem?: KemPublicKeys }
 
 // Signs a join request with the joining device for the invite it read. The X25519 binding signature is made by the same signer. The nonce is drawn
 // fresh here, after the invite was read, which is what makes the safety code cost a second preimage (safetyCode.ts).
@@ -264,6 +294,7 @@ export function buildJoinRequest(signer: PayloadSigner, invite: InvitePayload, i
   if (member !== undefined) fields.member = member;
   const payload: JoinRequestPayload = { invite: fields.invite, genesisHash: fields.genesisHash, name: fields.name, publicKey: fields.publicKey, x25519: fields.x25519, x25519Sig: signer.sign(x25519BindingBytes(input.x25519, writer)), nonce: fields.nonce, mac: joinMac(invite.secret, fields) };
   if (member !== undefined) payload.member = member;
+  if (input.kem !== undefined && (invite.requires ?? []).includes(KEM_JOIN_FEATURE)) payload.kem = signKemBinding(input.kem, writer, (bytes) => signer.sign(bytes));
   if (joinPayloadOf(payload) === undefined) throw new Error('The join request was not made: one of its fields is not valid.');
   return signPayload(signer, 'staff-join-request', payload, { now: () => input.now });
 }
@@ -283,7 +314,7 @@ export function checkJoinRequest(file: unknown, expected: JoinRequestExpectation
 }
 
 /** What the lead knows of an invitation that already admitted a device: no secret is needed or used. */
-export interface AdmittedRequestExpectation { invite: Pick<InvitePayload, 'genesisHash' | 'invite' | 'forMember'> }
+export interface AdmittedRequestExpectation { invite: Pick<InvitePayload, 'genesisHash' | 'invite' | 'forMember' | 'requires'> }
 
 // The check of a join request for an invitation the roster shows as used, so the welcome file can be made again for the device it admitted (MJ-02):
 // shape and size, signature, project, invitation id, key binding and member, in that order, and no MAC (the join secret may be forgotten by now). The
@@ -309,6 +340,9 @@ function checkRequestFile(file: unknown, expected: JoinRequestExpectation, withM
     if (expected.now !== undefined && expected.now.getTime() > Date.parse(expected.invite.expiresAt)) return refuse('invite-expired');
     const writer = writerIdOf(payload.publicKey);
     if (!verifySignature(x25519BindingBytes(payload.x25519, writer), payload.x25519Sig, payload.publicKey)) return refuse('bad-binding');
+    // Post-quantum keys come only in answer to an invitation that requires wrap@2, so a lead never meets keys it did not ask for (33.2 D-03).
+    if (payload.kem !== undefined && !(expected.invite.requires ?? []).includes(KEM_JOIN_FEATURE)) return refuse('malformed');
+    if (payload.kem !== undefined && !kemBindingHolds(payload.kem, writer, payload.publicKey)) return refuse('bad-binding');
     if (withMac) {
       const want = Buffer.from(joinMac(expected.secret, payload), 'base64url');
       const got = Buffer.from(payload.mac, 'base64url');
@@ -325,7 +359,7 @@ function checkRequestFile(file: unknown, expected: JoinRequestExpectation, withM
 
 
 /** The joining device's keys and the nonce of its join request. */
-export interface SafetyCodeKeys { publicKey: string; x25519: string; nonce: string }
+export interface SafetyCodeKeys { publicKey: string; x25519: string; nonce: string; kem?: { p256: string; mlkem768: string } }
 
 // The six safety code words for an invite and a join request (D-16). Both sides pass the join request (the lead the checked one it received, the
 // joining device the one it made). Both read the anchor's and the inviter's keys, the invite id and the genesis hash from the invite, so the two
@@ -336,7 +370,7 @@ export function inviteSafetyCode(invite: Pick<InvitePayload, 'invite' | 'genesis
     genesisHash: invite.genesisHash,
     lead: { publicKey: invite.lead.publicKey, x25519: invite.lead.x25519 },
     inviter: { publicKey: invite.inviter.publicKey, x25519: invite.inviter.x25519 },
-    joiner: { publicKey: joiner.publicKey, x25519: joiner.x25519 },
+    joiner: joiner.kem === undefined ? { publicKey: joiner.publicKey, x25519: joiner.x25519 } : { publicKey: joiner.publicKey, x25519: joiner.x25519, kem: { p256: joiner.kem.p256, mlkem768: joiner.kem.mlkem768 } },
     nonce: joiner.nonce
   });
 }

@@ -800,7 +800,8 @@ test('without wrap@2 in the invitation the joiner sends no kem, and a request th
   assert.equal(requestOf(answer(plain, plain.joiner, { kem: KEM_KEYS })).payload.kem, undefined);
   const requiring = invitedRequiring(['wrap@2']);
   const withKem = answer(requiring, requiring.joiner, { kem: KEM_KEYS });
-  assert.equal(reasonOf(checkJoinRequest(withKem, { invite: plain.invite, secret: plain.secret })), 'malformed');
+  const { requires: _none, ...withoutRequires } = requiring.invite;
+  assert.equal(reasonOf(checkJoinRequest(withKem, { invite: withoutRequires, secret: requiring.secret })), 'malformed');
   assert.equal(reasonOf(checkJoinRequest(withKem, { invite: { ...requiring.invite, requires: ['require@1'] }, secret: requiring.secret })), 'malformed');
 });
 
