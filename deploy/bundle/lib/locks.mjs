@@ -3,8 +3,8 @@
 // read as JSON, never run.
 //
 // Image lock sections: `images` (third-party, { ref: "<host>/<repository>:<tag>@sha256:<64 hex, the linux/amd64 manifest>", component }), `built` (ours, { name:
-// "sterling/<name>", image: "deploy/images/<name>/image.json", component, digest: null | "sha256:..." }) and `release` (published by another
-// pipeline, { name, from, digest: null | "sha256:..." }). A site registry serves every image under `sitePath(ref)`.
+// "sterling/<name>", image: "deploy/images/<name>/image.json", component, digest: null | "sha256:...", optional tag for a chart that joins
+// repository and tag }) and `release` (published by another pipeline, { name, from, digest: null | "sha256:..." }). A site registry serves every image under `sitePath(ref)`.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 

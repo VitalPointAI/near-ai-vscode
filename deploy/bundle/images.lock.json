@@ -4,7 +4,21 @@
     { "ref": "quay.io/jetstack/cert-manager-controller:v1.21.3@sha256:9b262e9493ab3e0daebc2c9cfbddc6df68b9ac91afc036a759584f3d49d607e5", "component": "cert-manager" },
     { "ref": "quay.io/jetstack/cert-manager-webhook:v1.21.3@sha256:fc2845cc042ab57c8b98c5ff62462d50dcd5d8d3302f9e6875cd05042ce1020b", "component": "cert-manager" },
     { "ref": "quay.io/jetstack/cert-manager-cainjector:v1.21.3@sha256:165691f631d61931a27e4fbbb82bbed8205431d0446b3c14d170081aeff75f0a", "component": "cert-manager" },
-    { "ref": "quay.io/jetstack/cert-manager-startupapicheck:v1.21.3@sha256:6b9e17adc075c80c0c5cb1f901654f0efa4c5d4b1a8b369985ac67f5bbb0b8d2", "component": "cert-manager" }
+    { "ref": "quay.io/jetstack/cert-manager-startupapicheck:v1.21.3@sha256:6b9e17adc075c80c0c5cb1f901654f0efa4c5d4b1a8b369985ac67f5bbb0b8d2", "component": "cert-manager" },
+    { "ref": "docker.io/haproxytech/kubernetes-ingress:3.4.1@sha256:9dd24b69db53fa6dbaaad0a9d3d5da39363eff9103c589d0eff4ec57dcc04932", "component": "ingress" },
+    { "ref": "reg.kyverno.io/kyverno/kyverno:v1.20.0@sha256:60c02e59bc914bee8eea21534720fff45fc8c81a3ceff09bdc84c3ab53fa4e90", "component": "image-registry" },
+    { "ref": "reg.kyverno.io/kyverno/kyvernopre:v1.20.0@sha256:0b3ef40d1570c36b5f00c2847e48c1be80130af2eb97712f78f6fb225a064625", "component": "image-registry" },
+    { "ref": "ghcr.io/kyverno/readiness-checker:v1.20.0@sha256:db5b8331335ff4b799daf3b6f112a744ed2891a1ef8507ee4e42669a8b576e18", "component": "image-registry", "note": "Kyverno chart test pods (always rendered with the admission controller) and the pre-delete webhook cleanup hook." },
+    { "ref": "ghcr.io/project-zot/zot:v2.1.23@sha256:b68f727fe35c1eb45b2ae91519dfb0e33192d69b5104882c3e7809b7146c4a02", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/harbor-core:v2.15.5@sha256:5644d353661de160aca165b61a04228bdbcacc9c622dac64900ad3ce9166cdef", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/harbor-portal:v2.15.5@sha256:30cae17b1d46d371ed6447ceda12a7ad3ce411fe60f19864d8bf9a9e59ea55b6", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/harbor-jobservice:v2.15.5@sha256:dd5cb3fac57a0cce8e37f208803d6075f00f45322038599098602b582afdfd96", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/registry-photon:v2.15.5@sha256:ea74a645fa2281e75640d203d320d76233c2541f49efe7ee20e369c0a07d9ece", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/harbor-registryctl:v2.15.5@sha256:42b911eb7742bb2d08d9ca4732cf0e5b62a83f815d9b57d894e5ed53a49fa3d4", "component": "image-registry" },
+    { "ref": "docker.io/goharbor/harbor-db:v2.15.5@sha256:3a9131176f620601302eca77d2ca64ef1e0d56a6e7f9c71221e0f9ffb141db67", "component": "image-registry", "note": "Harbor internal database (Harbor sites only)." },
+    { "ref": "docker.io/goharbor/valkey-photon:v2.15.5@sha256:2083c33ee8c590a5c03ead3a70c28a80cd2d0bae27b355d6f73ad378a46192c2", "component": "image-registry", "note": "Harbor internal Redis-compatible cache (Harbor sites only)." },
+    { "ref": "quay.io/keycloak/keycloak:26.8.2@sha256:75b5c435a83b530caba5923922f93d47b2e3f8b4ad9e79200581122996653e55", "component": "keycloak", "note": "26.8.2 is the newest 26.8.x on 2026-11-23 (no 26.8.3); the tag 26.8.2 and its rebuild tag 26.8.2-3 have the same digest." },
+    { "ref": "docker.io/adorsys/keycloak-config-cli:6.5.1-26.5.5@sha256:303b5c801fffbc34a8d47ff94bb7f00eba907418076a0061799424138ad16788", "component": "keycloak", "note": "The realm applier (Decision 10), the 6.5.1 build for Keycloak 26 (the newest 26.x client build); mapped by the realm release (47-08)." }
   ],
   "built": [
     { "name": "sterling/theia-cloud-operator", "image": "deploy/images/theia-cloud-operator/image.json", "component": "theia-cloud", "digest": null },
@@ -13,7 +27,7 @@
     { "name": "sterling/theia-cloud-landing-page", "image": "deploy/images/theia-cloud-landing-page/image.json", "component": "theia-cloud", "digest": null },
     { "name": "sterling/oauth2-proxy", "image": "deploy/images/oauth2-proxy/image.json", "component": "oauth2-proxy", "digest": null },
     { "name": "sterling/postgres", "image": "deploy/images/postgres/image.json", "component": "keycloak", "digest": null },
-    { "name": "sterling/openbao", "image": "deploy/images/openbao/image.json", "component": "openbao", "digest": null },
+    { "name": "sterling/openbao", "image": "deploy/images/openbao/image.json", "component": "openbao", "tag": "2.7.3", "note": "tag: the OpenBao release it is built from; the chart joins repository and tag, the digest is what pins it.", "digest": null },
     { "name": "sterling/openbao-softhsm", "image": "deploy/images/openbao-softhsm/image.json", "component": "hsm", "scope": "test", "digest": null },
     { "name": "sterling/near-ai-hub", "image": "deploy/images/hub/image.json", "component": "hub", "note": "Built from the unchanged hub/Dockerfile (D-45, D-46).", "digest": null }
   ],

@@ -10,8 +10,9 @@
 // Release descriptor: deploy/values/<release>.release.json, the release name being the file name. Fields: chart (a charts.lock.json name, or
 // path:<directory> for a local chart), namespace, order (install order), values (our values files), site (optional per-site values file under
 // deploy/values/site.example/), images (list of { lock: <image name in images.lock.json>, set: { <values path>: <part> } }, part one of ref,
-// registry, repository, digest, tagAtDigest), enabledWhen (optional site-global equalities), instances (optional site-global list; the release
-// renders once per item as <release>-<item.name>, the item passed as the value `instance`), secrets (optional, read by the install script), note.
+// registry, repository, name (<registry>/<repository>, for charts that join it to a tag), digest, tagAtDigest), enabledWhen (optional
+// site-global equalities), instances (optional site-global list; the release renders once per item as <release>-<item.name>, the item passed
+// as the value `instance`), secrets (optional, read by the install script), note.
 //
 // Site file: JSON syntax (valid YAML), parsed with JSON.parse. A values file names a setting as ${site.<dotted key>}; a token that is a whole
 // double-quoted string ("${site.key}") is replaced together with its quotes by the JSON of the value (so a JSON file stays valid JSON), anywhere
@@ -28,7 +29,7 @@ import { CHARTS_LOCK, IMAGES_LOCK, readChartsLock, readImagesLock, resolveImage 
 export const VALUES_DIR = 'deploy/values';
 /** The Kubernetes version charts are rendered for: RKE2 v1.37.2+rke2r1 (research, Standard Stack). */
 export const KUBE_VERSION = '1.37.2';
-export const IMAGE_PARTS = Object.freeze(['ref', 'registry', 'repository', 'digest', 'tagAtDigest']);
+export const IMAGE_PARTS = Object.freeze(['ref', 'registry', 'repository', 'name', 'digest', 'tagAtDigest']);
 const DESCRIPTOR_FIELDS = new Set(['chart', 'namespace', 'order', 'values', 'site', 'images', 'enabledWhen', 'instances', 'secrets', 'note']);
 const RELEASE_NAME = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const TOKEN = /("?)\$\{site\.([A-Za-z0-9_.-]+)\}("?)/g;
@@ -160,7 +161,7 @@ function imageSets(root, release, site) {
     for (const [valuePath, part] of Object.entries(mapping.set ?? {})) {
       if (!IMAGE_PARTS.includes(part)) throw new Error(`${release.file}: ${valuePath} asks for the image part "${part}"; use one of ${IMAGE_PARTS.join(', ')}.`);
       if (part === 'tagAtDigest' && !image.tag) throw new Error(`${release.file}: the image ${mapping.lock} has no tag in ${IMAGES_LOCK}, so ${valuePath} cannot use tagAtDigest.`);
-      const value = part === 'tagAtDigest' ? `${image.tag}@${image.digest}` : image[part];
+      const value = part === 'tagAtDigest' ? `${image.tag}@${image.digest}` : part === 'name' ? `${image.registry}/${image.repository}` : image[part];
       args.push('--set-string', `${valuePath}=${value}`);
     }
   }

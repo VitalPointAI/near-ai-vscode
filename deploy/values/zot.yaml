@@ -1,0 +1,9 @@
+# Zot v2.1.23 (chart deploy/charts/vendored/zot-0.1.135.tgz), the settings that decide which images render. The descriptor sets image.repository
+# and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). Later plans add the registry configuration here (it needs
+# http.compat ["docker2s2"] so Red Hat images keep their digests, spike S1) and must keep these.
+replicaCount: 1
+image:
+  pullPolicy: IfNotPresent
+# No helm test pods: they run an alpine image.
+test:
+  enabled: false

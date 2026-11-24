@@ -1,0 +1,13 @@
+# OpenBao (chart deploy/charts/vendored/openbao-0.30.8.tgz), the settings that decide which images render. The descriptor sets the server image
+# to our rebuilt sterling/openbao by digest from deploy/bundle/images.lock.json (D-20, D-38: our image carries the kms-pkcs11 plugin). 47-07
+# adds the rest of the OpenBao settings here and must keep these.
+
+# No agent injector (it would pull the HashiCorp vault-k8s image) and no CSI provider: static secrets come from our install script (Decision 6).
+injector:
+  enabled: false
+csi:
+  enabled: false
+
+server:
+  image:
+    pullPolicy: IfNotPresent
