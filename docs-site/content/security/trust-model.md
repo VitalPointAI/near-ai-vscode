@@ -64,5 +64,7 @@ organization's own sites, which is planned and not yet released. See
 
 Labels and routing are an organizational control that helps prevent mistakes; they are not an
 accreditation. What the extension does not protect against yet is listed in
-[Known limitations](./policy.synced.md#known-limitations). To report a problem, see
+[Known limitations](./policy.synced.md#known-limitations). Every known gap and open condition, and
+what changes at each higher classification level, is listed in
+[Road to production and higher classification](./road-to-production.md). To report a problem, see
 [Reporting a vulnerability](./policy.synced.md#reporting-a-vulnerability).

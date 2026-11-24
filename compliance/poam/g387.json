@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-21",
+    "sc-12"
+  ],
+  "gap": "G387",
+  "id": "g387",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "Your organization's authorizing official accepts the risk, or a key access server is planned"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Your organization runs no key access server for partners, so an export wrapped to a partner's key is final: nothing can withdraw access after release. Your organization's authorizing official accepts that risk, or a key access server at your site is planned. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-11.",
+  "title": "An export cannot be revoked once it is wrapped to a partner key"
+}

@@ -7,9 +7,14 @@
   "properties": { "gaps": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/gap" } } },
   "definitions": {
     "control": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
+    "appliesAt": {
+      "$comment": "The lowest level where the gap matters, lowest first. The one list of levels: scripts/build-road-to-production.mjs reads its order from here.",
+      "type": "string",
+      "enum": ["now", "protected-a", "protected-b", "protected-c", "confidential", "secret", "top-secret", "coalition-exchange"]
+    },
     "gap": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "title", "controls", "remediation", "ownerRole"],
+      "required": ["id", "title", "controls", "remediation", "ownerRole", "appliesAt", "blocksProduction"],
       "oneOf": [{ "properties": { "closesInPhase": { "type": "string" } }, "required": ["closesInPhase"] }, { "properties": { "poam": { "type": "string" } }, "required": ["poam"] }],
       "properties": {
         "id": { "type": "string", "pattern": "^[GX][0-9]+$" },
@@ -20,7 +25,9 @@
         "profiles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/control" } },
         "overlay": { "type": "string", "enum": ["both"] },
         "closesInPhase": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" },
-        "poam": { "type": "string", "pattern": "^[gx][0-9]{2,}$" }
+        "poam": { "type": "string", "pattern": "^[gx][0-9]{2,}$" },
+        "appliesAt": { "$ref": "#/definitions/appliesAt" },
+        "blocksProduction": { "type": "boolean" }
       }
     }
   }

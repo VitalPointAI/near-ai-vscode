@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ra-03"
+  ],
+  "gap": "G379",
+  "id": "g379",
+  "milestones": [
+    {
+      "phase": "93",
+      "title": "The assessment is complete before automated labels apply"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Automated labelling proposes classification levels for your organization's data. The Directive on Automated Decision-Making does not bind us, but its algorithmic impact assessment is a useful check. Complete it voluntarily before automated labelling is turned on, and share the result with your organization.",
+  "title": "No algorithmic impact assessment covers automated labelling"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-16",
+    "si-07"
+  ],
+  "gap": "G384",
+  "id": "g384",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "The provisional profile is replaced when ADatP-4778.2 arrives"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "ADatP-5636 makes the signed binding mandatory, and its profile is in ADatP-4778.2 chapter 2, which your organization does not hold yet. Bindings are signed now with our own clearly marked provisional profile. Replace it when ADatP-4778.2 arrives. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+  "title": "Signed NATO bindings use a provisional profile"
+}

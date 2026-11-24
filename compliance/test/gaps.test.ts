@@ -17,9 +17,22 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 349);
-  assert.equal(poam.length, 326);
+  assert.equal(gaps.length, 391);
+  assert.equal(poam.length, 353);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
+});
+// Every gap names the lowest level where it matters and whether it blocks production (the road to production page groups by both).
+test('a gap without its level or production flag, or with a level outside the fixed list, is refused', () => {
+  const register = JSON.parse(readFileSync(path.join(root, 'gaps.json'), 'utf8')) as { gaps: Record<string, unknown>[] };
+  assert.equal(validateOurs(register, 'gaps').ok, true);
+  const withFirst = (change: (gap: Record<string, unknown>) => void) => {
+    const copy = structuredClone(register); change(copy.gaps[0]!); return validateOurs(copy, 'gaps').ok;
+  };
+  assert.equal(withFirst((gap) => { delete gap.appliesAt; }), false);
+  assert.equal(withFirst((gap) => { delete gap.blocksProduction; }), false);
+  assert.equal(withFirst((gap) => { gap.appliesAt = 'restricted'; }), false);
+  assert.equal(withFirst((gap) => { gap.blocksProduction = 'yes'; }), false);
+  for (const level of ['now', 'protected-a', 'protected-b', 'protected-c', 'confidential', 'secret', 'top-secret', 'coalition-exchange']) assert.equal(withFirst((gap) => { gap.appliesAt = level; }), true, level);
 });
 test('release assessment gaps have named open paths', () => {
   for (const [control, id, phase] of [

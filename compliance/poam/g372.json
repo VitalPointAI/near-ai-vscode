@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sr-03",
+    "sr-11"
+  ],
+  "gap": "G372",
+  "id": "g372",
+  "milestones": [
+    {
+      "phase": "71",
+      "title": "The fit register records the packages as test scope only"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The Digital Bazaar packages used to test verified credentials have no build provenance, and their cryptosuite has not been updated in two years. They are used in tests only and never shipped. Keep them in test scope in the fit register, and replace them if they stop working or a maintained set appears.",
+  "title": "The credential test packages have no build provenance"
+}

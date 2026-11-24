@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G353",
+  "id": "g353",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Key access types are reviewed against the ACP-240 edition your organization receives"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "OpenBao cannot do ECDH, so the key that opens objects sent to your organization is an RSA-3072 key held in OpenBao, not a P-256 key. It works with partners that use RSA key access. Revisit it when OpenBao adds ECDH or the exchange gains a post-quantum key access type.",
+  "title": "The exchange receiving key is RSA-3072 because OpenBao has no ECDH"
+}

@@ -1,6 +1,8 @@
 {
   "gaps": [
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44.1",
       "controls": [
         "ir-01",
@@ -15,6 +17,8 @@
       "title": "Incident response and advisory operation still need evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "au-04",
         "au-06",
@@ -28,6 +32,8 @@
       "title": "Gate decision records are not tamper-evident and cannot be exported"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-17",
         "ia-02",
@@ -41,6 +47,8 @@
       "title": "The messaging relay has no inbound authentication yet"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "sr-04",
@@ -54,6 +62,8 @@
       "title": "No build provenance or attestation for the VSIX, the relay image or the package"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "ra-05",
@@ -66,6 +76,8 @@
       "title": "No vulnerability scan or SBOM for the relay container image"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "sa-11.01"
@@ -76,6 +88,8 @@
       "title": "No static analysis of the source code"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "cm-05",
@@ -87,6 +101,8 @@
       "title": "No CODEOWNERS file; review routing is by convention"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cp-09",
         "cp-10"
@@ -98,6 +114,8 @@
       "title": "No backup and recovery guidance for the messaging relay"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "ra-03",
@@ -110,6 +128,8 @@
       "title": "No standalone threat model or data-flow diagram"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cm-02",
         "si-02",
@@ -122,6 +142,8 @@
       "title": "Root install scripts and automated security update alerts still need closure"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "au-02",
         "au-06",
@@ -135,6 +157,8 @@
       "title": "Deployment audit event coverage, forwarding and retention need evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": false,
       "controls": [
         "cm-03"
       ],
@@ -145,6 +169,8 @@
       "title": "The docs build is not a required check"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "sc-08",
         "sr-11"
@@ -156,6 +182,8 @@
       "title": "The attestation checks do not check TCB status, certificate revocation or enclave measurements"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-02"
       ],
@@ -166,6 +194,8 @@
       "title": "Staff account lifecycle needs release and deployment evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "si-03"
       ],
@@ -176,6 +206,8 @@
       "title": "Deployment malware protection needs implementation or inheritance evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-16.02",
         "ac-16.05"
@@ -187,6 +219,8 @@
       "title": "Release evidence for authorized label changes and output markings"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-05",
         "ac-06.01",
@@ -203,6 +237,8 @@
       "title": "Operational separation of duties and privileges need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-05",
         "au-05.01",
@@ -215,6 +251,8 @@
       "title": "Deployment audit failure alerts and clock settings need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05",
         "ia-05.02",
@@ -228,6 +266,8 @@
       "title": "Deployment authenticator lifecycle needs verified evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-01"
       ],
@@ -238,6 +278,8 @@
       "title": "Deployment identification and authentication policy needs approval and evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-04",
         "ia-04.04"
@@ -249,6 +291,8 @@
       "title": "Identifier assignment and user status need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-12",
         "ia-12.02",
@@ -263,6 +307,8 @@
       "title": "Deployment identity proofing needs sponsor and registration authority evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-03"
       ],
@@ -273,6 +319,8 @@
       "title": "Device authentication needs connection-specific evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.01",
         "ia-06"
@@ -284,6 +332,8 @@
       "title": "Interactive authentication needs password and feedback evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.07"
       ],
@@ -294,6 +344,8 @@
       "title": "Release and deployment artifacts need embedded authenticator review"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-07"
       ],
@@ -304,6 +356,8 @@
       "title": "Cryptographic module authentication needs deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-02",
         "ia-02.01",
@@ -319,6 +373,8 @@
       "title": "Organizational sign-in needs deployment authentication evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.08"
       ],
@@ -329,6 +385,8 @@
       "title": "Authenticator reuse across systems needs a deployment risk review"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.09",
         "ia-08",
@@ -343,6 +401,8 @@
       "title": "External authentication and federation need sponsor-approved scope"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.14"
       ],
@@ -353,6 +413,8 @@
       "title": "Public key trust stores need deployment governance evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-01",
         "cp-02",
@@ -368,6 +430,8 @@
       "title": "Approved contingency policy, critical assets and recovery priorities need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-03",
         "cp-04",
@@ -380,6 +444,8 @@
       "title": "Contingency role training and coordinated exercises need dated records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-06",
         "cp-06.01",
@@ -398,6 +464,8 @@
       "title": "Alternate storage and processing sites need approved scope and readiness evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-08",
         "cp-08.01",
@@ -412,6 +480,8 @@
       "title": "Alternate telecommunications agreements and exercises need evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cp-09",
         "cp-09.01",
@@ -427,6 +497,8 @@
       "title": "Backup reliability, transfer, removal authority and cryptographic protections need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-10",
         "cp-10.02",
@@ -440,6 +512,8 @@
       "title": "Transaction and component recovery need scoped drills and protected inputs"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-07"
       ],
@@ -450,6 +524,8 @@
       "title": "Failed sign-in limits and responses need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-08",
         "ac-14"
@@ -461,6 +537,8 @@
       "title": "System use notices and actions before authentication need review"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-11",
         "ac-11.01"
@@ -472,6 +550,8 @@
       "title": "Device locking and obscured displays need endpoint evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-02.05",
         "ac-12"
@@ -483,6 +563,8 @@
       "title": "Inactivity logout and logical session termination need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-17",
         "ac-17.01",
@@ -498,6 +580,8 @@
       "title": "Remote access methods and privileged access need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-20",
         "ac-20.01",
@@ -511,6 +595,8 @@
       "title": "External system use and storage restrictions need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-21",
         "ac-21.400",
@@ -523,6 +609,8 @@
       "title": "Information-sharing safeguards and agreements need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-01"
       ],
@@ -533,6 +621,8 @@
       "title": "Deployment audit and accountability policy needs approval and operating records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-03",
         "au-03.01",
@@ -545,6 +635,8 @@
       "title": "Selected component events and audit record fields need coverage evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-04",
         "au-04.01"
@@ -556,6 +648,8 @@
       "title": "Audit capacity planning and offloading need measured deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-06",
         "au-06.01",
@@ -570,6 +664,8 @@
       "title": "Audit review, centralized analysis and time correlation need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-07",
         "au-07.01"
@@ -581,6 +677,8 @@
       "title": "Audit analysis and reports need authorized field searches and source integrity evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "au-09",
         "au-09.02",
@@ -594,6 +692,8 @@
       "title": "Audit infrastructure separation, privileged roles and protection alerts need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-01",
         "cm-09"
@@ -605,6 +705,8 @@
       "title": "Configuration policy and management plan need deployment approval"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cm-02",
         "cm-02.02",
@@ -618,6 +720,8 @@
       "title": "Configuration baselines need automated reconciliation, retained versions and separated environments"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-02.07"
       ],
@@ -628,6 +732,8 @@
       "title": "High-risk travel device configuration and return evidence need approved scope"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-03",
         "cm-03.02",
@@ -644,6 +750,8 @@
       "title": "Deployment change decisions, impacts and authorized access need a verified change trace"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-06",
         "cm-07",
@@ -658,6 +766,8 @@
       "title": "Secure settings, least-functionality review and approved execution need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-08",
         "cm-08.01",
@@ -672,6 +782,8 @@
       "title": "Installed components need accountable inventory and automated unauthorized component response"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-10",
         "cm-11",
@@ -684,6 +796,8 @@
       "title": "Software use, licences and privileged user installations need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cm-12",
         "cm-12.01"
@@ -695,6 +809,8 @@
       "title": "Information locations, access and automated discovery need scoped deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-01"
       ],
@@ -705,6 +821,8 @@
       "title": "Deployment access control policy needs approval and evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-02.01",
         "ac-02.02",
@@ -720,6 +838,8 @@
       "title": "Account automation, disablement and audit need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-02.07"
       ],
@@ -730,6 +850,8 @@
       "title": "Privileged account assignment and removal need monitoring evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-03.02"
       ],
@@ -740,6 +862,8 @@
       "title": "Dual authorization for designated actions needs evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-03.04"
       ],
@@ -750,6 +874,8 @@
       "title": "Discretionary access decisions need scoped permission evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-03.09"
       ],
@@ -760,6 +886,8 @@
       "title": "Controlled information release needs destination and approval evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-18",
         "ac-18.01",
@@ -773,6 +901,8 @@
       "title": "Wireless access and configuration restrictions need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-19",
         "ac-19.05"
@@ -784,6 +914,8 @@
       "title": "Managed mobile access and encryption need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ac-22"
       ],
@@ -794,6 +926,8 @@
       "title": "Public posting authority and content review need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-01"
       ],
@@ -804,6 +938,8 @@
       "title": "System integrity policy and procedures need approved operating evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "si-02",
         "si-02.02"
@@ -815,6 +951,8 @@
       "title": "Automated installed-update inventory and patch closure need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-03.04"
       ],
@@ -825,6 +963,8 @@
       "title": "Malware protection updates need privileged authorization and activity evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "si-04",
         "si-04.02",
@@ -844,6 +984,8 @@
       "title": "Monitoring and alerts need verified coverage, privacy scope and operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-07",
         "si-07.01",
@@ -858,6 +1000,8 @@
       "title": "Deployed integrity checks and violation response need tested coverage"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-08",
         "si-08.02"
@@ -869,6 +1013,8 @@
       "title": "Message boundary spam protection and automatic updates need verified applicability"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-10",
         "si-11"
@@ -880,6 +1026,8 @@
       "title": "Component input validation and role-scoped errors need traceable tests"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-16",
         "si-400"
@@ -891,6 +1039,8 @@
       "title": "Managed memory protections and dedicated administration workstations need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ra-01",
         "ra-07"
@@ -902,6 +1052,8 @@
       "title": "Assessment policy and risk treatment decisions need authority and follow-up evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ra-02",
         "ra-03",
@@ -914,6 +1066,8 @@
       "title": "System sensitivity, risks and critical dependencies need assessed deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ra-03.01"
       ],
@@ -924,6 +1078,8 @@
       "title": "Supply chain risk assessments need reviewed service and dependency scope"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ra-05",
         "ra-05.02",
@@ -936,6 +1092,8 @@
       "title": "Vulnerability monitoring needs current coverage and bounded scan authority"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ra-05.11"
       ],
@@ -946,6 +1104,8 @@
       "title": "Public reporting instructions and private vulnerability intake need an exercised handoff"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pl-01",
         "pl-02",
@@ -958,6 +1118,8 @@
       "title": "System security and privacy plans need approved deployment scope and diagrams"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pl-04",
         "pl-04.01"
@@ -969,6 +1131,8 @@
       "title": "Rules of behaviour and external-site restrictions need acknowledged deployment records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pl-10",
         "pl-11"
@@ -980,6 +1144,8 @@
       "title": "Selected control baselines and tailoring need authorized decisions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ir-02",
         "ir-03",
@@ -992,6 +1158,8 @@
       "title": "Response training and coordinated exercises need dated deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ir-04",
         "ir-04.03",
@@ -1004,6 +1172,8 @@
       "title": "Incident handling and continuity actions need a tested response trace"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ir-04.08"
       ],
@@ -1014,6 +1184,8 @@
       "title": "External incident correlation and information sharing need authorized evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ir-05",
         "ir-06",
@@ -1028,6 +1200,8 @@
       "title": "Incident tracking and automated reporting need demonstrated handoffs"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ir-07",
         "ir-07.01"
@@ -1039,6 +1213,8 @@
       "title": "Incident reporting assistance and automated availability need an exercised user path"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ir-01",
         "ir-08"
@@ -1050,6 +1226,8 @@
       "title": "Deployment incident response policy and plan need approved scope and review evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-01",
         "sr-02",
@@ -1062,6 +1240,8 @@
       "title": "Supply chain risk policy, plan and team need approved operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-05"
       ],
@@ -1072,6 +1252,8 @@
       "title": "Acquisition safeguards need evidence from a reviewed procurement"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-03",
         "sr-06"
@@ -1083,6 +1265,8 @@
       "title": "Supplier assessments and treatment of supply chain findings need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-08"
       ],
@@ -1093,6 +1277,8 @@
       "title": "Supplier notification agreements and escalation routes need verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-10"
       ],
@@ -1103,6 +1289,8 @@
       "title": "Tamper inspection needs approved triggers and observed acceptance evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-11",
         "sr-11.01"
@@ -1114,6 +1302,8 @@
       "title": "Component authenticity procedures and anti-counterfeit training need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-11.02"
       ],
@@ -1124,6 +1314,8 @@
       "title": "Service and repair components need controlled configuration and return records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sr-12"
       ],
@@ -1134,6 +1326,8 @@
       "title": "Component disposal needs approved methods and custody evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ca-01",
         "ca-02",
@@ -1146,6 +1340,8 @@
       "title": "Assessment policy and independent assessment need approved records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ca-03",
         "ca-09",
@@ -1158,6 +1354,8 @@
       "title": "External exchange and internal connection authorization need reviewed evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ca-05"
       ],
@@ -1168,6 +1366,8 @@
       "title": "Deployment POA&M needs tracked ownership and revision evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ca-06"
       ],
@@ -1178,6 +1378,8 @@
       "title": "Authorization and inherited control decisions need designated officials and signed records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ca-07",
         "ca-07.01",
@@ -1190,6 +1392,8 @@
       "title": "Continuous monitoring needs independent reviews and operating risk evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-01"
       ],
@@ -1200,6 +1404,8 @@
       "title": "System and services acquisition policy and procedures need approved operating records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-02"
       ],
@@ -1210,6 +1416,8 @@
       "title": "Security and privacy resource commitments need approved budget evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-03"
       ],
@@ -1220,6 +1428,8 @@
       "title": "Lifecycle security and privacy roles and risk reviews need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-04",
         "sa-04.01",
@@ -1232,6 +1442,8 @@
       "title": "Acquisition contracts need traceable security, privacy and interface acceptance evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-04.10"
       ],
@@ -1242,6 +1454,8 @@
       "title": "Digital credential products need validated recommendation and procurement evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-04.12"
       ],
@@ -1252,6 +1466,8 @@
       "title": "Contractor data ownership, return and removal need verified records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-05",
         "sa-16"
@@ -1263,6 +1479,8 @@
       "title": "Administrator and user documentation and training need versioned delivery evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-08",
         "sa-17"
@@ -1274,6 +1492,8 @@
       "title": "Engineering principles and developer security and privacy design need reviewed traces"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "sa-09",
         "sa-09.01",
@@ -1286,6 +1506,8 @@
       "title": "External services need approved risk, interface and oversight evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-09.08"
       ],
@@ -1296,6 +1518,8 @@
       "title": "In-scope processing and storage locations need verified Canadian boundary evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-10",
         "sa-10.07"
@@ -1307,6 +1531,8 @@
       "title": "Developer change control and security and privacy review need exact change evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-10.01"
       ],
@@ -1317,6 +1543,8 @@
       "title": "Delivered software and firmware integrity verification needs a tested acceptance record"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-11"
       ],
@@ -1327,6 +1555,8 @@
       "title": "Developer control testing and verifiable flaw correction need reviewed release evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-15",
         "sa-15.03"
@@ -1338,6 +1568,8 @@
       "title": "Developer process, tools and criticality decisions need controlled records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-22"
       ],
@@ -1348,6 +1580,8 @@
       "title": "Unsupported components need lifecycle decisions and replacement evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sa-400"
       ],
@@ -1358,6 +1592,8 @@
       "title": "Sovereignty and jurisdiction risk needs an approved sponsor assessment"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-01"
       ],
@@ -1368,6 +1604,8 @@
       "title": "System and communications protection policy needs assigned ownership and review"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-02",
         "sc-04"
@@ -1379,6 +1617,8 @@
       "title": "Management separation and shared-resource isolation need scoped evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-05",
         "sc-05.02"
@@ -1390,6 +1630,8 @@
       "title": "Availability protections and capacity limits need deployment evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "sc-07",
         "sc-07.03",
@@ -1402,6 +1644,8 @@
       "title": "Managed boundary interfaces and telecom service exceptions need reviewed evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-07.05",
         "sc-07.11"
@@ -1413,6 +1657,8 @@
       "title": "Default-deny and allowed incoming communications need effective rule evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-07.07",
         "sc-07.08"
@@ -1424,6 +1670,8 @@
       "title": "Remote tunnel safeguards and authenticated proxy use need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-07.09"
       ],
@@ -1434,6 +1682,8 @@
       "title": "Outbound threat denial and responsible-identity auditing need scoped evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-07.12",
         "sc-07.13"
@@ -1445,6 +1695,8 @@
       "title": "Host boundary protections and security-tool subnet separation need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-08",
         "sc-08.01"
@@ -1456,6 +1708,8 @@
       "title": "Confidentiality and integrity in transit need per-link deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-10"
       ],
@@ -1466,6 +1720,8 @@
       "title": "Connection termination and idle timing need end-to-end evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-12",
         "sc-12.01"
@@ -1477,6 +1733,8 @@
       "title": "Key lifecycle and authorized recovery need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-13"
       ],
@@ -1487,6 +1745,8 @@
       "title": "Approved cryptography by use and deployed configuration need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-15",
         "sc-15.03"
@@ -1498,6 +1758,8 @@
       "title": "Collaborative-device activation and restricted-area disablement need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-17"
       ],
@@ -1508,6 +1770,8 @@
       "title": "Certificate issuance and approved trust stores need deployment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-18",
         "sc-18.01",
@@ -1523,6 +1787,8 @@
       "title": "Mobile code acquisition, execution controls and confinement need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-20"
       ],
@@ -1533,6 +1799,8 @@
       "title": "Authoritative DNS integrity and delegation evidence need verified scope"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-21",
         "sc-22"
@@ -1544,6 +1812,8 @@
       "title": "Resolver validation, fault tolerance and role separation need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-23",
         "sc-23.01",
@@ -1556,6 +1826,8 @@
       "title": "Session authenticity, identifier generation and logout invalidation need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-28",
         "sc-28.01"
@@ -1567,6 +1839,8 @@
       "title": "Storage confidentiality and integrity need assessed component and media evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-29"
       ],
@@ -1577,6 +1851,8 @@
       "title": "Assessed technology diversity needs architecture rationale and operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-39"
       ],
@@ -1587,6 +1863,8 @@
       "title": "Process execution domains need independent boundary evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-45"
       ],
@@ -1597,6 +1875,8 @@
       "title": "Clock synchronization needs assessed component settings and drift evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "at-01"
       ],
@@ -1607,6 +1887,8 @@
       "title": "Awareness and training policy and procedures need approved operating records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "at-02",
         "at-02.02",
@@ -1619,6 +1901,8 @@
       "title": "Literacy training and reporting awareness need representative delivery evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "at-03"
       ],
@@ -1629,6 +1913,8 @@
       "title": "Role-based training needs a verified link to authorized duties and access"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "at-04"
       ],
@@ -1639,6 +1925,8 @@
       "title": "Training record monitoring and retention need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-01"
       ],
@@ -1649,6 +1937,8 @@
       "title": "Maintenance policy and procedures need approved scope and operating records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-02"
       ],
@@ -1659,6 +1949,8 @@
       "title": "Controlled maintenance needs approval, media handling and post-service verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-03",
         "ma-03.01",
@@ -1671,6 +1963,8 @@
       "title": "Maintenance tools and diagnostic media need authorized inventory and inspection evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-03.03"
       ],
@@ -1681,6 +1975,8 @@
       "title": "Maintenance equipment removal needs verified information and custody safeguards"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-04",
         "ma-04.01"
@@ -1692,6 +1988,8 @@
       "title": "Non-local maintenance needs monitored authorization and session closure evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-04.03"
       ],
@@ -1702,6 +2000,8 @@
       "title": "Non-local service needs comparable safeguards and controlled reconnection evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-04.04",
         "ma-04.06"
@@ -1713,6 +2013,8 @@
       "title": "Non-local maintenance session isolation and cryptographic protection need verified configuration"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-05",
         "ma-05.01"
@@ -1724,6 +2026,8 @@
       "title": "Maintenance personnel authorization and escorted service need verified records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ma-06"
       ],
@@ -1734,6 +2038,8 @@
       "title": "Maintenance support and spares need verified response commitments"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-01"
       ],
@@ -1744,6 +2050,8 @@
       "title": "Media protection policy and procedures need approved operating evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "mp-02",
         "mp-07"
@@ -1755,6 +2063,8 @@
       "title": "Media access and portable media restrictions need verified enforcement"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-03",
         "mp-04"
@@ -1766,6 +2076,8 @@
       "title": "Media marking and secure storage need inventory and facility evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-05"
       ],
@@ -1776,6 +2088,8 @@
       "title": "Media transport outside controlled areas needs verified custody evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-06",
         "mp-06.03"
@@ -1787,6 +2101,8 @@
       "title": "Media sanitization and portable media preparation need verified outcomes"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-06.08"
       ],
@@ -1797,6 +2113,8 @@
       "title": "Remote media purge or wipe needs approved scope and authorized test evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "mp-08",
         "mp-08.03"
@@ -1808,6 +2126,8 @@
       "title": "Media downgrading and public release need reviewed sanitization evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-01"
       ],
@@ -1818,6 +2138,8 @@
       "title": "Physical and environmental protection policy requires sponsor approval"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-02",
         "pe-02.400"
@@ -1829,6 +2151,8 @@
       "title": "Physical access authorization and identification credentials need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-03",
         "pe-03.400"
@@ -1840,6 +2164,8 @@
       "title": "Entry enforcement and physical security inspections need site evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-04",
         "pe-05"
@@ -1851,6 +2177,8 @@
       "title": "Physical protection of transmission paths and output needs verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-06",
         "pe-06.01"
@@ -1862,6 +2190,8 @@
       "title": "Physical monitoring and security incident handoff need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-08"
       ],
@@ -1872,6 +2202,8 @@
       "title": "Visitor records and anomaly escalation need facility evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-09",
         "pe-10"
@@ -1883,6 +2215,8 @@
       "title": "Protected power cabling and emergency shutoff need site verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-11",
         "pe-12"
@@ -1894,6 +2228,8 @@
       "title": "Backup power and emergency egress lighting need test records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-13",
         "pe-13.01",
@@ -1907,6 +2243,8 @@
       "title": "Fire detection, suppression and emergency response need facility evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-14",
         "pe-15"
@@ -1918,6 +2256,8 @@
       "title": "Environmental monitoring and water isolation need facility evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-16"
       ],
@@ -1928,6 +2268,8 @@
       "title": "Facility delivery and removal authorization needs movement records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-17",
         "pe-400",
@@ -1940,6 +2282,8 @@
       "title": "Alternate work and domestic telework safeguards need sponsor assessment"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-400.02"
       ],
@@ -1950,6 +2294,8 @@
       "title": "International telework exceptions need sponsor decisions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pe-401"
       ],
@@ -1960,6 +2306,8 @@
       "title": "Security operations centre coverage needs sponsor validation"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-01"
       ],
@@ -1970,6 +2318,8 @@
       "title": "Personnel security policy requires sponsor approval"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-02",
         "ps-03",
@@ -1982,6 +2332,8 @@
       "title": "Position screening requirements and personnel eligibility need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-04"
       ],
@@ -1992,6 +2344,8 @@
       "title": "Termination and credential revocation need timestamped sponsor evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-06"
       ],
@@ -2002,6 +2356,8 @@
       "title": "Access agreements need documented issuance and renewal"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-07"
       ],
@@ -2012,6 +2368,8 @@
       "title": "External personnel screening and provider notification need sponsor evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ps-08"
       ],
@@ -2022,6 +2380,8 @@
       "title": "Personnel sanctions and timely notification need sponsor evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-01",
         "pm-02",
@@ -2034,6 +2394,8 @@
       "title": "Security program leadership and authorized investment need records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-04",
         "pm-06",
@@ -2047,6 +2409,8 @@
       "title": "Program remediation and monitoring need verified review records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-05",
         "pm-05.01"
@@ -2058,6 +2422,8 @@
       "title": "System and personal information inventories need approved coverage"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-07",
         "pm-07.01",
@@ -2071,6 +2437,8 @@
       "title": "Enterprise architecture and mission use need traceability to approved purpose"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-08"
       ],
@@ -2081,6 +2449,8 @@
       "title": "Critical infrastructure protection plan needs approved security and privacy scope"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-09",
         "pm-10",
@@ -2094,6 +2464,8 @@
       "title": "Enterprise risk framing and authorization governance need accountable decisions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-12",
         "pm-13"
@@ -2105,6 +2477,8 @@
       "title": "Insider response team and workforce development need role and operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-15",
         "pm-16",
@@ -2117,6 +2491,8 @@
       "title": "Threat awareness and external community participation need approved sharing evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-17"
       ],
@@ -2127,6 +2503,8 @@
       "title": "Outsourced controlled information needs verified protection authority"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-18",
         "pm-19",
@@ -2139,6 +2517,8 @@
       "title": "Privacy program ownership and reporting need approved governance evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-20",
         "pm-20.01",
@@ -2151,6 +2531,8 @@
       "title": "Public privacy information and the complaints route need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-21",
         "pm-22"
@@ -2162,6 +2544,8 @@
       "title": "Privacy disclosure and information quality procedures need reviewed records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-23",
         "pm-24",
@@ -2174,6 +2558,8 @@
       "title": "Data governance, matching review and personal information minimization need scope evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "pm-30",
         "pm-30.01"
@@ -2185,6 +2571,8 @@
       "title": "Program supply-chain strategy and critical supplier review need authorized records"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-9"
       ],
@@ -2198,6 +2586,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-10-b",
         "cgp-10-c"
@@ -2212,6 +2602,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-10-f",
         "cgp-10-g"
@@ -2226,6 +2618,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-10-i"
       ],
@@ -2239,6 +2633,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-10-j"
       ],
@@ -2252,6 +2648,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-11",
         "cgp-12"
@@ -2266,6 +2664,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-13",
         "cgp-14",
@@ -2281,6 +2681,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-16"
       ],
@@ -2294,6 +2696,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-17",
         "cgp-18",
@@ -2310,6 +2714,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "cgp-37-1",
         "cgp-37-2"
@@ -2324,6 +2730,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itar-120.50"
       ],
@@ -2337,6 +2745,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itar-120.55",
         "itar-120.56-a",
@@ -2352,6 +2762,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itar-122.1"
       ],
@@ -2365,6 +2777,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itar-126.1"
       ],
@@ -2378,6 +2792,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itar-126.18"
       ],
@@ -2391,6 +2807,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ear-734.13",
         "ear-734.15",
@@ -2406,6 +2824,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.01"
       ],
@@ -2419,6 +2839,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.02"
       ],
@@ -2432,6 +2854,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.20"
       ],
@@ -2445,6 +2869,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.22"
       ],
@@ -2458,6 +2884,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.01"
       ],
@@ -2471,6 +2899,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.02"
       ],
@@ -2484,6 +2914,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.03"
       ],
@@ -2497,6 +2929,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.03"
       ],
@@ -2510,6 +2944,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.01"
       ],
@@ -2523,6 +2959,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.07"
       ],
@@ -2536,6 +2974,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.01"
       ],
@@ -2549,6 +2989,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.01"
       ],
@@ -2562,6 +3004,8 @@
       ]
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.02"
       ],
@@ -2575,6 +3019,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.01"
       ],
@@ -2588,6 +3034,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.02"
       ],
@@ -2601,6 +3049,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.03"
       ],
@@ -2614,6 +3064,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.04"
       ],
@@ -2627,6 +3079,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.05",
         "itsp171-03.01.06",
@@ -2642,6 +3096,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.08"
       ],
@@ -2655,6 +3111,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.09"
       ],
@@ -2668,6 +3126,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.10",
         "itsp171-03.01.11"
@@ -2682,6 +3142,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.12"
       ],
@@ -2695,6 +3157,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.16",
         "itsp171-03.01.18"
@@ -2709,6 +3173,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.20"
       ],
@@ -2722,6 +3188,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.22"
       ],
@@ -2735,6 +3203,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.02.01",
         "itsp171-03.02.02"
@@ -2749,6 +3219,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.01",
         "itsp171-03.03.02",
@@ -2764,6 +3236,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.04"
       ],
@@ -2777,6 +3251,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.05"
       ],
@@ -2790,6 +3266,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.06"
       ],
@@ -2803,6 +3281,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.07"
       ],
@@ -2816,6 +3296,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.03.08"
       ],
@@ -2829,6 +3311,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.01.13",
         "itsp171-03.01.14",
@@ -2849,6 +3333,8 @@
       ]
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.01",
         "itsp171-03.04.02"
@@ -2863,6 +3349,8 @@
       "title": "ITSP.10.171 configuration baselines and restrictive settings need approved evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.03",
         "itsp171-03.04.04",
@@ -2878,6 +3366,8 @@
       "title": "ITSP.10.171 configuration changes, impact review and change privileges need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.06"
       ],
@@ -2891,6 +3381,8 @@
       "title": "ITSP.10.171 least-functionality reviews and removals need effective evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.08"
       ],
@@ -2904,6 +3396,8 @@
       "title": "ITSP.10.171 authorized execution and deny-by-default settings need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.10",
         "itsp171-03.04.11"
@@ -2918,6 +3412,8 @@
       "title": "ITSP.10.171 component inventory and specified-information locations need reconciliation"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.12"
       ],
@@ -2931,6 +3427,8 @@
       "title": "ITSP.10.171 travel device configuration and return safeguards need disposition"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.01"
       ],
@@ -2944,6 +3442,8 @@
       "title": "ITSP.10.171 unique user identity and re-authentication need assessed records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.02"
       ],
@@ -2957,6 +3457,8 @@
       "title": "ITSP.10.171 device identity and authentication before connection need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.03",
         "itsp171-03.05.04"
@@ -2971,6 +3473,8 @@
       "title": "ITSP.10.171 strong factors and replay-resistant sign-in need role coverage"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.05"
       ],
@@ -2984,6 +3488,8 @@
       "title": "ITSP.10.171 identifier issuance, status and non-reuse need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.07",
         "itsp171-03.05.11"
@@ -2998,6 +3504,8 @@
       "title": "ITSP.10.171 password protections and obscured authentication feedback need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.05.12"
       ],
@@ -3011,6 +3519,8 @@
       "title": "ITSP.10.171 authenticator issuance, refresh and revocation need lifecycle proof"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.06.01",
         "itsp171-03.06.03"
@@ -3025,6 +3535,8 @@
       "title": "ITSP.10.171 incident handling and periodic exercises need assessed records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.06.02"
       ],
@@ -3038,6 +3550,8 @@
       "title": "ITSP.10.171 incident tracking, reporting deadlines and support need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.06.04"
       ],
@@ -3051,6 +3565,8 @@
       "title": "ITSP.10.171 role-based incident response training needs completion and refresh records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.06.05"
       ],
@@ -3064,6 +3580,8 @@
       "title": "ITSP.10.171 the incident response plan needs approval, distribution and protected maintenance"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.07.04"
       ],
@@ -3077,6 +3595,8 @@
       "title": "ITSP.10.171 maintenance tools and diagnostic media need approved custody evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.07.05"
       ],
@@ -3090,6 +3610,8 @@
       "title": "ITSP.10.171 approved remote maintenance and session closure need evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.07.06"
       ],
@@ -3103,6 +3625,8 @@
       "title": "ITSP.10.171 maintenance personnel authorization and supervision need operating records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.01",
         "itsp171-03.08.02"
@@ -3117,6 +3641,8 @@
       "title": "ITSP.10.171 media storage safeguards and authorized access need assessment evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.03"
       ],
@@ -3130,6 +3656,8 @@
       "title": "ITSP.10.171 media sanitization before reuse, release or disposal needs verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.04",
         "itsp171-03.08.05"
@@ -3144,6 +3672,8 @@
       "title": "ITSP.10.171 media markings and transport outside controlled areas need traceable evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.07"
       ],
@@ -3157,6 +3687,8 @@
       "title": "ITSP.10.171 authorized media types and identifiable owners need enforcement evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.08.09"
       ],
@@ -3170,6 +3702,8 @@
       "title": "ITSP.10.171 cryptographic protection of backup information needs scoped evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.04.07",
         "itsp171-03.04.09",
@@ -3193,6 +3727,8 @@
       "title": "ITSP.10.171 unallocated configuration, identity, maintenance and media entries need sponsor reconciliation"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.09.01"
       ],
@@ -3206,6 +3742,8 @@
       "title": "Supplementary personnel screening needs dated authorization evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.09.02"
       ],
@@ -3219,6 +3757,8 @@
       "title": "Supplementary personnel separation and transfer need access and property records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.02"
       ],
@@ -3232,6 +3772,8 @@
       "title": "Supplementary facility monitoring and access log review need operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.03",
         "itsp171-03.10.04",
@@ -3247,6 +3789,8 @@
       "title": "Unallocated supplementary physical rows need individual sponsor dispositions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.06"
       ],
@@ -3260,6 +3804,8 @@
       "title": "Supplementary alternate work sites need approved boundaries and verified safeguards"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.08"
       ],
@@ -3273,6 +3819,8 @@
       "title": "Supplementary distribution and transmission lines need scoped physical protection evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.11.01"
       ],
@@ -3286,6 +3834,8 @@
       "title": "Supplementary disclosure risk assessment needs approved scope and review evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.11.02"
       ],
@@ -3299,6 +3849,8 @@
       "title": "Supplementary vulnerability monitoring needs authorized schedule and remediation records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.11.03"
       ],
@@ -3312,6 +3864,8 @@
       "title": "Unallocated supplementary risk row needs a sponsor source decision"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.11.04"
       ],
@@ -3325,6 +3879,8 @@
       "title": "Supplementary risk response needs reviewed treatment and follow-up records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.12.01"
       ],
@@ -3338,6 +3894,8 @@
       "title": "Supplementary security assessment needs authorized scope and results"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.12.02"
       ],
@@ -3351,6 +3909,8 @@
       "title": "Supplementary remediation plan needs an operating revision trail"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.12.03"
       ],
@@ -3364,6 +3924,8 @@
       "title": "Supplementary continuous monitoring needs operating strategy evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.12.04"
       ],
@@ -3377,6 +3939,8 @@
       "title": "Unallocated supplementary assessment row needs a sponsor scope decision"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.12.05"
       ],
@@ -3390,6 +3954,8 @@
       "title": "Supplementary information exchanges need approved agreements and review records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.04"
       ],
@@ -3403,6 +3969,8 @@
       "title": "Supplementary shared-resource safeguards need verified isolation evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.02",
         "itsp171-03.13.03",
@@ -3421,6 +3989,8 @@
       "title": "Unallocated supplementary communications rows need per-objective sponsor decisions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.06"
       ],
@@ -3434,6 +4004,8 @@
       "title": "Supplementary network deny-by-default settings need observed rule evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.08"
       ],
@@ -3447,6 +4019,8 @@
       "title": "Supplementary confidentiality in transit and storage needs scoped protection evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.09"
       ],
@@ -3460,6 +4034,8 @@
       "title": "Supplementary network session disconnect needs timed verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.10"
       ],
@@ -3473,6 +4049,8 @@
       "title": "Supplementary key lifecycle governance needs protected operating evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.11"
       ],
@@ -3486,6 +4064,8 @@
       "title": "Supplementary cryptography approval needs exact deployment configuration evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.12"
       ],
@@ -3499,6 +4079,8 @@
       "title": "Supplementary collaboration remote activation and indicator settings need observed evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.13"
       ],
@@ -3512,6 +4094,8 @@
       "title": "Supplementary mobile code governance needs reviewed authorization and monitoring evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.15"
       ],
@@ -3525,6 +4109,8 @@
       "title": "Supplementary communications session authenticity needs scoped validation evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.01"
       ],
@@ -3538,6 +4124,8 @@
       "title": "Supplementary physical access authorization needs verified identity and removal records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.10.07"
       ],
@@ -3551,6 +4139,8 @@
       "title": "Supplementary facility access controls need tested boundary and visitor evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.13.01"
       ],
@@ -3564,6 +4154,8 @@
       "title": "Supplementary managed interfaces and public subnet separation need deployment verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.01"
       ],
@@ -3577,6 +4169,8 @@
       "title": "Supplementary flaw remediation requires dated release and update records"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.02"
       ],
@@ -3590,6 +4184,8 @@
       "title": "Supplementary malicious code protection needs deployment and response evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.03"
       ],
@@ -3603,6 +4199,8 @@
       "title": "Security advisory receipt and dissemination need operational evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.06"
       ],
@@ -3616,6 +4214,8 @@
       "title": "System monitoring needs coverage and detection verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.08"
       ],
@@ -3629,6 +4229,8 @@
       "title": "Specified information handling and retention need sponsor approval"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.09"
       ],
@@ -3642,6 +4244,8 @@
       "title": "Dedicated administration workstation scope and isolation need verification"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.14.04",
         "itsp171-03.14.05",
@@ -3657,6 +4261,8 @@
       "title": "Unallocated integrity rows need signed source and scope reconciliation"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.15.01"
       ],
@@ -3670,6 +4276,8 @@
       "title": "Specified information security procedures need sponsor adoption and review evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.15.02"
       ],
@@ -3683,6 +4291,8 @@
       "title": "System security and privacy plan needs sponsor approval and boundary evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.15.03"
       ],
@@ -3696,6 +4306,8 @@
       "title": "Rules of behaviour need documented acknowledgement before access"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.16.01"
       ],
@@ -3709,6 +4321,8 @@
       "title": "Security engineering principles need assessed implementation evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.16.02"
       ],
@@ -3722,6 +4336,8 @@
       "title": "Unsupported components need replacement or an approved mitigation path"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.16.03"
       ],
@@ -3735,6 +4351,8 @@
       "title": "External specified information services need requirements and ongoing oversight evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.17.01"
       ],
@@ -3748,6 +4366,8 @@
       "title": "Supply chain risk management plan needs lifecycle and access evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.17.02"
       ],
@@ -3761,6 +4381,8 @@
       "title": "Acquisition strategies and contract tools need procurement evidence"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "itsp171-03.17.03"
       ],
@@ -3774,6 +4396,8 @@
       "title": "Supply chain weaknesses and security requirements need operational evidence"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-16",
         "cgp-37-2",
@@ -3787,6 +4411,8 @@
       "title": "The CGP, ITAR and EAR compartments have no fixed meaning that ties them to a regime"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-03",
         "ac-21",
@@ -3803,6 +4429,8 @@
       "title": "Clearances are self-declared; there is no signed person decision for export regimes"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-04",
         "sa-09",
@@ -3817,6 +4445,8 @@
       "title": "Endpoints carry a highest label and a region, but no export eligibility"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-04",
         "sc-07",
@@ -3831,6 +4461,8 @@
       "title": "Agent network tools are refused only by the no-agent-tools flag, not by the marking"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "au-09",
         "au-10",
@@ -3845,6 +4477,8 @@
       "title": "Export-control records are not tamper-evident and cannot be exported"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "au-11",
         "si-12",
@@ -3859,6 +4493,8 @@
       "title": "No retention rule, and no content hash in records, so a later marking cannot find earlier sends"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ir-04",
         "ir-06",
@@ -3873,6 +4509,8 @@
       "title": "No incident flow for a possible release"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "sc-12",
         "sc-13",
@@ -3886,6 +4524,8 @@
       "title": "The product's cryptography is not run as a FIPS 140 validated module"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ra-02",
         "ac-16"
@@ -3898,6 +4538,8 @@
       "title": "Setup asks nothing about export-controlled work, and there is no export-control contact topic"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "controls": [
         "ac-03",
         "ac-04",
@@ -3913,6 +4555,8 @@
       "title": "The hub, the data platform and the relay do not know export decisions"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "ca-02",
@@ -3925,6 +4569,8 @@
       "title": "No Controlled goods or ITAR overlay on the dashboard"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "44",
       "controls": [
         "sa-05",
@@ -3937,6 +4583,8 @@
       "title": "No published guidance for organizations on controlled goods and ITAR"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "si-02"
       ],
@@ -3952,6 +4600,8 @@
       "title": "The Red Hat build of Keycloak release that fixes CVE-2026-6856 is not confirmed"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-02.02",
         "sc-05"
@@ -3968,6 +4618,8 @@
       "title": "The hosted deployment has no recorded load test at the target session count"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-02.02"
       ],
@@ -3983,6 +4635,8 @@
       "title": "Sync hub load at its per-hub target is not measured under the hosted load test"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
       "controls": [
         "sc-12",
         "sc-13"
@@ -3999,6 +4653,8 @@
       "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
       "controls": [
         "sc-08",
         "sc-13"
@@ -4015,6 +4671,8 @@
       "title": "Traefik with Theia Cloud is untested and RKE2's Traefik FIPS build is not confirmed"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "sc-12"
       ],
@@ -4030,6 +4688,8 @@
       "title": "The OpenBao kms-pkcs11 plugin is not tested against the chosen HSM"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "cp-02.02"
       ],
@@ -4045,6 +4705,8 @@
       "title": "Cold-start time for persistent workspaces is not measured"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-11"
       ],
@@ -4060,6 +4722,8 @@
       "title": "Step-up re-authentication through the session sidecar is not shown"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "ia-02",
@@ -4076,6 +4740,8 @@
       "title": "The signInKeys levels have no evidence rule yet"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "ia-02",
@@ -4092,6 +4758,8 @@
       "title": "The shared relying-party ID has no evidence rule yet"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "controls": [
         "ia-05.02"
       ],
@@ -4107,6 +4775,8 @@
       "title": "Large smart-card revocation lists are not tested"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
       "controls": [
         "sc-13"
       ],
@@ -4122,6 +4792,8 @@
       "title": "No FIPS 140-3 certificate names the BC-FIPS version Keycloak 26.8 asks for"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
       "controls": [
         "sc-13"
       ],
@@ -4137,6 +4809,8 @@
       "title": "Harbor and Zot have no build made with a validated module"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-13",
@@ -4156,6 +4830,8 @@
       "title": "RKE2 has no statements for four of its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "si-02",
@@ -4177,6 +4853,8 @@
       "title": "Keycloak has no statements for its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-13",
@@ -4202,6 +4880,8 @@
       "title": "Theia Cloud has no statements for its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-13",
@@ -4221,6 +4901,8 @@
       "title": "oauth2-proxy has no statements for its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-12"
@@ -4236,6 +4918,8 @@
       "title": "The OpenBao key ceremony has no statement"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sr-05"
@@ -4251,6 +4935,8 @@
       "title": "Handling of export-controlled HSM hardware has no statement"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-13",
@@ -4267,6 +4953,8 @@
       "title": "The ingress has no statement for its HAProxy FIPS condition"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "si-07",
@@ -4286,6 +4974,8 @@
       "title": "The image registry has no statements for its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-13",
@@ -4303,6 +4993,8 @@
       "title": "The workbench image has no statements for its section 10 conditions"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-12",
@@ -4319,6 +5011,8 @@
       "title": "cert-manager is not assessed and has no CA issuer statement"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "cm-06",
@@ -4336,6 +5030,8 @@
       "title": "The sync hub is not re-assessed for the hosted deployment"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "sc-28"
@@ -4351,6 +5047,8 @@
       "title": "The site storage class is not assessed"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
         "au-09"
@@ -4364,6 +5062,646 @@
       ],
       "remediation": "Record the fit check for the log and metrics stores, a log store that is not AGPL (Loki is not chosen), then add their statements with test rules and deployment observations.",
       "title": "The site log and metrics stores are not assessed"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-13",
+        "ia-07"
+      ],
+      "id": "G347",
+      "ownerRole": "shared",
+      "poam": "g347",
+      "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays.",
+      "title": "The extension's Node and Electron cryptography does not run in a validated module"
+    },
+    {
+      "appliesAt": "protected-c",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G348",
+      "ownerRole": "shared",
+      "poam": "g348",
+      "profiles": [
+        "classified"
+      ],
+      "remediation": "The post-quantum cell key wrap uses ML-KEM-768 with P-256, which ITSP.40.111 lists up to Protected B. Above that, ask the Cyber Centre for advice through your organization's sponsor, then build wrap version 3 (ML-KEM-1024 with P-384, feature wrap@3). Until then readers refuse version 3 as not supported yet.",
+      "title": "ML-KEM-768 is listed only up to Protected B"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "33.2",
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G349",
+      "ownerRole": "maintainers",
+      "remediation": "The current cell key wrap uses X25519, which ITSP.40.111 version 5 does not list. Phase 33.2 replaces it with cell-wrap/v2 (P-256 with ML-KEM-768). The condition closes when Phase 33.2 merges and every project has switched to the new keys.",
+      "title": "X25519 cell key wraps are not listed in ITSP.40.111"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "ia-07"
+      ],
+      "id": "G350",
+      "ownerRole": "maintainers",
+      "remediation": "Verified credentials, DID logs and status lists are signed with Ed25519. FIPS 186-5 approves it, but no module in the stack runs it as validated: Node's FIPS mode is off, OpenBao has no FIPS build (issue 1409), the OpenSSL 3.1.2 provider (CMVP 4985) does not allow it, and the RHEL 9 provider (CMVP 5573) does not offer it. A site whose policy requires validated modules uses the fallback from decision O8: ecdsa-jcs-2019 credentials, with P-256 keys for officers and status lists.",
+      "title": "Ed25519 does not run in a validated module anywhere in the stack"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G351",
+      "ownerRole": "shared",
+      "poam": "g351",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition.",
+      "title": "OpenBao has no FIPS 140-3 validated build"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G352",
+      "ownerRole": "shared",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "In development the organization site key lives in a SoftHSM2 token on the owner's computer. Production needs the key generated inside your organization's HSM. The install check refuses a production site whose signing token is SoftHSM2, and refuses a bundle signed by one. G324 records the HSM model's certificate.",
+      "title": "The organization site key is in SoftHSM2 until a real HSM is installed"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G353",
+      "ownerRole": "maintainers",
+      "poam": "g353",
+      "remediation": "OpenBao cannot do ECDH, so the key that opens objects sent to your organization is an RSA-3072 key held in OpenBao, not a P-256 key. It works with partners that use RSA key access. Revisit it when OpenBao adds ECDH or the exchange gains a post-quantum key access type.",
+      "title": "The exchange receiving key is RSA-3072 because OpenBao has no ECDH"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "closesInPhase": "45.2",
+      "controls": [
+        "ac-16",
+        "ac-21"
+      ],
+      "id": "G354",
+      "ownerRole": "shared",
+      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor. Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
+      "title": "ZTDF conformance is not verified"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21"
+      ],
+      "id": "G355",
+      "ownerRole": "owner",
+      "poam": "g355",
+      "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
+      "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13",
+        "ac-21"
+      ],
+      "id": "G356",
+      "ownerRole": "shared",
+      "poam": "g356",
+      "remediation": "Partners have no post-quantum key type, so key access at the boundary is classical (RSA or P-256), which a future quantum computer could open from a recording. Each export records the key access algorithm, the export dialog says so, and your organization's security officer can set the highest level a partner may receive that way. The security officer accepts this condition for each partner. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-12 and D-13.",
+      "title": "Partners without post-quantum support get classical key access only"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "cp-10",
+        "si-07"
+      ],
+      "id": "G357",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The admission policy looks up each image's signature in the site registry, and Harbor serves its own images, so a Harbor pod that stops cannot start again under Deny. Zot sites have an exact-digest exception for the Zot pod. Harbor sites need the same form for Harbor's pods, or preloaded and accepted images, before a Harbor site runs in Deny.",
+      "title": "A Harbor registry cannot restart when image admission is set to Deny"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "46",
+      "controls": [
+        "ac-03",
+        "ia-02"
+      ],
+      "id": "G358",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The operator's template gives oauth2-proxy a sign-in exemption for the monitor path that is not anchored. Phase 46 anchors it. Rebuild the operator image from that template when Phase 46 merges, and check that only the exact monitor path skips sign-in.",
+      "title": "The session operator image must be rebuilt with the anchored sign-in exemption"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sc-08",
+        "sc-23",
+        "ia-05"
+      ],
+      "id": "G359",
+      "ownerRole": "maintainers",
+      "poam": "g359",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Upstream Theia Cloud makes the operator trust every TLS certificate for its session probe, ships the service with OIDC TLS verification set to none, and logs the service's client secret at start. Our images fix all three. File the issues with Eclipse Theia Cloud, and keep the build checks so that a version update cannot bring them back.",
+      "title": "Three Theia Cloud security issues are fixed only in our build"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ia-02",
+        "ia-05.02"
+      ],
+      "id": "G360",
+      "ownerRole": "maintainers",
+      "poam": "g360",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The HAProxy ingress checks client certificates on the whole HTTPS frontend, so with smart cards on, every site address asks for a certificate, not only Keycloak's. Keycloak also reads the certificate from a header, so a site must add the NetworkPolicy that lets only HAProxy reach Keycloak before it turns smart cards on. Limit the request to the Keycloak host, or record the limit for your organization.",
+      "title": "Smart-card sign-in asks for a certificate on every host"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "47",
+      "controls": [
+        "sa-11",
+        "cm-02"
+      ],
+      "id": "G361",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The pinned ubi9/nginx-126 placeholder prints its usage and exits, so a placeholder session never runs. The lab needs a placeholder image that keeps running for its session checks. No production site uses the placeholder.",
+      "title": "The lab placeholder session image exits at once"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "sc-05",
+        "si-11"
+      ],
+      "id": "G362",
+      "ownerRole": "maintainers",
+      "poam": "g362",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Upstream Theia Cloud fails with a NullPointerException when it checks the instance limit while another new session has no status yet. Starts one at a time work, and the start page launches one session for each person. Report it upstream, and check with the load test's start bursts whether different people starting together are affected.",
+      "title": "Starting two sessions at the same moment can fail in Theia Cloud"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-13",
+        "ia-07"
+      ],
+      "id": "G363",
+      "ownerRole": "maintainers",
+      "poam": "g363",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Keycloak's FIPS mode was deferred when the stack was built. Turn on strict FIPS mode with a BC-FIPS version that a certificate names (G332), on a FIPS host, and test sign-in with passkeys and smart cards in that mode.",
+      "title": "Keycloak does not run in FIPS mode yet"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-13",
+        "cm-02"
+      ],
+      "id": "G364",
+      "ownerRole": "shared",
+      "poam": "g364",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The site storage images are not built on a UBI base, and the hosted design does not accept Debian or Alpine bases at Protected B. Record the rebuild path on UBI 9 and its feasibility. Until it lands, your organization's authorizing official decides whether to accept the condition.",
+      "title": "Longhorn's images are not built on UBI"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-13",
+        "au-09"
+      ],
+      "id": "G365",
+      "ownerRole": "shared",
+      "poam": "g365",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The site log store runs OpenSearch, which has no FIPS 140-3 validated build. Record the rebuild path or a validated alternative and its feasibility. Until then your organization's authorizing official decides whether to accept the condition.",
+      "title": "OpenSearch has no FIPS build"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "sc-13",
+        "cm-02"
+      ],
+      "id": "G366",
+      "ownerRole": "shared",
+      "poam": "g366",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The hub image builds on a Debian base, which the hosted design does not accept at Protected B, and that base is not assessed for hosting. Rebase it on UBI 9 with the OpenSSL FIPS provider. Until then your organization's authorizing official decides whether to accept the condition.",
+      "title": "The sync hub image is on a Debian base"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "au-08",
+        "sc-45"
+      ],
+      "id": "G367",
+      "ownerRole": "shared",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Signatures, certificates, credentials and audit records all depend on correct clocks. A site with no internet needs its own time source and a largest allowed clock error, which the site checks and alerts on. Phase 47 adds time for air-gapped sites. G139 covers your organization's evidence for its time settings.",
+      "title": "Air-gapped sites have no trusted time source yet"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "au-08",
+        "ia-05"
+      ],
+      "id": "G368",
+      "ownerRole": "maintainers",
+      "remediation": "DID log resolution must fail for an entry dated more than a few minutes ahead of the resolver's clock. An edge whose clock runs slow would then refuse a correct import. Treat that case as not yet valid and try again later, never as a forgery, and keep edge clocks correct through the site time source.",
+      "title": "An edge clock running slow refuses valid new DID log entries"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ac-02",
+        "ia-05",
+        "ia-05.02"
+      ],
+      "id": "G369",
+      "ownerRole": "shared",
+      "poam": "g369",
+      "remediation": "An edge that cannot reach HQ uses the last status list it received. A revoked credential stays trusted there until that list passes the longest offline time allowed for the level, which your organization's security officer sets in the signed policy. The defaults are 7 days for Protected A, 72 hours for Protected B and 24 hours for any classified level. Your organization's authorizing official accepts the lag for each level.",
+      "title": "A revoked credential stays trusted at an offline edge until its list is too old"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ac-02",
+        "ia-03",
+        "ia-05"
+      ],
+      "id": "G370",
+      "ownerRole": "shared",
+      "poam": "g370",
+      "remediation": "A removed device's key stays trusted by people who have not yet received the roster update, and a device that stays offline keeps its key until it next connects. Keep roster updates moving through the hub and the offline transports, and state the limit in the security plan so that your organization's authorizing official can accept it.",
+      "title": "A device key held offline stays trusted until its next contact"
+    },
+    {
+      "appliesAt": "confidential",
+      "blocksProduction": false,
+      "controls": [
+        "ac-02",
+        "ia-05"
+      ],
+      "id": "G371",
+      "ownerRole": "owner",
+      "poam": "g371",
+      "profiles": [
+        "classified"
+      ],
+      "remediation": "An edge holding classified data accepts only a status list signed in the last 24 hours, even when nothing changed. Every list signature needs an officer's passkey step-up, so a security officer must sign again at least daily for such edges. Your organization plans that duty, with a backup officer, before a classified edge goes live.",
+      "title": "Classified edges need a status list signed every day"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sr-03",
+        "sr-11"
+      ],
+      "id": "G372",
+      "ownerRole": "maintainers",
+      "poam": "g372",
+      "remediation": "The Digital Bazaar packages used to test verified credentials have no build provenance, and their cryptosuite has not been updated in two years. They are used in tests only and never shipped. Keep them in test scope in the fit register, and replace them if they stop working or a maintained set appears.",
+      "title": "The credential test packages have no build provenance"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "cm-02"
+      ],
+      "id": "G373",
+      "ownerRole": "maintainers",
+      "poam": "g373",
+      "remediation": "CI refuses an extension package over 14 MiB, and the package has little room left. Watch its size in each release, and move large bundled data out of the package before the limit blocks a release.",
+      "title": "The extension package is close to its size limit"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "46",
+      "controls": [
+        "cm-02",
+        "cm-03",
+        "si-02"
+      ],
+      "id": "G374",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Plan 46-09 makes each person's session run the workbench version the site has installed, so people never update by hand and every session stays compatible with its site. It is planned and not built. A site should not go live until sessions follow its version.",
+      "title": "Sessions do not yet follow the site version"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-07",
+        "cm-08",
+        "sa-04"
+      ],
+      "id": "G375",
+      "ownerRole": "owner",
+      "poam": "g375",
+      "remediation": "Each component in the fit register says why the architecture needs it. Many entries were written by an agent and still wait for the owner to confirm them. The owner reviews each role and its fit, and the reviewer field then names the owner.",
+      "title": "Component roles in the fit register wait for the owner's review"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ac-10",
+        "sc-05"
+      ],
+      "id": "G376",
+      "ownerRole": "shared",
+      "poam": "g376",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Each person has one hosted workbench session (plan 33-24), and opening the workbench in a second place uses the same session. Your organization decides whether people need more than one, and the design records the choice.",
+      "title": "A person can have only one hosted session at a time"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "sc-12",
+        "sc-08"
+      ],
+      "id": "G377",
+      "ownerRole": "maintainers",
+      "remediation": "Plan 33-23 adds the session and person signers and the envelope code that plan 33.2-05 builds on. It is not on main yet, so 33.2-05 waits. Merge 33-23 before the Phase 33.2 wave that needs it.",
+      "title": "The envelope code from plan 33-23 is not on main"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "74.1",
+      "controls": [
+        "cm-10",
+        "sa-04"
+      ],
+      "id": "G378",
+      "ownerRole": "shared",
+      "remediation": "Nemotron models are under the NVIDIA Open Model License. Command A+ may be used only through Cohere Model Vault or under a commercial licence from Cohere. Record each model's licence in its passport, and refuse a model whose licence does not allow your organization's use.",
+      "title": "Model licences limit which models a site may run"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ra-03"
+      ],
+      "id": "G379",
+      "ownerRole": "owner",
+      "poam": "g379",
+      "remediation": "Automated labelling proposes classification levels for your organization's data. The Directive on Automated Decision-Making does not bind us, but its algorithmic impact assessment is a useful check. Complete it voluntarily before automated labelling is turned on, and share the result with your organization.",
+      "title": "No algorithmic impact assessment covers automated labelling"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "93",
+      "controls": [
+        "ac-16",
+        "sa-11"
+      ],
+      "id": "G380",
+      "ownerRole": "maintainers",
+      "remediation": "Labels are proposed by local models that run quantized. Quantization can shift a model's confidence, so thresholds set on the full model may be wrong. Calibrate each quantized model's confidence on your organization's audit sample, level by level, before its labels apply.",
+      "title": "Label confidence is not calibrated on quantized models"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "85",
+      "controls": [
+        "cp-02.02",
+        "sc-05"
+      ],
+      "id": "G381",
+      "ownerRole": "maintainers",
+      "remediation": "How many items the local models can label in an hour on your organization's hardware is not measured. Measure it on the target hardware before sizing a site, and state no figure until a recorded run gives one.",
+      "title": "Classification throughput is not measured"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "ca-02",
+        "ca-07"
+      ],
+      "id": "G382",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The readers that turn a site's evidence export into observations follow upstream formats that have not been run on the rig. They count only realm-wide sign-in flows and only cluster-wide admission policies. Run the export on the rig, fix any difference, and read client-level flow overrides and namespaced policies too.",
+      "title": "The deployment evidence readers have not run against a real site"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": true,
+      "controls": [
+        "cm-08",
+        "sc-13"
+      ],
+      "id": "G383",
+      "ownerRole": "maintainers",
+      "poam": "g383",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The upstream openbao-ubi image is built on RHEL 10, while the fit register describes it as UBI 9 and the SoftHSM2 build stage is UBI 9. Correct the register, and record which OpenSSL FIPS provider certificate applies to the UBI 10 base.",
+      "title": "The OpenBao base image is UBI 10, not the UBI 9 the register records"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "si-07"
+      ],
+      "id": "G384",
+      "ownerRole": "shared",
+      "poam": "g384",
+      "remediation": "ADatP-5636 makes the signed binding mandatory, and its profile is in ADatP-4778.2 chapter 2, which your organization does not hold yet. Bindings are signed now with our own clearly marked provisional profile. Replace it when ADatP-4778.2 arrives. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+      "title": "Signed NATO bindings use a provisional profile"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G385",
+      "ownerRole": "owner",
+      "poam": "g385",
+      "remediation": "Writing a label in the NATO policy itself needs the value lists of AC/322-N(2011)0130-REV1. Exports label in your organization's national policy and the common partner policy, so the lists are needed only if your organization decides to write NATO policy labels. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03.",
+      "title": "NATO policy value lists are needed only to write labels in NATO policy"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "sa-11"
+      ],
+      "id": "G386",
+      "ownerRole": "owner",
+      "poam": "g386",
+      "remediation": "No schema, prose or example from ADatP-4774 or 4778 enters the repository; the test vectors are our own. Whether the schemas may be kept as test data is a question to your organization's national security officer. Until it is answered they stay out of the repository. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-02.",
+      "title": "Whether the NATO schemas may be kept as test data is not answered"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-21",
+        "sc-12"
+      ],
+      "id": "G387",
+      "ownerRole": "owner",
+      "poam": "g387",
+      "remediation": "Your organization runs no key access server for partners, so an export wrapped to a partner's key is final: nothing can withdraw access after release. Your organization's authorizing official accepts that risk, or a key access server at your site is planned. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-11.",
+      "title": "An export cannot be revoked once it is wrapped to a partner key"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ac-03"
+      ],
+      "id": "G388",
+      "ownerRole": "maintainers",
+      "poam": "g388",
+      "remediation": "Plan 33.1-01 keeps the typed-in clearance field of Phase 31's member invite and admit entries readable, so existing logs still replay. It grants nothing: access comes only from verified credentials. Remove it once no log from before Phase 33.1 remains. Source: .planning/phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md.",
+      "title": "Phase 31's typed-in clearance stays readable for replay"
     }
   ]
 }

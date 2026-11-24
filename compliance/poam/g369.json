@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-02",
+    "ia-05",
+    "ia-05.02"
+  ],
+  "gap": "G369",
+  "id": "g369",
+  "milestones": [
+    {
+      "phase": "71",
+      "title": "Edges refuse credentials whose status list is older than the level allows"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "An edge that cannot reach HQ uses the last status list it received. A revoked credential stays trusted there until that list passes the longest offline time allowed for the level, which your organization's security officer sets in the signed policy. The defaults are 7 days for Protected A, 72 hours for Protected B and 24 hours for any classified level. Your organization's authorizing official accepts the lag for each level.",
+  "title": "A revoked credential stays trusted at an offline edge until its list is too old"
+}

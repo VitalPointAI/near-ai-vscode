@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ac-16"
+  ],
+  "gap": "G385",
+  "id": "g385",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Your organization decides whether it writes labels in NATO policy"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Writing a label in the NATO policy itself needs the value lists of AC/322-N(2011)0130-REV1. Exports label in your organization's national policy and the common partner policy, so the lists are needed only if your organization decides to write NATO policy labels. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03.",
+  "title": "NATO policy value lists are needed only to write labels in NATO policy"
+}
