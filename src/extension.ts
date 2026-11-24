@@ -22,6 +22,7 @@ import { modelOptions } from './services/chatBridge';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
+import { panelCommand } from './services/webview/openPanel';
 import { registerAgentActivity } from './services/activityView';
 import { registerTeamLive } from './services/teamLiveView';
 import { registerStaffRoom } from './services/staffRoomPanel';
@@ -154,11 +155,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerModelComparison(context, auth, gate);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('nearAi.setup', () => void openOnboarding(context, {
+    vscode.commands.registerCommand('nearAi.setup', panelCommand(() => openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(context, auth, sidebar),
       showProgress: () => showStatus(auth)
-    })),
+    }), 'Set Up')),
     vscode.commands.registerCommand('nearAi.status', () => showStatus(auth)),
     vscode.commands.registerCommand('nearAi.selectProfile', () => selectProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.removeProfile', () => removeProfile(auth, sidebar)),

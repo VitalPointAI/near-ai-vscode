@@ -1,0 +1,28 @@
+# Compatibility inventory: the existing extension in Theia
+
+**Direction (owner, 2026-11-23):** Theia, in the Sterling edition, is the only development target, and Phases 32.1 and 33 are built **natively** in Theia, not through the VSIX compatibility host. See the hosting design at [`.planning/research/multiuser-hosting/DESIGN.md`](../.planning/research/multiuser-hosting/DESIGN.md) and Phases 46 to 48 in the [roadmap](../.planning/ROADMAP.md).
+
+This page is an **inventory, not a cutover plan.** It records which current workflows run through the pinned compatibility host, which have native ports, and which are blocked. Use it to decide what each native port replaces, and to keep existing behaviour checked while the native workbench is built. Keep the TypeScript engine and project files shared. The VSIX in the compatibility host is a reference and a parity check. It is not the shipping path.
+
+| Area | Work and acceptance |
+| --- | --- |
+| Activation and setup | Load the latest released VSIX in the Theia compatibility host. Confirm activation for a clean workspace and an existing project. Complete onboarding and project/profile switching. Verify commands, settings, welcome content, and webview asset loading. |
+| Project, team, and workspace UI | Exercise Team Studio, Team Live, board, activity, project configuration, and memory with existing project files. Confirm read, validation, save, reopen, cancellation, and project switching. The native Team Studio preview exercises parser reuse and read-only synthetic projects. |
+| Chat and agent controls | Check the extension sidebar and chat command, history, steering, pause, resume, approvals, emergency stop, and reports. Replace unsupported host chat entry points with the native view as needed. Use deterministic providers or mocks for parity checks. |
+| Accounts and integrations | Verify provider profiles, OAuth callbacks, secrets after restart, sync and recovery, offline/online hosting, model selection, spending controls, web search, and MCP. Preserve the product's authorization and secret storage contracts under the new host. |
+| Staff and governance | Verify Staff Room, roster and project membership, approvals and decision records, policy editing and enforcement, labels, and audit history in an isolated sample project. |
+| Compliance and exports | Verify the security posture panel, evidence views and exports, analytics, and SA&A package generation and downloads using synthetic inputs. Verify that unsupported controls and missing evidence are identified accurately. |
+| Status of each flow | Record each contributed command and UI flow as verified through the compatibility host, ported natively, or blocked with a tracked fix. Restart persistence of secrets depends on Phase 46's per-person key store; per-person sessions and sign-in depend on Phases 46 and 47. |
+
+Run each group against the actual browser container. Installed and registered commands are only the activation check. A workflow requires a browser test through its normal entry point and the same outcome as the supported extension.
+
+## Confirmed host differences
+
+- Theia 1.77 returns a stub from `vscode.chat.createChatParticipant`. Preserve the NEAR AI chat behavior through a working Theia command and chat view. Verify the existing sidebar path independently. [Plugin API implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/plugin/plugin-context.ts)
+- Theia 1.77 forwards VSIX `SecretStorage` calls to its workbench credentials service. Its default server falls back to an in-memory provider when the OS credential store is unavailable. A browser container must demonstrate an available durable store and successful secret retrieval after restart before accounts and sync pass parity. [SecretStorage bridge](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/main/browser/secrets-main.ts) · [Key store implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/core/src/node/key-store-server.ts)
+
+## First browser checks
+
+The released 0.4.36 VSIX started under Theia 1.77. Chromium rendered the Setup, Team Studio, Chat, and Compare Models webviews, and opened the New Team wizard. Setup and Compare Models returned live webview objects from their command handlers, which caused an RPC encoding error. Controlled reruns with each handler returning no value opened the same view without that error.
+
+The locally built VSIX with both command fixes passed the same four webview checks in the Docker workbench without uncaught page errors. A synthetic team saved through the New Team wizard produced a Markdown file and reappeared in the library from a fresh browser session. Configured-provider behavior, credential persistence across container restart, and the rest of the workflow matrix still require verification.

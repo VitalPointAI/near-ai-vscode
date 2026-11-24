@@ -1,0 +1,54 @@
+{
+  "name": "@near-ai/sterling-workbench-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/browser/*.css lib/browser/"
+  },
+  "dependencies": {
+    "@theia/core": "1.77.0"
+  },
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/team-preview-frontend-module",
+      "backend": "lib/node/team-preview-backend-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-welcome-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-documentation-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-compliance-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-portfolio-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-work-areas-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-resource-inventory-module"
+    },
+    {
+      "backend": "lib/node/sterling-backend-module"
+    },
+    {
+      "frontend": "lib/browser/session-identity-frontend-module",
+      "backend": "lib/node/session-identity-backend-module"
+    },
+    {
+      "frontend": "lib/browser/secret-store-frontend-module",
+      "backend": "lib/node/key-store-backend-module"
+    },
+    {
+      "backend": "lib/node/key-service-backend-module"
+    },
+    {
+      "frontend": "lib/browser/session-activity-frontend-module",
+      "backend": "lib/node/session-activity-backend-module"
+    }
+  ]
+}

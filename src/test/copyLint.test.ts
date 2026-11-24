@@ -207,6 +207,67 @@ test('D-41 rule 3: a misspelt brand and a brand prefix on a title are counted', 
   assert.deepEqual(one('NEAR AI: Something'), {}, 'a prefix only counts on a title');
 });
 
+// ---- D-33: the Sterling workbench's sources and its edition names (Phase 46) ----
+
+const WORKBENCH_PAGE = 'workbench/extension/src/browser/example-module.ts';
+
+test('D-33 workbench: the real scan reads the workbench browser, common and backend sources, and no build output, test or declaration file', () => {
+  const files = copySourceFiles();
+  for (const expected of ['workbench/extension/src/browser/sterling-welcome-module.ts', 'workbench/extension/src/common/team-preview.ts',
+    'workbench/extension/src/node/team-preview-reader.ts']) assert.ok(files.includes(expected), expected);
+  const outside = files.filter((file) => file.startsWith('workbench/') && !/^workbench\/extension\/src\/(?:browser|common|node)\//.test(file));
+  assert.deepEqual(outside, [], 'nothing under workbench/node_modules, workbench/lib or workbench/test');
+  assert.ok(!files.some((file) => file.startsWith('workbench/') && (file.endsWith('.d.ts') || !file.endsWith('.ts'))), 'only .ts sources, never a .d.ts');
+});
+
+test('D-33 rule 3: the Sterling edition names count zero, while sovereign elsewhere and a misspelt NEAR AI still count', () => {
+  const edition = one('Sterling Sovereign AI (Canadian Defence Edition)', WORKBENCH_PAGE);
+  assert.deepEqual(edition, {});
+  const command = one('SovAI: Open Team Studio Preview', WORKBENCH_PAGE, true);
+  assert.equal(command.glossary, undefined, 'SovAI is the command category');
+  assert.equal(command.brand, undefined, 'a SovAI prefix is not a brand prefix');
+  assert.deepEqual(one('Your sovereign data stays here.', WORKBENCH_PAGE), { glossary: 1 }, 'sovereign outside the edition name is the glossary word');
+  assert.deepEqual(one('Sovereign AI for your organization.', WORKBENCH_PAGE), { glossary: 1 }, 'only the whole edition name is a name');
+  assert.deepEqual(one('Open Near AI now.', WORKBENCH_PAGE), { brand: 1 });
+  // The Get Started heading breaks the edition name over two lines; it is still one name.
+  const heading = "node.innerHTML = '<h1 id=\"sterling-title\">Sterling<br>Sovereign AI</h1>';";
+  assert.deepEqual(texts(heading, WORKBENCH_PAGE), ['Sterling Sovereign AI']);
+  assert.deepEqual(countHits(extractCopy(heading, WORKBENCH_PAGE), WORKBENCH_PAGE), {});
+});
+
+test('D-33 workbench: a workbench page gives its text arguments, and not class names, Symbol descriptions, command ids or CSS imports', () => {
+  const source = [
+    `import './team-preview.css';`,
+    `export const TeamPreviewService = Symbol('TeamPreviewService');`,
+    `const open = { id: 'sterling.getStarted', label: 'Get Started', command: 'sterling.getStarted' };`,
+    `function element(tag, className, text) { return document.createElement(tag); }`,
+    `header.append(element('h1', undefined, 'Get Started'), element('div', 'team-preview'), element('div', 'card wide', 'Ready'));`
+  ].join('\n');
+  assert.deepEqual(texts(source, WORKBENCH_PAGE), ['Get Started', 'Get Started', 'Ready']);
+  // The class name argument is found from the helper's own parameters: a module whose helper takes (tag, text, className) keeps its text as copy.
+  const other = [
+    `function element(tag, text, className) { return document.createElement(tag); }`,
+    `body.append(element('p', 'Published evidence for your review', 'card wide'));`
+  ].join('\n');
+  assert.deepEqual(texts(other, 'workbench/extension/src/common/example.ts'), ['Published evidence for your review']);
+});
+
+test('W3 workbench backend: what it sends to the browser is copy (text constants, result fields, refused() arguments), a start error is not', () => {
+  const backend = 'workbench/extension/src/node/example.ts';
+  const source = [
+    `const UNAVAILABLE = { kind: 'missing', message: 'The shipped sample is unavailable.' };`,
+    `const projects = [{ id: 'orchard', title: 'Orchard sample', fixture: 'orchard.md' }];`,
+    `const LOCAL_TEXT = 'Signing is not available on this computer.';`,
+    `function read(error) { return { kind: 'invalid', message: error instanceof Error ? error.message : 'The sample could not be read.' }; }`,
+    `function sign() { return refused('Your signing key is not set up yet.', 'Ask your administrator.'); }`,
+    `function start() { throw new Error('STERLING_MODEL_SERVERS must be a JSON array of addresses.'); }`,
+    `console.error('The Sterling workbench cannot start.');`,
+  ].join('\n');
+  assert.deepEqual(texts(source, backend), ['The shipped sample is unavailable.', 'Orchard sample', 'Signing is not available on this computer.',
+    'The sample could not be read.', 'Your signing key is not set up yet.', 'Ask your administrator.']);
+  assert.deepEqual(countHits(extractCopy(`const missing = { message: 'This sample has no team file.' };`, backend), backend), { [backend]: { 'bare-team': 1 } });
+});
+
 // ---- Rule 5: the provider's name before organization (Task 2) ----
 
 test('D-41 rule 5: the provider\'s name before organization is counted in its three spellings', () => {

@@ -91,6 +91,11 @@ this page in the same PR.
 - `hub` is built the same way for the sync hub in `hub/`: its own lockfile, Node 26.13.1, a Node 24
   kept only for the hub's older-Node refusal tests (`NEAR_AI_HUB_OLD_NODE`), and the hub image
   build with its container and Compose hardening tests.
+- `workbench` builds and tests the Sterling workbench in `workbench/` on Node 26.13.1: `npm ci
+  --ignore-scripts`, `npm audit` (report-only for now), lint, unit tests, the image build, and the
+  container suite with Playwright driving that image in Chromium. It also writes the image's SBOM,
+  Grype scan and digest. It is not yet a required check (like `compliance`). The Release workflow
+  signs the image it publishes.
 - Every action is pinned to a full commit SHA; the workflow token is read-only and checkouts do
   not keep credentials.
 

@@ -319,7 +319,7 @@ Plans:
 ### Phase 33.1: Assigned positions and handover (INSERTED)
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
-**Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review).
+**Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review); Phase 71 (core) (credentials, `did:webvh`, status lists, the checker and issuance; revised 2026-11-24, owner: credentials): 33.1-04 and waves 4 to 7 wait for its checker (71-07), and 33.1-12 and the observer plans wait for the hub checks (71-09) and issuance (71-12) (33.1 D-38); Phase 33.2 (the wrap entry point; it merges between 33.1 waves 7 and 8): 33.1-19 and 33.1-23 to 33.1-26 wait for 33.2-02, 33.2-05 and 33.2-06 (33.1 D-41).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
 **Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08, POST-09 (in REQUIREMENTS.md since 2026-11-24; POST-09, observer positions, added by the owner the same day)
 **Prerequisite**: POST-01 belongs to Phase 33; this phase registers `positions@1` on it.
@@ -332,7 +332,7 @@ Plans:
   6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 25 plans in 12 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-35 and 19 owner items, 17 of them accepted)
+**Plans:** 26 plans in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
 **UI hint**: yes
 
 Plans:
@@ -347,7 +347,7 @@ Plans:
 - [ ] 33.1-09-PLAN.md: Wave 7. Native: posting cards and tasker actions in the Sterling Staff Room
 - [ ] 33.1-10-PLAN.md: Wave 8. Native: the posting file and Share with people in assignment modes
 - [ ] 33.1-11-PLAN.md: Wave 8. Native: the position workspace and rechecks in an open session
-- [ ] 33.1-12-PLAN.md: Wave 12. Close-out on the built image: criteria 1 to 6 in two browsers, SECURITY.md, the full suites once
+- [ ] 33.1-12-PLAN.md: Wave 13. Close-out on the built image: criteria 1 to 6 in two browsers, SECURITY.md, the full suites once
 - [ ] 33.1-13-PLAN.md: Wave 4. A posting delivered and proven through your organization's server
 - [ ] 33.1-14-PLAN.md: Wave 7. The acting position checked at your organization's server, on replay and before signing
 - [ ] 33.1-15-PLAN.md: Wave 1. Your organization's people rules handed to the workbench by one hidden extension command
@@ -355,12 +355,19 @@ Plans:
 - [ ] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
 - [ ] 33.1-18-PLAN.md: Wave 3. Observer shapes, the observer invitation and one fold of an observer stream
 - [ ] 33.1-19-PLAN.md: Wave 8. Observers placed into Observer positions with their own cell; releasability and signer-approved markings at the key grant
-- [ ] 33.1-20-PLAN.md: Wave 10. Your organization's security contact approves outside observers and release markings; nothing widens without a new approval
+- [ ] 33.1-20-PLAN.md: Wave 11. A holder of your organization's security contact credential approves outside observers, bound to their credential evidence; release markings approved by a release authority; nothing widens without a new approval
 - [ ] 33.1-21-PLAN.md: Wave 9. Releases to an observer, their comments and staff replies; what may be written in an observer stream
-- [ ] 33.1-22-PLAN.md: Wave 11. Native: inviting and releasing to observers, the feedback inbox, markings, the approval card and the observer's own view
+- [ ] 33.1-22-PLAN.md: Wave 12. Native: inviting and releasing to observers, the feedback inbox, markings, the approval card (what the observer's credentials prove, to security contacts only) and the observer's own view
 - [ ] 33.1-23-PLAN.md: Wave 9. Every key wrap through releasability; a narrowed marking rekeys in the same action
 - [ ] 33.1-24-PLAN.md: Wave 10. The observer's own client without the roster, and the server's narrow view for observers
 - [ ] 33.1-25-PLAN.md: Wave 9. Observer invitations that survive restarts and lead handovers, and a way out when one cannot be completed
+- [ ] 33.1-26-PLAN.md: Wave 10. The security-office key group: outside observers' credentials sealed for your organization's security contacts only, cited elsewhere by hash (33.1 D-37, 33.1 D-39)
+
+**Amendment (2026-11-24, from Phase 48.1, observer compliance AC-21.400, AC-21.401, PS-6; owner decision on B4; revised the same day, owner: credentials)**: what an outside observer must hold depends on what they may see: nothing more for key groups marked public; their `AccessAgreementCredential` (PS-6) and an organization-to-organization agreement record in the signed policy (AC-21) for any marked key group; and their `VisitClearanceCredential` as well for any ITAR, CGP or EAR compartment. The table is part of the policy's `credentials@1` section, which your organization may only tighten, and Phase 71 (core)'s `mayRelease` applies it at the approval, at every release and at every serve. The approval binds the hashes of the observer's credentials, which are sealed for your organization's security contacts only. Planned as 33.1 D-37 in 33.1-01, 33.1-18, 33.1-20, 33.1-22 and 33.1-26 (48.1-HANDOFFS.md H-18). Phase 48.1-19 writes the hub and workbench statements from 33.1's tests once this is on `main`; the vocabulary, authorities and rules of behaviour are in `docs/security/hosted-observers.md` (48.1-05).
+
+**Version safety (2026-11-24)**: observer streams follow the rule for every shared, signed format (32.1 D-60): the observer invitation names the stream's features (`observers@1`), your organization's server holds back a staff entry an observer's Sterling cannot read yet, and `observers@1` is its own roster feature (33.1 D-36, in 33.1-01, 33.1-18, 33.1-19 and 33.1-24).
+
+**Credentials (owner, 2026-11-24)**: access is decided by DIDs with W3C Verifiable Credentials and enforced by the data itself, with zero trust (`.planning/research/data-centric-access/RESEARCH.md`). The roster stand-ins (`clearance`, `serves`, `nationality`, `organization`, the lead-written `did`, `project.mode.signers`) are replaced by the member's own `did:webvh`, credentials cited by hash (33.1 D-39) and the policy's trusted-issuer section; one checker decides every posting, wrap and release, the level included, for everyone who holds a marked key group (owner decision O5). Positions, postings, handover, observer streams and no-roster observers stay. `cell.marking` and label-change entries carry an optional `basis` (33.1 D-40). From wave 8 on every wrap goes through Phase 33.2's `wrapForDevice`, and observers get the post-quantum wrap with keys from their join request (33.1 D-41); release copies reserve an optional label binding for 45.1-04 (33.1 D-42); the project feature `verified-clearance@1` switches on owner decision O11 (33.1 D-39).
 
 **Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 12 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR. Observer positions (POST-09, criterion 6, D-27 to D-35) were added by the owner on 2026-11-24, and the same day the owner decided that observers receive no roster: staff release chosen versions into each observer's own stream. Outside observers are not usable on a real site until Phase 47 guest accounts (planned) ship (D-33).
 
@@ -782,17 +789,17 @@ Plans:
   4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
   5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
   6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
-**Plans:** 9 plans in 5 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first; 46-09 and 46 D-44 to 46 D-47 added 2026-11-24 for version safety, VSAFE-03)
+**Plans:** 8/9 plans executed in 5 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first; 46-09 and 46 D-44 to 46 D-47 added 2026-11-24 for version safety, VSAFE-03). Waves 1 to 4 (46-01 to 46-08) complete 2026-11-24 on `feat/phase-46-wave-1`: the verification gaps closed (STERLING_MODEL_SERVERS as one JSON array on both sides, the activity tracker answered, the release image's browser egress proof), the Defence preview's Get Started, rail and work-area pages merged in with the work-area creation command ported into the extension, the activity tracker answered on the pod IP (47-15's lab), and main (#182 to #185) merged. 46-09 (wave 5) is not executed yet.
 
 Plans:
-- [ ] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
-- [ ] 46-02-PLAN.md: Wave 2. Session identity: who signed in from the forwarded token and `THEIACLOUD_SESSION_USER`, OpenBao jwt login, renew and revoke, Retry on failure, step-up link
-- [ ] 46-03-PLAN.md: Wave 2. Air gap and image hardening: addresses only from configuration, a test that the image calls nothing else, one Node major
-- [ ] 46-04-PLAN.md: Wave 2. Compliance fit before use for the workbench packages and the VSIX boundary
-- [ ] 46-05-PLAN.md: Wave 2. Copy lint covers the workbench and accepts Sterling and SovAI; the two #162 command handlers report errors
-- [ ] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
-- [ ] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
-- [ ] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
+- [x] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
+- [x] 46-02-PLAN.md: Wave 2. Session identity: who signed in from the forwarded token and `THEIACLOUD_SESSION_USER`, OpenBao jwt login, renew and revoke, Retry on failure, step-up link
+- [x] 46-03-PLAN.md: Wave 2. Air gap and image hardening: addresses only from configuration, a test that the image calls nothing else, one Node major
+- [x] 46-04-PLAN.md: Wave 2. Compliance fit before use for the workbench packages and the VSIX boundary
+- [x] 46-05-PLAN.md: Wave 2. Copy lint covers the workbench and accepts Sterling and SovAI; the two #162 command handlers report errors
+- [x] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
+- [x] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
+- [x] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
 - [ ] 46-09-PLAN.md: Wave 5. Sessions follow the site's version: the image's release facts, the signed release file in every release, the "new version is ready" notice, and the move at the next idle stop or sign-in with nothing unsaved (version safety, 32.1 D-66)
 
 ### Phase 47: On-premise deployment stack and offline bundle
@@ -828,9 +835,9 @@ Plans:
 - [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
 - [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
 - [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
-- [ ] 47-19-PLAN.md: Wave 6. Guest accounts by hand: `guests` group and attributes in the realm, `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
-- [ ] 47-20-PLAN.md: Wave 7. Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path)
-- [ ] 47-21-PLAN.md: Wave 7. Guests per site unless named in a signed user export (`--include-guests`); the guest accounts runbook
+- [ ] 47-19-PLAN.md: Wave 6. Guest accounts by hand: the `guests` group and lifecycle attributes only in the realm (no `serves`, `nationality`, `organization`, `security-contacts` group or token claims; approver checked by `SecurityContactCredential`; revised 2026-11-24, owner: credentials), `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
+- [ ] 47-20-PLAN.md: Wave 7. Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path); credentials end on their own at the same date
+- [ ] 47-21-PLAN.md: Wave 7. Guests per site unless named in a signed user export (`--include-guests`, `guests@1`, target-site check); a guest record carries lifecycle fields and the DID only; the guest accounts runbook
 - [ ] 47-32-PLAN.md: Wave 9. The site's release record from the signed release file, with what its user import reads, mounted live in every session; an update never stops a running session; the user export carries `requires` (47-14 amended; version safety, 47 D-66 to 47 D-69)
 
 **Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
@@ -857,6 +864,43 @@ Plans:
 - [ ] 48-09-PLAN.md: Wave 3. Rig load run to the HQ target of 400 sessions and beyond as headroom (revised 2026-11-24), capacity page and sizing defaults, reference site export; gate PR 4
 - [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
 - [ ] 48-11-PLAN.md: Wave 2. The signed site evidence export carries the site's Sterling release and the policy features it reads (schema 2), read by your organization's rules tool before it signs (version safety, VSAFE-04; gate PR)
+
+### Phase 48.1: Hosted SA&A completeness (INSERTED)
+**Goal**: Every documentation and evidence obligation that the controls require of the hosted deployment is identified, planned and delivered by us, not left for the owner to spot (owner, 2026-11-24): exchanges and interconnections, external services, the hosted SSP, the threat model and criticality, alerting and audit review, audit store integrity and retention, key management, the hosted crypto inventory, observers, privacy, incident playbooks, roles and separation of duties, suppliers, and continuous monitoring. Generated from one source with CI drift checks wherever possible; written by hand only what cannot be generated.
+**Depends on**: the component catalogue (CM-8, the generated catalogue and the OSCAL inventory; on main since #184; built on, not duplicated); Phase 47 (47-14 and 47-16 before the key separation); Phase 48's compliance machinery and its statement plans 48-04, 48-07 and 48-08, which it fits around; Phase 33.1 for the observer statements. The Phase 47 follow-ups planned in parallel (time source, bundle image scanning, contingency and backup runbooks, media handling, maintenance, the AC-8 notice, guest accounts) are referenced, not planned here.
+**Requirements**: SAA-01 to SAA-14 (defined in `48.1-CONTEXT.md`, one per audit area, with their control ids)
+**Success Criteria** (what must be TRUE):
+  1. Each of the fourteen areas has a gap row from the first plan, and its documents are required documents whose generated blocks a required CI job keeps in step with their sources (exchanges, services, ports and services, diagrams, key inventory, crypto inventory, suppliers, roles, alerts, system description).
+  2. The hosted SSP names the Sterling system and id and carries information types, the boundary with what the site inherits, users and roles, recovery objectives and generated diagrams; the extension SSPs are unchanged.
+  3. Audit failures raise alerts that cannot be silently broken by a missing input; audit records are archived daily to write-once object storage with a signed, chained manifest whose signing is restricted to the archive's service account (a cluster administrator could sign the current day's manifest but cannot alter a day already archived, and a second signature in a day raises an alert), are kept 1,825 days, and leave the online store only after the archive holds them.
+  4. Every hosted key is inventoried from code with its lifecycle; the supplier release key and the organization site key are separated as the owner decided, with the development site key in SoftHSM2 refused at production sites.
+  5. Every 48.1 obligation shows on the hosted dashboard from current documents and passing tests, and its gap closes only on that evidence.
+**Plans:** 23 plans in 7 waves (planned 2026-11-24, revised the same day after the independent plan check and the owner's decisions a to d, all answered; decisions D-01 to D-27 in `48.1-CONTEXT.md`; cross-phase items in `48.1-HANDOFFS.md`; each wave lands as one combined pull request with one owner gate approval)
+
+Plans:
+- [ ] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
+- [ ] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
+- [ ] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
+- [ ] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
+- [ ] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
+- [ ] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
+- [ ] 48.1-06-PLAN.md: Wave 2. External services as a fit-checked `service` kind and their register; model-endpoints and the Controlled Goods and ITAR overlays in the hosted scope
+- [ ] 48.1-07-PLAN.md: Wave 2. Hosted threat model by trust boundary (every T-47 row), criticality analysis, hosted data flows
+- [ ] 48.1-08-PLAN.md: Wave 2. Key management plan and a code-checked key inventory; the cosign, timestamp and crypto-erase limits
+- [ ] 48.1-10-PLAN.md: Wave 2. Roles and separation-of-duties matrix from the policies, invariant tests, training outline
+- [ ] 48.1-12-PLAN.md: Wave 2. Certificate, backup and admission alerts; the generated alert list; the auditor review runbook
+- [ ] 48.1-09-PLAN.md: Wave 3. Hosted crypto inventory per component with open conditions planned; supplier register from resources.json
+- [ ] 48.1-11-PLAN.md: Wave 3. Ports, protocols and services, the network and boundary diagram and workload rights from the rendered charts
+- [ ] 48.1-17-PLAN.md: Wave 3 (own pull request, after 47-14 and 47-16). Owner decision a applied: two-key bundle build and signed files through pkcs11-tool with stock cosign verification, the SoftHSM2 test in CI, the softhsm-signing-token preflight refusal
+- [ ] 48.1-14-PLAN.md: Wave 3. Audit archive tools: daily export, signed and chained manifest, deletion only of verified archived days, the signature watch, the offline verifier with an anchor and an expected last day, sign-only OpenBao policy
+- [ ] 48.1-13-PLAN.md: Wave 4. Hosted SSP: Sterling name and id, information types, boundary and inheritance, RTO and RPO from 47-27's two site-wide settings, users and roles, diagrams
+- [ ] 48.1-16-PLAN.md: Wave 4. No retention-policy delete for audit records, the archiver's delete right, 730 days online, archive and sign-watch alerts, clock-error and escrow-currency alerts, the archive and retention documents
+- [ ] 48.1-20-PLAN.md: Wave 4. The write-once object store: S3 object-lock target, cited evaluation (not MinIO), fit entry, and the local second site on this machine
+- [ ] 48.1-23-PLAN.md: Wave 5 (tail; after 47-22, 47-24, 47-25 and 47-33 merge). Alerts on the Phase 47 follow-ups' signals: clock error, escrow currency (longhorn-crypto only), snapshot and off-site job results
+- [ ] 48.1-15-PLAN.md: Wave 5. Audit archive at the site: our image, the archive and sign-watch CronJobs, the object store and 1,825-day settings, the fit register repoint
+- [ ] 48.1-18-PLAN.md: Wave 6. Statements and evidence rules for the 48.1 controls
+- [ ] 48.1-21-PLAN.md: Wave 6. Key separation in the inventory, key plan, playbooks and fit register text
+- [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench once Phase 71 (core)'s credential release check and 33.1's observer waves are on main: access and visit-clearance credentials, the agreements record and the clearance level for marked material (48.1-HANDOFFS.md H-18)
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -2036,9 +2080,10 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
 | 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/TBD | Stub (trigger: your organization receives ACP-240 Ed A and ADatP-4774 and 4778) | - |
-| 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
+| 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
+| 48.1. Hosted SA&A completeness | 0/23 | Planned 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
