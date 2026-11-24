@@ -14,6 +14,8 @@
 // is; it stops when the device is revoked, removed or quarantined, when its own log forks, and, by the hub's clock, at its certificate's notAfter.
 import type { KeyObject } from 'node:crypto';
 import { readGrant, unwrapEpochKey } from '@ext/domain/replica/cellKeys';
+import { unwrapEpochKeyV2, wrapFormatOf } from '@ext/domain/replica/cellWrapV2';
+import type { KemPrivateKeys } from '@ext/domain/replica/cellWrapV2';
 import type { CellGrant } from '@ext/domain/replica/cellKeys';
 import { openBody, parseHeaderShape } from '@ext/domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
@@ -32,6 +34,17 @@ import type { HubStore, StoredEntry } from '../store/hubStore';
 export interface RosterIdentity {
   writer: string;
   x25519Private: KeyObject;
+  /** The hub's post-quantum private keys (33.2 D-03), when it has a kem key: it then opens cell-wrap/v2 wraps too. */
+  kem?: { privateKeys: KemPrivateKeys };
+}
+
+/** The epoch key in a wrap addressed to the hub, by the wrap's format: v1 with the X25519 key, v2 with the post-quantum keys. Never throws. */
+export function openHubWrap(identity: RosterIdentity, grant: CellGrant, wrap: string): Buffer | undefined {
+  const format = wrapFormatOf(wrap);
+  const where = { cell: grant.cell, epoch: grant.epoch, writer: identity.writer, wrap };
+  if (format.ok && format.format === 1) return unwrapEpochKey({ ...where, privateKey: identity.x25519Private });
+  if (format.ok && format.format === 2 && identity.kem !== undefined) return unwrapEpochKeyV2({ ...where, privateKeys: identity.kem.privateKeys });
+  return undefined;
 }
 
 /** A place in one writer's log. */
@@ -82,7 +95,7 @@ function ringKeys(grants: readonly unknown[], identity: RosterIdentity, only?: R
     if (keys.has(slot)) continue;
     const mine = grant.wraps.find((wrap) => wrap.writer === identity.writer);
     if (mine === undefined) continue;
-    const key = unwrapEpochKey({ cell: grant.cell, epoch: grant.epoch, writer: identity.writer, privateKey: identity.x25519Private, wrap: mine.wrap });
+    const key = openHubWrap(identity, grant, mine.wrap);
     if (key !== undefined) keys.set(slot, { key, grant: read.hash });
   }
   return keys;

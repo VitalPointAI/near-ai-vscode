@@ -7,7 +7,15 @@ import test from 'node:test';
 import { x25519BindingBytes, x25519PrivateFromSeed, x25519PublicRaw } from '@ext/domain/replica/cellKeys';
 import { writerIdOf } from '@ext/domain/replica/entry';
 import { fingerprintOf, verifySignature } from '@ext/domain/team/canonical';
-import { generateKeyFile, KEY_PREFIXES, KeyFileError, readEncryptionKey, readSigningKey } from '../src/keys';
+import { generateKeyFile, KEY_PREFIXES, KeyFileError, readEncryptionKey, readKemKey, readSigningKey } from '../src/keys';
+import { generateKeyPairSync } from 'node:crypto';
+import { wrapEpochKey } from '@ext/domain/replica/cellKeys';
+import { wrapEpochKeyV2 } from '@ext/domain/replica/cellWrapV2';
+import { kemBindingHolds } from '@ext/domain/replica/deviceKem';
+import { hubDeviceKemData } from '@ext/domain/replica/hubFile';
+import { openHubWrap } from '../src/append/rosterCache';
+import { hubIdentityOf, issueHubFile } from '../src/enrol';
+import type { HubStore } from '../src/store/hubStore';
 import { BIN } from './helpers/hubProcess';
 
 // Phase 32, plan 14 (D-30): the hub's own keys. The operator makes each with --generate-key, which prints exactly one key line on stdout and writes
@@ -152,4 +160,60 @@ test('readEncryptionKey gives the X25519 key of the seed and a binding signature
   assert.ok(verifySignature(x25519BindingBytes(expected, signing.writer), encryption.x25519Sig, signing.publicKey), 'the binding signature verifies');
   const other = readSigningKey(generateKeyFile('signing'));
   assert.ok(!verifySignature(x25519BindingBytes(expected, other.writer), encryption.x25519Sig, signing.publicKey), 'the binding names this writer only');
+});
+
+// ---- 33.2-04 Task 3 (D-03): the hub's own post-quantum keys ----
+
+test('generateKeyFile(kem) gives one near-ai-hub-kem-key:v2 line of 96 bytes; readKemKey gives the keys and a binding the signing key made', () => {
+  const line = generateKeyFile('kem');
+  assert.match(line, /^near-ai-hub-kem-key:v2:[A-Za-z0-9_-]{128}$/);
+  assert.equal(KEY_PREFIXES.kem, 'near-ai-hub-kem-key:v2:');
+  const signing = readSigningKey(generateKeyFile('signing'));
+  const kem = readKemKey(`${line}\n`, signing);
+  assert.equal(Buffer.from(kem.publicKeys.p256, 'base64url').length, 65);
+  assert.equal(Buffer.from(kem.publicKeys.mlkem768, 'base64url').length, 1184);
+  assert.equal(kemBindingHolds({ ...kem.publicKeys, sig: kem.sig }, signing.writer, signing.publicKey), true);
+  assert.deepEqual(readKemKey(line, signing).publicKeys, kem.publicKeys, 'the same line gives the same keys');
+});
+
+test('readKemKey refuses a signing line, an encryption line and a truncated line, in plain sentences naming HUB_KEM_KEY', () => {
+  const signingLine = generateKeyFile('signing');
+  const signing = readSigningKey(signingLine);
+  const kemLine = generateKeyFile('kem');
+  refused(() => readKemKey(signingLine, signing), 'HUB_KEM_KEY', /signing key, not its kem key/, signingLine);
+  refused(() => readKemKey(generateKeyFile('encryption'), signing), 'HUB_KEM_KEY', /encryption key, not its kem key/, kemLine);
+  refused(() => readKemKey(kemLine.slice(0, -4), signing), 'HUB_KEM_KEY', /damaged/, kemLine);
+  refused(() => readSigningKey(kemLine), 'HUB_SIGNING_KEY', /kem key, not its signing key/, kemLine);
+});
+
+test('the hub opens an epoch key granted to it in a v1 wrap and in a v2 wrap; without a kem key it opens the v1 wrap only', () => {
+  const signing = readSigningKey(generateKeyFile('signing'));
+  const encryption = readEncryptionKey(generateKeyFile('encryption'), signing);
+  const kem = readKemKey(generateKeyFile('kem'), signing);
+  const cell = 'a'.repeat(32);
+  const epochKey = Buffer.alloc(32, 9);
+  const grant = { cell, epoch: 2, roster: 'b'.repeat(64), labelSealed: '', wraps: [] };
+  const v1 = wrapEpochKey({ cell, epoch: 2, writer: signing.writer, recipient: encryption.x25519, epochKey });
+  const v2 = wrapEpochKeyV2({ cell, epoch: 2, writer: signing.writer, recipient: kem.publicKeys, epochKey });
+  const withKem = { writer: signing.writer, x25519Private: encryption.privateKey, kem };
+  const withoutKem = { writer: signing.writer, x25519Private: encryption.privateKey };
+  assert.deepEqual(openHubWrap(withKem, grant, v1), epochKey);
+  assert.deepEqual(openHubWrap(withKem, grant, v2), epochKey);
+  assert.deepEqual(openHubWrap(withoutKem, grant, v1), epochKey);
+  assert.equal(openHubWrap(withoutKem, grant, v2), undefined);
+});
+
+test('a hub with a kem key issues a hub file carrying its keys and binding, from which a lead builds the hub\'s device.kem; without one, no kem', () => {
+  const signing = readSigningKey(generateKeyFile('signing'));
+  const encryption = readEncryptionKey(generateKeyFile('encryption'), signing);
+  const kem = readKemKey(generateKeyFile('kem'), signing);
+  const withKem = hubIdentityOf(signing, encryption, generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey, 'hub.example.org:8443', kem);
+  const store = { putEnrolment: () => undefined } as unknown as HubStore;
+  const issued = issueHubFile(store, withKem, { days: 7, now: new Date('2026-11-24T10:00:00.000Z') });
+  assert.equal(issued.ok, true);
+  if (!issued.ok) return;
+  const data = hubDeviceKemData(issued.file.payload);
+  assert.deepEqual(data, { device: signing.writer, ...kem.publicKeys, sig: kem.sig });
+  const without = issueHubFile(store, hubIdentityOf(signing, encryption, generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey, 'hub.example.org:8443'), { days: 7, now: new Date('2026-11-24T10:00:00.000Z') });
+  assert.equal(without.ok && Object.prototype.hasOwnProperty.call(without.file.payload, 'kem'), false);
 });

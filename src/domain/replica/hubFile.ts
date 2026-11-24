@@ -28,6 +28,9 @@ import { HASH_PATTERN, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN
 import type { SealedEntry } from './entry';
 import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
 import { MAX_FEATURES, isReplicaFeature } from './features';
+import { kemBindingHolds } from './deviceKem';
+import type { DeviceKemData, KemBinding } from './deviceKem';
+import { kemProblem } from './kindSchemas/device';
 
 export const HUB_FILE_EXTENSION = '.near-staff-hub';
 export const HUB_FILE_VERSION = 1;
@@ -56,6 +59,8 @@ export interface HubFilePayload {
   enrolment: string;
   enrolmentSecret: string;
   expiresAt: string;
+  /** The hub's post-quantum keys with their binding signed by the hub's key (33.2 D-03); only from a hub that has a kem key. */
+  kem?: KemBinding;
 }
 
 export const HUB_FILE_REFUSALS = {
@@ -149,16 +154,31 @@ export function certPinOf(certificate: string | Buffer): string {
 
 /** A hub file payload read from hostile input: exact keys, every field of its shape, and the hub id and writer id derived from the signing key. */
 function hubFilePayloadOf(value: unknown): HubFilePayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, HUB_FILE_KEYS)) return undefined;
+  if (!isRecord(value)) return undefined;
+  const kemIn = own(value, 'kem');
+  if (!hasKeys(value, kemIn === undefined ? HUB_FILE_KEYS : [...HUB_FILE_KEYS, 'kem'])) return undefined;
+  if (kemIn !== undefined && kemProblem(kemIn, 'kem') !== undefined) return undefined;
   const [v, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt] = HUB_FILE_KEYS.map((key) => own(value, key));
   if (v !== HUB_FILE_VERSION || !isHubAddress(address) || !isHash(certPin)) return undefined;
   if (!isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES) || !isKey(x25519Sig, ED25519_SIGNATURE_BYTES)) return undefined;
   if (typeof writer !== 'string' || writer !== writerIdOf(publicKey) || typeof hub !== 'string' || hub !== hubIdOf(writer)) return undefined;
   if (typeof enrolment !== 'string' || !ENROLMENT_ID_PATTERN.test(enrolment) || !isKey(enrolmentSecret, ENROLMENT_SECRET_BYTES) || !isTime(expiresAt)) return undefined;
-  return { v: HUB_FILE_VERSION, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt };
+  const payload: HubFilePayload = { v: HUB_FILE_VERSION, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt };
+  if (kemIn !== undefined) {
+    const kem = kemIn as Record<string, string>;
+    payload.kem = { p256: kem.p256, mlkem768: kem.mlkem768, sig: kem.sig };
+  }
+  return payload;
 }
 
-const isBound = (file: Pick<HubFilePayload, 'x25519' | 'x25519Sig' | 'writer' | 'publicKey'>): boolean => verifySignature(x25519BindingBytes(file.x25519, file.writer), file.x25519Sig, file.publicKey);
+// Both bindings to the hub's signing key: the X25519 key, and the post-quantum keys when the file carries them.
+const isBound = (file: Pick<HubFilePayload, 'x25519' | 'x25519Sig' | 'writer' | 'publicKey' | 'kem'>): boolean =>
+  verifySignature(x25519BindingBytes(file.x25519, file.writer), file.x25519Sig, file.publicKey) && (file.kem === undefined || kemBindingHolds(file.kem, file.writer, file.publicKey));
+
+/** The hub's device.kem a lead's device writes from a hub file it read (33.2 D-03), or undefined for a hub file without post-quantum keys. */
+export function hubDeviceKemData(file: Pick<HubFilePayload, 'writer' | 'kem'>): DeviceKemData | undefined {
+  return file.kem === undefined ? undefined : { device: file.writer, p256: file.kem.p256, mlkem768: file.kem.mlkem768, sig: file.kem.sig };
+}
 
 /** x25519Sig is the hub's Ed25519 signature over x25519BindingBytes(x25519, the hub's writer id). now is the signing time; expiresAt must be after it. */
 export interface BuildHubFileInput {
@@ -170,6 +190,8 @@ export interface BuildHubFileInput {
   enrolmentSecret: string;
   expiresAt: string;
   now: Date;
+  /** The hub's post-quantum keys and their binding, when the hub has a kem key (33.2 D-03). */
+  kem?: KemBinding;
 }
 
 // Signs a hub file with the hub's own key. Throws a plain error, naming no secret, when a field is not valid, the expiry is not after now or the
@@ -189,10 +211,11 @@ export function buildHubFile(signer: PayloadSigner, input: BuildHubFileInput): S
     enrolmentSecret: input.enrolmentSecret,
     expiresAt: input.expiresAt
   };
+  if (input.kem !== undefined) payload.kem = { p256: input.kem.p256, mlkem768: input.kem.mlkem768, sig: input.kem.sig };
   if (!isHubAddress(payload.address)) throw new Error('The hub file was not made: the address must be a host name or IP address and a port, such as hub.example.org:8443.');
   if (hubFilePayloadOf(payload) === undefined) throw new Error('The hub file was not made: one of its fields is not valid.');
   if (Date.parse(payload.expiresAt) <= input.now.getTime()) throw new Error('The hub file was not made: its expiry must be after the time it is made.');
-  if (!isBound(payload)) throw new Error('The hub file was not made: the X25519 key is not bound to the hub\'s signing key.');
+  if (!isBound(payload)) throw new Error('The hub file was not made: the X25519 key or the post-quantum keys are not bound to the hub\'s signing key.');
   return signPayload(signer, 'staff-hub-file', payload, { now: () => input.now });
 }
 

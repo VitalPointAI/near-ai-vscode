@@ -6,9 +6,11 @@ import { createHash, createHmac, createPublicKey, generateKeyPairSync, randomByt
 import type { KeyObject } from 'node:crypto';
 import test from 'node:test';
 import { x25519BindingBytes } from '../domain/replica/cellKeys';
+import { kemPublicFromSeeds } from '../domain/replica/cellWrapV2';
+import { deviceKemProblem, signKemBinding } from '../domain/replica/deviceKem';
 import {
   CHALLENGE_BYTES, HUB_FILE_EXTENSION, HUB_FILE_MAX_BYTES, HUB_FILE_REFUSALS, SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, SESSION_REFUSALS, SESSION_VERSION, buildHubFile, buildSessionAnswer, certPinOf,
-  checkEnrolmentMac, enrolmentMac, hubIdOf, isHubAddress, readHubFile, readSessionAnswer, spkiPin
+  checkEnrolmentMac, enrolmentMac, hubDeviceKemData, hubIdOf, isHubAddress, readHubFile, readSessionAnswer, spkiPin
 } from '../domain/replica/hubFile';
 import type { BuildHubFileInput, EnrolmentMacFields, HubFilePayload, SessionAnswerPayload, SessionExpectation } from '../domain/replica/hubFile';
 import { KNOWN_REPLICA_FEATURES, MAX_FEATURES } from '../domain/replica/features';
@@ -529,4 +531,26 @@ test('checkEnrolmentMac is false for any one field changed, another secret, a MA
   for (const junk of ['', 'not a mac!', 42, null, undefined, { mac }]) assert.equal(checkEnrolmentMac(secret, ENROLMENT_FIELDS, junk as string), false);
   assert.equal(checkEnrolmentMac('short', ENROLMENT_FIELDS, mac), false);
   assert.equal(checkEnrolmentMac(secret, null as unknown as EnrolmentMacFields, mac), false);
+});
+
+// ---- 33.2-04 Task 3 (D-03): a hub file may carry the hub's post-quantum keys ----
+
+test('a hub file with kem reads back with it; a lead builds the hub\'s device.kem from it and deviceKemProblem accepts it; a forged kem is bad-binding', () => {
+  const world = hubWorld('HUB-KEM');
+  const keys = kemPublicFromSeeds({ p256: createHash('sha256').update('hub kem p256').digest(), mlkem768: createHash('sha512').update('hub kem mlkem').digest() });
+  const kem = signKemBinding(keys, world.hub.writer, (bytes) => world.hub.signer.sign(bytes));
+  const signed = buildHubFile(world.hub.signer, { ...world.input, kem });
+  const read = readHubFile(asFile(signed), NOW);
+  assert.equal(reasonOf(read), 'ok');
+  const file = (read as { ok: true; hubFile: HubFilePayload }).hubFile;
+  assert.deepEqual(file.kem, kem);
+  const data = hubDeviceKemData(file);
+  assert.deepEqual(data, { device: world.hub.writer, ...kem });
+  const lead = rosterDevice('LEAD', 'mbr-lead');
+  const ctx = { deviceAt: (writer: string) => (writer === world.hub.writer ? { publicKey: world.hub.publicKey } : undefined), isLeadDevice: (writer: string) => writer === lead.writer };
+  assert.equal(deviceKemProblem({ signer: lead.writer, roster: 'd'.repeat(64), data: data as NonNullable<typeof data> }, ctx), undefined);
+  assert.equal(hubDeviceKemData(fileOf(world).payload), undefined, 'a hub file without kem gives no device.kem');
+  const forged = { ...kem, sig: rosterDevice('NOT-HUB', 'hub').signer.sign(Buffer.from('other')) };
+  assert.equal(reasonOf(readHubFile(signedAs(world.hub, { ...signed.payload, kem: forged }), NOW)), 'bad-binding');
+  assert.throws(() => buildHubFile(world.hub.signer, { ...world.input, kem: forged }), /post-quantum/);
 });

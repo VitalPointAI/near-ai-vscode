@@ -199,13 +199,15 @@ The hub reads four secrets, each from its own file, exactly as the relay does (s
 | `hub_tls_key` | `HUB_TLS_KEY` | The certificate's private key, without a passphrase. |
 | `hub_signing_key` | `HUB_SIGNING_KEY` | The hub's Ed25519 signing key: one line made with `--generate-key signing`. It is the hub's identity; its checkpoints and hub files are signed with it. |
 | `hub_encryption_key` | `HUB_ENCRYPTION_KEY` | The hub's X25519 encryption key: one line made with `--generate-key encryption`. The keys of the parts of a project the hub may read are wrapped to it. |
+| `hub_kem_key` (optional) | `HUB_KEM_KEY` | The hub's post-quantum keys (P-256 and ML-KEM-768): one line made with `--generate-key kem`. With it, the hub file carries these keys and the hub can open keys wrapped with post-quantum protection. Without it the hub works as before. |
 
-Build the image first, then make the two key lines. Each command prints one line and writes nothing else; the `umask` keeps the new file private from the moment it exists:
+Build the image first, then make the key lines (the third is optional; to use it, also list `hub_kem_key` under the hub's secrets in `relay/compose.yaml`). Each command prints one line and writes nothing else; the `umask` keeps the new file private from the moment it exists:
 
 ```sh
 docker compose -f relay/compose.yaml --profile hub build hub
 (umask 077; docker run --rm --network none near-ai-hub:local /app/bin.mjs --generate-key signing > relay/secrets/hub/hub_signing_key)
 (umask 077; docker run --rm --network none near-ai-hub:local /app/bin.mjs --generate-key encryption > relay/secrets/hub/hub_encryption_key)
+(umask 077; docker run --rm --network none near-ai-hub:local /app/bin.mjs --generate-key kem > relay/secrets/hub/hub_kem_key)
 ```
 
 Without Docker, a checkout with Node 26.13.1 does the same: `cd hub && npm ci --ignore-scripts && npm run build`, then `node hub/dist/bin.mjs --generate-key signing` from the repository root.
