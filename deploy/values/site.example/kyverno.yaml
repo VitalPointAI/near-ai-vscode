@@ -1,0 +1,7 @@
+# Per-site Kyverno settings. The admission controller reads image signatures from the site registry over TLS and trusts only the CA bundle
+# given here: the site CA certificate (PEM), which the install script writes from the bootstrap CA (47-13, 47-16). Left empty here because
+# every site has its own CA; an empty value means the image's system bundle, which cannot verify the site registry, so signature checks fail
+# closed rather than open.
+admissionController:
+  caCertificates:
+    data: ""

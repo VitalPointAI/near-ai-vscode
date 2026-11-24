@@ -1,0 +1,7 @@
+{
+  "chart": "path:deploy/charts/sterling-admission",
+  "namespace": "kyverno",
+  "order": 25,
+  "values": ["deploy/values/sterling-admission.yaml"],
+  "note": "The image signature and site-registry policies, installed right after Kyverno (D-15, D-48)."
+}

@@ -3,6 +3,7 @@
   "namespace": "sterling-registry",
   "order": 10,
   "values": ["deploy/values/zot.yaml"],
+  "site": "deploy/values/site.example/zot.yaml",
   "enabledWhen": { "registryKind": "zot" },
   "images": [
     { "lock": "ghcr.io/project-zot/zot", "set": { "image.repository": "name", "image.tag": "tagAtDigest" } }

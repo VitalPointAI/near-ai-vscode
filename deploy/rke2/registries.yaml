@@ -1,0 +1,11 @@
+# containerd registry configuration (D-14, D-15), copied to /etc/rancher/rke2/registries.yaml by install-node.sh after site substitution.
+# Every image the stack runs names the site registry directly by digest; the wildcard mirror is only a safety net for RKE2's own system
+# images (research Pitfall 17), and with disable-default-registry-endpoint in config.yaml no pull ever falls back to the internet.
+mirrors:
+  "*":
+    endpoint:
+      - "https://${site.registry}"
+configs:
+  "${site.registry}":
+    tls:
+      ca_file: /etc/rancher/rke2/site-ca.crt
