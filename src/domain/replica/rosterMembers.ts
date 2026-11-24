@@ -34,7 +34,8 @@ export const MEMBER_REFUSALS = {
   'quarantine-stream-unknown': 'This quarantine names a stream that is neither this project nor a part of it the roster has at the roster it follows, so it records nothing.',
   'quarantine-recorded': 'A quarantine for this device at this stream and position is already recorded, so this one records nothing new.',
   'hub-exists': 'A hub or member with this id is already in the roster, and an id is never given twice.',
-  'hub-unknown': 'This names a hub the roster does not have at the roster it follows.'
+  'hub-unknown': 'This names a hub the roster does not have at the roster it follows.',
+  'hub-revoked': 'Your organization\'s server was removed from this shared work, so it cannot be trusted again. Admit it again as a new server instead.'
 } as const;
 export type MemberRefusal = keyof typeof MEMBER_REFUSALS;
 export type MemberApplyOutcome = { status: 'applied' } | { status: 'refused'; reason: MemberRefusal | 'roster-kind-pending' };
@@ -85,6 +86,8 @@ export interface HubRecord {
   ceiling: unknown;
   // The cells granted to the hub (hub.grant), in the order granted.
   cells: readonly string[];
+  // True on a version a hub.readmit opened (Phase 33 D-42): the lead trusted this hub again from `from` on, with this certPin.
+  readmit?: boolean;
   from: number;
   until?: number;
 }
@@ -418,6 +421,7 @@ interface ReleaseData extends SlotData { branch: string }
 interface HubAdmitData { hub: string; device: DeviceDescriptor; certPin: string; ceiling: unknown }
 interface HubGrantData { hub: string; cell: string }
 interface HubRevokeData { hub: string }
+interface HubReadmitData { hub: string; certPin: string }
 
 // device.quarantine is record only (D-48): the quarantine itself comes from an equivocation proof in the main fold, so the entry changes no other
 // state. What the roster can check, it does, so a quarantine naming the wrong place is refused with its reason instead of accepted as a no-op: the
@@ -473,6 +477,22 @@ function applyHubRevoke(state: MembersState, data: HubRevokeData, ctx: MemberApp
   return { status: 'applied' };
 }
 
+// hub.readmit (Phase 33 D-42): the lead trusts an admitted hub again after a fork or rollback finding, with the pin the lead compared. A new version
+// of the hub's record opens at this position with that pin; its devices, ceiling and cells are unchanged. A revoked hub stays revoked.
+function applyHubReadmit(state: MembersState, data: HubReadmitData, ctx: MemberApplyContext): MemberApplyOutcome {
+  const versions = state.hubs.get(data.hub);
+  if (versions === undefined) return refused('hub-unknown');
+  const current = hubAt(state, data.hub, ctx.position - 1);
+  if (current === undefined) return refused('hub-revoked');
+  nextVersion(versions, current, { hub: current.hub, certPin: data.certPin, ceiling: current.ceiling, cells: current.cells, readmit: true, from: ctx.position });
+  return { status: 'applied' };
+}
+
+// The positions at which the hub was trusted again (hub.readmit), oldest first.
+export function hubReadmitPositions(state: MembersState, hub: string): number[] {
+  return (state.hubs.get(hub) ?? []).filter((record) => record.readmit === true).map((record) => record.from);
+}
+
 // Applies one member, device, hub or invite kind. The data was checked against its closed schema at verification. Validates first and changes the
 // state only when the outcome is applied.
 export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx: MemberApplyContext): MemberApplyOutcome {
@@ -503,6 +523,8 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
       return applyHubGrant(state, entry.data as HubGrantData, ctx);
     case 'hub.revoke':
       return applyHubRevoke(state, entry.data as HubRevokeData, ctx);
+    case 'hub.readmit':
+      return applyHubReadmit(state, entry.data as HubReadmitData, ctx);
     default:
       // A kind the driver routes here with no rule in this version: refused, never applied.
       return refused('roster-kind-pending');

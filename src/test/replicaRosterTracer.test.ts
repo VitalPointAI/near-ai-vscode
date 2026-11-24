@@ -229,9 +229,9 @@ test('every roster refusal reason is a plain sentence without an em-dash', () =>
   for (const kind of Object.keys(ROSTER_KIND_OWNER)) assert.ok(KIND_FAMILIES.has(kind), kind);
 });
 
-test('ROSTER_KIND_OWNER routes each of the 19 roster kinds and project.genesis to exactly one owner module', () => {
+test('ROSTER_KIND_OWNER routes each of the 20 roster kinds and project.genesis to exactly one owner module', () => {
   const rosterKinds = [...KIND_FAMILIES].filter(([, family]) => family === 'roster').map(([kind]) => kind);
-  assert.equal(rosterKinds.length, 19, 'roster.require, Phase 33 POST-01');
+  assert.equal(rosterKinds.length, 20, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   assert.deepEqual(Object.keys(ROSTER_KIND_OWNER).sort(), [...rosterKinds, 'project.genesis'].sort());
   for (const [kind, owner] of Object.entries(ROSTER_KIND_OWNER)) {
     const expected = /^(member|device|hub|invite)\./.test(kind) ? 'members' : /^cell\./.test(kind) ? 'cells' : 'roster';

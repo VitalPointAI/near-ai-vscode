@@ -28,7 +28,7 @@ import { readGrant } from './cellKeys';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
-import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
+import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
 import { verifyEntry } from './verify';
@@ -42,7 +42,7 @@ export interface RosterAnchor { genesisHash: string; project: string; lead: { me
 
 export type RosterKindOwner = 'members' | 'cells' | 'roster';
 
-// Every roster kind (19) and project.genesis, each routed to exactly one owner module.
+// Every roster kind (20) and project.genesis, each routed to exactly one owner module.
 export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Object.freeze({
   'project.genesis': 'roster',
   'member.invite': 'members',
@@ -57,6 +57,7 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'hub.admit': 'members',
   'hub.grant': 'members',
   'hub.revoke': 'members',
+  'hub.readmit': 'members',
   'invite.void': 'members',
   'cell.create': 'cells',
   'cell.rekey': 'cells',
@@ -222,7 +223,12 @@ export function rosterView(state: RosterState): RosterView {
       const position = at(hash);
       return position === undefined ? undefined : granteesAt(state.cells, cell, position, (writer) => deviceAt(state.members, writer, position) !== undefined);
     },
-    rosterBranchPending: (hash) => state.notChosen.has(hash)
+    rosterBranchPending: (hash) => state.notChosen.has(hash),
+    hubPin(hub, hash) {
+      const position = at(hash);
+      return position === undefined ? undefined : hubAt(state.members, hub, position)?.certPin;
+    },
+    hubReadmits: (hub) => hubReadmitPositions(state.members, hub).map((position) => state.positions[position])
   };
 }
 

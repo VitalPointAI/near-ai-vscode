@@ -32,6 +32,10 @@ export interface RosterView {
   cellGrantees?(cell: string, rosterHash: string): readonly string[] | undefined;
   // True when the roster hash is on a branch of a roster split that the lead or deputy has not chosen yet (D-11).
   rosterBranchPending?(rosterHash: string): boolean;
+  // The certificate pin of the hub in force at that roster (its hub.admit, then each hub.readmit), or undefined when the hub is not in force there.
+  hubPin?(hub: string, rosterHash: string): string | undefined;
+  // The roster entry hashes of the hub's re-admissions (hub.readmit), oldest first; each is handed to readmitWitness once (Phase 33 D-42).
+  hubReadmits?(hub: string): readonly string[];
 }
 
 // The role words the roster uses. A member holds any number of them at one roster position.

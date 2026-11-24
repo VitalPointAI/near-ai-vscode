@@ -98,7 +98,7 @@ const nameCheck = lineCheck(120);
 const reasonCheck = lineCheck(200);
 const epochCheck: Check = (value, path) => (isSafeIntegerInRange(value, 1, Number.MAX_SAFE_INTEGER) ? undefined : invalidAt(path));
 
-// The 19 roster kinds. The key order of a record is the order the checks run in, so the first wrong field is the one named.
+// The 20 roster kinds. The key order of a record is the order the checks run in, so the first wrong field is the one named.
 // Phase 31 additions (D-49) are optional on the wire so every Phase 30 sample and vector stays valid; the roster fold requires them where D-41, D-44
 // and D-49 need them:
 // - member.invite forMember: the invite admits another device of an existing member (D-18, Add My Other Machine).
@@ -107,6 +107,7 @@ const epochCheck: Check = (value, path) => (isSafeIntegerInRange(value, 1, Numbe
 // - cell.create epoch and grant, cell.rekey grant: the sha256 of the signed grant object outside the streams (D-44).
 // - invite.void: closes an open invite (D-17).
 // - roster.require (Phase 33 POST-01, D-04): the features the project requires; written by a lead device, the required set only grows.
+// - hub.readmit (Phase 33 D-42): a lead device trusts an admitted hub again with the pin the lead compared; fromCheckpoint names a restored checkpoint.
 const SHAPES: Readonly<Record<string, Shape>> = {
   'member.invite': { required: { invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, expiresAt: timeCheck, secretHash: hashCheck, rosterPrev: hashCheck }, optional: { forMember: slugCheck } },
   'member.admit': { required: { member: slugCheck, invite: slugCheck, name: nameCheck, seat: slugCheck, roles: rolesProblem, clearance: clearanceProblem, device: deviceProblem, rosterPrev: hashCheck }, optional: { agentSeats: agentSeatsProblem } },
@@ -126,7 +127,8 @@ const SHAPES: Readonly<Record<string, Shape>> = {
   'roster.choose': { required: { chosen: hashCheck, rosterPrev: hashCheck } },
   'deputy.name': { required: { member: slugCheck, rosterPrev: hashCheck } },
   'invite.void': { required: { invite: slugCheck, rosterPrev: hashCheck } },
-  'roster.require': { required: { features: featuresProblem, rosterPrev: hashCheck } }
+  'roster.require': { required: { features: featuresProblem, rosterPrev: hashCheck } },
+  'hub.readmit': { required: { hub: slugCheck, certPin: hashCheck, rosterPrev: hashCheck }, optional: { fromCheckpoint: hashCheck } }
 };
 
 // Returns a reason, or undefined when the data is valid.
