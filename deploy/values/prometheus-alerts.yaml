@@ -1,0 +1,122 @@
+{
+  "note": "The site's alert rules as code (48.1-02, D-16; AU-5, SI-4(5)), a values file of the prometheus release (deploy/values/prometheus.release.json). JSON syntax, which is also YAML, so Node reads it without a YAML library (deploy/test/alerting.test.mjs, the alert list of 48.1-12). Every rule names its input with labels.source and links the review runbook. Every source has a guard rule (labels.guard \"true\"): its scrape target being up, or absent() on a series in startSeries, which are gauges present from start; absent() is never used on a counter that appears only after its first event, because it would fire on a healthy site. So a missing or renamed input raises an alert instead of leaving its rule silent. metricSources gives the documentation of each source's metrics for the pinned version.",
+  "metricSources": {
+    "openbao": "OpenBao 2.7 telemetry: https://openbao.org/docs/internals/telemetry/metrics/core-system/ (vault.core.unsealed, a gauge) and https://openbao.org/docs/internals/telemetry/metrics/audit/ (vault.audit.log_request_failure and vault.audit.log_response_failure, counters); the listener's metrics_only and unauthenticated_metrics_access: https://openbao.org/docs/configuration/listener/tcp/ (read 2026-11-24)",
+    "fluent-bit": "Fluent Bit 5.2 monitoring, the v2 Prometheus endpoint /api/v2/metrics/prometheus: https://docs.fluentbit.io/manual/administration/monitoring (fluentbit_output_errors_total, fluentbit_output_retries_failed_total, fluentbit_output_proc_records_total, fluentbit_input_records_total, counters labelled with the instance name or alias; read 2026-11-24)"
+  },
+  "startSeries": {
+    "vault_core_unsealed": "OpenBao gauge, 1 when unsealed and 0 when sealed, reported by every server from start once telemetry is on"
+  },
+  "serverFiles": {
+    "alerting_rules.yml": {
+      "groups": [
+        {
+          "name": "openbao",
+          "rules": [
+            {
+              "alert": "OpenBaoSealed",
+              "expr": "vault_core_unsealed{job=\"openbao\"} == 0",
+              "for": "2m",
+              "labels": { "severity": "critical", "source": "openbao" },
+              "annotations": {
+                "summary": "OpenBao {{ $labels.pod }} is sealed",
+                "description": "Sessions cannot read secrets or sign while OpenBao is sealed. Check the HSM, its slot and PIN, or bring the Shamir shares (unseal failure playbook).",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "OpenBaoAuditDeviceFailing",
+              "expr": "increase(vault_audit_log_request_failure{job=\"openbao\"}[5m]) > 0 or increase(vault_audit_log_response_failure{job=\"openbao\"}[5m]) > 0",
+              "labels": { "severity": "critical", "source": "openbao" },
+              "annotations": {
+                "summary": "OpenBao {{ $labels.pod }} could not write to its audit device",
+                "description": "OpenBao refuses requests it cannot audit. Check the stdout audit device and the container log path to the log store.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "OpenBaoMetricsTargetDown",
+              "expr": "up{job=\"openbao\"} == 0",
+              "for": "10m",
+              "labels": { "severity": "warning", "source": "openbao", "guard": "true" },
+              "annotations": {
+                "summary": "Prometheus cannot read OpenBao {{ $labels.pod }}'s metrics",
+                "description": "The seal and audit device alerts cannot fire while OpenBao's metrics are not read. OpenBao may be down or sealed, or its metrics listener or certificate changed.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "OpenBaoMetricsMissing",
+              "expr": "absent(up{job=\"openbao\"})",
+              "for": "10m",
+              "labels": { "severity": "warning", "source": "openbao", "guard": "true" },
+              "annotations": {
+                "summary": "Prometheus finds no OpenBao server to read",
+                "description": "No OpenBao scrape target exists, so the OpenBao alerts are silent. Check the openbao scrape job and the server pods in sterling-openbao.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "OpenBaoSealSeriesMissing",
+              "expr": "absent(vault_core_unsealed{job=\"openbao\"})",
+              "for": "10m",
+              "labels": { "severity": "warning", "source": "openbao", "guard": "true" },
+              "annotations": {
+                "summary": "OpenBao reports no seal state",
+                "description": "vault_core_unsealed is missing, so the seal alert cannot fire: OpenBao telemetry is off or the metric was renamed.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            }
+          ]
+        },
+        {
+          "name": "audit-shipping",
+          "rules": [
+            {
+              "alert": "FluentBitOutputFailing",
+              "expr": "sum by (pod, node) (increase(fluentbit_output_errors_total{namespace=\"sterling-log-shipper\", name=\"site_opensearch\"}[15m])) > 0 or sum by (pod, node) (increase(fluentbit_output_retries_failed_total{namespace=\"sterling-log-shipper\", name=\"site_opensearch\"}[15m])) > 0",
+              "labels": { "severity": "critical", "source": "fluent-bit" },
+              "annotations": {
+                "summary": "Fluent Bit on {{ $labels.node }} fails to ship records to the site log store",
+                "description": "Chunks failed or ran out of retries in the last 15 minutes. Check OpenSearch, its certificate and the audit-writer account.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "AuditRecordsNotReachingStore",
+              "expr": "(sum by (pod) (increase(fluentbit_input_records_total{namespace=\"sterling-log-shipper\", name=\"audit_kubernetes\"}[30m])) > 0 and on (pod) sum by (pod) (increase(fluentbit_output_proc_records_total{namespace=\"sterling-log-shipper\", name=\"site_opensearch\"}[30m])) == 0) or sum(increase(fluentbit_input_records_total{namespace=\"sterling-log-shipper\", name=\"audit_kubernetes\"}[30m])) == 0",
+              "labels": { "severity": "critical", "source": "fluent-bit" },
+              "annotations": {
+                "summary": "Audit records are not reaching the site log store",
+                "description": "For 30 minutes a Fluent Bit pod read Kubernetes audit records but sent none to OpenSearch, or no pod read any. Check the output, OpenSearch and the API server's audit log on the control-plane nodes.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "FluentBitMetricsTargetDown",
+              "expr": "up{namespace=\"sterling-log-shipper\", app_kubernetes_io_name=\"fluent-bit\"} == 0",
+              "for": "10m",
+              "labels": { "severity": "warning", "source": "fluent-bit", "guard": "true" },
+              "annotations": {
+                "summary": "Prometheus cannot read Fluent Bit {{ $labels.pod }}'s metrics",
+                "description": "The audit shipping alerts cannot fire for this node while its metrics are not read. Its error counters appear only after the first error, so the scrape target itself is the guard.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
+              "alert": "FluentBitMetricsMissing",
+              "expr": "absent(up{namespace=\"sterling-log-shipper\", app_kubernetes_io_name=\"fluent-bit\"})",
+              "for": "10m",
+              "labels": { "severity": "warning", "source": "fluent-bit", "guard": "true" },
+              "annotations": {
+                "summary": "Prometheus finds no Fluent Bit pod to read",
+                "description": "No Fluent Bit scrape target exists, so the audit shipping alerts are silent. Check the log shipper DaemonSet and its scrape annotations.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

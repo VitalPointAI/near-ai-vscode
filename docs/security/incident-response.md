@@ -127,3 +127,9 @@ responsibility, and this plan does not replace it. In particular, your organizat
 
 A suspected problem in the product itself goes to the maintainers through private vulnerability
 reporting, as above.
+
+For a hosted site your organization runs (the Sterling workbench at HQ and its edge sites), the
+[hosted incident playbooks](hosted-incident-playbooks.md) give the site team's steps for the
+incidents that hit the site's trust: a signing key, the HQ root or a site intermediate, the
+hardware security module, an unseal failure, a person's passkey, a spill to an observer, a
+credential issuer or status-list key, and a stale status list at an edge site.

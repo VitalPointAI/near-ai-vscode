@@ -29,6 +29,7 @@ Back to the [component catalogue](./index.md).
 | image:docker.io/longhornio/support-bundle-kit | Container image | runtime | Pass with conditions |
 | image:docker.io/opensearchproject/opensearch | Container image | runtime | Pass with conditions |
 | image:quay.io/prometheus-operator/prometheus-config-reloader | Container image | runtime | Pass with conditions |
+| image:quay.io/prometheus/alertmanager | Container image | runtime | Pass with conditions |
 | image:quay.io/prometheus/node-exporter | Container image | runtime | Pass with conditions |
 | image:quay.io/prometheus/prometheus | Container image | runtime | Pass with conditions |
 | image:registry.k8s.io/kube-state-metrics/kube-state-metrics | Container image | runtime | Pass with conditions |
@@ -463,7 +464,7 @@ Conditions:
 
 **What it provides.** Reloads the Prometheus configuration when it changes.
 
-**Why it is needed.** Reloads Prometheus when its configuration changes, without a restart.
+**Why it is needed.** Reloads Prometheus and Alertmanager when their configuration changes, without a restart.
 
 | | |
 | --- | --- |
@@ -486,7 +487,35 @@ Conditions:
 - Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.
 - Loki is AGPL and is not used (D-19).
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
-- Alertmanager is off; metrics stay on the site.
+- Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02).
+
+## image:quay.io/prometheus/alertmanager
+
+**What it provides.** Alertmanager 0.35.0: sends the site's alerts (audit shipping, OpenBao seal and audit device, and later rules) to your organization's security operators by email.
+
+**Why it is needed.** Receives the alerts Prometheus raises from deploy/values/prometheus-alerts.yaml and emails them to the site setting alertRecipients through the site's own mail server. It has one receiver and no webhook, chat or remote receiver.
+
+| | |
+| --- | --- |
+| Kind | Container image |
+| Pinned version or digest | `v0.35.0@sha256:0f6727a39ff00b6cf95e8a5ebaf7442c55af855b79c689fb9a060e2bada1ecbf` |
+| Architecture component | `site-logging` |
+| Used in | `deploy/bundle/images.lock.json` |
+| Scope | Runtime: it runs in the product |
+| Licence | Apache-2.0 |
+| Cryptography | Not a validated cryptographic module |
+| Air gap | Works air-gapped once mirrored: the pinned digest in the site registry, carried with its signature by the offline bundle |
+| Compliance fit | Pass with conditions |
+| Controls | AU-5, SI-4(5) |
+| Security fixes | Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
+
+Conditions:
+
+- One receiver: email to the site setting alertRecipients through the site's own mail server, which the site lists in egressAllow when it is outside the cluster; no webhook, chat or remote receiver (48.1-02, D-16).
+- Mail uses STARTTLS (smtp\_require\_tls). The mail server's certificate must chain to a CA the image trusts; a site whose mail server uses only its own CA mounts that CA for Alertmanager or relays through a server the image trusts, or alerts are not delivered.
+- Alert text names pods, nodes and alert names only; it carries no record content, secrets or personal information.
+- The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
 
 ## image:quay.io/prometheus/node-exporter
 
@@ -522,7 +551,7 @@ Conditions:
 
 **What it provides.** Prometheus 3.16.0: site metrics, needed by Phase 48's load test.
 
-**Why it is needed.** Collects metrics about the site's nodes and Kubernetes objects. The Phase 48 load tests read them to measure a site. Alertmanager is off.
+**Why it is needed.** Collects metrics about the site's nodes, Kubernetes objects, OpenBao and the log shipper, and evaluates the alert rules of deploy/values/prometheus-alerts.yaml. The Phase 48 load tests read its metrics to measure a site.
 
 | | |
 | --- | --- |
@@ -545,7 +574,7 @@ Conditions:
 - Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.
 - Loki is AGPL and is not used (D-19).
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
-- Alertmanager is off; metrics stay on the site.
+- Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02).
 
 ## image:registry.k8s.io/kube-state-metrics/kube-state-metrics
 
@@ -631,6 +660,7 @@ Conditions:
 - Longhorn images are not rebuilt by us: the Protected B base-image row is open.
 - Host packages (dm\_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).
 - longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods.
+- The longhorn-crypto key, which any backup restore needs once the cluster is gone, is escrowed with the RKE2 keys and checked daily by the sterling-escrow-currency job (47-25).
 
 ## chart:opensearch
 
@@ -649,7 +679,7 @@ Conditions:
 | Cryptography | None |
 | Air gap | Works with no internet access |
 | Compliance fit | Pass with conditions |
-| Controls | AU-2, AU-3, AU-9, AU-12 |
+| Controls | AU-2, AU-3, AU-9, AU-12, CP-9, CP-10 |
 | Security fixes | Bumped by hand in a reviewed change: download the new tarball, check its index SHA-256, update the lock and re-run the render invariants. The chart holds templates only; fixes in the software arrive through its image pins. |
 | Reviewed | Claude (agent review; owner to confirm), 2026-11-24 |
 
@@ -658,6 +688,7 @@ Conditions:
 - Logs and audit records ship only to the site store; no outbound output is configured.
 - Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.
 - Loki is AGPL and is not used (D-19).
+- audit-\* and logs-\* are snapshotted on a schedule to a filesystem repository on an encrypted volume, without the security index, with a tested restore (47-24). Multi-node sites need the snapshot volume as ReadWriteMany on the encrypted class, confirmed on Phase 48's lab-full rig.
 
 ## chart:prometheus
 
