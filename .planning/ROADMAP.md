@@ -697,7 +697,7 @@ Plans:
   4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
-**Plans:** 6/18 plans executed in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
+**Plans:** 7/18 plans executed in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -706,7 +706,7 @@ Plans:
 - [x] 47-04-PLAN.md: Wave 3 (merged with #172). Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
 - [x] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
 - [x] 47-06-PLAN.md: Wave 4. Signed offline bundle build, check and import; signed-file mechanism
-- [ ] 47-07-PLAN.md: Wave 4. OpenBao as code: PKCS#11 seal, sterling-workbench and step-up roles, policies, two-key enrolment
+- [x] 47-07-PLAN.md: Wave 4. OpenBao as code: PKCS#11 seal, sterling-workbench and step-up roles, policies, two-key enrolment
 - [ ] 47-08-PLAN.md: Wave 4. Keycloak realm as code: passwordless WebAuthn only, `signInKeys` policy (passkeys or hardware-only), shared rpId, step-up acr levels
 - [ ] 47-09-PLAN.md: Wave 4. Rebuilt Theia Cloud and oauth2-proxy images; hardened session pod template
 - [ ] 47-10-PLAN.md: Wave 4. Encrypted storage class, OpenSearch with Fluent Bit, Prometheus, Harbor values
@@ -1884,7 +1884,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
-| 47. On-premise deployment stack and offline bundle | 6/18 | In Progress 2026-11-23 (beside 46) | - |
+| 47. On-premise deployment stack and offline bundle | 7/18 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
