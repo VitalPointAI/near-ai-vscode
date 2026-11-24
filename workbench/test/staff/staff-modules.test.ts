@@ -11,8 +11,9 @@ import { ConnectionHandler, RpcConnectionHandler } from '@theia/core/lib/common/
 import { BackendApplicationContribution } from '@theia/core/lib/node/backend-application.js';
 import { STAFF_STATUS_PATH, StaffStatusServer } from '../../extension/src/common/staff-live.ts';
 import { StaffLiveSessionId, createStaffBackendModule } from '../../extension/src/node/staff-backend-module.ts';
+import { SessionIdentity } from '../../extension/src/node/session-identity.ts';
 
-const extensionRoot = fileURLToPath(new URL('../../extension/', import.meta.url));
+const extensionRoot = fileURLToPath(new URL('../../../extension/', import.meta.url));
 
 function spies<K extends string>(names: readonly K[]): { parts: Record<K, (bind: interfaces.Bind) => void>; calls: Record<K, number> } {
   const calls = Object.fromEntries(names.map((name) => [name, 0])) as Record<K, number>;
@@ -23,6 +24,8 @@ function spies<K extends string>(names: readonly K[]): { parts: Record<K, (bind:
 test('the backend module binds the live session, the status service and its lifecycle once, and calls each backend part once', () => {
   const { parts, calls } = spies(['binding', 'staffRoom', 'share'] as const);
   const container = new Container();
+  // The session's identity, as 46-02 binds it: the lifecycle contribution resolves the live session, which reads it.
+  container.bind(SessionIdentity).toConstantValue({ status: () => ({ mode: 'local' }) });
   container.load(createStaffBackendModule(parts, () => undefined));
   assert.deepEqual(calls, { binding: 1, staffRoom: 1, share: 1 });
   assert.equal(container.isBound(StaffLiveSessionId), true);
