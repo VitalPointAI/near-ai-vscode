@@ -942,16 +942,16 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 ## Phases 45.1 and 45.2 requirements: NATO and Five Eyes exchange
 
-**Defined:** 2026-11-24 from the owner's decision O1 and NATO direction (`.planning/research/data-centric-access/RESEARCH.md` sections 2.2 and 11), when Phase 45.1 was planned. XCHG-05 … XCHG-08 are drafts until your organization receives the NATO texts (Phase 45.2's trigger).
+**Defined:** 2026-11-24 from the owner's decision O1 and NATO direction (`.planning/research/data-centric-access/RESEARCH.md` sections 2.2 and 11), when Phase 45.1 was planned. XCHG-05 … XCHG-08 were reworded 2026-11-24 when Phase 45.2 was planned from AC322 (DCRA v2), ADatP-4774, 4778, 5636 and the public OpenTDF specification 4.3.0 (`45.2-RESEARCH.md`); ACP-240(A) is not held, so ZTDF conformance stays unverified until it or partner samples arrive.
 
 - [ ] **XCHG-01**: Your organization's signed policy maps each label to a NATO-readable form (`labelInterop@1`: policy identifier, classification value, restrictive and permissive categories) that its security officer confirms; a label with no mapping is refused for export; mapping out and back gives the same label.
 - [ ] **XCHG-02**: Every release copy and export carries a signed label binding (4778-style) over the label, the mapping version and the content hash, signed by the certified staff session key (release copies) or your organization's release key (exports), never with a person key and never naming a person; a changed label or content is refused.
 - [ ] **XCHG-03**: An export is a release to a partner: the same `mayRelease` check against the partner's agreement, a release authority credential, a passkey step-up and a recorded entry; export-controlled content is refused until Phase 45; a received object is verified, mapped and held until a person accepts it.
 - [ ] **XCHG-04**: Base TDF objects from the public OpenTDF specification are written to a partner's key and read through our own non-exportable receiving key in OpenBao.
-- [ ] **XCHG-05** (draft): ADatP-4774 XML labels written and read exactly as the text defines.
-- [ ] **XCHG-06** (draft): ADatP-4778 binding objects written and checked exactly as the text and its profiles define.
-- [ ] **XCHG-07** (draft): ZTDF objects with their assertions and label placement, and key access to a partner's key access server.
-- [ ] **XCHG-08** (draft): Conformance against allied or vendor sample objects, and an exchange trial with a partner's test key server.
+- [ ] **XCHG-05**: ADatP-4774 labels are written and read exactly as the text defines: every export carries an originator label in your organization's own policy and an alternative label in the common partner policy, spelled from your security officer's signed tables with no NATO value shipped; a partner's labels are mapped in and joined, never lowered, and an unmappable label is refused; test vectors follow the structure of every example in the text.
+- [ ] **XCHG-06**: ADatP-4778 binding objects carrying the ADatP-5636 mandatory core metadata (the metadata label bound by the ADatP-5636 binding profile) are written for every export and read in every form the text allows; they are signed by your organization's release key under a provisional profile until ADatP-4778.2 is read; a changed label, metadata entry or payload is refused.
+- [ ] **XCHG-07**: A ZTDF-compatible profile on the public OpenTDF specification 4.3.0 carries the 4774 label and the 4778 binding as signed assertions, with every point where ZTDF may differ behind one profile interface; key access reaches a partner's key access server listed and pinned in the signed policy, by wrapping to it and by rewrapping from it; classical key access is recorded and limited where partners lack post-quantum keys. ZTDF conformance is unverified until ACP-240(A) or partner samples are available.
+- [ ] **XCHG-08**: Conformance evidence: an AC322 (DCRA v2) conformance matrix for data-centric security, ABAC and data-product metadata with a passing test behind every claim; negative tests for every refusal; our XML checked against the texts' own schemas; and an interop trial with an ally's or vendor's ZTDF samples and test key server as the acceptance check.
 
 | Requirement | Phase |
 |-------------|-------|

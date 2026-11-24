@@ -768,15 +768,31 @@ Plans:
 - [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
 
 ### Phase 45.2: NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts (INSERTED)
-**Goal**: Your organization exchanges ZTDF objects with allies, with labels and bindings written exactly as ADatP-4774 and 4778 define them, and key access to a partner's key access server.
-**Inserted**: 2026-11-24 as a stub (research row J). **Trigger**: your organization receives ACP-240 Ed A with its ZTDF specification, and ADatP-4774, 4778 and 4778.2, through DND (research 11.1). The trigger is the texts, not a date.
-**Depends on**: Phase 45.1; the texts.
-**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08 (drafts until the texts arrive)
-**Scope when triggered** (research 11.3): the ADatP-4774 XML serializer and parser; the ADatP-4778 binding object; ZTDF assertions and label placement; key access to a partner key access server; XML canonicalization only if the 4778 binding needs XML signatures (prefer our own narrow implementation; any library gets a compliance fit entry); conformance against allied or vendor sample objects and a trial with a partner's test key server.
-**Plans:** 0 plans
+**Goal**: Your organization's exports to allies carry labels, a binding and core metadata exactly as ADatP-4774, 4778 and 5636 define them, conformant to the principles of the AC322 Data Centric Reference Architecture, inside a ZTDF-compatible object built on the public OpenTDF specification whose key access reaches a partner's key access server; partners' objects in those forms are read, checked and held until a person accepts them. ZTDF conformance stays unverified until ACP-240(A) or partner samples are available.
+**Inserted**: 2026-11-24 as a stub (research row J); planned 2026-11-24 on `docs/phase-45.2-plan` from the texts the owner provided: AC/322-D(2025)0056 (DCRA v2, used for its principles and not in place of ACP-240(A), which defines ZTDF and is not held), ADatP-4774, ADatP-4778, ADatP-5636 and 5636.1 (local, gitignored, cited by section only), and the public OpenTDF specification 4.3.0 as the base for a ZTDF-compatible profile (owner, 2026-11-24).
+**Depends on**: Phase 45.1 (45.1-01 for 45.2-01, 45.1-02 for 45.2-05, 45.1-03 for 45.2-06, 45.1-04 for 45.2-07, 45.1-05 for 45.2-08) and, through it, Phase 71 (core); 46-07 for the workbench tasks. ACP-240(A), ADatP-4778.2 and partner samples are not prerequisites: each is swapped in by a gap-closure plan when it arrives (`45.2-RESEARCH.md` section 10).
+**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08
+**Success Criteria** (what must be TRUE):
+  1. Every export carries an ADatP-4774 originator label in your organization's own policy and an alternative label in the common partner policy, spelled from your security officer's signed tables with no NATO value shipped; a partner's labels are mapped in and joined, never lowered, and an unmappable label is refused. (XCHG-05)
+  2. Every export carries an ADatP-4778 binding object with the seven ADatP-5636 mandatory metadata elements, signed by your organization's release key under a provisional profile until ADatP-4778.2 is read; partner binding objects are read in every form the text allows, and a changed label, metadata entry or payload is refused. (XCHG-06)
+  3. A ZTDF-compatible object on OpenTDF 4.3.0 carries the label and the binding as signed assertions, with every point where ZTDF may differ behind one profile; key access reaches partner key access servers listed and pinned in the signed policy, both ways; classical key access is recorded and limited where partners lack post-quantum keys. (XCHG-07)
+  4. An AC322 conformance matrix cites a passing test for every claim; control statements carry evidence; our XML is checked against the texts' own schemas; an interop trial with an ally's or vendor's samples and test key server is the acceptance check for ZTDF compatibility. (XCHG-08)
+**Research flags**: (1) AC322 is an architecture blueprint, not a ZTDF specification; never cite it for ZTDF. (2) No text, schema or example from an ADatP enters the repository. (3) The signed-binding profile is provisional until ADatP-4778.2. (4) Not a cross-domain guard. (5) Partners have no post-quantum key access type. (6) The texts' printed examples contain errata (research section 8).
+**Undo cost**: Medium. The label tables and partner pins are policy data; the exchange record values are permanent (settled at 45.2-07's checkpoint); the ZTDF profile is swappable by design.
+**Plans:** 10 plans in 8 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-19, nine owner items, owner actions and a hand-off ledger in `45.2-CONTEXT.md`)
+**UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 45.2 to break down once the texts arrive)
+- [ ] 45.2-01-PLAN.md: Wave 1. Tracer: our own narrow XML reader and writer; one label out as ADatP-4774 and back
+- [ ] 45.2-02-PLAN.md: Wave 2. The `labelXml` table, every 4774 structure from the text's examples, labels coming in
+- [ ] 45.2-03-PLAN.md: Wave 2. ADatP-4778 binding objects with the ADatP-5636 mandatory metadata; every binding form read
+- [ ] 45.2-04-PLAN.md: Wave 3. Exclusive canonicalization, the provisional signed binding, the `release-p256-<site>` key
+- [ ] 45.2-05-PLAN.md: Wave 3. Part 2b: the ZTDF-compatible profile on OpenTDF 4.3.0, extending 45.1-02
+- [ ] 45.2-06-PLAN.md: Wave 4. Key access to partner key access servers (push and pull); partners pinned in `exchangePartners`
+- [ ] 45.2-07-PLAN.md: Wave 5. The record checkpoint, NATO-format export and import, the native screens
+- [ ] 45.2-08-PLAN.md: Wave 6. AC322 conformance matrix, SECURITY.md, crypto inventory, data flow, control statements
+- [ ] 45.2-09-PLAN.md: Wave 7. Schema check against the texts' schemas, full suites once, the integration PR after the owner's gate approval
+- [ ] 45.2-10-PLAN.md: Wave 8. Interop trial with allied or vendor samples and a test key server, the ZTDF acceptance check (waits for the samples)
 
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
@@ -2090,7 +2106,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 45.1. NATO and Five Eyes exchange, part 1 | 0/5 | Planned 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
-| 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/TBD | Stub (trigger: your organization receives ACP-240 Ed A and ADatP-4774 and 4778) | - |
+| 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/10 | Planned 2026-11-24 (after 45.1's plans; 45.2-10 waits for allied or vendor samples) | - |
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
