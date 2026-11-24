@@ -1,6 +1,6 @@
-import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { ContainerModule, injectable, postConstruct } from '@theia/core/shared/inversify';
+import DOMPurify from '@theia/core/shared/dompurify';
 import { isDocumentationPages, type DocumentationPage } from '../common/sterling-evidence.js';
-import { CoreMarkdownRenderer, MarkdownRenderer, MarkdownRenderResult } from '@theia/core/lib/browser/markdown-rendering/markdown-renderer.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
@@ -11,19 +11,43 @@ const widgetId = 'sterling-documentation';
 export const sterlingDocumentationCommand = { id: 'sterling.documentation.open', category: 'SovAI', label: 'Documentation' };
 const documentRoot = new URL('https://documents.invalid/');
 const repository = 'https://github.com/VitalPointAI/near-ai-vscode/blob/main';
+// Bundled images live beside sterling-documentation.json (workbench/tools/documentation-render.mjs); nothing else may be loaded.
+const assetPath = /^sterling-documentation\/[0-9a-f]{16}\.(png|jpe?g|gif|webp|svg)$/;
+
+/**
+ * The pages are HTML made at build time from the repository's own guides. Sanitize it again anyway, with a private DOMPurify instance
+ * (its hooks never touch Theia's shared one): no scripts, styles, forms or embedded content, and nothing that would load from anywhere but
+ * the bundled images (46-03: the page makes only same-origin, data: or blob: requests).
+ */
+function createSanitizer(): (html: string) => DocumentFragment {
+  const purify = DOMPurify(window);
+  purify.addHook('uponSanitizeAttribute', (node, data) => {
+    const name = data.attrName;
+    const value = data.attrValue.trim();
+    if (name === 'src') data.keepAttr = node.nodeName === 'IMG' && assetPath.test(value);
+    else if (name === 'href' || name === 'xlink:href') data.keepAttr = node.nodeName === 'A' || value.startsWith('#');
+    else if (name === 'srcset' || name === 'poster' || name === 'background' || /url\(\s*(?!['"]?#)/i.test(value)) data.keepAttr = false;
+  });
+  purify.addHook('afterSanitizeAttributes', node => {
+    if (node.nodeName === 'IMG' && !node.hasAttribute('src')) node.remove();
+  });
+  return html => purify.sanitize(html, {
+    RETURN_DOM_FRAGMENT: true,
+    USE_PROFILES: { html: true, svg: true },
+    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'foreignObject', 'image', 'use', 'video', 'audio', 'iframe', 'object', 'embed'],
+    ALLOW_DATA_ATTR: false,
+  });
+}
 
 
 @injectable()
 class SterlingDocumentationWidget extends BaseWidget {
-  @inject(CoreMarkdownRenderer)
-  protected readonly renderer!: MarkdownRenderer;
-
+  private readonly sanitize = createSanitizer();
   private readonly search = document.createElement('input');
   private readonly navigation = document.createElement('nav');
   private readonly content = document.createElement('article');
   private pages: DocumentationPage[] = [];
   private active?: DocumentationPage;
-  private rendered?: MarkdownRenderResult;
   private readonly loadRequest = new AbortController();
 
   @postConstruct()
@@ -46,10 +70,7 @@ class SterlingDocumentationWidget extends BaseWidget {
     status.textContent = 'Loading documentation…';
     this.content.append(status);
     this.node.append(sidebar, this.content);
-    this.toDispose.push({ dispose: () => {
-      this.loadRequest.abort();
-      this.rendered?.dispose();
-    } });
+    this.toDispose.push({ dispose: () => this.loadRequest.abort() });
     void this.load(status);
   }
 
@@ -80,7 +101,7 @@ class SterlingDocumentationWidget extends BaseWidget {
     const categories = new Map<string, HTMLElement>();
     this.navigation.replaceChildren();
     for (const page of this.pages) {
-      if (query && ![page.title, page.category, page.markdown].some(value => value.toLowerCase().includes(query))) continue;
+      if (query && ![page.title, page.category, page.text].some(value => value.toLowerCase().includes(query))) continue;
       let group = categories.get(page.category);
       if (!group) {
         group = document.createElement('section');
@@ -105,9 +126,8 @@ class SterlingDocumentationWidget extends BaseWidget {
 
   private openPage(page: DocumentationPage, hash = ''): void {
     this.active = page;
-    this.rendered?.dispose();
-    this.rendered = this.renderer.render({ value: page.markdown, isTrusted: false });
-    const body = this.rendered.element;
+    const body = document.createElement('div');
+    body.append(this.sanitize(page.html));
     const headingIds = new Map<string, number>();
     body.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach(heading => {
       const base = (heading.textContent ?? '').toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-');

@@ -22,12 +22,15 @@ export interface DocumentationPage {
   readonly route: string;
   readonly category: string;
   readonly title: string;
-  readonly markdown: string;
+  /** The page as HTML, made at build time (workbench/tools/documentation-render.mjs); the view sanitizes it again before showing it. */
+  readonly html: string;
+  /** The page's plain text, for search. */
+  readonly text: string;
 }
 
-/** The bundled documentation collection: a non-empty list of pages whose five fields are all strings. */
+/** The bundled documentation collection: a non-empty list of pages whose six fields are all strings. */
 export function isDocumentationPages(value: unknown): value is DocumentationPage[] {
   return Array.isArray(value) && value.length > 0 && value.every(page =>
     typeof page === 'object' && page !== null &&
-    ['source', 'route', 'category', 'title', 'markdown'].every(key => typeof (page as Record<string, unknown>)[key] === 'string'));
+    ['source', 'route', 'category', 'title', 'html', 'text'].every(key => typeof (page as Record<string, unknown>)[key] === 'string'));
 }
