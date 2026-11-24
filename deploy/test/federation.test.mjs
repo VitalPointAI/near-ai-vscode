@@ -5,13 +5,15 @@
 // Run: env COSIGN=compliance/out/tools/cosign node scripts/run-tests.mjs deploy/test/federation.test.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { X509Certificate, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { before, test } from 'node:test';
 import { cosignBinary } from '../bundle/lib/cosign.mjs';
-import { signFile } from '../bundle/signed-file.mjs';
+import { signFile, verifySignedFile } from '../bundle/signed-file.mjs';
 import { FORMAT, PASSWORDLESS, STORED_FIELDS, exportUsers, importUsers } from '../keycloak/users.mjs';
+import { MOUNT, exportCrl, importCrl, importIntermediate, pemBlocks, requestIntermediate } from '../openbao/pki-files.mjs';
 
 process.env.COSIGN_PASSWORD = 'federation-test';
 const DIR = mkdtempSync(path.join(tmpdir(), 'federation-'));
@@ -145,3 +147,134 @@ for (const [name, makeFile] of [
     assert.deepEqual(edge.calls, []);
   });
 }
+
+// --- PKI intermediate and revocation lists --------------------------------------------------------------------------------------------
+
+const openssl = (...args) => {
+  const run = spawnSync('openssl', args, { cwd: DIR, encoding: 'utf8' });
+  assert.ok(!run.error, 'openssl was not found; it makes the test certificates.');
+  assert.equal(run.status, 0, run.stderr);
+};
+const pem = (name) => readFileSync(path.join(DIR, name), 'utf8');
+const serialNumber = () => `0x${randomBytes(12).toString('hex')}`;
+/** A self-signed CA, standing in for HQ's offline root (made in the key ceremony). */
+const makeRoot = (name) => openssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', `${name}.key`, '-out', `${name}.pem`,
+  '-subj', `/CN=${name}`, '-days', '3650', '-set_serial', serialNumber(), '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign');
+/** A certificate for a new key, signed by `root`: a CA certificate unless `ca` is false. */
+function issue(root, name, { ca = true } = {}) {
+  openssl('req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-384', '-nodes', '-keyout', `${name}.key`, '-out', `${name}.csr`, '-subj', `/CN=${name}`);
+  writeFileSync(path.join(DIR, `${name}.ext`), ca ? 'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n' : 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n');
+  openssl('x509', '-req', '-in', `${name}.csr`, '-CA', `${root}.pem`, '-CAkey', `${root}.key`, '-days', '365', '-set_serial', serialNumber(), '-extfile', `${name}.ext`, '-out', `${name}.pem`);
+}
+const CRL = `-----BEGIN X509 CRL-----\n${randomBytes(96).toString('base64')}\n-----END X509 CRL-----\n`;
+
+before(() => {
+  makeRoot('hq-root');
+  makeRoot('other-root');
+  issue('hq-root', 'site-intermediate');
+  issue('other-root', 'foreign-intermediate');
+  issue('hq-root', 'leaf', { ca: false });
+});
+
+/** OpenBao's pki_int behind the paths pki-files.mjs calls; set-signed imports each certificate as an issuer, the first with `keyId`. */
+function fakeOpenbao({ keyId = 'key-site' } = {}) {
+  const calls = [];
+  const state = { issuers: {}, default: null };
+  const colons = (hex) => hex.toLowerCase().match(/../g).join(':');
+  const bao = async (method, apiPath, body) => {
+    calls.push(`${method} ${apiPath}`);
+    if (apiPath === `${MOUNT}/intermediate/generate/internal`) return { status: 200, data: { data: { csr: pem('site-intermediate.csr'), key_id: keyId } } };
+    if (apiPath === `${MOUNT}/intermediate/set-signed`) {
+      pemBlocks(body.certificate).forEach((block, index) => {
+        state.issuers[`issuer-${index}`] = { serial_number: colons(new X509Certificate(block.pem).serialNumber), key_id: index === 0 ? keyId : '' };
+      });
+      return { status: 200, data: { data: {} } };
+    }
+    if (apiPath === `${MOUNT}/issuers?list=true`) return { status: 200, data: { data: { keys: Object.keys(state.issuers), key_info: state.issuers } } };
+    if (apiPath === `${MOUNT}/config/issuers`) { state.default = body.default; return { status: 200, data: { data: {} } }; }
+    if (apiPath === `${MOUNT}/cert/crl`) return { status: 200, data: { data: { certificate: CRL } } };
+    return { status: 404, data: null };
+  };
+  return { bao, calls, state };
+}
+
+/** A copy of a certificate file in the scratch folder, signed. */
+const signedCopy = (name, { signWith = ORG, text = pem(name) } = {}) => {
+  const file = scratch(name);
+  writeFileSync(file, text);
+  signFile(file, signWith.private);
+  return file;
+};
+
+test('csr and export-crl write files that verify with the site public key; the CSR and its key come from OpenBao', async () => {
+  const openbao = fakeOpenbao();
+  const csrFile = scratch('site.csr');
+  const { csr } = await requestIntermediate(openbao.bao, { out: csrFile, key: ORG.private, siteName: 'edge-1' });
+  assert.equal(csr, pem('site-intermediate.csr'));
+  assert.equal(readFileSync(csrFile, 'utf8'), csr);
+  const crlFile = scratch('site.crl.pem');
+  await exportCrl(openbao.bao, { out: crlFile, key: ORG.private });
+  assert.equal(readFileSync(crlFile, 'utf8'), CRL);
+  for (const file of [csrFile, crlFile]) {
+    assert.equal(verifySignedFile(file, ORG.public).ok, true, file);
+    assert.equal(verifySignedFile(file, OTHER.public).ok, false, file);
+  }
+  assert.deepEqual(openbao.calls, [`POST ${MOUNT}/intermediate/generate/internal`, `GET ${MOUNT}/cert/crl`]);
+});
+
+test('an intermediate signed by the HQ root becomes the default issuer and the chain is written for siteCaChain', async () => {
+  const openbao = fakeOpenbao();
+  const chainOut = scratch('site-ca-chain.pem');
+  const result = await importIntermediate(openbao.bao, { file: signedCopy('site-intermediate.pem'), publicKey: ORG.public, rootPem: pem('hq-root.pem'), chainOut });
+  assert.deepEqual(result, { ok: true, issuerId: 'issuer-0', chainOut });
+  assert.equal(openbao.state.default, 'issuer-0');
+  assert.deepEqual(pemBlocks(readFileSync(chainOut, 'utf8')).map((block) => new X509Certificate(block.pem).subject), ['CN=site-intermediate', 'CN=hq-root']);
+  // A certificate OpenBao holds no key for cannot sign: it is never made the default and no chain is written.
+  const keyless = fakeOpenbao({ keyId: '' });
+  const keylessOut = scratch('keyless-chain.pem');
+  await assert.rejects(importIntermediate(keyless.bao, { file: signedCopy('site-intermediate.pem'), publicKey: ORG.public, rootPem: pem('hq-root.pem'), chainOut: keylessOut }), /does not match a key pki_int generated/);
+  assert.equal(keyless.state.default, null);
+  assert.equal(existsSync(keylessOut), false);
+});
+
+for (const [name, makeFile, options = {}] of [
+  ['a certificate file changed after signing', () => {
+    const file = signedCopy('site-intermediate.pem');
+    writeFileSync(file, pem('foreign-intermediate.pem'));
+    return file;
+  }],
+  ['a certificate file signed with another key', () => signedCopy('site-intermediate.pem', { signWith: OTHER })],
+  ['an intermediate issued by another root', () => signedCopy('foreign-intermediate.pem')],
+  ['a certificate that is not a CA certificate', () => signedCopy('leaf.pem')],
+  ['an intermediate that is no longer valid', () => signedCopy('site-intermediate.pem'), { now: new Date('2100-01-01T00:00:00Z') }],
+  ['a file with text outside the certificate', () => signedCopy('site-intermediate.pem', { text: `Certificate:\n    Data: ...\n${pem('site-intermediate.pem')}` })]
+]) {
+  test(`import-intermediate refuses ${name} with zero OpenBao calls and no file written`, async () => {
+    const openbao = fakeOpenbao();
+    const chainOut = scratch('refused-chain.pem');
+    const result = await importIntermediate(openbao.bao, { file: makeFile(), publicKey: ORG.public, rootPem: pem('hq-root.pem'), chainOut, ...options });
+    assert.equal(result.ok, false);
+    assert.ok(result.reason);
+    assert.deepEqual(openbao.calls, []);
+    assert.equal(existsSync(chainOut), false);
+  });
+}
+
+test('import-crl places a verified revocation list at every path and writes nothing for a refused one', () => {
+  const file = scratch('hq.crl.pem');
+  writeFileSync(file, CRL);
+  signFile(file, ORG.private);
+  const outs = [scratch('smart-card.crl.pem'), scratch('tls-trust.crl.pem')];
+  assert.deepEqual(importCrl({ file, publicKey: ORG.public, outs }), { ok: true, outs });
+  for (const out of outs) assert.equal(readFileSync(out, 'utf8'), CRL);
+  const tampered = scratch('tampered.crl.pem');
+  writeFileSync(tampered, CRL);
+  signFile(tampered, ORG.private);
+  writeFileSync(tampered, `-----BEGIN X509 CRL-----\n${randomBytes(96).toString('base64')}\n-----END X509 CRL-----\n`);
+  for (const refused of [tampered, (() => { const other = scratch('other.crl.pem'); writeFileSync(other, CRL); signFile(other, OTHER.private); return other; })(), signedCopy('hq-root.pem')]) {
+    const written = [];
+    const result = importCrl({ file: refused, publicKey: ORG.public, outs: [scratch('never.crl.pem')], write: (out) => written.push(out) });
+    assert.equal(result.ok, false, refused);
+    assert.deepEqual(written, []);
+  }
+});
