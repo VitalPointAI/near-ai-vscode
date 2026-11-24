@@ -24,7 +24,8 @@ import type { KeyStatusLookup } from '../team/keyStatus';
 import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord } from '../team/validate';
-import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from './entry';
+import { HASH_PATTERN, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, writerIdOf } from './entry';
+import type { SealedEntry } from './entry';
 import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
 import { MAX_FEATURES, isReplicaFeature } from './features';
 
@@ -232,15 +233,17 @@ const BASE64URL_TEXT = /^[A-Za-z0-9_-]+$/;
 
 /**
  * hub is the hub's writer id (64 hex), project the project's stream id (32 hex), challenge and keying base64url of 32 bytes each, features the
- * replica features the device folds (at most MAX_FEATURES name@N ids, sorted and unique).
+ * replica features the device folds (at most MAX_FEATURES name@N ids, sorted and unique). certificate and certificateEntry, only in an answer signed
+ * by a person's session key (Phase 33 D-62), are the entry hash of the session.certify that vouches for that key and the sealed entry itself, so the
+ * hub can check the chain to the person's device before its first push has stored it. A device's answer carries neither.
  */
-export interface SessionAnswerPayload { v: 2; hub: string; project: string; challenge: string; keying: string; features: string[] }
+export interface SessionAnswerPayload { v: 2; hub: string; project: string; challenge: string; keying: string; features: string[]; certificate?: string; certificateEntry?: SealedEntry }
 /** Bytes or their base64url text. */
 export type SessionBytes = Uint8Array | string;
 /** What the hub expects: its own writer id, the project asked for, the challenge it gave on this connection and this connection's keying material. */
 export interface SessionExpectation { hub: string; project: string; challenge: SessionBytes; keying: SessionBytes }
 /** features: the replica features the device folds (KNOWN_REPLICA_FEATURES), in any order; signed sorted. None given signs an empty list. */
-export interface BuildSessionAnswerInput extends SessionExpectation { features?: readonly string[]; now: Date }
+export interface BuildSessionAnswerInput extends SessionExpectation { features?: readonly string[]; certificateEntry?: SealedEntry; now: Date }
 
 export const SESSION_REFUSALS = {
   malformed: 'This is not a session answer this version can read. Open a new session and answer its challenge.',
@@ -252,7 +255,7 @@ export const SESSION_REFUSALS = {
 } as const;
 export type SessionRefusal = keyof typeof SESSION_REFUSALS;
 export type SessionFailure = { ok: false; reason: SessionRefusal; message: string };
-export type SessionRead = { ok: true; publicKey: string; writer: string; features: string[] } | SessionFailure;
+export type SessionRead = { ok: true; publicKey: string; writer: string; features: string[]; certificate?: string; certificateEntry?: SealedEntry } | SessionFailure;
 
 const refuseSession = (reason: SessionRefusal): SessionFailure => ({ ok: false, reason, message: SESSION_REFUSALS[reason] });
 
@@ -289,14 +292,28 @@ function featureListOf(value: unknown): string[] | undefined {
 
 function sessionPayloadOf(value: unknown): SessionAnswerPayload | undefined {
   if (!isRecord(value)) return undefined;
-  const announced = hasKeys(value, SESSION_KEYS);
-  if (!announced && !hasKeys(value, SESSION_KEYS_WITHOUT_FEATURES)) return undefined;
+  // A session key's answer carries both certificate fields or neither.
+  const certified = Object.prototype.hasOwnProperty.call(value, 'certificate');
+  const extra = certified ? ['certificate', 'certificateEntry'] : [];
+  const announced = hasKeys(value, [...SESSION_KEYS, ...extra]);
+  if (!announced && !hasKeys(value, [...SESSION_KEYS_WITHOUT_FEATURES, ...extra])) return undefined;
+  const certificateEntry = certified ? certificateEntryOf(own(value, 'certificateEntry')) : undefined;
+  if (certified && (certificateEntry === undefined || entryHash(certificateEntry.header) !== own(value, 'certificate'))) return undefined;
   const [v, hub, project, challenge, keying] = SESSION_KEYS_WITHOUT_FEATURES.map((key) => own(value, key));
   if (v !== SESSION_VERSION || !isHash(hub) || typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
   if (!isKey(challenge, CHALLENGE_BYTES) || !isKey(keying, SESSION_KEYING_BYTES)) return undefined;
   const features = announced ? featureListOf(own(value, 'features')) : [];
   if (features === undefined) return undefined;
-  return { v: SESSION_VERSION, hub, project, challenge, keying, features };
+  return { v: SESSION_VERSION, hub, project, challenge, keying, features, ...(certificateEntry === undefined ? {} : { certificate: entryHash(certificateEntry.header), certificateEntry }) };
+}
+
+// A sealed entry read from hostile input as a fresh copy: an exact header and a base64url body no larger than an inline body, or undefined.
+function certificateEntryOf(value: unknown): SealedEntry | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['header', 'body'])) return undefined;
+  const shape = parseHeaderShape(own(value, 'header'));
+  const body = own(value, 'body');
+  if (!shape.ok || typeof body !== 'string' || !BASE64URL_TEXT.test(body) || body.length > Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD) * 4) / 3)) return undefined;
+  return { header: shape.header, body };
 }
 
 // The caller's features as a sorted copy, or the value itself when it is not a list, so the shape check refuses it. None given is an empty list.
@@ -309,7 +326,8 @@ function sortedFeatures(value: unknown): unknown {
 export function buildSessionAnswer(signer: PayloadSigner, input: BuildSessionAnswerInput): SignedPayload<SessionAnswerPayload> {
   const challenge = sessionText(input.challenge, CHALLENGE_BYTES);
   const keying = sessionText(input.keying, SESSION_KEYING_BYTES);
-  const payload = { v: SESSION_VERSION, hub: input.hub, project: input.project, challenge, keying, features: sortedFeatures(input.features) };
+  const certificate = input.certificateEntry === undefined ? {} : { certificate: entryHash(input.certificateEntry.header), certificateEntry: input.certificateEntry };
+  const payload = { v: SESSION_VERSION, hub: input.hub, project: input.project, challenge, keying, features: sortedFeatures(input.features), ...certificate };
   const checked = sessionPayloadOf(payload);
   if (checked === undefined) {
     throw new Error(`The session answer was not made: the hub must be a writer id, the project a project id, the challenge and keying material 32 bytes each, and the features at most ${String(MAX_FEATURES)} different feature ids such as require@1.`);
@@ -337,7 +355,8 @@ export function readSessionAnswer(answer: unknown, expected: SessionExpectation)
     if (payload.project !== expected.project) return refuseSession('wrong-project');
     if (!sameBytes(Buffer.from(payload.challenge, 'base64url'), sessionBytes(expected.challenge))) return refuseSession('wrong-challenge');
     if (!sameBytes(Buffer.from(payload.keying, 'base64url'), sessionBytes(expected.keying))) return refuseSession('wrong-connection');
-    return { ok: true, publicKey, writer: writerIdOf(publicKey), features: payload.features };
+    const certificate = payload.certificateEntry === undefined ? {} : { certificate: payload.certificate as string, certificateEntry: payload.certificateEntry };
+    return { ok: true, publicKey, writer: writerIdOf(publicKey), features: payload.features, ...certificate };
   } catch {
     // Hostile input never throws out of the check.
     return refuseSession('malformed');

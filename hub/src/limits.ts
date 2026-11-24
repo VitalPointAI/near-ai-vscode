@@ -37,6 +37,11 @@ export const LIMITS = Object.freeze({
   eventStreamsPerAddress: 300,
   /** One presence heartbeat (D-38). */
   presenceBytes: 2 * KIB,
+  /**
+   * Live session keys one person device may certify at a time (Phase 33 D-62): a fifth session.certify while four of its certificates are before
+   * their notAfter is refused too-many-sessions. Certificates past notAfter do not count; they stay in the log.
+   */
+  liveSessionKeysPerDevice: 4,
   /** Per pushing device: 50 entries a second, a burst of 200 (D-39). */
   writerPerSecond: 50,
   writerBurst: 200,

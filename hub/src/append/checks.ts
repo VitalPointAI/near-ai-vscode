@@ -21,6 +21,12 @@
 // Entries of other cells are never opened here, so they already follow the rule; a missing blob refuses only the entry that uses it, so the client
 // uploads the blob and sends that entry again while the rest of the batch is stored.
 //
+// Session keys (Phase 33 D-60, D-62): a writer that is not a roster device is checked with the key of the session.certify the fold placed for it. It
+// is taken only while its certifying device stands and the hub's clock is before the certificate's notAfter (session-expired otherwise); a kind
+// only the person key may sign is refused person-key-required wherever the hub can open the body; a certificate in the base stream refolds the
+// overlay, so the session's own entries after it in the same batch are judged with it; and a device may hold LIMITS.liveSessionKeysPerDevice live
+// certificates at a time (too-many-sessions).
+//
 // A batch is checked in order against an in-memory overlay (heads, places and a roster folded again after each roster entry), then written by
 // commitBatch in one store transaction. Only after COMMIT does the overlay replace the cached roster, so a failed write accepts nothing (D-26).
 // A roster entry the fold refuses is still stored, because it is the writer's log; the roster head simply does not move.
@@ -32,6 +38,7 @@ import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { missingFeatures } from '@ext/domain/replica/features';
 import { validateBody } from '@ext/domain/replica/kinds';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
+import { SESSION_REFUSALS, isPersonKeyKind } from '@ext/domain/replica/sessionKeys';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
@@ -63,7 +70,11 @@ export const APPEND_REFUSALS = {
   'roster-unreadable': 'This entry of the roster part of the project does not open with the key its part names, or what it holds is not an entry.',
   'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.',
   'needs-update': 'This shared work needs a newer version of your organization\'s server. Ask its operator to update it.',
-  restoring: 'Your organization\'s server is being restored. Send this change again in a moment.'
+  restoring: 'Your organization\'s server is being restored. Send this change again in a moment.',
+  // Phase 33 D-60, D-62: a person's session key.
+  'session-expired': 'Your session key has ended. Sign in again.',
+  'person-key-required': SESSION_REFUSALS['person-key-required'],
+  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.'
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -204,6 +215,19 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   }
 }
 
+/** The kind of an entry whose body the hub holds a key for (the base cell, or a cell granted to the hub), or undefined when it cannot read it. */
+function kindOf(roster: ProjectRoster, header: EntryHeader, wire: Buffer): string | undefined {
+  const key = roster.ring(header.stream, header.epoch);
+  const plaintext = key === undefined ? undefined : openBody(key, header, wire);
+  if (plaintext === undefined) return undefined;
+  try {
+    const checked = validateBody(JSON.parse(plaintext.toString('utf8')) as unknown);
+    return checked.ok ? checked.body.kind : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True when a kept checkpoint of this hub names this writer log's head at or beyond the entry's place, and at that place names this very entry. */
 function coveredBefore(store: HubStore, project: string, header: EntryHeader, hash: string): boolean {
   const covered = store.coveredHead(project, header.stream, header.writer);
@@ -237,6 +261,8 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   // POST-01 (D-07): a project that requires a feature this hub does not fold takes no append, so an outdated hub never accepts writes it cannot
   // judge. The whole batch is refused; no entry is called bad. Reads still answer.
   if (missingFeatures(base.state.required).length > 0) return refuseBatch('needs-update');
+  // A session key pushing after its certificate's notAfter (Phase 33 D-62): the whole batch, 403, never retried. Its token normally ends first.
+  if (base.standingAt(input.device, now) === 'session-expired') return refuseBatch('session-expired');
   // Restore mode (D-32, D-45): every entry must be one the hub holds or one at a place a kept or handed-back checkpoint covers. Anything else waits
   // with a retryable answer until members have handed back what the hub lost. An entry that does not read is judged by the checks below.
   if (ctx.restore?.active() === true) {
@@ -336,16 +362,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       refuse('unknown-stream', hash);
       continue;
     }
-    const device = roster.view.deviceKey(header.writer);
-    if (device === undefined) {
+    // A roster device, or a session key the fold placed a certificate for (D-62), checked with its certified key.
+    const session = roster.sessionOf(header.writer);
+    const publicKey = roster.view.deviceKey(header.writer)?.publicKey ?? session?.sessionKey;
+    if (publicKey === undefined) {
       refuse('not-admitted', hash);
       continue;
     }
-    if (!verify(header, device.publicKey)) {
+    if (!verify(header, publicKey)) {
       refuse('bad-signature', hash);
       continue;
     }
-    const standing = roster.standing(header.writer);
+    const standing = roster.standingAt(header.writer, now);
     // WR-02 (D-54): standing is judged at the entry's place, not only at the head. A place at or below the furthest head a kept checkpoint of this
     // hub names for that log is one the hub accepted before, so after a restore the entry there is taken back even from a device revoked since
     // (at the covered head itself only the very entry the checkpoint names). Without it the hub could never cover that checkpoint's heads again
@@ -373,7 +401,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       }
       // D-43: a second validly signed header at a used place. The first stays the hub's entry; both headers are kept as proof, and the writer is
       // refused everywhere until the roster releases this place or revokes the device.
-      const proof = canonicalProof(existing.header, header, device.publicKey);
+      const proof = canonicalProof(existing.header, header, publicKey);
       const place = { writer: header.writer, stream: header.stream, seq: header.seq };
       equivocations.push({ proofHash: proofHash(proof), ...place, proof: canonicalize(proof), recordedAt: now });
       proofs.push(proof);
@@ -396,6 +424,14 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     if (header.prev !== (head === undefined ? GENESIS_PREV : head.hash)) {
       refuse('prev-mismatch', hash);
       continue;
+    }
+    // A session key never signs a person-key kind (D-60). The hub refuses what it can read; a client's fold refuses the rest.
+    if (session !== undefined) {
+      const kind = kindOf(roster, header, wire);
+      if (kind !== undefined && isPersonKeyKind(kind)) {
+        refuse('person-key-required', hash);
+        continue;
+      }
     }
     if (header.stream === project) {
       const read = await readBase(roster, store, project, header, wire, batchBlobs);
@@ -426,6 +462,14 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         }
         baseEntries.push({ header, body: raw.body as string });
         if (read.blob !== undefined) batchBlobs.set(read.blob.hash, read.blob);
+        dirty = true;
+      } else if (read.opened.kind === 'session.certify') {
+        // A certificate takes no roster position, but the overlay folds it, so the session key's own entries later in this batch are judged with it.
+        if (roster.liveSessionsOf(header.writer, now) >= LIMITS.liveSessionKeysPerDevice) {
+          refuse('too-many-sessions', hash);
+          continue;
+        }
+        baseEntries.push({ header, body: raw.body as string });
         dirty = true;
       }
     }

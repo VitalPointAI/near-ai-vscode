@@ -9,6 +9,11 @@
 // is refused. Every authenticated call checks the device's standing at the current head again, so a device revoked or quarantined since it opened
 // its session gets nowhere.
 //
+// A person's session key (Phase 33 D-62) answers the same challenge, signed with the session key, and names the entry hash of the session.certify that
+// vouches for it, with that entry, so the hub can check the chain to the person's device before the first push stores it. The hub takes it only when
+// that is the certificate its fold places for the key, the certifying device stands, and the hub's clock is before the certificate's notAfter; the
+// token it gets never outlives notAfter, and no session is made for an expired certificate.
+//
 // A connection that has not opened a session within the authentication deadline (10 seconds from the handshake) is closed. GET /healthz and the
 // session, enrolment and join calls work before that, inside the deadline. The deadline is for getting a session, not for an upload: a request
 // whose body is still arriving when it passes (an enrolment of up to 4 MiB on a slow link) is read to the end under the server's minimum-rate rule
@@ -51,6 +56,9 @@ export const SESSION_REFUSALS = {
   malformed: ANSWER_REFUSALS.malformed,
   // POST-01 (D-07): the device's signed features do not cover what the project requires, so a client too old for it cannot write through the hub.
   'needs-update': UPDATE_SENTENCE,
+  // Phase 33 D-62: a person's session key.
+  'session-expired': 'Your session key has ended. Sign in again.',
+  revoked: 'The device that vouched for this session key is no longer admitted. Sign in again, or ask your staff lead.',
 } as const;
 export type SessionRefusal = keyof typeof SESSION_REFUSALS;
 
@@ -70,6 +78,8 @@ export interface Session {
   project: string;
   writer: string;
   expiresAt: number;
+  /** The session.certify entry hash, for a session opened by a person's session key (Phase 33 D-62). */
+  certificate?: string;
 }
 
 export type ChallengeResult = { ok: true; body: { project: string; hub: string; challenge: string } } | { ok: false; reason: SessionRefusal; message: string };
@@ -97,6 +107,8 @@ interface OpenChallenge {
 
 interface TokenRecord extends Session {
   keying: Buffer;
+  /** For a session key: the device that certified it, which stands for it until its first push has stored the certificate (Phase 33 D-62). */
+  vouchedBy?: string;
 }
 
 const refuse = (reason: SessionRefusal): { ok: false; reason: SessionRefusal; message: string } => ({ ok: false, reason, message: SESSION_REFUSALS[reason] });
@@ -162,6 +174,19 @@ export class SessionRegistry {
     if (!read.ok) return refuse(read.reason);
 
     const roster = await this.cache.get(open.project);
+    // A person's session key (D-62): only with the certificate the fold placed for it, from a device that stands, before notAfter.
+    if (roster.sessionOf(read.writer) !== undefined || read.certificateEntry !== undefined) {
+      // Before the session's first push has stored its certificate, the hub folds the certificate the answer carries over its roster, unstored.
+      const judged = roster.sessionOf(read.writer) === undefined && read.certificateEntry !== undefined ? roster.withBatch([read.certificateEntry], []) : roster;
+      const certificate = judged.sessionOf(read.writer);
+      if (certificate === undefined || read.certificate !== certificate.hash || certificate.sessionKey !== read.publicKey) return refuse('not-admitted');
+      const now = this.now();
+      const standing = judged.standingAt(read.writer, now);
+      if (standing === 'session-expired' || standing === 'quarantined' || standing === 'revoked') return refuse(standing);
+      if (standing !== 'admitted') return refuse('not-admitted');
+      if (!coversRequired(read.features, judged.state.required)) return refuse('needs-update');
+      return this.issue(socket, keying, { project: open.project, writer: read.writer, expiresAt: Math.min(now + TOKEN_TTL_MS, Date.parse(certificate.notAfter)), certificate: certificate.hash }, certificate.device);
+    }
     const standing = roster.standing(read.writer);
     if (standing === 'quarantined') return refuse('quarantined');
     if (standing !== 'admitted') return refuse('not-admitted');
@@ -170,9 +195,13 @@ export class SessionRegistry {
     if (device.kind !== 'person') return refuse('not-a-person-device');
     if (!coversRequired(read.features, roster.state.required)) return refuse('needs-update');
 
+    return this.issue(socket, keying, { project: open.project, writer: read.writer, expiresAt: this.now() + TOKEN_TTL_MS });
+  }
+
+  /** Issues a token bound to this connection's keying material. */
+  private issue(socket: TLSSocket, keying: Buffer, session: Session, vouchedBy?: string): AnswerResult {
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
-    const session: Session = { project: open.project, writer: read.writer, expiresAt: this.now() + TOKEN_TTL_MS };
-    this.keep(tokenId(token), { ...session, keying: Buffer.from(keying) });
+    this.keep(tokenId(token), { ...session, keying: Buffer.from(keying), ...(vouchedBy === undefined ? {} : { vouchedBy }) });
     this.markAuthenticated(socket);
     return { ok: true, session, body: { project: session.project, token, expiresAt: new Date(session.expiresAt).toISOString() } };
   }
@@ -206,13 +235,19 @@ export class SessionRegistry {
     if (keying === undefined || !sameBytes(keying, record.keying)) return refuseAuth('other-connection');
     if (project !== undefined && project !== record.project) return refuseAuth('wrong-project');
     const roster = await this.cache.get(record.project);
-    const standing = roster.standing(record.writer);
+    // A session key whose certificate its first push has not stored yet stands where its certifying device stands; the token ends by notAfter.
+    const unstored = record.vouchedBy !== undefined && roster.sessionOf(record.writer) === undefined;
+    const standing = unstored ? roster.standing(record.vouchedBy as string) : roster.standingAt(record.writer, this.now());
+    if (standing === 'session-expired') {
+      this.tokens.delete(id);
+      return refuseAuth('token-expired');
+    }
     if (standing === 'quarantined') return refuseAuth('quarantined');
     if (standing !== 'admitted') {
       this.revokeDevice(record.writer, record.project);
       return refuseAuth('revoked');
     }
-    return { ok: true, session: { project: record.project, writer: record.writer, expiresAt: record.expiresAt } };
+    return { ok: true, session: { project: record.project, writer: record.writer, expiresAt: record.expiresAt, ...(record.certificate === undefined ? {} : { certificate: record.certificate }) } };
   }
 
   /** Starts the authentication deadline of a new TLS connection (the server's onSecureConnection hook). */

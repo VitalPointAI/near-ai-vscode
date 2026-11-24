@@ -190,6 +190,8 @@ const APPEND_STATUS: Readonly<Partial<Record<AppendRefusal, number>>> = {
   'needs-update': 403,
   // Restore mode (Phase 33 D-32): retryable, with Retry-After and retryAfterSeconds in the body.
   restoring: 503,
+  // A person's session key past its certificate's notAfter (Phase 33 D-62): not retryable; the person signs in again.
+  'session-expired': 403,
 };
 
 interface Matched {
@@ -491,7 +493,8 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       // Below every held checkpoint that covers at least as much; otherwise after all of them. The store places it with one query (WR-05).
       if (store.putHandedBackCheckpoint(project, { hash: item.hash, body: item.text }, now) === 'stored') kept += 1;
     }
-    await deps.restore?.noteAsk(project, auth.writer);
+    // A session key asks for its person's device (Phase 33 D-62), so a hosted session counts toward ending restore mode.
+    await deps.restore?.noteAsk(project, (await cache.get(project)).sessionOf(auth.writer)?.device ?? auth.writer);
     sendJson(res, 200, JSON.stringify({ project, kept, ...checkpointOf(project) }));
     events.channel.emit('checkpoint', project);
   };
