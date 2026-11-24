@@ -791,7 +791,7 @@ Plans:
 - [ ] 48.1-11-PLAN.md: Wave 3. Ports, protocols and services, the network and boundary diagram and workload rights from the rendered charts
 - [ ] 48.1-17-PLAN.md: Wave 3 (own pull request, after 47-14 and 47-16). Owner decision a applied: two-key bundle build and signed files through pkcs11-tool with stock cosign verification, the SoftHSM2 test in CI, the softhsm-signing-token preflight refusal
 - [ ] 48.1-14-PLAN.md: Wave 3. Audit archive tools: daily export, signed and chained manifest, deletion only of verified archived days, the signature watch, the offline verifier with an anchor and an expected last day, sign-only OpenBao policy
-- [ ] 48.1-13-PLAN.md: Wave 4. Hosted SSP: Sterling name and id, information types, boundary and inheritance, RTO and RPO from 47-25's site settings, users and roles, diagrams
+- [ ] 48.1-13-PLAN.md: Wave 4. Hosted SSP: Sterling name and id, information types, boundary and inheritance, RTO and RPO from 47-27's two site-wide settings, users and roles, diagrams
 - [ ] 48.1-16-PLAN.md: Wave 4. No retention-policy delete for audit records, the archiver's delete right, 730 days online, archive and sign-watch alerts, clock-error and escrow-currency alerts, the archive and retention documents
 - [ ] 48.1-20-PLAN.md: Wave 4. The write-once object store: S3 object-lock target, cited evaluation (not MinIO), fit entry, and the local second site on this machine
 - [ ] 48.1-15-PLAN.md: Wave 5. Audit archive at the site: our image, the archive and sign-watch CronJobs, the object store and 1,825-day settings, the fit register repoint
