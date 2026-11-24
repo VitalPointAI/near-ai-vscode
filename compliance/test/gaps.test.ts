@@ -7,6 +7,7 @@ import { gapStates, loadGaps, loadPoam } from '../src/gaps.ts';
 import type { Gap, Poam } from '../src/gaps.ts';
 import { reviewedAt } from '../src/collectors/documents.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
+import { selectedIds } from '../src/profiles.ts';
 import { validateOurs } from '../src/validate.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -312,9 +313,64 @@ test('the register has one row per DESIGN section 12 item, in order, then the th
   // The design already decided sign-in strength, the cross-device caveat and the shared relying-party ID (D-26).
   assert.deepEqual(rows.filter((row) => row.state === 'decided').map((row) => row.number), [11, 12, 13]);
 });
+// The thirteen hosted components (48-01, D-17) plus the two existing components DESIGN section 10 re-assesses.
+const HOSTED_COMPONENTS = ['workbench', 'rke2', 'image-registry', 'ingress', 'cert-manager', 'keycloak', 'theia-cloud', 'oauth2-proxy', 'openbao', 'hsm', 'site-storage', 'site-logging', 'offline-bundle'];
+const SECTION_10_COMPONENTS = new Set([...HOSTED_COMPONENTS, 'release-pipeline', 'hub']);
+// DESIGN section 10 has 18 component rows; split into their separate conditions they are 49 (counted 2026-11-23).
+const SECTION_10_CONDITIONS = 49;
+const NO_CONDITION = 'no section 10 condition';
+const mediumControls = new Set(selectedIds(path.join(root, 'profiles', 'itsp-10-033-01-medium.json')));
+interface SectionTenRow { readonly number: number; readonly component: string; readonly condition: string; readonly controls: string[]; readonly references: References }
+function sectionTenRows(text: string): SectionTenRow[] {
+  return tableUnder(text, 'Section 10 conditions').map(([number, component, condition, , controls, reference]) => ({
+    number: Number(number), component, condition, controls: (controls ?? '').split(',').map((item) => item.trim()).filter((item) => item !== ''), references: referencesIn(reference ?? '')
+  }));
+}
+function sectionTenProblems(text: string, context: RecordsContext): string[] {
+  const problems: string[] = [];
+  for (const row of sectionTenRows(text)) {
+    const at = `section 10 row ${row.number}`;
+    const { records, gaps: gapIds, rules, none, unknown } = row.references;
+    if (!SECTION_10_COMPONENTS.has(row.component)) problems.push(`${at}: unknown component ${row.component}`);
+    for (const part of unknown) problems.push(`${at}: unknown reference "${part}"`);
+    if (row.condition === NO_CONDITION) {
+      if (!none || records.length + gapIds.length + rules.length > 0) problems.push(`${at}: a component with no condition has the reference none`);
+      continue;
+    }
+    if (none || records.length + gapIds.length + rules.length !== 1 || records.length !== 0) problems.push(`${at}: needs exactly one gap or rule`);
+    for (const control of row.controls) if (!mediumControls.has(control)) problems.push(`${at}: control ${control} is not in the Medium profile`);
+    if (row.controls.length === 0) problems.push(`${at}: names no control`);
+    for (const rule of rules) if (!context.ruleIds.has(rule)) problems.push(`${at}: rule ${rule} does not exist`);
+    for (const id of gapIds) {
+      const gap = context.gaps.find((item) => item.id === id);
+      const item = context.poam.find((candidate) => candidate.id === gap?.poam);
+      if (!gap) problems.push(`${at}: gap ${id} does not exist`);
+      else if (gap.ownerRole === '' || (gap.closesInPhase === undefined && !item?.milestones.length)) problems.push(`${at}: gap ${id} has no owner role and phase or milestone`);
+    }
+  }
+  return problems;
+}
+test('every DESIGN section 10 condition maps to a hosted component and exactly one gap or rule', () => {
+  const rows = sectionTenRows(recordsText());
+  assert.equal(rows.filter((row) => row.condition !== NO_CONDITION).length, SECTION_10_CONDITIONS);
+  assert.deepEqual(rows.map((row) => row.number), rows.map((_, index) => index + 1));
+  assert.deepEqual(sectionTenProblems(recordsText(), realContext), []);
+});
+test('every hosted component appears in the section 10 table, marked when DESIGN sets no condition', () => {
+  const rows = sectionTenRows(recordsText());
+  for (const component of HOSTED_COMPONENTS) assert.ok(rows.some((row) => row.component === component), component);
+  assert.deepEqual(rows.filter((row) => row.condition === NO_CONDITION).map((row) => row.component), ['offline-bundle']);
+});
+test('a section 10 row with two references or none fails', () => {
+  const header = ['## Section 10 conditions', '', '| # | Component | Condition | Evidence kind | Controls | Reference |', '|---|---|---|---|---|---|'];
+  const twice = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | gap G2; gap G321 |', ''].join('\n');
+  const missing = [...header, '| 1 | keycloak | Events shipped | deployment observation | au-12 | none |', ''].join('\n');
+  assert.deepEqual(sectionTenProblems(twice, realContext), ['section 10 row 1: needs exactly one gap or rule']);
+  assert.deepEqual(sectionTenProblems(missing, realContext), ['section 10 row 1: needs exactly one gap or rule']);
+});
 test('every gap the hosted records add is scoped to the hosted levels', () => {
   const text = recordsText();
-  const referenced = new Set([...registerRows(text)].flatMap((row) => row.references.gaps));
+  const referenced = new Set([...registerRows(text), ...sectionTenRows(text)].flatMap((row) => row.references.gaps));
   const added = gaps.filter((gap) => referenced.has(gap.id) && Number(gap.id.slice(1)) > 320);
   assert.ok(added.length > 0);
   for (const gap of added) assert.deepEqual(gap.profiles, HOSTED_LEVELS, gap.id);
