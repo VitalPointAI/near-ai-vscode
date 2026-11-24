@@ -101,6 +101,10 @@ test('the Sterling image bundles the verified VSIX and is smoke-tested before ar
   assert.ok(egress > list.findIndex((step) => /docker save/.test(step)), 'the egress run comes after the archive is saved');
   list.forEach((step, index) => { if (/actions\/upload-artifact@/.test(step)) assert.ok(index < egress, 'every upload comes before the egress run'); });
   assert.match(list[egress], /IMAGE_ID: \$\{\{ steps\.archive\.outputs\.image_id \}\}[\s\S]*test "\$\(docker image inspect --format '\{\{\.Id\}\}' "sterling-release:\$TAG"\)" = "\$IMAGE_ID"\n\s*WORKBENCH_TEST_IMAGE="sterling-release:\$TAG" node \.\.\/scripts\/run-tests\.mjs --test-concurrency=1 dist\/test\/container\/egress\.test\.js/);
+  // The UI the owner reviewed (Get Started, the work-area pages and creating a work area through the bundled extension) is checked on the
+  // same archived image, in the same last step, so it cannot be missing from a release unnoticed.
+  assert.match(list[egress], /egress\.test\.js\n\s*WORKBENCH_TEST_IMAGE="sterling-release:\$TAG" node \.\.\/scripts\/run-tests\.mjs --test-concurrency=1 dist\/test\/container\/get-started\.test\.js\n/);
+  assert.equal(egress, list.length - 1, 'the egress and Get Started run is the image job\'s last step');
   assert.doesNotMatch(image, /npm ci(?! --ignore-scripts)|cache:\s*npm/);
   assert.match(image, /archive_sha256: \$\{\{ steps\.archive\.outputs\.sha256 \}\}/);
   assert.match(image, /image_id: \$\{\{ steps\.archive\.outputs\.image_id \}\}/);
