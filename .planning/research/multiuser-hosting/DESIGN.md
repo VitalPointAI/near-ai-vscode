@@ -32,6 +32,8 @@ These are settled.
 | D7 | Model servers on the network come from your organization's policy (policy-listed servers). The session states which checks run in the session. | Hosted sessions do not scan or listen for servers; they offer only servers the policy lists, and the checks run in the session backend (section 9.1). |
 | D8 | Phases 32.1 (guided setup) and 33 (live multi-user staff projects) are built natively in Theia now. 32.1 integrates with the existing Sterling Get Started page: the guide is what "Set up Sterling" opens; the checklist becomes a section of that page; no VS Code walkthrough; no second home page. | Section 9. |
 | D9 | Every resource adopted must help pass the compliance requirements, checked before use. A compliance fit check is being built separately (`compliance/resources.json` and `scripts/resource-check.mjs`). | Section 10 lists the verdicts each entry starts from. |
+| D10 | No generic word for what a work area holds. Each work area has its own landing page and kinds of work: Capability Development (program, product, project: major capital, minor capital, initiative), Planning (operational or administrative planning), Resource Management (the whole inventory), Exercises & Training (exercise, course, other training). "Project" is a capability development term only. | Section 9.1; the setup guide lands on the chosen work area's landing page. |
+| D11 | One Defence Team mode for the Defence edition: CAF members and DND public servants work together, so the mode is not split into Military or Public service. | Section 9.1; a new mode in `src/domain/org/modes.ts`, with how each person serves on their record. |
 
 ## 3. Where we are
 
@@ -210,8 +212,8 @@ No state waits silently: `starting` and `identity` have timeouts, and `refused` 
 | `sterling.getStarted` vs `nearAi.setup` | Both stay: one opens the page, the other the guide. No alias between them. |
 | "SovAI:" vs "NEAR AI:" palette categories | One category for every command in the Sterling edition: **SovAI**, as the spike uses. NEAR AI is only an AI service and no longer names commands. |
 | "Kind of work" vs work areas | "Kind of work" stays the setup question. In the Defence edition its answers are the four work areas, and the landing is that work area's page. |
-| Project vs work area | A **work area** is one of the four pages. A folder in it is a **project** (the glossary word). The spike's "Create to name a new work area" becomes "Create a project". |
-| Defence edition vs Military mode | The **edition** is what ships (branding, work areas). The **mode** is "How your organization works", set by policy. The Defence edition suggests Military or Public service mode; it does not fix it. |
+| What a work area holds | **Decided (owner, 2026-11-23): no single generic word.** Each work area has its own landing page and its own kinds of work. "Project" is a capability development term only. **Capability Development** leads to a landing page to choose a program, a product, or a project (major capital, minor capital, or initiative). **Planning** leads to a page to choose operational planning or administrative planning. **Resource Management** is the landing page for the whole inventory, of every type. **Exercises & Training** is the landing page for a new exercise, a new course, or other training. The spike's "Create to name a new work area" becomes each landing page's own create action. |
+| Defence edition vs mode | **Decided (owner, 2026-11-23): one Defence Team mode.** CAF members and DND public servants work together as the Defence Team, so the mode cannot be split into Military or Public service. The **edition** is what ships (branding, work areas); the **mode** is "How your organization works", set by policy, and the Defence edition uses a new **Defence Team** mode. Everyone in it is tasked the same way: assigned to positions, report unable rather than decline, handover required. Each person's record says how they serve (Regular Force, Reserve Force, public servant, contractor), and only the few words that genuinely differ follow the person (for example "posted" for CAF members, "assigned" for public servants). The Defence Team words are confirmed by the owner, as the Military words were. A new mode id goes into `src/domain/org/modes.ts` with a policy section version; the existing Military and Public service modes stay for other organizations. |
 
 ### 9.2 Phase 33: live multi-user staff projects, native
 
@@ -314,7 +316,8 @@ Sequential because of real dependencies: (b) and (c) need (a)'s service pattern 
 
 | # | Question | Default |
 |---|---|---|
-| O1 | Confirm the naming defaults in section 9.1 (Set up Sterling vs Get Started, the SovAI category, work area vs project, edition vs mode). | As listed |
+| O1 | Confirm the remaining naming defaults in section 9.1 (Get Started vs Set up Sterling, the SovAI category). What a work area holds and the Defence Team mode were decided on 2026-11-23. | As listed |
+| O1b | Confirm the Defence Team mode's words, and which words follow how a person serves (Regular Force, Reserve Force, public servant, contractor). | Proposed when the mode is planned |
 | O2 | HAProxy or Traefik as the ingress. | HAProxy until Traefik is tested |
 | O3 | One relying-party ID across sites, or a separate key registration per site. | One shared parent domain |
 | O4 | Recovery for hosted people: administrator-attested re-enrolment only, or also a recovery code. | Re-enrolment only where policy says hardware only |
