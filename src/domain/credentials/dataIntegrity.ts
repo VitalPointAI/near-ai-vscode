@@ -18,6 +18,8 @@ import { MultibaseError, multibaseDecode, multibaseEncode } from './multibase';
 
 export const DATA_INTEGRITY_PROOF = 'DataIntegrityProof';
 export const EDDSA_JCS_2022 = 'eddsa-jcs-2022';
+// The second suite (O8), for a site that must use only FIPS 140-3 approved signatures; its signing and checking live in ecdsaJcs2019.ts.
+export const ECDSA_JCS_2019 = 'ecdsa-jcs-2019';
 export const DATA_INTEGRITY_INPUT_BYTES = 64;
 const ED25519_PUBLIC_KEY_BYTES = 32;
 const ED25519_SIGNATURE_BYTES = 64;
@@ -25,9 +27,9 @@ const ED25519_SIGNATURE_BYTES = 64;
 const MAX_PROOF_VALUE_LENGTH = 89;
 const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 // XML Schema 1.1 dateTime: year, month, day, time, optional fraction, optional time zone.
-const XSD_DATE_TIME = /^-?\d{4,}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]((0\d|1[0-3]):[0-5]\d|14:00))?$/;
+export const XSD_DATE_TIME = /^-?\d{4,}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]((0\d|1[0-3]):[0-5]\d|14:00))?$/;
 
-export type CredentialSuite = typeof EDDSA_JCS_2022;
+export type CredentialSuite = typeof EDDSA_JCS_2022 | typeof ECDSA_JCS_2019;
 
 export interface CredentialSigner {
   readonly verificationMethod: string;
@@ -113,52 +115,80 @@ function sameJson(left: unknown, right: unknown): boolean {
   return canonical(left).equals(canonical(right));
 }
 
-// Create Proof (section 3.3.1). Returns the proof; the caller attaches it as `proof`. Every refusal happens before the signer is called.
-export async function createProof(unsecuredDocument: Record<string, unknown>, options: ProofOptions, signer: CredentialSigner): Promise<DataIntegrityProof> {
+// The proof configuration both suites sign (section 3.3.1 steps 1 and 2). Every refusal happens here, before any signer is called.
+export function proofConfigFor(
+  unsecuredDocument: Record<string, unknown>, options: ProofOptions, signer: CredentialSigner, cryptosuite: CredentialSuite
+): Omit<DataIntegrityProof, 'proofValue'> {
   if (!isPlainObject(unsecuredDocument)) throw new DataIntegrityError('not-canonical', 'the credential must be a plain object');
   if ('proof' in unsecuredDocument) throw new DataIntegrityError('already-signed');
-  if (signer.suite !== EDDSA_JCS_2022) throw new DataIntegrityError('unsupported-suite');
+  if (signer.suite !== cryptosuite) throw new DataIntegrityError('unsupported-suite');
   if (typeof signer.verificationMethod !== 'string' || signer.verificationMethod.length === 0) throw new DataIntegrityError('bad-proof', 'the signer has no verification method');
   if (typeof options.proofPurpose !== 'string' || options.proofPurpose.length === 0) throw new DataIntegrityError('bad-proof', 'the proof purpose is missing');
   if (options.created !== undefined && (typeof options.created !== 'string' || !XSD_DATE_TIME.test(options.created))) throw new DataIntegrityError('bad-created');
-  const proofConfig: Omit<DataIntegrityProof, 'proofValue'> = {
+  return {
     type: DATA_INTEGRITY_PROOF,
-    cryptosuite: EDDSA_JCS_2022,
+    cryptosuite,
     ...(options.created === undefined ? {} : { created: options.created }),
     verificationMethod: signer.verificationMethod,
     proofPurpose: options.proofPurpose,
     ...('@context' in unsecuredDocument ? { '@context': unsecuredDocument['@context'] } : {})
   };
+}
+
+// Create Proof (section 3.3.1). Returns the proof; the caller attaches it as `proof`. Every refusal happens before the signer is called.
+export async function createProof(unsecuredDocument: Record<string, unknown>, options: ProofOptions, signer: CredentialSigner): Promise<DataIntegrityProof> {
+  const proofConfig = proofConfigFor(unsecuredDocument, options, signer, EDDSA_JCS_2022);
   const input = dataIntegritySigningInput(unsecuredDocument, proofConfig as unknown as Record<string, unknown>);
   const signature = await signer.sign(new Uint8Array(input));
   if (!(signature instanceof Uint8Array) || signature.length !== ED25519_SIGNATURE_BYTES) throw new DataIntegrityError('bad-signature', 'the signer did not return a 64-byte Ed25519 signature');
   return { ...proofConfig, proofValue: multibaseEncode(signature) };
 }
 
-function refuse(reason: DataIntegrityFailureReason): DataIntegrityVerdict {
-  return { ok: false, reason, message: DATA_INTEGRITY_FAILURES[reason] };
+export function refuseProof(reason: DataIntegrityFailureReason, message: string = DATA_INTEGRITY_FAILURES[reason]): { ok: false; reason: DataIntegrityFailureReason; message: string } {
+  return { ok: false, reason, message };
 }
+const refuse = refuseProof;
 
 export interface VerifyProofOptions { proofPurpose?: string }
+
+export type ReadProof =
+  | { ok: true; unsecuredDocument: Record<string, unknown>; proof: Record<string, unknown> & { proofValue: string } }
+  | { ok: false; reason: DataIntegrityFailureReason; message: string };
+
+// The checks both suites make before touching the key or the signature (section 3.3.2 steps 1 to 4, and the narrower rules above). Throws only
+// DataIntegrityError, from canonicalizing an @context, which the callers turn into a refusal.
+export function readSecuredProof(securedDocument: unknown, cryptosuite: CredentialSuite, options: VerifyProofOptions): ReadProof {
+  if (!isPlainObject(securedDocument) || !isPlainObject(securedDocument.proof)) return refuse('bad-proof');
+  const { proof: rawProof, ...unsecuredDocument } = securedDocument;
+  const proof = rawProof as Record<string, unknown>;
+  if (proof.type !== DATA_INTEGRITY_PROOF || proof.cryptosuite !== cryptosuite) return refuse('unsupported-suite');
+  if (typeof proof.verificationMethod !== 'string' || typeof proof.proofPurpose !== 'string' || typeof proof.proofValue !== 'string') return refuse('bad-proof');
+  if (proof.created !== undefined && (typeof proof.created !== 'string' || !XSD_DATE_TIME.test(proof.created))) return refuse('bad-created');
+  if (proof.proofPurpose !== (options.proofPurpose ?? 'assertionMethod')) return refuse('wrong-purpose');
+  if ('@context' in proof || '@context' in unsecuredDocument) {
+    if (!('@context' in proof) || !('@context' in unsecuredDocument) || !sameJson(proof['@context'], unsecuredDocument['@context'])) return refuse('context-mismatch');
+  }
+  return { ok: true, unsecuredDocument, proof: proof as Record<string, unknown> & { proofValue: string } };
+}
+
+// A proofValue as the 64 signature bytes both suites use (Ed25519, and P-256 as r then s), or undefined for anything else. Throws MultibaseError for
+// a character outside the base58btc alphabet.
+export function proofSignature(proofValue: string): Uint8Array | undefined {
+  if (proofValue.length > MAX_PROOF_VALUE_LENGTH) return undefined;
+  const signature = multibaseDecode(proofValue);
+  return signature.length === ED25519_SIGNATURE_BYTES ? signature : undefined;
+}
 
 // Verify Proof (section 3.3.2) against a raw 32-byte Ed25519 public key that the caller has already resolved from proof.verificationMethod.
 // Never throws: every failure is a refusal with a reason.
 export function verifyProof(securedDocument: unknown, publicKey: Uint8Array, options: VerifyProofOptions = {}): DataIntegrityVerdict {
   try {
-    if (!isPlainObject(securedDocument) || !isPlainObject(securedDocument.proof)) return refuse('bad-proof');
-    const { proof: rawProof, ...unsecuredDocument } = securedDocument;
-    const proof = rawProof as Record<string, unknown>;
-    if (proof.type !== DATA_INTEGRITY_PROOF || proof.cryptosuite !== EDDSA_JCS_2022) return refuse('unsupported-suite');
-    if (typeof proof.verificationMethod !== 'string' || typeof proof.proofPurpose !== 'string' || typeof proof.proofValue !== 'string') return refuse('bad-proof');
-    if (proof.created !== undefined && (typeof proof.created !== 'string' || !XSD_DATE_TIME.test(proof.created))) return refuse('bad-created');
-    if (proof.proofPurpose !== (options.proofPurpose ?? 'assertionMethod')) return refuse('wrong-purpose');
-    if ('@context' in proof || '@context' in unsecuredDocument) {
-      if (!('@context' in proof) || !('@context' in unsecuredDocument) || !sameJson(proof['@context'], unsecuredDocument['@context'])) return refuse('context-mismatch');
-    }
+    const read = readSecuredProof(securedDocument, EDDSA_JCS_2022, options);
+    if (!read.ok) return read;
+    const { unsecuredDocument, proof } = read;
     if (!(publicKey instanceof Uint8Array) || publicKey.length !== ED25519_PUBLIC_KEY_BYTES) return refuse('bad-key');
-    if (proof.proofValue.length > MAX_PROOF_VALUE_LENGTH) return refuse('bad-signature');
-    const signature = multibaseDecode(proof.proofValue);
-    if (signature.length !== ED25519_SIGNATURE_BYTES) return refuse('bad-signature');
+    const signature = proofSignature(proof.proofValue);
+    if (signature === undefined) return refuse('bad-signature');
     const { proofValue: _proofValue, ...proofConfig } = proof;
     const input = dataIntegritySigningInput(unsecuredDocument, proofConfig);
     let key: KeyObject;
