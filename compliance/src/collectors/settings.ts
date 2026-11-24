@@ -4,7 +4,7 @@ import { AGENT_REVIEW_CONTEXT, CI_CHECKS } from '../../../scripts/lib/workflow.m
 import { asObject, checkRepository, COMMIT_SHA, githubGet, githubList, requireFetch } from './github.ts';
 // The GitHub Actions app ID used in the documented main protection settings.
 const ACTIONS_APP_ID = 15368;
-export const SETTINGS_CHECKS = Object.freeze(['required-checks', 'docs-required', 'enforce-admins', 'review-required', 'main-change-protection', 'tag-ruleset', 'environment-marketplace', 'environment-agent-review-gates', 'codeowners-valid'] as const);
+export const SETTINGS_CHECKS = Object.freeze(['required-checks', 'docs-required', 'enforce-admins', 'review-required', 'main-change-protection', 'tag-ruleset', 'environment-container-release', 'environment-agent-review-gates', 'codeowners-valid'] as const);
 export interface SettingsInput { readonly repository: string; }
 const value = (subject: string, passed: boolean, context: CollectorContext, counts: Record<string, number> = {}): Observation => ({ collector: 'settings', subject, passed, collectedAt: context.now.toISOString(), commit: context.commit, ...(context.runUrl ? { runUrl: context.runUrl } : {}), counts });
 const CODEOWNERS_MAX_BYTES = 3_000_000;
@@ -12,7 +12,7 @@ const CONTENTS_READ = { collector: 'settings', permission: 'Contents read' };
 const ACTIONS_READ = { collector: 'settings', permission: 'Actions read' };
 
 async function environmentObservation(
-  fetch: FetchJson, repository: string, name: 'marketplace' | 'agent-review-gates', context: CollectorContext
+  fetch: FetchJson, repository: string, name: 'container-release' | 'agent-review-gates', context: CollectorContext
 ): Promise<Observation> {
   const subject = `environment-${name}`;
   const endpoint = `/repos/${repository}/environments/${name}`;
@@ -118,8 +118,8 @@ export const settingsCollector: Collector<SettingsInput> = Object.freeze({
     const reviewRequired = typeof count === 'number' && Number.isSafeInteger(count) && count > 0 && review?.dismiss_stale_reviews === true;
     const protections = [checksRequired, admins, reviewRequired, flag('required_linear_history', true),
       flag('allow_force_pushes', false), flag('allow_deletions', false), flag('required_conversation_resolution', true)];
-    const [marketplace, gates, codeowners] = await Promise.all([
-      environmentObservation(fetch, repository, 'marketplace', context),
+    const [containerRelease, gates, codeowners] = await Promise.all([
+      environmentObservation(fetch, repository, 'container-release', context),
       environmentObservation(fetch, repository, 'agent-review-gates', context),
       codeownersObservation(fetch, repository, context)
     ]);
@@ -131,7 +131,7 @@ export const settingsCollector: Collector<SettingsInput> = Object.freeze({
       value('main-change-protection', protections.every(Boolean), context, { required: protections.length, present: protections.filter(Boolean).length }),
       // Read-only settings collection cannot verify the rulesets' bypass actors.
       value('tag-ruleset', false, context, { unverified: 1 }),
-      marketplace, gates, codeowners
+      containerRelease, gates, codeowners
     ];
   }
 });

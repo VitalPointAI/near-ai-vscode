@@ -724,26 +724,33 @@
       "id": "image:docker.io/library/node",
       "kind": "image",
       "where": [
+        ".planning/spikes/theia-team-studio/Dockerfile",
         "hub/Dockerfile",
         "relay/Dockerfile"
       ],
-      "component": "relay",
-      "scope": "build",
-      "purpose": "Build stage of the relay and hub images: installs the locked packages with scripts off and compiles them; nothing from it but the built files reaches the final image.",
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Base of the Sterling Theia workbench image (node:24 bookworm-slim, build and runtime stages; the release image published to GHCR), and build stage of the relay and hub images.",
       "licence": "MIT (Node.js); Debian packages under their own licences",
       "controls": [
         "cm-02",
+        "cm-07",
+        "sc-13",
+        "si-02",
+        "si-07",
         "sr-03",
-        "sr-11",
-        "si-07"
+        "sr-11"
       ],
-      "evidence": "Pinned by sha256 digest; the hub and relay container suites fail if a pin is missing or the Node is too old.",
-      "crypto": "none",
-      "cveResponse": "Pinned by digest; re-pinned by hand in a reviewed change (no Dependabot). Build stage only, so its vulnerabilities do not ship; the final image is scanned by grype in relay-image-scan.",
-      "airGap": "needs-mirror:the pinned docker.io/library/node digest and an npm registry mirror holding the relay's and hub's locked packages",
+      "evidence": "Pinned by sha256 digest in every Dockerfile; the Release workflow smoke-tests the workbench image and records its GHCR digest on the GitHub release; the hub and relay container suites fail if a pin is missing.",
+      "crypto": "unvalidated",
+      "cveResponse": "Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). The workbench image is not yet scanned in CI; the relay and hub final images are scanned by grype in relay-image-scan.",
+      "airGap": "needs-mirror:the pinned docker.io/library/node digests, Debian package mirrors and an npm registry mirror holding the locked packages",
       "fit": "pass-with-conditions",
       "conditions": [
-        "A site that builds the relay or hub image without internet must mirror this image digest and an npm registry with the locked packages, or build the images elsewhere and import them."
+        "A site that builds these images without internet must mirror the pinned image digests, Debian packages and an npm registry with the locked packages, or build elsewhere and import the signed image.",
+        "The workbench image uses Debian's OpenSSL, which is not a validated cryptographic module: it is not for Protected B until Phase 46 moves it to UBI 9 in FIPS mode (hosting design #163, section 10).",
+        "The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (the entrypoint refuses to start otherwise).",
+        "The workbench image is not yet signed or scanned in CI; signing with your organization's key and an SBOM are Phase 46 items."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-23"

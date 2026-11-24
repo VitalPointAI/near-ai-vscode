@@ -5,16 +5,15 @@
 #            tests, builds and verifies the VSIX, and records the SHA-256 of the VSIX and of the
 #            release notes as job outputs. Dependency install scripts are disabled. The
 #            checksums tie the later jobs' artifacts to this build's outputs.
-#   release  holds contents: write to create the GitHub release, so it installs and runs nothing:
-#            it downloads the build's artifact, checks both checksums, and runs `gh release`.
-#   publish  runs in the protected "marketplace" environment, so it waits until the owner
-#            approves it in GitHub. It checks the VSIX checksum before anything else, installs
-#            the vsce pinned in package-lock.json without install scripts, and publishes that
-#            exact VSIX with the VSCE_PAT secret, which exists only in that environment.
+#   image    builds and smoke-tests the Theia image with the verified VSIX inside it.
+#   publish  pushes that exact image archive to GHCR after owner approval.
+#   release  records the published digest, VSIX and compliance evidence on GitHub.
 #
-# Once the tag rulesets in docs/development-workflow.md ("Repository settings") are applied,
-# only organization owners can create v* tags and nobody can move or delete them. The
-# "marketplace" environment cannot be bypassed by admins.
+# Once the tag rulesets in docs/development-workflow.md are applied, only
+# organization owners can create v* tags and nobody can move or delete them.
+# The protected "container-release" environment (owner as required reviewer, v*.*.* tags only,
+# no admin bypass) authorizes GHCR publication. The Marketplace is retired (owner, 2026-11-23).
+# The image has no sign-in of its own: it runs behind Theia Cloud's sign-in, or locally on 127.0.0.1.
 name: Release
 
 on:
@@ -128,9 +127,9 @@ jobs:
 
   release:
     name: release
-    needs: [build, package, attest]
+    needs: [build, package, attest, publish]
     if: >-
-      ${{ !cancelled() && needs.build.result == 'success' && needs.attest.result == 'success' &&
+      ${{ !cancelled() && needs.build.result == 'success' && needs.attest.result == 'success' && needs.publish.result == 'success' &&
       ((needs.build.outputs.package_required == 'true' && needs.package.result == 'success') ||
       (needs.build.outputs.package_required == 'false' && needs.package.result == 'skipped')) }}
     runs-on: ubuntu-latest
@@ -167,6 +166,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           VERSION: ${{ needs.build.outputs.version }}
+          IMAGE: ${{ needs.publish.outputs.image }}
           VSIX: ${{ needs.build.outputs.vsix }}
           PACKAGE: ${{ needs.package.outputs.package }}
           PACKAGE_REQUIRED: ${{ needs.build.outputs.package_required }}
@@ -178,6 +178,10 @@ jobs:
           if [ "$PACKAGE_REQUIRED" = true ]; then
             assets+=("$PACKAGE" "$PACKAGE.sha256")
           fi
+          [[ "$IMAGE" =~ ^ghcr[.]io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$ ]]
+          printf '\n## Sterling container image\n\n`%s`\n' "$IMAGE" >> release-notes.md
+          printf '%s\n' "$IMAGE" > sterling-image.txt
+          assets+=(sterling-image.txt)
           gh release create "$TAG" "${assets[@]}" --title "$VERSION" --notes-file release-notes.md --verify-tag --repo "$GITHUB_REPOSITORY"
 
   package:
@@ -344,9 +348,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: '*'
+          name: release-vsix
           path: release
-          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.build.outputs.package_required == 'true'
+        with:
+          name: compliance-package
+          path: release
       - name: Verify the released subjects before attesting them
         working-directory: release
         env:
@@ -404,41 +412,120 @@ jobs:
         continue-on-error: true
         run: cd trestle-work && trestle validate -a >> "$GITHUB_STEP_SUMMARY" 2>&1
 
-  publish:
-    name: publish
-    needs: [build, release]
+  image:
+    name: Build and verify Sterling image
+    needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Protected environment: the job waits here until the owner approves it in GitHub.
-    environment:
-      name: marketplace
-      url: https://marketplace.visualstudio.com/items?itemName=VitalPoint.near-ai-vscode
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      archive_sha256: ${{ steps.archive.outputs.sha256 }}
+      image_id: ${{ steps.archive.outputs.image_id }}
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-vsix
-          path: release
-      - name: Check the VSIX is the one the build job verified
-        working-directory: release
-        env:
-          SHA256: ${{ needs.build.outputs.sha256 }}
-          VSIX: ${{ needs.build.outputs.vsix }}
-        run: echo "$SHA256  $VSIX" | sha256sum --check --strict
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-      # Only package.json and the lockfile are needed, to install the pinned vsce. The checkout
-      # goes into its own folder so it cannot replace the verified VSIX.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          path: tools
-      - name: Install the vsce version pinned in package-lock.json, without install scripts
-        working-directory: tools
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Publish to the Visual Studio Marketplace
-        working-directory: tools
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-vsix
+          path: verified-release
+      - name: Build the release target with the verified extension
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
           VSIX: ${{ needs.build.outputs.vsix }}
-        run: ./node_modules/.bin/vsce publish --packagePath "../release/$VSIX"
+          SHA256: ${{ needs.build.outputs.sha256 }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          (cd verified-release && printf '%s  %s\n' "$SHA256" "$VSIX" | sha256sum --check --strict)
+          mkdir release-input
+          cp "verified-release/$VSIX" release-input/sterling.vsix
+          docker build --target release --platform linux/amd64 --provenance=false --sbom=false \
+            --file .planning/spikes/theia-team-studio/Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$TAG" \
+            --tag "sterling-release:$TAG" .
+      - name: Start Sterling and check the bundled extension
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          image="sterling-release:$TAG"
+          test "$(docker image inspect --format '{{.Config.User}}' "$image")" = node
+          docker run -d --name sterling-release-smoke -e STERLING_PREVIEW_NO_SIGN_IN=accept -p 127.0.0.1::3000 "$image"
+          trap 'docker logs sterling-release-smoke; docker stop sterling-release-smoke >/dev/null' EXIT
+          address="$(docker port sterling-release-smoke 3000/tcp)"
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 2 \
+            --max-time 5 "http://$address/" -o sterling-index.html
+          grep -q 'bundle.js' sterling-index.html
+          docker exec sterling-release-smoke test -s /plugins/extension/package.json
+      - name: Save the tested image
+        id: archive
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          docker save "sterling-release:$TAG" | gzip -1 > sterling-image.tar.gz
+          echo "sha256=$(sha256sum sterling-image.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "image_id=$(docker image inspect --format '{{.Id}}' "sterling-release:$TAG")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sterling-image
+          path: sterling-image.tar.gz
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error
+
+  publish:
+    name: Publish Sterling image
+    needs: [build, package, attest, image]
+    if: >-
+      ${{ !cancelled() && needs.build.result == 'success' && needs.attest.result == 'success' &&
+      needs.image.result == 'success' &&
+      ((needs.build.outputs.package_required == 'true' && needs.package.result == 'success') ||
+      (needs.build.outputs.package_required == 'false' && needs.package.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      packages: write
+    environment:
+      name: container-release
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sterling-image
+      - name: Publish the verified image and record its registry digest
+        id: push
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SHA256: ${{ needs.image.outputs.archive_sha256 }}
+          IMAGE_ID: ${{ needs.image.outputs.image_id }}
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' "$SHA256" sterling-image.tar.gz | sha256sum --check --strict
+          docker load --input sterling-image.tar.gz
+          local_image="sterling-release:$TAG"
+          test "$(docker image inspect --format '{{.Id}}' "$local_image")" = "$IMAGE_ID"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          ref="$repository:$TAG"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          if docker manifest inspect "$ref" > remote-manifest.json 2> registry-error.txt; then
+            # An interrupted run can reuse this tag only for the same tested image.
+            test "$(jq -er '.config.digest' remote-manifest.json)" = "$IMAGE_ID"
+            docker pull "$ref"
+            digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$ref")"
+          else
+            if ! grep -Eqi 'manifest unknown|name unknown|no such manifest' registry-error.txt; then
+              cat registry-error.txt >&2
+              exit 1
+            fi
+            docker tag "$local_image" "$ref"
+            docker push "$ref" | tee registry-push.txt
+            digest="$repository@$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}) .*/\1/p' registry-push.txt | tail -1)"
+          fi
+          [[ "$digest" == "$repository"@sha256:* && "${digest##*@sha256:}" =~ ^[a-f0-9]{64}$ ]]
+          docker manifest inspect "$digest" | jq -e --arg id "$IMAGE_ID" '.config.digest == $id'
+          echo "image=$digest" >> "$GITHUB_OUTPUT"

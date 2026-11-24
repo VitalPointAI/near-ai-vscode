@@ -1,4 +1,4 @@
-FROM node:24.22.1-bookworm-slim AS build
+FROM docker.io/library/node:24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS build
 RUN apt-get update && apt-get install -y --no-install-recommends g++ make python3
 WORKDIR /repo/.planning/spikes/theia-team-studio
 
@@ -17,7 +17,7 @@ RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 # The runtime needs only the built app and its production dependencies: drop the CLI, bundlers and compilers.
 RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 
-FROM node:24.22.1-bookworm-slim
+FROM docker.io/library/node:24.22.1-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends git procps
 WORKDIR /repo/.planning/spikes/theia-team-studio
 
@@ -33,3 +33,18 @@ EXPOSE 3000
 ENV STERLING_PREVIEW_NO_SIGN_IN=""
 ENTRYPOINT ["sh", "-c", "if [ \"$STERLING_PREVIEW_NO_SIGN_IN\" != accept ]; then echo 'This preview has no sign-in and includes a terminal. Publish it on 127.0.0.1 only and start it with -e STERLING_PREVIEW_NO_SIGN_IN=accept.' >&2; exit 1; fi; exec \"$@\"", "--"]
 CMD ["node", "lib/backend/main.js", "/home/node/workspace", "--hostname", "0.0.0.0", "--port", "3000"]
+
+# The release image: the runtime with the release's verified VSIX bundled as a default plugin.
+FROM build AS bundled-plugin
+RUN apt-get update && apt-get install -y --no-install-recommends unzip
+COPY release-input/sterling.vsix /bundle/sterling.vsix
+RUN unzip -q /bundle/sterling.vsix 'extension/*' -d /plugins \
+    && test -s /plugins/extension/package.json
+
+FROM runtime AS release
+COPY --from=bundled-plugin /plugins /plugins
+ENV THEIA_DEFAULT_PLUGINS=local-dir:///plugins
+CMD ["node", "lib/backend/main.js", "/home/node/workspace", "--hostname", "0.0.0.0", "--port", "3000", "--session-preference", "nearAi.autoInstallGsd=false"]
+
+# Default target for local builds: the preview without a bundled VSIX.
+FROM runtime AS development
