@@ -63,3 +63,15 @@ test('a real browser opens Get Started and sees the parser\'s own refusal throug
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   assert.match(result.stdout, /\b2 passed\b/);
 });
+
+test('the Documentation view shows the bundled diagrams and screenshots, not their source, and loads only from the workbench', async () => {
+  const port = await freePort();
+  const started = await runContainer('docs', ['-d', '-p', `127.0.0.1:${port}:3000`,
+    '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
+  assert.equal(started.code, 0, started.stderr);
+  const url = `http://127.0.0.1:${port}`;
+  await waitHealthy('docs', url);
+  const result = await runPlaywright('documentation.spec.ts', { WORKBENCH_URL: url });
+  assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
+  assert.match(result.stdout, /\b1 passed\b/);
+});

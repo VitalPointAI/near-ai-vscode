@@ -67,3 +67,33 @@
   border: 1px solid var(--theia-panel-border);
 }
 .sterling-documentation article a { color: var(--theia-textLink-foreground); }
+
+/* Images and diagrams made at build time (workbench/tools/documentation-render.mjs). Diagram colours follow the Theia theme. */
+.sterling-documentation article img {
+  max-width: 100%;
+  height: auto;
+}
+.sterling-documentation article figure { margin: 1.25em 0; }
+.sterling-documentation article figcaption {
+  margin-top: 6px;
+  font-size: 0.9em;
+  color: var(--theia-descriptionForeground);
+}
+.sterling-documentation .sterling-doc-diagram {
+  --sterling-diagram-bg: var(--theia-editor-background);
+  --sterling-diagram-fg: var(--theia-editor-foreground);
+  overflow: auto;
+}
+/* Wide diagrams keep their drawn size (13 px labels) and scroll sideways; shrinking them to the column makes the labels unreadable. */
+.sterling-documentation .sterling-doc-diagram svg {
+  display: block;
+  max-width: none;
+  height: auto;
+  margin-inline: auto;
+}
+.sterling-documentation .sterling-doc-diagram text { font-family: var(--theia-ui-font-family); }
+.sterling-documentation .sterling-doc-diagram .mono { font-family: var(--theia-code-font-family); }
+.sterling-documentation :is(.sterling-doc-fallback, .sterling-doc-image-missing) {
+  color: var(--theia-descriptionForeground);
+  font-style: italic;
+}

@@ -42,6 +42,8 @@ RUN JOBS=2 npm_config_build_from_source=true npm_config_nodedir=/usr/local npm r
 COPY src /repo/src
 COPY README.md SECURITY.md CHANGELOG.md /repo/
 COPY docs/development-workflow.md docs/testing.md /repo/docs/
+# The screenshots README.md shows: bundled as same-origin images by the documentation tool, never loaded from GitHub.
+COPY docs/marketplace/near-ai-approval.png docs/marketplace/near-ai-chat.png docs/marketplace/near-ai-commands.png docs/marketplace/near-ai-workflow.png /repo/docs/marketplace/
 COPY docs-site/content/index.md /repo/docs-site/content/
 COPY docs-site/content/architecture/overview.md /repo/docs-site/content/architecture/
 COPY docs-site/content/releases/versions.md /repo/docs-site/content/releases/

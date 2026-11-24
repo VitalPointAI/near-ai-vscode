@@ -1000,6 +1000,58 @@
       "reviewedAt": "2026-11-24"
     },
     {
+      "id": "npm:beautiful-mermaid",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Draws the guides' Mermaid diagrams to static SVG in the workbench image build (workbench/tools/documentation-render.mjs), without a DOM or a browser, so the Documentation view shows each diagram instead of its source.",
+      "licence": "MIT (its tree: elkjs 0.11.1 EPL-2.0 and entities 7.0.1 BSD-2-Clause, build stage only; none of them reaches the runtime image)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "sc-18",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 1.1.3 in workbench/package-lock.json; workbench/test/documentation-render.test.mjs draws the architecture overview's three diagrams and checks the SVG; the container suite's Documentation browser test",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job; bumped by hand in a reviewed change after re-reading the renderer's output",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Build stage only: npm prune --omit=dev removes it and elkjs before the runtime stage; only the SVG it draws ships.",
+        "Its SVG carries a <style> block that @imports Google Fonts: documentation-render.mjs removes the block, keeps only the colour variables, and stops the build if any style, script, foreignObject, image, use, link, event handler or remote address is left. The Documentation view sanitizes the SVG again with DOMPurify.",
+        "A young project from one company (Craft Docs, first released in 2026): re-review its output before each bump. If it is abandoned, the fallback is a local Mermaid bundle with its own entry."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:markdown-it",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "Turns the bundled guides into HTML in the workbench image build (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view never shows Markdown, MDX or HTML source as text. The same version @theia/core already ships for its own Markdown rendering.",
+      "licence": "MIT",
+      "controls": [
+        "sa-15",
+        "si-10",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 14.3.3 in workbench/package-lock.json, the version @theia/core resolves; workbench/test/documentation-render.test.mjs",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan (it is also in the runtime tree through @theia/core); bumped together with @theia/core in a reviewed change",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
       "id": "npm:@near-ai/sterling-workbench-extension",
       "kind": "npm",
       "where": [

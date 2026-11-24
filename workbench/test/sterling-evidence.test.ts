@@ -23,9 +23,9 @@ test('missing, unverified, malformed or other-commit records never vouch', () =>
 });
 
 test('the documentation collection must be a non-empty list of complete pages', () => {
-  const page = { source: 'docs-site/content/index.md', route: 'index.md', category: 'Overview', title: 'Welcome', markdown: '# Hi' };
+  const page = { source: 'docs-site/content/index.md', route: 'index.md', category: 'Overview', title: 'Welcome', html: '<h1>Hi</h1>', text: 'Hi' };
   assert.equal(isDocumentationPages([page]), true);
-  for (const bad of [[], {}, null, [{ ...page, title: undefined }], [page, 'x'], [{ ...page, markdown: 3 }]]) {
+  for (const bad of [[], {}, null, [{ ...page, title: undefined }], [page, 'x'], [{ ...page, html: 3 }], [{ ...page, text: undefined }]]) {
     assert.equal(isDocumentationPages(bad), false, JSON.stringify(bad));
   }
 });

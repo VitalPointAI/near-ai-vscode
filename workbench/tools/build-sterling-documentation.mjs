@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { ASSET_DIR, createDocumentationRenderer } from './documentation-render.mjs';
 
 // The tools folder sits at workbench/tools both in a checkout and in the image build, so root is the repository root in both.
 // It reads the repository docs from there and writes only inside workbench/ (lib/frontend/). Fail with a plain message if a layout change breaks that.
@@ -10,7 +12,7 @@ if (!existsSync(new URL('docs-site/content/index.md', root))) {
 }
 
 // Only bundle the guides already published by the documentation site.
-// Keep this list aligned with the Dockerfile inputs and Docker context allowlist.
+// Keep this list, and the images the guides show (docs/marketplace/), aligned with the Dockerfile inputs and Docker context allowlist.
 const guides = [
   ['docs-site/content/index.md', 'Overview', 'Welcome', 'index.md'],
   ['docs-site/content/using/getting-started.md', 'Using Sterling', 'Getting started', 'using/getting-started.md'],
@@ -28,11 +30,13 @@ const guides = [
   ['CHANGELOG.md', 'Releases', 'Changelog', 'releases/changelog.synced.md'],
 ];
 
+// Each page is HTML made here (documentation-render.mjs): no Markdown, MDX or diagram source reaches the browser.
+const renderer = createDocumentationRenderer({ root: fileURLToPath(root) });
 const pages = await Promise.all(guides.map(async ([source, category, title, route]) => {
-  const input = await readFile(new URL(source, root), 'utf8');
-  const markdown = input.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
-    .replace(/!\[([^\]\n]*)\]([([])/g, '[$1]$2');
-  return { source, route, category, title, markdown };
+  const { html, text } = renderer.render(source, await readFile(new URL(source, root), 'utf8'), title);
+  return { source, route, category, title, html, text };
 }));
-await mkdir(output, { recursive: true });
+await rm(new URL(`${ASSET_DIR}/`, output), { recursive: true, force: true });
+await mkdir(new URL(`${ASSET_DIR}/`, output), { recursive: true });
+for (const [name, file] of renderer.assets) await copyFile(file, new URL(`${ASSET_DIR}/${name}`, output));
 await writeFile(new URL('sterling-documentation.json', output), JSON.stringify(pages));
