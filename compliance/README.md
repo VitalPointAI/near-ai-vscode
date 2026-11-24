@@ -33,6 +33,12 @@ node scripts/run-tests.mjs compliance/test/*.test.ts
 
 Run the tests through the repository's runner as shown (from the repository root), or `npm --prefix compliance test`, which calls the same runner.
 
+## Adding a resource
+
+Before the repository uses a new third-party resource (an npm package in any `package.json`, a container image in `hub/Dockerfile`, `relay/Dockerfile` or `relay/compose.yaml`, a GitHub Action, or a library `scripts/vendor-libs.mjs` ships), check how it fits the compliance requirements and add an entry to `resources.json`. The fields are described in `schemas/resources.schema.json`: where it is used, which component, runtime, build or test scope, purpose, licence, the controls it supports or affects, the evidence it gives a collector, its cryptography, how security fixes reach us, whether it works air-gapped, and the verdict `fit` (`pass`, `pass-with-conditions` with the conditions written down, or `fail`), with the reviewer and date.
+
+The `lint` CI job runs `node scripts/resource-check.mjs`, which fails when a resource has no entry, an entry is `fail`, a `pass-with-conditions` entry lists no conditions, a field is missing or invalid (unknown control or component included), an entry no longer matches anything (stale), an action is not pinned to a full commit SHA, or an image is not pinned by digest. Something the product runs that needs the internet or uses unvalidated cryptography is never a plain `pass`. `node scripts/resource-check.mjs --json` prints the inventory as evidence. The register and the script are gate files: changing them needs the owner's approval.
+
 ## Generated files
 
 Everything generated (resolved profiles, the evidence bundle, the dashboard JSON and the release package) goes under `compliance/out/`, which git ignores. Nothing generated is committed, so nothing on `main` can drift from what CI computed.

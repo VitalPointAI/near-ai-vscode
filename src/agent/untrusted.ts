@@ -78,7 +78,7 @@ export function visibleText(html: string): { text: string; title?: string; hidde
   let out = '';
   let skipping: { tag: string; depth: number } | undefined;
   let hiddenElements = 0;
-  const token = /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<!doctype[^>]*>|<\/\s*([a-z][\w:-]*)\s*>|<([a-z][\w:-]*)((?:\s+[^\s/>=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>|([^<]+|<)/gi;
+  const token = /<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?\]\]>|<!doctype[^>]*>|<\/\s*([a-z][\w:-]*)\s*>|<([a-z][\w:-]*)((?:\s+[^\s"'/>=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>|([^<]+|<)/gi;
   for (let match = token.exec(html); match; match = token.exec(html)) {
     const [whole, closing, opening, attributes = '', selfClosing, text] = match;
     if (whole.startsWith('<!--')) { if (!skipping) hiddenElements += whole.trim().length > 7 ? 1 : 0; continue; }

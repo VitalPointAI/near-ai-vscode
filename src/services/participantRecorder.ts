@@ -116,7 +116,8 @@ export function commandNoticeText(command: string, args: string, reply: string):
  * The usage footer the participant streams after a reply, at the end of a reply's text: a blank line, then one italic line of the model and its
  * ' · ' separated parts (`usageFooter` in chatParticipant.ts). A session from before turns were recorded holds replies with this still attached.
  */
-export const USAGE_FOOTER_TAIL = /\n[ \t]*\n\*[^*\n]+(?: · [^*\n]+)+\*[ \t]*$/;
+// A part never contains '·', so each ' · ' is the only way to split the line and the match cannot backtrack exponentially on model text.
+export const USAGE_FOOTER_TAIL = /\n[ \t]*\n\*[^*\n·]+(?: · [^*\n·]+)+\*[ \t]*$/;
 
 /** A notice that is shown in the thread and is never sent to the model. */
 function notice(text: string): SeedItem {

@@ -1,0 +1,40 @@
+{
+  "$id": "urn:near-ai-vscode:compliance:schema:resources",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Compliance fit register: one reviewed entry per third-party resource (checked by scripts/resource-check.mjs)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resources"],
+  "properties": {
+    "note": { "type": "string" },
+    "resources": { "type": "array", "items": { "$ref": "#/definitions/resource" } }
+  },
+  "definitions": {
+    "text": { "type": "string", "minLength": 1 },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "where", "component", "scope", "purpose", "licence", "controls", "evidence", "crypto", "cveResponse", "airGap", "fit", "reviewer", "reviewedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(npm|image|action|vendor):\\S+$" },
+        "kind": { "enum": ["npm", "image", "action", "vendored"] },
+        "where": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/text" } },
+        "component": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
+        "scope": { "enum": ["runtime", "build", "test"] },
+        "purpose": { "$ref": "#/definitions/text" },
+        "licence": { "$ref": "#/definitions/text" },
+        "controls": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" } },
+        "evidence": { "$ref": "#/definitions/text" },
+        "crypto": { "type": "string", "pattern": "^(none|uses-platform|unvalidated|validated:.+)$" },
+        "cveResponse": { "$ref": "#/definitions/text" },
+        "airGap": { "type": "string", "pattern": "^(ok|no|needs-mirror:.+)$" },
+        "fit": { "enum": ["pass", "pass-with-conditions", "fail"] },
+        "conditions": { "type": "array", "items": { "$ref": "#/definitions/text" } },
+        "reviewer": { "$ref": "#/definitions/text" },
+        "reviewedAt": { "type": "string", "format": "date" }
+      },
+      "if": { "properties": { "fit": { "const": "pass-with-conditions" } } },
+      "then": { "properties": { "conditions": { "type": "array", "minItems": 1 } }, "required": ["conditions"] }
+    }
+  }
+}

@@ -183,3 +183,14 @@ test('attachments are fenced, and an injection in one is reported for Agent Acti
   const entries = feed.subscribe(() => undefined).snapshot.filter((entry) => entry.kind === 'security');
   assert.deepEqual(entries.map((entry) => entry.title), ['Possible prompt injection · attachment notes.md', 'Held for approval · Run curl …', 'Blocked · Run curl …']);
 });
+
+test('a page built to make the tag pattern backtrack is read in linear time (CodeQL js/redos)', () => {
+  // Each '"" !=' pair once doubled the ways the attribute pattern could match; 60 of them would never finish.
+  const page = `<p>before</p><a !=${'"" !='.repeat(60)}<p>after</p>`;
+  const started = Date.now();
+  const { text } = visibleText(page);
+  assert.ok(Date.now() - started < 1000, 'the page is read without catastrophic backtracking');
+  assert.match(text, /before/);
+  assert.match(text, /after/);
+  assert.equal(visibleText('<a href="x" title=\'y\' data-n=3 hidden>shown</a>').hiddenElements, 1);
+});
