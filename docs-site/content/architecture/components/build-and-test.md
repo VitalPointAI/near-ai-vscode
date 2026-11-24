@@ -13,6 +13,9 @@ Back to the [component catalogue](./index.md).
 
 | Component | Kind | Scope | Fit |
 | --- | --- | --- | --- |
+| npm:@digitalbazaar/eddsa-jcs-2022-cryptosuite | npm package | test | Pass with conditions |
+| npm:@digitalbazaar/vc | npm package | test | Pass with conditions |
+| npm:@digitalbazaar/vc-bitstring-status-list | npm package | test | Pass with conditions |
 | npm:@jsquash/jpeg | npm package | build | Pass |
 | npm:@jsquash/webp | npm package | build | Pass |
 | npm:@types/node | npm package | build | Pass |
@@ -21,6 +24,86 @@ Back to the [component catalogue](./index.md).
 | npm:esbuild | npm package | build | Pass |
 | npm:typescript | npm package | build | Pass |
 | action:actions/cache | GitHub Action | build | Pass |
+
+## npm:@digitalbazaar/eddsa-jcs-2022-cryptosuite
+
+**What it provides.** The reference eddsa-jcs-2022 cryptosuite, used only in tests to check our own credential proofs.
+
+**Why it is needed.** Checks in tests that credentials we sign verify with the reference implementation and that its proofs verify with ours, and gives the RFC 8785 canonical form our canonical JSON is compared with. Nothing from it ships. Without it we would trust our own reading of the specification alone.
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `1.0.0` |
+| Architecture component | `extension` |
+| Used in | `package.json` |
+| Scope | Test only: not shipped |
+| Licence | BSD-3-Clause |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | SA-11, SA-15, SR-3 |
+| Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
+| Reviewed | Claude (agent review); owner approved 2026-11-24 ("approved", 71-01 package check), 2026-11-24 |
+
+Conditions:
+
+- Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node\_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).
+- No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.
+- Not updated since its only release (1.0.0, 2024-11-08, two years old); it predates the W3C Recommendation of 2025-05-15, so the frozen W3C vectors in our test are the arbiter if the two ever disagree.
+
+## npm:@digitalbazaar/vc
+
+**What it provides.** The reference Verifiable Credentials library, used only in tests to issue and verify credentials against ours.
+
+**Why it is needed.** Issues and verifies credentials in tests with a static document loader that holds the needed contexts and refuses any other address, so no test reaches the network. Nothing from it ships. Without it we would trust our own reading of the specification alone.
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `7.3.0` |
+| Architecture component | `extension` |
+| Used in | `package.json` |
+| Scope | Test only: not shipped |
+| Licence | BSD-3-Clause |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | SA-11, SA-15, SR-3 |
+| Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
+| Reviewed | Claude (agent review); owner approved 2026-11-24 ("approved", 71-01 package check), 2026-11-24 |
+
+Conditions:
+
+- Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node\_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).
+- No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.
+- Brings JSON-LD and HTTP client code (jsonld, ky, undici); tests pass a static document loader, so no context is ever fetched.
+
+## npm:@digitalbazaar/vc-bitstring-status-list
+
+**What it provides.** The reference Bitstring Status List library, used only in tests to check our status lists.
+
+**Why it is needed.** Reads and checks status lists we build in tests, so our lists match the W3C Recommendation. Nothing from it ships. Without it we would trust our own reading of the specification alone.
+
+| | |
+| --- | --- |
+| Kind | npm package |
+| Pinned version or digest | `2.0.1` |
+| Architecture component | `extension` |
+| Used in | `package.json` |
+| Scope | Test only: not shipped |
+| Licence | BSD-3-Clause |
+| Cryptography | None |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | SA-11, SA-15, SR-3 |
+| Security fixes | Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR. |
+| Reviewed | Claude (agent review); owner approved 2026-11-24 ("approved", 71-01 package check), 2026-11-24 |
+
+Conditions:
+
+- Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node\_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).
+- No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.
 
 ## npm:@jsquash/jpeg
 

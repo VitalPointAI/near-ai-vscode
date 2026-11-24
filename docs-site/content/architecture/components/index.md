@@ -13,7 +13,7 @@ Nothing here is typed by hand. The pages are generated from the compliance fit r
 
 This catalogue is evidence for these controls in the compliance package: CM-8 and CM-8(1) (the inventory, kept current with each change), CM-7 (why each component is needed), SA-4 (the review before a component is used), SA-5 (this documentation) and SR-3 (exact pins). It is evidence only: your organization decides what it accepts.
 
-There are 137 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
+There are 140 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
 
 ## How to read an entry
 
@@ -82,7 +82,7 @@ This site is built with Docusaurus into static pages, with an offline search ind
 
 These are used only to compile, type-check, bundle and test the code, or to rebuild bundled map tiles. Nothing from them ships in the product; only what they produce does.
 
-8 components: npm:@jsquash/jpeg, npm:@jsquash/webp, npm:@types/node, npm:@types/vscode, npm:@vscode/test-electron, npm:esbuild, npm:typescript, action:actions/cache.
+11 components: npm:@digitalbazaar/eddsa-jcs-2022-cryptosuite, npm:@digitalbazaar/vc, npm:@digitalbazaar/vc-bitstring-status-list, npm:@jsquash/jpeg, npm:@jsquash/webp, npm:@types/node, npm:@types/vscode, npm:@vscode/test-electron, npm:esbuild, npm:typescript, action:actions/cache.
 
 ## Software bill of materials
 
