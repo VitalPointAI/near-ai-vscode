@@ -7,3 +7,17 @@ issuerprod:
   enable: false
 issuerca:
   enable: false
+
+# RBAC review (D-27, hardening 10), from the 1.2.0 templates:
+#   theia-cloud-base ClusterRole operator-api-access (operator-role.yaml), bound cluster-wide by theia-cloud's ClusterRoleBinding
+#     operator-api-access-<namespace> to ServiceAccount operator-api-service-account: list, create, watch, get, edit, patch, delete, update
+#     on customresourcedefinitions, appdefinitions(/status), workspaces(/status), sessions(/status), ingresses, persistentvolumes,
+#     persistentvolumeclaims, services, configmaps, deployments, leases and pods, in every namespace.
+#   theia-cloud-base ClusterRole service-api-access (service-role.yaml), bound by theia-cloud's RoleBinding in the release namespace only to
+#     ServiceAccount service-api-service-account: list, create, watch, get, patch, delete on appdefinitions, sessions, workspaces (and their
+#     status); list, get, watch on deployments, replicasets, pods, services (and metrics).
+# Narrowing the values allow: none. Both role bodies are fixed in the templates and the operator's binding is a ClusterRoleBinding; values
+# only rename the roles. What limits the operator today: it runs only in theia-cloud (Pod Security restricted, the egress policy, admission of
+# signed images), and session pods mount no service account token (the session template, 47-09). Narrowing the operator to its namespace
+# (a Role in place of the cluster-wide grant, without customresourcedefinitions and persistentvolumes) needs a chart change tested against
+# the operator; recorded for Phase 48, not applied here.

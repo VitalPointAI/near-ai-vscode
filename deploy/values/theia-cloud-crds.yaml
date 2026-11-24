@@ -1,8 +1,7 @@
-# Theia Cloud CRDs 1.2.0 (chart deploy/charts/vendored/theia-cloud-crds-1.2.0.tgz). The descriptor (theia-cloud-crds.release.json) sets
-# conversion.image to our rebuilt conversion webhook by digest from deploy/bundle/images.lock.json (D-20, D-23).
-#
-# Pull policy: the chart's conversion webhook template has no imagePullPolicy setting, so none can be set here. The image is referenced by
-# digest and not tagged latest, so Kubernetes defaults its pull policy to IfNotPresent (D-20). 47-15's carried chart patch may make it explicit.
+# Theia Cloud CRDs 1.2.0 (chart deploy/charts/vendored/theia-cloud-crds-1.2.0-sterling.tgz: the upstream chart with the carried patch
+# deploy/charts/patches/theia-cloud-crds.patch). The descriptor (theia-cloud-crds.release.json) sets conversion.image to our rebuilt
+# conversion webhook by digest from deploy/bundle/images.lock.json (D-20, D-23). Pull policy IfNotPresent and the restricted security context
+# are in the patch: the chart's template has no setting for either.
 
 # The conversion webhook's certificate comes from the site PKI (D-16, 47-13). The chart default, theia-cloud-selfsigned-issuer, is a CA
 # issuer whose CA certificate nothing issues once the base chart's self-signing issuer is off, so the webhook would never get a certificate.
