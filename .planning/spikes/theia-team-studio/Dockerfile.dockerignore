@@ -1,0 +1,17 @@
+**
+!src/
+!src/**
+!.planning/
+!.planning/spikes/
+!.planning/spikes/theia-team-studio/
+!.planning/spikes/theia-team-studio/package.json
+!.planning/spikes/theia-team-studio/package-lock.json
+!.planning/spikes/theia-team-studio/extension/
+!.planning/spikes/theia-team-studio/extension/package.json
+!.planning/spikes/theia-team-studio/extension/tsconfig.json
+!.planning/spikes/theia-team-studio/extension/src/
+!.planning/spikes/theia-team-studio/extension/src/**
+!.planning/spikes/theia-team-studio/extension/fixtures/
+!.planning/spikes/theia-team-studio/extension/fixtures/**
+!.planning/spikes/theia-team-studio/tools/
+!.planning/spikes/theia-team-studio/tools/**

@@ -1,0 +1,18 @@
+{
+  "name": "@near-ai/theia-team-preview",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/browser/team-preview.css lib/browser/team-preview.css"
+  },
+  "dependencies": {
+    "@theia/core": "1.77.0"
+  },
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/team-preview-frontend-module",
+      "backend": "lib/node/team-preview-backend-module"
+    }
+  ]
+}
