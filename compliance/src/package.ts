@@ -6,6 +6,7 @@ import { toCsv } from '../../docs-site/src/compliance/lib.mjs';
 import { loadComponents } from './components.ts';
 import type { Dashboard } from './dashboard.ts';
 import { loadGaps, loadPoam } from './gaps.ts';
+import { inventoryCsv, loadInventory } from './inventory.ts';
 import { verifyManifest } from './manifest.ts';
 import type { Observation } from './model.ts';
 import { buildSsp, type SspInput } from './oscalSsp.ts';
@@ -212,11 +213,13 @@ export function buildPackage(options: PackageOptions): PackageResult {
   mkdirSync(path.join(destination, 'oscal/ssp'), { recursive: true });
   mkdirSync(path.join(destination, 'readable'));
   const statements = packageSources(root, destination, levels, options.resolved);
+  // The component inventory comes from the register at the repository root (the compliance folder's parent), like the supporting documents.
+  const inventory = loadInventory(path.dirname(root));
   const collectors = dashboard.collectors as readonly { id: string; window: string }[];
   const generatedAt = dashboard.generatedAt;
   for (const level of levels) {
     const rows = dashboard.rows.flatMap((row, dashboardIndex) => row.level === level.id ? [{ ...row, dashboardIndex }] : []);
-    const input: SspInput = { level: { ...level, profile: `../${level.profile}` }, rows, components: loaded.components, generatedAt };
+    const input: SspInput = { level: { ...level, profile: `../${level.profile}` }, rows, components: loaded.components, generatedAt, inventory: inventory.entries };
     const ssp = buildSsp(input);
     validateDocument(level.id, ssp, 'system-security-plan');
     writeFileSync(path.join(destination, 'oscal/ssp', `${level.id}.json`), stable(ssp));
@@ -255,6 +258,7 @@ export function buildPackage(options: PackageOptions): PackageResult {
   const mappings = crosswalk.mappings.map(({ source, target, relation }) => ({
     'ITSG-33 control': source, 'ITSP.10.033 control': target, [note]: relation
   }));
+  writeFileSync(path.join(destination, 'readable', 'component-inventory.csv'), inventoryCsv(inventory));
   writeFileSync(path.join(destination, 'readable', 'itsg33-crosswalk.csv'), `${toCsv(mappings, ['ITSG-33 control', 'ITSP.10.033 control', note])}\r\n`);
   copySupportingDocuments(root, destination);
   cpSync(bundle, path.join(destination, 'evidence/bundle'), { recursive: true, dereference: false });
