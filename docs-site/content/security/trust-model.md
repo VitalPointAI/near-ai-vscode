@@ -51,6 +51,15 @@ project's own state folder, and leave it only as ciphertext, and only after you 
 extension sends no telemetry. The full list of what goes where is in
 [Where your data goes](./policy.synced.md#where-your-data-goes).
 
+## The Sterling workbench image
+
+The workbench image is a local preview. It has no sign-in of its own and includes a terminal, so
+anyone who can reach its port gets a shell inside the container and everything you entered there. Publish it on `127.0.0.1` only; it refuses to
+start until you confirm that. Pull it by the digest the GitHub release records, so you run exactly
+the image that was tested and approved. Sign-in for each person comes with hosting at your
+organization's own sites, which is planned and not yet released. See
+[Getting started](../using/getting-started.md#run-the-sterling-workbench-image).
+
 ## Limits
 
 Labels and routing are an organizational control that helps prevent mistakes; they are not an
