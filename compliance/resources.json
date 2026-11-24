@@ -888,7 +888,8 @@
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24",
       "conditions": [
-        "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one."
+        "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one.",
+        "npm audit --omit=dev in the workbench job is report-only until Theia ships a fix: on 2026-11-24 it reports one high advisory, zod 3.25.x below 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory exhaustion validating oversized collections), through @theia/plugin-ext > @theia/ai-mcp > @modelcontextprotocol/sdk; it validates MCP messages, and MCP traffic exists only when a person adds an MCP server."
       ]
     },
     {
@@ -1067,16 +1068,15 @@
         "sr-03",
         "sr-11"
       ],
-      "evidence": "Pinned by sha256 digest in every Dockerfile; the workbench container suite checks the runtime prints a v26 Node and loads its native addons; the Release workflow smoke-tests the workbench image and records its GHCR digest on the GitHub release; the hub and relay container suites fail if a pin is missing.",
+      "evidence": "Pinned by sha256 digest in every Dockerfile; the workbench container suite checks the runtime prints a v26 Node and loads its native addons; the workbench CI job writes the image SBOM, a Grype scan and the image digest on every PR; the Release workflow smoke-tests the release image, attests its SBOM and signs its GHCR digest with your organization's key, verifies both, and records the digest on the GitHub release; the hub and relay container suites fail if a pin is missing.",
       "crypto": "unvalidated",
-      "cveResponse": "Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). The workbench image is not yet scanned in CI; the relay and hub final images are scanned by grype in relay-image-scan.",
+      "cveResponse": "Pinned by digest and re-pinned by hand in a reviewed change (no Dependabot). Grype scans the workbench image in the workbench CI job and the release image in the Release workflow (report-only); the relay and hub final images are scanned by grype in relay-image-scan.",
       "airGap": "needs-mirror:the pinned docker.io/library/node digest through the builder's registry-mirror setting, and an npm registry mirror holding the locked packages (NPM_REGISTRY)",
       "fit": "pass-with-conditions",
       "conditions": [
         "A site that builds these images without internet must mirror the pinned image digests and an npm registry with the locked packages, or build elsewhere and import the signed image.",
         "The upstream Node OpenSSL in the workbench runtime is not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B.",
-        "The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (it binds 127.0.0.1 by default and refuses a non-loopback local bind without STERLING_PREVIEW_NO_SIGN_IN=accept).",
-        "Pending 46-06: the workbench image is not yet signed or scanned in CI; that plan adds the SBOM, scan and signature, and this condition is then dropped."
+        "The workbench image has no sign-in of its own: it runs only behind Theia Cloud's sign-in (Phase 47) or locally on 127.0.0.1 (it binds 127.0.0.1 by default and refuses a non-loopback local bind without STERLING_PREVIEW_NO_SIGN_IN=accept)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3529,7 +3529,7 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Writes CycloneDX SBOMs of the relay image and of every rebuilt deployment image.",
+      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.",
       "licence": "Apache-2.0",
       "controls": [
         "sa-10",
@@ -3555,7 +3555,7 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI.",
+      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.",
       "licence": "Apache-2.0",
       "controls": [
         "sa-10",
@@ -3581,7 +3581,7 @@
       ],
       "component": "offline-bundle",
       "scope": "runtime",
-      "purpose": "Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1).",
+      "purpose": "Signs our rebuilt images, the bundle manifest and archive with your organization's key, and verifies them at import (Decision 5, spike S1); signs the Sterling workbench image the Release workflow publishes and attests its CycloneDX SBOM, verifying both in the same job (Phase 46).",
       "licence": "Apache-2.0",
       "controls": [
         "si-07",
@@ -3590,7 +3590,7 @@
         "cm-14",
         "sc-13"
       ],
-      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
+      "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed. The Release workflow's image job installs it the same way and its publish job checks that hash again before signing; scripts/test/workflow-files.test.mjs holds the key-mode flags.",
       "crypto": "unvalidated",
       "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
       "airGap": "ok",
