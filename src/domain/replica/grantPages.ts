@@ -34,7 +34,7 @@ export function buildGrantPages(signer: PayloadSigner, input: CellGrant): Array<
 export const GRANT_PAGE_REFUSALS = {
   'founding-malformed': 'The first page of this cell grant is not in a shape this version can read, or its signature does not match.',
   'page-bad-signature': 'A page of this cell grant was changed or was not made by the key it names.',
-  'page-other-epoch': 'A page of this cell grant is for another cell, epoch or roster, or was signed by someone else.',
+  'page-other-epoch': 'A page of this cell grant belongs to another grant, or was signed by someone else.',
   'page-not-listed': 'A page given with this cell grant is not one its first page lists.',
   'page-missing': 'A page of this cell grant has not arrived yet.',
   'page-repeats-device': 'A device is named on more than one page of this cell grant.'

@@ -191,6 +191,10 @@ function keptCopy(checkpoint: Checkpoint, sig: string, roster: RosterView): Sign
 // checkpointConflict judge nesting as well as equal counts; pass the entries this computer holds under both checkpoints, or none.
 export function witnessCheckpoint(state: WitnessState, signed: unknown, roster: RosterView, entries?: readonly CheckpointEntry[]): CheckpointWitness {
   const verdict = verifyCheckpoint(signed, roster);
+  // The watched hub's checkpoint at a roster this computer has not folded yet (the hub saw a roster change first) cannot be judged now: it is not
+  // kept, and a later one, after this computer has pulled that roster, is judged in full. Any other signer is judged as before.
+  const unseen = !verdict.ok && verdict.reason === 'not-a-checkpoint-signer' && isRecord(signed) ? readCheckpoint(signed.payload) : undefined;
+  if (unseen !== undefined && unseen.signer === state.hub && roster.rosterPosition(unseen.rosterHead) === undefined) return { state: make(state), findings: [], trusted: false };
   if (!verdict.ok) return { state: make(state), findings: [finding('injected', { reason: verdict.reason })], trusted: false };
   const checkpoint = verdict.checkpoint;
   if (checkpoint.project !== state.project) return { state: make(state), findings: [finding('wrong-project', { project: short(checkpoint.project), checkpoint: short(verdict.hash) })], trusted: false };
