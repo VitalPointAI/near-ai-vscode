@@ -1552,8 +1552,9 @@ waits for a quantum computer gains at most Grover's square-root speed-up (AES-25
 strength against Grover before counting scrypt's cost.
 
 **Constraint for later work.** Any public-key step added to sync, such as sharing state between
-different people in Team Mode, must use a hybrid key exchange (X25519 plus ML-KEM), so that it does
-not bring back the harvest-now-decrypt-later weakness the symmetric design avoids.
+different people in Team Mode, must use a hybrid key exchange (P-256 plus ML-KEM-768, as shared
+staff projects do), so that it does not bring back the harvest-now-decrypt-later weakness the
+symmetric design avoids.
 
 ### What still leaks
 
@@ -1743,9 +1744,10 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **A key is wrapped to each cleared device.** Every device has an encryption key pair besides
   its signing key; the device signs its encryption key so it cannot be swapped. To give a device a
   cell key, the lead's machine makes a fresh key pair, agrees a shared secret with the device's
-  public key (X25519), derives a wrapping key from it with HKDF-SHA256 bound to the cell, the
-  epoch and the receiving device, and seals the cell key with AES-256-GCM. A wrap copied to
-  another device, cell or epoch does not open.
+  public key (X25519 in the first format; new work uses the hybrid in the next subsection), derives
+  a wrapping key from it with HKDF-SHA256 bound to the cell, the epoch and the receiving device,
+  and seals the cell key with AES-256-GCM. A wrap copied to another device, cell or epoch does not
+  open.
 - **Grants are signed and sent only to that cell's devices.** The wraps for one cell and epoch
   travel together in a grant signed by the staff lead (or the deputy, once named). The roster
   entry that creates the cell or gives it a new key records the hash of the grant, so a changed
@@ -1770,6 +1772,31 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **Who is cleared is decided when a grant is written.** Clearance checks need the current date
   and the label scales, so they run on the lead's machine when a grant or a new key is written.
   The shared history then relies on the signed grant: it never decides clearance itself.
+
+### How cell keys are wrapped
+
+New shared work, and every project its lead switches to post-quantum keys, wraps each cell key with a hybrid of P-256 and ML-KEM-768, joined by HKDF-SHA256 and sealed with AES-256-GCM. An attacker who records shared work today
+must break both halves to open it later, so a future quantum computer that breaks P-256 alone
+gains nothing. Both halves and the key derivation are listed in CCCS ITSP.40.111 for Unclassified,
+Protected A and Protected B information.
+
+- **The wrap.** A fresh P-256 key agrees a secret with the device's P-256 key, and ML-KEM-768
+  gives a second secret. HKDF-SHA256 joins them, the P-256 secret first, bound to both ciphertexts,
+  the cell, the epoch, the receiving device and both of its keys. The cell key is sealed with
+  AES-256-GCM. A wrap is 1,214 bytes, so a grant for many devices is split into signed pages, all
+  committed by the one hash the roster holds.
+- **The device's keys.** Each computer, hosted person and hub signs its P-256 and ML-KEM-768 keys
+  with its own signing key, and the six safety words cover them when a join request carries them.
+  The private parts are kept only as seeds: in this computer's secret storage, in the hosted
+  person's key envelope sealed by your organization's key service, or in the hub's key file.
+- **The switch.** A project that requires post-quantum keys refuses any new X25519 wrap, on every
+  member's computer and on your organization's server alike. Keys given before the switch keep their older X25519 wraps and stay readable. Each part of the
+  project moves to the new wrap at its next new key. A computer that cannot make the new wrap is
+  told to update; it never falls back to the older one, and a computer that has not published its
+  keys yet is given the key later.
+- **Protected B.** Protected B work is never wrapped the older way, so a project must switch before it shares Protected B work.
+- **Reserved.** ML-KEM-1024 with P-384 is reserved for Protected C and classified work, pending the Cyber Centre's advice.
+- **Signatures.** Signatures stay Ed25519. A later change to post-quantum signatures is its own decision.
 
 ### Labelled products in shared projects
 
