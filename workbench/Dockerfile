@@ -13,7 +13,7 @@
 # Node 26.13.1: only its binary, headers and npm are copied out (COPY --from=node); nothing else of this Debian image reaches the runtime.
 FROM docker.io/library/node:26.13.1-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS node
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS build
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS build
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 RUN microdnf -y --nodocs --setopt=install_weak_deps=0 install gcc-c++ make python3 libatomic tar gzip unzip \
     && microdnf clean all
@@ -57,14 +57,17 @@ COPY workbench/extension/assets ./extension/assets
 RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
 # The runtime holds only the built app and its production dependencies: no @theia/cli, esbuild, puppeteer or Playwright (typescript
 # stays: @theia/filesystem needs it at run time through opfs-worker). Prune leaves emptied scope folders behind; remove those too.
+# @theia/core lists @types/* packages (express, ws, ...) as dependencies, so prune keeps @types/node with them; they hold only type
+# declarations that nothing loads at run time, so the whole @types folder goes.
 RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund \
+    && rm -rf node_modules/@types \
     && rmdir --ignore-fail-on-non-empty node_modules/@*/ && rm -rf /root/.npm && chmod -R go-w /repo/workbench
 
 # Declared only so the fit check sees and pin-checks the test OpenBao (D-29); no stage copies from it and a plain build never builds it.
 # 46-02's container tests take the image reference from this line.
 FROM docker.io/openbao/openbao:2.7.3@sha256:ba4b133eb9586630024e71a617e66f37f29cc3534cdd46a6233e098ceded8dc9 AS openbao-test
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS runtime
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS runtime
 RUN microdnf -y --nodocs --setopt=install_weak_deps=0 install libatomic procps-ng \
     && microdnf clean all \
     && rm -rf /var/cache/dnf /var/cache/yum /var/lib/dnf/repos /var/log/dnf* /var/log/yum* \
