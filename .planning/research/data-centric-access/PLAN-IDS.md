@@ -23,27 +23,27 @@ Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-
 | 71-03 | 2 | The narrow VC 2.0 profile, every credential type below, the second suite `ecdsa-jcs-2019` | |
 | 71-04 | 2 | `did:key` for devices (Phase 69 keys unchanged), `did:webvh` log verification from a cached copy | |
 | 71-05 | 3 | Bitstring Status List: build, sign, verify, staple, cite by hash | |
-| 71-06 | 3 | `credentials@1` and `agreements@1` policy sections; issuer authority chain; agents and devices never issue | 33.1-03 (`project.mode` cites the policy hash), 33.1-20 (`agreements[]`), 48.1-05 |
+| 71-06 | 3 | `credentials@1` and `agreements@1` policy sections; issuer authority chain; agents and devices never issue | 33.1-20 (`agreements[]`), 48.1-05 |
 | 71-07 | 4 | The credential checker (API below) | 33.1-04, 33.1-19, 33.1-20, 33.1-23, 45.1-03 |
-| 71-08 | 5 | The person's wallet, the gate's clearance from credentials, the verifier tool `scripts/credential-check.mjs` | 47-19 (`guests.mjs create --approved-by`), 47-20 |
+| 71-08 | 5 | The person's wallet (`.near-vc` files), the gate's clearance from credentials (after the owner answers item 1 at 71-02's checkpoint), the verifier tool `deploy/tools/credential-check.mjs`, shipped in the signed offline bundle | 47-19 (`guests.mjs create --approved-by`) |
 | 71-09 | 5 | Sync hub: serves logs and status lists, checks cited evidence on append and serve, revocation watch | 33.1-24 (observer server view), 33.1 observer waves |
 | 71-10 | 6 | A person's `did:webvh` at first sign-in, your organization's root DID and role credentials (offline), binding a computer | |
-| 71-11 | 6 | Trust export file `.near-trust-export` (logs, lists, issuer section) and its import at an edge | 47-14 (runs beside it; no shared file) |
-| 71-12 | 7 | Issuance from the officer's own session (Issue credential card), status-list key in OpenBao, revoke and suspend, the wallet inbox | 33.1 observer waves (33.1-18 to 33.1-25), 47-20 (early end revokes) |
+| 71-11 | 6 | Trust export file `.near-trust-export` (logs, lists, issuer section), a separate file beside 47-14's user export (confirmed), and its import at an edge | 47-14 (runs beside it; no shared file) |
+| 71-12 | 7 | Issuance from the officer's own session (Issue credential card), status-list key in OpenBao, revoke and suspend, the wallet inbox, and the revocation card that reads the revocation request inbox | 33.1 observer waves (33.1-18 to 33.1-25); 47-20 and 47-31 write revocation requests and name 71-12's revocation card (no script revokes) |
 | 71-13 | 8 | Credential cache state in the session (`fresh`, `stale`, `unavailable`), key release in hosted sessions, tokens authenticate only | |
 | 71-14 | 9 | SECURITY.md and docs, full suites once, verification record, integration PR | 48.1 statements (48 D-11: only what is on main) |
 | 33.2-01 | 1 | Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; permanent shapes checkpoint | |
-| 33.2-02 | 2 | Second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, hub check | |
+| 33.2-02 | 2 | Second device key binding: `device.kem`, the descriptor's `kem`, the optional `kem` on join requests (observer invitations included, so `observer.key` recipients get v2 keys), safety words, hub check | 33.1-18 (observer join request reserves the optional `kem`) |
 | 33.2-03 | 2 | Grant pages | |
 | 33.2-04 | 3 | Where the new private keys live (keyring, Transit envelope, hub) and publishing `device.kem` at open | |
 | 33.2-05 | 4 | `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in fold and hub | |
-| 33.2-06 | 5 | Every wrap path through `wrapForDevice`; the Protected B rule; the CI check; SECURITY.md | 33.1-19 and 33.1-23 (wrap paths must call `wrapForDevice`); 48.1-09 (X25519 open condition closes when 33.2 is on main) |
+| 33.2-06 | 5 | Every wrap path through `wrapForDevice` (its `read_first` names `observers.ts` and the `observerKeys` path); the Protected B rule; the CI check; SECURITY.md | 33.1-19 and 33.1-23 (wrap paths must call `wrapForDevice`); 48.1-09 (X25519 open condition closes when 33.2 is on main) |
 | 33.2-07 | 6 | Native Switch, Move and Give keys cards; scheduled rekey per cell | |
 | 33.2-08 | 7 | Close-out on the built image, integration PR | |
-| 45.1-01 | 1 | Tracer: `labelInterop@1` table and the signed label binding | 33.1-01 (reserve `release.copy` `binding`), 33.1-21 |
+| 45.1-01 | 1 | Tracer: `labelInterop@1` table and the signed label binding | 33.1-01 (reserve the `release.copy` `binding` slot) |
 | 45.1-02 | 2 | Base TDF manifest from the public OpenTDF spec; partner key access; receiving key in OpenBao | |
 | 45.1-03 | 3 | The exchange adapter at the release boundary; `exchange.export` and `exchange.import` shapes checkpoint | |
-| 45.1-04 | 4 | Binding on every release copy; Export for a partner and Received objects in the workbench | |
+| 45.1-04 | 4 | Binding on every release copy, signed by the staff session key that signs `release.copy`; Export for a partner and Received objects in the workbench. Waits for 33.1-21 | |
 | 45.1-05 | 5 | SECURITY.md, full suites once, verification record, integration PR | |
 
 ## Requirement ids (added to REQUIREMENTS.md on this branch)
@@ -77,7 +77,7 @@ Authority (role) credentials, issued from your organization's root (offline) or 
 | `IssuerRoleCredential` | `{ credentialType, scale?, upTo?, compartments?, regimes? }`: may issue that type within those limits |
 | `SecurityContactCredential` | `{ scope }` |
 | `ReleaseAuthorityCredential` | `{ scope }` |
-| `ClassificationAuthorityCredential` | `{ scale, upTo, scope }`: may lower or declassify up to `upTo`; `scope: own-items` is the originator's authority (AI-classification research 6.4) |
+| `ClassificationAuthorityCredential` | `{ scale, upTo, scope }`: may lower or declassify up to `upTo`; `scope: own-items` is the originator's authority (AI-classification research 6.4). Phase 71 issues and verifies it; enforcing it is deferred to Phase 70.1 and Phase 74.3 |
 | `RoleCredential` | `{ role, scope }` |
 
 Devices: `DeviceBindingCredential { device, class }` (issued by the person to a device `did:key`). Reserved for Phase 71.1: `DelegationCredential`. Status: the W3C `BitstringStatusListCredential`.
@@ -99,7 +99,7 @@ Not a credential: the organization-to-organization agreement is a record in the 
 | `verifyStatusList(value)`, `statusAt(list, index, purpose)` | `statusList.ts` (71-05) | Read a signed list and one bit |
 | `didKeyFromDevice(publicKey)`, `resolveDidKey(did)`, `verifyWebvhLog(log, cached?)` | `src/domain/did/` (71-04) | DIDs |
 | `issuerAuthority(credential, roles, policy, didState)` | `issuerAuthority.ts` (71-06) | Is this issuer allowed to issue this, within its ceiling |
-| `checkEvidence(citation, evidence, context)` | `evidence.ts` | **Fold-time.** Deterministic: proof, issuer authority under the cited policy, subject is the member's DID, dates at the entry's signed time, bit clear in the cited list, list valid at the entry's time within the level's maximum offline age |
+| `checkEvidence(citation, evidence, context)` | `evidence.ts` | **Fold-time.** Deterministic: proof, issuer authority under the cited policy, each cited status list signed by the status-list issuer key the cited policy's `credentials@1.statusLists` names (never checked through the person-issuer rule), subject is the member's DID, dates at the entry's signed time, bit clear in the cited list, list valid at the entry's time within the level's maximum offline age |
 | `mayRelease(facts, label, context)` | `mayRelease.ts` | **The decision** for every wrap, release and serve |
 | `eligibleForPosition(facts, position)` | `mayRelease.ts` | Posting check: required clearance and `eligibleServes` (replaces 33.1 D-15's roster clearance) |
 | `checkFreshness(citation, newest, level, policy, now)` | `freshness.ts` | **Enforcement points:** hub append and serve, wrap preparer, session |
@@ -107,8 +107,8 @@ Not a credential: the organization-to-organization agreement is a record in the 
 | `clearanceFromCredentials(facts, scales)` | `clearance.ts` | VCRD-07: the gate's clearance |
 | `presentFor(request, wallet)` | `present.ts` (71-08) | Present only what a check asks (VCRD-05) |
 | `credentialClock(entrySignedAt, witnessAt?, bundleTime?, counter?)` | `clock.ts` | One clock helper (Phase 74 tightens it) |
-| `node scripts/credential-check.mjs --holder <did> --type <Type> [--scope <s>]` | 71-08 | Command-line verifier for `deploy/` tools (47-19) |
-| `bindLabel(signer, binding)`, `verifyLabelBinding(value, content)` | `src/domain/exchange/labelBinding.ts` (45.1-01) | Signed label binding (4778-style) |
+| `node deploy/tools/credential-check.mjs --holder <did> --type <Type> --credential <file> --trust <dir> [--scope <s>]` | 71-08 | Command-line verifier for `deploy/` tools (47-19). Its engine (`credential-checker.engine.mjs`, built from `src/domain/credentials/`) is generated by `deploy/bundle/build.mjs`, so the tool ships to operators in the signed offline bundle |
+| `bindLabel(signer, binding)`, `verifyLabelBinding(value, content)` | `src/domain/exchange/labelBinding.ts` (45.1-01) | Signed label binding (4778-style). Signer is only `session:<writer>` (the certified staff session key that signs `release.copy`, 33.1 D-35) or `org-release:<site>` (your organization's release key, for exports); never a person DID or key |
 | `wrapForDevice(input)`, `unwrapEpochKeyV2(input)` | `src/domain/replica/cellWrapV2.ts` (33.2-01) | Every wrap path calls `wrapForDevice`, which picks the format; an architecture test (33.2-06) refuses a direct `wrapEpochKey` call |
 
 ## Shapes other plans should reserve (proposed; 33.1-01's checkpoint settles the 33.1 ones)
@@ -132,4 +132,24 @@ Owner items for Phase 33.2 (the wrap as its own phase; Protected B never wrapped
 
 - **Protected B and the wrap (33.2 D-07).** From 33.2-06 on, a cell whose label routes `local-only` or `deny` (by default Protected B, Protected C and every classified level) is never wrapped with X25519. In a project that has not switched to `wrap@2`, such a cell cannot be shared until the lead switches.
 - **One wrap entry point (33.2 D-09).** Every wrap path calls `wrapForDevice`; the architecture test refuses a direct `wrapEpochKey` call outside `cellKeys.ts` and `cellWrapV2.ts`. 33.1's later wrap paths (33.1-19, 33.1-23) follow it.
-- **Trust export (71-11).** `.near-trust-export` is its own file beside 47-14's signed user export; 47-14's runbook names it; no change to `deploy/keycloak/users.mjs`.
+- **Trust export (71-11).** `.near-trust-export` is its own file beside 47-14's signed user export (confirmed); 47-14's runbook names it; no change to `deploy/keycloak/users.mjs`.
+- **Status lists are signed by the HQ status-list key, and each signature is authorized only by an officer's step-up (O4).** The cited policy's `credentials@1.statusLists` names the key for each list; every verifier checks lists against it.
+- **Observers and guests see no staff identity.** Your organization's server refuses every `/v1/trust` route (DID logs and status lists) to observer and guest principals (71-09). Label bindings in observer streams carry no person DID or key (45.1-04).
+
+## `credentials@1` means three different things
+
+The same string names three unrelated features. Keep them apart:
+
+| Where | Registry | Owner | Meaning |
+|---|---|---|---|
+| Signed policy | `FEATURE_IDS` in `src/domain/gate/features.ts` | 71-06 | The policy has a `credentials` section (trusted issuers, status lists, offline ages, sensitivity rules) |
+| Shared project | `KNOWN_REPLICA_FEATURES` in `src/domain/replica/features.ts` | 33.1-03 | O11: the project requires credentials above the lowest level (`declaredClearanceCounts`). 33.1-03 may give it a distinct id; this phase does not register it |
+| User export | 47-14's export `requires` | none | Not used by these plans |
+
+## Revocation request inbox (one format for 47-20 and 47-31)
+
+- **Path:** `kv/data/site/revocation-requests/<entity>-<reason>`, written once with `cas: 0`.
+- **Format:** `sterling-revocation-request/1`: `{ format, entity (OpenBao entity name), keycloakId, reason, seenAt, job }`. No secrets and no credential data.
+- **Reasons:** `disabled` and `removed` (47-31, from Keycloak), `guest-ended` (47-20, an early end; an end on the date needs no request, since `validUntil` equals the end date).
+- **Writers:** 47-20 and 47-31 only (create).
+- **Reader:** 71-12's revocation card, through the issuer step-up role (read, list, delete on that path only). It resolves the entity to the person's DID through the people directory, and shows each officer only the credentials they issued to that person (the issued register `kv/site/issued/<entity>/<credential hash>`). The officer revokes or suspends in their own session after a step-up. The card deletes the request once every credential issued to that person is revoked or suspended. No script revokes anything.
