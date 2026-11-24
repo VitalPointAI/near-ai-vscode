@@ -13,7 +13,7 @@
 
 ### Accepted owner decisions that bind this phase (owner, 2026-11-23)
 - **D-01 (owner, D2):** On-premise only, including fully air-gapped sites. Hosting, sign-in, secrets and session management never depend on the internet. Commercial cloud only for what your organization's signed policy allows (for example an approved model endpoint), never for the stack itself.
-- **D-02 (owner, D3):** Hundreds to thousands of concurrent people per site, connected HQ and disconnected edge. Charts are sized by per-site values; no capacity figure is stated until Phase 48 measures it.
+- **D-02 (owner, D3; revised 2026-11-24, owner):** The first goal is one connected HQ with about 400 concurrent people (was hundreds to thousands per site); edge sites stay disconnected and smaller, and the design still grows later. Charts are sized by per-site values; no capacity figure is stated until Phase 48 measures it. See 47-CONTEXT.md.
 - **D-03 (owner, D4):** Self-hosted Eclipse Theia Cloud is the session orchestrator, one session per person (`sessionsPerUser: 1`).
 - **D-04 (owner, D5):** OpenBao (MPL-2.0), never HashiCorp Vault (BUSL-1.1). One OpenBao cluster per site, no cross-site replication.
 - **D-05 (owner, D6):** Sign-in by hardware security keys or device-bound passkeys only, through Keycloak WebAuthn passwordless. No password or OTP authenticator in any flow. PKI smart cards are an optional hardware flow.

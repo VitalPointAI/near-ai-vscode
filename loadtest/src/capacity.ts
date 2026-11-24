@@ -116,7 +116,7 @@ function runSection(run: RunFile): string[] {
   lines.push('| Stage | Result | Sessions held | Burst |', '| --- | --- | --- | --- |');
   for (const stage of run.stages) {
     lines.push(stage.reached
-      ? `| ${grouped(stage.target)} | reached | ${grouped(stage.sessions)} | ${stage.burst.reached ? `reached, peak ${grouped(stage.burst.peakConcurrency)}` : `not reached: ${stage.burst.reason}`} |`
+      ? `| ${grouped(stage.target)} | ${stage.target > TOP_CLASS ? 'reached (headroom)' : 'reached'} | ${grouped(stage.sessions)} | ${stage.burst.reached ? `reached, peak ${grouped(stage.burst.peakConcurrency)}` : `not reached: ${stage.burst.reason}`} |`
       : `| ${grouped(stage.target)} | not reached: ${stage.reason} | | |`);
   }
   lines.push('');
@@ -124,8 +124,9 @@ function runSection(run: RunFile): string[] {
   return lines;
 }
 
-/** The site size classes with a default: up to 250, 500 and 1,000 people, and each higher stage a load run reached (D-07). */
-const BASE_CLASSES = [250, 500, 1_000];
+/** The site size classes with a default: up to 100, 200 and 400 people (D-07, the HQ target). A reached stage above the last is headroom, never a class (D-20). */
+const BASE_CLASSES = [100, 200, 400];
+const TOP_CLASS = BASE_CLASSES[BASE_CLASSES.length - 1];
 
 /** A p95-based default, or why there is none: "no samples" or "n too small". */
 function rounded(sorted: readonly number[], toValue: (p95: number) => string): string {
@@ -140,11 +141,9 @@ function rounded(sorted: readonly number[], toValue: (p95: number) => string): s
  * stage no load run reached prints "not measured". Setting these in a site's chart values stays with the site.
  */
 function sizingSection(sources: readonly RunFile[]): string[] {
-  const higher = sources.flatMap((run) => run.stages.filter((stage) => stage.reached && stage.target > 1_000).map((stage) => stage.target));
-  const classes = [...new Set([...BASE_CLASSES, ...higher])].sort((a, b) => a - b);
   const lines = ['## Sizing defaults per site size class', '', 'Each class reads the latest load run that reached its stage. Memory per person is the active sample\'s p95 working set rounded up to 256 MiB; the workspace volume is the active sample\'s p95 volume use doubled and rounded up to a whole GiB; the idle timeout is the one that run used, shown with the idle-session memory (p95) and the cold-start p95 to Pod Ready measured under it.', ''];
   lines.push('| Site size class | Source run | Memory per person | Workspace volume | Idle timeout | Idle-session memory | Cold start p95 |', '| --- | --- | --- | --- | --- | --- | --- |');
-  for (const size of classes) {
+  for (const size of BASE_CLASSES) {
     const label = `Up to ${grouped(size)} people`;
     const found = [...sources].sort((a, b) => b.startedAt - a.startedAt || (a.id < b.id ? 1 : -1))
       .map((run) => ({ run, stage: run.stages.find((stage) => stage.target === size && stage.reached) }))

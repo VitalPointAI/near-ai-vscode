@@ -29,7 +29,7 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 1 | rke2 | FIPS build with Canal and the bundled FIPS components | deployment observation (version, host FIPS mode), document record | sc-13, sc-12 | gap G334 |
 | 2 | rke2 | STIG profile | test rule (rendered RKE2 configuration), deployment observation | cm-06 | gap G334 |
 | 3 | rke2 | Kubernetes audit policy | test rule (policy file), deployment observation (audit stream present) | au-02, au-12 | gap G334 |
-| 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | gap G334 |
+| 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | rule rke2.cm-07.no-k3s |
 | 5 | keycloak | FIPS strict mode with BC-FIPS on a FIPS host, OpenJDK 21 | deployment observation (strict mode, host FIPS mode), document record (BC-FIPS certificate) | sc-13 | gap G332 |
 | 6 | keycloak | A version with CVE-2026-6856 fixed | deployment observation (version at or above the recorded minimum), document record | si-02 | gap G335 |
 | 7 | keycloak | Password and OTP authenticators disabled | test rule (realm as code), deployment observation (live realm) | ia-02, ia-05 | gap G335 |
@@ -53,7 +53,7 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 25 | ingress | HAProxy is FIPS only when linked against a validated OpenSSL provider on a FIPS host | deployment observation (image base, host FIPS mode) | sc-13, sc-08 | gap G340 |
 | 26 | ingress | RKE2 Traefik: a FIPS build from RKE2 | document record | sc-13 | gap G325 |
 | 27 | ingress | RKE2 Traefik works with Theia Cloud only through explicit annotations (untested) | rig experiment record | sc-08 | gap G325 |
-| 28 | ingress | No ingress-nginx (archived, no further patches) | test rule (rendered production profile) | cm-07 | gap G340 |
+| 28 | ingress | No ingress-nginx (archived, no further patches) | test rule (rendered production profile) | cm-07 | rule ingress.cm-07.no-ingress-nginx |
 | 29 | image-registry | Harbor: signature-enforced import and admission | deployment observation (admission enforcing, unsigned images admitted counted), test rule | si-07 | gap G341 |
 | 30 | image-registry | Harbor: scanning | deployment observation | ra-05 | gap G341 |
 | 31 | image-registry | Harbor: SBOM storage | deployment observation | cm-08 | gap G341 |

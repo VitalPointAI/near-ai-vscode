@@ -2,6 +2,7 @@
 
 **Status:** design for the owner. Docs only: no code changed.
 **Written:** 2026-11-23, against `origin/main` at 9d3ec09f (after #160).
+**Revised:** 2026-11-24 (owner): the first scale target is one HQ with about 400 concurrent people, not thousands (D3; sections 1, 7 and 12).
 **Inputs:** `RESEARCH.md` in this folder (the hosting research, with its sources); `.planning/ROADMAP.md` (Phases 32.1, 33, L1b, L6); `.planning/research/multiuser-sync/DESIGN.md` (MUS: the sync hub and signed replication); `.planning/research/compliance-dashboard/DESIGN.md` and `compliance/README.md`; `.planning/research/coherence/` (REVIEW.md and GLOSSARY.md: the vocabulary rules this design follows); the Theia spike on the local branch `docs/theia-container-release` (`.planning/spikes/theia-team-studio/README.md` and `MIGRATION.md`); the owner's decisions of 2026-11-23; the re-aim findings for Phases 32.1 and 33.
 **Marking:** **[verified]** means read in source or official docs during the research. **[unverified]** means inference, estimate or not yet confirmed. Unmarked statements about this repository were checked on `origin/main` or the named branch.
 
@@ -15,7 +16,7 @@
 6. **Phases 32.1 and 33 are rebuilt natively in Theia now,** not through the VSIX compatibility layer. Most of their executed work is host-neutral engine code and carries over unchanged.
 7. **A native Theia foundation comes first.** Backend services, the key store, the key service and session identity are what both phases need. The deployment stack and the offline bundle can be built in parallel from day one.
 8. **Nothing is adopted until it passes the compliance fit check.** Each component below has a verdict and conditions. None counts toward any claim until it is in `compliance/` and assessed.
-9. **The main unknowns are scale and certificates.** Nobody has publicly run 1,000 or more Theia Cloud sessions. We load-test on our own hardware before stating a capacity figure.
+9. **The main unknowns are scale and certificates.** The first goal is one HQ with about 400 concurrent people (owner, 2026-11-24). No public scale results exist for Theia Cloud, at 400 or above (`RESEARCH.md` section 2). We load-test on our own hardware before stating a capacity figure.
 
 ## 2. Owner decisions (2026-11-23)
 
@@ -25,7 +26,7 @@ These are settled.
 |---|---|---|
 | D1 | Theia (Sterling-branded edition; the Sterling and SovAI names are intended) is the sole development target. No more VS Code Marketplace publishing. Releases ship as a versioned container image published by digest. | The release pipeline, its evidence (installer SBOM, signatures) and the compliance package move from the VSIX to the image (section 8). |
 | D2 | Defence deployment is on-premise, including fully air-gapped sites. Commercial cloud is used only for specific things your organization's signed policy allows (for example an approved model endpoint). | Hosting, sign-in, secrets and session management never depend on the internet. Images and charts arrive by signed bundle. |
-| D3 | Scale: hundreds to thousands of concurrent people; connected HQ and disconnected edge sites. | Per-site capacity planning, a load test to 1,000+ sessions, and several hubs per site (section 12). |
+| D3 | Scale: connected HQ and disconnected edge sites. Revised 2026-11-24 (owner): the first goal is one HQ with about 400 concurrent people, not thousands as first stated. Edge sites are smaller. The design still grows beyond 400 later. | Per-site capacity planning, a load test to 400 sessions with start bursts of 200, then beyond 400 as headroom while the rig allows, and several hubs per site (sections 7 and 12). |
 | D4 | Self-hosted Eclipse Theia Cloud on your organization's Kubernetes is approved as the session orchestrator, one Theia session per person. | `sessionsPerUser: 1`; the hardening list in section 11 applies. |
 | D5 | Secrets: an OS-keyring sidecar or your organization's KMS, working connected and disconnected. Research recommends OpenBao (MPL-2.0) with HSM auto-unseal per site. | One OpenBao cluster per site. Single-machine installs fall back to the OS keyring through the same interface. |
 | D6 | Sign-in by passkeys or hardware security keys only, no passwords (Keycloak WebAuthn passwordless; PKI smart cards as a hardware option). Amended 2026-11-23 (owner: no hardware keys available yet, phone passkeys first): sign-in strength is a site policy setting, `signInKeys: passkeys \| hardware-only`. | Password and OTP authenticators are disabled at both levels. `passkeys` (default for development, the lab and the Phase 47 lab run) accepts any WebAuthn passkey: phone platform passkeys including synced ones (iCloud Keychain, Google Password Manager), device-bound passkeys and hardware keys; no attestation, no AAGUID allowlist. `hardware-only` (the recommended production setting for defence sites once they have keys; not forced) requires attestation, an AAGUID allowlist of approved hardware key models and device-bound keys (section 6). |
@@ -162,7 +163,9 @@ No state waits silently: `starting` and `identity` have timeouts, and `refused` 
 - The volume holds the project files, the replica store and project state. It holds no secrets: those are in OpenBao.
 - Backups: storage snapshots plus Velero or etcd snapshots for the Session and Workspace records.
 
-**Capacity [estimate].** About 1 to 2 GiB of memory and 0.25 to 1 vCPU per active session, more for agents running local tools. 50 people need about 100 GiB plus 16 to 24 GiB of platform overhead; 1,000 people need about 1 to 2 TiB of worker memory. Phase (e) replaces these with measured figures.
+**Scale (revised 2026-11-24, owner).** The first target is one HQ with about 400 concurrent people. Edge sites are disconnected and smaller. Nothing in the design caps a site at 400: charts are sized per site, hubs are added as projects and people grow (MUS 10.9), and phase (e) records any stage beyond 400 as headroom, never as a claim. A larger site later gets its own target and its own load run.
+
+**Capacity [estimate].** About 1 to 2 GiB of memory and 0.25 to 1 vCPU per active session, more for agents running local tools. 50 people need about 100 GiB plus 16 to 24 GiB of platform overhead. 400 people, the first HQ target, need about 0.4 to 0.8 TiB of worker memory and 100 to 400 vCPU, plus platform overhead; 1,000 people would need about 1 to 2 TiB. Phase (e) replaces these with measured figures.
 
 ## 8. Product changes and deployment work
 
@@ -287,7 +290,7 @@ Open evidence work: an OSCAL component per row; evidence rules for Keycloak even
 
 | Risk | What to verify |
 |---|---|
-| No public proof of 1,000+ Theia Cloud sessions | Load test to 1,000+ sessions on our own hardware: start bursts of 500+, operator reconcile rate, the single shared Ingress object's size (etcd's limit is about 1.5 MiB), etcd load per session, ingress reload time, cold-start time |
+| No public proof of Theia Cloud at the HQ target (about 400 sessions; revised 2026-11-24, owner) | Load test to 400 sessions on our own hardware, then beyond as headroom while the rig allows: start bursts of 200, operator reconcile rate, the single shared Ingress object's size (etcd's limit is about 1.5 MiB), etcd load per session, ingress reload time, cold-start time |
 | Hub capacity (150 people per hub, MUS 10.9) | Several hubs per site, each serving a set of projects; measure under the same load test |
 | Keycloak CVE-2026-6856 (AAGUID allowlist bypass with self-attestation) | The fixed version **[unverified]**; pin a 26.8.x release that has it |
 | HSM certificates | The exact FIPS 140-3 certificate numbers of the chosen HSM models **[unverified]** |

@@ -70,7 +70,7 @@ Filled by the planner from the requirement map below.
 
 | Behaviour | Requirement | Why manual | Instructions |
 |-----------|-------------|------------|--------------|
-| Load stages to 1,000+ sessions | VER-01, VER-02 | Needs the owner's rig | Run the harness per stage; commit the run file; a stage not reached is recorded as such |
+| Load stages to the HQ target of 400 sessions, then beyond as headroom (revised 2026-11-24, owner) | VER-01, VER-02 | Needs the owner's rig | Run the harness per stage; commit the run file; a stage not reached is recorded as such |
 | Traefik, prewarm with volumes, step-up, `kms-pkcs11`, CRL refresh | VER-09 | Rig and HSM hardware | Recorded experiment per item, or a gap with owner and date |
 | Gate-path pull requests | VER-04 to VER-07 | Owner approval | Owner checkpoint at the end of each gate plan |
 
