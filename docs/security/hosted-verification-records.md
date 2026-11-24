@@ -29,7 +29,7 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 1 | rke2 | FIPS build with Canal and the bundled FIPS components | deployment observation (version, host FIPS mode), document record | sc-13, sc-12 | gap G334 |
 | 2 | rke2 | STIG profile | test rule (rendered RKE2 configuration), deployment observation | cm-06 | gap G334 |
 | 3 | rke2 | Kubernetes audit policy | test rule (policy file), deployment observation (audit stream present) | au-02, au-12 | gap G334 |
-| 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | gap G334 |
+| 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | rule rke2.cm-07.no-k3s |
 | 5 | keycloak | FIPS strict mode with BC-FIPS on a FIPS host, OpenJDK 21 | deployment observation (strict mode, host FIPS mode), document record (BC-FIPS certificate) | sc-13 | gap G332 |
 | 6 | keycloak | A version with CVE-2026-6856 fixed | deployment observation (version at or above the recorded minimum), document record | si-02 | gap G335 |
 | 7 | keycloak | Password and OTP authenticators disabled | test rule (realm as code), deployment observation (live realm) | ia-02, ia-05 | gap G335 |

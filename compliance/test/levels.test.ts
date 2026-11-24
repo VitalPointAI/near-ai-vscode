@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { run as runBundleCommand } from '../src/commands/bundle.ts';
+import { loadComponents } from '../src/components.ts';
 import { validateOurs } from '../src/validate.ts';
 const levelsFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'levels.json');
 const ROOT = path.resolve(path.dirname(levelsFile), '..');
@@ -96,10 +97,14 @@ test('every hosted platform row of hosted Protected B ac-02 reads No statement y
 });
 
 test('no hosted component without statements reads Met on any hosted row', async () => {
+  // A platform statement (48-08) reads Met only from a collected result, and this bundle collects none; a control with no statement says so.
+  const stated = new Set(loadComponents(path.join(ROOT, 'compliance', 'components')).components
+    .flatMap((component) => component.implemented.filter((item) => item.statements.length > 0).map((item) => `${component.id}/${item.control}`)));
   const rows = (await dashboard()).rows.filter((item: any) => HOSTED_LEVELS.includes(item.level));
   assert.ok(rows.length > 0);
   for (const row of rows) for (const component of row.components) if ([...PLATFORM, 'workbench'].includes(component.component)) {
     assert.notEqual(component.state, 'met', `${row.level}/${row.control}/${component.component}`);
+    if (stated.has(`${component.component}/${row.control}`)) continue;
     assert.ok(['no-statement', 'your-organization'].includes(component.reason), `${row.level}/${row.control}/${component.component}: ${component.reason}`);
   }
 });

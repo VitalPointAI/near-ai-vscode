@@ -4142,7 +4142,6 @@
         "sc-13",
         "sc-12",
         "cm-06",
-        "cm-07",
         "au-02",
         "au-12"
       ],
@@ -4153,8 +4152,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy, no k3s in production and hosts in FIPS mode: test rules on the Phase 47 rendered configuration and production profile, and observations from the deployment evidence export.",
-      "title": "RKE2 has no statements for its section 10 conditions"
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy and hosts in FIPS mode: test rules on the Phase 47 rendered configuration, and observations from the deployment evidence export.",
+      "title": "RKE2 has no statements for four of its section 10 conditions"
     },
     {
       "closesInPhase": "48",
