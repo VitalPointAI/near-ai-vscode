@@ -178,7 +178,11 @@ function fakeRun(answers = () => null) {
   const calls = [];
   const run = (command, args, options = {}) => {
     calls.push({ command, args, input: options.input });
-    return answers(command, args, options) ?? { status: 0, stdout: '', stderr: '' };
+    const answer = answers(command, args, options);
+    if (answer) return answer;
+    // A Secret the test did not set up does not exist in the fake cluster.
+    if (args[0] === 'get' && args[1] === 'secret') return { status: 1, stdout: '', stderr: `Error from server (NotFound): secrets "${args[2]}" not found` };
+    return { status: 0, stdout: '', stderr: '' };
   };
   return { run, calls };
 }
@@ -236,7 +240,8 @@ test('registry: the import password reaches htpasswd and the cluster on stdin on
 const ready = { sealStatus: async () => ({ initialized: true, sealed: false }), intermediateSigned: async () => true };
 function steps() {
   const done = [];
-  return { done, openbaoApply: () => done.push('openbao-apply'), keycloakRealm: () => done.push('realm'), openSearchObjects: () => done.push('opensearch-objects') };
+  return { done, openbaoApply: () => done.push('openbao-apply'), secrets: async () => { done.push('secrets'); }, keycloakRealm: () => done.push('realm'),
+    openSearchObjects: () => done.push('opensearch-objects') };
 }
 const helmInstalls = (calls) => calls.filter((call) => call.args[0] === 'upgrade').map((call) => call.args[2]);
 const siteExample = path.join(ROOT, 'deploy/values/site.example');
@@ -250,7 +255,8 @@ test('apply installs the enabled releases in descriptor order, running the as-co
   const expected = listReleases(ROOT).filter((release) => isEnabled(release, CI) && !['zot', 'harbor', 'sterling-keycloak-realm'].includes(release.name))
     .flatMap((release) => (release.instances ? CI[release.instances].map((item) => `${release.name}-${item.name}`) : [release.name]));
   assert.deepEqual(helmInstalls(calls), expected);
-  assert.deepEqual(done.done, ['openbao-apply', 'realm', 'opensearch-objects']);
+  assert.deepEqual(done.done, ['openbao-apply', 'secrets', 'realm', 'opensearch-objects']);
+  assert.ok(!calls.some((call) => call.args[0] === 'upgrade' && call.args[2] === 'openbao' && call.args.includes('--wait')), 'OpenBao is Ready only once unsealed');
   assert.ok(calls.some((call) => call.args.join(' ') === 'uninstall sterling-pki-bootstrap --namespace cert-manager'), 'the bootstrap release goes before sterling-pki');
 });
 
@@ -264,11 +270,11 @@ test('apply stops at the unseal ceremony and before an unsigned intermediate, th
   const one = await applySite({ site: CI, siteDir: siteExample, state, run: first.run, checks, steps: steps(), log: (line) => logs.push(line) });
   assert.equal(helmInstalls(first.calls).at(-1), 'openbao');
   assert.match(one.stopped.runbook, /key-ceremony\.md \(OpenBao initialisation and unseal\)/);
-  assert.match(logs.at(-1), /not initialised.*install\.mjs apply --from 46/);
+  assert.match(logs.at(-1), /stopped after openbao\. OpenBao is not initialised\..*install\.mjs apply --from 40/);
   sealed = false;
   const second = fakeRun();
   const two = await applySite({ site: CI, siteDir: siteExample, state, from: one.stopped.order, run: second.run, checks, steps: steps(), log: (line) => logs.push(line) });
-  assert.deepEqual(helmInstalls(second.calls), [], 'nothing is installed before the intermediate is signed');
+  assert.deepEqual(helmInstalls(second.calls), ['openbao'], 'the resume re-applies OpenBao, then stops before sterling-pki');
   assert.equal(two.stopped.release, 'sterling-pki');
   assert.match(two.stopped.runbook, /a site intermediate/);
   signed = true;
@@ -362,4 +368,26 @@ test('record-digests writes a published digest only after its signature verifies
     /did not verify with your organization's key/);
   assert.throws(() => recordDigests({ releases: [{ name: 'sterling/sterling-workbench', ref: `ghcr.io/someone/else@${digest}` }], verify: ok, write: false }),
     /is not ghcr\.io\/vitalpointai\/near-ai-vscode@sha256/);
+});
+
+test('apply makes the bootstrap volume key before the storage class, on stdin only, and never replaces an existing one', async () => {
+  const state = temp('state-');
+  const { run, calls } = fakeRun();
+  await applySite({ site: CI, siteDir: siteExample, state, run, checks: ready, steps: steps(), log: () => {} });
+  const made = calls.filter((call) => call.args.join(' ') === 'apply -f -').map((call) => JSON.parse(call.input)).filter((object) => object.kind === 'Secret');
+  assert.deepEqual(made.map((secret) => `${secret.metadata.namespace}/${secret.metadata.name}`), ['longhorn-system/longhorn-crypto']);
+  const key = Buffer.from(made[0].data.CRYPTO_KEY_VALUE, 'base64').toString();
+  assert.ok(key.length >= 43);
+  assert.ok(!argvText(calls).includes(key));
+  const order = calls.map((call) => (call.input?.includes('longhorn-crypto') ? 'secret' : call.args[0] === 'upgrade' ? call.args[2] : null)).filter(Boolean);
+  assert.ok(order.indexOf('secret') < order.indexOf('sterling-storage') && order.indexOf('secret') < order.indexOf('openbao'));
+  // Present already: kept as it is.
+  const existing = fakeRun((command, args) => (args.join(' ').startsWith('get secret longhorn-crypto')
+    ? { status: 0, stdout: JSON.stringify({ data: { CRYPTO_KEY_VALUE: Buffer.from('k'.repeat(43)).toString('base64') } }), stderr: '' } : null));
+  await applySite({ site: CI, siteDir: siteExample, state: temp('state-'), run: existing.run, checks: ready, steps: steps(), log: () => {} });
+  assert.ok(!existing.calls.some((call) => call.input?.includes('"longhorn-crypto"')), 'an existing volume key is never replaced');
+  // The secrets step copies the cluster's value into OpenBao instead of generating a new one.
+  const bao = fakeBao();
+  await writeSecrets({ site: CI, bao, run: existing.run, log: () => {} });
+  assert.equal(bao.store.get('apps/storage').data.CRYPTO_KEY_VALUE, 'k'.repeat(43));
 });

@@ -21,6 +21,7 @@
     {
       "secret": "longhorn-crypto",
       "kv": "storage",
+      "bootstrap": true,
       "keys": {
         "CRYPTO_KEY_VALUE": {
           "generate": "random-32",

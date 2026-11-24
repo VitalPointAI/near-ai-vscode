@@ -90,7 +90,7 @@ export const secretManifest = (name, namespace, data, type = 'Opaque') => ({
 });
 
 /** helm upgrade --install of one release with the same values and image injection as the render harness. Returns the instance names. */
-export function installRelease({ root, release, site, siteDir, run, sets = [] }) {
+export function installRelease({ root, release, site, siteDir, run, sets = [], wait = true }) {
   const { descriptor, chart, sets: imageSets, instances, texts } = releaseInputs(root, release, { site, siteDir });
   const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-install-'));
   try {
@@ -98,7 +98,7 @@ export function installRelease({ root, release, site, siteDir, run, sets = [] })
     const files = writeValues(scratch, texts);
     for (const { name, instance } of instances) {
       const args = ['upgrade', '--install', name, chart, '--namespace', descriptor.namespace, '--create-namespace', ...files, ...imageSets,
-        ...sets.flatMap((set) => ['--set-string', set]), ...(instance ? ['--set-json', `instance=${JSON.stringify(instance)}`] : []), '--wait', '--timeout', '20m'];
+        ...sets.flatMap((set) => ['--set-string', set]), ...(instance ? ['--set-json', `instance=${JSON.stringify(instance)}`] : []), ...(wait ? ['--wait', '--timeout', '20m'] : [])];
       must(run(tool('HELM', 'helm'), args, { env }), `helm upgrade --install ${name}`);
     }
     return instances.map((instance) => instance.name);
@@ -312,6 +312,36 @@ export async function generateValue(spec, { run, site, root, job }) {
   throw new Error(`no generator ${spec.generate ?? '(none)'}; the key ceremony or the operator writes this value into OpenBao first.`);
 }
 
+/** A Secret's decoded values, read into memory; null when it does not exist. */
+export function clusterSecret(run, name, namespace) {
+  const result = run(tool('KUBECTL', 'kubectl'), ['get', 'secret', name, '-n', namespace, '-o', 'json']);
+  if (result.status !== 0) {
+    if (/NotFound|not found/.test(result.stderr || '')) return null;
+    throw new Error(`kubectl get secret ${namespace}/${name} failed: ${String(result.stderr).trim()}`);
+  }
+  const data = JSON.parse(result.stdout).data ?? {};
+  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, Buffer.from(value, 'base64').toString()]));
+}
+
+/**
+ * Bootstrap secrets (`bootstrap: true`) are needed before OpenBao runs: longhorn-crypto opens every encrypted volume, OpenBao's own among
+ * them. Before such a release is installed, a missing Secret is made in memory and applied on stdin; the secrets step later copies the
+ * cluster's value into OpenBao kv/apps, and it is escrowed (escrow.mjs). An existing Secret is never replaced.
+ */
+export async function ensureBootstrapSecrets({ root = ROOT, site, release, run = defaultRun, log = console.log }) {
+  for (const entry of (release.secrets ?? []).filter((candidate) => candidate.bootstrap)) {
+    const namespace = entry.namespace ?? release.namespace;
+    if (clusterSecret(run, entry.secret, namespace)) continue;
+    const data = {};
+    for (const [key, spec] of Object.entries(entry.keys)) {
+      data[key] = spec.value !== undefined ? String(spec.value) : await generateValue(spec, { run, site, root, job: { namespace } });
+    }
+    // The namespace exists already: sterling-network (order 15) makes every namespace with its Pod Security labels.
+    applyManifest(run, secretManifest(entry.secret, namespace, data, entry.type ?? 'Opaque'), `Secret ${entry.secret}`);
+    log(`apply: ${namespace}/${entry.secret} generated before OpenBao; the secrets step copies it into kv/apps/${entry.kv}. Escrow it (escrow.mjs export).`);
+  }
+}
+
 /**
  * Static application secrets (D-41): for each `secrets` entry of every enabled descriptor, read kv/apps/<kv>, generate a missing field once,
  * refuse a value shorter than its minLength, then apply the Kubernetes Secret on stdin. Per-person secrets are never written here.
@@ -326,11 +356,13 @@ export async function writeSecrets({ root = ROOT, site, bao, run = defaultRun, l
       const fields = { ...(existing?.data ?? {}) };
       let changed = false;
       const data = {};
+      // A bootstrap secret was made in the cluster before OpenBao existed (ensureBootstrapSecrets): OpenBao takes the cluster's value.
+      const inCluster = entry.bootstrap ? clusterSecret(run, entry.secret, entry.namespace ?? release.namespace) : null;
       for (const [key, spec] of Object.entries(entry.keys)) {
         if (spec.value !== undefined) { data[key] = String(spec.value); continue; }
         const field = spec.field ?? key;
         if (fields[field] === undefined || fields[field] === '') {
-          fields[field] = await generateValue(spec, { run, site, root, job: { namespace: entry.namespace ?? release.namespace } });
+          fields[field] = inCluster?.[key] ?? await generateValue(spec, { run, site, root, job: { namespace: entry.namespace ?? release.namespace } });
           changed = true;
         }
         if (spec.minLength && String(fields[field]).length < spec.minLength) {
@@ -442,9 +474,9 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
   const state = readState(stateDir);
   const installed = [];
   const releases = listReleases(root).filter((release) => isEnabled(release, site) && release.order >= from && (!only || release.name === only));
-  const stop = (release, runbook, message) => {
+  const stop = (release, runbook, message, where = 'before') => {
     writeState(stateDir, state);
-    log(`apply: stopped before ${release.name}. ${message} Follow ${runbook}, then run install.mjs apply --from ${release.order}.`);
+    log(`apply: stopped ${where} ${release.name}. ${message} Follow ${runbook}, then run install.mjs apply --from ${release.order}.`);
     return { installed, stopped: { release: release.name, order: release.order, runbook, message } };
   };
   for (const release of releases) {
@@ -458,11 +490,13 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
         delete state.installed['sterling-pki-bootstrap'];
       }
     }
+    await ensureBootstrapSecrets({ root, site, release, run, log });
     if (release.name === 'sterling-keycloak-realm') {
       steps.keycloakRealm();
     } else {
       const sets = release.name === 'sterling-admission' ? [`admission.mode=${state.admissionDeny ? 'Deny' : 'Audit'}`] : [];
-      installRelease({ root, release, site, siteDir, run, sets });
+      // OpenBao's pods are Ready only once it is initialised and unsealed, so its install does not wait for readiness.
+      installRelease({ root, release, site, siteDir, run, sets, wait: release.name !== 'openbao' });
     }
     state.installed[release.name] = release.order;
     installed.push(release.name);
@@ -470,11 +504,10 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
     log(`apply: ${release.name} installed (order ${release.order})`);
     if (release.name === 'openbao') {
       const status = await checks.sealStatus();
-      if (!status.initialized || status.sealed) {
-        const next = releases.find((candidate) => candidate.order > release.order) ?? release;
-        return stop(next, RUNBOOKS.unseal, `OpenBao is ${status.initialized ? 'sealed' : 'not initialised'}.`);
-      }
+      if (!status.initialized || status.sealed) return stop(release, RUNBOOKS.unseal, `OpenBao is ${status.initialized ? 'sealed' : 'not initialised'}.`, 'after');
       steps.openbaoApply();
+      // The static application secrets (and the bootstrap ones, into OpenBao) before the releases that use them.
+      await steps.secrets();
     }
     if (release.name === 'opensearch') steps.openSearchObjects();
   }
@@ -651,6 +684,7 @@ export async function main(argv, { run = defaultRun, log = console.log, error = 
           keycloakRealm: () => must(run(process.execPath, [path.join(ROOT, 'deploy/keycloak/apply.mjs'), '--site', need('--site'),
             '--realm-site', path.join(siteDir, 'sterling-keycloak-realm.yaml'), '--keycloakx-site', path.join(siteDir, 'keycloakx.yaml')]), 'deploy/keycloak/apply.mjs'),
           openSearchObjects: () => putOpenSearchObjects({ site: settings, siteDir, run, log }),
+          secrets: () => writeSecrets({ site: settings, bao: client, run, log, stateDir: need('--state') }),
         },
       });
       return stopped ? 3 : 0;
