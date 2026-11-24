@@ -700,8 +700,8 @@ Plans:
 **Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
 
 Plans:
-- [ ] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
-- [ ] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
+- [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
+- [x] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
 - [ ] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
 - [ ] 47-04-PLAN.md: Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
 - [ ] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
