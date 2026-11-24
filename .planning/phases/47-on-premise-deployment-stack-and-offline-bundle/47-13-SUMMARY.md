@@ -182,6 +182,8 @@ retire: sterling-pki re-applied with bootstrapCaCertificate "", Secret site-boot
   connection refused") and the registry image itself has no signature in the registry. Any node drain or pod loss stops the site's
   registry. The lab worked around it by setting the policy to Audit for the restart. Fix (outside this plan): exclude the registry's own
   namespace from the signature policy (its image is pinned by digest in pins.sha256) or otherwise break the loop.
+  **Fixed in the wave 5 integration** (exact-digest admission of the Zot pod in sterling-registry only; lab check pending for 47-18, Harbor
+  still open): see 47-15-SUMMARY.md, "Wave 5 integration".
 - **47-16 install:** at handover the node's `/etc/rancher/rke2/site-ca.crt` and Kyverno's `admissionController.caCertificates` must hold
   the site chain plus the bootstrap CA; at retire-bootstrap only the site chain (containerd reads the file per pull; Kyverno needs a
   restart). Then: remove the sterling-pki-bootstrap release, install sterling-pki, restart OpenBao (unseal) and the registry, clear
