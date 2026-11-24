@@ -49,6 +49,10 @@
     {
       "frontend": "lib/browser/session-activity-frontend-module",
       "backend": "lib/node/session-activity-backend-module"
+    },
+    {
+      "frontend": "lib/browser/staff-frontend-module",
+      "backend": "lib/node/staff-backend-module"
     }
   ]
 }
