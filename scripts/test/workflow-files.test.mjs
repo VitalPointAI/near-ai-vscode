@@ -657,3 +657,35 @@ test('publish signs and attests the published digest with your organization\'s k
   assert.doesNotMatch(publish, /id-token|npm |actions\/checkout/);
   assert.doesNotMatch(text, /--identity-token|--oidc-|COSIGN_EXPERIMENTAL|--tlog-upload=true|--fulcio|--rekor/);
 });
+
+test('every workflow image build retries only a Red Hat registry refusal, and a failing build never passes', () => {
+  const wrapper = new URL('../../.github/retry-registry-auth.sh', import.meta.url).pathname;
+  for (const name of ['ci.yml', 'deploy-images.yml', 'release.yml']) {
+    for (const line of read(name).split('\n').filter((l) => /\bdocker build\b/.test(l))) {
+      assert.match(line, /bash \.github\/retry-registry-auth\.sh docker build /, `${name}: ${line.trim()}`);
+    }
+  }
+  const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-registry-retry-'));
+  try {
+    const refused = 'ERROR: failed to solve: failed to fetch anonymous token: unexpected status from GET request to https://brew.registry.redhat.io/auth/realms/rhcc/protocol/redhat-docker-v2/auth?scope=repository%3Aubi9%2Fopenjdk-21-runtime%3Apull&service=docker-registry: 401 Unauthorized';
+    // A fake docker that plays each queued outcome in turn ("ok", or an exit status and a message), and a sleep that does not wait.
+    writeFileSync(path.join(dir, 'docker'), '#!/usr/bin/env bash\nn=$(cat "$DIR/calls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$DIR/calls"\nline=$(sed -n "${n}p" "$DIR/outcomes")\n[ "$line" = ok ] && exit 0\necho "${line#* }" >&2; exit "${line%% *}"\n', { mode: 0o755 });
+    writeFileSync(path.join(dir, 'sleep'), '#!/bin/sh\n', { mode: 0o755 });
+    const run = (outcomes) => {
+      rmSync(path.join(dir, 'calls'), { force: true });
+      writeFileSync(path.join(dir, 'outcomes'), `${outcomes.join('\n')}\n`);
+      let status = 0;
+      try {
+        execFileSync('bash', [wrapper, 'docker', 'build', '.'], { env: { ...process.env, DIR: dir, PATH: `${dir}:${process.env.PATH}` }, stdio: 'pipe' });
+      } catch (error) {
+        status = error.status;
+      }
+      return { status, calls: Number(readFileSync(path.join(dir, 'calls'), 'utf8')) };
+    };
+    assert.deepEqual(run([`1 ${refused}`, `1 ${refused.replace('brew.', '')}`, 'ok']), { status: 0, calls: 3 });
+    assert.deepEqual(run([`1 ${refused}`, `1 ${refused}`, `1 ${refused}`, 'ok']), { status: 1, calls: 3 }, 'three runs at most');
+    assert.deepEqual(run(['7 ERROR: failed to solve: process "/bin/sh -c make" did not complete successfully: exit code: 2', 'ok']), { status: 7, calls: 1 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

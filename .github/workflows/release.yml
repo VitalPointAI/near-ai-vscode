@@ -444,7 +444,7 @@ jobs:
           (cd verified-release && printf '%s  %s\n' "$SHA256" "$VSIX" | sha256sum --check --strict)
           mkdir release-input
           cp "verified-release/$VSIX" release-input/sterling.vsix
-          docker build --target release --platform linux/amd64 --provenance=false --sbom=false \
+          bash .github/retry-registry-auth.sh docker build --target release --platform linux/amd64 --provenance=false --sbom=false \
             --file workbench/Dockerfile \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
