@@ -22,6 +22,15 @@
     },
     {
       "frontend": "lib/browser/sterling-compliance-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-portfolio-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-work-areas-module"
+    },
+    {
+      "frontend": "lib/browser/sterling-resource-inventory-module"
     }
   ]
 }

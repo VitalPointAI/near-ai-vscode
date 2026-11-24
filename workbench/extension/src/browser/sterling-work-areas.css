@@ -1,0 +1,240 @@
+.sterling-area {
+  overflow: auto;
+  container-type: inline-size;
+  background: var(--theia-editor-background);
+  color: var(--theia-foreground);
+  font-family: var(--theia-ui-font-family), system-ui, sans-serif;
+}
+
+.sterling-area:focus { outline: none; }
+
+.sterling-area-page {
+  width: min(100% - 72px, 1160px);
+  margin: 0 auto;
+  padding: clamp(18px, 3vw, 36px) 0 48px;
+}
+
+.sterling-area button,
+.sterling-area select { font: inherit; }
+
+.sterling-area button:focus-visible,
+.sterling-area select:focus-visible {
+  outline: 2px solid var(--theia-focusBorder);
+  outline-offset: 2px;
+}
+
+.sterling-area-back {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0 0 18px;
+  padding: 5px 0;
+  background: transparent;
+  color: var(--theia-textLink-foreground);
+  border: 0;
+  cursor: pointer;
+}
+
+.sterling-area-back:hover { text-decoration: underline; }
+
+.sterling-area-hero {
+  position: relative;
+  isolation: isolate;
+  min-height: 280px;
+  display: flex;
+  align-items: flex-end;
+  border: 1px solid #526477;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #152838;
+  color: #fff;
+}
+
+.sterling-area-art {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.sterling-area-hero::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: '';
+  background: linear-gradient(90deg, #0a1522f5 0%, #0a1522e4 37%, #0a152287 65%, #0a15221c 100%),
+    linear-gradient(0deg, #0a1522c0 0%, transparent 58%);
+}
+
+.sterling-area-hero-copy { padding: clamp(24px, 4vw, 46px); }
+
+.sterling-area-hero h1 {
+  max-width: 18ch;
+  margin: 0;
+  font-size: clamp(36px, 5.4cqi, 68px);
+  font-weight: 650;
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  overflow-wrap: break-word;
+}
+
+.sterling-area-hero p {
+  font-size: clamp(14px, 1.75cqi, 18px);
+  line-height: 1.5;
+  color: #dce8f2;
+  margin: 12px 0 20px;
+  max-width: 45ch;
+}
+
+.sterling-area-actions,
+.sterling-area-shortcuts,
+.sterling-area-tools {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sterling-area .sterling-area-primary,
+.sterling-area .sterling-area-action {
+  padding: 8px 13px;
+  min-height: 34px;
+  border: 1px solid var(--theia-button-border, var(--theia-widget-border, transparent));
+  border-radius: 5px;
+  color: var(--theia-button-secondaryForeground, var(--theia-foreground));
+  background: var(--theia-button-secondaryBackground, var(--theia-editorWidget-background));
+  cursor: pointer;
+}
+
+.sterling-area .sterling-area-action:hover { background: var(--theia-button-secondaryHoverBackground, var(--theia-list-hoverBackground)); }
+
+.sterling-area .sterling-area-primary {
+  font-weight: 650;
+  background: #a62131;
+  color: #fff;
+  border-color: #d75b68;
+}
+
+.sterling-area .sterling-area-primary:hover { background: #bf3050; }
+.sterling-area .sterling-area-primary:disabled { opacity: .7; cursor: wait; }
+
+.sterling-area-hero .sterling-area-action {
+  background: #122336eb;
+  border-color: #8192a6;
+  color: #fff;
+}
+
+.sterling-area-hero .sterling-area-action:hover { background: #28415a; }
+
+.sterling-area-shortcuts { margin: 16px 0 0; }
+
+.sterling-area-feedback,
+.sterling-area-status {
+  margin: 10px 0 0;
+  color: var(--theia-descriptionForeground);
+}
+
+.sterling-area-feedback:not([hidden]) { color: var(--theia-editorWarning-foreground, var(--theia-foreground)); }
+.sterling-area-status:empty { display: none; }
+
+.sterling-area-local { margin-top: 28px; }
+
+.sterling-area-local-header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.sterling-area-local-header h2 {
+  margin: 0;
+  font-size: clamp(19px, 2.85cqi, 27px);
+  line-height: 1.2;
+}
+
+.sterling-area-tools label {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sterling-area-tools select {
+  max-width: min(260px, 90cqi);
+  padding: 6px 7px;
+  background: var(--theia-dropdown-background);
+  border: 1px solid var(--theia-dropdown-border);
+  border-radius: 4px;
+  color: var(--theia-dropdown-foreground);
+}
+
+.sterling-area-tools select:disabled { opacity: .8; }
+
+.sterling-area-records {
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 8px;
+  list-style: none;
+}
+
+.sterling-area-record-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.sterling-area-references {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  list-style: none;
+  padding: 0 2px 4px;
+  margin: 0;
+  color: var(--theia-descriptionForeground);
+  overflow-wrap: anywhere;
+}
+
+.sterling-area-references code {
+  display: block;
+  padding: 3px 6px;
+  border: 1px solid var(--theia-widget-border, var(--theia-panel-border));
+  border-radius: 4px;
+}
+
+.sterling-area-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  width: 100%;
+  padding: 12px 14px;
+  color: var(--theia-foreground);
+  background: var(--theia-editorWidget-background);
+  border: 1px solid var(--theia-widget-border, var(--theia-panel-border));
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sterling-area-record:hover:not(:disabled) { background: var(--theia-list-hoverBackground); }
+.sterling-area-record:disabled { cursor: default; }
+.sterling-area-record strong { overflow-wrap: anywhere; }
+.sterling-area-record-open { color: var(--theia-textLink-foreground); }
+.sterling-area-record:disabled .sterling-area-record-open,
+.sterling-area-record-detail { color: var(--theia-descriptionForeground); }
+
+@container (max-width: 620px) {
+  .sterling-area-page { width: calc(100% - 28px); }
+  .sterling-area-record-item { grid-template-columns: minmax(0, 1fr); }
+  .sterling-area-link { justify-self: start; }
+  .sterling-area-hero { min-height: 264px; }
+  .sterling-area-hero::after { background: linear-gradient(0deg, #0a1522f7 0%, #0a1522c9 54%, #0a15224c 100%); }
+  .sterling-area-hero-copy { padding: 22px 16px; }
+  .sterling-area-hero h1 { font-size: clamp(27px, 9cqi, 42px); }
+}

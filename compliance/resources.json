@@ -724,9 +724,9 @@
       "id": "image:docker.io/library/node",
       "kind": "image",
       "where": [
-        ".planning/spikes/theia-team-studio/Dockerfile",
         "hub/Dockerfile",
-        "relay/Dockerfile"
+        "relay/Dockerfile",
+        "workbench/Dockerfile"
       ],
       "component": "extension",
       "scope": "runtime",

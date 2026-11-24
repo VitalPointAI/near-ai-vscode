@@ -440,7 +440,7 @@ jobs:
           mkdir release-input
           cp "verified-release/$VSIX" release-input/sterling.vsix
           docker build --target release --platform linux/amd64 --provenance=false --sbom=false \
-            --file .planning/spikes/theia-team-studio/Dockerfile \
+            --file workbench/Dockerfile \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.version=$TAG" \
