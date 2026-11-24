@@ -1,6 +1,6 @@
 {
-  "name": "@near-ai/theia-team-preview",
-  "version": "0.0.1",
+  "name": "@near-ai/sterling-workbench-extension",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {

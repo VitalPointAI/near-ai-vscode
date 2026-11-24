@@ -1,12 +1,17 @@
 {
-  "name": "near-ai-theia-preview",
-  "version": "0.0.1",
+  "name": "sterling-workbench",
+  "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "description": "The Sterling Sovereign AI workbench: an Eclipse Theia browser app with the Sterling pages, built into a UBI 9 image. Not the VS Code extension.",
+  "engines": {
+    "node": ">=26.13.1 <27"
+  },
   "workspaces": [
     "extension"
   ],
   "dependencies": {
-    "@near-ai/theia-team-preview": "0.0.1",
+    "@near-ai/sterling-workbench-extension": "0.1.0",
     "@theia/core": "1.77.0",
     "@theia/editor": "1.77.0",
     "@theia/filesystem": "1.77.0",
@@ -18,20 +23,27 @@
     "@theia/workspace": "1.77.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@theia/cli": "1.77.0",
+    "@types/node": "26.6.6",
     "esbuild": "0.28.2",
     "typescript": "5.9.3"
   },
   "scripts": {
-    "build": "npm run build:parser && npm run build --workspace @near-ai/theia-team-preview && theia build && cp extension/assets/* lib/frontend/ && node tools/build-sterling-documentation.mjs",
-    "start": "theia start --hostname 127.0.0.1 --port 18771",
-    "build:parser": "esbuild tools/team-parser-entry.ts --bundle --platform=node --format=cjs --outfile=../../../dist/agent/teams.js"
+    "build": "node tools/build-engine.mjs && npm run build --workspace @near-ai/sterling-workbench-extension && theia build --mode production && cp extension/assets/* lib/frontend/ && node tools/build-sterling-documentation.mjs",
+    "lint": "tsc --noEmit -p extension/tsconfig.json && tsc -p tsconfig.json",
+    "test": "node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js",
+    "test:container": "node scripts/build.mjs && node ../scripts/run-tests.mjs --test-concurrency=1 dist/test/container/*.test.js",
+    "start": "node bin/start.mjs"
   },
   "theia": {
     "target": "browser",
     "frontend": {
       "config": {
-        "applicationName": "Sterling Sovereign AI"
+        "applicationName": "Sterling Sovereign AI",
+        "preferences": {
+          "telemetry.telemetryLevel": "off"
+        }
       }
     }
   }

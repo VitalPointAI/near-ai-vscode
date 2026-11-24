@@ -3,7 +3,7 @@ import test from 'node:test';
 import { BinaryBuffer } from '@theia/core/lib/common/buffer.js';
 import { URI } from '@theia/core/lib/common/uri.js';
 import { FileType, etag } from '@theia/filesystem/lib/common/files.js';
-import { linkWorkAreaResource } from '../lib/browser/sterling-work-area-resource-links.js';
+import { linkWorkAreaResource } from '../extension/src/browser/sterling-work-area-resource-links.ts';
 
 const scope = new URI('file:///workspace');
 const child = scope.resolve('work-area-0123456789abcdef');

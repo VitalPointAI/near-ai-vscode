@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { TeamPreviewProject, TeamPreviewResult, TeamPreviewService, TeamPreviewTeam } from '../common/team-preview.js';
 
 const projects: readonly (TeamPreviewProject & { readonly fixture?: string })[] = [
@@ -10,11 +11,11 @@ const projects: readonly (TeamPreviewProject & { readonly fixture?: string })[] 
   { id: 'invalid', title: 'Sample with an invalid team', fixture: 'invalid.md' }
 ];
 
-const spikeRoot = process.cwd();
-const fixtureDirectory = resolve(spikeRoot, 'extension', 'fixtures');
-const loadProductModule = createRequire(resolve(spikeRoot, 'package.json'));
-const parserFile = resolve(spikeRoot, '../../..', 'dist', 'agent', 'teams.js');
-const { parseTeam } = loadProductModule(parserFile) as { parseTeam(text: string, file: string): TeamPreviewTeam };
+// The app root from this code's own location (lib/backend/main.js once bundled), never the working folder (D-12).
+const appRoot = fileURLToPath(new URL('../..', import.meta.url));
+const fixtureDirectory = resolve(appRoot, 'extension', 'fixtures');
+const parserFile = resolve(appRoot, 'engine', 'teams.cjs');
+const { parseTeam } = createRequire(parserFile)(parserFile) as { parseTeam(text: string, file: string): TeamPreviewTeam };
 
 async function readProject(id: string): Promise<TeamPreviewResult> {
   const project = projects.find(candidate => candidate.id === id);

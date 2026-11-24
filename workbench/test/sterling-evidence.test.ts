@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isDocumentationPages, refreshRecordMatches } from '../src/common/sterling-evidence.ts';
+import { isDocumentationPages, refreshRecordMatches } from '../extension/src/common/sterling-evidence.ts';
 
 const commit = 'a'.repeat(40);
 const verified = { manifest: 'verified', source: 'release', commit, fetchedAt: '2026-11-24T00:00:00Z', attestation: 'verified' };

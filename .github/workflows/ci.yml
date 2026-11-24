@@ -356,6 +356,75 @@ jobs:
         if: steps.has_hub.outputs.present == 'true'
         run: npm run test:container
 
+  # The Sterling Theia workbench (Phase 46, D-10): install without scripts, lint and unit tests with their report. Not a required check.
+  # 46-06 adds the audit, the image build, the container suite with Playwright, the SBOM, the scan and the digest.
+  workbench:
+    name: workbench
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: workbench
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The detection step below reads the base commit and main's history, not only this commit.
+          fetch-depth: 0
+      # The hub's hotfix rule, keyed on workbench/package.json: a hotfix/x.y.z branch whose commit and base commit both lack the workbench
+      # passes without running anything else; any other change without it fails, and a push to main never skips. The branch name and base
+      # commit come in through env, never pasted into the script.
+      - name: Check that this commit has the workbench
+        id: has_workbench
+        working-directory: .
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -f workbench/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=""
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            base="$(git merge-base HEAD refs/remotes/origin/main 2>/dev/null || true)"
+          fi
+          if [[ "$BRANCH" =~ ^hotfix/[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -n "$base" ] \
+            && git cat-file -e "$base^{commit}" 2>/dev/null && ! git cat-file -e "$base:workbench/package.json" 2>/dev/null; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=workbench checks skipped::workbench/package.json is neither on this commit of $BRANCH nor on its base commit (a hotfix from a release older than the workbench), so the workbench checks were skipped."
+          else
+            echo "::error title=workbench missing::workbench/package.json is not on this commit. Only a hotfix/x.y.z branch from a release older than the workbench, whose base commit has no workbench either, may skip the workbench checks."
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.has_workbench.outputs.present == 'true'
+        with:
+          node-version: '26.13.1'
+          cache: npm
+          cache-dependency-path: workbench/package-lock.json
+      - if: steps.has_workbench.outputs.present == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.has_workbench.outputs.present == 'true'
+        run: npm run lint
+      - name: Run workbench tests and write the evidence report
+        if: steps.has_workbench.outputs.present == 'true'
+        env:
+          NEAR_AI_TEST_REPORT: test-report-workbench.ndjson
+        run: npm test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.has_workbench.outputs.present == 'true' && always()
+        continue-on-error: true
+        with:
+          name: test-report-workbench
+          path: workbench/test-report-workbench.ndjson
+          if-no-files-found: warn
+
   relay-image-scan:
     name: relay image scan
     runs-on: ubuntu-latest
