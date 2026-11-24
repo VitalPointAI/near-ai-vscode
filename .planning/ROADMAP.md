@@ -324,14 +324,14 @@ Plans:
 **Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (in REQUIREMENTS.md since 2026-11-24)
 **Prerequisite**: POST-01 belongs to Phase 33; this phase registers `positions@1` on it.
 **Success Criteria** (what must be TRUE):
-  1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
-  2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
+  1. A J1 delegate posts a person to "Watch Officer, night" from 1 December (from today in the built-image check); the person chooses "Confirm it is you" in a hosted session ("Prove this computer" on a single machine) and compares the safety code, sees no Decline, and reports for duty from the start date after a passkey confirmation; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
+  2. A report-unable reason, signed by the posted person's enrolled key, reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
   3. In a handover, a decision the outgoing holder signs after the incoming's report is refused, the incoming reads new entries and the outgoing cannot, and a membership change between order and report forces a restage, in random fold orders and through an offline split. (POST-06)
   4. Acting postings move decision roles and back on return; a dual-hatted person cannot approve a product they own; a client without the positions feature refuses the project with the update sentence. (POST-01, POST-07)
-  5. An existing multi-user project switched to Military mode gives the same decisions and grants after migration from seats; invitation-mode projects are unchanged. (POST-08)
+  5. An existing multi-user project switched to an assignment mode (Defence Team in the Defence edition, Military elsewhere) gives the same decisions and grants after migration from seats; invitation-mode projects keep their screens and outcomes, with silent positions per seat. (POST-08)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 16 plans in 9 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-26 and 17 owner items)
+**Plans:** 17 plans in 9 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-26 and 17 owner items)
 **UI hint**: yes
 
 Plans:
@@ -351,8 +351,9 @@ Plans:
 - [ ] 33.1-14-PLAN.md: Wave 7. The acting position checked at your organization's server, on replay and before signing
 - [ ] 33.1-15-PLAN.md: Wave 1. Your organization's people rules handed to the workbench by one hidden extension command
 - [ ] 33.1-16-PLAN.md: Wave 7. Presence that shows each person once, in the position they work in, and grants nothing
+- [ ] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
 
-**Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criterion 5's "switched to Military mode" reads "switched to an assignment mode" (Defence Team in the Defence edition). It runs beside Phase 33's native waves on its own integration branch and lands with or after Phase 33's PR.
+**Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criteria 1, 2 and 5 above were edited on 2026-11-24 to the native words (Confirm it is you, the enrolled key, an assignment mode). Waves 1 to 6 run beside Phase 33's waves 5 to 7 on their own integration branch; waves 7 to 9 wait for Phase 33's last waves; the phase lands with or after Phase 33's PR.
 
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
@@ -1906,7 +1907,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/16 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.1. Assigned positions and handover | 0/17 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
