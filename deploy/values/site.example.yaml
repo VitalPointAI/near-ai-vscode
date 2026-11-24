@@ -8,6 +8,7 @@
     "registryKind": "zot (the lab and small sites) or harbor (HQ and large sites).",
     "clusterCidrs": "pod and service are the RKE2 defaults; nodes is the site's node network (required, no default).",
     "egressAllow": "The only addresses outside the cluster that pods may reach, each one something your organization's signed policy allows (for example the site mail server or an approved model endpoint), D-01. Empty means none.",
+    "storageProvider": "longhorn installs the reference Longhorn release and its encrypted class (D-17); any other value (for example ceph or nfs) means the site supplies its own encrypted storage class, named in storageClass with storageEncryptionAtRest saying how; the install preflight (47-16) checks it.",
     "storageClass": "The storage class every workspace and data volume uses; it must be encrypted at rest (D-17).",
     "storageEncryptionAtRest": "How the class is encrypted at rest when it is not the reference Longhorn class (for example the array's own encryption for Ceph or NFS). Empty for Longhorn, whose class carries encrypted: \"true\".",
     "requestedStorage": "The size of each person's workspace volume (for example 10Gi). Required: there is no silent default (D-11).",
@@ -30,6 +31,7 @@
     "nodes": ""
   },
   "egressAllow": [],
+  "storageProvider": "longhorn",
   "storageClass": "sterling-encrypted",
   "storageEncryptionAtRest": "",
   "requestedStorage": "",

@@ -1,0 +1,26 @@
+# Prometheus v3.16.0 (chart deploy/charts/vendored/prometheus-30.0.0.tgz with its bundled subcharts), the settings that decide which images
+# render. The descriptor sets the server, config reloader, kube-state-metrics and node-exporter images by digest from
+# deploy/bundle/images.lock.json (D-19, D-20). Later plans add the rest of the metrics settings here and must keep these.
+server:
+  image:
+    pullPolicy: IfNotPresent
+configmapReload:
+  prometheus:
+    enabled: true
+    image:
+      pullPolicy: IfNotPresent
+
+kube-state-metrics:
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+prometheus-node-exporter:
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+
+# No alertmanager and no pushgateway (two images fewer; alerts are a Phase 48 item).
+alertmanager:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
