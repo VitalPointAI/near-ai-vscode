@@ -2,11 +2,47 @@
   "chart": "path:deploy/charts/sterling-storage",
   "namespace": "longhorn-system",
   "order": 39,
-  "values": ["deploy/values/sterling-storage.yaml"],
+  "values": [
+    "deploy/values/sterling-storage.yaml"
+  ],
   "site": "deploy/values/site.example/longhorn.yaml",
-  "enabledWhen": { "storageProvider": "longhorn" },
+  "enabledWhen": {
+    "storageProvider": "longhorn"
+  },
   "images": [
-    { "lock": "sterling/openbao", "set": { "escrowCurrency.image": "ref" } }
+    {
+      "lock": "sterling/openbao",
+      "set": {
+        "escrowCurrency.image": "ref"
+      }
+    }
+  ],
+  "secrets": [
+    {
+      "secret": "longhorn-crypto",
+      "kv": "storage",
+      "keys": {
+        "CRYPTO_KEY_VALUE": {
+          "generate": "random-32",
+          "minLength": 43
+        },
+        "CRYPTO_KEY_PROVIDER": {
+          "value": "secret"
+        },
+        "CRYPTO_KEY_CIPHER": {
+          "value": "aes-xts-plain64"
+        },
+        "CRYPTO_KEY_HASH": {
+          "value": "sha256"
+        },
+        "CRYPTO_KEY_SIZE": {
+          "value": "256"
+        },
+        "CRYPTO_PBKDF": {
+          "value": "pbkdf2"
+        }
+      }
+    }
   ],
   "note": "The encrypted reference storage class and the recurring snapshots and backups of every volume (D-17, D-54), and the daily escrow-currency check of longhorn-crypto on our sterling/openbao image (D-73); right after Longhorn."
 }

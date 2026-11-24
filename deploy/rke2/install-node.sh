@@ -9,8 +9,9 @@
 #   rke2.linux-amd64.tar.gz          the pinned RKE2 release
 #   rke2-images-core.linux-amd64.tar.zst, rke2-images-canal.linux-amd64.tar.zst   RKE2's own images (Canal is the only FIPS-rebuilt CNI)
 #   rke2-selinux-0.24-1.el9.noarch.rpm                                           installed when SELinux is enforcing
-#   images/*.tar | *.tar.zst         extra image archives for containerd, such as the site registry's own image (it cannot be pulled from
-#                                    before it exists, research Pitfall 8); each must be listed in pins.sha256
+#   images/*.tar | *.tar.zst         extra image archives for containerd: images/registry-images.tar holds the site registry's own images,
+#                                    named for the site registry by install.mjs node-files (it cannot be pulled from before it exists,
+#                                    research Pitfall 8); each must be listed in pins.sha256
 #   config.yaml registries.yaml audit-policy.yaml psa.yaml site-ca.crt   already site-substituted on the admin host with
 #                                    node deploy/bundle/lib/render.mjs --site <site> --substitute <file>
 #   chrony.conf clock.env check-time.sh   the node clock files written on the admin host with
