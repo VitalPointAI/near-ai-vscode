@@ -28,7 +28,8 @@ siteEnv:
   stepUpAcr: ""
   stepUpMaxAgeSeconds: 300
   openVsxUrl: ""
-  # The model servers your organization's policy lists, as a list of URLs; the workbench reads them as JSON.
+  # The model servers your organization's policy lists, as a list of URLs. site-env.yaml renders them as one JSON array of strings
+  # (STERLING_MODEL_SERVERS), the form the workbench reads (workbench/README.md, Settings); empty or unset renders [] (none).
   modelServers: []
 sessionEnv:
   # The names the operator template sets (java/operator/.../templateDeployment.yaml at Theia Cloud 1.2.0, e2d201fd; our copy in

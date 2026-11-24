@@ -110,7 +110,7 @@ test('with STERLING_LISTEN_HOST=0.0.0.0 and STERLING_PREVIEW_NO_SIGN_IN=accept i
 });
 
 test('an invalid STERLING_MODEL_SERVERS stops the workbench with one line naming the setting', async () => {
-  const result = await runContainer('bad-models', ['--rm', '-e', 'STERLING_MODEL_SERVERS=http://models.example.test', image]);
+  const result = await runContainer('bad-models', ['--rm', '-e', 'STERLING_MODEL_SERVERS=["http://models.example.test"]', image]);
   assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /STERLING_MODEL_SERVERS/);
 });
