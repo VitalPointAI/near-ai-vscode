@@ -5,6 +5,7 @@
 import { isRecord, isSafeIntegerInRange } from '../../team/validate';
 import { isSlot } from '../clientIds';
 import { writerIdOf } from '../entry';
+import { kemProblem } from './device';
 import { exactKeys, invalidAt, isBase64urlBytes, isHash, isIsoTime, isSlug } from './shared';
 
 export const STREAM_HEX = /^[0-9a-f]{32}$/;
@@ -67,10 +68,11 @@ function isExactBytes(value: unknown, bytes: number): value is string {
 
 // A device as the roster names it (DESIGN 7.4): the Ed25519 key it signs with, the X25519 key it opens wraps with, and the Ed25519 signature that binds
 // them. slot is its roster slot (D-41), 1 to 4095, never reused, assigned in the entry that admits or adds the device; it is optional on the wire so
-// every Phase 30 sample stays valid, and the roster fold requires it where D-41 needs it.
+// every Phase 30 sample stays valid, and the roster fold requires it where D-41 needs it. kem is the device's optional post-quantum keys with their
+// binding (33.2 D-03), written only in projects that require wrap@2; without it the descriptor is exactly as before.
 export function deviceProblem(value: unknown, path: string): string | undefined {
   if (!isRecord(value)) return invalidAt(path);
-  const keys = keyProblem(value, path, ['writer', 'publicKey', 'x25519', 'x25519Sig'], ['slot']);
+  const keys = keyProblem(value, path, ['writer', 'publicKey', 'x25519', 'x25519Sig'], ['slot', 'kem']);
   if (keys !== undefined) return keys;
   if (!isHash(value.writer)) return invalidAt(`${path}.writer`);
   if (!isExactBytes(value.publicKey, ED25519_PUBLIC_BYTES)) return invalidAt(`${path}.publicKey`);
@@ -79,6 +81,7 @@ export function deviceProblem(value: unknown, path: string): string | undefined 
   // The writer id of a device is the hash of its signing key, so a descriptor that names another writer is wrong on its face.
   if (value.writer !== writerIdOf(value.publicKey)) return invalidAt(`${path}.writer`, 'not the hash of the key');
   if (hasOwn(value, 'slot') && !isSlot(value.slot)) return invalidAt(`${path}.slot`);
+  if (hasOwn(value, 'kem')) return kemProblem(value.kem, `${path}.kem`);
   return undefined;
 }
 
