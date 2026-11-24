@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "cm-02"
+  ],
+  "gap": "G373",
+  "id": "g373",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "Large bundled data is moved out of the package, or the limit is reviewed"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "CI refuses an extension package over 14 MiB, and the package has little room left. Watch its size in each release, and move large bundled data out of the package before the limit blocks a release.",
+  "title": "The extension package is close to its size limit"
+}

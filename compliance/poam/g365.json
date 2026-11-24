@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-13",
+    "au-09"
+  ],
+  "gap": "G365",
+  "id": "g365",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory lists the condition with an item for your organization's authorizing official"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The site log store runs OpenSearch, which has no FIPS 140-3 validated build. Record the rebuild path or a validated alternative and its feasibility. Until then your organization's authorizing official decides whether to accept the condition.",
+  "title": "OpenSearch has no FIPS build"
+}

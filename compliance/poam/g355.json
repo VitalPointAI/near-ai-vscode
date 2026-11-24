@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-16",
+    "ac-21"
+  ],
+  "gap": "G355",
+  "id": "g355",
+  "milestones": [
+    {
+      "phase": "45.1",
+      "title": "Exports are refused until the label values are in the signed policy"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
+  "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+}

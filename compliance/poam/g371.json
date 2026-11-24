@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-02",
+    "ia-05"
+  ],
+  "gap": "G371",
+  "id": "g371",
+  "milestones": [
+    {
+      "phase": "71",
+      "title": "Status lists are signed with the officer's step-up"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "An edge holding classified data accepts only a status list signed in the last 24 hours, even when nothing changed. Every list signature needs an officer's passkey step-up, so a security officer must sign again at least daily for such edges. Your organization plans that duty, with a backup officer, before a classified edge goes live.",
+  "title": "Classified edges need a status list signed every day"
+}

@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G351",
+  "id": "g351",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The hosted cryptography inventory lists the condition with an item for your organization's authorizing official"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition.",
+  "title": "OpenBao has no FIPS 140-3 validated build"
+}

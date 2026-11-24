@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ac-03"
+  ],
+  "gap": "G388",
+  "id": "g388",
+  "milestones": [
+    {
+      "phase": "33.1",
+      "title": "The typed-in clearance is read only for replay and grants nothing"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Plan 33.1-01 keeps the typed-in clearance field of Phase 31's member invite and admit entries readable, so existing logs still replay. It grants nothing: access comes only from verified credentials. Remove it once no log from before Phase 33.1 remains. Source: .planning/phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md.",
+  "title": "Phase 31's typed-in clearance stays readable for replay"
+}

@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G348",
+  "id": "g348",
+  "milestones": [
+    {
+      "phase": "33.2",
+      "title": "Wrap version 3 and wrap@3 are reserved, and readers refuse them as not supported yet"
+    },
+    {
+      "targetDate": "2027-06-30",
+      "title": "The Cyber Centre's advice above Protected B is requested through your organization's sponsor"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The post-quantum cell key wrap uses ML-KEM-768 with P-256, which ITSP.40.111 lists up to Protected B. Above that, ask the Cyber Centre for advice through your organization's sponsor, then build wrap version 3 (ML-KEM-1024 with P-384, feature wrap@3). Until then readers refuse version 3 as not supported yet.",
+  "title": "ML-KEM-768 is listed only up to Protected B"
+}
