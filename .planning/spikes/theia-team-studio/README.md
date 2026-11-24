@@ -9,6 +9,7 @@ From the root of this checkout, build and start the preview with Docker.
 ```sh
 docker build -f .planning/spikes/theia-team-studio/Dockerfile -t near-ai-theia-preview:local .
 docker run --detach --name near-ai-theia-team-preview \
+  --env STERLING_PREVIEW_NO_SIGN_IN=accept \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
@@ -16,7 +17,9 @@ Open [Team Studio](http://127.0.0.1:18771/). If you close the tab inside the wor
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
-The container runs as the unprivileged Node user and binds to localhost on the host. The examples are synthetic. This preview has no host workspace mounts, provider credentials, or agent run controls.
+**Publish it on `127.0.0.1` only.** The preview has no sign-in and includes a terminal, so anyone who can reach its port gets a shell as the container's `node` user. It listens on every interface inside the container, because port mapping needs that, so the safety comes from `--publish 127.0.0.1:…`. Never use `-p 3000:3000` or publish it on a shared host. The image refuses to start until you pass `--env STERLING_PREVIEW_NO_SIGN_IN=accept` to confirm this. Sign-in and per-person sessions come in Phase 46 and Phase 47.
+
+The container runs as the unprivileged Node user. Its runtime holds only production dependencies: the Theia CLI, bundlers and compilers stay in the build stage. The examples are synthetic. This preview has no host workspace mounts, provider credentials, or agent run controls.
 
 ## Run the existing extension in Theia
 
@@ -31,8 +34,9 @@ docker run --detach --name near-ai-theia-vsix \
   --publish 127.0.0.1:18874:3000 \
   --mount "type=bind,source=$PWD/.planning/spikes/theia-team-studio/local-plugins,target=/plugins,readonly" \
   --env THEIA_DEFAULT_PLUGINS=local-dir:///plugins \
+  --env STERLING_PREVIEW_NO_SIGN_IN=accept \
   near-ai-theia-preview:local \
-  node_modules/.bin/theia start /home/node/workspace --hostname 0.0.0.0 --port 3000 \
+  node lib/backend/main.js /home/node/workspace --hostname 0.0.0.0 --port 3000 \
   --session-preference nearAi.autoInstallGsd=false
 ```
 

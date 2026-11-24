@@ -14,6 +14,8 @@ COPY .planning/spikes/theia-team-studio/extension/tsconfig.json ./extension/tsco
 COPY .planning/spikes/theia-team-studio/extension/src ./extension/src
 COPY .planning/spikes/theia-team-studio/extension/fixtures ./extension/fixtures
 RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
+# The runtime needs only the built app and its production dependencies: drop the CLI, bundlers and compilers.
+RUN npm prune --omit=dev --ignore-scripts --no-audit --no-fund
 
 FROM node:24.22.1-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git procps
@@ -25,4 +27,9 @@ COPY --from=build /repo/dist/agent/teams.js /repo/dist/agent/teams.js
 USER node
 RUN mkdir /home/node/workspace
 EXPOSE 3000
-CMD ["node_modules/.bin/theia", "start", "--hostname", "0.0.0.0", "--port", "3000"]
+# This preview has no sign-in and includes a terminal, so whoever reaches port 3000 gets a shell as `node`.
+# It listens on every interface inside the container (port mapping needs that), so it refuses to start
+# until the person running it confirms they publish it on 127.0.0.1 only (see README.md).
+ENV STERLING_PREVIEW_NO_SIGN_IN=""
+ENTRYPOINT ["sh", "-c", "if [ \"$STERLING_PREVIEW_NO_SIGN_IN\" != accept ]; then echo 'This preview has no sign-in and includes a terminal. Publish it on 127.0.0.1 only and start it with -e STERLING_PREVIEW_NO_SIGN_IN=accept.' >&2; exit 1; fi; exec \"$@\"", "--"]
+CMD ["node", "lib/backend/main.js", "/home/node/workspace", "--hostname", "0.0.0.0", "--port", "3000"]

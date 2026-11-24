@@ -1,8 +1,8 @@
-# Move NEAR AI development to Theia
+# Compatibility inventory: the existing extension in Theia
 
-The browser container is the development and acceptance target. Use the existing VSIX in a pinned Theia compatibility host to bring current workflows across while native ports are built. Keep the TypeScript engine and project files shared. Cut over to Theia as the sole development target after the workflows below pass end to end.
+**Direction (owner, 2026-11-23):** Theia, in the Sterling edition, is the only development target, and Phases 32.1 and 33 are built **natively** in Theia, not through the VSIX compatibility host. See the hosting design at [`.planning/research/multiuser-hosting/DESIGN.md`](../../research/multiuser-hosting/DESIGN.md) and Phases 46 to 48 in the [roadmap](../../ROADMAP.md).
 
-The [roadmap](../../ROADMAP.md) already calls for a VSIX bridge in L1b and native Team Studio, chat, and board in L6. Start the browser migration now. The appliance release keeps its hardware and offline deployment prerequisites.
+This page is an **inventory, not a cutover plan.** It records which current workflows run through the pinned compatibility host, which have native ports, and which are blocked. Use it to decide what each native port replaces, and to keep existing behaviour checked while the native workbench is built. Keep the TypeScript engine and project files shared. The VSIX in the compatibility host is a reference and a parity check. It is not the shipping path.
 
 | Area | Work and acceptance |
 | --- | --- |
@@ -12,7 +12,7 @@ The [roadmap](../../ROADMAP.md) already calls for a VSIX bridge in L1b and nativ
 | Accounts and integrations | Verify provider profiles, OAuth callbacks, secrets after restart, sync and recovery, offline/online hosting, model selection, spending controls, web search, and MCP. Preserve the product's authorization and secret storage contracts under the new host. |
 | Staff and governance | Verify Staff Room, roster and project membership, approvals and decision records, policy editing and enforcement, labels, and audit history in an isolated sample project. |
 | Compliance and exports | Verify the security posture panel, evidence views and exports, analytics, and SA&A package generation and downloads using synthetic inputs. Verify that unsupported controls and missing evidence are identified accurately. |
-| Cutover | Record each contributed command and UI flow as verified through the compatibility host, verified natively, or blocked with a tracked fix. Verify local container startup, existing project compatibility, restart persistence, and the release pipeline before retiring the VS Code development target. |
+| Status of each flow | Record each contributed command and UI flow as verified through the compatibility host, ported natively, or blocked with a tracked fix. Restart persistence of secrets depends on Phase 46's per-person key store; per-person sessions and sign-in depend on Phases 46 and 47. |
 
 Run each group against the actual browser container. Installed and registered commands are only the activation check. A workflow requires a browser test through its normal entry point and the same outcome as the supported extension.
 
