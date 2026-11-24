@@ -59,8 +59,8 @@ import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { RouteAttestation, SessionRoute } from '../gate/sessionMark';
 import { WaitingNotices } from './waitingNotices';
-import { chatLabelChanged, clearChatInView, onChatNotice, setChatInView, takeChatNotices } from './chatInView';
-import type { ChatInView } from './chatInView';
+import { chatLabelChanged, clearChatInView, onChatNotice, setChatInView, takeChatNotices, type ChatInView } from './chatInView';
+import { hideDrawerForLastConversation } from './chatDrawer';
 import { SHIPPED_DEFAULT_LABEL } from '../domain/gate/bundle';
 import { latestOnly, PROJECT_TEAM_WATCH_PATHS, projectHasTeam, SETUP_NUDGE_DISMISSED_KEY, shouldShowSetupNudge } from './setupSteps';
 import { linkStaffTeam, projectStaffTeamsReported, staffMenuEntries } from './staffTeams';
@@ -647,7 +647,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
     // A (re)loaded view shows the conversation on screen again, with the prompts still waiting pinned.
     if (message.type === 'chat-ready') { show(onScreen()); sendSyncStatus(); refreshSyncHomeHere(); return; }
     if (message.type === 'switch-conversation') { const target = tabs.find((candidate) => candidate.id === message.id); if (target) show(target); return; }
-    if (message.type === 'close-conversation') { await closeConversation(message.id); return; }
+    if (message.type === 'close-conversation') { if (!(await hideDrawerForLastConversation(tabs.map((tab) => tab.id), message.id))) await closeConversation(message.id); return; }
     if (message.type === 'new-chat') { await newConversation(); return; }
     if (message.type === 'resume-conversation') { await openSaved(message.id); return; }
     if (message.type === 'pickup-card') {
