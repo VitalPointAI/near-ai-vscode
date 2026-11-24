@@ -1,7 +1,8 @@
 # Policy sterling-workbench (D-40, Phase 46 interface items 5 to 7): what a signed-in person's session token may do, through role
 # sterling-workbench on auth/jwt. Every per-person path is templated on the person's own OpenBao entity, so a token reaches only its owner's
-# secrets and keys. Nothing under transit/keys/: the workbench never creates, rotates or deletes a key (only deploy/openbao/enrol.mjs does).
-# Signing is not here: it is granted only by sterling-workbench-sign, through the step-up role.
+# secrets and keys. Under transit/keys/ only one read of the person's own signing key, for its public key: the workbench never creates,
+# rotates, configures, exports or deletes a key (only deploy/openbao/enrol.mjs creates them). Signing is not here: it is granted only by
+# sterling-workbench-sign, through the step-up role.
 
 # The person's own secrets, KV v2 at kv/: kv/users/<entity>/<service>/<account>.
 path "kv/data/users/{{identity.entity.id}}/*" {
@@ -17,6 +18,14 @@ path "transit/datakey/wrapped/kek-{{identity.entity.id}}" {
 }
 path "transit/decrypt/kek-{{identity.entity.id}}" {
   capabilities = ["update"]
+}
+
+# The person's own signing key, read only (Phase 33 D-61, owner decision 2026-11-24): the read answers the key's public keys, which the
+# workbench checks every signature against and enters in a project's roster; a non-exportable key's private part is never in it. Exactly
+# this name, as enrol.mjs creates it (person-<entity id>): no list, no other key, and no rotate, config, export, sign or delete, which are
+# other paths or capabilities.
+path "transit/keys/person-{{identity.entity.id}}" {
+  capabilities = ["read"]
 }
 
 # The session's own token.

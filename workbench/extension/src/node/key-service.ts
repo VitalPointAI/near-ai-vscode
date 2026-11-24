@@ -4,6 +4,8 @@
  *   sign(messageBase64)        transit/sign/person-<entity>, ed25519, only after a fresh passkey or security key sign-in
  *   generateWrappedDataKey()   transit/datakey/wrapped/kek-<entity>: a new data key, wrapped; no plaintext leaves OpenBao here
  *   unwrapDataKey(ciphertext)  transit/decrypt/kek-<entity>: backend only (never on the RPC), needs an active session, not step-up
+ *   personPublicKey()          GET transit/keys/person-<entity>: backend only, the signing key's latest public key, with the session token
+ *                              (the session policy reads this one key and no other; Phase 33 D-61, owner decision 2026-11-24)
  *
  * The workbench never creates, rotates, exports, configures or deletes a Transit key: Phase 47 creates person-<entity> and kek-<entity> at
  * enrolment, and a missing key is a plain refusal. Signing has two checks. Here, a guard and a clear message: the latest forwarded token's
@@ -21,9 +23,17 @@ import type { SessionIdentityStatus } from '../common/session-identity.js';
 
 export const KeyService = Symbol('KeyService');
 
+/** The person's signing key as Transit answers it: the latest version's raw Ed25519 public key, base64url, and that version. */
+export interface PersonPublicKey {
+  readonly publicKey: string;
+  readonly keyVersion: number;
+}
+
 export interface KeyService extends KeyServiceRpc {
   /** Backend only: the plaintext data key, base64. Never offered on the RPC. */
   unwrapDataKey(ciphertext: string): Promise<ServiceResult<{ readonly plaintext: string }>>;
+  /** Backend only: the public key of the person's own signing key (no step-up: it is public, and the session policy reads only this key). */
+  personPublicKey(): Promise<ServiceResult<PersonPublicKey>>;
 }
 
 /** What the key service needs from SessionIdentity. */
@@ -133,7 +143,25 @@ export function createKeyService(identity: KeySessionSource, clock: KeyClock = r
     }
   }
 
-  return { sign, generateWrappedDataKey, unwrapDataKey };
+  async function personPublicKey(): Promise<ServiceResult<PersonPublicKey>> {
+    const session = active();
+    if (isRefusal(session)) return session;
+    try {
+      const answer = await session.client.request('GET', `${session.config.transitMount}/keys/person-${session.entityId}`, { token: session.token });
+      if (answer.status === 404) return refused(KEY_SERVICE_TEXT.signingKeyMissing);
+      const data = (answer.json as { data?: { type?: unknown; latest_version?: unknown; keys?: Record<string, { public_key?: unknown } | undefined> } } | undefined)?.data;
+      const version = data?.latest_version;
+      if (data?.type !== 'ed25519' || typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) return refused(KEY_SERVICE_TEXT.unreachable);
+      const text = data.keys?.[String(version)]?.public_key;
+      const raw = typeof text === 'string' && BASE64.test(text) ? Buffer.from(text, 'base64') : undefined;
+      if (raw === undefined || raw.length !== 32) return refused(KEY_SERVICE_TEXT.unreachable);
+      return ok({ publicKey: raw.toString('base64url'), keyVersion: version });
+    } catch (error) {
+      return missingOr(error, KEY_SERVICE_TEXT.signingKeyMissing);
+    }
+  }
+
+  return { sign, generateWrappedDataKey, unwrapDataKey, personPublicKey };
 }
 
 /** The object bound at KEY_SERVICE_PATH: sign and generateWrappedDataKey only, so the browser can never unwrap a data key (T-46-29). */

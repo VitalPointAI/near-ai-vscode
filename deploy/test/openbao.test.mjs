@@ -107,15 +107,71 @@ test('re-enrolment moves the alias to the new Keycloak account, so the same enti
   assert.deepEqual([...bao.aliases.values()].map((alias) => alias.name), ['kc-ana-2']);
 });
 
-test('no policy a session token can hold grants any transit/keys/ path, and signing is only in the step-up policy', () => {
+/** A block's capabilities, from its `capabilities = [...]` line. */
+const capabilitiesOf = (block) => {
+  const line = block.body.find((item) => item.startsWith('capabilities'));
+  return line ? JSON.parse(line.slice(line.indexOf('['))) : [];
+};
+
+const escape = (text) => text.replace(/[.*?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether a token holding these policies, for the entity `entity`, may use `capability` on `apiPath`, by OpenBao's ACL path rules: the
+ * entity template is filled in, a path matches exactly, a trailing "*" matches any rest, and "+" matches one segment. These policies have no
+ * deny blocks, so any matching block that lists the capability allows it.
+ */
+function allows(policies, entity, capability, apiPath) {
+  return policies.flatMap((name) => pathBlocks(policy(name))).some((block) => {
+    const filled = block.path.replaceAll('{{identity.entity.id}}', entity);
+    const glob = filled.endsWith('*');
+    const pattern = (glob ? filled.slice(0, -1) : filled).split('+').map(escape).join('[^/]+');
+    return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath) && capabilitiesOf(block).includes(capability);
+  });
+}
+
+const SESSION_POLICIES = ['sterling-workbench', 'sterling-workbench-sign'];
+const ADA = '1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7a8b';
+const BEN = '9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a';
+
+test('a session token reads only its own signing key under transit/keys/, and signing is only in the step-up policy', () => {
   const base = pathBlocks(policy('sterling-workbench'));
   const sign = pathBlocks(policy('sterling-workbench-sign'));
-  for (const block of [...base, ...sign]) assert.doesNotMatch(block.path, /^transit\/keys\//, `${block.path} would let a session manage keys`);
+  const keyBlocks = [...base, ...sign].filter((block) => block.path.startsWith('transit/keys'));
+  // Exactly one: the person's own signing key, by the name enrol.mjs creates (person-<entity id>), read only.
+  assert.deepEqual(keyBlocks.map((block) => [block.path, capabilitiesOf(block)]), [['transit/keys/person-{{identity.entity.id}}', ['read']]]);
+  assert.ok(!sign.some((block) => block.path.startsWith('transit/keys')), 'the step-up policy reads no key');
   assert.ok(!base.some((block) => block.path.startsWith('transit/sign/')), 'the base policy cannot sign');
   assert.deepEqual(sign.map((block) => block.path), ['transit/sign/person-{{identity.entity.id}}']);
   assert.deepEqual(base.map((block) => block.path).sort(), ['auth/token/lookup-self', 'auth/token/renew-self', 'auth/token/revoke-self',
     'kv/data/users/{{identity.entity.id}}/*', 'kv/metadata/users/{{identity.entity.id}}/*', 'transit/datakey/wrapped/kek-{{identity.entity.id}}',
-    'transit/decrypt/kek-{{identity.entity.id}}'].sort());
+    'transit/decrypt/kek-{{identity.entity.id}}', 'transit/keys/person-{{identity.entity.id}}'].sort());
+  // No glob anywhere under transit/ in a session policy.
+  for (const block of [...base, ...sign].filter((item) => item.path.startsWith('transit/'))) assert.doesNotMatch(block.path, /[*+]/, `${block.path} is a glob`);
+});
+
+test('the read reaches no other key: not another person\'s, not the KEK, not a longer name, and no list, export, rotate, config or change', () => {
+  assert.equal(allows(SESSION_POLICIES, ADA, 'read', `transit/keys/person-${ADA}`), true, 'the person reads their own signing key');
+  // Another person's key, and the person's own KEK.
+  assert.equal(allows(SESSION_POLICIES, ADA, 'read', `transit/keys/person-${BEN}`), false);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'read', `transit/keys/kek-${ADA}`), false);
+  // A wildcard or another name never matches the exact path.
+  for (const name of ['person-*', '*', '+', `person-${ADA}-other`, `person-${ADA}x`, 'person-', `person-${ADA.slice(0, 8)}`]) {
+    assert.equal(allows(SESSION_POLICIES, ADA, 'read', `transit/keys/${name}`), false, name);
+  }
+  // Listing the key names (LIST transit/keys and transit/keys/), or under the person's key.
+  for (const listPath of ['transit/keys', 'transit/keys/', `transit/keys/person-${ADA}`]) assert.equal(allows(SESSION_POLICIES, ADA, 'list', listPath), false, listPath);
+  // Export, backup, rotate, config, trim, import: other paths, none granted with any capability.
+  for (const other of [`transit/export/signing-key/person-${ADA}`, `transit/export/public-key/person-${ADA}`, `transit/backup/person-${ADA}`,
+    `transit/keys/person-${ADA}/rotate`, `transit/keys/person-${ADA}/config`, `transit/keys/person-${ADA}/trim`, `transit/keys/person-${ADA}/import`]) {
+    for (const capability of ['read', 'create', 'update', 'list', 'delete']) assert.equal(allows(SESSION_POLICIES, ADA, capability, other), false, `${capability} ${other}`);
+  }
+  // Create, change or delete the key itself.
+  for (const capability of ['create', 'update', 'delete', 'sudo']) assert.equal(allows(SESSION_POLICIES, ADA, capability, `transit/keys/person-${ADA}`), false, capability);
+  // Signing still needs the step-up policy, and only with the person's own key; decrypt and rewrap are not granted on the signing key.
+  assert.equal(allows(['sterling-workbench'], ADA, 'update', `transit/sign/person-${ADA}`), false);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'update', `transit/sign/person-${BEN}`), false);
+  for (const verb of ['decrypt', 'rewrap', 'encrypt', 'hmac']) assert.equal(allows(SESSION_POLICIES, ADA, 'update', `transit/${verb}/person-${ADA}`), false, verb);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'update', `transit/rewrap/kek-${ADA}`), false);
 });
 
 test('every key-move path needs two approvals from key-custodians', () => {
