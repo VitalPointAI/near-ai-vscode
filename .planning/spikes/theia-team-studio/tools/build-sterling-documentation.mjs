@@ -3,6 +3,13 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 const root = new URL('../../../../', import.meta.url);
 const output = new URL('../lib/frontend/', import.meta.url);
 
+// The tools folder sits at .planning/spikes/theia-team-studio/tools both in a checkout and in the image (the Dockerfile's
+// WORKDIR is that folder), so root is the repository root in both. Fail with a plain message if a layout change breaks that.
+import { existsSync } from 'node:fs';
+if (!existsSync(new URL('docs-site/content/index.md', root))) {
+  throw new Error(`build-sterling-documentation: no docs-site/content under ${root.pathname}; run it from the spike folder of a checkout or the image build.`);
+}
+
 // Only bundle the guides already published by the documentation site.
 // Keep this list aligned with the Dockerfile inputs and Docker context allowlist.
 const guides = [

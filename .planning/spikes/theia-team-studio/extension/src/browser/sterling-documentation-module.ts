@@ -1,4 +1,5 @@
 import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { isDocumentationPages, type DocumentationPage } from '../common/sterling-evidence.js';
 import { CoreMarkdownRenderer, MarkdownRenderer, MarkdownRenderResult } from '@theia/core/lib/browser/markdown-rendering/markdown-renderer.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
@@ -11,13 +12,6 @@ export const sterlingDocumentationCommand = { id: 'sterling.documentation.open',
 const documentRoot = new URL('https://documents.invalid/');
 const repository = 'https://github.com/VitalPointAI/near-ai-vscode/blob/main';
 
-interface DocumentationPage {
-  readonly source: string;
-  readonly route: string;
-  readonly category: string;
-  readonly title: string;
-  readonly markdown: string;
-}
 
 @injectable()
 class SterlingDocumentationWidget extends BaseWidget {
@@ -69,7 +63,9 @@ class SterlingDocumentationWidget extends BaseWidget {
         signal: this.loadRequest.signal, mode: 'same-origin', redirect: 'error'
       });
       if (!response.ok) throw new Error(`Documentation fetch returned ${response.status}`);
-      this.pages = await response.json() as DocumentationPage[];
+      const pages: unknown = await response.json();
+      if (!isDocumentationPages(pages)) throw new Error('Documentation collection has an unexpected shape');
+      this.pages = pages;
       if (this.isDisposed) return;
       const welcome = this.pages.find(page => page.route === 'index.md') ?? this.pages[0];
       if (!welcome) throw new Error('Documentation collection is empty');

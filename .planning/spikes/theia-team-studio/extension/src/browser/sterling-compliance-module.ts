@@ -3,6 +3,7 @@ import { CommandRegistry } from '@theia/core/lib/common/command.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
+import { refreshRecordMatches } from '../common/sterling-evidence.js';
 import './sterling-compliance.css';
 
 const widgetId = 'sterling-compliance';
@@ -88,10 +89,7 @@ function isDashboard(value: unknown): value is Dashboard {
 
 // compliance:refresh writes refresh.json beside the dashboard only after the bundle's manifest hashes check out.
 function isRefreshRecord(value: unknown, dashboard: Dashboard): value is RefreshRecord {
-  if (!record(value) || value.manifest !== 'verified' || !allStrings(value, ['source', 'commit', 'fetchedAt', 'attestation'])) return false;
-  const recorded = (value.commit as string).toLowerCase();
-  const shown = dashboard.commit.toLowerCase();
-  return recorded.length >= 7 && (recorded.startsWith(shown) || shown.startsWith(recorded));
+  return refreshRecordMatches(value, dashboard.commit);
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
