@@ -92,7 +92,13 @@ const ringOf = (keys: ReadonlyMap<string, RingKey>): KeyRing => (stream, epoch) 
 
 const placedGrantsOf = (state: RosterState): Set<string> => {
   const placed = new Set<string>();
-  for (const cell of state.cells.cells.values()) for (const grant of cell.grants) placed.add(grant.hash);
+  // A paged grant (33.2 D-04) is placed under its founding page's hash; every page it lists is placed with it, so the hub keeps and serves each.
+  for (const cell of state.cells.cells.values()) {
+    for (const grant of cell.grants) {
+      placed.add(grant.hash);
+      for (const page of grant.grant.pages ?? []) placed.add(page);
+    }
+  }
   return placed;
 };
 

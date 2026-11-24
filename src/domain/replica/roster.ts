@@ -28,6 +28,8 @@
 import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
+import type { CellGrant } from './cellKeys';
+import { readGrantPages } from './grantPages';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -546,16 +548,40 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
   }
 }
 
+// Places the grants. A grant that lists pages (33.2 D-04) is read with readGrantPages together with the pages it lists and placed as one grant under
+// its own hash; a listed page is never placed alone. A grant whose pages have not all arrived waits, held missing-blob under its hash like an entry
+// whose blob has not arrived (33-07), and is placed when they come.
 function placeGrants(state: RosterState, grants: readonly unknown[]): void {
-  const seen = new Set<string>();
+  const reads: Array<{ value: unknown; read: Extract<ReturnType<typeof readGrant>, { ok: true }> }> = [];
+  const byHash = new Map<string, unknown>();
   for (const value of grants) {
     const read = readGrant(value);
     if (!read.ok) {
       state.refused.push({ hash: '', kind: 'grant', reason: read.reason });
       continue;
     }
-    if (seen.has(read.hash)) continue;
-    seen.add(read.hash);
+    if (byHash.has(read.hash)) continue;
+    byHash.set(read.hash, value);
+    reads.push({ value, read });
+  }
+  const listed = new Set<string>();
+  for (const { read } of reads) for (const page of read.grant.pages ?? []) listed.add(page);
+  for (const { value, read: first } of reads) {
+    if (listed.has(first.hash)) continue;
+    let read: { grant: CellGrant; hash: string; signer: { writer: string } } = first;
+    if ((first.grant.pages ?? []).length > 0) {
+      const pages = (first.grant.pages as string[]).map((hash) => byHash.get(hash));
+      if (pages.some((page) => page === undefined)) {
+        state.held.push({ hash: first.hash, reason: 'missing-blob' });
+        continue;
+      }
+      const paged = readGrantPages(value, pages);
+      if (!paged.ok) {
+        state.refused.push({ hash: first.hash, kind: 'grant', reason: paged.reason });
+        continue;
+      }
+      read = paged;
+    }
     const position = state.positionOf.get(read.grant.roster);
     if (position === undefined) {
       state.held.push({ hash: read.hash, reason: 'missing-roster' });
