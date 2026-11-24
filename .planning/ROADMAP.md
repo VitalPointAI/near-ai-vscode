@@ -1369,11 +1369,28 @@ Plans:
   7. Route records, staff product headers and staff ledger entries carry the model, artifact hash and passport hash, and a per-project AI bill of materials (CycloneDX ML-BOM) lists every model used with its lineage. (MPRV-10)
 **Research flags**: (1) Owner confirmations O1 to O5 in the design (report mode for installs with no organization policy, staff tiers, 90-day acceptances, the acceptance signer before Phase 71, shipped Western passports capped at T2). (2) The questions for NEAR (N1 to N8): Western models in the TEE, provenance fields in `/v1/models`, change notice, the weights hash in attestation, a Canadian region, licence pass-through. (3) Exact Western model ids are pinned only when hosted; passports never match by brand name (Llama-Nemotron and OpenReasoning-Nemotron are different lineages). (4) Switching embeddings rebuilds the knowledge base index.
 **Undo cost**: Medium: passports and acceptances are written into signed bundles and records, so settle the schema in WP-0.
-**Plans:** 0 plans
+**Planned**: 2026-11-24 on `docs/phase-74.1-plan` (`.planning/phases/74.1-model-passports-use-tiers-and-western-defaults/`). The licence check found Command A+ under Apache 2.0 at Cohere and Hugging Face; the non-commercial licence is Command A's and Command A Vision's, so the owner's Command A+ restriction is kept as a default to confirm (74.1-CONTEXT.md D-05, consideration C-1). Nine considerations (C-1 to C-9, 74.1-CONTEXT.md D-26) are filed in the gap register by 74.1-01 at execution under the next free ids. Phase 74.3 depends on every plan; its interfaces are listed in 74.1-RESEARCH.md section 4.
+**Plans:** 17 plans in 7 waves
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 74.1 to break down)
+- [ ] 74.1-01-PLAN.md: Wave 1. Licences checked at the publishers and corrected (first task), Granite rows, every shipped model in the fit register, the nine considerations filed
+- [ ] 74.1-02-PLAN.md: Wave 1. Tracer: a PRC model refused for agent work under enforce, before anything is sent; record and trust fields
+- [ ] 74.1-03-PLAN.md: Wave 2. Every caller says its use; the project reaches the decision
+- [ ] 74.1-04-PLAN.md: Wave 2. A sentence for every reason, the T1 exception, the non-commercial licence rule, the models that would pass, no retry
+- [ ] 74.1-05-PLAN.md: Wave 2. Western defaults by passport in one place and the job resolver
+- [ ] 74.1-06-PLAN.md: Wave 3. Passport lifecycle, re-evaluation triggers, revocation, evaluation before a checking role
+- [ ] 74.1-07-PLAN.md: Wave 3. The research workspace
+- [ ] 74.1-08-PLAN.md: Wave 3. The different-family rule, the safety classifier and the run's models by job
+- [ ] 74.1-09-PLAN.md: Wave 4. Checking roles in team and staff runs; both families in records
+- [ ] 74.1-10-PLAN.md: Wave 4. The cyber harness and Compare Models in the research lane
+- [ ] 74.1-11-PLAN.md: Wave 4. Exceptions (t1-risk) drafted, signed and proposed in the policy editor
+- [ ] 74.1-12-PLAN.md: Wave 5. Picker and directory words, the end of bare "Private", Apply only for writing-approved answers
+- [ ] 74.1-13-PLAN.md: Wave 4. The empty-state card and Adopt the Western defaults
+- [ ] 74.1-14-PLAN.md: Wave 5. Staff product headers and signed entries carry the model and approval
+- [ ] 74.1-15-PLAN.md: Wave 4. The per-project AI bill of materials (CycloneDX 1.6)
+- [ ] 74.1-16-PLAN.md: Wave 6. Compliance statements (SA-4, SR-3, SR-4, SA-11, CM-8), the gap register, the docs
+- [ ] 74.1-17-PLAN.md: Wave 7. One full verification run, the owner's check, the integration PR
 
 ### Phase 74.2: Your organization's attested model hosting (INSERTED)
 **Goal**: A model server your organization runs on confidential-computing hardware in a Canadian data centre counts as private once its attestation is verified, exactly like NEAR's private hardware, so Western models can serve labels that need attested hosting before NEAR hosts them.
