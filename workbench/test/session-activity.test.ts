@@ -3,7 +3,8 @@
 // use; every other /monitor path is 404, and nothing is answered outside the tracker or outside /monitor. An answer is a number or one word.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createSessionActivity } from '../extension/src/node/session-activity.ts';
+import type { AddressInfo } from 'node:net';
+import { createSessionActivity, createTrackerServer, trackerAddress } from '../extension/src/node/session-activity.ts';
 
 const SECRET = 'a-session-secret-0123456789';
 const TRACKED = { THEIACLOUD_SESSION_SECRET: SECRET, THEIACLOUD_MONITOR_ENABLE_ACTIVITY_TRACKER: 'true', THEIACLOUD_SESSION_USER: 'person@site.example' };
@@ -72,4 +73,40 @@ test('no answer carries anything about the person or the secret', () => {
     assert.ok(/^(?:[0-9]{13}|ok|Unauthorized|Not found)$/.test(body), body);
     assert.ok(!body.includes('person') && !body.includes(SECRET), body);
   }
+});
+
+// Phase 47's lab (47-15, spike S7): the operator calls the app port on the pod IP, not through the sidecar. A pod IP in STERLING_LISTEN_HOST
+// in hosted mode opens only the tracker there; Theia stays on loopback (bin/start.mjs).
+const HOSTED = { STERLING_OPENBAO_ADDR: 'https://openbao.site.example' };
+
+test('the tracker address is a pod IP in hosted mode only; loopback, a wildcard or unset is none, and a name stops the backend', () => {
+  assert.equal(trackerAddress({ ...HOSTED, STERLING_LISTEN_HOST: '10.42.0.82' }), '10.42.0.82');
+  assert.equal(trackerAddress({ ...HOSTED, STERLING_LISTEN_HOST: ' fd00::12 ' }), 'fd00::12');
+  for (const host of [undefined, '', '127.0.0.1', '::1', 'localhost', '0.0.0.0', '::']) {
+    assert.equal(trackerAddress({ ...HOSTED, STERLING_LISTEN_HOST: host }), undefined, String(host));
+  }
+  assert.equal(trackerAddress({ STERLING_LISTEN_HOST: '10.42.0.82' }), undefined, 'local mode keeps STERLING_LISTEN_HOST as Theia\'s own bind');
+  for (const host of ['session.example', '10.42.0.82:3000', '10.42.0.0/24', '[fd00::12]', '10.42.0.82,10.42.0.83']) {
+    assert.throws(() => trackerAddress({ ...HOSTED, STERLING_LISTEN_HOST: host }), /STERLING_LISTEN_HOST must be 127\.0\.0\.1, 0\.0\.0\.0 or the pod's IP address/, host);
+  }
+});
+
+test('the listener on the tracker address answers the tracker and 404s everything else, the workbench\'s own paths included', async (t) => {
+  const activity = createSessionActivity(TRACKED, () => 1_800_000_000_000);
+  const server = createTrackerServer(activity);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const { port } = server.address() as AddressInfo;
+  const ask = async (method: string, path: string, authorization?: string) => {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: authorization ? { authorization } : {} });
+    return { status: response.status, body: await response.text(), cookie: response.headers.get('set-cookie') };
+  };
+  assert.deepEqual(await ask('GET', LAST, BEARER), { status: 200, body: '1800000000000', cookie: null });
+  assert.deepEqual(await ask('GET', `${LAST}?x=1`, BEARER), { status: 200, body: '1800000000000', cookie: null });
+  assert.deepEqual(await ask('GET', LAST), { status: 401, body: 'Unauthorized', cookie: null });
+  for (const path of ['/', '/healthz', '/bundle.js', '/services/sterling-session-activity', '/monitor/message', '/x/monitor/activity/lastActivity']) {
+    assert.deepEqual(await ask('GET', path, BEARER), { status: 404, body: 'Not found', cookie: null }, path);
+  }
+  assert.deepEqual(await ask('POST', POPUP, BEARER), { status: 200, body: 'ok', cookie: null });
+  assert.equal(activity.state(), 'idle-warned');
 });

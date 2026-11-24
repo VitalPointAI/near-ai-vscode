@@ -32,8 +32,10 @@ siteEnv:
   # (STERLING_MODEL_SERVERS), the form the workbench reads (workbench/README.md, Settings); empty or unset renders [] (none).
   modelServers: []
 sessionEnv:
-  # The names the operator template sets (java/operator/.../templateDeployment.yaml at Theia Cloud 1.2.0, e2d201fd; our copy in
-  # deploy/images/theia-cloud-operator/templates). STERLING_LISTEN_HOST and THEIA_HOSTS are not set by our template (47-09), so not here.
+  # The names our operator template sets (deploy/images/theia-cloud-operator/templates/templateDeployment.yaml): the 13 THEIACLOUD_ names
+  # of the upstream file at Theia Cloud 1.2.0 (e2d201fd), and STERLING_LISTEN_HOST from the pod IP, where the operator's activity monitor
+  # reaches the workbench (47-15, spike S7; session-env-policy.yaml accepts it only as the downward API status.podIP). THEIA_HOSTS is not
+  # set (the sidecar passes the browser's Host through), so not here.
   operatorNames:
     - THEIACLOUD_SERVICE_AUTH_TOKEN
     - THEIACLOUD_APP_ID
@@ -48,5 +50,6 @@ sessionEnv:
     - THEIACLOUD_KEYCLOAK_URL
     - THEIACLOUD_KEYCLOAK_REALM
     - THEIACLOUD_KEYCLOAK_CLIENT_ID
+    - STERLING_LISTEN_HOST
   # Extra environment names a session pod may carry beyond the operator's own and the site ConfigMap. Empty: a launch request adds nothing.
   allowedNames: []

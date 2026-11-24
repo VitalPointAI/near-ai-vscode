@@ -49,6 +49,10 @@ spec:
       message: "A session may not read a Secret or a ConfigMap key into its environment."
     - expression: "variables.containers.all(c, !has(c.env) || c.env.all(v, v.name in variables.allowedNames))"
       message: "A session may carry only the environment names the operator sets."
+    # STERLING_LISTEN_HOST only ever as the pod's own IP: a launch request that set it to a literal (0.0.0.0, say) would serve the whole
+    # workbench on the pod address, past the sidecar's sign-in.
+    - expression: "variables.containers.all(c, !has(c.env) || c.env.all(v, v.name != 'STERLING_LISTEN_HOST' || (has(v.valueFrom) && has(v.valueFrom.fieldRef) && v.valueFrom.fieldRef.fieldPath == 'status.podIP' && !has(v.value))))"
+      message: "STERLING_LISTEN_HOST may only be the pod IP (downward API status.podIP)."
     - expression: "(has(variables.spec.volumes) ? variables.spec.volumes : []).all(v, (!has(v.secret) || v.secret.secretName == 'oauth2-proxy-secrets') && (!has(v.projected) || v.projected.sources.all(s, !has(s.secret))))"
       message: "The only Secret a session may mount is oauth2-proxy-secrets."
     - expression: "variables.containers.all(c, c.name == 'oauth2-proxy' || !has(c.volumeMounts) || c.volumeMounts.all(m, !(m.name in variables.secretVolumes)))"

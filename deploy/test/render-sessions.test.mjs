@@ -137,8 +137,20 @@ test('the policy refuses envFrom other than sterling-site-env, any Secret or Con
   assert.ok(doc.includes('!has(v.valueFrom.secretKeyRef) && !has(v.valueFrom.configMapKeyRef)'));
   assert.ok(doc.includes('v.name in variables.allowedNames'));
   const allowed = JSON.parse(JSON.parse(/name: allowedNames\n\s+expression: (".*")$/m.exec(doc)[1]));
-  assert.equal(allowed.length, 13);
-  assert.ok(allowed.every((name) => name.startsWith('THEIACLOUD_')), 'only the operator template\'s names; the launch request adds none');
+  // Exactly the names our operator template sets, read from the template itself: the launch request adds none.
+  const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
+  const templateNames = [...template.matchAll(/^ {10}- name: (\S+)$/gm)].map((match) => match[1]);
+  assert.deepEqual([...allowed].sort(), [...templateNames].sort());
+  assert.equal(allowed.filter((name) => name.startsWith('THEIACLOUD_')).length, 13);
+  assert.deepEqual(allowed.filter((name) => !name.startsWith('THEIACLOUD_')), ['STERLING_LISTEN_HOST']);
+});
+
+test('STERLING_LISTEN_HOST is the pod IP from the downward API in the template, and the policy refuses it in any other form', () => {
+  const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
+  assert.match(template, /^ {10}- name: STERLING_LISTEN_HOST\n {12}valueFrom:\n {14}fieldRef:\n {16}fieldPath: status\.podIP$/m);
+  assert.doesNotMatch(template, /name: STERLING_LISTEN_HOST\n\s+value:/);
+  const doc = policy();
+  assert.ok(doc.includes("v.name != 'STERLING_LISTEN_HOST' || (has(v.valueFrom) && has(v.valueFrom.fieldRef) && v.valueFrom.fieldRef.fieldPath == 'status.podIP' && !has(v.value))"));
 });
 
 test('the policy allows only the oauth2-proxy-secrets Secret volume, and only in the oauth2-proxy container', () => {

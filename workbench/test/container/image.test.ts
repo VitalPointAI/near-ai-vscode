@@ -1,7 +1,8 @@
 // Phase 46, plan 03, task 2 (D-12, D-13, D-26, D-30, D-34, D-35, D-39, D-42; T-46-12, T-46-14): the runtime image the Phase 47 contract
 // describes. It runs as 10001:0 and can write only its home, its workspace and /tmp; it keeps no package-manager cache; it carries no build or
 // browser tooling, no extension gallery and no model provider package; it binds 127.0.0.1 by default and refuses a bad address setting; it
-// reports healthy; it answers Theia Cloud's activity tracker only with the session secret and says nothing about the person; it runs Node 26,
+// reports healthy; it answers Theia Cloud's activity tracker only with the session secret and says nothing about the person, and in hosted mode
+// a pod IP in STERLING_LISTEN_HOST carries that tracker only while the workbench stays on loopback; it runs Node 26,
 // the hub's major; and every FROM line of its Dockerfile is literal and pinned by digest. Hygiene as in test/helpers/docker.ts. Run it with `npm run test:container`; it is not part of `npm test`.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
@@ -150,6 +151,49 @@ test('Theia Cloud\'s activity tracker gets the last use only with the session se
   const lastUse = answers[3].got.body;
   assert.match(lastUse, /^[0-9]{13}$/);
   assert.ok(Number(lastUse) >= before - 1000 && Number(lastUse) <= Date.now(), lastUse);
+});
+
+test('hosted, with the pod IP in STERLING_LISTEN_HOST: the tracker answers on the pod IP, the workbench stays on loopback, and it is healthy', async (t) => {
+  // A network with a fixed address stands in for the pod IP (status.podIP); a second container plays the operator's activity monitor.
+  const network = `sterling-podip-${randomBytes(4).toString('hex')}`;
+  let podIp = '';
+  for (let attempt = 0; attempt < 5 && !podIp; attempt++) {
+    const prefix = `10.${200 + (randomBytes(1)[0] % 50)}.${randomBytes(1)[0]}`;
+    // A subnet another network already uses is refused; try another.
+    if ((await run('docker', ['network', 'create', '--internal', '--subnet', `${prefix}.0/24`, network])).code === 0) podIp = `${prefix}.10`;
+  }
+  assert.ok(podIp, 'a docker network with a free subnet');
+  t.after(async () => {
+    await removeOwn();
+    await run('docker', ['network', 'rm', network]);
+  });
+  const secret = randomBytes(24).toString('hex');
+  const started = await runContainer('podip', ['-d', '--health-interval=2s', '--network', network, '--ip', podIp,
+    '-e', `STERLING_LISTEN_HOST=${podIp}`, '-e', 'STERLING_OPENBAO_ADDR=http://127.0.0.1:8200', '-e', 'THEIACLOUD_SESSION_USER=person.podip@site.example',
+    '-e', `THEIACLOUD_SESSION_SECRET=${secret}`, '-e', 'THEIACLOUD_MONITOR_ENABLE_ACTIVITY_TRACKER=true', image]);
+  assert.equal(started.code, 0, started.stderr);
+  const name = containerName('podip');
+  await waitFor(async () => (await run('docker', ['inspect', '--format', '{{.State.Health.Status}}', name])).stdout.trim() === 'healthy', 'healthy');
+  const get = (url: string, authorization = ''): string =>
+    `fetch(${JSON.stringify(url)}, { headers: ${JSON.stringify(authorization ? { authorization } : {})} }).then(async (r) => console.log(r.status + ' ' + await r.text()), () => console.log('no answer'))`;
+  const inside = await mustRun('docker', ['exec', name, 'node', '-e', get('http://127.0.0.1:3000/healthz')]);
+  assert.equal(inside.stdout.trim(), '200 ok', 'Theia answers the sidecar on loopback');
+  const monitor = async (path: string, authorization?: string): Promise<string> => {
+    const result = await runContainer(`podip-monitor-${randomBytes(3).toString('hex')}`, ['--rm', '--network', network, '--entrypoint', 'node', image, '-e',
+      get(`http://${podIp}:3000${path}`, authorization)]);
+    assert.equal(result.code, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  assert.match(await monitor('/monitor/activity/lastActivity', `Bearer ${secret}`), /^200 [0-9]{13}$/);
+  assert.equal(await monitor('/monitor/activity/lastActivity'), '401 Unauthorized');
+  for (const path of ['/', '/healthz', '/bundle.js', '/services']) assert.equal(await monitor(path, `Bearer ${secret}`), '404 Not found', `the pod IP serves nothing of the workbench: ${path}`);
+});
+
+test('hosted, a STERLING_LISTEN_HOST that is not an IP address stops the workbench with one line naming the setting', async () => {
+  const result = await runContainer('bad-listen', ['--rm', '-e', 'STERLING_LISTEN_HOST=session.example', '-e', 'STERLING_OPENBAO_ADDR=http://127.0.0.1:8200',
+    '-e', 'THEIACLOUD_SESSION_USER=person@site.example', image]);
+  assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /STERLING_LISTEN_HOST must be 127\.0\.0\.1, 0\.0\.0\.0 or the pod's IP address/);
 });
 
 test('an invalid STERLING_MODEL_SERVERS stops the workbench with one line naming the setting', async () => {

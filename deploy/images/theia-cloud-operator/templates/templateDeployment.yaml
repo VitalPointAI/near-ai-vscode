@@ -107,6 +107,12 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
+          # Sterling: the operator's activity monitor calls the app port on the pod IP (47-15, spike S7), so the workbench answers its
+          # tracker there; Theia itself stays on 127.0.0.1 behind the sidecar (workbench/README.md, STERLING_LISTEN_HOST).
+          - name: STERLING_LISTEN_HOST
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
           securityContext:
             runAsNonRoot: true
             runAsUser: placeholder-uid

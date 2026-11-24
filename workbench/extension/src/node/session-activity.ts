@@ -12,6 +12,8 @@
  * Nothing here imports Theia.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
+import http from 'node:http';
+import net from 'node:net';
 import type { SessionActivityState } from '../common/session-activity.js';
 
 export const SessionActivity = Symbol('SessionActivity');
@@ -70,4 +72,49 @@ export function createSessionActivity(env: NodeJS.ProcessEnv, clock: () => numbe
       return { status: 404, body: 'Not found' };
     },
   };
+}
+
+/** The workbench's port (bin/start.mjs passes it to Theia; the AppDefinition's port and monitor port). */
+export const WORKBENCH_PORT = 3000;
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+const WILDCARD_HOSTS = new Set(['0.0.0.0', '::']);
+
+/**
+ * Where Theia Cloud's activity tracker reaches the session, when that is not where Theia listens (workbench/README.md, STERLING_LISTEN_HOST).
+ * The operator calls the app port on the pod's own address (its session-...-int Service), not through the oauth2-proxy sidecar, while the
+ * sidecar reaches Theia on 127.0.0.1. So in hosted mode a pod IP in STERLING_LISTEN_HOST (downward API status.podIP) keeps Theia on loopback
+ * (bin/start.mjs) and opens only the tracker's answers on that address. Undefined in local mode, and when the setting is unset, loopback or a
+ * wildcard (Theia itself answers there). In hosted mode anything else that is not one IP address stops the backend, naming the setting.
+ */
+export function trackerAddress(env: NodeJS.ProcessEnv): string | undefined {
+  if (!env.STERLING_OPENBAO_ADDR?.trim()) return undefined;
+  const host = env.STERLING_LISTEN_HOST?.trim();
+  if (!host || LOOPBACK_HOSTS.has(host) || WILDCARD_HOSTS.has(host)) return undefined;
+  if (net.isIP(host) === 0) {
+    throw new Error('STERLING_LISTEN_HOST must be 127.0.0.1, 0.0.0.0 or the pod\'s IP address (status.podIP) in hosted mode.');
+  }
+  return host;
+}
+
+/**
+ * The listener on the tracker address: the tracker's answers and a plain 404 for every other path, so the pod address serves nothing of the
+ * workbench itself (no page, no WebSocket, no file, no terminal); those stay behind the sidecar's sign-in on loopback. No body is read.
+ */
+export function createTrackerServer(activity: SessionActivity): http.Server {
+  const server = http.createServer((request, response) => {
+    request.resume();
+    let path = '/';
+    try {
+      path = new URL(request.url ?? '/', 'http://tracker.invalid').pathname;
+    } catch {
+      // A target that is not a path is answered 404 below.
+    }
+    const answer = activity.answer(request.method ?? '', path, request.headers.authorization) ?? { status: 404, body: 'Not found' };
+    response.writeHead(answer.status, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    response.end(answer.body);
+  });
+  server.headersTimeout = 10_000;
+  server.requestTimeout = 10_000;
+  return server;
 }
