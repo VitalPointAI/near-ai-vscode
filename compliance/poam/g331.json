@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ia-05.02"
+  ],
+  "gap": "G331",
+  "id": "g331",
+  "milestones": [
+    {
+      "phase": "48",
+      "targetDate": "2027-03-31",
+      "title": "Revocation list experiment recorded on the rig"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "On the rig, measure Keycloak memory and refresh time against a large revocation list, or test a local OCSP responder, and record the experiment.",
+  "title": "Large smart-card revocation lists are not tested"
+}

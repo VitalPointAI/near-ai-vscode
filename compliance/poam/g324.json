@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G324",
+  "id": "g324",
+  "milestones": [
+    {
+      "targetDate": "2027-06-30",
+      "title": "Chosen HSM model bought and its matching certificate recorded"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap.",
+  "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
+}

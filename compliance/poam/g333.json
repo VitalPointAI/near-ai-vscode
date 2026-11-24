@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "sc-13"
+  ],
+  "gap": "G333",
+  "id": "g333",
+  "milestones": [
+    {
+      "targetDate": "2027-02-26",
+      "title": "Owner decision on Harbor and Zot FIPS builds recorded"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Decide between running Harbor and Zot under recorded conditions without a validated module and rebuilding them (Zot with a pinned GOFIPS140 module version; Harbor component by component), then record the decision and, for a rebuild, the build evidence.",
+  "title": "Harbor and Zot have no build made with a validated module"
+}

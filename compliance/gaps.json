@@ -3935,6 +3935,437 @@
       "ownerRole": "maintainers",
       "remediation": "Publish a Controlled goods and ITAR page that says what the product does, what it does not do, and the interim settings your officials may choose.",
       "title": "No published guidance for organizations on controlled goods and ITAR"
+    },
+    {
+      "controls": [
+        "si-02"
+      ],
+      "id": "G321",
+      "ownerRole": "owner",
+      "poam": "g321",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Hosted sites run upstream Keycloak at or above the minimum version in the hosted verification records. Before a site runs the Red Hat build of Keycloak instead, confirm with Red Hat which release of that build fixes CVE-2026-6856 for the release line the site would run (Red Hat's data names 26.4.12 and still lists the build as affected; Bugzilla 2460004 reads NEW), and record the answer with its source and date in the hosted verification records.",
+      "title": "The Red Hat build of Keycloak release that fixes CVE-2026-6856 is not confirmed"
+    },
+    {
+      "controls": [
+        "cp-02.02",
+        "sc-05"
+      ],
+      "id": "G322",
+      "ownerRole": "owner",
+      "poam": "g322",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Provide the load-test rig, run the load test to the target stage with start bursts, and commit the hashed run file. A stage the rig does not reach is recorded as not reached with its reason; capacity figures in docs come only from the run file.",
+      "title": "The hosted deployment has no recorded load test at the target session count"
+    },
+    {
+      "controls": [
+        "cp-02.02"
+      ],
+      "id": "G323",
+      "ownerRole": "owner",
+      "poam": "g323",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Run several hubs per site under the same load-test run and record each hub's load against its per-hub target in the run file.",
+      "title": "Sync hub load at its per-hub target is not measured under the hosted load test"
+    },
+    {
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G324",
+      "ownerRole": "owner",
+      "poam": "g324",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap.",
+      "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
+    },
+    {
+      "controls": [
+        "sc-08",
+        "sc-13"
+      ],
+      "id": "G325",
+      "ownerRole": "owner",
+      "poam": "g325",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Run the Traefik experiment on the rig (HAProxy and Traefik, host-based and path-based, rule add latency, route propagation, WebSocket survival, Ingress size growth) and record it; confirm from a source whether RKE2 ships a FIPS build of Traefik. HAProxy stays the default unless the owner then chooses otherwise.",
+      "title": "Traefik with Theia Cloud is untested and RKE2's Traefik FIPS build is not confirmed"
+    },
+    {
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G326",
+      "ownerRole": "owner",
+      "poam": "g326",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Test the kms-pkcs11 plugin release in use against the chosen HSM on the rig and record the experiment; until then OpenBao does not rely on it. SoftHSM2 results prove wiring only.",
+      "title": "The OpenBao kms-pkcs11 plugin is not tested against the chosen HSM"
+    },
+    {
+      "controls": [
+        "cp-02.02"
+      ],
+      "id": "G327",
+      "ownerRole": "owner",
+      "poam": "g327",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Measure cold-start time on the rig with and without image preloading and record it in a run file against the owner's cold-start threshold. The prewarm pool stays at 0 for persistent workspaces, because a pooled pod cannot take a person's saved workspace volume.",
+      "title": "Cold-start time for persistent workspaces is not measured"
+    },
+    {
+      "controls": [
+        "ia-11"
+      ],
+      "id": "G328",
+      "ownerRole": "owner",
+      "poam": "g328",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "On the rig, force a fresh WebAuthn step from a running session and record whether the workbench sees a new auth_time and acr through oauth2-proxy.",
+      "title": "Step-up re-authentication through the session sidecar is not shown"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "ia-05"
+      ],
+      "id": "G329",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add evidence rules on the realm as code that prove each signInKeys level: passkeys accepts synced and device-bound passkeys; hardware-only requires attestation, a non-empty AAGUID allowlist and device-bound keys and is the recommended production setting. State that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped.",
+      "title": "The signInKeys levels have no evidence rule yet"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "ia-05"
+      ],
+      "id": "G330",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the evidence rule that proves each site's relying-party ID is the shared parent domain of its DNS layout (O3).",
+      "title": "The shared relying-party ID has no evidence rule yet"
+    },
+    {
+      "controls": [
+        "ia-05.02"
+      ],
+      "id": "G331",
+      "ownerRole": "owner",
+      "poam": "g331",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "On the rig, measure Keycloak memory and refresh time against a large revocation list, or test a local OCSP responder, and record the experiment.",
+      "title": "Large smart-card revocation lists are not tested"
+    },
+    {
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G332",
+      "ownerRole": "owner",
+      "poam": "g332",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Keycloak's FIPS guide asks for bc-fips 2.1.3, which Bouncy Castle describes as going into submission; the active certificates name 2.0.0 and 2.1.x. Record a certificate that names the version in use, or record the owner's decision on which certificate-listed version to run in strict mode and how it is proven to work.",
+      "title": "No FIPS 140-3 certificate names the BC-FIPS version Keycloak 26.8 asks for"
+    },
+    {
+      "controls": [
+        "sc-13"
+      ],
+      "id": "G333",
+      "ownerRole": "owner",
+      "poam": "g333",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Decide between running Harbor and Zot under recorded conditions without a validated module and rebuilding them (Zot with a pinned GOFIPS140 module version; Harbor component by component), then record the decision and, for a rebuild, the build evidence.",
+      "title": "Harbor and Zot have no build made with a validated module"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-12",
+        "cm-06",
+        "cm-07",
+        "au-02",
+        "au-12"
+      ],
+      "id": "G334",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy, no k3s in production and hosts in FIPS mode: test rules on the Phase 47 rendered configuration and production profile, and observations from the deployment evidence export.",
+      "title": "RKE2 has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "si-02",
+        "ia-02",
+        "ia-05",
+        "au-02",
+        "au-12",
+        "sc-08",
+        "sc-28"
+      ],
+      "id": "G335",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add keycloak statements with evidence rules for a version at or above the recorded minimum for CVE-2026-6856, password and OTP authenticators disabled, events shipped to the audit store, and its Postgres with TLS and encryption at rest: test rules on the realm as code and Phase 47 manifests, and observations from the deployment evidence export.",
+      "title": "Keycloak has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sa-10",
+        "sr-03",
+        "sr-11",
+        "si-07",
+        "sc-08",
+        "sc-23",
+        "au-02",
+        "au-12",
+        "cm-02",
+        "cm-07"
+      ],
+      "id": "G336",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add theia-cloud statements with evidence rules for the rebuild on a FIPS-capable UBI 9 JRE, signature, SBOM and provenance per image digest, the fixed oauth2-proxy defaults in the chart, the audit policy on Session and Workspace records, the pin to the assessed commit and no Debian or Alpine bases at Protected B.",
+      "title": "Theia Cloud has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-08",
+        "sc-23",
+        "ia-05",
+        "ia-02"
+      ],
+      "id": "G337",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add oauth2-proxy statements with evidence rules for the rebuild with the pinned Go FIPS module version, TLS verify on, secure cookies, a real client secret and token forwarding, as test rules on the Phase 47 build job and rendered manifests.",
+      "title": "oauth2-proxy has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G338",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the openbao statement for the documented key ceremony with a document evidence rule on the reviewed runbook record or attestation.",
+      "title": "The OpenBao key ceremony has no statement"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sr-05"
+      ],
+      "id": "G339",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add the hsm statement that export-controlled hardware is handled under your organization's Controlled Goods and ITAR procedures, recorded as your organization's responsibility with a document evidence rule.",
+      "title": "Handling of export-controlled HSM hardware has no statement"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-08",
+        "cm-07"
+      ],
+      "id": "G340",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add ingress statements with evidence rules for HAProxy linked against a validated OpenSSL provider on a FIPS host (observation of the image base and host FIPS mode) and no ingress-nginx (test rule on the rendered production profile).",
+      "title": "The ingress has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "si-07",
+        "ra-05",
+        "cm-08",
+        "ia-02",
+        "au-12"
+      ],
+      "id": "G341",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add image-registry statements with evidence rules for signature-enforced import and admission, scanning, SBOM storage, OIDC to Keycloak and the audit log at Harbor sites, and the same import rules at Zot sites: observations from the deployment evidence export and test rules on the Phase 47 configuration.",
+      "title": "The image registry has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-13",
+        "sc-12",
+        "cm-02"
+      ],
+      "id": "G342",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add workbench statements with evidence rules for the UBI 9 base, Node with OpenSSL 3 and the RHEL FIPS provider on a FIPS host, and signing and unwrapping through OpenBao or the HSM: test rules on the Phase 46 image build and P4 tests, and an observation of the FIPS mode Node reports.",
+      "title": "The workbench image has no statements for its section 10 conditions"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-12",
+        "sc-23"
+      ],
+      "id": "G343",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests: a CA issuer chained to the OpenBao PKI and no ACME issuer.",
+      "title": "cert-manager is not assessed"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "cm-06",
+        "ac-03",
+        "ia-05.02"
+      ],
+      "id": "G344",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Add hub statements with evidence rules for its Kubernetes deployment, several hubs per site each serving a set of projects, and session keys with a site-issued certificate: test rules on the hub and Phase 47 manifest tests and an observation of the hub workload settings.",
+      "title": "The sync hub is not re-assessed for the hosted deployment"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "sc-28"
+      ],
+      "id": "G345",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the storage class fit check, then add its statement for declared encryption at rest with a test rule on the install check.",
+      "title": "The site storage class is not assessed"
+    },
+    {
+      "closesInPhase": "48",
+      "controls": [
+        "au-09"
+      ],
+      "id": "G346",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Record the fit check for the log and metrics stores, a log store that is not AGPL (Loki is not chosen), then add their statements with test rules and deployment observations.",
+      "title": "The site log and metrics stores are not assessed"
     }
   ]
 }
