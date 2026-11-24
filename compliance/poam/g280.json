@@ -1,0 +1,16 @@
+{
+  "gap": "G280",
+  "id": "g280",
+  "controls": [
+    "itsp171-03.10.08"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary distribution and transmission lines need scoped physical protection evidence",
+  "remediation": "The facility engineering and network security owners identify assessed distribution and transmission lines on restricted drawings. Review controls over physical access at applicable rooms, enclosures and exposed access points. Verify a dated inspection and sampled owner approval or inherited facility assurance, and retain sanitized references in the package.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved line inventory and restricted drawing references, a redacted inspection, and disposition of any access-control finding"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G138",
+  "id": "g138",
+  "controls": [
+    "sc-39"
+  ],
+  "ownerRole": "shared",
+  "title": "Process execution domains need independent boundary evidence",
+  "remediation": "Deployment runtime operators and component maintainers inventory assessed processes and their execution domains, privileges and shared resources. Review the effective isolation settings at each applicable host, service, container or VM boundary. Verify that distinct synthetic principals cannot read each other’s test process data through reuse of shared resources. Record any dependency on inherited host protection.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect execution-domain maps, effective isolation configuration and approved separate-domain verification results"
+    }
+  ]
+}

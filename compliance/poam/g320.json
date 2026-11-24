@@ -1,0 +1,16 @@
+{
+  "gap": "G320",
+  "id": "g320",
+  "controls": [
+    "itsp171-03.17.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Supply chain weaknesses and security requirements need operational evidence",
+  "remediation": "The sponsor supply chain and service owners establish how weaknesses are identified and addressed and define enforceable security requirements that reduce risk and limit harm. Trace an assessed supply chain issue or authorized exercise through notification, triage, corrective action and follow-up. Verify a representative requirement or enforcement record in the assessed boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the weakness response procedure, approved enforceable requirements and a redacted issue or exercise record with corrective action and follow-up"
+    }
+  ]
+}

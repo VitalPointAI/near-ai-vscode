@@ -1,0 +1,26 @@
+# cert-manager v1.21.3 (chart deploy/charts/vendored/cert-manager-v1.21.3.tgz), our values. Every image comes from the site registry by digest:
+# the release descriptor (cert-manager.release.json) sets each component's image.registry, image.repository and image.digest from
+# deploy/bundle/images.lock.json at render time (D-12, D-20).
+#
+# No ACME issuer is created anywhere (D-16); the site's issuers come from our own charts. The controller still receives an ACME HTTP-01 solver
+# image argument (the chart always passes one); it is never used because no ACME issuer exists, and it points at the site registry, not quay.io.
+
+# The chart installs and keeps its CRDs, so a helm uninstall never deletes every Certificate on the site.
+crds:
+  enabled: true
+  keep: true
+
+# Used only to build the unused ACME solver image argument (the four running images are set by the descriptor).
+imageRegistry: "${site.registry}"
+
+image:
+  pullPolicy: IfNotPresent
+webhook:
+  image:
+    pullPolicy: IfNotPresent
+cainjector:
+  image:
+    pullPolicy: IfNotPresent
+startupapicheck:
+  image:
+    pullPolicy: IfNotPresent

@@ -1,0 +1,25 @@
+{
+  "gap": "G70",
+  "id": "g70",
+  "controls": [
+    "si-04",
+    "si-04.02",
+    "si-04.04",
+    "si-04.05",
+    "si-04.10",
+    "si-04.11",
+    "si-04.12",
+    "si-04.13",
+    "si-04.14",
+    "si-04.15"
+  ],
+  "ownerRole": "shared",
+  "title": "Monitoring and alerts need verified coverage, privacy scope and operating evidence",
+  "remediation": "The deployment monitoring and network owners approve monitored interfaces, ingress and egress anomaly criteria, alert recipients and collection boundary, including separately approved visibility for encrypted traffic. Use benign synthetic events to verify timely analysis, deployed event baselines and anomaly recognition, automated operator alerts and response. Where assessed, verify wireless protection and monitoring at the wired boundary. Record approved limits, configuration and observed results per mechanism.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect monitoring and encryption visibility decisions, deployed source and alert coverage, and timed anomaly and response evidence"
+    }
+  ]
+}

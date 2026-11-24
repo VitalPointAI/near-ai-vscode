@@ -1,0 +1,20 @@
+{
+  "gap": "G47",
+  "id": "g47",
+  "controls": [
+    "au-06",
+    "au-06.01",
+    "au-06.03",
+    "au-06.04",
+    "au-12.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Audit review, centralized analysis and time correlation need operating evidence",
+  "remediation": "Deployment monitoring and incident response owners approve review cadence, review triggers, reporting recipients, and the sources and clock tolerance for a system-wide trail. Component maintainers provide redacted event samples. Demonstrate central review, correlation across repositories and automated routing of a harmless test event to the approved response process. Record measured clock tolerance, owner review and follow-up, then assign and retest coverage gaps.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved review and source settings, a time-correlated multi-source record and a documented alert handoff and review"
+    }
+  ]
+}

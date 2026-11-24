@@ -1,0 +1,17 @@
+{
+  "gap": "G155",
+  "id": "g155",
+  "controls": [
+    "mp-03",
+    "mp-04"
+  ],
+  "ownerRole": "owner",
+  "title": "Media marking and secure storage need inventory and facility evidence",
+  "remediation": "The information owner and media custodian approve marking and controlled storage rules by media type and sensitivity. Verify sampled markings for distribution limits and handling caveats, applicable approved exemption boundaries, and secure physical storage and custody until authorized sanitization or destruction.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved marking and storage rules, a redacted media and storage sample, and dated custody or exemption records"
+    }
+  ]
+}

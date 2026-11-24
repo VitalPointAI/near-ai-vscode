@@ -1,0 +1,17 @@
+{
+  "gap": "G232",
+  "id": "g232",
+  "controls": [
+    "itsp171-03.01.10",
+    "itsp171-03.01.11"
+  ],
+  "ownerRole": "owner",
+  "title": "Device lock and session termination need distinct test evidence",
+  "remediation": "The sponsor endpoint and session service owners approve device lock timing or manual lock requirements, renewed authentication, screen concealment and automatic session disconnect triggers. Test lock and unlock on an assessed device and separately demonstrate session termination on a specified trigger. Record provider or platform inheritance for sponsor approval.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved endpoint and session policies and distinct demonstrations of display concealment, reauthentication and automatic session termination"
+    }
+  ]
+}

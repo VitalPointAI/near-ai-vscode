@@ -121,7 +121,7 @@ test('CI runs the hub job on Node 26.13.1 with pinned actions, after the relay j
   assert.ok(!ciJob(workflow, 'lint').includes('26.13.1'), 'the extension jobs stay on the default Node version');
   // The header names every required job, the hub included.
   const header = lines.slice(0, lines.findIndex((line) => line.startsWith('name:'))).join('\n');
-  assert.match(header, /secret-scan,\s+relay,\s+hub\)/, 'the ci.yml header lists hub among the required checks');
+  assert.match(header, /secret-scan,\s+relay,\s+hub[,)]/, 'the ci.yml header lists hub among the required checks');
 });
 
 const HAS_HUB = "if: steps.has_hub.outputs.present == 'true'";

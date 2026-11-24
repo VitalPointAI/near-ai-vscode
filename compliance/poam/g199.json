@@ -1,0 +1,17 @@
+{
+  "gap": "G199",
+  "id": "g199",
+  "controls": [
+    "cgp-11",
+    "cgp-12"
+  ],
+  "ownerRole": "owner",
+  "title": "Controlled Goods designated official authority needs verified appointment evidence",
+  "remediation": "The sponsor registration owner and privacy officer review the proposed designated official role, applicable qualification records, assessment and acceptance. Verify an approved appointment and its current review status with evidence references controlled by the responsible custodian. Record pending applicability or missing authority before making an assessment finding.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect dated appointment, assessment review and official acceptance references, with the approved scope and reviewer"
+    }
+  ]
+}

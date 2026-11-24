@@ -782,8 +782,11 @@ const PLACES_HEADING = '#### Where AI may run';
 const EXPORT_HEADING = '#### Export-controlled content';
 const TRUST_LINE_HEADING = '#### The trust line';
 const routingSection = sectionOf(SECURITY, LABELS_HEADING);
-const changelogUnreleased = CHANGELOG.split(/\n(?=## )/).find((section) => section.startsWith('## Unreleased')) ?? '';
-const changelogOrganization = sectionOf(changelogUnreleased.startsWith('\n') ? changelogUnreleased : `\n${changelogUnreleased}`, "### Your organization's rules");
+const changelogOrganizationHeading = "### Your organization's rules";
+const changelogOrganizationRelease = CHANGELOG.split(/\n(?=## )/).find((section) =>
+  /^## (?:Unreleased|\d+\.\d+\.\d+)\n/.test(section) && section.includes(`\n${changelogOrganizationHeading}\n`));
+assert.ok(changelogOrganizationRelease, 'organization rules are documented under Unreleased or a tagged version');
+const changelogOrganization = sectionOf(changelogOrganizationRelease, changelogOrganizationHeading);
 /** Prose only: inline code is an identifier for administrators (`accredited-device`), not a claim, so the clean-text counters read the words around it. */
 const prose = (text: string): string => flat(text).replace(/`[^`]*`/g, ' ');
 
@@ -1007,9 +1010,8 @@ test('Phase 41: README and CHANGELOG say the same in plain words', async () => {
     assert.ok(readme.includes(phrase), phrase);
   }
   assert.ok(readmePolicy.startsWith('- **Your policy.**'));
-  // CHANGELOG: the section sits under Unreleased, above Fixes.
-  const unreleased = changelogUnreleased;
-  assert.ok(unreleased.indexOf("### Your organization's rules") >= 0 && unreleased.indexOf("### Your organization's rules") < unreleased.indexOf('### Fixes'), 'above Fixes');
+  // The organization rules stay above Fixes when the entry moves into a release.
+  assert.ok(changelogOrganizationRelease.indexOf(changelogOrganizationHeading) < changelogOrganizationRelease.indexOf('### Fixes'), 'above Fixes');
   const entry = flat(changelogOrganization);
   for (const phrase of [
     'Protected B sent to a server your policy names as local now needs a TLS pin and a Protected B authorization naming that server.',

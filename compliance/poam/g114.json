@@ -1,0 +1,16 @@
+{
+  "gap": "G114",
+  "id": "g114",
+  "controls": [
+    "sa-11"
+  ],
+  "ownerRole": "shared",
+  "title": "Developer control testing and verifiable flaw correction need reviewed release evidence",
+  "remediation": "The sponsor assessment lead and developer assurance lead approve the post-design assessment plan, test methods, scope and frequency for security and privacy controls. Retain evidence of test execution and the reviewed result. Trace a flaw through triage, correction and exact-version retest with acceptance or disposition of unresolved findings. Use G6 for scoped static analysis.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved assessment plan, a versioned execution report, and a finding traced through fix and retest"
+    }
+  ]
+}

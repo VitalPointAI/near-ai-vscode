@@ -1,0 +1,25 @@
+{
+  "gap": "G16",
+  "id": "g16",
+  "controls": [
+    "ac-16.02",
+    "ac-16.05"
+  ],
+  "ownerRole": "shared",
+  "title": "Release evidence for authorized label changes and output markings",
+  "remediation": "Extension policy and label maintainers verify signed attribute changes, including absent, revoked or wrong-purpose authority. The deployment information owner lists each in-scope output and its marking rule. Collect the signed test configuration, allow and refusal records, and labelled output samples. Implement and retest missing markings or document an approved scope exclusion.",
+  "milestones": [
+    {
+      "phase": "41",
+      "title": "Map the signed authorization and revocation rules to exact label-change tests and decision records"
+    },
+    {
+      "phase": "70",
+      "title": "Verify required markings in the chat and each in-scope export format with captured outputs"
+    },
+    {
+      "phase": "44.1",
+      "title": "Review deployment marking rules and reconcile evidence for every assessed output"
+    }
+  ]
+}

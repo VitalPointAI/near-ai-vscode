@@ -1,0 +1,17 @@
+{
+  "gap": "G24",
+  "id": "g24",
+  "controls": [
+    "ia-05.01",
+    "ia-06"
+  ],
+  "ownerRole": "shared",
+  "title": "Interactive authentication needs password and feedback evidence",
+  "remediation": "The deployment identity owner inventories each interactive sign-in and recovery surface and identifies the operator responsible for it. For each password-based surface, collect provider or component evidence for the password blocklist, protected transport, approved salted storage where passwords are stored, recovery reset and approved password selection rules. For every in-scope authentication surface, verify that input and responses obscure sensitive authentication details. Retain redacted screenshots and permitted and denied test results. Review password-specific applicability separately from feedback protection.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the sign-in and recovery inventory and obtain operator policy, masked input and sanitized feedback evidence for each applicable surface"
+    }
+  ]
+}

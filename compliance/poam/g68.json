@@ -1,0 +1,17 @@
+{
+  "gap": "G68",
+  "id": "g68",
+  "controls": [
+    "si-02",
+    "si-02.02"
+  ],
+  "ownerRole": "shared",
+  "title": "Automated installed-update inventory and patch closure need deployment evidence",
+  "remediation": "Release maintainers and deployment patch operators map scoped supported component and firmware versions to security updates. Validate applicable fixes in a representative test environment and prove an automated deployment inventory distinguishes applied, overdue and excepted updates. Keep release dependency observations and approved deployment exceptions with their dated remediation result.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect component update inventory, automated results showing applied and outstanding updates, and a sampled update and retest"
+    }
+  ]
+}

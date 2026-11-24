@@ -1,0 +1,16 @@
+{
+  "gap": "G307",
+  "id": "g307",
+  "controls": [
+    "itsp171-03.14.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Security advisory receipt and dissemination need operational evidence",
+  "remediation": "The sponsor vulnerability and incident communications leads define trusted external sources and internal recipients and roles. Sample receipt of an external alert or directive, its assessment and timely preparation and dissemination of internal advice when needed. Cite assessed service boundaries and reviewed subscription or routing settings.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect source subscriptions, a sanitized incoming advisory and a dated internal advisory or triage disposition with routing evidence"
+    }
+  ]
+}

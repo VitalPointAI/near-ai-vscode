@@ -1,0 +1,19 @@
+{
+  "gap": "G64",
+  "id": "g64",
+  "controls": [
+    "ac-18",
+    "ac-18.01",
+    "ac-18.03",
+    "ac-18.04"
+  ],
+  "ownerRole": "shared",
+  "title": "Wireless access and configuration restrictions need deployment evidence",
+  "remediation": "The sponsor authorizes each permitted wireless access type and appoints the wireless network and endpoint administrators. Collect the approved inventory and configuration requirements, effective encryption and required user or device authentication settings, pre-issuance evidence for disabled unused radios and the authorized wireless configurator roles. Exercise admission and refusal for the approved boundary and verify that unauthorized roles cannot change wireless settings.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect authorized wireless scope, deployed settings, disabled-radio and configuration-role evidence and permitted and refused connection tests"
+    }
+  ]
+}

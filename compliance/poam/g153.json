@@ -1,0 +1,16 @@
+{
+  "gap": "G153",
+  "id": "g153",
+  "controls": [
+    "mp-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Media protection policy and procedures need approved operating evidence",
+  "remediation": "The sponsor media protection official approves assessed media scope, accountable custodian roles and procedures for access, marking, storage, movement, use and disposition. Record approval, distribution, review triggers and a sampled operating action that followed the procedures.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and procedures, named owners, distribution and review records, and one traceable operating action"
+    }
+  ]
+}

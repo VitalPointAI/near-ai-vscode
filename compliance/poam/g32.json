@@ -1,0 +1,18 @@
+{
+  "gap": "G32",
+  "id": "g32",
+  "controls": [
+    "cp-03",
+    "cp-04",
+    "cp-04.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Contingency role training and coordinated exercises need dated records",
+  "remediation": "The deployment continuity exercise lead identifies the required trainees and role-specific training schedule, reviews training when roles or systems change, and coordinates a test with the owners of related plans. Record the dated training and exercise results, approved scenarios, corrective actions and retests. Use the hub restore drill as a component input when the hub is in scope.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect training completion, coordinated exercise records and closure evidence for corrective actions"
+    }
+  ]
+}

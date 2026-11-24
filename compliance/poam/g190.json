@@ -1,0 +1,18 @@
+{
+  "gap": "G190",
+  "id": "g190",
+  "controls": [
+    "pm-20",
+    "pm-20.01",
+    "pm-26"
+  ],
+  "ownerRole": "owner",
+  "title": "Public privacy information and the complaints route need operating evidence",
+  "remediation": "The sponsor privacy communications and complaints leads maintain public resource and notice inventory for applicable digital services, approve current notices and accessible contact paths, and test a harmless enquiry through intake, tracking and response with restricted case records.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect dated public notices and resource links, approval and review records, and a redacted request-to-response receipt"
+    }
+  ]
+}

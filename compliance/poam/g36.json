@@ -1,0 +1,23 @@
+{
+  "gap": "G36",
+  "id": "g36",
+  "controls": [
+    "cp-10",
+    "cp-10.02",
+    "cp-10.04",
+    "cp-10.06"
+  ],
+  "ownerRole": "shared",
+  "title": "Transaction and component recovery need scoped drills and protected inputs",
+  "remediation": "Deployment recovery operators and component maintainers identify transaction-based stores, critical components and protected recovery tools. Exercise rollback or journal recovery on each applicable transaction store and restore components from approved integrity-checked baselines. Measure time to known operational state, verify protection and access limits on recovery components, and record sponsor decisions for inapplicable objectives.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Capture applicable transaction repair, timed reconstitution from known baselines, and reviewed recovery tool access"
+    },
+    {
+      "phase": "84",
+      "title": "Verify relay recovery from its approved operator runbook when it is in scope"
+    }
+  ]
+}

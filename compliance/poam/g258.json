@@ -1,0 +1,16 @@
+{
+  "gap": "G258",
+  "id": "g258",
+  "controls": [
+    "itsp171-03.06.02"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 incident tracking, reporting deadlines and support need operating evidence",
+  "remediation": "The sponsor response desk owner identifies approved reporting windows, recipient authorities and support contacts for assessed systems. Sample a redacted incident or an approved exercise through recording, timed notification and response assistance. Review that support guidance is available to affected users. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the assessed reporting route and deadlines with a redacted timeline, notification receipt and support evidence"
+    }
+  ]
+}

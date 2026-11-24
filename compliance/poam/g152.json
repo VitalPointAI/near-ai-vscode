@@ -1,0 +1,16 @@
+{
+  "gap": "G152",
+  "id": "g152",
+  "controls": [
+    "ma-06"
+  ],
+  "ownerRole": "owner",
+  "title": "Maintenance support and spares need verified response commitments",
+  "remediation": "The deployment service owner identifies critical components, approved support and replacement times, designated providers and spare locations. Reconcile a dated support agreement and spare inventory with the requirements. Sample a completed event or approved exercise and verify elapsed time and escalation for any miss.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect critical component timing requirements, current support and spare records, and a dated response result and disposition"
+    }
+  ]
+}

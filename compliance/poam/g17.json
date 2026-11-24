@@ -1,0 +1,30 @@
+{
+  "gap": "G17",
+  "id": "g17",
+  "controls": [
+    "ac-05",
+    "ac-06.01",
+    "ac-06.02",
+    "ac-06.05",
+    "ac-06.07",
+    "ac-06.09",
+    "ac-06.10"
+  ],
+  "ownerRole": "shared",
+  "title": "Operational separation of duties and privileges need evidence",
+  "remediation": "Staff and gate maintainers demonstrate that role restrictions apply during approval, routine work and privileged actions, including a denial when a person holds incompatible roles. The deployment identity and security owners approve the role matrix and sample privilege reviews, separate privileged accounts, and the allowed and denied action audit records.",
+  "milestones": [
+    {
+      "phase": "33.1",
+      "title": "Demonstrate the signed role and approval transitions including the dual-role self-approval refusal"
+    },
+    {
+      "phase": "71",
+      "title": "Verify scope, assignment and revocation of delegated actions where deployed"
+    },
+    {
+      "phase": "44.1",
+      "title": "Reconcile the approved privilege matrix with tested restrictions, review results and audit records"
+    }
+  ]
+}

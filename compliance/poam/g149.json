@@ -1,0 +1,16 @@
+{
+  "gap": "G149",
+  "id": "g149",
+  "controls": [
+    "ma-04.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Non-local service needs comparable safeguards and controlled reconnection evidence",
+  "remediation": "The deployment system security owner and service custodian compare the non-local maintenance environment and tools with the assessed system safeguards. Verify a sampled component was removed and sanitized before service, inspected and sanitized for potentially malicious software afterward, and checked before reconnecting under approved custody and release rules.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the reviewed safeguards comparison, removal and pre-service sanitization records, and post-service inspection, sanitization and reconnection approval"
+    }
+  ]
+}

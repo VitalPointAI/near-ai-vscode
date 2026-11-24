@@ -1,0 +1,17 @@
+{
+  "gap": "G21",
+  "id": "g21",
+  "controls": [
+    "ia-04",
+    "ia-04.04"
+  ],
+  "ownerRole": "shared",
+  "title": "Identifier assignment and user status need deployment evidence",
+  "remediation": "The deployment identity owner approves how individual, group, role, service and device identifiers are authorized, assigned and protected from reuse, and defines which user statuses must be recorded. Component maintainers trace these rules through the relevant staff or device workflows in the assessed release. Collect the identifier policy, status rules and redacted assignment, change and offboarding records. Document inheritance or missing controls for each applicable component.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Verify the authorized assignment and non-reuse rules, user status handling, redacted lifecycle records and exact-release evidence for each applicable component"
+    }
+  ]
+}

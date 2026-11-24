@@ -1,0 +1,16 @@
+{
+  "gap": "G252",
+  "id": "g252",
+  "controls": [
+    "itsp171-03.05.02"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 device identity and authentication before connection need evidence",
+  "remediation": "The sponsor endpoint identity owner specifies applicable devices, unique identifiers and approved enrollment and authentication rules. Review effective settings and verify that an authorized synthetic device can connect while an unrecognized or deauthorized synthetic device is refused before an assessed session is established. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect assessed device scope, enrollment settings and redacted connection acceptance and refusal records"
+    }
+  ]
+}

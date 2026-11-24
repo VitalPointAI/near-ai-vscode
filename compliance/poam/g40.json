@@ -1,0 +1,17 @@
+{
+  "gap": "G40",
+  "id": "g40",
+  "controls": [
+    "ac-02.05",
+    "ac-12"
+  ],
+  "ownerRole": "shared",
+  "title": "Inactivity logout and logical session termination need evidence",
+  "remediation": "Deployment identity and session operators identify in-scope local, browser and remote user sessions. The sponsor approves when users must log out and the conditions for automatic session termination. Collect the approved user procedure and deployed settings. Exercise the configured triggers and verify that the old session cannot continue or regain protected access. Record any approved work allowed to continue after termination and its access boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the inactivity logout procedure, effective session configuration and redacted termination and expired-session denial results"
+    }
+  ]
+}

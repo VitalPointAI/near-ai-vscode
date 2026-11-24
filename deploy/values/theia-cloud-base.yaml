@@ -1,0 +1,9 @@
+# Theia Cloud base 1.2.0 (chart deploy/charts/vendored/theia-cloud-base-1.2.0.tgz). The chart renders no image.
+#
+# D-16: no ACME issuer and not the chart's own self-signing ClusterIssuer; the site's issuers come from our PKI releases (47-13). This leaves
+# two unconditional templates of the chart: the CA-type ClusterIssuer theia-cloud-selfsigned-issuer and the Certificate theia-cloud-ca-certificate
+# that would feed it; with issuerca off nothing issues that Certificate, so 47-13/47-15 point the Theia Cloud issuers at the site PKI.
+issuerprod:
+  enable: false
+issuerca:
+  enable: false

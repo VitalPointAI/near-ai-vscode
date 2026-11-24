@@ -195,6 +195,8 @@ test('the shipped signer list is empty and validates, so nothing is accepted unt
 
 test('the risk acceptance schema accepts a signed acceptance and refuses one without a named person', () => {
   assert.deepEqual(validateOurs(goodEnvelope(), 'risk-acceptance'), { ok: true, errors: [] });
+  const threeDigitGap = signEnvelope(LISTED, RISK_ACCEPTANCE_PURPOSE, payload({ gap: 'G100' }), ISSUED);
+  assert.deepEqual(validateOurs(threeDigitGap, 'risk-acceptance'), { ok: true, errors: [] });
   const { namedPerson: _drop, ...withoutPerson } = payload();
   assert.equal(validateOurs({ ...goodEnvelope(), payload: withoutPerson }, 'risk-acceptance').ok, false);
 });

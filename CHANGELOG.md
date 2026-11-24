@@ -1,6 +1,53 @@
 # Changelog
 
-## Unreleased
+## 0.4.37
+
+This is the first release shipped as a Sterling container image instead of a Marketplace
+extension. It also adds an editable Security Assessment and Authorization (SA&A) package and
+makes the compliance dashboard stricter about what it shows as met.
+
+### Released as a container image
+
+- **One versioned image per release.** Each release publishes the Sterling workbench image to
+  the GitHub Container Registry after the owner's approval. The GitHub release records the
+  exact image digest beside the extension package, its checksum and the assessor package. The
+  extension is no longer published to the Visual Studio Marketplace.
+- **The Sterling workbench in your browser.** The image opens the Sterling Get Started page,
+  with the Canadian Defence Edition, read-only Team Studio samples, the bundled documentation,
+  and a Compliance view that shows control states only from an evidence bundle whose hashes
+  were checked for the same release.
+- **Local preview only, for now.** The image has no sign-in of its own. It refuses to start
+  until you confirm you publish it on `127.0.0.1` only. Sign-in for many people at your own
+  sites comes in later releases.
+
+### SA&A package on demand
+
+- **Generate an SA&A package.** Choose a published release in **NEAR AI: Generate SA&A
+  Package…**. The ZIP includes an editable sponsor Word draft, a control and evidence workbook,
+  verified release records, and administrative forms.
+- **Follow the evidence for each finding.** OSCAL keeps partially met controls open and links
+  each finding to its evidence in the bundle.
+- **See who approved the release.** The export includes a checksummed receipt of the
+  publication approval when GitHub confirms it for the selected release, for container
+  releases and for earlier Marketplace releases.
+
+### Compliance and security
+
+- **No control shows as met while part of the system says nothing about it.** A control is
+  now Partly met until every component in scope has a statement or a reviewed exclusion.
+- **Release integrity evidence works again.** The release check follows each release tag to
+  its commit and checks the published checksum against GitHub's recorded asset digests.
+- **Nothing new is used without a compliance check.** Every dependency, base image, workflow
+  action and bundled library now needs a reviewed entry before it can be used.
+- **Two pages or replies can no longer freeze the editor.** The reader for fetched web pages
+  and the usage line under chat replies now take linear time on any input.
+
+## 0.4.36
+
+Your organization can now distribute signed rules and see where each answer ran. This release
+also adds an operator-ready sync hub, tighter routing and privacy controls, and accreditation
+evidence for assessors. Shared staff projects remain a preview. Live editing through the hub and
+the guided Get Started workflows will ship in later feature releases.
 
 ### Your organization's rules
 

@@ -1,0 +1,16 @@
+{
+  "gap": "G15",
+  "id": "g15",
+  "controls": [
+    "si-03"
+  ],
+  "ownerRole": "shared",
+  "title": "Deployment malware protection needs implementation or inheritance evidence",
+  "remediation": "The deployment sponsor and endpoint operator identify the approved malware protection provider for each in-scope workstation and hosted component. Obtain the policy and current coverage record, then record the result of an approved benign detection exercise. If a component lacks coverage, assign its deployment owner to implement the missing protection and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Reconcile the assessed component inventory with approved protection coverage, configuration and detection evidence"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G85",
+  "id": "g85",
+  "controls": [
+    "ir-04.08"
+  ],
+  "ownerRole": "owner",
+  "title": "External incident correlation and information sharing need authorized evidence",
+  "remediation": "The sponsor response lead, privacy authority and approved external partners agree the incident information categories, purpose, recipient, handling and coordination procedure. Demonstrate an authorized sanitized exchange and correlation in a drill. Keep an approved agreement or equivalent record, its scope and evidence reference.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved partner scope and sharing terms, plus a sanitized exchange and correlation exercise record"
+    }
+  ]
+}

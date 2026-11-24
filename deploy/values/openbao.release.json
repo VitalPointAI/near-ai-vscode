@@ -1,0 +1,10 @@
+{
+  "chart": "openbao",
+  "namespace": "sterling-openbao",
+  "order": 40,
+  "values": ["deploy/values/openbao.yaml"],
+  "images": [
+    { "lock": "sterling/openbao", "set": { "server.image.registry": "registry", "server.image.repository": "repository", "server.image.tag": "tagAtDigest" } }
+  ],
+  "note": "OpenBao 2.7.3 on our UBI 9 rebuild that carries the kms-pkcs11 plugin (D-38); renders with the reserved unpublished digest until it is published."
+}

@@ -1,0 +1,17 @@
+{
+  "gap": "G120",
+  "id": "g120",
+  "controls": [
+    "sc-05",
+    "sc-05.02"
+  ],
+  "ownerRole": "shared",
+  "title": "Availability protections and capacity limits need deployment evidence",
+  "remediation": "Service operators and maintainers identify applicable denial-of-service scenarios and agree on capacity, bandwidth, redundancy, upstream safeguards and recovery thresholds. From a controlled staging load or resilience exercise, retain configured limits, service and alert timing, failover or recovery observations, and treatment for uncovered paths.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved availability thresholds and a measured staging load and recovery record"
+    }
+  ]
+}

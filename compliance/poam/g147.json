@@ -1,0 +1,16 @@
+{
+  "gap": "G147",
+  "id": "g147",
+  "controls": [
+    "ma-03.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Maintenance equipment removal needs verified information and custody safeguards",
+  "remediation": "The maintenance facility authority and equipment custodian approve removal rules for assessed equipment. Verify a sampled exit decision using evidence that protected information is absent, the equipment was sanitized or destroyed, or the equipment was retained. If the approved process allows an exception, retain the expressly authorized exemption and custody record.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the removal policy, a redacted equipment check and a dated release, hold or exception decision with custody evidence"
+    }
+  ]
+}

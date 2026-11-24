@@ -1,0 +1,25 @@
+{
+  "gap": "G41",
+  "id": "g41",
+  "controls": [
+    "ac-17",
+    "ac-17.01",
+    "ac-17.02",
+    "ac-17.03",
+    "ac-17.04",
+    "ac-17.400"
+  ],
+  "ownerRole": "shared",
+  "title": "Remote access methods and privileged access need deployment evidence",
+  "remediation": "The sponsor authorizes each applicable remote access method and documents its conditions and privileged-use rationale in the system security plan. Network and service operators record managed entry points, monitoring and control settings, session cryptographic configuration and approved dedicated management consoles. Collect redacted tests for allowed access, denied unapproved paths and denied privileged access from ordinary endpoints, plus trustworthy records of authorized remote privileged commands and access to security-relevant information.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the remote-access inventory and collect managed path, session protection, monitoring and privileged-operation evidence"
+    },
+    {
+      "phase": "84",
+      "title": "If the messaging relay is deployed, use its proxy configuration and operator records alongside G3 as scoped inputs to remote-access verification"
+    }
+  ]
+}

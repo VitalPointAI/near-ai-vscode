@@ -1,0 +1,12 @@
+{
+  "chart": "cert-manager",
+  "namespace": "cert-manager",
+  "order": 30,
+  "values": ["deploy/values/cert-manager.yaml"],
+  "images": [
+    { "lock": "quay.io/jetstack/cert-manager-controller", "set": { "image.registry": "registry", "image.repository": "repository", "image.digest": "digest" } },
+    { "lock": "quay.io/jetstack/cert-manager-webhook", "set": { "webhook.image.registry": "registry", "webhook.image.repository": "repository", "webhook.image.digest": "digest" } },
+    { "lock": "quay.io/jetstack/cert-manager-cainjector", "set": { "cainjector.image.registry": "registry", "cainjector.image.repository": "repository", "cainjector.image.digest": "digest" } },
+    { "lock": "quay.io/jetstack/cert-manager-startupapicheck", "set": { "startupapicheck.image.registry": "registry", "startupapicheck.image.repository": "repository", "startupapicheck.image.digest": "digest" } }
+  ]
+}

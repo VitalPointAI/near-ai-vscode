@@ -1,0 +1,16 @@
+{
+  "gap": "G137",
+  "id": "g137",
+  "controls": [
+    "sc-29"
+  ],
+  "ownerRole": "owner",
+  "title": "Assessed technology diversity needs architecture rationale and operating evidence",
+  "remediation": "The sponsor architecture owner identifies components for which technology diversity is required and documents the intended risk reduction and correlated dependencies. Compare the approved design to installed component, platform and provider inventories. Use an approved resilience exercise or disposition for gaps in the declared diversity boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved diversity criteria, assessed technology inventory and a reviewed dependency or resilience result"
+    }
+  ]
+}

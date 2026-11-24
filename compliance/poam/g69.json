@@ -1,0 +1,16 @@
+{
+  "gap": "G69",
+  "id": "g69",
+  "controls": [
+    "si-03.04"
+  ],
+  "ownerRole": "owner",
+  "title": "Malware protection updates need privileged authorization and activity evidence",
+  "remediation": "Deployment endpoint and hosted security owners identify each malware protection update mechanism and its privileged approving role. Verify a permitted update and denial for an ordinary role or unauthorized configuration change. Capture redacted policy and audit receipts from each assessed protection mechanism and track uncovered assets through G15.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved update authority and observed privileged update and denied unprivileged change evidence"
+    }
+  ]
+}

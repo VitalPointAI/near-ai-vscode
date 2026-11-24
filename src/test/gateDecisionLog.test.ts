@@ -1,7 +1,7 @@
 // Decision log tests (GATE-07, D-21): order and sequence, rotation, redaction, failures that never block, and where the files may be. Real files in temp
 // folders; nothing touches the real global storage. Token-shaped strings are built at run time, never written.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -119,6 +119,23 @@ test('at most MAX_ROTATED_FILES rotated files are kept, the newest at .1 and the
 test('the default rotation size is 5 MiB and the rotated count is 4', () => {
   assert.equal(MAX_DECISION_LOG_BYTES, 5 * 1024 * 1024);
   assert.equal(MAX_ROTATED_FILES, 4);
+});
+
+test('gate decision log creation and rotation grant no group or other access on POSIX', {
+  skip: process.platform === 'win32' ? 'POSIX permission bits do not model Windows ACLs' : false
+}, async () => {
+  const lineBytes = Buffer.byteLength(JSON.stringify(record(1)), 'utf8') + 4;
+  await withLog(async ({ dir, key, log, failures }) => {
+    await log.append(record(1));
+    await log.append(record(2));
+    const modes = await Promise.all([
+      stat(dir), stat(path.join(dir, `${key}.jsonl`)), stat(path.join(dir, `${key}.1.jsonl`))
+    ]);
+    assert.ok(modes[0].isDirectory());
+    assert.ok(modes[1].isFile() && modes[2].isFile());
+    assert.deepEqual(modes.map(({ mode }) => mode & 0o077), [0, 0, 0]);
+    assert.deepEqual(failures, []);
+  }, Math.floor(lineBytes * 1.5));
 });
 
 test('a token-shaped string in a record is written redacted', async () => {

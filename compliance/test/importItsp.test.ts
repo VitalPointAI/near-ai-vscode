@@ -31,6 +31,31 @@ test('imports the English fixture family into a labelled OSCAL control', async (
   assert.equal(control.parts.find((part: any) => part.name === 'guidance').prose, 'Discuss access management.');
 });
 
+test('extracts inline statements after bold control and activity labels', async () => {
+  const family = 'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xa-en.html';
+  const html = pages[family]
+    .replace('<h3>Control</h3>', '<p><strong>Control</strong> appears in an ordinary paragraph.</p><p><strong>Activity/Control:</strong> Use approved accounts.</p>')
+    .replace('<h3>Activity</h3>', '<p><strong>Activity:</strong> Verify account records.</p>');
+  const result: any = await importSource({ offlinePages: { ...pages, [family]: html } });
+  const controls = result.catalog.catalog.groups[0].controls;
+  assert.equal(controls[0].class, 'control');
+  assert.equal(controls[0].parts[0].prose, 'Use approved accounts.\nThe organization assigns {{ insert: xa-01_param_1 }}.\nThe organization reviews accounts.');
+  assert.equal(controls[1].class, 'activity');
+  assert.equal(controls[1].parts[0].prose, 'Verify account records.\nThe organization records Canadian activity.');
+});
+
+test('recognizes standalone bold statements and inline French plural labels', async () => {
+  const family = 'https://www.cyber.gc.ca/fr/orientation/gestion-risques-lies-cybersecurite-risques-datteinte-vie-privee/famille-xa-fr.html';
+  const html = pages[family].replaceAll('<h3>Contrôle</h3>', '<p><strong>Contrôle:</strong></p>')
+    .replace('<p><strong>Contrôle:</strong></p><ol><li>L’organisation', '<p><strong>Contrôles&nbsp;:</strong>Utiliser les comptes approuvés.</p><ol><li>L’organisation');
+  const en = 'https://www.cyber.gc.ca/en/guidance/cyber-security-privacy-risk-management/family-xa-en.html';
+  const result: any = await importSource({ offlinePages: { ...pages, [family]: html, [en]: pages[en].replace('<h3>Control</h3>', '<p><strong>Control:</strong></p>') }, lang: 'both' });
+  const { parts } = result.catalog.catalog.groups[0].controls[0];
+  assert.match(parts[0].prose, /The organization assigns/);
+  assert.equal(parts.find((part: any) => part.name === 'statement' && part.props?.some((prop: any) => prop.value === 'fr')).prose,
+    'Utiliser les comptes approuvés.\nL’organisation attribue les propriétaires de compte.');
+});
+
 test('the imported catalogue is an OSCAL 1.2.1 document with source provenance', async () => {
   const result: any = await imported();
   assert.deepEqual(validateOscal(result.catalog, 'catalog', { ours: true }), { ok: true, errors: [] });

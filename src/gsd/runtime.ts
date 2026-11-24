@@ -160,7 +160,8 @@ export async function gsdShellEnv(home: string, storageDir: string, hasSystemNod
   const binDir = path.join(storageDir, 'bin');
   await mkdir(binDir, { recursive: true });
   const shim = path.join(binDir, 'node');
-  await writeFile(shim, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${electronNode.replace(/"/g, '\\"')}" "$@"\n`, { mode: 0o755 });
+  // Single quotes: the shell expands nothing inside them ($, backticks, backslashes), so only a quote itself needs escaping.
+  await writeFile(shim, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec '${electronNode.replace(/'/g, `'\\''`)}' "$@"\n`, { mode: 0o755 });
   env.PATH = `${binDir}${path.delimiter}${process.env.PATH ?? ''}`;
   return env;
 }

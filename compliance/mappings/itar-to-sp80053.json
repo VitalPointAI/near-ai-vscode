@@ -3,8 +3,8 @@
     "uuid": "00000000-0000-4000-8000-000000000014",
     "metadata": {"title": "ITAR and EAR requirements to NIST SP 800-53", "version": "0.1.0", "last-modified": "2026-11-21T00:00:00Z", "oscal-version": "1.2.1"},
     "provenance": {"method": "human", "matching-rationale": "functional", "status": "complete", "mapping-description": "Our product-oriented reading, not legal advice."},
-    "mappings": [{
-      "uuid": "00000000-0000-4000-8000-000000000140", "source-resource": {"type": "catalog", "href": "../catalogs/itar/catalog.json"}, "target-resource": {"type": "catalog", "href": "../catalogs/nist/catalog.json"},
+    "mappings": {
+      "uuid": "00000000-0000-4000-8000-000000000140", "source-resource": {"type": "catalog", "href": "../catalogs/itar/catalog.json"}, "target-resource": {"type": "catalog", "href": "../catalogs/nist-800-53-r5/catalog-min.json"},
       "maps": [
         {"uuid":"00000000-0000-4000-8000-000000000201","relationship":"intersects-with","sources":[{"type":"control","id-ref":"itar-120.50"}],"targets":[{"type":"control","id-ref":"ac-3"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"}]},
         {"uuid":"00000000-0000-4000-8000-000000000202","relationship":"intersects-with","sources":[{"type":"control","id-ref":"itar-120.54-a5"}],"targets":[{"type":"control","id-ref":"sc-8"},{"type":"control","id-ref":"sc-13"},{"type":"control","id-ref":"sc-28"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"},{"name":"unsettled","ns":"urn:near-ai-vscode:compliance","value":"tee-question"}]},
@@ -22,6 +22,6 @@
         {"uuid":"00000000-0000-4000-8000-000000000214","relationship":"intersects-with","sources":[{"type":"control","id-ref":"ear-734.15"}],"targets":[{"type":"control","id-ref":"ac-4"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"}]},
         {"uuid":"00000000-0000-4000-8000-000000000215","relationship":"intersects-with","sources":[{"type":"control","id-ref":"ear-734.18-a5"}],"targets":[{"type":"control","id-ref":"sc-8"}],"props":[{"name":"ours","ns":"urn:near-ai-vscode:compliance","value":"true"}]}
       ]
-    }]
+    }
   }
 }

@@ -1,0 +1,17 @@
+{
+  "gap": "G162",
+  "id": "g162",
+  "controls": [
+    "pe-03",
+    "pe-03.400"
+  ],
+  "ownerRole": "owner",
+  "title": "Entry enforcement and physical security inspections need site evidence",
+  "remediation": "The sponsor site security manager designates controlled entry and public boundaries, visitor escort conditions, access device inventories and lost or compromised credential response. Sample authorized access and logs, credential replacement or removal, and a qualified site inspection with authorized follow-up, including changed inspection cadence when required. Record inherited site controls for sponsor validation.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved entry plan, redacted access and device lifecycle samples, and an inspection report with corrective action tracking"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gap": "G111",
+  "id": "g111",
+  "controls": [
+    "sa-09.08"
+  ],
+  "ownerRole": "shared",
+  "title": "In-scope processing and storage locations need verified Canadian boundary evidence",
+  "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect reviewed data flows, provider and region evidence, deployment location settings, and a dated restriction verification"
+    }
+  ]
+}

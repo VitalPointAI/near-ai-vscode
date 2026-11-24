@@ -1,0 +1,16 @@
+{
+  "gap": "G140",
+  "id": "g140",
+  "controls": [
+    "at-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Awareness and training policy and procedures need approved operating records",
+  "remediation": "The sponsor training policy official approves the awareness and training scope, procedures, coordination, and accountable security and privacy roles. Verify distribution to required audiences and review at the approved schedule and after applicable changes. Record a dated policy or procedure revision and the resulting operating action.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved policy and procedures, a named coordinator, distribution and review records, and a sampled corrective action"
+    }
+  ]
+}

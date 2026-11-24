@@ -31,6 +31,7 @@ import { registerResearchVerifiers } from './services/researchProfileCommand';
 import { registerStaffScenario } from './services/staffScenario';
 import { registerStaffSetup } from './services/staffSetupCommand';
 import { registerUsageExport } from './services/usageExport';
+import { registerSaaExport } from './services/saaExportCommand';
 import { closeAllConversations } from './services/agentSession';
 import { registerSecurityScanning } from './services/securityScan';
 import { registerWebSearchSetup } from './services/webSearchSetup';
@@ -148,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerTeamLive(context, sidebar);
   registerStaffRoom(context, gate, sidebar);
   registerUsageExport(context);
+  registerSaaExport(context);
   registerSecurityScanning(context);
   registerWebSearchSetup(context);
   registerSpendTracking(context, auth);
@@ -157,7 +159,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerModelComparison(context, auth, gate);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('nearAi.setup', () => openOnboarding(context, {
+    vscode.commands.registerCommand('nearAi.setup', () => void openOnboarding(context, {
       openApiKeyPortal: () => openApiKeyPortal(),
       configureApiKey: () => configureApiKey(context, auth, sidebar),
       showProgress: () => showStatus(auth)

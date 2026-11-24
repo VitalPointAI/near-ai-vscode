@@ -24,8 +24,9 @@ Work here ships as 0.4.x releases: a `hotfix/0.4.N` branch from `main`, then the
 | 0.4.3 | 2026-10-28 | Approval mode picker in the chat bar |
 | 0.4.4 | 2026-10-29 | Conversations, steering, accurate spend, Agent Activity overview, Tools directory |
 | 0.4.5 | 2026-10-29 | Team Studio; stalled replies retried and reported; reporting token in Settings |
+| 0.4.36 | Preparing | Organization policy, routing and privacy fixes, sync hub for operators, and accreditation evidence |
 
-Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2 and 33.1) when 0.4.x work is planned with GSD.
+Next phases are added here (Phases 26 to 44 so far, with inserted decimal phases 32.1, 32.2, 33.1 and 44.1) when 0.4.x work is planned with GSD.
 
 ### Patch line (updated 2026-11-15)
 
@@ -288,12 +289,14 @@ Plans:
 - [ ] 33-14-PLAN.md: Wave 6. Two- and three-person scenarios over a real hub, leak test with presence, CI step (gate path)
 - [ ] 33-15-PLAN.md: Wave 6. README, SECURITY.md, operator guide and CHANGELOG with the word-for-word docs test (gate path)
 - [ ] 33-16-PLAN.md: Wave 7. Close-out: tight baselines, every check once, verification record, integration PR after the owner's gate approval
-- [ ] 33-17-PLAN.md: Wave 8. Drop A release PR `release/0.4.36` prepared green; the owner approves merge, tag and publish
+- [ ] 33-17-PLAN.md: Wave 8. Prepare the next available 0.4.x release for Drop A after Phase 33 merges. The owner approves merge, tag and publish.
 - [ ] 33-18-PLAN.md: Wave 1. Wire pieces: feature registry, signed session features, server pin words
 - [ ] 33-19-PLAN.md: Wave 3. Editor binding in VS Code: adapter, undo keybindings, take or restore, Show Who Wrote This
 - [ ] 33-20-PLAN.md: Wave 5. Sync word in the one NEAR AI status item
 
 **Note (2026-11-20)**: plan POST-01 into this phase: a generic `roster.require` feature check, so a client that lacks a feature a project needs refuses to fold it instead of ignoring entries it does not know. It must be in the field before Phase 33.1 ships positions, because an older client that ignored a relief would keep accepting the relieved holder's writes (`.planning/research/portfolio-and-assignment/DESIGN.md`, 3.9).
+
+**Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer: a Monaco co-editing binding, native presence and cursors, a native Staff Room, and Share with people on the Sterling work-area page. Each person gets their own Theia Cloud session; secrets and long-term keys move to OpenBao through the native Theia foundation, which this phase now depends on. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.2 and 13.
 
 ### Phase 33.1: Assigned positions and handover (INSERTED)
 **Goal**: In military, public service and capital projects work, people are posted to positions that outlive them by someone with the authority to do so; they cannot decline, only report for duty or report unable with a reason the tasker decides on; a handover passes a position's authority and keys from one holder to the next at a single point, never leaving it empty or held by two.
@@ -390,6 +393,7 @@ Plans:
 Design: `.planning/research/guided-onboarding/DESIGN.md`. Owner request and agreed shape of 2026-11-20: setup asks about the work in plain words (role; personal information; Protected A, B or classified markings; client information under a contract security clause; must it stay in Canada), turns the answers into a project label that the signed policy's routing table then decides on, so the guide is a front door to the gate and never a second gate; it offers only options that are viable on that machine (detected, configured, allowed by the policy, and answering a test request), never local models where no local server answers; it gives one recommendation with a one-sentence reason and greys ruled-out options with the reason; the policy wins, and when answers need what it does not allow the guide says who to ask and offers no workaround; Protected C and classified work get no recommendation; changes are previewed before Apply, re-runs show only differences, and answers are recorded. Then each role lands where it works, and with the data platform the guide offers the matching one-click connections. A local model manager shows what the machine can run (unified memory on Strix Halo and GB10 first), installs Western models from passports with verified hashes and licences, and assigns tiers. Both phases ship in the 0.4.x line after Phase 32 and before Phases 36 and 37, so Cohere's options arrive through the guide; they need only the Phase 70 gate, may run beside Phases 33 to 35 (different files), and share one contract before running in parallel. The data-connection step (GUIDE-09) lands in Phase 89. Requirement ids GUIDE-01 to GUIDE-09 and LMOD-01 to LMOD-07 are defined in the design (section 16) and are added to REQUIREMENTS.md when Phase 32.1 is planned. Open owner decisions D1 to D11 are in the design (section 17), each with a default.
 
 ### Phase 32.1: Guided setup with viable options and a plain recommendation (INSERTED)
+**Release**: Ship Get Started in its own release once the end-to-end setup flow is verified and the feature merges.
 **Goal**: A person setting up a project answers a few plain questions about their work, sees only the options that really work on their machine and that your organization allows, gets one recommendation with a reason, applies it after seeing what will change, and lands where their role works; the answers are recorded and can be changed later.
 **Depends on**: Phase 32 (build order, owner 2026-11-20); Phase 70 (labels, routing, the bundle, records); Phase 41 (organization policy, endpoints, residency rule, mode table and `term()`, the passport schema, the policy editor for proposals; coherence review 2026-11-20). Phase 74.1 enforcement not required: the guide reads the passport schema from Phase 41.
 **Inserted**: 2026-11-20 at the owner's request.
@@ -428,6 +432,8 @@ Plans:
 - [ ] 32.1-18-PLAN.md: Wave 5. Chat welcome: one Get Started button
 - [ ] 32.1-19-PLAN.md: Wave 5. SECURITY.md, README, docs site, CHANGELOG
 - [ ] 32.1-20-PLAN.md: Wave 6. Close-out: First Project page removed, end-to-end scenario, baselines tightened, full suite once, UAT and verification
+
+**Re-aimed (owner, 2026-11-23)**: built natively in Theia, not through the VSIX compatibility layer. The guide is what "Set up Sterling" opens from the Sterling Get Started page; its checklist becomes a section of that page; plan 17's walkthrough and title-bar entry are dropped, and there is no second home page. Hosted sessions offer only servers your organization's policy lists. Executed engine plans carry over; it now depends on the native Theia foundation. Design: `.planning/research/multiuser-hosting/DESIGN.md`, sections 9.1 and 13.
 
 ### Phase 32.2: Local model manager (INSERTED)
 **Goal**: On the appliance or any capable computer, a person sees what local models the machine can run and how fast, installs the recommended Western models with verified hashes and accepted licences, assigns them to the tiers, and the guide then offers local AI as a viable option.
@@ -613,6 +619,29 @@ Plans:
 - [x] 44-18-PLAN.md: Wave 5. Component definitions, statements, evidence rules and overlay statements on the real catalogues
 - [ ] 44-19-PLAN.md: Wave 6. Workflows and gates: compliance and relay image jobs, scheduled evidence, CodeQL, release package and attestations, CODEOWNERS, the owner's steps
 
+### Phase 44.1: Accreditation control implementation and evidence closure
+
+**Goal**: Verify and close product control and evidence gaps for Unclassified and Protected A first. Extend the assessment to Protected B, the Classified appliance baseline, and applicable ITSP.10.171, CPCSC Level 1, Controlled Goods, and ITAR overlays as their prerequisites and deployment scope become available.
+
+**Depends on**: Phase 44's dashboard, evidence rules and plan of action and milestones (POA&M). Work can proceed alongside other phases and does not gate general development or releases.
+
+**Baseline for triage**: The published v0.4.36 snapshot shows 521 product rows with no implementation statement or linked gap across Unclassified (3), Protected A (259), and Protected B (259). These represent 259 distinct published control IDs. Verify the responsible component and existing implementation before assigning remediation. Track any evidence gap separately from confirmed missing implementation. The 179 Classified reference rows relate to the appliance scope.
+
+**Success Criteria** (what must be TRUE):
+
+1. Each applicable control has a responsible owner and a verifiable disposition. The POA&M distinguishes missing implementation, missing evidence, inherited or sponsor responsibilities, and reviewed exclusions. Every open action links to a delivery phase or a sponsor assessment action.
+2. Product-owned gaps close when the implementation works in the stated release and scope and the assessor can inspect dated evidence such as a screenshot, reproducible test result, configuration snapshot, or audit record.
+3. The export reports product evidence separately from inherited and sponsor evidence, and shows pending items until verified. Draft sponsor responses identify evidence to collect and decisions to confirm. Sensitive artifacts remain in the authorized assessor location.
+4. Assess Unclassified and Protected A first. Review Protected B, the Classified appliance, and each applicable overlay when scope is established. Authorization remains with the responsible organization.
+5. The submission review confirms that the report's applicable sponsor and deployment fields contain verified entries, with a rationale and authority for each exclusion. Its diagrams reflect the assessed deployment's components, trust boundaries, data flows, and operating dependencies. The submission includes the linked evidence, completed applicable forms, sponsor concurrence, independent assessor findings, and the authorized decision or the sponsor's confirmed submission route and outstanding decision step. Generated draft text and unfilled fields remain tracked until the sponsor or assessor supplies the required information.
+
+**Plans:** 4 planned waves, starting with the evidence pipeline and the existing supplier control mappings.
+
+- [x] 44.1-01-PLAN.md: Verify evidence reaches the local assessor package and map existing audit and incident practices with their documented limits. Check the published bundle after the reviewed release.
+- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner.
+- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions.
+- [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
+
 ### Export-controlled technical data: Controlled Goods Program and ITAR (Phase 45, added 2026-11-20)
 
 Design: `.planning/research/compliance-dashboard/CGP-ITAR.md`. Owner request of 2026-11-20: "also consider what we need to show compliance for the Controlled Goods Program and ITAR." Meeting either regime is your organization's obligation, confirmed by its counsel, designated official and empowered official; the product provides controls and evidence. Sending controlled technical data to an AI model is a transfer to whoever runs it (Defence Production Act s. 37(3); 22 CFR 120.50, 120.56), and the ITAR encryption carve-out (120.54(a)(5)) covers storage and transmission, not a model reading the data. So controlled content stays on this computer or goes only to endpoints your organization's officials have approved by a signed decision. Planned, not planned in detail.
@@ -633,6 +662,84 @@ Design: `.planning/research/compliance-dashboard/CGP-ITAR.md`. Owner request of 
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 45 to break down)
+
+### Phase 46: Native Theia foundation
+**Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
+**Depends on**: the hosting design (`.planning/research/multiuser-hosting/DESIGN.md`, owner decisions D1 to D11, 2026-11-23); the Theia spike (`.planning/spikes/theia-team-studio/`, PR #162); the compliance fit check (`compliance/resources.json`, PR #164). Runs beside Phase 47 from day one.
+**Requirements**: FND-T-01, FND-T-02, FND-T-03, FND-T-04, FND-T-05, FND-T-06, FND-T-07, FND-T-08, FND-T-09, FND-T-10 (from DESIGN.md section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10)
+**Success Criteria** (what must be TRUE):
+  1. The workbench builds, tests and runs from a workspace package in CI, in a browser test against the built container; nothing remains only under `.planning/spikes/`.
+  2. A native widget calls engine code in the backend through one JSON-RPC service pattern, with the same refusals the extension host gives.
+  3. A secret saved in the workbench survives a container restart, is readable only by that person, and is stored in OpenBao (or the OS keyring on a single machine); no secret is held only in memory.
+  4. Signing with a person's long-term key happens inside OpenBao and is refused without a fresh hardware-key or passkey sign-in.
+  5. The session knows the signed-in person from the forwarded sign-in token, and renews or ends with it.
+  6. The image makes no outbound call (telemetry, update checks, Open VSX, public registries) except to addresses in your organization's policy; the image and the hub run one Node major; every resource it adds has a passing entry in `compliance/resources.json`.
+**Plans:** 8 plans in 4 waves (planned 2026-11-23; requirements FND-T-01 to FND-T-10 and decisions D-01 to D-43 in `46-CONTEXT.md`; needs #165 and #166 merged first)
+
+Plans:
+- [ ] 46-01-PLAN.md: Wave 1. Tracer and evidence gate: the spike becomes the `workbench/` package on a digest-pinned UBI 9 minimal base with Node 26, Get Started opens with its native addons; one JSON-RPC helper; Release workflow points at `workbench/Dockerfile`
+- [ ] 46-02-PLAN.md: Wave 2. Session identity: who signed in from the forwarded token and `THEIACLOUD_SESSION_USER`, OpenBao jwt login, renew and revoke, Retry on failure, step-up link
+- [ ] 46-03-PLAN.md: Wave 2. Air gap and image hardening: addresses only from configuration, a test that the image calls nothing else, one Node major
+- [ ] 46-04-PLAN.md: Wave 2. Compliance fit before use for the workbench packages and the VSIX boundary
+- [ ] 46-05-PLAN.md: Wave 2. Copy lint covers the workbench and accepts Sterling and SovAI; the two #162 command handlers report errors
+- [ ] 46-06-PLAN.md: Wave 2. Workbench CI job; the Release workflow adds the image SBOM, a scan, and key-mode cosign signing in `container-release`
+- [ ] 46-07-PLAN.md: Wave 3. Per-person secrets in OpenBao KV (or the OS keyring, never memory) and a `KeyService` on Transit with the step-up check; one person cannot read another's secrets
+- [ ] 46-08-PLAN.md: Wave 4. End-to-end browser proof against the built image with a real OpenBao (a secret survives a restart, person mismatch, no egress) and the contract Phase 47 consumes
+
+### Phase 47: On-premise deployment stack and offline bundle
+**Goal**: Your organization can install and run the Sterling workbench for many people at a site it owns, connected or fully disconnected: RKE2, a local image registry, HAProxy ingress, cert-manager with an OpenBao CA, Keycloak with sign-in by passkeys or hardware keys only, self-hosted Theia Cloud (one session per person), OpenBao with HSM unseal, and the sync hub, all from a signed offline bundle with no outbound calls.
+**Depends on**: the hosting design (DESIGN.md sections 4 to 7, 10, 11; decisions O2 to O6 accepted 2026-11-23); the compliance fit check (every component needs a passing entry); Phase 46's image only for the end-to-end run. Runs beside Phase 46 from day one.
+**Requirements**: DEP-01 to DEP-12 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list)
+**Success Criteria** (what must be TRUE):
+  1. A site installs from one signed offline bundle (images, vendored charts, realm and policy as code) on air-gapped hardware, and nothing in the running stack calls out.
+  2. A person signs in with a passkey or a hardware security key, as the site's policy sets, never a password; a lost key is replaced by administrator-attested re-enrolment; two keys are registered per person.
+  3. Each person gets their own Theia session with a durable workspace volume; idle sessions stop; per-person secrets come from OpenBao, unsealed by an HSM (or Shamir where no HSM exists).
+  4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
+  5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
+  6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
+**Plans:** 18 plans in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production)
+
+Plans:
+- [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
+- [x] 47-02-PLAN.md: Wave 1. Vendored charts with a SHA-256 lock, the offline render path and the site example file
+- [x] 47-03-PLAN.md: Wave 2. Pin every third-party image; list our rebuilt and released images; release descriptors per chart
+- [ ] 47-04-PLAN.md: (tasks 1-3 done, owner gate approval pending) Wave 3. Gate PR: checker chart and tool kinds, fit entries, component files, deploy CI check, tag-signed deploy-images workflow (owner approval)
+- [ ] 47-05-PLAN.md: Wave 4. Site base: RKE2 node config, Zot registry, Kyverno signed-image admission
+- [ ] 47-06-PLAN.md: Wave 4. Signed offline bundle build, check and import; signed-file mechanism
+- [ ] 47-07-PLAN.md: Wave 4. OpenBao as code: PKCS#11 seal, sterling-workbench and step-up roles, policies, two-key enrolment
+- [ ] 47-08-PLAN.md: Wave 4. Keycloak realm as code: passwordless WebAuthn only, `signInKeys` policy (passkeys or hardware-only), shared rpId, step-up acr levels
+- [ ] 47-09-PLAN.md: Wave 4. Rebuilt Theia Cloud and oauth2-proxy images; hardened session pod template
+- [ ] 47-10-PLAN.md: Wave 4. Encrypted storage class, OpenSearch with Fluent Bit, Prometheus, Harbor values
+- [ ] 47-11-PLAN.md: Wave 4. Sync hubs as single-writer StatefulSets; Keycloak's Postgres
+- [ ] 47-12-PLAN.md: Wave 4. Workbench AppDefinition, site environment ConfigMap, session environment policy
+- [ ] 47-13-PLAN.md: Wave 5. Ingress and certificates from the OpenBao PKI intermediate; HAProxy ingress
+- [ ] 47-14-PLAN.md: Wave 5. HQ and edge federation: signed user export and import, PKI files, revocation lists
+- [ ] 47-15-PLAN.md: Wave 5. Theia Cloud deployment: chart patch, oauth2-proxy alpha config, values, spike S7
+- [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
+- [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
+- [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
+
+### Phase 48: Load and accreditation verification
+**Goal**: Before any capacity or compliance claim is made for the hosted workbench, we measure it: a load test on our own hardware to the target number of concurrent sessions, and OSCAL components and evidence rules for every component of Phases 46 and 47 so the compliance dashboard shows the hosted deployment's real state.
+**Depends on**: Phases 46 and 47 for the running stack; the evidence-rule work starts as soon as each component in Phase 47 is chosen; Phase 44's compliance machinery.
+**Requirements**: VER-01 to VER-nn (defined when planned, from DESIGN.md sections 10, 12 and 13(e))
+**Success Criteria** (what must be TRUE):
+  1. A repeatable load test on our own hardware reaches the target concurrent sessions (1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
+  2. Each component of Phases 46 and 47 has an OSCAL component definition and evidence rules, and the dashboard shows its controls from collected evidence, never assumed.
+  3. The open verification items in DESIGN.md section 12 are each closed with evidence or recorded as a gap with an owner and date (Keycloak CVE-2026-6856 fix version, HSM and Go FIPS certificate status, Traefik with Theia Cloud).
+**Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`)
+
+Plans:
+- [x] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
+- [x] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
+- [x] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
+- [x] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
+- [ ] 48-04-PLAN.md: Wave 2. Hub load driver and a browser sample with a WebAuthn virtual authenticator (needs Phase 46's workbench package)
+- [x] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
+- [ ] 48-07-PLAN.md: Wave 3. Phase 46 components: workbench statements and evidence rules, release pipeline re-assessed for the image; gate PR 2
+- [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
+- [ ] 48-09-PLAN.md: Wave 3. Rig load run to 1,000+ sessions, capacity page and sizing defaults, reference site export; gate PR 4
+- [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -1775,6 +1882,10 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 42. Capital project offices on the replica | 0/TBD | Not started (after Phase 33.1) | - |
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
+| 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
+| 46. Native Theia foundation | 0/8 | Planned 2026-11-23 (after #165 and #166; beside 47) | - |
+| 47. On-premise deployment stack and offline bundle | 3/18 | Planned 2026-11-23 (beside 46) | - |
+| 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

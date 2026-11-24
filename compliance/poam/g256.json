@@ -1,0 +1,16 @@
+{
+  "gap": "G256",
+  "id": "g256",
+  "controls": [
+    "itsp171-03.05.12"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 authenticator issuance, refresh and revocation need lifecycle proof",
+  "remediation": "The sponsor authenticator custodian documents recipient identity verification, approved initial authenticator settings, distribution, default replacement, lost or damaged handling, compromise reporting, refresh triggers and revocation. Review protective access and sample a sanitized initial issue and a rotation or revocation. Retain no authenticator material. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved authenticator lifecycle settings and redacted issuance, default replacement, refresh or revocation evidence"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "gap": "G71",
+  "id": "g71",
+  "controls": [
+    "si-07",
+    "si-07.01",
+    "si-07.02",
+    "si-07.03",
+    "si-07.07"
+  ],
+  "ownerRole": "shared",
+  "title": "Deployed integrity checks and violation response need tested coverage",
+  "remediation": "Component maintainers and deployment integrity and incident response owners approve the software, firmware and information to verify, checking schedule and recipients. Demonstrate centrally managed settings and notifications by detecting a harmless changed test artifact, then record incident intake and corrective action. Use G4 attestations as supplier provenance and verify deployed monitoring and response separately.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved integrity coverage, check schedule and central configuration, a detected change receipt, and the incident handling record"
+    }
+  ]
+}

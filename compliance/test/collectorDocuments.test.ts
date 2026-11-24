@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { documentsCollector, DOCUMENT_MAX_AGE_MS, LAST_REVIEWED_PATTERN, REQUIRED_DOCUMENTS, reviewedAt } from '../src/collectors/documents.ts';
 import type { CollectorContext } from '../src/collectors/types.ts';
+import { redactObservation } from '../src/redact.ts';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'collectors', 'documents');
 const ROOT = '/fixture-checkout';
@@ -25,7 +26,7 @@ function context(files: Readonly<Record<string, string>>): CollectorContext {
 test('a current reviewed SECURITY document with all required headings passes and uses its review date', async () => {
   const text = await fixture('SECURITY.md');
   const observations = await documentsCollector.collect({ repoRoot: ROOT }, context({ [fileAt('SECURITY.md')]: text }));
-  assert.deepEqual(observations[0], { collector: 'documents', subject: 'SECURITY.md', passed: true, collectedAt: '2026-10-22T00:00:00.000Z', commit: COMMIT, counts: { missing: 0, missingHeadings: 0, missingReview: 0, staleReview: 0 } });
+  assert.deepEqual(observations[0], { collector: 'documents', subject: 'security.md', passed: true, collectedAt: '2026-10-22T00:00:00.000Z', commit: COMMIT, counts: { missing: 0, 'missing-headings': 0, 'missing-review': 0, 'stale-review': 0 } });
 });
 
 test('a review 366 days old fails, while a 365-day review is still a valid record for the freshness window', async () => {
@@ -35,7 +36,7 @@ test('a review 366 days old fails, while a 365-day review is still a valid recor
   const [staleObservation] = await documentsCollector.collect({ repoRoot: ROOT }, context({ [fileAt('SECURITY.md')]: stale }));
   const [edgeObservation] = await documentsCollector.collect({ repoRoot: ROOT }, context({ [fileAt('SECURITY.md')]: edge }));
   assert.equal(staleObservation.passed, false);
-  assert.deepEqual(staleObservation.counts, { missing: 0, missingHeadings: 0, missingReview: 0, staleReview: 1 });
+  assert.deepEqual(staleObservation.counts, { missing: 0, 'missing-headings': 0, 'missing-review': 0, 'stale-review': 1 });
   assert.equal(edgeObservation.passed, true);
   assert.equal(NOW.getTime() - new Date(edgeObservation.collectedAt).getTime(), DOCUMENT_MAX_AGE_MS);
 });
@@ -44,15 +45,15 @@ test('a missing heading fails and counts the missing headings without copying do
   const withoutHeading = (await fixture('SECURITY.md')).replace('## Known limitations\n\nFixture limitations.\n\n', '');
   const [observation] = await documentsCollector.collect({ repoRoot: ROOT }, context({ [fileAt('SECURITY.md')]: withoutHeading }));
   assert.equal(observation.passed, false);
-  assert.equal(observation.counts?.missingHeadings, 1);
+  assert.equal(observation.counts?.['missing-headings'], 1);
   assert.doesNotMatch(JSON.stringify(observation), /Fixture limitations|Fixture reporting/);
 });
 
 test('a required file that is gone remains a failing observation rather than disappearing', async () => {
   const observations = await documentsCollector.collect({ repoRoot: ROOT }, context({}));
   assert.equal(observations.length, REQUIRED_DOCUMENTS.length);
-  const security = observations.find((observation) => observation.subject === 'SECURITY.md');
-  assert.deepEqual(security?.counts, { missing: 1, missingHeadings: 3 });
+  const security = observations.find((observation) => observation.subject === 'security.md');
+  assert.deepEqual(security?.counts, { missing: 1, 'missing-headings': 3 });
   assert.equal(security?.passed, false);
 });
 
@@ -62,8 +63,26 @@ test('the review pattern only accepts valid calendar dates', () => {
   assert.equal(reviewedAt('2026-02-30'), undefined);
 });
 
-test('the real repository gives an observation for every required document', async () => {
+test('every required document in the real repository produces a publishable observation', async () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const observations = await documentsCollector.collect({ repoRoot }, { now: NOW, commit: COMMIT, readFile: (file) => readFile(file, 'utf8') });
-  assert.deepEqual(observations.map((observation) => observation.subject), REQUIRED_DOCUMENTS.map((document) => document.path));
+  assert.deepEqual(observations.map(redactObservation).map((observation) => observation.subject),
+    REQUIRED_DOCUMENTS.map((document) => document.path.toLowerCase()));
+});
+
+test('the hosted verification records are a reviewed required document whose register and record headings are present', async () => {
+  // 48-05 (D-24): the desk records are evidence only while reviewed within the window; judged on their own review date.
+  const document = REQUIRED_DOCUMENTS.find((entry) => entry.path === 'docs/security/hosted-verification-records.md');
+  assert.ok(document?.reviewRequired);
+  assert.ok(document.headings.includes('Verification register'));
+  assert.ok(document.headings.includes('Keycloak CVE-2026-6856 fix version'));
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const text = await readFile(path.join(repoRoot, document.path), 'utf8');
+  const reviewed = reviewedAt(LAST_REVIEWED_PATTERN.exec(text)?.[1] ?? '');
+  assert.ok(reviewed);
+  const observations = await documentsCollector.collect({ repoRoot }, { now: reviewed, commit: COMMIT, readFile: (file) => readFile(file, 'utf8') });
+  assert.deepEqual(observations.find((observation) => observation.subject === document.path), {
+    collector: 'documents', subject: document.path, passed: true, collectedAt: reviewed.toISOString(), commit: COMMIT,
+    counts: { missing: 0, 'missing-headings': 0, 'missing-review': 0, 'stale-review': 0 }
+  });
 });

@@ -283,9 +283,9 @@ your teams to **Link**, after you confirm. Staff projects work on one machine
 by default. Several people on their own computers sharing one staff project is
 a preview: turn on `nearAi.staff.multiUserPreview` to try the invite, join and
 admit commands, **Make This Staff Project Multi-User** and **Make a
-Single-Machine Copy**. Projects with products labelled above `org/Public` are
-not converted yet, and the shared project cannot yet be synced between
-computers; that comes in a later release. **NEAR AI: Update Team…** recognises a
+Single-Machine Copy**. You can convert a project with labelled products when your
+declared clearance covers those products. Operators can deploy the sync hub, and
+live editing across computers comes in a later release. **NEAR AI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
@@ -1418,7 +1418,9 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Get started in two minutes
 
-1. Install **NEAR AI for VS Code** and open a project folder.
+1. Install **NEAR AI for VS Code** and open a project folder. From 0.4.37 each release also ships
+   as the Sterling workbench container image on the GitHub Container Registry, recorded by digest
+   on the GitHub release; the image has no sign-in of its own, so run it on `127.0.0.1` only.
 2. Open the **NEAR AI** chat and choose **Set up a new profile** (or run
    **NEAR AI: Set Up a New Profile** from the Command Palette). A profile is
    your NEAR AI key or local runtime for this project; it is working once the
@@ -1435,6 +1437,18 @@ copy of Open-GSD to a project that doesn't already have one.
    type `/new-project` to plan something new.
 
 ## Security and privacy
+
+Use **NEAR AI: Generate SA&A Package…** in the Command Palette to export a Security
+Assessment and Authorization draft for a published release. Choose the version and
+where to save the ZIP. The extension checks the published evidence archive against
+its release digest and builds a consolidated editable sponsor Word draft and a
+control-to-evidence workbook alongside the assessment documents and blank
+administrative forms. The command downloads public release files from GitHub
+and verified privacy forms from Canada.ca. It includes a publication approval
+receipt when GitHub can verify it for the selected release: the container image approval from
+0.4.37, the Marketplace approval for earlier releases. The evidence index
+records missing and partial coverage. Your organization completes deployment
+scope, findings, and approvals through its own review process.
 
 - **Web research with guard rails.** Agents search with the provider you pick
   (**NEAR AI: Set Up Web Search**: your own SearXNG, Brave Search, or Tavily),

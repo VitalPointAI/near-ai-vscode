@@ -1,0 +1,17 @@
+{
+  "gap": "G264",
+  "id": "g264",
+  "controls": [
+    "itsp171-03.08.01",
+    "itsp171-03.08.02"
+  ],
+  "ownerRole": "owner",
+  "title": "ITSP.10.171 media storage safeguards and authorized access need assessment evidence",
+  "remediation": "The sponsor media custodian inventories system media holding specified information and approves storage controls, custodians and access roles. Review physical safeguards and effective access, and sample a controlled retrieval or checkout and return. Document inherited storage boundaries and authorized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect an approved media and storage inventory, physical and access safeguards, and redacted custody and retrieval evidence"
+    }
+  ]
+}

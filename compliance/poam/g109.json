@@ -1,0 +1,17 @@
+{
+  "gap": "G109",
+  "id": "g109",
+  "controls": [
+    "sa-08",
+    "sa-17"
+  ],
+  "ownerRole": "shared",
+  "title": "Engineering principles and developer security and privacy design need reviewed traces",
+  "remediation": "The sponsor security and privacy architects approve applicable engineering principles and scope. Supplier architects link those principles and required controls to design decisions, component allocations and interdependent security and privacy functions. Review the design with the organization architecture owner and trace an implemented decision to its exact verification evidence. Use G9 for scoped threat models and data flows.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved principles, reviewed architecture and component-control allocations, and a sampled design-to-verification trace"
+    }
+  ]
+}

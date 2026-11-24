@@ -1,0 +1,20 @@
+{
+  "gap": "G29",
+  "id": "g29",
+  "controls": [
+    "ia-05.09",
+    "ia-08",
+    "ia-08.01",
+    "ia-08.02",
+    "ia-08.04"
+  ],
+  "ownerRole": "shared",
+  "title": "External authentication and federation need sponsor-approved scope",
+  "remediation": "The deployment sponsor records whether external users or processes and federated credentials are in scope and approves participating organizations, external authenticators, required assurance levels and profiles. Verify that each in-scope external user is uniquely authenticated and bound to any process acting for them. Where required, demonstrate electronic verification of public key credentials from approved Government of Canada departments and agencies. Collect a redacted issuer and authenticator inventory, conformance evidence, accepted and denied sign-in receipts for approved and unapproved credentials, and the sponsor decision for each excluded path.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Record the sponsor's external access and federation scope, approved issuers and profiles, and deployment acceptance and refusal evidence"
+    }
+  ]
+}

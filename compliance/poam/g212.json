@@ -1,0 +1,16 @@
+{
+  "gap": "G212",
+  "id": "g212",
+  "controls": [
+    "itsp171-03.01.20"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 external system use needs approvals and enforcement evidence",
+  "remediation": "The sponsor external-service owner inventories systems used for the contract to access, process, store or transmit specified information. Record the default prohibition, authorization criteria, security verification, approved connection or processing agreements, and restrictions for organization-controlled portable storage. Retain approved and refused cases from the effective boundary. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect a reviewed external-system register, signed connection or processing agreement, verified safeguards and scoped restriction results"
+    }
+  ]
+}

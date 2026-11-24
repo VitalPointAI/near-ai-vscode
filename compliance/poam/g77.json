@@ -1,0 +1,16 @@
+{
+  "gap": "G77",
+  "id": "g77",
+  "controls": [
+    "ra-03.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Supply chain risk assessments need reviewed service and dependency scope",
+  "remediation": "The deployment procurement and risk owners identify assessed suppliers, services, release dependencies and trust boundaries. Release maintainers supply available inventory and provenance. Assess concentration, integrity and continuity risks, record owners and treatments, and retain the review trigger and date. Use supplier evidence and approved exception references rather than unverified assertions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect scoped supplier and dependency inventory, approved supply chain risk findings and dated treatment or review records"
+    }
+  ]
+}

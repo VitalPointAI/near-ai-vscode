@@ -1,0 +1,17 @@
+{
+  "gap": "G38",
+  "id": "g38",
+  "controls": [
+    "ac-08",
+    "ac-14"
+  ],
+  "ownerRole": "shared",
+  "title": "System use notices and actions before authentication need review",
+  "remediation": "The sponsor approves the notice text with privacy and security owners and documents each action allowed before authentication with its rationale in the system security plan. Interface and service operators inventory public and restricted entry points. Collect redacted captures of notice timing and required acknowledgment before access, and test that approved public actions work while protected actions require authentication. Record any distinct notice for publicly accessible systems.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Approve the notices and anonymous action inventory and collect entry-point screenshots, acknowledgment and access decision evidence"
+    }
+  ]
+}

@@ -4,12 +4,15 @@ import { test } from 'node:test';
 import { CGP_REQUIREMENTS } from '../src/import/cgp.ts';
 import { ITAR_REQUIREMENTS } from '../src/import/itar.ts';
 import { NS, UNSETTLED_QUESTIONS } from '../src/model.ts';
+import { controlIdentifiers } from '../src/profiles.ts';
 import { validateOscal } from '../src/validate.ts';
 
 type MapRow = { sources: Array<{ 'id-ref': string }>; targets: Array<{ 'id-ref': string }>; relationship: string; props: Array<{ name: string; value: string; ns?: string }> };
-type Mapping = { 'mapping-collection': { mappings: Array<{ maps: MapRow[] }> } };
+type Mapping = { 'mapping-collection': { mappings: {
+  'source-resource': { href: string }; 'target-resource': { href: string }; maps: MapRow[];
+} } };
 const mapping = (name: string): Mapping => JSON.parse(readFileSync(new URL(`../mappings/${name}`, import.meta.url), 'utf8')) as Mapping;
-const rows = (doc: Mapping) => doc['mapping-collection'].mappings.flatMap((entry) => entry.maps);
+const rows = (doc: Mapping) => doc['mapping-collection'].mappings.maps;
 const prop = (row: MapRow, name: string) => row.props.find((candidate) => candidate.ns === NS && candidate.name === name)?.value;
 
 test('each CGP, ITAR and EAR requirement has an authored mapping row', () => {
@@ -39,9 +42,20 @@ test('only official person and endpoint decisions require an official signature'
   assert.deepEqual(signed, ['cgp-13', 'cgp-37-2', 'itar-120.56-a', 'itar-126.18', 'itar-126.5']);
 });
 
-test('CGP targets use ITSP ids while ITAR and EAR targets use NIST ids', () => {
-  for (const row of rows(mapping('cgp-to-itsp10033.json'))) assert.match(row.targets[0]['id-ref'], /^[a-z]{2}-\d{2}/);
-  for (const row of rows(mapping('itar-to-sp80053.json'))) assert.match(row.targets[0]['id-ref'], /^[a-z]{2}-\d/);
+test('every mapped control ID resolves in its linked source or target catalogue', () => {
+  for (const name of ['cgp-to-itsp10033.json', 'itar-to-sp80053.json']) {
+    const file = new URL(`../mappings/${name}`, import.meta.url);
+    const { 'mapping-collection': { mappings } } = mapping(name);
+    for (const [resource, side] of [['source-resource', 'sources'], ['target-resource', 'targets']] as const) {
+      const { catalog } = JSON.parse(readFileSync(new URL(mappings[resource].href, file), 'utf8'));
+      const ids = new Set(controlIdentifiers(catalog));
+      for (const row of mappings.maps) {
+        for (const { 'id-ref': id } of row[side]) {
+          assert.ok(ids.has(id), `${name} ${resource} is missing ${id}`);
+        }
+      }
+    }
+  }
 });
 
 test('both mapping collections and the ITAR include-all profile validate', () => {

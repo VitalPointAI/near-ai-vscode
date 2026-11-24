@@ -1,0 +1,17 @@
+{
+  "chart": "harbor",
+  "namespace": "sterling-registry",
+  "order": 10,
+  "values": ["deploy/values/harbor.yaml"],
+  "enabledWhen": { "registryKind": "harbor" },
+  "images": [
+    { "lock": "docker.io/goharbor/harbor-core", "set": { "core.image.repository": "name", "core.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/harbor-portal", "set": { "portal.image.repository": "name", "portal.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/harbor-jobservice", "set": { "jobservice.image.repository": "name", "jobservice.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/registry-photon", "set": { "registry.registry.image.repository": "name", "registry.registry.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/harbor-registryctl", "set": { "registry.controller.image.repository": "name", "registry.controller.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/harbor-db", "set": { "database.internal.image.repository": "name", "database.internal.image.tag": "tagAtDigest" } },
+    { "lock": "docker.io/goharbor/valkey-photon", "set": { "redis.internal.image.repository": "name", "redis.internal.image.tag": "tagAtDigest" } }
+  ],
+  "note": "Harbor v2.15.5 images on chart 1.19.4 (which carries 2.15.4; no chart for 2.15.5 exists, 47-02), the site registry of HQ and large sites (research Decision 8)."
+}

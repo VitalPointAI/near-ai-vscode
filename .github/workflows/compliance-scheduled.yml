@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -61,12 +61,13 @@ jobs:
       - name: Record compliance audit
         continue-on-error: true
         run: npm --prefix compliance audit --json > compliance/out/audit-compliance.json
-      - name: Download the latest evidence bundle
+      - name: Download CI evidence for the assessed commit
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
         run: |
           mkdir -p compliance/out/previous
-          run_id="$(gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          run_id="$(gh run list --workflow ci.yml --branch main --event push --status success --commit "$COMMIT" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -n "$run_id" ]; then gh run download "$run_id" --name compliance-bundle --dir compliance/out/previous || true; fi
       - name: Read the latest release metadata
         env:
@@ -82,7 +83,12 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const repository = process.env.REPOSITORY; const commit = process.env.COMMIT;
-            const collectors = { settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository }, audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] } };
+            const collectors = {
+              documents: { repoRoot: "." }, crypto: { repoRoot: "." },
+              deployment: { file: "compliance/site-evidence/reference.json", signersFile: "compliance/attestations/site-signers.json" },
+              settings: { repository }, "review-trail": { repository, since: new Date(Date.now()-365*86400000).toISOString() }, "code-scanning": { repository },
+              audit: { audits: [{ package:"root", file:"compliance/out/audit-root.json" }, { package:"relay", file:"compliance/out/audit-relay.json" }, { package:"hub", file:"compliance/out/audit-hub.json" }, { package:"docs", file:"compliance/out/audit-docs.json" }, { package:"compliance", file:"compliance/out/audit-compliance.json" }] }
+            };
             const release = JSON.parse(readFileSync("compliance/out/latest-release.json", "utf8"));
             if (/^v?\d+\.\d+\.\d+$/.test(release.tag_name)) {
               collectors.release = { repository, tag: release.tag_name };
@@ -146,10 +152,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: main
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: compliance/package-lock.json
+      - run: npm --prefix compliance ci --ignore-scripts
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
@@ -158,11 +167,39 @@ jobs:
         run: |
           sh compliance/ci/install-tool.sh oscal-cli compliance/out/tools
           find compliance/out/tools -type f -name oscal-cli -printf '%h\n' >> "$GITHUB_PATH"
-      - name: Validate and resolve every OSCAL profile
-        continue-on-error: true
+      - name: Check OSCAL CLI and validate source JSON
+        run: |
+          oscal-cli --version
+          node compliance/src/cli.ts validate
+      - name: Stage the assessor ITSG-33 profile for validation
         run: |
           mkdir -p compliance/out/resolved
-          find compliance/catalogs compliance/profiles compliance/components compliance/mappings -type f -name '*.json' -print0 | while IFS= read -r -d '' file; do sh compliance/ci/oscal-validate.sh "$file"; done
-          for profile in compliance/profiles/*.json; do sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$(basename "$profile")"; done
+          node --input-type=module -e 'import { stageAssessorItsg33Profile } from "./compliance/src/package.ts"; stageAssessorItsg33Profile(process.argv[1]);' compliance/out/assessor-oscal
+      - name: Validate and resolve every OSCAL profile
+        shell: bash
+        continue-on-error: true
+        run: |
+          # The public ITSG-33 reference contains IDs and titles. The two internal crosswalks
+          # use project JSON. The source check above covers them without imposing OSCAL statements.
+          find compliance/catalogs compliance/profiles compliance/components compliance/mappings -type f -name '*.json' \
+            ! -path 'compliance/catalogs/itsg-33/annex-3a.json' \
+            ! -path 'compliance/mappings/baseline-to-itsp10033.json' \
+            ! -path 'compliance/mappings/itsg33-to-itsp10033.json' -print0 > compliance/out/oscal-inputs
+          status=0
+          while IFS= read -r -d '' file; do
+            if ! sh compliance/ci/oscal-validate.sh "$file"; then
+              printf -- '- OSCAL validation failed for `%s`. See the job log.\n' "$file" >> "$GITHUB_STEP_SUMMARY"
+              status=1
+            fi
+          done < compliance/out/oscal-inputs
+          for profile in compliance/profiles/*.json; do
+            name="$(basename "$profile")"
+            if [ "$name" = itsg33-profile3.json ]; then profile="compliance/out/assessor-oscal/profiles/$name"; fi
+            if ! sh compliance/ci/oscal-validate.sh resolve "$profile" "compliance/out/resolved/$name"; then
+              printf -- '- OSCAL resolution failed for `%s`. See the job log.\n' "$name" >> "$GITHUB_STEP_SUMMARY"
+              status=1
+            fi
+          done
+          exit "$status"
       - name: Report profile-resolution differences
         run: node compliance/src/cli.ts resolve-check --resolved compliance/out/resolved --out compliance/out/resolve-check.md && cat compliance/out/resolve-check.md >> "$GITHUB_STEP_SUMMARY"

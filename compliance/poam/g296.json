@@ -1,0 +1,16 @@
+{
+  "gap": "G296",
+  "id": "g296",
+  "controls": [
+    "itsp171-03.13.11"
+  ],
+  "ownerRole": "owner",
+  "title": "Supplementary cryptography approval needs exact deployment configuration evidence",
+  "remediation": "The sponsor cryptographic authority and deployment security engineer verify the contract-selected cryptography and effective settings for each assessed protection use. Retain approved type, module and version references, permitted mode where relevant and a redacted comparison to deployment observations. Leave nonmatching or unresolved scope pending authorized disposition.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved cryptographic requirements, versioned implementation evidence, and a dated conformance comparison with any open discrepancy"
+    }
+  ]
+}

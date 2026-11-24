@@ -37,6 +37,8 @@ const required = [
   'extension/media/near-ai-vscode-icon-128.png',
   'extension/media/near-ai-vscode-icon.svg',
   'extension/dist/extension.js',
+  'extension/resources/saa/editable/01-02-scar-and-statement-of-sensitivity.docx',
+  'extension/resources/saa/official/350-103-nf.pdf',
   // The memory-capped decode worker for staff updates from other machines (D-43): a package without it would skip that check.
   'extension/dist/staff/replica/decodeWorker.js',
   'extension/media/chat/chat.js',

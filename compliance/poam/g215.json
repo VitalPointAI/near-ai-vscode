@@ -1,0 +1,16 @@
+{
+  "gap": "G215",
+  "id": "g215",
+  "controls": [
+    "itsp171-03.05.02"
+  ],
+  "ownerRole": "owner",
+  "title": "CPCSC Level 1 device identification and authentication need connection evidence",
+  "remediation": "The sponsor endpoint identity owner defines the contract-scope devices that must identify and authenticate before connecting. Review enrolment, unique identity and connection policy records. Verify an authorized synthetic device can connect and an unrecognized or de-authorized one is refused before session establishment. The sponsor separately confirms applicability to the CPCSC Level 1 contract and certification boundary. An ITSP.10.171 reference or evidence mapped for a different assessed system establishes no disposition for this contract.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "For CPCSC Level 1, collect the assessed device inventory and enrolment requirements, effective connection controls and redacted allow and refusal evidence"
+    }
+  ]
+}

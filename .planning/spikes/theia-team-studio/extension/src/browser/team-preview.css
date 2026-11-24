@@ -1,0 +1,24 @@
+.near-team-preview {
+  overflow: auto;
+  background: var(--theia-editor-background);
+  color: var(--theia-foreground);
+}
+.near-team-shell { max-width: 920px; margin: auto; padding: 36px clamp(20px, 5vw, 60px); }
+.near-team-header { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding-bottom: 24px; border-bottom: 1px solid var(--theia-panel-border, #7775); }
+.near-team-header h1 { font-size: 30px; line-height: 1.2; margin: 0; font-weight: 650; }
+.near-project-field { display: grid; gap: 7px; font-weight: 600; }
+.near-project-select { min-height: 34px; padding: 5px 26px 5px 10px; border: 1px solid var(--theia-dropdown-border, #7778); border-radius: 4px; background: var(--theia-dropdown-background); color: var(--theia-dropdown-foreground); font: inherit; }
+.near-team-overview { padding: 25px 0 20px; }
+.near-team-overview h2 { margin: 0 0 6px; font-size: 22px; }
+.near-team-overview p, .near-member-role, .near-member-reports { margin: 0; color: var(--theia-descriptionForeground, inherit); line-height: 1.55; }
+.near-team-columns { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(0, 1.8fr); gap: 18px; }
+.near-team-card { min-width: 0; padding: 18px; border: 1px solid var(--theia-panel-border, #7775); border-radius: 7px; }
+.near-team-card h3 { font-size: 17px; margin: 0 0 12px; }
+.near-team-card h4 { font-size: 13px; margin: 20px 0 5px; }
+.near-team-member { display: grid; gap: 4px; width: 100%; text-align: left; color: inherit; font: inherit; background: transparent; padding: 10px; margin: 2px 0; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.near-team-member:hover { background: var(--theia-list-hoverBackground, #7772); }
+.near-team-member[aria-pressed='true'] { background: var(--theia-list-activeSelectionBackground, #5676a248); color: var(--theia-list-activeSelectionForeground, inherit); }
+.near-team-member:focus-visible, .near-project-select:focus-visible { outline: 2px solid var(--theia-focusBorder, #5797ec); outline-offset: 1px; }
+.near-member-instructions { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; line-height: 1.55; }
+.near-team-status { margin-top: 22px; }
+@media (max-width: 630px) { .near-team-columns { grid-template-columns: 1fr; } }

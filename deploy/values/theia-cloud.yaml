@@ -1,0 +1,26 @@
+# Theia Cloud 1.2.0 (chart deploy/charts/vendored/theia-cloud-1.2.0.tgz), the settings that decide which images render and how they are pulled.
+# The descriptor (theia-cloud.release.json) sets operator.image, service.image and landingPage.image to our rebuilt images by digest from
+# deploy/bundle/images.lock.json (D-20, D-23). 47-15 adds the rest of the Theia Cloud settings here and must keep these.
+
+# Root pull policy (the chart default is Always) and each component's own (D-20, hardening 1).
+imagePullPolicy: IfNotPresent
+
+# The chart's demo AppDefinition hard-codes uid, port and capacity (research Pitfall 5); ours is shipped by the sterling-site release instead.
+demoApplication:
+  install: false
+
+# No image preloading DaemonSet: it would pull the demo image, and the session image is pulled by digest when a session starts.
+preloading:
+  enable: false
+
+operator:
+  imagePullPolicy: IfNotPresent
+  # Annotation mode: the operator sets bandwidth annotations and never starts the wondershaper image, so that image is not bundled (D-20).
+  # The chart still passes its default name as --wondershaperImage; it is never pulled in this mode.
+  bandwidthLimiter: "K8SANNOTATION"
+
+service:
+  imagePullPolicy: IfNotPresent
+
+landingPage:
+  imagePullPolicy: IfNotPresent

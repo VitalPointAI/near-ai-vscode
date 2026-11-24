@@ -1,0 +1,16 @@
+{
+  "gap": "G283",
+  "id": "g283",
+  "controls": [
+    "itsp171-03.11.03"
+  ],
+  "ownerRole": "owner",
+  "title": "Unallocated supplementary risk row needs a sponsor source decision",
+  "remediation": "The contracting sponsor risk authority and assessor reconcile this displayed identifier to the approved source edition and contract selection. The source records it as not allocated following NIST withdrawal. Record the authoritative citation, dated disposition and any successor identified by the contracting authority. Preserve pending status during review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect a source-cited scope disposition for 03.11.03 or a dated record of the outstanding sponsor decision"
+    }
+  ]
+}

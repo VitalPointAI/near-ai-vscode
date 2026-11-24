@@ -1,0 +1,18 @@
+{
+  "gap": "G171",
+  "id": "g171",
+  "controls": [
+    "pe-17",
+    "pe-400",
+    "pe-400.01"
+  ],
+  "ownerRole": "owner",
+  "title": "Alternate work and domestic telework safeguards need sponsor assessment",
+  "remediation": "The sponsor remote-work authority and physical security lead define approved work sites and information categories. Review site safeguards, incident contacts, approved devices and storage for physical information and assets against departmental requirements and applicable RCMP guidance. Sample an authorized site assessment and evidence of control effectiveness without publishing residential details.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved alternate-site criteria and a sanitized effectiveness assessment covering devices, physical storage and incident contact"
+    }
+  ]
+}

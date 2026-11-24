@@ -1,0 +1,16 @@
+{
+  "gap": "G177",
+  "id": "g177",
+  "controls": [
+    "ps-06"
+  ],
+  "ownerRole": "owner",
+  "title": "Access agreements need documented issuance and renewal",
+  "remediation": "The sponsor access governance lead and privacy office approve agreement versions, review intervals and re-signing triggers. Sample a recorded acceptance before access and a renewal after a revision or scheduled interval. Retain a restricted reference or redacted evidence for assessor review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved agreement versions, review history and redacted before-access acceptance and renewal records"
+    }
+  ]
+}

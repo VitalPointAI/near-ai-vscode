@@ -1,0 +1,17 @@
+{
+  "gap": "G48",
+  "id": "g48",
+  "controls": [
+    "au-07",
+    "au-07.01"
+  ],
+  "ownerRole": "shared",
+  "title": "Audit analysis and reports need authorized field searches and source integrity evidence",
+  "remediation": "The deployment audit analyst and reporting system owner identify approved search and sorting fields and the reporting tool. Generate an on-demand review and a representative incident report from sanitized source records. Compare source checksums and record order before and after reduction to verify that the tool preserves original records. Assign missing capabilities to the component or monitoring owner and retest.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved query fields, representative query and report results, and before-and-after source integrity and ordering receipts"
+    }
+  ]
+}

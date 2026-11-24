@@ -1,0 +1,19 @@
+{
+  "gap": "G183",
+  "id": "g183",
+  "controls": [
+    "pm-07",
+    "pm-07.01",
+    "pm-11",
+    "pm-32"
+  ],
+  "ownerRole": "owner",
+  "title": "Enterprise architecture and mission use need traceability to approved purpose",
+  "remediation": "The enterprise architect and business owners map essential processes and authorized uses to systems, data flows and safeguards. Identify nonessential functions selected for offloading, record destination responsibilities and risks, and sample operating use against approved purposes. Record treatment or signed scope determination for omissions.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved architecture and mission mapping, scoped offload decisions and a sampled authorized-purpose review"
+    }
+  ]
+}

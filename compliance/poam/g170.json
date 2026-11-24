@@ -1,0 +1,16 @@
+{
+  "gap": "G170",
+  "id": "g170",
+  "controls": [
+    "pe-16"
+  ],
+  "ownerRole": "owner",
+  "title": "Facility delivery and removal authorization needs movement records",
+  "remediation": "The sponsor asset custodian defines controlled component classes and who authorizes receipt or removal. Sample entry, release and custody reconciliation against asset records. Use restricted references or redact identifying information while retaining dates, approvals and exceptions needed for assessment.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the component movement procedure and authorized receipt and removal samples traceable to custody records"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages:
+  - RequestReceived
+rules:
+  # Read-only noise from the node agents.
+  - level: None
+    users: ["system:kube-proxy"]
+    verbs: ["watch"]
+    resources:
+      - group: ""
+        resources: ["endpoints", "services", "services/status"]
+  # Never record secret contents.
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets", "configmaps"]
+  # Theia Cloud records: who started, changed or ended a session or workspace.
+  - level: RequestResponse
+    resources:
+      - group: "theia.cloud"
+        resources: ["sessions", "workspaces"]
+  - level: Metadata

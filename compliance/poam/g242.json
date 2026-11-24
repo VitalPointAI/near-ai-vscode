@@ -1,0 +1,16 @@
+{
+  "gap": "G242",
+  "id": "g242",
+  "controls": [
+    "itsp171-03.03.07"
+  ],
+  "ownerRole": "owner",
+  "title": "Audit time stamps need clock and precision verification",
+  "remediation": "The sponsor platform and logging leads document clocks used to produce audit time stamps, precision and permitted UTC or local offset convention. Verify representative records from assessed components against the configuration and show their dates sort and correlate as expected across the specified boundary.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect approved clock and timestamp settings, sampled record precision and UTC or offset evidence for assessed sources"
+    }
+  ]
+}

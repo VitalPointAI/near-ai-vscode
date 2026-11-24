@@ -1,0 +1,16 @@
+{
+  "gap": "G58",
+  "id": "g58",
+  "controls": [
+    "ac-01"
+  ],
+  "ownerRole": "owner",
+  "title": "Deployment access control policy needs approval and evidence",
+  "remediation": "The deployment sponsor designates the access control policy owner and approves the policy and operating procedures for the assessed system. The policy owner records scope, responsibilities, coordination and distribution, and sets review intervals and triggers. Retain the signed version, named owner, dissemination record and schedule and samples for policy and procedure review.",
+  "milestones": [
+    {
+      "phase": "44.1",
+      "title": "Collect the approved deployment access control policy, procedures, named owner and dissemination and review records"
+    }
+  ]
+}
