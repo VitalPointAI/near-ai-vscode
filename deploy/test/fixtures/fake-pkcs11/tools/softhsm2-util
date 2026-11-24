@@ -1,0 +1,44 @@
+#!/bin/sh
+# Fake softhsm2-util for deploy/test/dev-site-key.test.mjs. Records its arguments in $FAKE_LOG and keeps a token as a folder under the
+# directories.tokendir of $SOFTHSM2_CONF. It reads PINs from standard input the way the real tool prompts for them, and never stores them.
+set -eu
+printf 'softhsm2-util' >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+
+[ -f "${SOFTHSM2_CONF:-}" ] || { echo "ERROR: Could not load the SoftHSM configuration" >&2; exit 1; }
+tokendir=$(sed -n 's/^directories\.tokendir = //p' "$SOFTHSM2_CONF")
+[ -d "$tokendir" ] || { echo "ERROR: Failed to enumerate object store in $tokendir" >&2; exit 1; }
+
+case "${1:-}" in
+  --show-slots)
+    echo "Available slots:"
+    n=0
+    for dir in "$tokendir"/*/; do
+      [ -f "$dir/label" ] || continue
+      n=$((n + 1))
+      printf 'Slot %s\n    Token info:\n        Initialized:      yes\n        Label:            %-32s\n' "$n" "$(cat "$dir/label")"
+    done
+    printf 'Slot %s\n    Token info:\n        Initialized:      no\n        Label:                                            \n' "$((n + 1))"
+    ;;
+  --init-token)
+    shift
+    label=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in --label) label=$2; shift 2 ;; --free) shift ;; *) echo "fake: unexpected argument $1" >&2; exit 2 ;; esac
+    done
+    [ -n "$label" ] || { echo "ERROR: A label for the token must be supplied." >&2; exit 1; }
+    for prompt in "Please enter SO PIN: " "Please reenter SO PIN: " "Please enter user PIN: " "Please reenter user PIN: "; do
+      printf '%s' "$prompt"
+      IFS= read -r pin || { echo "ERROR: Could not get PIN" >&2; exit 1; }
+      [ -n "$pin" ] || { echo "ERROR: Could not get PIN" >&2; exit 1; }
+    done
+    printf '\n'
+    count=$(ls "$tokendir" | wc -l)
+    dir="$tokendir/token-$((count + 1))"
+    mkdir "$dir"
+    printf '%s' "$label" > "$dir/label"
+    echo "The token has been initialized and is reassigned to slot $((count + 1))"
+    ;;
+  *) echo "fake softhsm2-util: unsupported call" >&2; exit 2 ;;
+esac
