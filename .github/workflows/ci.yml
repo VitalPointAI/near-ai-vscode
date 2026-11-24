@@ -416,11 +416,10 @@ jobs:
           cache-dependency-path: workbench/package-lock.json
       - if: steps.has_workbench.outputs.present == 'true'
         run: npm ci --ignore-scripts
-      # Report-only while the Theia 1.77 tree carries a high advisory with no fix inside the pinned version (zod through @theia/ai-mcp,
-      # GHSA-mrhx-c7xc-m3w5, 2026-11-24); the JSON goes up with the test report and the register records the condition.
-      - name: Audit the workbench runtime dependencies (report-only)
+      # Blocking at high. zod GHSA-mrhx-c7xc-m3w5 (through @theia/ai-mcp) is fixed by the scoped override in workbench/package.json;
+      # the JSON still goes up with the test report.
+      - name: Audit the workbench runtime dependencies
         if: steps.has_workbench.outputs.present == 'true'
-        continue-on-error: true
         run: |
           status=0
           npm audit --omit=dev --audit-level=high --json > workbench-audit.json || status=$?

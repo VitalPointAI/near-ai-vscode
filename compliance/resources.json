@@ -1041,7 +1041,7 @@
       "reviewedAt": "2026-11-24",
       "conditions": [
         "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one.",
-        "npm audit --omit=dev in the workbench job is report-only until Theia ships a fix: on 2026-11-24 it reports one high advisory, zod 3.25.x below 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory exhaustion validating oversized collections), through @theia/plugin-ext > @theia/ai-mcp > @modelcontextprotocol/sdk; it validates MCP messages, and MCP traffic exists only when a person adds an MCP server."
+        "zod under @modelcontextprotocol/sdk (through @theia/plugin-ext > @theia/ai-mcp) is held at 4.6.7 by an override in workbench/package.json, because Theia 1.77.0 resolves zod 3.25.x, below 4.6.6 (GHSA-mrhx-c7xc-m3w5, high, memory exhaustion validating oversized collections); the SDK accepts zod ^3.25 || ^4.0. Remove the override when a Theia upgrade brings zod 4.6.6 or later. npm audit --omit=dev --audit-level=high in the workbench job blocks."
       ]
     },
     {
