@@ -796,7 +796,7 @@ Plans:
 - [ ] 48.1-15-PLAN.md: Wave 5. Audit archive at the site: our image, the archive and sign-watch CronJobs, the object store and 1,825-day settings, the fit register repoint
 - [ ] 48.1-18-PLAN.md: Wave 6. Statements and evidence rules for the 48.1 controls
 - [ ] 48.1-21-PLAN.md: Wave 6. Key separation in the inventory, key plan, playbooks and fit register text
-- [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench after Phase 33.1 (its observer.approve references, 48.1-HANDOFFS.md H-18)
+- [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench after Phase 33.1, whose observer.approve records the required references according to what the observer may see (33.1 D-37; 48.1-HANDOFFS.md H-18)
 
 ## Milestone v0.5.0: Governed agent platform
 
