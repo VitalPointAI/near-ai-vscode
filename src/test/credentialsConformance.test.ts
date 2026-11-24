@@ -267,7 +267,9 @@ test('Multikey: 0xed01 and 0x1200 headers round-trip a 32-byte Ed25519 key and a
 
 
 // ---- The reference implementation (test-only devDependencies, owner-approved 2026-11-24; never imported outside src/test) ----
-// The Digital Bazaar packages are ES modules; a variable specifier keeps this CommonJS build loading them through Node's require of ES modules.
+// Only the two approved packages this file needs are imported: @digitalbazaar/vc and @digitalbazaar/eddsa-jcs-2022-cryptosuite. Their own
+// dependencies are used only through them. The packages are ES modules; a variable specifier keeps this CommonJS build loading them through
+// Node's require of ES modules.
 async function esm(name: string): Promise<any> {
   return import(name);
 }
@@ -275,21 +277,16 @@ async function esm(name: string): Promise<any> {
 interface Reference {
   vc: any;
   cryptosuite: any;
-  multikey: any;
-  base58: any;
-  contexts: Map<string, unknown>;
-  jcs: (value: unknown) => string | undefined;
+  // The cryptosuite's own RFC 8785 canonicalization (the JCS step of eddsa-jcs-2022).
+  jcs: (value: unknown) => Promise<string | undefined>;
 }
 
 let referenceLoaded: Promise<Reference> | undefined;
 function reference(): Promise<Reference> {
   referenceLoaded ??= (async () => {
-    const [vc, cryptosuite, multikey, base58, credentialsContext, canonicalizeModule] = await Promise.all([
-      esm('@digitalbazaar/vc'), esm('@digitalbazaar/eddsa-jcs-2022-cryptosuite'), esm('@digitalbazaar/ed25519-multikey'), esm('base58-universal'),
-      esm('@digitalbazaar/credentials-context'), esm('canonicalize')
-    ]);
-    const jcs = (canonicalizeModule.default?.default ?? canonicalizeModule.default ?? canonicalizeModule) as (value: unknown) => string | undefined;
-    return { vc, cryptosuite, multikey, base58, contexts: credentialsContext.contexts as Map<string, unknown>, jcs };
+    const [vc, cryptosuite] = await Promise.all([esm('@digitalbazaar/vc'), esm('@digitalbazaar/eddsa-jcs-2022-cryptosuite')]);
+    const suite = cryptosuite.createVerifyCryptosuite();
+    return { vc, cryptosuite, jcs: (value: unknown) => suite.canonize(value) };
   })();
   return referenceLoaded;
 }
@@ -300,12 +297,13 @@ const OUR_CONTEXT = 'https://w3id.org/sterling/credentials/v1';
 const OUR_CONTEXT_STUB = { '@context': { '@protected': true, ClearanceCredential: `${OUR_CONTEXT}#ClearanceCredential`, scale: `${OUR_CONTEXT}#scale`, atLeast: `${OUR_CONTEXT}#atLeast` } };
 const CHECK_TIME = '2026-12-01T00:00:00Z';
 
-// A static document loader: the two credential contexts and did:key documents built from the key itself. Any other address is refused, so no test
-// ever reaches the network (jsonld would otherwise fetch contexts over HTTP).
+// A static document loader: the VC 2.0 context from @digitalbazaar/vc's own embedded copy (its defaultDocumentLoader never fetches), our
+// context's stand-in, and did:key documents built from the key itself. Any other address is refused, so no test ever reaches the network
+// (jsonld would otherwise fetch contexts over HTTP).
 function staticLoader(ref: Reference): (url: string) => Promise<{ contextUrl: null; documentUrl: string; document: unknown }> {
   return async (url: string) => {
     const answer = (document: unknown) => ({ contextUrl: null, documentUrl: url, document });
-    if (url === VC_V2) return answer(ref.contexts.get(VC_V2));
+    if (url === VC_V2) return answer((await ref.vc.defaultDocumentLoader(url)).document);
     if (url === OUR_CONTEXT) return answer(OUR_CONTEXT_STUB);
     if (url.startsWith('did:key:z6Mk')) {
       const [did, fragment] = url.split('#');
@@ -321,9 +319,11 @@ function staticLoader(ref: Reference): (url: string) => Promise<{ contextUrl: nu
   };
 }
 
-// The glue @digitalbazaar/vc expects from a suite (what @digitalbazaar/data-integrity provides, which is not a dependency): every byte that matters
-// (the JCS form, both hashes, the @context rule, Ed25519 and base58btc) comes from the reference packages, not from our code.
-function referenceSuite(ref: Reference, options: { verificationMethod: string; signer?: { sign(input: { data: Uint8Array }): Promise<Uint8Array> } }) {
+// The glue @digitalbazaar/vc expects from a suite (what @digitalbazaar/data-integrity provides, which is not a dependency). The reference
+// cryptosuite computes the JCS form, both hashes and the @context rule, and verifies Ed25519 signatures. Ed25519 signing for issuance uses
+// node:crypto (Ed25519 is deterministic, so the signer adds nothing implementation-specific), and proofValue's base58btc is our multibase.ts,
+// which is checked against known vectors above.
+function referenceSuite(ref: Reference, options: { verificationMethod: string; signer?: (data: Uint8Array) => Uint8Array }) {
   return {
     type: 'DataIntegrityProof',
     cryptosuite: 'eddsa-jcs-2022',
@@ -337,7 +337,7 @@ function referenceSuite(ref: Reference, options: { verificationMethod: string; s
       proof = await purpose.update(proof, { document, suite: this, documentLoader });
       const cryptosuite = ref.cryptosuite.createSignCryptosuite();
       const data = await cryptosuite.createVerifyData({ cryptosuite, document: { ...document }, proof });
-      proof.proofValue = `z${ref.base58.encode(await signer.sign({ data }))}`;
+      proof.proofValue = multibaseEncode(signer(data));
       return proof;
     },
     async matchProof({ proof }: any) {
@@ -350,7 +350,7 @@ function referenceSuite(ref: Reference, options: { verificationMethod: string; s
         const cryptosuite = ref.cryptosuite.createVerifyCryptosuite();
         const data = await cryptosuite.createVerifyData({ cryptosuite, document: unsecured, proof: { ...proof } });
         const verifier = await cryptosuite.createVerifier({ verificationMethod: method });
-        const verified = await verifier.verify({ data, signature: ref.base58.decode(proof.proofValue.slice(1)) });
+        const verified = await verifier.verify({ data, signature: multibaseDecode(proof.proofValue) });
         return { verified, verificationMethod: method };
       } catch (error) {
         return { verified: false, error };
@@ -374,39 +374,40 @@ test('cross-check: a ClearanceCredential we sign verifies with Digital Bazaar\'s
   assert.equal(refused.verified, false, 'the reference refuses our credential once a claim is changed');
 });
 
-test('cross-check: a ClearanceCredential Digital Bazaar issues through @digitalbazaar/vc verifies with our verifyProof, and a changed claim does not', async () => {
+test('cross-check: a ClearanceCredential issued through @digitalbazaar/vc with the reference cryptosuite verifies with our verifyProof, and a changed claim does not', async () => {
   const ref = await reference();
-  const keyPair = await ref.multikey.generate();
-  const did = `did:key:${keyPair.publicKeyMultibase}`;
-  const verificationMethod = `${did}#${keyPair.publicKeyMultibase}`;
-  const credential = clearanceCredential(did);
-  const suite = referenceSuite(ref, { verificationMethod, signer: keyPair.signer() });
+  const issuer = newTestKey();
+  const credential = clearanceCredential(issuer.didKey);
+  const suite = referenceSuite(ref, { verificationMethod: issuer.verificationMethod, signer: (data) => new Uint8Array(edSign(null, data, issuer.privateKey)) });
   const issued = await ref.vc.issue({ credential: clone(credential), suite, documentLoader: staticLoader(ref), now: CHECK_TIME });
   assert.equal(issued.proof.cryptosuite, 'eddsa-jcs-2022');
-  const { key } = decodePublicKeyMultibase(keyPair.publicKeyMultibase);
-  const verdict = verifyProof(issued, key);
+  const verdict = verifyProof(issued, issuer.publicKey);
   assert.equal(verdict.ok, true, verdict.ok ? '' : verdict.reason);
   const reverify = await ref.vc.verifyCredential({ credential: issued, suite, documentLoader: staticLoader(ref), now: CHECK_TIME });
   assert.equal(reverify.verified, true, 'the reference also accepts what it issued, so the glue above is sound');
   const changed = clone(issued);
   changed.credentialSubject.scale = 'ca-gc-protected';
-  const refused = verifyProof(changed, key);
+  const refused = verifyProof(changed, issuer.publicKey);
   assert.equal(refused.ok, false);
   if (!refused.ok) assert.equal(refused.reason, 'bad-signature');
 });
 
-test('cross-check: the reference cryptosuite reproduces the W3C example proofValue, the same bytes our createProof gives', async () => {
+test('cross-check: the reference cryptosuite computes the W3C example\'s hash data and accepts its proofValue', async () => {
   const ref = await reference();
   const { proofValue: _value, ...options } = vectors.signedCredential.proof;
-  const cryptosuite = ref.cryptosuite.createSignCryptosuite();
-  const data = await cryptosuite.createVerifyData({ cryptosuite, document: clone(vectors.unsecuredCredential), proof: clone(options) });
+  const signing = ref.cryptosuite.createSignCryptosuite();
+  const data = await signing.createVerifyData({ cryptosuite: signing, document: clone(vectors.unsecuredCredential), proof: clone(options) });
   assert.equal(Buffer.from(data).toString('hex'), vectors.combinedHashHex);
-  const keyPair = await ref.multikey.from({ type: 'Multikey', controller: 'did:key:example', id: options.verificationMethod, ...vectors.keyPair });
-  const signature = await keyPair.signer().sign({ data });
-  assert.equal(`z${ref.base58.encode(signature)}`, vectors.proofValue);
+  const verifying = ref.cryptosuite.createVerifyCryptosuite();
+  const method = { type: 'Multikey', id: options.verificationMethod, controller: options.verificationMethod.split('#')[0], publicKeyMultibase: vectors.keyPair.publicKeyMultibase };
+  const verifier = await verifying.createVerifier({ verificationMethod: method });
+  assert.equal(await verifier.verify({ data, signature: multibaseDecode(vectors.proofValue) }), true);
+  const flipped = new Uint8Array(data);
+  flipped[0] ^= 1;
+  assert.equal(await verifier.verify({ data: flipped, signature: multibaseDecode(vectors.proofValue) }), false);
 });
 
-// ---- RFC 8785: canonical.ts against the reference JCS (canonicalize, by an RFC 8785 author) for every input the profile allows ----
+// ---- RFC 8785: canonical.ts against the reference cryptosuite's JCS step for every input the profile allows ----
 const STRING_ATOMS = [
   'a', 'Z', '0', ' ', '"', '\\', '/', '\b', '\f', '\n', '\r', '\t', '\u0000', '\u0001', '\u001f', '\u007f', '\u0080', 'é', 'ß', '€', ' ',
   ' ', '﻿', '￿', '日本', '😀', '𐀀', '􏿿', 'סֶ', '<', '>', '&', '\'', 'Secret', 'ca-gc-classified'
@@ -459,7 +460,7 @@ test('RFC 8785: for 2,000 seeded profile values (text, true and false, null, saf
     const value = index % 100 === 0 ? nested(16, random) : randomValue(random, 0);
     if (index % 100 === 0) deepest += 1;
     const ours = canonicalize(value);
-    const theirs = ref.jcs(value);
+    const theirs = await ref.jcs(value);
     if (ours !== theirs) failures.push(`#${index}: ${JSON.stringify(value)}`);
   }
   assert.equal(deepest, 20, 'twenty of the values are nested exactly 16 deep');
@@ -469,6 +470,6 @@ test('RFC 8785: for 2,000 seeded profile values (text, true and false, null, saf
 test('RFC 8785: key order follows UTF-16 code units, astral characters included, in both implementations', async () => {
   const ref = await reference();
   const tricky = { '😀': 1, 'דּ': 2, '€': 3, 'é': 4, a: 5, A: 6, '': 7, '\u0080': 8, 'éa': 9, '1': 10, '10': 11, '2': 12 };
-  assert.equal(canonicalize(tricky), ref.jcs(tricky));
+  assert.equal(canonicalize(tricky), await ref.jcs(tricky));
   assert.equal(canonicalize(tricky), '{"":7,"1":10,"10":11,"2":12,"A":6,"a":5,"\u0080":8,"é":4,"éa":9,"€":3,"😀":1,"דּ":2}');
 });

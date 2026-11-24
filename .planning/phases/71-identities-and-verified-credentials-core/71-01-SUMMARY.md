@@ -95,7 +95,13 @@ Floats, -0, NaN, Infinity and integers beyond 2^53-1 are refused before signing 
 
 **1. [Rule 3 - Blocking] `@digitalbazaar/vc` needs a suite object, and the usual one (`@digitalbazaar/data-integrity`) is not an approved package**
 - **Found during:** Task 3.
-- **Fix:** I did not install a fourth package. Instead, a small test-only suite adapter is written in the test file. Every byte that matters in it comes from the reference packages: the JCS form and both hashes from `eddsa-jcs-2022-cryptosuite`, the @context rule, Ed25519 from `ed25519-multikey`, and base58btc from `base58-universal`. `@digitalbazaar/vc` runs its own credential checks and its issuance purpose. A self-check (the reference re-verifies what it issued) shows the glue is sound.
+- **Fix:** I did not install a fourth package. Instead, a small test-only suite adapter is written in the test file.
+  - The reference cryptosuite (`eddsa-jcs-2022-cryptosuite`) computes the JCS form, both hashes and the @context rule, and verifies Ed25519 signatures through its own `createVerifier`.
+  - `@digitalbazaar/vc` runs its own credential checks and its issuance purpose, and its `defaultDocumentLoader` supplies the VC 2.0 context from its embedded copy.
+  - Ed25519 signing for issuance uses `node:crypto`. Ed25519 is deterministic, so the signer adds nothing implementation-specific.
+  - The proofValue's base58btc is our `multibase.ts`, which is checked against known vectors.
+  - A self-check (the reference re-verifies what it issued) shows the glue is sound.
+- **Only the approved packages are imported:** the test imports exactly `@digitalbazaar/vc` and `@digitalbazaar/eddsa-jcs-2022-cryptosuite`, never a package that is only in their tree (agent review of #193). The RFC 8785 generator compares against the cryptosuite's own `canonize`, which is its JCS step.
 - **Files:** `src/test/credentialsConformance.test.ts`. **Commit:** e81a308b.
 
 **2. [Rule 1 - Copy lint] Two refusal messages used the glossary word "profile"**
