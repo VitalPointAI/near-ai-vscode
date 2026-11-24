@@ -883,6 +883,22 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | ACCR-13 | Phase 44 | 44-06, 44-13, 44-15, 44-16, 44-18 |
 | ACCR-14 | Phase 44 | 44-03, 44-04, 44-05, 44-13, 44-18 |
 
+## Phase 46 requirements: Native Theia foundation
+
+**Defined:** 2026-11-23 from `.planning/research/multiuser-hosting/DESIGN.md` (section 8: P1, P2, P3, P4, P5, P8, P9, P11 and the image build of P10; decisions D1 to D11), added when Phase 46 was planned. Decisions: `.planning/phases/46-native-theia-foundation/46-CONTEXT.md`.
+**Core value:** The Sterling workbench is a real, tested Theia product that keeps each person's secrets durable and their own, keeps long-term keys out of the session, knows who signed in, and calls nothing outside what your organization lists.
+
+- [ ] **FND-T-01**: The workbench lives in the `workbench/` package with its own lockfile, build, tests and CI job; nothing remains only under `.planning/spikes/`; the #162 review fixes are applied (localhost bind by default, no dev dependencies at run time, build writes only inside the package). (P1)
+- [ ] **FND-T-02**: Native widgets call engine code in the backend through one shared JSON-RPC service pattern, and refusals cross it as plain data with their reason. (P2)
+- [ ] **FND-T-03**: Secrets saved through Theia's `KeyStoreService` (VSIX `SecretStorage` and Theia AI credentials) are stored per person in OpenBao KV, or the OS keyring on a single machine, survive a restart, and are never held only in memory. (P3)
+- [ ] **FND-T-04**: `KeyService` signs, makes wrapped data keys and unwraps through OpenBao Transit; private keys never enter the session; signing is refused without a fresh `acr` and `auth_time`. (P4)
+- [ ] **FND-T-05**: The session identifies the person from the forwarded sign-in token and `THEIACLOUD_SESSION_USER`, logs in to OpenBao with jwt auth, renews and revokes its token with the session, shows `failed` with a reason and Retry, and can start a step-up sign-in. (P5)
+- [ ] **FND-T-06**: Open VSX and model server addresses come from configuration; telemetry and every update check are off; the running image makes no outbound connection outside the configured addresses, proven by a container test. (P8)
+- [ ] **FND-T-07**: A Playwright browser harness runs against the built container in CI. (P9)
+- [ ] **FND-T-08**: The workbench image and the hub use one Node major. (P11)
+- [ ] **FND-T-09**: CI builds the workbench image on a digest-pinned UBI 9 base, writes a CycloneDX SBOM, scans it, and signs it with your organization's key on `main` (no keyless signing). (P10, image build)
+- [ ] **FND-T-10**: Every resource the phase adds has a passing entry in `compliance/resources.json` and the fit check covers the workbench manifests; the copy lint accepts the Sterling edition names and scans the workbench's user strings. (D9; DESIGN section 15)
+
 ## Later milestones: draft requirements (not mapped to phases yet)
 
 Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are reserved so the outlines can be cited; each set is reviewed and mapped to phases when its milestone starts. Not counted in any coverage figure above.
