@@ -70,7 +70,7 @@ class TeamPreviewWidget extends BaseWidget {
 
   private async showProject(): Promise<void> {
     const request = ++this.request;
-    this.showMessage('Loading team…');
+    this.showMessage('Loading agent team…');
     try {
       const result = await this.service.readProject(this.projects.value);
       if (request !== this.request || this.isDisposed) return;
@@ -117,7 +117,7 @@ class TeamPreviewWidget extends BaseWidget {
       roster.append(button);
     });
     if (buttons.length) select(0);
-    else detail.append(element('p', undefined, 'This team has no members.'));
+    else detail.append(element('p', undefined, 'This agent team has no members.'));
     columns.append(roster, detail);
     this.body.replaceChildren(overview, columns);
   }

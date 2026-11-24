@@ -252,5 +252,14 @@
   },
   "src/team/gitTransport.ts": {
     "bare-team": 1
+  },
+  "workbench/extension/src/browser/sterling-welcome-module.ts": {
+    "bare-team": 1
+  },
+  "workbench/extension/src/browser/sterling-work-areas-module.ts": {
+    "bare-team": 1
+  },
+  "workbench/extension/src/browser/team-preview-frontend-module.ts": {
+    "bare-team": 7
   }
 }
