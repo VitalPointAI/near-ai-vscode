@@ -90,6 +90,11 @@ test('a fresh step-up signs: login to the step-up role, sign with that token, th
   assert.equal(sign.token, STEPUP_TOKEN, 'the step-up token signs');
   assert.equal(revoke.token, STEPUP_TOKEN, 'and is revoked');
   assert.ok(fake.calls.every((call) => call.token !== SESSION_TOKEN), "the session's ordinary token never signs");
+  // A step-up token lives no longer than the window and OpenBao refuses it after that (47-07's lab run), so no token is kept between
+  // signatures: the next one logs in again.
+  assert.equal((await service.sign(MESSAGE)).kind, 'ok');
+  assert.equal(fake.callsTo('POST /v1/auth/jwt/login').length, 2);
+  assert.equal(fake.callsTo('POST /v1/auth/token/revoke-self').length, 2);
 });
 
 test('acr missing or different, auth_time missing, too old or in the future: refused with the fix, and no OpenBao call', async () => {

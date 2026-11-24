@@ -17,7 +17,7 @@ provides:
   - "rebind(KeyStoreService) and /services/sterling-secret-store (key-store-backend-module.ts); status bar entry sterling-secret-store"
   - "createKeyService, keyServiceRpc, KeyService (key-service.ts); /services/sterling-key-service with sign and generateWrappedDataKey only"
   - "STERLING_OPENBAO_STEPUP_ROLE (default sterling-workbench-stepup) in readHostingConfig; ActiveSession.forwardedToken"
-  - "test fixtures: STERLING_STEPUP_POLICY, the sterling-workbench-stepup role and TEST_STEPUP_ACR in startDevOpenBao"
+  - "test fixtures: the sterling-workbench-stepup role, its signing policy (sterling-workbench-sign after the 46-08 alignment) and TEST_STEPUP_ACR in startDevOpenBao"
 affects: [46-08, 47, 33]
 
 actuals:
@@ -92,7 +92,7 @@ None. No gate file changed and no package, image or tool was added (keytar is Th
 | `keyServiceRpc(service)` and `KEY_SERVICE_PATH = '/services/sterling-key-service'` | `KeyServiceRpc` with `sign` and `generateWrappedDataKey` only; `KEY_SERVICE_TEXT` |
 | Hosting setting | `STERLING_OPENBAO_STEPUP_ROLE`, default `sterling-workbench-stepup`, must differ from `STERLING_OPENBAO_JWT_ROLE` |
 | `ActiveSession.forwardedToken` | the latest forwarded JWT, backend only, for the step-up login |
-| Test fixtures | `STERLING_STEPUP_POLICY`, `TEST_STEPUP_ACR`, role `sterling-workbench-stepup` (bound `acr`, TTL 5 min) in `startDevOpenBao`; the ordinary `sterling-workbench` test policy no longer grants `transit/sign` |
+| Test fixtures | `TEST_STEPUP_ACR` and role `sterling-workbench-stepup` (bound `acr`, TTL 5 min) in `startDevOpenBao`; the ordinary `sterling-workbench` test policy no longer grants `transit/sign`. Aligned during 46-08 with Phase 47's `deploy/openbao` (47-07): the signing policy is `sterling-workbench-sign` (`transit/sign/person-<id>` only, exported as `STERLING_SIGN_POLICY`), the step-up role carries it beside `sterling-workbench`, with `token_explicit_max_ttl` equal to the window and `token_no_default_policy` on both roles |
 
 Signing order, as the unit fake asserts: `POST auth/<jwt>/login {role: <step-up role>, jwt: <forwarded token>}`, then `POST <transit>/sign/person-<id> {input}` with that token, then `POST auth/token/revoke-self` with it (also when the sign fails). The guard before any call: `STERLING_STEPUP_ACR` set, the token's `acr` equal to it, `auth_time` present, no older than `STERLING_STEPUP_MAX_AGE_SECONDS` and no more than 30 s ahead of the clock.
 

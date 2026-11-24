@@ -1,15 +1,17 @@
 // A dev-mode OpenBao for the container suite (46-02; 46-03 and 46-08 reuse it on their own networks, 46-07 adds keys with createPersonKeys).
 // The image reference is read from the openbao-test FROM line of workbench/Dockerfile, so the tests run the pinned image the fit check sees
 // (D-29). It starts in dev mode (in memory, unsealed) with a random root token and 512 MiB, mounts kv (version 2) and transit, enables jwt auth
-// with the public key of a test signer (no Keycloak), and writes the policies and the two roles the Phase 47 contract names: the ordinary
-// sterling-workbench role (KV, data keys, token self paths) and the step-up role that alone may sign (46-07). These policies are test
-// fixtures that mirror the contract; Phase 47 owns the real ones. stop() removes only this helper's own container.
+// with the public key of a test signer (no Keycloak), and writes the policies and the two roles Phase 47 applies (deploy/openbao): the
+// sterling-workbench role (KV, data keys, token self paths) and the sterling-workbench-stepup role, which alone also holds
+// sterling-workbench-sign (46-07). These are test fixtures that mirror the contract; Phase 47 owns the real ones. stop() removes only
+// this helper's own container.
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { containerName, freePort, run, runContainer, workbenchRoot } from './docker';
 import { makeTestSigner, type TestSigner } from './test-jwt';
+import { makeTestCertificate, type TestCertificate } from './tls-cert';
 
 /** The audience the test role is bound to; test JWTs carry it as aud. */
 export const TEST_AUDIENCE = 'sterling-workbench-test';
@@ -29,13 +31,11 @@ path "auth/token/lookup-self" { capabilities = ["read"] }
 export const TEST_STEPUP_ACR = 'urn:sterling:test:acr:phishing-resistant';
 
 /**
- * The step-up role's policy (46-07, mirroring the Phase 47 contract in 47-07): signing only, and only with a token from the role whose bound
- * claims require the step-up acr. The ordinary sterling-workbench token above cannot sign.
+ * The signing policy, as Phase 47 writes it (deploy/openbao/policies/sterling-workbench-sign.hcl): signing with the person's own key and
+ * nothing else. Only the step-up role carries it, beside sterling-workbench, so the ordinary session token above cannot sign.
  */
-export const STERLING_STEPUP_POLICY = `
+export const STERLING_SIGN_POLICY = `
 path "transit/sign/person-{{identity.entity.id}}" { capabilities = ["update"] }
-path "auth/token/revoke-self" { capabilities = ["update"] }
-path "auth/token/lookup-self" { capabilities = ["read"] }
 `;
 
 export interface DevOpenBao {
@@ -43,6 +43,14 @@ export interface DevOpenBao {
   readonly addr: string;
   /** The address from another container on the given network, for example http://openbao-1:8200. */
   readonly networkAddr: string | undefined;
+  /**
+   * With `tls`: the https address from another container on the given network, for example https://openbao-1:8443, whose certificate
+   * the test CA in caFile signs. This is how a workbench on the network reaches OpenBao the way a site does (https with
+   * STERLING_OPENBAO_CA_FILE); plain http to a non-loopback address stays refused (46-02 planning choice 2).
+   */
+  readonly tlsNetworkAddr: string | undefined;
+  /** With `tls`: the test CA (PEM) on the host, to mount read-only as the workbench's STERLING_OPENBAO_CA_FILE. */
+  readonly caFile: string | undefined;
   readonly rootToken: string;
   /** Signs JWTs that the jwt auth accepts (aud TEST_AUDIENCE). */
   readonly signer: TestSigner;
@@ -64,15 +72,34 @@ export function openBaoTestImage(): string {
 
 let count = 0;
 
-export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?: string; network?: string } = {}): Promise<DevOpenBao> {
+/** The port of the extra TLS listener (the dev listener stays plain http on 8200 for setup through the published 127.0.0.1 port). */
+const TLS_PORT = 8443;
+
+export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?: string; network?: string; tls?: boolean } = {}): Promise<DevOpenBao> {
   const rootToken = `root-${randomBytes(12).toString('hex')}`;
   const short = `bao-${++count}`;
   const name = containerName(short);
   const alias = `openbao-${count}`;
   const port = await freePort();
-  const started = await runContainer(short, ['-d', '--memory=512m', '-p', `127.0.0.1:${port}:8200`,
+  assert.ok(!options.tls || options.network, 'a TLS listener is for a workbench on a network, so tls needs network');
+  // With tls, a test CA signs a certificate for the network alias; the folder is mounted read-only and the listener added with -config.
+  let certificate: TestCertificate | undefined;
+  const tlsArgs: string[] = [];
+  const configArgs: string[] = [];
+  if (options.tls) {
+    certificate = makeTestCertificate({ dnsNames: [alias] });
+    writeFileSync(path.join(certificate.dir, 'listener.hcl'),
+      `listener "tcp" {\n  address = "0.0.0.0:${TLS_PORT}"\n  tls_cert_file = "/sterling-tls/server.pem"\n  tls_key_file = "/sterling-tls/server.key"\n}\n`);
+    // OpenBao runs as its own user in the container; the test key is readable only inside this test's own temporary folder.
+    chmodSync(certificate.dir, 0o755);
+    for (const file of ['ca.pem', 'server.pem', 'server.key', 'listener.hcl']) chmodSync(path.join(certificate.dir, file), 0o644);
+    tlsArgs.push('-v', `${certificate.dir}:/sterling-tls:ro`);
+    configArgs.push('-config=/sterling-tls/listener.hcl');
+  }
+  const started = await runContainer(short, ['-d', '--memory=512m', '-p', `127.0.0.1:${port}:8200`, ...tlsArgs,
     '-e', `BAO_DEV_ROOT_TOKEN_ID=${rootToken}`, '-e', 'BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200', '-e', 'SKIP_SETCAP=true',
-    openBaoTestImage(), 'server', '-dev']);
+    openBaoTestImage(), 'server', '-dev', ...configArgs]);
+  if (started.code !== 0) certificate?.cleanup();
   assert.equal(started.code, 0, `the dev OpenBao did not start: ${started.stderr.slice(-2000)}`);
   // On a given network (an --internal one, for example) the workbench reaches it by alias; setup and checks still use the published port.
   if (options.network) {
@@ -116,24 +143,33 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
     role_type: 'jwt',
     bound_audiences: [TEST_AUDIENCE],
     user_claim: 'sub',
+    token_no_default_policy: true,
     token_policies: ['sterling-workbench'],
     token_ttl: options.tokenTtl ?? '1h',
     token_max_ttl: options.tokenMaxTtl ?? '24h',
   });
-  await must('POST', 'sys/policies/acl/sterling-workbench-stepup', { policy: STERLING_STEPUP_POLICY });
+  // The step-up role as Phase 47 applies it (deploy/openbao/apply.mjs): the step-up acr bound, a token that cannot outlive the window,
+  // and both policies; OpenBao refuses to sign once that token has expired, so each signature logs in again.
+  await must('POST', 'sys/policies/acl/sterling-workbench-sign', { policy: STERLING_SIGN_POLICY });
   await must('POST', 'auth/jwt/role/sterling-workbench-stepup', {
     role_type: 'jwt',
     bound_audiences: [TEST_AUDIENCE],
     bound_claims: { acr: TEST_STEPUP_ACR },
+    bound_claims_type: 'string',
     user_claim: 'sub',
-    token_policies: ['sterling-workbench-stepup'],
-    token_ttl: '5m',
-    token_max_ttl: '5m',
+    token_no_default_policy: true,
+    token_policies: ['sterling-workbench', 'sterling-workbench-sign'],
+    token_ttl: 300,
+    token_max_ttl: 300,
+    token_explicit_max_ttl: 300,
+    token_period: 0,
   });
 
   return {
     addr: `http://127.0.0.1:${port}`,
     networkAddr: options.network ? `http://${alias}:8200` : undefined,
+    tlsNetworkAddr: options.tls ? `https://${alias}:${TLS_PORT}` : undefined,
+    caFile: certificate?.caFile,
     rootToken,
     signer,
     name,
@@ -144,6 +180,7 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
     api,
     async stop() {
       await run('docker', ['rm', '-f', name]);
+      certificate?.cleanup();
     },
   };
 }
