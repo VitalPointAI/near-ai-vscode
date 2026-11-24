@@ -217,6 +217,10 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P15 | ~3h | 3 tasks | 21 files |
 | Phase 71 P01 | 46min | 3 tasks | 10 files |
 | Phase 71 P02 | 46min | 3 tasks | 7 files |
+| Phase 71 P03 | ~70min | 3 tasks | 9 files |
+| Phase 71 P04 | ~70min | 2 tasks | 5 files |
+| Phase 71 P05 | ~25min | 2 tasks | 2 files |
+| Phase 71 P06 | ~60min | 3 tasks | 12 files |
 
 ## Decisions
 
@@ -310,3 +314,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-15: forged X-Forwarded-Uri bypass closed: trusted_proxy_ips per site (fails closed), HAProxy overwrites forwarded headers, session NetworkPolicy (HAProxy and operator only)
 - [Phase 71]: 71-01: owner approved the three Digital Bazaar packages as exact-pinned test-only devDependencies (pass-with-conditions: no provenance, two-year-old cryptosuite, static loader); JCS verdict PASS
 - [Phase 71]: 71-02: did:webvh FULL, status lists FULL, O8 posture accepted with the ecdsa-jcs-2019 P-256 fallback (gap G350); owner items 1 and 2 answered defaults (solo installs declared, not verified; devices never issue; fallback issuers are policy-named officers)
+- [Phase 71]: 71-03: one credential format (two fixed contexts, one of 17 types with exact claims, required dates and status entries, the proof by the issuer's own method); scales come from the caller; ecdsa-jcs-2019 on P-256 (IEEE P1363 only) is the ready second suite
+- [Phase 71]: 71-04: did:key from Phase 69 keys unchanged; did:webvh v1.0 verified on our own code from any copy (82/82 DIF logs, every negative vector refused); WebvhState resumes from verified bytes; methodsAt answers the key in force at a time
+- [Phase 71]: 71-05: status lists of 131,072 random never-reused indexes, signed by the site's status-list key and checked only against the key the policy names; a signed version orders copies; revocation never clears
+- [Phase 71]: 71-06: credentials@1 and agreements@1 appended to the policy features; the root issues roles only, people with a root role issue within the ceiling, devices and agents never (2,000-case property test); requirements by sensitivity only tighten (store, layers, wideningOf)
