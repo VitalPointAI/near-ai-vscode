@@ -13,7 +13,8 @@ import { CanonicalJsonError, canonicalBytes } from '../team/canonical';
 import type { ScaleTable } from '../gate/labels';
 import { isRecord, ownValue } from '../gate/shape';
 import { CREDENTIAL_CONTEXTS } from './context';
-import { DATA_INTEGRITY_FAILURES, DataIntegrityError, EDDSA_JCS_2022, createProof, verifyProof } from './dataIntegrity';
+import { DATA_INTEGRITY_FAILURES, DataIntegrityError, ECDSA_JCS_2019, EDDSA_JCS_2022, createProof, verifyProof } from './dataIntegrity';
+import { createEcdsaProof, verifyEcdsaProof } from './ecdsaJcs2019';
 import type { CredentialSigner, CredentialSuite, DataIntegrityFailureReason, DataIntegrityVerdict } from './dataIntegrity';
 import type { MultikeyPublicKey, MultikeyType } from './multibase';
 import { STATUS_LIST_TYPE, STATUS_PURPOSES, credentialTimeMs, isCredentialType, isDid, parseClaims } from './types';
@@ -24,8 +25,8 @@ export const STATUS_ENTRY_TYPE = 'BitstringStatusListEntry';
 export const PROOF_PURPOSE = 'assertionMethod';
 
 /** The suites a proof may name, and the Multikey type of the key each one needs. */
-export const CREDENTIAL_SUITES: readonly CredentialSuite[] = Object.freeze([EDDSA_JCS_2022]);
-const SUITE_KEY_TYPE: Readonly<Record<string, MultikeyType>> = Object.freeze({ [EDDSA_JCS_2022]: 'Ed25519' });
+export const CREDENTIAL_SUITES: readonly CredentialSuite[] = Object.freeze([EDDSA_JCS_2022, ECDSA_JCS_2019]);
+const SUITE_KEY_TYPE: Readonly<Record<string, MultikeyType>> = Object.freeze({ [EDDSA_JCS_2022]: 'Ed25519', [ECDSA_JCS_2019]: 'P-256' });
 
 const MAX_ID = 2048;
 const STATUS_INDEX = /^(0|[1-9]\d{0,9})$/;
@@ -196,8 +197,9 @@ export interface VerifyCredentialOptions {
   readonly at?: number;
 }
 
+// The proof's own cryptosuite picks the check (D-05: every proof names its suite); the key's type was matched to it first.
 function checkProof(suite: CredentialSuite, value: unknown, key: Uint8Array): DataIntegrityVerdict {
-  return verifyProof(value, key, { proofPurpose: PROOF_PURPOSE });
+  return suite === ECDSA_JCS_2019 ? verifyEcdsaProof(value, key, { proofPurpose: PROOF_PURPOSE }) : verifyProof(value, key, { proofPurpose: PROOF_PURPOSE });
 }
 
 /** Verifies one credential: the format first, then the proof with the caller's key, then (with `at`) the date window. Never throws. */
@@ -234,7 +236,7 @@ export async function issueCredential(signer: CredentialSigner, unsigned: Record
   if (typeof signer.verificationMethod !== 'string' || !signer.verificationMethod.startsWith(`${read.value.issuer}#`)) throw new CredentialProfileError('issuer-mismatch');
   const proofOptions = { proofPurpose: PROOF_PURPOSE, ...(options.created === undefined ? {} : { created: options.created }) };
   try {
-    const proof = await createProof(unsigned, proofOptions, signer);
+    const proof = suite === ECDSA_JCS_2019 ? await createEcdsaProof(unsigned, proofOptions, signer) : await createProof(unsigned, proofOptions, signer);
     return { ...unsigned, proof };
   } catch (error) {
     if (error instanceof DataIntegrityError) throw new CredentialProfileError(error.reason);
