@@ -212,7 +212,7 @@ test('HAProxy is the default ingress class on node ports, and the client-certifi
   assert.deepEqual(forwarding.map((item) => `${item.namespace}/${item.name}`), ['sterling-identity/keycloakx']);
   const keycloak = forwarding[0].doc;
   assert.match(keycloak, /Client-Cert %\[ssl_c_der,base64\]/);
-  assert.match(keycloak, new RegExp(`host: "keycloak\\.${SITE.domain.replace(/\./g, '\\.')}"`));
+  assert.ok(keycloak.includes(`host: "keycloak.${SITE.domain}"`), `the Keycloak Ingress serves keycloak.${SITE.domain}`);
   assert.match(keycloak, /secretName: keycloak-tls/);
   assert.match(keycloak, /haproxy\.org\/server-ca: "sterling-identity\/sterling-site-ca"/, 'HAProxy verifies Keycloak with the site chain');
   assert.ok(rendered.some((item) => item.kind === 'Secret' && item.name === 'sterling-site-ca' && item.namespace === 'sterling-identity'));

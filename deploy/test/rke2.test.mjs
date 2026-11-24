@@ -145,7 +145,8 @@ test('admission exempts only the Zot pod, by its exact pinned digest in its own 
   const zot = splitDocs(renderRelease(ROOT, 'zot', { site, helm: HELM })).find((doc) => /^kind: StatefulSet$/m.test(doc));
   const zotImages = [...zot.matchAll(/^\s+image: "?([^\s"]+)"?$/gm)].map((match) => match[1]);
   assert.equal(zotImages.length, 1);
-  assert.match(zotImages[0], new RegExp(`^${site.registry.replaceAll('.', '\\.')}/.+@sha256:[0-9a-f]{64}$`));
+  assert.ok(zotImages[0].startsWith(`${site.registry}/`), 'served by the site registry');
+  assert.match(zotImages[0], /@sha256:[0-9a-f]{64}$/);
   const docs = render();
   const signed = named(docs, 'site-images-signed');
   assert.equal((signed.match(/^ {2}matchConditions:$/gm) ?? []).length, 1);

@@ -75,7 +75,7 @@ test('oauth2-proxy verifies TLS, sets secure cookies, reads its secrets from fil
   }
   // The session pod template mounts exactly these two keys (47-09).
   const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
-  for (const key of ['oauth2-proxy.cfg', 'oauth2-proxy-alpha.yaml']) assert.match(template, new RegExp(`subPath: ${key.replace('.', '\\.')}$`, 'm'));
+  for (const key of ['oauth2-proxy.cfg', 'oauth2-proxy-alpha.yaml']) assert.ok(template.split('\n').some((line) => line.trimEnd().endsWith(`subPath: ${key}`)), `the template mounts ${key}`);
   // No secret anywhere in the Theia Cloud releases' ConfigMaps, and none of the chart's public samples anywhere.
   for (const { release, kind, name, doc } of docs) {
     for (const sample of SAMPLE_SECRETS) assert.ok(!doc.includes(sample), `${release}: ${kind} ${name} has the public sample secret`);
