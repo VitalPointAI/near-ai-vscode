@@ -604,6 +604,9 @@ export const GATE_PATHS = Object.freeze([
   // The compliance fit check and its register: adding or approving a third-party resource is a gate change.
   /^scripts\/resource-check\.mjs$/,
   /^compliance\/resources\.json$/,
+  // What every register entry must contain: the fixed architecture areas and the register's schema.
+  /^compliance\/architecture-areas\.json$/,
+  /^compliance\/schemas\/resources\.schema\.json$/,
   /^SECURITY\.md$/,
   /^\.claude\/commands\//,
   /^compliance\/tailoring\//,

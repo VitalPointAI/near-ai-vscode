@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { loadInventory } from '../src/inventory.ts';
 import { buildSsp, TO_BE_COMPLETED } from '../src/oscalSsp.ts';
 import { validateOscal } from '../src/validate.ts';
 
@@ -42,4 +45,28 @@ test('controls without product components remain incomplete at the authorization
   assert.equal(implementation.description, TO_BE_COMPLETED);
   assert.equal(implementation.export, undefined);
   assert.deepEqual(validateOscal(document, 'system-security-plan', { ours: true }), { ok: true, errors: [] });
+});
+
+test('every level SSP carrying the register inventory validates against OSCAL, with each item tied to a component and a party', () => {
+  const root = fileURLToPath(new URL('../..', import.meta.url));
+  const { entries } = loadInventory(root);
+  const { levels } = JSON.parse(readFileSync(new URL('../levels.json', import.meta.url), 'utf8')) as { levels: { id: string; title: string; profile: string; components: string[] }[] };
+  let items = 0;
+  for (const level of levels) {
+    const document: any = buildSsp({ ...input, level, rows: [{ ...input.rows[0], level: level.id }], inventory: entries });
+    assert.deepEqual(validateOscal(document, 'system-security-plan', { ours: true }), { ok: true, errors: [] }, level.id);
+    const ssp = document['system-security-plan'];
+    const components = new Set(ssp['system-implementation'].components.map((component: { uuid: string }) => component.uuid));
+    const parties = new Set((ssp.metadata.parties ?? []).map((party: { uuid: string }) => party.uuid));
+    const roles = new Set((ssp.metadata.roles ?? []).map((role: { id: string }) => role.id));
+    for (const item of ssp['system-implementation']['inventory-items'] ?? []) {
+      items += 1;
+      assert.ok(components.has(item['implemented-components'][0]['component-uuid']), item.uuid);
+      for (const party of item['responsible-parties']) {
+        assert.ok(roles.has(party['role-id']), party['role-id']);
+        assert.ok(party['party-uuids'].every((uuid: string) => parties.has(uuid)), item.uuid);
+      }
+    }
+  }
+  assert.ok(items >= entries.length, 'every register entry appears in at least one level');
 });
