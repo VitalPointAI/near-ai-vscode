@@ -11,7 +11,7 @@ created: "2026-11-23"
 
 > Per-phase validation contract for feedback sampling during execution. Source: `46-RESEARCH.md`, "Validation Architecture".
 
-`CAP` = `systemd-run --user --scope -q -p MemoryMax=4G choom -n 1000 -- timeout 900`. One heavy run at a time (image build, container suite, Playwright).
+`CAP` = `systemd-run --user --scope -q -p MemoryMax=4G choom -n 1000 -- timeout 900`. One heavy run at a time (image build, container suite, Playwright, root compile): heavy runs go under the host-wide lock `flock "$HEAVY_LOCK"`, as each plan's verify block shows.
 
 ---
 
@@ -49,7 +49,7 @@ created: "2026-11-23"
 | FND-T-06 | Telemetry off; no gallery; outbound allow-list empty by default; container on an internal network attempts no connection outside it | container | `CAP npm run test:container` | ❌ W0 |
 | FND-T-07 | Playwright: Get Started, Team preview round trip, secret restart, no external requests | e2e | `CAP npm run test:container` | ❌ W0 |
 | FND-T-08 | `engines.node` `>=26.13.1 <27`; the image reports Node 26 | unit + container | as FND-T-01 | ❌ W0 |
-| FND-T-09 | Digest-pinned `FROM` lines; non-empty CycloneDX SBOM; Grype recorded; signing on `main` with a key, never keyless | CI + workflow-file test | `CAP node scripts/run-tests.mjs scripts/test/workflow-files.test.mjs` | extend existing |
+| FND-T-09 | Digest-pinned `FROM` lines; non-empty CycloneDX SBOM; Grype recorded; signing of the published image in the Release workflow's `publish` job (protected `container-release` environment, #165) with a key, never keyless | CI + workflow-file test | `CAP node scripts/run-tests.mjs scripts/test/workflow-files.test.mjs` | extend existing |
 | FND-T-10 | Fit check passes with the workbench manifests; copy lint scans the workbench and accepts Sterling and SovAI | unit | `CAP node scripts/resource-check.mjs`; root `CAP npm test` | extend existing |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
