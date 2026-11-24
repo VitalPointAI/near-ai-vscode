@@ -357,7 +357,7 @@
       "direction": "one-way",
       "data": "Time. No site data.",
       "format": "As the Phase 47 follow-up for time at air-gapped sites defines it.",
-      "protection": "As 47-22 defines it.",
+      "protection": "As 47-22 defines it; until then this is the open condition G367 (no trusted time source at air-gapped sites).",
       "frequency": "Continuously.",
       "status": "planned",
       "plannedIn": "47-22",
