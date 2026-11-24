@@ -16,7 +16,7 @@ test('pages have no prohibited claim wording', () => readdirSync(pages).filter((
 test('level pages use the shared data reader', () => expected.slice(0, 7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /AccreditationData/, name)));
 test('supporting pages open with the organization decision', () => expected.slice(7).forEach((name) => assert.match(readFileSync(join(pages, name), 'utf8'), /Your organization decides/, name)));
 // Phase 48 (D-18, VER-07): the hosted pages read the hosted levels from the same data and page component as the other level pages.
-const hosted = [['hosted-protected-b.mdx', 'hosted-protected-b']];
+const hosted = [['hosted-protected-a.mdx', 'hosted-protected-a'], ['hosted-protected-b.mdx', 'hosted-protected-b']];
 const firstParagraph = (source) => source.replace(/^---\n[\s\S]*?\n---\n/, '').split(/\n\s*\n/).map((part) => part.trim()).find((part) => part && !part.startsWith('import '));
 test('hosted level pages open with the organization decision and use the shared level page', () => hosted.forEach(([name, levelId]) => {
   assert.ok(readdirSync(pages).includes(name), name);

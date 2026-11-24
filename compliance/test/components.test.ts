@@ -46,7 +46,10 @@ test('the extension evidence file names a real gate decision test', () => {
 test('every component definition loads as OSCAL content, one per file, named by its component id', () => {
   const loaded = loadComponents(COMPONENTS);
   assert.deepEqual(loaded.errors, []);
-  assert.deepEqual(loaded.components.map((component) => component.id), ['appliance', 'extension', 'hub', 'model-endpoints', 'relay', 'release-pipeline', 'workbench']);
+  assert.deepEqual(loaded.components.map((component) => component.id), [
+    'appliance', 'cert-manager', 'extension', 'hsm', 'hub', 'image-registry', 'ingress', 'keycloak', 'model-endpoints', 'oauth2-proxy',
+    'offline-bundle', 'openbao', 'relay', 'release-pipeline', 'rke2', 'site-logging', 'site-storage', 'theia-cloud', 'workbench'
+  ]);
   for (const file of readdirSync(COMPONENTS).filter((name) => name.endsWith('.json'))) {
     const definition = JSON.parse(readFileSync(path.join(COMPONENTS, file), 'utf8'))['component-definition'];
     const ids = definition.components.map((component: any) => component.props.filter((prop: any) => prop.ns === NS && prop.name === 'component-id').map((prop: any) => prop.value));
