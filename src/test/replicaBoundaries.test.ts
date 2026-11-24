@@ -42,7 +42,9 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/hubFile',
   // The feature registry and id rule (POST-01, 33-18): the session answer signs a device's features, and the hub checks a project's required set
   // against the same registry it compiles, so features.ts is data and pure functions with no import.
-  'domain/replica/features'
+  'domain/replica/features',
+  // Session key certificates (Phase 33 D-62): the hub folds them with the roster and checks session writers with the same rules as every client.
+  'domain/replica/sessionKeys'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }

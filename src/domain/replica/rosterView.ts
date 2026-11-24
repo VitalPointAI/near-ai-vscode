@@ -4,6 +4,7 @@
 // The roster is linear: each roster hash has a position, and "at roster hash R" means the members and roles as of position(R).
 import { slotOfClientId } from './clientIds';
 import type { SealedBlob } from './entry';
+import type { SessionCertificate } from './sessionKeys';
 
 export interface RosterView {
   hasRoster(rosterHash: string): boolean;
@@ -36,6 +37,10 @@ export interface RosterView {
   hubPin?(hub: string, rosterHash: string): string | undefined;
   // The roster entry hashes of the hub's re-admissions (hub.readmit), oldest first; each is handed to readmitWitness once (Phase 33 D-42).
   hubReadmits?(hub: string): readonly string[];
+  // The session.certify the roster fold placed for this session writer, at any position, like deviceKey (Phase 33 D-62). Absent: no session keys.
+  sessionCertificate?(writer: string): SessionCertificate | undefined;
+  // The roster positions of the device's device.quarantine entries, each with the positions of the releases of the same place (Phase 33 D-62).
+  deviceQuarantines?(writer: string): ReadonlyArray<{ from: number; released: readonly number[] }>;
 }
 
 // The role words the roster uses. A member holds any number of them at one roster position.

@@ -17,20 +17,24 @@
 //    roster.choose citing the split point and naming one of its branches, from an allowed chooser, takes the next position and the chosen branch
 //    the one after it; the other branches and everything chained after them stay unapplied (notChosen, rosterBranchPending);
 // 5. after the line, places each grant it was given (signer a roster writer and every wrap a device admitted at the roster the grant names; a founding
-//    grant equal to its commitment).
+//    grant equal to its commitment);
+// 6. after the line, places each session.certify (Phase 33 D-62) by the rules in sessionKeys.ts, oldest cited roster first, and refuses a roster
+//    change or certificate written by a certified session key with person-key-required (D-60). Certificates never take a position.
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
 // kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
 // functions those modules export.
-import { GENESIS_PREV, parseHeaderShape, entryHash } from './entry';
+import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
-import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
+import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, quarantinesOf, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
+import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
+import type { SessionCertificate, SessionCertifyData } from './sessionKeys';
 import { verifyEntry } from './verify';
 import type { VerifiedEntry } from './verify';
 
@@ -123,6 +127,8 @@ export interface RosterState {
   // The features the project requires (POST-01, D-04): the sorted union of every applied roster.require. It never shrinks. Whether this build knows
   // them is the host's question (requireGate.ts against KNOWN_REPLICA_FEATURES), never the fold's.
   required: readonly string[];
+  // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
+  sessions: Map<string, SessionCertificate>;
   // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
   notChosen: Set<string>;
   refused: RosterRefused[];
@@ -141,6 +147,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     pending: [],
     choices: [],
     required: Object.freeze([]),
+    sessions: new Map(),
     notChosen: new Set(),
     refused: [],
     held: []
@@ -228,7 +235,9 @@ export function rosterView(state: RosterState): RosterView {
       const position = at(hash);
       return position === undefined ? undefined : hubAt(state.members, hub, position)?.certPin;
     },
-    hubReadmits: (hub) => hubReadmitPositions(state.members, hub).map((position) => state.positions[position])
+    hubReadmits: (hub) => hubReadmitPositions(state.members, hub).map((position) => state.positions[position]),
+    sessionCertificate: (writer) => state.sessions.get(writer),
+    deviceQuarantines: (writer) => quarantinesOf(state.members, writer)
   };
 }
 
@@ -368,6 +377,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
     if (!waiting.has(hash)) waiting.set(hash, raw);
   }
   const ready: VerifiedEntry[] = [];
+  const certificates: VerifiedEntry[] = [];
   const refuse = (hash: string, kind: string, reason: string): void => { state.refused.push({ hash, kind, reason }); };
 
   for (;;) {
@@ -385,6 +395,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
         continue;
       }
       const entry = outcome.entry;
+      if (entry.body.kind === 'session.certify') certificates.push(entry);
       if (entry.keep === 'newer-version' || !isRouted(entry.body.kind)) continue;
       const settled = settledRefusal(state, entry);
       if (settled !== undefined) refuse(hash, entry.body.kind, settled);
@@ -454,13 +465,43 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   }
 
   markNotChosen(state, ready);
-  for (const hash of waiting.keys()) state.held.push({ hash, reason: 'unknown-writer' });
+  placeSessions(state, certificates);
+  // A roster change or certificate by a certified session key: refused for good (D-60). Anything else still waiting is held as an unknown writer.
+  const settledView: ReplicaContext = { roster: rosterView(state), keys: input.keys, blobs: input.blobs, now: input.now };
+  for (const [hash, raw] of waiting) {
+    const outcome = state.sessions.size === 0 ? undefined : verifyEntry(raw, settledView);
+    const entry = outcome?.status === 'verified' ? outcome.entry : undefined;
+    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify')) refuse(hash, entry.body.kind, 'person-key-required');
+    else state.held.push({ hash, reason: 'unknown-writer' });
+  }
   // Verified entries that never reached the head: on a branch nobody chose (D-11), or following a roster that is not on this machine's line.
   for (const entry of ready) state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.hash) ? 'roster-branch-not-chosen' : 'roster-prev-not-applied' });
   state.held.sort(byHash);
 
   placeGrants(state, input.grants);
   return state;
+}
+
+// Places the session certificates (Phase 33 D-62) against the settled line, oldest cited roster first and then by hash, so every machine and the
+// server place the same ones. A certificate citing a roster off the line waits; one sessionKeys.ts or its signed lifetime refuses is refused.
+function placeSessions(state: RosterState, certificates: readonly VerifiedEntry[]): void {
+  const view = rosterView(state);
+  const on = (entry: VerifiedEntry): number => state.positionOf.get(entry.body.roster) ?? Number.MAX_SAFE_INTEGER;
+  for (const entry of [...certificates].sort((a, b) => on(a) - on(b) || byHash(a, b))) {
+    if (!state.positionOf.has(entry.body.roster)) {
+      state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.body.roster) ? 'roster-branch-not-chosen' : 'missing-roster' });
+      continue;
+    }
+    const data = entry.data as SessionCertifyData;
+    const lifetime = Date.parse(data.notAfter) - Date.parse(entry.body.at);
+    const problem = lifetime > 0 && lifetime <= SESSION_MAX_LIFETIME_MS ? certificateProblem(view, entry, state.anchor.project, state.sessions) : 'session-certificate-invalid';
+    if (problem !== undefined) {
+      state.refused.push({ hash: entry.hash, kind: entry.body.kind, reason: problem });
+      continue;
+    }
+    const writer = writerIdOf(data.sessionKey);
+    state.sessions.set(writer, { hash: entry.hash, writer, member: data.member, device: data.device, sessionKey: data.sessionKey, slot: data.slot, notAfter: data.notAfter, roster: entry.body.roster });
+  }
 }
 
 function append(state: RosterState, hash: string): void {

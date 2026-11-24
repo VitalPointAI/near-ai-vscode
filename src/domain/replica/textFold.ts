@@ -168,7 +168,8 @@ function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, v
   // view that cannot answer allows no agent registration.
   const actor = entry.body.actor;
   if (actor.kind === 'agent' && roster.canRunAgent?.(entry.member, actor.member, entry.body.roster) !== true) return refused('agent-seat-not-allowed');
-  if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== entry.header.writer) return refused('foreign-client-id');
+  // A certified session key takes its ids from its certifying device's slot (Phase 33 D-62), so the slot's owner is that device.
+  if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== (entry.session?.device ?? entry.header.writer)) return refused('foreign-client-id');
   const product = productText(state, entry.header.stream, data.product);
   if (product === undefined) return refused('too-many-products');
   const clientId = data.clientId as number;

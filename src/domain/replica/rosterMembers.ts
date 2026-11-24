@@ -105,6 +105,10 @@ export interface MembersState {
   hubs: Map<string, HubRecord[]>;
   // device.quarantine records by writer, stream and seq (D-48): record only, kept so the same fork position is never recorded twice.
   quarantines: Set<string>;
+  // The positions of each device.quarantine and device.release by the same writer, stream and seq key (Phase 33 D-62): a quarantine stops the session
+  // keys its device certified from that position on, and a release lets a new certificate be made after it.
+  quarantinedFrom: Map<string, number>;
+  releasedAt: Map<string, number[]>;
 }
 
 // What the driver tells this module about the entry it routes here. position is the position the entry takes when it applies; the roster it cites
@@ -131,6 +135,8 @@ export function createMembersState(anchor: MembersAnchor): MembersState {
     invites: new Map(),
     releases: new Map(),
     quarantines: new Set(),
+    quarantinedFrom: new Map(),
+    releasedAt: new Map(),
     hubs: new Map()
   };
 }
@@ -193,6 +199,13 @@ export function inviteAt(state: MembersState, invite: string, position: number, 
 // forkStanding (equivocation.ts) check against the branches of the slot.
 export function chosenBranchOf(state: MembersState, writer: string, stream: string, seq: number): string | undefined {
   return state.releases.get(`${writer}/${stream}/${seq}`);
+}
+
+// The device's quarantines with the positions they applied at, each with the positions of the releases of the same place (Phase 33 D-62).
+export function quarantinesOf(state: MembersState, writer: string): Array<{ from: number; released: number[] }> {
+  const found: Array<{ from: number; released: number[] }> = [];
+  for (const [key, from] of state.quarantinedFrom) if (key.startsWith(`${writer}/`)) found.push({ from, released: [...(state.releasedAt.get(key) ?? [])] });
+  return found;
 }
 
 export function hubAt(state: MembersState, hub: string, position: number): HubRecord | undefined {
@@ -433,15 +446,18 @@ function applyQuarantine(state: MembersState, data: SlotData, ctx: MemberApplyCo
   const key = `${data.writer}/${data.stream}/${data.seq}`;
   if (state.quarantines.has(key)) return refused('quarantine-recorded');
   state.quarantines.add(key);
+  state.quarantinedFrom.set(key, ctx.position);
   return { status: 'applied' };
 }
 
 // device.release (DESIGN 15.2 quarantined -> active): records the branch kept at the fork slot. Which hashes are branches of the slot is the main
 // fold's knowledge, so forkChosen accepts the choice only for a branch of that slot. A later release of the same slot replaces the choice: the roster
 // at its head is the lead's current word.
-function applyRelease(state: MembersState, data: ReleaseData): MemberApplyOutcome {
+function applyRelease(state: MembersState, data: ReleaseData, ctx: MemberApplyContext): MemberApplyOutcome {
   if (deviceKeyOf(state, data.writer) === undefined) return refused('device-unknown');
-  state.releases.set(`${data.writer}/${data.stream}/${data.seq}`, data.branch);
+  const key = `${data.writer}/${data.stream}/${data.seq}`;
+  state.releases.set(key, data.branch);
+  state.releasedAt.set(key, [...(state.releasedAt.get(key) ?? []), ctx.position]);
   return { status: 'applied' };
 }
 
@@ -516,7 +532,7 @@ export function applyMemberEntry(state: MembersState, entry: VerifiedEntry, ctx:
     case 'device.quarantine':
       return applyQuarantine(state, entry.data as SlotData, ctx);
     case 'device.release':
-      return applyRelease(state, entry.data as ReleaseData);
+      return applyRelease(state, entry.data as ReleaseData, ctx);
     case 'hub.admit':
       return applyHubAdmit(state, entry.data as HubAdmitData, ctx);
     case 'hub.grant':

@@ -35,6 +35,7 @@
 !src/domain/replica/kindSchemas/registers.ts
 !src/domain/replica/kindSchemas/roster.ts
 !src/domain/replica/kindSchemas/runs.ts
+!src/domain/replica/kindSchemas/session.ts
 !src/domain/replica/kindSchemas/shared.ts
 !src/domain/replica/kindSchemas/versions.ts
 !src/domain/replica/kindSchemas/watches.ts
@@ -46,6 +47,7 @@
 !src/domain/replica/rosterView.ts
 !src/domain/replica/safetyCode.ts
 !src/domain/replica/safetyWords.ts
+!src/domain/replica/sessionKeys.ts
 !src/domain/replica/transport.ts
 !src/domain/replica/updateGuard.ts
 !src/domain/replica/verify.ts
