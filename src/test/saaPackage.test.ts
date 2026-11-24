@@ -85,7 +85,7 @@ test('exports the original release, editable forms and traceability with deploym
   assert.ok(result.has('forms/editable/01-01-submission-cover-and-routing.docx'));
   assert.ok([...result.keys()].some((name) => name.startsWith('forms/official/') && name.endsWith('.pdf')));
   assert.match(result.get('README.md')?.().toString() ?? '', /v0\.4\.36/);
-  assert.match(result.get('evidence/README.md')!().toString(), /Marketplace approval evidence is pending verification/);
+  assert.match(result.get('evidence/README.md')!().toString(), /Publication approval evidence is pending verification/);
   assert.equal(result.has('evidence/marketplace-approval.json'), false);
   assert.match(result.get('evidence/evidence-index.csv')!().toString(), /EV-REL-07","CI installer software inventory","release-package\/evidence\/bundle\/vsix-sbom\.cdx\.json/);
   assert.match(result.get('evidence/coverage-summary.csv')?.().toString() ?? '', /"protected-a","Protected A","1","1"/);
@@ -120,7 +120,7 @@ test('exports the original release, editable forms and traceability with deploym
 test('a verified receipt is supplemental, checksummed and tied to the selected release', async () => {
   const evidence = release();
   const approval = {
-    tag: 'v0.4.36', commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/42',
+    environment: 'marketplace' as const, kind: 'marketplace-publish-approval' as const, tag: 'v0.4.36', commit, runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/42',
     publishCompletedAt: '2026-11-20T18:00:00Z', checkedAt: date
   };
   const without = readZip(await buildSaaPackage(evidence, formsDir, new Map()), 'original evidence');
@@ -128,7 +128,7 @@ test('a verified receipt is supplemental, checksummed and tied to the selected r
   const receiptPath = 'evidence/marketplace-approval.json';
   const receipt = withReceipt.get(receiptPath)!();
   assert.deepEqual(JSON.parse(receipt.toString()), {
-    schemaVersion: 1, kind: 'marketplace-publish-approval', ...approval, runAttempt: 1
+    schemaVersion: 1, ...approval, runAttempt: 1
   });
   assert.ok(withReceipt.get('SHA256SUMS')!().toString().includes(`${digest(receipt)}  ${receiptPath}\n`));
   const notes = withReceipt.get('evidence/README.md')!().toString();
@@ -144,6 +144,18 @@ test('a verified receipt is supplemental, checksummed and tied to the selected r
     assert.equal(unverified.has(receiptPath), false);
     assert.match(unverified.get('evidence/README.md')!().toString(), /pending verification/);
   }
+});
+
+test('a container image release gets a publication receipt named for the image, not the Marketplace', async () => {
+  const evidence = release();
+  const approval = {
+    environment: 'container-release' as const, kind: 'container-publish-approval' as const, tag: 'v0.4.36', commit,
+    runUrl: 'https://github.com/VitalPointAI/near-ai-vscode/actions/runs/42', publishCompletedAt: '2026-11-20T18:00:00Z', checkedAt: date
+  };
+  const zip = readZip(await buildSaaPackage(evidence, formsDir, new Map(), approval), 'container receipt');
+  assert.equal(zip.has('evidence/marketplace-approval.json'), false);
+  assert.deepEqual(JSON.parse(zip.get('evidence/publish-approval.json')!().toString()), { schemaVersion: 1, ...approval, runAttempt: 1 });
+  assert.match(zip.get('evidence/README.md')!().toString(), /\[container image publication approval receipt\]\(publish-approval\.json\)/);
 });
 
 test('distinguishes missing, stale and failed evidence and counts unresolved in-scope controls with no closure path', async () => {
