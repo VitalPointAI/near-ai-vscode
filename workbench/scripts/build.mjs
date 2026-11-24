@@ -14,6 +14,8 @@ const entryPoints = [
   ...globSync('test/helpers/*.ts', { cwd: workbenchRoot }),
 ].sort();
 
+// The tests call the engine bundle directly (the parser's own refusal is the expected text), so build it first, into engine/.
+await import('../tools/build-engine.mjs');
 rmSync(path.join(workbenchRoot, 'dist'), { recursive: true, force: true });
 if (entryPoints.length === 0) {
   console.error('workbench build: no test files found under test/');

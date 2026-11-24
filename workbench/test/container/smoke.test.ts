@@ -52,7 +52,7 @@ test('in local mode a non-loopback bind refuses to start without STERLING_PREVIE
   assert.match(result.stderr, /Publish it on 127\.0\.0\.1 only/);
 });
 
-test('a real browser opens Get Started against the started image (D-34, FND-T-07)', async () => {
+test('a real browser opens Get Started and sees the parser\'s own refusal through the Team preview (D-16, D-34, FND-T-07)', async () => {
   const port = await freePort();
   const started = await runContainer('browser', ['-d', '-p', `127.0.0.1:${port}:3000`,
     '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
@@ -61,5 +61,5 @@ test('a real browser opens Get Started against the started image (D-34, FND-T-07
   await waitHealthy('browser', url);
   const result = await runPlaywright('smoke.spec.ts', { WORKBENCH_URL: url });
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
-  assert.match(result.stdout, /\b1 passed\b/);
+  assert.match(result.stdout, /\b2 passed\b/);
 });

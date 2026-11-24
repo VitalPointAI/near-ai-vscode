@@ -1,4 +1,4 @@
-export const TEAM_PREVIEW_PATH = '/services/near-team-preview';
+export const TEAM_PREVIEW_PATH = '/services/sterling-team-preview';
 export const TeamPreviewService = Symbol('TeamPreviewService');
 
 export interface TeamPreviewProject {

@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TeamPreviewProject, TeamPreviewResult, TeamPreviewService, TeamPreviewTeam } from '../common/team-preview.js';
 
@@ -11,51 +11,84 @@ const projects: readonly (TeamPreviewProject & { readonly fixture?: string })[] 
   { id: 'invalid', title: 'Sample with an invalid team', fixture: 'invalid.md' }
 ];
 
-// The app root from this code's own location (lib/backend/main.js once bundled), never the working folder (D-12).
-const appRoot = fileURLToPath(new URL('../..', import.meta.url));
-const fixtureDirectory = resolve(appRoot, 'extension', 'fixtures');
-const parserFile = resolve(appRoot, 'engine', 'teams.cjs');
-const { parseTeam } = createRequire(parserFile)(parserFile) as { parseTeam(text: string, file: string): TeamPreviewTeam };
+const UNAVAILABLE: TeamPreviewResult = { kind: 'missing', message: 'The shipped team sample is unavailable.' };
 
-async function readProject(id: string): Promise<TeamPreviewResult> {
-  const project = projects.find(candidate => candidate.id === id);
-  if (!project?.fixture) {
-    return { kind: 'missing', message: 'This sample has no team file.' };
-  }
+type ParseTeam = (text: string, file: string) => TeamPreviewTeam;
 
-  const file = resolve(fixtureDirectory, project.fixture);
-  let content: string;
-  try {
-    // Ignore a link that would make a packaged fixture resolve to another location.
-    if (await realpath(file) !== file) {
-      return { kind: 'missing', message: 'The shipped team sample is unavailable.' };
-    }
-    content = await readFile(file, 'utf8');
-  } catch {
-    return { kind: 'missing', message: 'The shipped team sample is unavailable.' };
-  }
-
-  try {
-    const { name, description, members } = parseTeam(content, project.fixture);
-    return {
-      kind: 'ready',
-      team: {
-        name,
-        description,
-        members: members.map(({ name, role, reportsTo, instructions }) => ({ name, role, reportsTo, instructions }))
-      }
-    };
-  } catch (error) {
-    return {
-      kind: 'invalid',
-      message: error instanceof Error ? error.message : 'The team sample could not be parsed.'
-    };
-  }
+/**
+ * The app root from this code's own location, never the working folder (D-12). The backend is bundled by `theia build` (esbuild, ES
+ * modules) into lib/backend/main.js, where `import.meta.url` is the bundle's own URL at run time, so the app root is two folders up.
+ */
+export function defaultAppRoot(): string {
+  return fileURLToPath(new URL('../..', import.meta.url));
 }
 
-export const teamPreviewReader: TeamPreviewService = {
-  async listProjects() {
-    return projects.map(({ id, title }) => ({ id, title }));
-  },
-  readProject
-};
+/**
+ * The Team preview service over the shipped samples. The fixtures are `<appRoot>/extension/fixtures`, the engine is the parser bundle
+ * `<appRoot>/engine/teams.cjs` (tools/build-engine.mjs), the same parseTeam the extension calls, so an invalid sample returns the
+ * parser's own message as plain data (D-16). The engine is loaded on first use, so a missing bundle is "unavailable", never a crash at
+ * backend start.
+ */
+export function createTeamPreviewReader(options: { readonly appRoot?: string } = {}): TeamPreviewService {
+  const appRoot = options.appRoot ?? defaultAppRoot();
+  const fixtureDirectory = resolve(appRoot, 'extension', 'fixtures');
+  const engineFile = resolve(appRoot, 'engine', 'teams.cjs');
+  let parseTeam: ParseTeam | undefined;
+
+  const loadParser = (): ParseTeam | undefined => {
+    if (!parseTeam) {
+      try {
+        parseTeam = (createRequire(engineFile)(engineFile) as { parseTeam: ParseTeam }).parseTeam;
+      } catch {
+        return undefined;
+      }
+    }
+    return parseTeam;
+  };
+
+  async function readProject(id: string): Promise<TeamPreviewResult> {
+    const project = projects.find(candidate => candidate.id === id);
+    if (!project?.fixture) {
+      return { kind: 'missing', message: 'This sample has no team file.' };
+    }
+
+    let content: string;
+    try {
+      // Only a file inside the fixture folder counts: compare with the folder's own realpath, so a linked parent is fine and a fixture
+      // that is a link to somewhere else is not.
+      const file = join(fixtureDirectory, project.fixture);
+      if (await realpath(file) !== join(await realpath(fixtureDirectory), project.fixture)) {
+        return UNAVAILABLE;
+      }
+      content = await readFile(file, 'utf8');
+    } catch {
+      return UNAVAILABLE;
+    }
+
+    const parse = loadParser();
+    if (!parse) return UNAVAILABLE;
+    try {
+      const { name, description, members } = parse(content, project.fixture);
+      return {
+        kind: 'ready',
+        team: {
+          name,
+          description,
+          members: members.map(({ name, role, reportsTo, instructions }) => ({ name, role, reportsTo, instructions }))
+        }
+      };
+    } catch (error) {
+      return {
+        kind: 'invalid',
+        message: error instanceof Error ? error.message : 'The team sample could not be parsed.'
+      };
+    }
+  }
+
+  return {
+    async listProjects() {
+      return projects.map(({ id, title }) => ({ id, title }));
+    },
+    readProject
+  };
+}

@@ -3,7 +3,7 @@ import { Command, CommandRegistry } from '@theia/core/lib/common/command.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
-import { ServiceConnectionProvider } from '@theia/core/lib/browser/messaging/service-connection-provider.js';
+import { bindFrontendService } from './frontend-service.js';
 import { TEAM_PREVIEW_PATH, TeamPreviewService, type TeamPreviewResult } from '../common/team-preview.js';
 import './team-preview.css';
 
@@ -135,7 +135,7 @@ class TeamPreviewContribution extends AbstractViewContribution<TeamPreviewWidget
 }
 
 export default new ContainerModule(bind => {
-  bind(TeamPreviewService).toDynamicValue(context => ServiceConnectionProvider.createProxy<TeamPreviewService>(context.container, TEAM_PREVIEW_PATH)).inSingletonScope();
+  bindFrontendService<TeamPreviewService>(bind, TeamPreviewService, TEAM_PREVIEW_PATH);
   bind(TeamPreviewWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(context => ({ id: widgetId, createWidget: () => context.container.get(TeamPreviewWidget) })).inSingletonScope();
   bindViewContribution(bind, TeamPreviewContribution);
