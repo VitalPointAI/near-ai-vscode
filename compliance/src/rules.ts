@@ -28,7 +28,9 @@ export const OBSERVATION_WINDOWS: Readonly<Record<string, WindowKind>> = Object.
   documents: 'document',
   crypto: 'document',
   attestation: 'attestation',
-  attestations: 'attestation'
+  attestations: 'attestation',
+  // A site's signed export (48-02): dated at its signed time, so an export older than 7 days reads Stale.
+  deployment: 'settings'
 });
 
 /** The window for a collector id; unknown collectors are judged against the head commit. */
