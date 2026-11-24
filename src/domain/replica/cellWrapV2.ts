@@ -90,6 +90,17 @@ function checkedRecipient(recipient: RawKeys): { p256: Buffer; mlkem768: Buffer;
   return { p256, mlkem768, p256Key: importP256Public(p256), mlkemKey: importMlKem768Public(mlkem768) };
 }
 
+// True when both public keys are well formed: an uncompressed point on P-256 and an ML-KEM-768 key that passes the FIPS 203 check. Never throws.
+export function kemPublicKeysValid(keys: RawKeys): boolean {
+  try {
+    checkedRecipient(keys);
+    return true;
+  } catch {
+    // A key that does not import is not a key anyone can wrap to.
+    return false;
+  }
+}
+
 // The two private keys from the seeds the host keeps. Throws on a scalar outside 1..n-1 or a seed of the wrong size.
 export function kemPrivateFromSeeds(seeds: KemSeeds): KemPrivateKeys {
   if (seeds.p256.length !== P256_SCALAR_BYTES) throw new Error('A P-256 private scalar must be 32 bytes.');

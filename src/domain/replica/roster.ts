@@ -20,6 +20,7 @@
 //    grant equal to its commitment);
 // 6. after the line, places each session.certify (Phase 33 D-62) by the rules in sessionKeys.ts, oldest cited roster first, and refuses a roster
 //    change or certificate written by a certified session key with person-key-required (D-60). Certificates never take a position.
+// 7. after the line, places each device.kem (33.2 D-03) by the rules in deviceKem.ts; like certificates they take no position.
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
 // kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
@@ -27,6 +28,8 @@
 import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
+import { deviceKemContext, placeDeviceKems } from './deviceKem';
+import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
@@ -129,6 +132,8 @@ export interface RosterState {
   required: readonly string[];
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
+  // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
+  kems: Map<string, KemRecord>;
   // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
   notChosen: Set<string>;
   refused: RosterRefused[];
@@ -148,6 +153,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     choices: [],
     required: Object.freeze([]),
     sessions: new Map(),
+    kems: new Map(),
     notChosen: new Set(),
     refused: [],
     held: []
@@ -378,6 +384,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   }
   const ready: VerifiedEntry[] = [];
   const certificates: VerifiedEntry[] = [];
+  const kemEntries: VerifiedEntry[] = [];
   const refuse = (hash: string, kind: string, reason: string): void => { state.refused.push({ hash, kind, reason }); };
 
   for (;;) {
@@ -396,6 +403,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
       }
       const entry = outcome.entry;
       if (entry.body.kind === 'session.certify') certificates.push(entry);
+      if (entry.body.kind === 'device.kem') kemEntries.push(entry);
       if (entry.keep === 'newer-version' || !isRouted(entry.body.kind)) continue;
       const settled = settledRefusal(state, entry);
       if (settled !== undefined) refuse(hash, entry.body.kind, settled);
@@ -466,12 +474,13 @@ export function foldRoster(input: RosterFoldInput): RosterState {
 
   markNotChosen(state, ready);
   placeSessions(state, certificates);
+  placeKems(state, kemEntries);
   // A roster change or certificate by a certified session key: refused for good (D-60). Anything else still waiting is held as an unknown writer.
   const settledView: ReplicaContext = { roster: rosterView(state), keys: input.keys, blobs: input.blobs, now: input.now };
   for (const [hash, raw] of waiting) {
     const outcome = state.sessions.size === 0 ? undefined : verifyEntry(raw, settledView);
     const entry = outcome?.status === 'verified' ? outcome.entry : undefined;
-    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify')) refuse(hash, entry.body.kind, 'person-key-required');
+    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify' || entry.body.kind === 'device.kem')) refuse(hash, entry.body.kind, 'person-key-required');
     else state.held.push({ hash, reason: 'unknown-writer' });
   }
   // Verified entries that never reached the head: on a branch nobody chose (D-11), or following a roster that is not on this machine's line.
@@ -502,6 +511,15 @@ function placeSessions(state: RosterState, certificates: readonly VerifiedEntry[
     const writer = writerIdOf(data.sessionKey);
     state.sessions.set(writer, { hash: entry.hash, writer, member: data.member, device: data.device, sessionKey: data.sessionKey, slot: data.slot, notAfter: data.notAfter, roster: entry.body.roster });
   }
+}
+
+// Places the device key bindings (33.2 D-03) against the settled line with deviceKem.ts's one check, shared with your organization's server.
+function placeKems(state: RosterState, entries: readonly VerifiedEntry[]): void {
+  const offLine = (roster: string): string => (state.notChosen.has(roster) ? 'roster-branch-not-chosen' : 'missing-roster');
+  const result = placeDeviceKems(entries, deviceKemContext(state, (writer, position) => isRosterWriterAt(state, writer, position)), (roster) => state.positionOf.get(roster), offLine);
+  state.kems = result.placed;
+  state.refused.push(...result.refused);
+  state.held.push(...result.held);
 }
 
 function append(state: RosterState, hash: string): void {

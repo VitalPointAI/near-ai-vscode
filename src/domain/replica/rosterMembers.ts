@@ -9,6 +9,7 @@
 // kind. A kind with no rule yet is refused roster-kind-pending, never applied.
 import { verifySignature } from '../team/canonical';
 import { x25519BindingBytes } from './cellKeys';
+import { kemBindingHolds } from './deviceKem';
 import { MAX_SLOT, isSlot } from './clientIds';
 import type { VerifiedEntry } from './verify';
 
@@ -61,6 +62,8 @@ export interface DeviceRecord {
   publicKey: string;
   x25519: string;
   slot?: number;
+  // The device's post-quantum keys from its descriptor (33.2 D-03), when the descriptor carried them with a binding that holds.
+  kem?: { p256: string; mlkem768: string };
   kind: 'person' | 'hub';
   from: number;
   until?: number;
@@ -121,7 +124,9 @@ export interface MemberApplyContext {
   streamKnown?: (stream: string) => boolean;
 }
 
-interface DeviceDescriptor { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot?: number }
+interface DeviceDescriptor { writer: string; publicKey: string; x25519: string; x25519Sig: string; slot?: number; kem?: { p256: string; mlkem768: string; sig: string } }
+
+const kemOf = (device: DeviceDescriptor): Pick<DeviceRecord, 'kem'> => (device.kem === undefined ? {} : { kem: { p256: device.kem.p256, mlkem768: device.kem.mlkem768 } });
 
 const inForce = (record: { from: number; until?: number }, position: number): boolean => record.from <= position && (record.until === undefined || position < record.until);
 const LEAD_ROLES: readonly string[] = ['staff_lead', 'deputy_lead'];
@@ -235,6 +240,8 @@ function newDeviceProblem(state: MembersState, device: DeviceDescriptor): Member
   if (!isSlot(device.slot)) return 'slot-out-of-range';
   if (state.slots.has(device.slot)) return 'slot-in-use';
   if (!verifySignature(x25519BindingBytes(device.x25519, device.writer), device.x25519Sig, device.publicKey)) return 'bad-binding';
+  // A descriptor's post-quantum keys must be bound by the same device's signature too (33.2 D-03).
+  if (device.kem !== undefined && !kemBindingHolds(device.kem, device.writer, device.publicKey)) return 'bad-binding';
   return undefined;
 }
 
@@ -246,7 +253,7 @@ export function applyGenesisLead(state: MembersState, device: DeviceDescriptor, 
   if (versions === undefined || origin === undefined || origin.until !== undefined) return refused('member-unknown');
   const problem = newDeviceProblem(state, device);
   if (problem !== undefined) return refused(problem);
-  const opened: DeviceRecord = { writer: origin.writer, member: origin.member, publicKey: origin.publicKey, x25519: origin.x25519, slot: device.slot as number, kind: origin.kind, from: position };
+  const opened: DeviceRecord = { writer: origin.writer, member: origin.member, publicKey: origin.publicKey, x25519: origin.x25519, slot: device.slot as number, ...kemOf(device), kind: origin.kind, from: position };
   origin.until = position;
   versions.push(opened);
   state.slots.set(device.slot as number, device.writer);
@@ -283,7 +290,7 @@ function markUsed(state: MembersState, invite: string, member: string, position:
 }
 
 function addDevice(state: MembersState, member: string, device: DeviceDescriptor, kind: DeviceRecord['kind'], position: number): void {
-  state.devices.set(device.writer, [{ writer: device.writer, member, publicKey: device.publicKey, x25519: device.x25519, slot: device.slot, kind, from: position }]);
+  state.devices.set(device.writer, [{ writer: device.writer, member, publicKey: device.publicKey, x25519: device.x25519, slot: device.slot, ...kemOf(device), kind, from: position }]);
   state.slots.set(device.slot as number, device.writer);
 }
 
