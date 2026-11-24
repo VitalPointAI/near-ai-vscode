@@ -1,9 +1,9 @@
 // Deployment collector (48-02, D-13, D-14 (b), D-16, VER-05, VER-06). A site runs compliance/site-export/collect.sh and the site-export command,
 // which write a signed export: the extension's signed-payload envelope (signed.ts) for the purpose below, holding a strict set of facts (counts,
-// booleans, a few enum values and two version strings). This collector reads that file offline, never the site. It trusts only keys listed in
-// the site trust list (compliance/attestations/site-signers.json, a gate path), refuses anything else with a collector error, so every rule on
-// it reads missing-result, and decides every pass itself from the facts under thresholds held here. Observations are dated at the export's
-// signed time, so the `settings` window (7 days) measures the site's evidence, not the CI run that read it.
+// booleans, a few enum values, two version strings and one hash). This collector reads that file offline, never the site. It trusts only keys
+// listed in the site trust list (compliance/attestations/site-signers.json, a gate path, or your organization's own list), refuses anything else
+// with a collector error, so every rule on it reads missing-result, and decides every pass itself from the facts under thresholds held here.
+// Observations are dated at the export's signed time, so the `settings` window (7 days) measures the site's evidence, not the CI run.
 import { MAX_PAYLOAD_BYTES, verifyEnvelope } from '../signed.ts';
 import { parseSigners } from '../riskAcceptance.ts';
 import type { Observation } from '../model.ts';
@@ -22,24 +22,120 @@ export const MAX_EXPORT_FILE_BYTES = 2 * MAX_PAYLOAD_BYTES;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 /** One leaf of the fact allow-list. */
-type Leaf = { readonly kind: 'count' } | { readonly kind: 'boolean' };
+type Leaf =
+  | { readonly kind: 'count' }
+  | { readonly kind: 'boolean' }
+  | { readonly kind: 'enum'; readonly values: readonly string[] }
+  | { readonly kind: 'version' }
+  | { readonly kind: 'sha256' };
 
 const LEAVES = new WeakSet<object>();
 const leaf = <T extends Leaf>(value: T): T => { const frozen = Object.freeze(value); LEAVES.add(frozen); return frozen; };
 const count = leaf({ kind: 'count' });
+const flag = leaf({ kind: 'boolean' });
+const version = leaf({ kind: 'version' });
+const sha256 = leaf({ kind: 'sha256' });
+const oneOf = (values: readonly string[]) => leaf({ kind: 'enum', values });
+
+/** A version string: three numbers and an optional build suffix (a Red Hat build carries `.redhat-NNNNN`). */
+export const VERSION_PATTERN = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[.+-][0-9A-Za-z.+-]{1,64})?$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+export const KEYCLOAK_DISTRIBUTIONS = Object.freeze(['upstream', 'redhat', 'other'] as const);
+export const KEYCLOAK_FIPS_MODES = Object.freeze(['strict', 'non-strict', 'disabled'] as const);
+export const SEAL_TYPES = Object.freeze(['pkcs11', 'shamir', 'transit', 'other'] as const);
+export const REGISTRY_KINDS = Object.freeze(['zot', 'harbor', 'other'] as const);
 
 /** The fact allow-list: every key required, nothing else accepted. */
 export const FACT_SHAPE = Object.freeze({
   keycloak: Object.freeze({
+    distribution: oneOf(KEYCLOAK_DISTRIBUTIONS),
+    version,
+    fipsMode: oneOf(KEYCLOAK_FIPS_MODES),
     passwordAuthenticators: count,
-    otpAuthenticators: count
+    otpAuthenticators: count,
+    loadTestClients: count,
+    userEventsEnabled: flag,
+    adminEventsEnabled: flag,
+    eventsLastDay: count
+  }),
+  openbao: Object.freeze({
+    version,
+    sealType: oneOf(SEAL_TYPES),
+    auditDevices: count,
+    auditEventsLastDay: count
+  }),
+  kubernetes: Object.freeze({
+    auditPolicySha256: sha256,
+    sessionsAudited: flag,
+    workspacesAudited: flag,
+    auditEventsLastDay: count,
+    nodes: count,
+    fipsNodes: count
+  }),
+  registry: Object.freeze({
+    kind: oneOf(REGISTRY_KINDS),
+    enforcingImagePolicies: count,
+    unsignedImageResults: count,
+    auditEventsLastDay: count
+  }),
+  images: Object.freeze({
+    locked: count,
+    signatureVerified: count,
+    sbomVerified: count,
+    provenanceVerified: count
+  }),
+  workbench: Object.freeze({
+    sampledSessions: count,
+    fipsSessions: count
   })
 });
 
 export interface SiteFacts {
   readonly keycloak: {
+    readonly distribution: (typeof KEYCLOAK_DISTRIBUTIONS)[number];
+    readonly version: string;
+    readonly fipsMode: (typeof KEYCLOAK_FIPS_MODES)[number];
     readonly passwordAuthenticators: number;
     readonly otpAuthenticators: number;
+    readonly loadTestClients: number;
+    readonly userEventsEnabled: boolean;
+    readonly adminEventsEnabled: boolean;
+    /** Keycloak user and admin events the log store holds from the last day. */
+    readonly eventsLastDay: number;
+  };
+  readonly openbao: {
+    readonly version: string;
+    readonly sealType: (typeof SEAL_TYPES)[number];
+    readonly auditDevices: number;
+    readonly auditEventsLastDay: number;
+  };
+  readonly kubernetes: {
+    readonly auditPolicySha256: string;
+    readonly sessionsAudited: boolean;
+    readonly workspacesAudited: boolean;
+    readonly auditEventsLastDay: number;
+    readonly nodes: number;
+    readonly fipsNodes: number;
+  };
+  readonly registry: {
+    readonly kind: (typeof REGISTRY_KINDS)[number];
+    /** Admission policies that verify image signatures and deny on failure. */
+    readonly enforcingImagePolicies: number;
+    /** Current failed or errored results of those policies in the policy reports: images running without a verified signature. */
+    readonly unsignedImageResults: number;
+    readonly auditEventsLastDay: number;
+  };
+  readonly images: {
+    /** Images in the site's image lock list. */
+    readonly locked: number;
+    readonly signatureVerified: number;
+    readonly sbomVerified: number;
+    readonly provenanceVerified: number;
+  };
+  readonly workbench: {
+    readonly sampledSessions: number;
+    readonly fipsSessions: number;
   };
 }
 
@@ -58,13 +154,17 @@ function leafOk(leaf: Leaf, value: unknown): boolean {
   switch (leaf.kind) {
     case 'count': return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     case 'boolean': return typeof value === 'boolean';
+    case 'enum': return typeof value === 'string' && leaf.values.includes(value);
+    case 'version': return typeof value === 'string' && VERSION_PATTERN.test(value);
+    case 'sha256': return typeof value === 'string' && SHA256_PATTERN.test(value);
   }
 }
 
 function checkShape(shape: Readonly<Record<string, unknown>>, value: unknown, at: string): void {
   if (!isRecord(value)) throw collectorError('export-wrong-fact-type', `deployment: the fact ${at} is not an object`);
   for (const key of Object.keys(value)) {
-    if (!Object.hasOwn(shape, key)) throw collectorError('export-unknown-fact', `deployment: the export carries an unknown fact ${at}.${key}`);
+    // The message never repeats the key: it is text from the site.
+    if (!Object.hasOwn(shape, key)) throw collectorError('export-unknown-fact', `deployment: the export carries a fact under ${at} that is not in the allow-list`);
   }
   for (const [key, expected] of Object.entries(shape)) {
     if (!Object.hasOwn(value, key)) throw collectorError('export-missing-fact', `deployment: the export lacks the fact ${at}.${key}`);
@@ -102,14 +202,92 @@ export interface DeploymentCheck {
   readonly derive: (facts: SiteFacts) => CheckOutcome;
 }
 
-/** The most enabled password authenticators a bound flow may hold. */
+// Thresholds. Every pass is decided here from the facts; the export has no pass field this collector would accept.
 export const MAX_PASSWORD_AUTHENTICATORS = 0;
+export const MAX_OTP_AUTHENTICATORS = 0;
+export const MAX_LOAD_TEST_CLIENTS = 0;
+/**
+ * The lowest upstream Keycloak release with CVE-2026-6856 fixed (48-RESEARCH verification register row 3: the fix commits are ancestors of
+ * 26.8.0). A Red Hat build fails until its fix version is confirmed, and so does a build of unknown origin.
+ */
+export const KEYCLOAK_MIN_FIXED = '26.8.0';
+export const KEYCLOAK_FIXED_DISTRIBUTION = 'upstream';
+export const REQUIRED_KEYCLOAK_FIPS_MODE = 'strict';
+export const REQUIRED_SEAL_TYPE = 'pkcs11';
+/** The fewest events a stream must have shipped to the log store in the last day. */
+export const MIN_EVENTS_LAST_DAY = 1;
+export const MIN_AUDIT_DEVICES = 1;
+export const MIN_NODES = 1;
+export const MIN_ENFORCING_IMAGE_POLICIES = 1;
+export const MAX_UNSIGNED_IMAGE_RESULTS = 0;
+export const MIN_LOCKED_IMAGES = 1;
+export const MIN_SAMPLED_SESSIONS = 1;
+
+/** Compares two version strings by their three leading numbers. */
+export function compareVersions(a: string, b: string): number {
+  const parts = (value: string): number[] => value.split(/[.+-]/, 3).map((part) => Number.parseInt(part, 10));
+  const left = parts(a);
+  const right = parts(b);
+  for (let index = 0; index < 3; index += 1) if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  return 0;
+}
+
+const bit = (value: boolean): number => (value ? 1 : 0);
+/** At least `minimum` of `total`, and every one of them good. */
+const allOf = (total: number, good: number, minimum: number): boolean => total >= minimum && good === total;
 
 /** Every check, in the order its observation is written. */
 export const CHECKS: readonly DeploymentCheck[] = Object.freeze([
+  { subject: 'keycloak/no-password-authenticator', derive: ({ keycloak }: SiteFacts) => ({ passed: keycloak.passwordAuthenticators <= MAX_PASSWORD_AUTHENTICATORS, counts: { 'password-authenticators': keycloak.passwordAuthenticators } }) },
+  { subject: 'keycloak/no-otp-authenticator', derive: ({ keycloak }: SiteFacts) => ({ passed: keycloak.otpAuthenticators <= MAX_OTP_AUTHENTICATORS, counts: { 'otp-authenticators': keycloak.otpAuthenticators } }) },
+  { subject: 'keycloak/no-load-test-client', derive: ({ keycloak }: SiteFacts) => ({ passed: keycloak.loadTestClients <= MAX_LOAD_TEST_CLIENTS, counts: { 'load-test-clients': keycloak.loadTestClients } }) },
   {
-    subject: 'keycloak/no-password-authenticator',
-    derive: (facts: SiteFacts) => ({ passed: facts.keycloak.passwordAuthenticators <= MAX_PASSWORD_AUTHENTICATORS, counts: { 'password-authenticators': facts.keycloak.passwordAuthenticators } })
+    subject: 'keycloak/cve-2026-6856-fixed',
+    derive: ({ keycloak }: SiteFacts) => {
+      const below = compareVersions(keycloak.version, KEYCLOAK_MIN_FIXED) < 0;
+      const unconfirmed = keycloak.distribution !== KEYCLOAK_FIXED_DISTRIBUTION;
+      return { passed: !below && !unconfirmed, counts: { 'below-fixed-version': bit(below), 'unconfirmed-build': bit(unconfirmed) } };
+    }
+  },
+  {
+    subject: 'keycloak/events-shipped',
+    derive: ({ keycloak }: SiteFacts) => ({
+      passed: keycloak.userEventsEnabled && keycloak.adminEventsEnabled && keycloak.eventsLastDay >= MIN_EVENTS_LAST_DAY,
+      counts: { 'events-last-day': keycloak.eventsLastDay, 'user-events-off': bit(!keycloak.userEventsEnabled), 'admin-events-off': bit(!keycloak.adminEventsEnabled) }
+    })
+  },
+  { subject: 'keycloak/fips-strict', derive: ({ keycloak }: SiteFacts) => ({ passed: keycloak.fipsMode === REQUIRED_KEYCLOAK_FIPS_MODE, counts: { 'not-strict': bit(keycloak.fipsMode !== REQUIRED_KEYCLOAK_FIPS_MODE) } }) },
+  {
+    subject: 'openbao/audit-device',
+    derive: ({ openbao }: SiteFacts) => ({
+      passed: openbao.auditDevices >= MIN_AUDIT_DEVICES && openbao.auditEventsLastDay >= MIN_EVENTS_LAST_DAY,
+      counts: { 'audit-devices': openbao.auditDevices, 'events-last-day': openbao.auditEventsLastDay }
+    })
+  },
+  { subject: 'openbao/hsm-seal', derive: ({ openbao }: SiteFacts) => ({ passed: openbao.sealType === REQUIRED_SEAL_TYPE, counts: { 'not-pkcs11': bit(openbao.sealType !== REQUIRED_SEAL_TYPE) } }) },
+  {
+    subject: 'kubernetes/audit-session-workspace',
+    derive: ({ kubernetes }: SiteFacts) => ({
+      passed: kubernetes.sessionsAudited && kubernetes.workspacesAudited && kubernetes.auditEventsLastDay >= MIN_EVENTS_LAST_DAY,
+      counts: { 'unaudited-resources': bit(!kubernetes.sessionsAudited) + bit(!kubernetes.workspacesAudited), 'events-last-day': kubernetes.auditEventsLastDay },
+      hash: kubernetes.auditPolicySha256
+    })
+  },
+  { subject: 'kubernetes/fips-nodes', derive: ({ kubernetes }: SiteFacts) => ({ passed: allOf(kubernetes.nodes, kubernetes.fipsNodes, MIN_NODES), counts: { nodes: kubernetes.nodes, 'fips-nodes': kubernetes.fipsNodes } }) },
+  {
+    subject: 'registry/signature-enforced',
+    derive: ({ registry }: SiteFacts) => ({
+      passed: registry.enforcingImagePolicies >= MIN_ENFORCING_IMAGE_POLICIES && registry.unsignedImageResults <= MAX_UNSIGNED_IMAGE_RESULTS,
+      counts: { 'enforcing-policies': registry.enforcingImagePolicies, 'unsigned-results': registry.unsignedImageResults }
+    })
+  },
+  { subject: 'registry/audit', derive: ({ registry }: SiteFacts) => ({ passed: registry.auditEventsLastDay >= MIN_EVENTS_LAST_DAY, counts: { 'events-last-day': registry.auditEventsLastDay } }) },
+  { subject: 'images/signed', derive: ({ images }: SiteFacts) => ({ passed: allOf(images.locked, images.signatureVerified, MIN_LOCKED_IMAGES), counts: { images: images.locked, verified: images.signatureVerified } }) },
+  { subject: 'images/sbom', derive: ({ images }: SiteFacts) => ({ passed: allOf(images.locked, images.sbomVerified, MIN_LOCKED_IMAGES), counts: { images: images.locked, verified: images.sbomVerified } }) },
+  { subject: 'images/provenance', derive: ({ images }: SiteFacts) => ({ passed: allOf(images.locked, images.provenanceVerified, MIN_LOCKED_IMAGES), counts: { images: images.locked, verified: images.provenanceVerified } }) },
+  {
+    subject: 'workbench/fips-provider',
+    derive: ({ workbench }: SiteFacts) => ({ passed: allOf(workbench.sampledSessions, workbench.fipsSessions, MIN_SAMPLED_SESSIONS), counts: { sampled: workbench.sampledSessions, 'fips-on': workbench.fipsSessions } })
   }
 ]);
 
@@ -122,23 +300,24 @@ export interface DeploymentInput {
 
 const isMissing = (error: unknown): boolean => isRecord(error) && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 
-async function readCapped(context: CollectorContext, file: string, what: string, missingCode: string): Promise<string> {
+async function readCapped(context: CollectorContext, file: string, what: 'export' | 'signers'): Promise<string> {
+  const label = what === 'export' ? 'export' : 'site trust list';
   let text: string;
   try {
     text = await context.readFile(file);
   } catch (error) {
-    if (isMissing(error)) throw collectorError(missingCode, `deployment: the ${what} file is missing`);
-    throw collectorError(`${missingCode.replace(/-missing$/, '')}-unreadable`, `deployment: the ${what} file could not be read`);
+    if (isMissing(error)) throw collectorError(`${what}-missing`, `deployment: the ${label} file is missing`);
+    throw collectorError(`${what}-unreadable`, `deployment: the ${label} file could not be read`);
   }
-  if (Buffer.byteLength(text, 'utf8') > MAX_EXPORT_FILE_BYTES) throw collectorError(missingCode === 'export-missing' ? 'export-too-large' : 'signers-too-large', `deployment: the ${what} file is larger than allowed`);
+  if (Buffer.byteLength(text, 'utf8') > MAX_EXPORT_FILE_BYTES) throw collectorError(`${what}-too-large`, `deployment: the ${label} file is larger than allowed`);
   return text;
 }
 
-function parseJson(text: string, code: string, what: string): unknown {
+function parseJson(text: string, what: 'export' | 'signers'): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    throw collectorError(code, `deployment: the ${what} file is not JSON`);
+    throw collectorError(`${what}-unreadable`, `deployment: the ${what === 'export' ? 'export' : 'site trust list'} file is not JSON`);
   }
 }
 
@@ -150,15 +329,14 @@ export const deploymentCollector: Collector<DeploymentInput> = Object.freeze({
     if (!isRecord(input) || typeof input.file !== 'string' || input.file === '' || typeof input.signersFile !== 'string' || input.signersFile === '') {
       throw collectorError('invalid-input', 'deployment: input.file and input.signersFile are required');
     }
-    const signersText = await readCapped(context, input.signersFile, 'site trust list', 'signers-missing');
+    const signersDoc = parseJson(await readCapped(context, input.signersFile, 'signers'), 'signers');
     let keys;
     try {
-      keys = parseSigners(parseJson(signersText, 'signers-unreadable', 'site trust list'), 'site trust list');
-    } catch (error) {
-      if (isRecord(error) && typeof error.code === 'string') throw error;
+      keys = parseSigners(signersDoc, 'site trust list');
+    } catch {
       throw collectorError('signers-invalid', 'deployment: the site trust list is not a valid signers file');
     }
-    const envelope = parseJson(await readCapped(context, input.file, 'export', 'export-missing'), 'export-unreadable', 'export');
+    const envelope = parseJson(await readCapped(context, input.file, 'export'), 'export');
     const verdict = verifyEnvelope(envelope, { purpose: SITE_EXPORT_PURPOSE, keys, now: context.now });
     if (!verdict.ok) throw collectorError(`export-${verdict.reason}`, `deployment: ${verdict.message}`);
     const payload = parseExportPayload(verdict.payload);
