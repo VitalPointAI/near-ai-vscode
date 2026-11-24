@@ -32,6 +32,7 @@ The first milestone includes onboarding, both API-key and NEAR sign-in authentic
 - Exact NEAR sign-in/token-exchange mechanics and the supported Open-GSD command integration boundary require validation during implementation research.
 - Open-GSD updates must be constrained to the official stable package/channel and must use the upstream installer/update contract rather than copying managed files blindly.
 - The MVP should favor a safe approval policy over unrestricted autonomy; autonomy can be expanded through explicit settings and budgets.
+- **Open conditions go in the gap register before a phase closes (owner, 2026-11-24).** Any open condition, unverified fact, deferred hardening or limit found while planning or executing (for example a POA&M item, a "pending" lab check, a validated-module gap, an upstream issue we work around) is added to `compliance/gaps.json` with `appliesAt`, `blocksProduction`, controls, an owner role and `closesInPhase` or a POA&M item, then `node scripts/build-road-to-production.mjs` regenerates the road to production page. Every plan SUMMARY ends with a `## Open conditions` section: one list item per condition citing its gap id (for example `- G351: OpenBao has no FIPS build`), or `None.`. The docs job checks it: a listed condition without an existing gap id fails, and a SUMMARY completed on or after 2026-11-25 without the section fails. The verifier checks the same before marking a phase complete.
 
 ## Current Milestone: v0.5.0 Governed agent platform
 
