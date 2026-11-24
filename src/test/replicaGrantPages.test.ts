@@ -3,7 +3,7 @@
 // shape (the grant never opens them), so they are fictional bytes of the right size and version.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GRANT_MAX_BYTES, MAX_GRANT_WRAPS, MAX_LABEL_SEALED_CHARS, WRAP_BYTES, buildGrant, grantHash, readGrant } from '../domain/replica/cellKeys';
+import { GRANT_MAX_BYTES, MAX_GRANT_WRAPS, MAX_LABEL_SEALED_CHARS, WRAP_BYTES, buildGrant, grantHash, readGrant, wrapEpochKey } from '../domain/replica/cellKeys';
 import type { CellGrant, GrantWrap } from '../domain/replica/cellKeys';
 import { WRAP_V2_BYTES } from '../domain/replica/cellWrapV2';
 import { GRANT_PAGE_REFUSALS, MAX_WRAPS_PER_V2_PAGE, buildGrantPages, readGrantPages } from '../domain/replica/grantPages';
@@ -11,7 +11,11 @@ import { canonicalBytes } from '../domain/team/canonical';
 import { signPayload } from '../domain/team/signedPayload';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { REPLICA_SIGNED_AT } from '../domain/replica/entry';
-import { rosterDevice } from './helpers/replicaRosterWorld';
+import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
+import { granteesAt } from '../domain/replica/rosterCells';
+import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
+import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
+import type { Written } from './helpers/replicaWorld';
 import { streamId } from './helpers/replicaWorld';
 
 const LEAD = rosterDevice('PAGES-LEAD', 'mbr-lead');
@@ -117,4 +121,58 @@ test('the founding page\'s grant hash is stable: the same grant built twice give
   const read = readGrantPages(first[0], first.slice(1));
   assert.equal(read.ok && read.hash, grantHash(first[0]));
   for (const reason of Object.values(GRANT_PAGE_REFUSALS)) assert.ok(reason.length > 0);
+});
+
+// ---- the roster fold (Task 2) ----
+
+const CELL_P = streamId('paged-cell');
+
+interface PagedScene { world: RosterWorld; pat: RosterDevice; quinn: RosterDevice; founding: Page; page: Page; create: Written }
+
+// The lead admits Pat and Quinn, then creates cell P with a two-page founding grant: the lead and Pat on the founding page, Quinn on the second.
+// The pages are made directly with buildGrant so a small grant can span two pages; buildGrantPages splits only past MAX_WRAPS_PER_V2_PAGE.
+function pagedScene(): PagedScene {
+  const world = createRosterWorld();
+  const pat = world.device('PAT-LAPTOP', 'mbr-pat');
+  const quinn = world.device('QUINN-LAPTOP', 'mbr-quinn');
+  const { entry: genesis } = world.genesis();
+  let head = genesis.hash;
+  for (const [device, slot] of [[pat, 2], [quinn, 3]] as const) {
+    const id = `inv-${device.member}`;
+    const invite = world.rosterEntry(world.lead, 'member.invite', { invite: id, name: 'Fictional Person', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, expiresAt: INVITE_EXPIRES, secretHash: joinSecretHash(newJoinSecret()) }, head);
+    head = world.rosterEntry(world.lead, 'member.admit', { member: device.member, invite: id, name: 'Fictional Person', seat: 'j2-chief', roles: ['member'], clearance: DEMO_CLEARANCE, device: device.descriptor(slot), agentSeats: [] }, invite.hash).hash;
+  }
+  const key = world.epochKeyOf(CELL_P, 1);
+  const wrapTo = (device: RosterDevice): GrantWrap => ({ writer: device.writer, wrap: wrapEpochKey({ cell: CELL_P, epoch: 1, writer: device.writer, recipient: device.x25519, epochKey: key }) });
+  const page = buildGrant(world.lead.signer, { cell: CELL_P, epoch: 1, roster: head, labelSealed: '', wraps: [wrapTo(quinn)], pages: [] });
+  const founding = buildGrant(world.lead.signer, { cell: CELL_P, epoch: 1, roster: head, labelSealed: LABEL, wraps: [wrapTo(world.lead), wrapTo(pat)], pages: [grantHash(page)] });
+  const create = world.rosterEntry(world.lead, 'cell.create', { cell: CELL_P, epoch: 1, grant: grantHash(founding) }, head);
+  return { world, pat, quinn, founding, page, create };
+}
+
+const granteesOf = (scene: PagedScene, grants: readonly unknown[]): readonly string[] | undefined => {
+  const state = scene.world.foldRoster({ grants: [...scene.world.grants, ...grants] });
+  return granteesAt(state.cells, CELL_P, state.positionOf.get(scene.create.hash) as number, () => true);
+};
+
+test('the fold places a cell.create whose grant hash is a founding page, with every page it lists: all three devices hold the epoch', () => {
+  const scene = pagedScene();
+  assert.deepEqual([...(granteesOf(scene, [scene.page, scene.founding]) ?? [])].sort(), [scene.world.lead.writer, scene.pat.writer, scene.quinn.writer].sort());
+});
+
+test('a page that has not arrived holds the founding grant missing-blob, and the epoch resolves once the page arrives', () => {
+  const scene = pagedScene();
+  const state = scene.world.foldRoster({ grants: [...scene.world.grants, scene.founding] });
+  assert.ok(state.held.some((item) => item.hash === grantHash(scene.founding) && item.reason === 'missing-blob'));
+  assert.equal(granteesOf(scene, [scene.founding]), undefined);
+  assert.ok(granteesOf(scene, [scene.founding, scene.page])?.includes(scene.quinn.writer));
+});
+
+test('a changed page is refused and the founding grant is not placed', () => {
+  const scene = pagedScene();
+  const changed = JSON.parse(JSON.stringify(scene.page)) as Page;
+  changed.payload.wraps[0].writer = scene.pat.writer;
+  const state = scene.world.foldRoster({ grants: [...scene.world.grants, scene.founding, changed] });
+  assert.ok(state.refused.some((item) => item.kind === 'grant' && item.reason === 'bad-signature'));
+  assert.equal(granteesAt(state.cells, CELL_P, state.positionOf.get(scene.create.hash) as number, () => true), undefined);
 });
