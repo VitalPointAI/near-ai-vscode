@@ -23,3 +23,15 @@ export const UPDATE_SENTENCE = 'This project needs a newer version of the extens
 export function isReplicaFeature(value: unknown): value is string {
   return typeof value === 'string' && REPLICA_FEATURE_PATTERN.test(value);
 }
+
+/** The distinct required features this build does not fold, sorted for a stable refusal. */
+export function missingFeatures(required: readonly string[], known: readonly string[] = KNOWN_REPLICA_FEATURES): string[] {
+  const knownIds = new Set(known);
+  return [...new Set(required)].filter((id) => !knownIds.has(id)).sort();
+}
+
+/** A session covers a requirement only when the device announces it and this build knows it. */
+export function coversRequired(announced: readonly string[], required: readonly string[]): boolean {
+  const announcedIds = new Set(announced);
+  return required.every((id) => announcedIds.has(id) && KNOWN_REPLICA_FEATURES.includes(id));
+}
