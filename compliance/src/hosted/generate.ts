@@ -29,6 +29,8 @@ export interface Block {
 }
 
 export const BLOCKS_DIR = fileURLToPath(new URL('./blocks/', import.meta.url));
+/** The extension this module runs under: block modules beside it have the same one (.ts with Node's type stripping, .js once compiled). */
+const MODULE_EXTENSION = path.extname(fileURLToPath(import.meta.url));
 /** The repository root this module sits in (compliance/src/hosted/). */
 export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const BLOCK_ID = /^[a-z][a-z0-9-]{0,47}$/;
@@ -42,7 +44,9 @@ export const fileSource = (root: string): SourceReader => ({ readText: async (re
 
 /** Every block exported by a module in `dir`, in file name order; refuses a malformed or repeated id. */
 export async function loadBlocks(dir: string = BLOCKS_DIR): Promise<Block[]> {
-  const files = readdirSync(dir).filter((name) => name.endsWith('.ts')).sort();
+  if (!existsSync(dir)) throw new Error(`the hosted blocks folder ${dir} does not exist`);
+  const files = readdirSync(dir).filter((name) => path.extname(name) === MODULE_EXTENSION && !name.endsWith('.d.ts')).sort();
+  if (!files.length) throw new Error(`the hosted blocks folder ${dir} has no block modules (*${MODULE_EXTENSION})`);
   const blocks: Block[] = [];
   for (const file of files) {
     const module = await import(pathToFileURL(path.join(dir, file)).href) as { blocks?: readonly Block[] };
