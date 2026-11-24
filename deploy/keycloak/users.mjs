@@ -5,8 +5,9 @@
 //   export: reads each named person and their WebAuthn passwordless credential records at this site, writes one sterling-users/1 file and
 //           signs it with your organization's cosign key (COSIGN_PASSWORD in the environment).
 //   import: checks the file's signature with the public key from the install media first, and refuses before any Keycloak call when the
-//           signature fails, the format is unknown, the relying-party id differs from this site's (a key registered under another rpId
-//           cannot work here), or a record is not a passwordless WebAuthn credential. Then it creates each person who is missing, adds the
+//           signature fails, the format is unknown, the file's requires names a feature this import does not read (USERS_FEATURES, 47 D-69)
+//           or is missing, the relying-party id differs from this site's (a key registered under another rpId cannot work here), or a
+//           record is not a passwordless WebAuthn credential. Then it creates each person who is missing, adds the
 //           credential ids they do not already have, and leaves the rest. A second run changes nothing.
 //
 //   node deploy/keycloak/users.mjs export --users <username,...> --out <file> --key <cosign key> --site <site file> <connection flags>
@@ -27,6 +28,14 @@ import { loadSite } from '../bundle/lib/render.mjs';
 
 export const FORMAT = 'sterling-users/1';
 export const PASSWORDLESS = 'webauthn-passwordless';
+/**
+ * The feature ids this import reads (47 D-69, version safety). A file names what it needs in `requires` (sorted, unique `name@N` ids;
+ * empty for people alone); an import refuses, whole and before any Keycloak call, a file naming an id that is not here. Every addition to
+ * the file takes an id, and the import learns it in the same release before any export writes it (guests@1 in 47-21, marking@1 in 47-30).
+ * A site reports this list as reads.users (47-32).
+ */
+export const USERS_FEATURES = Object.freeze([]);
+const FEATURE_ID = /^[a-z][a-z0-9-]{0,31}@[1-9][0-9]{0,2}$/;
 /**
  * The WebAuthn fields Keycloak stores. The admin API adds display fields looked up from the AAGUID (authenticatorProvider, iconLight,
  * iconDark) that its own user creation refuses, so only these travel (spike S6, 47-08).
@@ -80,13 +89,23 @@ export async function exportUsers(admin, { usernames, sourceSite, rpId, created 
     users.push({ username: person.username, email: person.email ?? '', firstName: person.firstName ?? '', lastName: person.lastName ?? '',
       enabled: person.enabled !== false, emailVerified: person.emailVerified === true, credentials });
   }
-  return { format: FORMAT, sourceSite, rpId, created, users };
+  return { format: FORMAT, requires: [], sourceSite, rpId, created, users };
 }
 
 /** Every reason a parsed document may not be imported at a site whose rpId is `rpId`; empty means it may. */
 export function checkUsersDocument(document, rpId) {
   if (!document || typeof document !== 'object') return ['the file is not a JSON object'];
   if (document.format !== FORMAT) return [`the format is ${JSON.stringify(document.format)}, not ${FORMAT}`];
+  // requires is part of sterling-users/1 from its first version (47 D-69): a file without it, or with a malformed list, is not one this
+  // import can trust to name what it needs, so it is refused like an unknown format.
+  const requires = document.requires;
+  if (!Array.isArray(requires)) return ['the file has no requires list (47 D-69); export it again with this release\'s users.mjs'];
+  if (!requires.every((id) => typeof id === 'string' && FEATURE_ID.test(id))) return [`the file's requires ${JSON.stringify(requires)} is not a list of name@N feature ids`];
+  if (requires.some((id, index) => index > 0 && requires[index - 1] >= id)) return [`the file's requires ${JSON.stringify(requires)} is not sorted and unique`];
+  const unread = requires.filter((id) => !USERS_FEATURES.includes(id));
+  if (unread.length) {
+    return [`the file needs ${unread.join(', ')}, which this site's import does not read; update this site from a newer signed bundle first, then import the file again`];
+  }
   if (!rpId || document.rpId !== rpId) return [`the file's relying-party id ${JSON.stringify(document.rpId)} is not this site's ${JSON.stringify(rpId)}; a key registered under another rpId cannot sign in here (D-08)`];
   if (!Array.isArray(document.users) || !document.users.length) return ['the file lists no people'];
   const problems = [];

@@ -16,7 +16,7 @@ import { cosignBinary } from '../bundle/lib/cosign.mjs';
 import { loadSite } from '../bundle/lib/render.mjs';
 import { signFile, verifySignedFile } from '../bundle/signed-file.mjs';
 import { HQ_BROKER, HQ_FIRST_LOGIN_FLOW, HQ_SECRET_ENV, checkRealm, prepareRealm } from '../keycloak/apply.mjs';
-import { FORMAT, PASSWORDLESS, STORED_FIELDS, exportUsers, importUsers } from '../keycloak/users.mjs';
+import { FORMAT, PASSWORDLESS, STORED_FIELDS, USERS_FEATURES, exportUsers, importUsers } from '../keycloak/users.mjs';
 import { MOUNT, exportCrl, importCrl, importIntermediate, pemBlocks, requestIntermediate } from '../openbao/pki-files.mjs';
 
 process.env.COSIGN_PASSWORD = 'federation-test';
@@ -103,6 +103,9 @@ test('a person and both passwordless keys move by a verified signed file, and a 
   const file = await exportedAda();
   const document = JSON.parse(readFileSync(file, 'utf8'));
   assert.equal(document.format, FORMAT);
+  // 47 D-69: people alone need no feature, and this import reads none yet; a file with requires [] is accepted (the import below).
+  assert.deepEqual(document.requires, []);
+  assert.deepEqual(USERS_FEATURES, []);
   for (const credential of document.users[0].credentials) assert.deepEqual(Object.keys(JSON.parse(credential.credentialData)), STORED_FIELDS);
   const edge = fakeKeycloak();
   const imported = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID });
@@ -137,6 +140,11 @@ for (const [name, makeFile] of [
   ['a file signed with another key', async () => signedDocument(JSON.parse(readFileSync(await exportedAda(), 'utf8')), { signWith: OTHER })],
   ['a file of an unknown format', () => exportedAda((document) => ({ ...document, format: 'sterling-users/2' }))],
   ['a file from another relying-party id', () => exportedAda((document) => ({ ...document, rpId: 'other.example' }))],
+  // 47 D-69: requires is part of sterling-users/1 from its first version; a file without it, or with a malformed list, is refused whole.
+  ['a file with no requires list', () => exportedAda(({ requires: _requires, ...document }) => document)],
+  ['a file whose requires is not a list', () => exportedAda((document) => ({ ...document, requires: 'guests@1' }))],
+  ['a file whose requires is not sorted and unique', () => exportedAda((document) => ({ ...document, requires: ['marking@1', 'guests@1'] }))],
+  ['a file whose requires holds something other than name@N ids', () => exportedAda((document) => ({ ...document, requires: ['guests'] }))],
   ['a file carrying a password credential', () => exportedAda((document) => {
     document.users[0].credentials.push({ type: 'password', credentialData: '{"hashIterations":1}', secretData: '{"value":"x"}' });
     return document;
@@ -151,6 +159,16 @@ for (const [name, makeFile] of [
     assert.deepEqual(edge.calls, []);
   });
 }
+
+test('a file needing a feature this import does not read (guests@1 today) is refused whole, naming it, with zero Keycloak calls', async () => {
+  const file = await exportedAda((document) => ({ ...document, requires: ['guests@1'] }));
+  const edge = fakeKeycloak();
+  const result = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /needs guests@1, which this site's import does not read/);
+  assert.deepEqual(edge.calls, []);
+  assert.equal(edge.users.size, 0);
+});
 
 // --- PKI intermediate and revocation lists --------------------------------------------------------------------------------------------
 

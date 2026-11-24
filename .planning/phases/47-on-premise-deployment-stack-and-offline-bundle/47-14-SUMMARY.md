@@ -198,3 +198,12 @@ checks accept them, the name never resolves, and checkRealm refuses them once th
 ## Self-Check: PASSED
 
 - All 3 created files exist; commits `26d12d5e`, `a4938669` and `907a58c3` are on feat/phase-47-14.
+
+## Amendment: version safety (47 D-69, from #185), added at the wave 5 integration
+
+- `exportUsers` writes `requires: []`; `USERS_FEATURES` is exported and empty. `checkUsersDocument` refuses the whole file before any
+  Keycloak call when `requires` is missing or not a list (requires is part of `sterling-users/1` from its first version, and no file has
+  reached a site yet), holds anything but sorted, unique `name@N` ids, or names an id not in `USERS_FEATURES`, with one sentence naming the
+  ids. The target-site check before an export (`reads.users`) is 47-21's and 47-30's, not this plan's.
+- Tests (`federation.test.mjs`, 5 added): `requires: ['guests@1']` refused naming it with zero admin calls; a missing list, a non-list, an
+  unsorted list and a malformed id each refused with zero calls; the existing import case checks `requires: []` is written and accepted.
