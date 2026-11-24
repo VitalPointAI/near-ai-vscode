@@ -1,11 +1,14 @@
 // OpenBao as code (D-33, D-34, D-38 to D-41): the enrolment gate (two distinct passwordless keys before any OpenBao call), what the
-// policies grant, and the key-move Control Groups. enrolPerson runs against injected Keycloak and OpenBao fakes, so no server is needed;
-// policy files are read as text.
+// policies grant, the key-move Control Groups, the rendered seal, plugin and TLS configuration, and the roles apply.mjs writes. enrolPerson
+// runs against injected Keycloak and OpenBao fakes, so no server is needed; policy files are read as text. The render tests need helm
+// ($HELM or PATH).
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
 import { countPasswordlessKeys, enrolPerson, rebindPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -140,4 +143,64 @@ test('every per-person path is templated on the entity and no policy names a lit
     }
   }
   assert.ok(pathBlocks(policy('enrolment')).every((block) => !block.path.startsWith('kv/')), 'the enrolment operator cannot read secrets');
+});
+
+const SITE_FILE = path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml');
+const HELM = process.env.HELM || 'helm';
+const openbao = () => listReleases(ROOT).find((release) => release.name === 'openbao');
+
+test('the rendered server configuration has the kms-pkcs11 plugin, its seal, TLS on, and no injector, CSI or HashiCorp image', () => {
+  const yaml = renderRelease(ROOT, openbao(), { site: loadSite(SITE_FILE), helm: HELM });
+  const plugin = /plugin "kms" "([a-z0-9-]+)" \{/.exec(yaml);
+  const seal = /seal "([a-z0-9-]+)" \{/.exec(yaml);
+  assert.ok(plugin && seal, 'a kms plugin and a seal stanza');
+  assert.equal(seal[1], plugin[1], 'the seal is named after the plugin');
+  assert.match(yaml, /plugin_directory = "\/openbao\/plugins"/);
+  assert.match(yaml, /command {3}= "openbao-plugin-kms-pkcs11"/);
+  assert.match(yaml, /sha256sum = "[0-9a-f]{64}"/);
+  assert.match(yaml, /audit "file" "stdout" \{/);
+  assert.match(yaml, /name: BAO_HSM_PIN/);
+  assert.doesNotMatch(yaml, /tls_disable[ \t]*=/);
+  assert.match(yaml, /tls_cert_file {6}= "\/openbao\/userconfig\/openbao-tls\/tls\.crt"/);
+  assert.doesNotMatch(yaml, /hashicorp\//, 'no HashiCorp image (D-04)');
+  assert.doesNotMatch(yaml, /agent-injector|csi-provider/, 'injector and CSI provider off');
+  assert.equal((yaml.match(/retry_join \{/g) ?? []).length, 3, 'one retry_join per node of the 3-node example');
+});
+
+test('with a Shamir site file no seal stanza renders, and a missing seal choice stops the render', () => {
+  const site = loadSite(SITE_FILE);
+  const yaml = renderRelease(ROOT, { ...openbao(), site: 'deploy/test/fixtures/openbao-shamir.yaml' }, { site, helm: HELM });
+  assert.match(yaml, /plugin "kms" "pkcs11"/);
+  assert.doesNotMatch(yaml, /seal "/);
+  assert.equal((yaml.match(/retry_join \{/g) ?? []).length, 1);
+  assert.throws(() => renderRelease(ROOT, { ...openbao(), site: undefined }, { site, helm: HELM }), /sterling\.seal must be pkcs11 or shamir/);
+});
+
+test('apply.mjs gives only the step-up role the signing policy, bound to the step-up acr and capped at the step-up window', () => {
+  const run = spawnSync(process.execPath, [path.join(ROOT, 'deploy/openbao/apply.mjs'), '--site', SITE_FILE, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const operations = JSON.parse(run.stdout);
+  const site = loadSite(SITE_FILE);
+  const role = (name) => operations.find((operation) => operation.write === `auth/jwt/role/${name}`)?.body;
+  const stepUp = role('sterling-workbench-stepup');
+  const base = role('sterling-workbench');
+  assert.deepEqual(stepUp.bound_claims, { acr: site.stepUpAcr });
+  assert.equal(stepUp.token_explicit_max_ttl, site.stepUpMaxAgeSeconds);
+  assert.equal(stepUp.token_max_ttl, site.stepUpMaxAgeSeconds);
+  assert.deepEqual(stepUp.token_policies, ['sterling-workbench', 'sterling-workbench-sign']);
+  assert.deepEqual(base.token_policies, ['sterling-workbench']);
+  for (const body of [base, stepUp]) {
+    assert.deepEqual(body.bound_audiences, ['sterling-sessions']);
+    assert.equal(body.user_claim, 'sub');
+    assert.equal(body.token_no_default_policy, true);
+  }
+  const config = operations.find((operation) => operation.write === 'auth/jwt/config').body;
+  assert.equal(config.oidc_discovery_url, `https://keycloak.${site.domain}/realms/sterling`);
+  for (const where of ['sys/mounts/kv', 'sys/mounts/transit', 'sys/mounts/pki_int', 'pki_int/roles/ingress', 'pki_int/roles/hub', 'identity/group/name/key-custodians']) {
+    assert.ok(operations.some((operation) => operation.write === where), `apply writes ${where}`);
+  }
+});
+
+test('the install policy reaches only the static application secrets under kv/data/apps/', () => {
+  assert.deepEqual(pathBlocks(policy('install')).map((block) => block.path), ['kv/data/apps/*']);
 });
