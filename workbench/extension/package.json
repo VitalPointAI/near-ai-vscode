@@ -31,6 +31,9 @@
     },
     {
       "frontend": "lib/browser/sterling-resource-inventory-module"
+    },
+    {
+      "backend": "lib/node/sterling-backend-module"
     }
   ]
 }

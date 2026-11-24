@@ -4,6 +4,9 @@
 !workbench/
 !workbench/package.json
 !workbench/package-lock.json
+!workbench/.npmrc
+!workbench/bin/
+!workbench/bin/**
 !workbench/extension/
 !workbench/extension/package.json
 !workbench/extension/tsconfig.json

@@ -450,8 +450,8 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           image="sterling-release:$TAG"
-          test "$(docker image inspect --format '{{.Config.User}}' "$image")" = node
-          docker run -d --name sterling-release-smoke -e STERLING_PREVIEW_NO_SIGN_IN=accept -p 127.0.0.1::3000 "$image"
+          test "$(docker image inspect --format '{{.Config.User}}' "$image")" = 10001:0
+          docker run -d --name sterling-release-smoke -e STERLING_LISTEN_HOST=0.0.0.0 -e STERLING_PREVIEW_NO_SIGN_IN=accept -p 127.0.0.1::3000 "$image"
           trap 'docker logs sterling-release-smoke; docker stop sterling-release-smoke >/dev/null' EXIT
           address="$(docker port sterling-release-smoke 3000/tcp)"
           curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 2 \
