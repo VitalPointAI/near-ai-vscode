@@ -46,8 +46,88 @@ export interface KemPrivateKeys {
   readonly mlkem768: KeyObject;
 }
 
-/** The engine names the staff backend calls. 33-24 adds the replica project and the live replicator. */
-export interface StaffEngine {
+/** A refusal of the replica project (src/staff/replica/replicaProject.ts ProjectRefused). */
+export interface EngineRefused {
+  readonly refused: string;
+  readonly message: string;
+}
+
+/** A device's versions in the roster, as far as the live engine reads them. */
+export interface EngineDeviceRecord {
+  readonly member: string;
+  readonly slot?: number;
+  readonly kind: 'person' | 'hub';
+}
+
+/** The roster state, as far as the live engine reads it; anything else of it is passed back to the engine untouched. */
+export interface EngineRoster {
+  readonly positions: readonly string[];
+  readonly members: { readonly devices: ReadonlyMap<string, readonly EngineDeviceRecord[]> };
+}
+
+/** An open shared project (ReplicaProject), as far as the live engine uses it. */
+export interface EngineProject {
+  readonly projectId: string;
+  readonly deviceWriter: string;
+  readonly signer: { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): string };
+  state(): Promise<{ readonly roster: EngineRoster; readonly fold: unknown }>;
+  appendOwn(kind: string, data: unknown, options?: object): Promise<{ readonly ok: true; readonly hash: string; readonly built: { readonly entry: unknown } } | EngineRefused>;
+  close(): Promise<void>;
+}
+
+/** The replicator's status (src/staff/replica/liveReplicator.ts LiveStatus). */
+export interface EngineLiveStatus {
+  readonly state: string;
+  readonly since: number;
+  readonly reason?: string;
+  readonly findings: readonly string[];
+  readonly pulled: number;
+  readonly pushed: number;
+  readonly lastSyncedAt?: number;
+  readonly retryAt?: number;
+}
+
+/** One live replicator (src/staff/replica/liveReplicator.ts LiveReplicator). */
+export interface EngineReplicator {
+  readonly status: EngineLiveStatus;
+  onStatus(listener: (status: EngineLiveStatus) => void): { dispose(): void };
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  syncNow(): void;
+  localAppended(): void;
+}
+
+/** One hub as the roster has it (src/staff/replica/hubMembership.ts HubStanding). */
+export interface EngineHubStanding {
+  readonly hub: string;
+  readonly writer?: string;
+  readonly certPin: string;
+  readonly standing: 'admitted' | 'revoked';
+}
+
+/** The live engine's names (33-24): the replica project, the live replicator and what runs beside them. */
+export interface StaffLiveApi {
+  readonly ReplicaProject: { open(root: string, deps: never): Promise<EngineProject | EngineRefused | undefined> };
+  isProjectRefused(value: unknown): value is EngineRefused;
+  syncLocalOf(project: never): object;
+  readonly LiveReplicator: new (options: never) => EngineReplicator;
+  hubMemoryOf(secrets: never): object;
+  hubStanding(shared: never): Promise<EngineHubStanding[]>;
+  readHubAddress(globalStorageDir: string, project: string, expect?: { readonly hub?: string }): Promise<{ readonly address: string } | undefined>;
+  ensureRequireArmed(project: never): Promise<unknown>;
+  projectLive(root: string, input: never, options: { readonly globalStorageDir: string; readonly project: string; readonly bound?: ReadonlySet<string> }): Promise<{ readonly written: string[]; readonly left: ReadonlyArray<{ readonly path: string; readonly reason: string }> }>;
+  projectionInputOf(project: never, deps: never): Promise<unknown>;
+  compactAfterCheckpoint(project: never, input: never): Promise<{ readonly compacted: string[] }>;
+  syncStatusFor(root: string): { setStatus(status: never): void };
+  syncSentence(status: never): string;
+  readonly UPDATE_SENTENCE: string;
+  isRosterWriterAt(state: never, writer: string, position: number): boolean;
+  /** The cell order the fold checks writes against (D-25), as the extension's staff host builds it. */
+  cellOrderHook(options: { readonly now?: () => Date }): unknown;
+}
+
+/** The engine names the staff backend calls. */
+export interface StaffEngine extends StaffLiveApi {
   newKemSeeds(): KemSeeds;
   kemPublicFromSeeds(seeds: KemSeeds): KemPublicKeys;
   kemPrivateFromSeeds(seeds: KemSeeds): KemPrivateKeys;

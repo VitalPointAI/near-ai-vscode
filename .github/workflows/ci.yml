@@ -411,6 +411,11 @@ jobs:
           cache-dependency-path: workbench/package-lock.json
       - if: steps.has_workbench.outputs.present == 'true'
         run: npm ci --ignore-scripts
+      # The staff engine bundle (Phase 33 D-51) copies the vendored, hash-pinned Yjs build, which the repository's own install makes.
+      - name: Vendor the pinned Yjs for the staff engine bundle
+        if: steps.has_workbench.outputs.present == 'true'
+        working-directory: .
+        run: npm ci --ignore-scripts && node scripts/vendor-libs.mjs
       # Report-only while the Theia 1.77 tree carries a high advisory with no fix inside the pinned version (zod through @theia/ai-mcp,
       # GHSA-mrhx-c7xc-m3w5, 2026-11-24); the JSON goes up with the test report and the register records the condition.
       - name: Audit the workbench runtime dependencies (report-only)
