@@ -107,12 +107,14 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
-          # Sterling: the operator's activity monitor calls the app port on the pod IP (47-15, spike S7), so the workbench answers its
-          # tracker there; Theia itself stays on 127.0.0.1 behind the sidecar (workbench/README.md, STERLING_LISTEN_HOST).
+          # The workbench (Phase 46) listens on 127.0.0.1 unless this is set. The oauth2-proxy sidecar reaches it on 127.0.0.1 and the
+          # operator's activity monitor on the pod IP (the session's -int Service): 0.0.0.0 is exactly the pod's loopback and its pod IP.
+          # Who may reach the pod IP, and on which port, is the sterling-session-ingress NetworkPolicy (HAProxy to the sidecar only, the
+          # operator to this port only). The narrower form is valueFrom.fieldRef status.podIP: the workbench then keeps Theia on 127.0.0.1
+          # and answers only the activity tracker on the pod IP (workbench/README.md, Bind). The sterling-session-env policy accepts these
+          # two forms only.
           - name: STERLING_LISTEN_HOST
-            valueFrom:
-              fieldRef:
-                fieldPath: status.podIP
+            value: "0.0.0.0"
           securityContext:
             runAsNonRoot: true
             runAsUser: placeholder-uid

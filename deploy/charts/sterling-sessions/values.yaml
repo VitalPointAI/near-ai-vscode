@@ -32,11 +32,12 @@ siteEnv:
   # (STERLING_MODEL_SERVERS), the form the workbench reads (workbench/README.md, Settings); empty or unset renders [] (none).
   modelServers: []
 sessionEnv:
-  # The names our operator template sets (deploy/images/theia-cloud-operator/templates/templateDeployment.yaml): the 13 THEIACLOUD_ names
-  # of the upstream file at Theia Cloud 1.2.0 (e2d201fd), and STERLING_LISTEN_HOST from the pod IP, where the operator's activity monitor
-  # reaches the workbench (47-15, spike S7; session-env-policy.yaml accepts it only as the downward API status.podIP). THEIA_HOSTS is not
-  # set (the sidecar passes the browser's Host through), so not here.
+  # The names our operator template sets (deploy/images/theia-cloud-operator/templates/templateDeployment.yaml): the 13 of the upstream
+  # template at Theia Cloud 1.2.0 (e2d201fd) and STERLING_LISTEN_HOST (the workbench's bind address, wave-5 integration; the policy accepts
+  # it only as "0.0.0.0" or the downward API status.podIP). THEIA_HOSTS is not set (the sidecar passes the browser's host on), so not here.
+  # render-sessions.test.mjs checks this list is exactly the template's names.
   operatorNames:
+    - STERLING_LISTEN_HOST
     - THEIACLOUD_SERVICE_AUTH_TOKEN
     - THEIACLOUD_APP_ID
     - THEIACLOUD_SERVICE_URL
@@ -50,6 +51,10 @@ sessionEnv:
     - THEIACLOUD_KEYCLOAK_URL
     - THEIACLOUD_KEYCLOAK_REALM
     - THEIACLOUD_KEYCLOAK_CLIENT_ID
-    - STERLING_LISTEN_HOST
   # Extra environment names a session pod may carry beyond the operator's own and the site ConfigMap. Empty: a launch request adds nothing.
   allowedNames: []
+# Who may connect to a session pod (templates/session-network-policy.yaml): the HAProxy controllers' namespace and the operator.
+sessionAccess:
+  ingressNamespace: haproxy-controller
+  # The oauth2-proxy sidecar's port in our operator template (containerPort 5000, name web): the only port HAProxy may reach.
+  sidecarPort: 5000

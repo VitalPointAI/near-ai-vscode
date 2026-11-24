@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-pki
+description: The site PKI issuers on OpenBao's pki_int, the site CA trust in every namespace that verifies site TLS, and the re-issued bootstrap certificates (D-16, D-50).
+type: application
+version: 0.1.0

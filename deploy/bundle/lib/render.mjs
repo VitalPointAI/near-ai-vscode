@@ -143,9 +143,11 @@ function chartPath(root, release) {
   }
   const entry = readChartsLock(root).charts.find((chart) => chart.name === release.chart);
   if (!entry) throw new Error(`${release.file}: chart ${release.chart} is not in ${CHARTS_LOCK} and is not a path:<directory> local chart.`);
-  const file = path.join(root, entry.file);
-  if (!existsSync(file)) throw new Error(`${entry.file} is missing; run node deploy/charts/vendor.mjs on a connected host.`);
-  if (sha256(file) !== entry.sha256) throw new Error(`${entry.file} does not match the SHA-256 in ${CHARTS_LOCK}; refusing to render it.`);
+  // A chart with a carried patch renders from its patched tarball (deploy/charts/vendor.mjs), never from the upstream one.
+  const { file: name, sha256: expected } = entry.patch ? { file: entry.patch.output, sha256: entry.patch.sha256 } : entry;
+  const file = path.join(root, String(name));
+  if (!existsSync(file)) throw new Error(`${name} is missing; run node deploy/charts/vendor.mjs on a connected host.`);
+  if (sha256(file) !== expected) throw new Error(`${name} does not match the SHA-256 in ${CHARTS_LOCK}; refusing to render it.`);
   return file;
 }
 

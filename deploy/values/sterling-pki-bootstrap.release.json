@@ -1,0 +1,7 @@
+{
+  "chart": "path:deploy/charts/sterling-pki-bootstrap",
+  "namespace": "cert-manager",
+  "order": 32,
+  "values": [],
+  "note": "The bootstrap CA issuer and OpenBao's first TLS certificate (D-16); right after cert-manager. The install script removes this release just before sterling-pki re-issues openbao-tls."
+}

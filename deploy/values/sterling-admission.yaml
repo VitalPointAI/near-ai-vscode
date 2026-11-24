@@ -1,6 +1,8 @@
 # The admission policies (deploy/charts/sterling-admission), D-15 and D-48. The registry and the key come from the site file.
 registry: "${site.registry}"
 organizationPublicKey: "${site.organizationPublicKey}"
+# On a Zot site the registry's own pod is admitted by its exact pinned digest (the chart's values.yaml says why).
+registryKind: "${site.registryKind}"
 admission:
   # Deny: an unsigned image, or one from anywhere but the site registry, is refused. The install script (47-16) may install this release
   # with --set admission.mode=Audit first and switch to Deny after it has checked that every running pod's image verifies (research

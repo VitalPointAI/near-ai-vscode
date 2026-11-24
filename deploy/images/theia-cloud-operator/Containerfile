@@ -11,6 +11,9 @@ COPY --from=upstream --chown=185:0 java/common /home/default/build/common
 RUN cd /home/default/build/common/maven-conf && mvn -B clean install --no-transfer-progress \
  && cd /home/default/build/common/org.eclipse.theia.cloud.common && mvn -B clean install --no-transfer-progress
 COPY --from=upstream --chown=185:0 java/operator /home/default/build/operator
+# Our one source edit: the session URL probe verifies certificates and host names and no longer makes trust-all the JVM default (probe-tls.sh).
+COPY --chown=0:0 --chmod=0555 probe-tls.sh /home/default/probe-tls.sh
+RUN sh /home/default/probe-tls.sh /home/default/build/operator/org.eclipse.theia.cloud.operator/src/main/java/org/eclipse/theia/cloud/operator/handler/AddedHandlerUtil.java
 RUN cd /home/default/build/operator/org.eclipse.theia.cloud.operator && mvn -B clean install --no-transfer-progress \
  && cd /home/default/build/operator/org.eclipse.theia.cloud.defaultoperator && mvn -B clean verify --no-transfer-progress
 
@@ -26,5 +29,8 @@ COPY --from=build --chown=0:0 --chmod=0444 /home/default/build/operator/org.ecli
 COPY --chown=0:0 --chmod=0444 templates/templateDeployment.yaml /templates/templateDeployment.yaml
 USER 185
 WORKDIR /operator
-ENTRYPOINT ["java", "-Dlog4j2.configurationFile=/log-config/log4j2.xml", "-jar", "/operator/defaultoperator-1.2.0-jar-with-dependencies.jar"]
+# The JVM's default trust is the site chain only (ConfigMap sterling-site-ca, key truststore.p12, mounted by the chart patch at
+# /etc/ssl/site-ca): the session URL probe goes to https://<instances host> through HAProxy with a site-pki certificate. The Kubernetes
+# client keeps its own trust (the service account's CA, which it adds to this store). A missing or empty store trusts nothing (fails closed).
+ENTRYPOINT ["java", "-Djavax.net.ssl.trustStore=/etc/ssl/site-ca/truststore.p12", "-Djavax.net.ssl.trustStoreType=PKCS12", "-Dlog4j2.configurationFile=/log-config/log4j2.xml", "-jar", "/operator/defaultoperator-1.2.0-jar-with-dependencies.jar"]
 CMD [""]

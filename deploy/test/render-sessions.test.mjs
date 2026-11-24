@@ -137,20 +137,23 @@ test('the policy refuses envFrom other than sterling-site-env, any Secret or Con
   assert.ok(doc.includes('!has(v.valueFrom.secretKeyRef) && !has(v.valueFrom.configMapKeyRef)'));
   assert.ok(doc.includes('v.name in variables.allowedNames'));
   const allowed = JSON.parse(JSON.parse(/name: allowedNames\n\s+expression: (".*")$/m.exec(doc)[1]));
-  // Exactly the names our operator template sets, read from the template itself: the launch request adds none.
+  // Exactly the names our operator template sets on the workbench container (the 13 THEIACLOUD_ names and STERLING_LISTEN_HOST), no more
+  // and no fewer; the launch request adds none.
   const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
-  const templateNames = [...template.matchAll(/^ {10}- name: (\S+)$/gm)].map((match) => match[1]);
+  const templateNames = [...template.matchAll(/^ {10}- name: ([A-Z][A-Z0-9_]*)$/gm)].map((match) => match[1]);
+  assert.equal(templateNames.length, 14);
   assert.deepEqual([...allowed].sort(), [...templateNames].sort());
   assert.equal(allowed.filter((name) => name.startsWith('THEIACLOUD_')).length, 13);
-  assert.deepEqual(allowed.filter((name) => !name.startsWith('THEIACLOUD_')), ['STERLING_LISTEN_HOST']);
+  // The workbench binds loopback (for the sidecar) and the pod IP (for the operator's activity monitor).
+  assert.match(template, /- name: STERLING_LISTEN_HOST\n\s+value: "0\.0\.0\.0"$/m);
 });
 
-test('STERLING_LISTEN_HOST is the pod IP from the downward API in the template, and the policy refuses it in any other form', () => {
+test('STERLING_LISTEN_HOST is "0.0.0.0" in the template, and the policy accepts only that or the pod IP from the downward API', () => {
   const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
-  assert.match(template, /^ {10}- name: STERLING_LISTEN_HOST\n {12}valueFrom:\n {14}fieldRef:\n {16}fieldPath: status\.podIP$/m);
-  assert.doesNotMatch(template, /name: STERLING_LISTEN_HOST\n\s+value:/);
+  assert.equal([...template.matchAll(/- name: STERLING_LISTEN_HOST\n/g)].length, 1);
   const doc = policy();
-  assert.ok(doc.includes("v.name != 'STERLING_LISTEN_HOST' || (has(v.valueFrom) && has(v.valueFrom.fieldRef) && v.valueFrom.fieldRef.fieldPath == 'status.podIP' && !has(v.value))"));
+  assert.ok(doc.includes("v.name != 'STERLING_LISTEN_HOST' || (has(v.value) && v.value == '0.0.0.0' && !has(v.valueFrom)) || (!has(v.value) && has(v.valueFrom) && has(v.valueFrom.fieldRef) && v.valueFrom.fieldRef.fieldPath == 'status.podIP')"));
+  assert.match(doc, /STERLING_LISTEN_HOST may only be 0\.0\.0\.0 or the pod IP/);
 });
 
 test('the policy allows only the oauth2-proxy-secrets Secret volume, and only in the oauth2-proxy container', () => {
