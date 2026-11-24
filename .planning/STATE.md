@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: 33.2-04 Tasks 1 and 3 done; Task 2 blocked on 33-23
-last_updated: "2026-11-24T21:10:27.757Z"
-state_head: 5762251f1de1f8383c3455fba791af776c2d03c2
+stopped_at: Completed 33.2-05-PLAN.md
+last_updated: "2026-11-24T21:52:41.394Z"
+state_head: 52397eaf112304d891c654f5268fb4945e24d2ed
 progress:
   total_phases: 10
   completed_phases: 1
@@ -162,7 +162,6 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
-- 33.2-04 Task 2 (hosted keys in the Transit-KEK envelope) waits on 33-23 encryption-key.ts reaching main
 
 ### Quick Tasks Completed
 
@@ -177,8 +176,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T21:10:27.555Z
-**Stopped at:** 33.2-04 Tasks 1 and 3 done; Task 2 blocked on 33-23
+**Last session:** 2026-11-24T21:52:41.227Z
+**Stopped at:** Completed 33.2-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -310,3 +309,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 33.2]: 33.2-01: owner accepted the cell-wrap/v2 permanent shapes as proposed (2026-11-24); no new ITSP.40.111 v5 compliance issue
 - [Phase 33.2]: 33.2-02: device.kem is a base-cell, person-key kind folded beside the roster line; invitations carry the required features so join requests send kem only for wrap@2
 - [Phase 33.2]: 33.2-03: grant pages of at most 607 v2 wraps, committed by the founding hash; a missing page holds the grant missing-blob
+- [Phase 33.2]: 33.2-04: seeds only everywhere; publishing at open behind publishKem; v1 envelopes sealed again as v2 under the same data key; HUB_KEM_KEY optional
+- [Phase 33.2]: 33.2-05: cutover rule shared by fold and hub; wrap@2 known only where the probe passes; wrap@2 at creation behind wrapV2AtCreation until 33.2-06
