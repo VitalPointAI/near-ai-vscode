@@ -34,7 +34,7 @@
   "scripts": {
     "build": "node tools/build-engine.mjs && npm run build --workspace @near-ai/sterling-workbench-extension && theia build --mode production && cp extension/assets/* lib/frontend/ && node tools/build-sterling-documentation.mjs",
     "lint": "tsc --noEmit -p extension/tsconfig.json && tsc -p tsconfig.json",
-    "test": "node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js",
+    "test": "node scripts/build.mjs && node ../scripts/run-tests.mjs dist/test/*.test.js dist/test/staff/*.test.js",
     "test:container": "node scripts/build.mjs && node ../scripts/run-tests.mjs --test-concurrency=1 dist/test/container/*.test.js",
     "start": "node bin/start.mjs"
   },

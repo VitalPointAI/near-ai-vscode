@@ -579,7 +579,8 @@ export class NearAiClient implements ModelEndpoint {
   public async transcribeAudio(model: string, audio: Uint8Array, fileName: string, mimeType: string, signal?: AbortSignal): Promise<{ text: string; usage: UsageMetadata }> {
     const started = Date.now();
     const form = new FormData();
-    form.append('file', new Blob([audio], { type: mimeType }), fileName);
+    // slice() gives an ArrayBuffer-backed copy, which the DOM Blob typing the workbench lint checks this file with requires.
+    form.append('file', new Blob([audio.slice()], { type: mimeType }), fileName);
     form.append('model', model);
     form.append('response_format', 'json');
     const response = await this.request('/audio/transcriptions', { method: 'POST', signal, body: form }, { model });
