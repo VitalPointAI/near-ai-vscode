@@ -5,7 +5,8 @@
 #   sh deploy/keys/new-dev-site-key.sh --show     print the existing public key and PKCS#11 URI
 #   sh deploy/keys/new-dev-site-key.sh --rotate   archive the current token and public key, then make a new key
 #
-# Run it yourself, in a terminal: it refuses to run without one, so no agent or script can make or change your key.
+# Run it yourself, in a terminal. It asks for the PINs in the token tools' own prompts and refuses to run without a terminal, so it is not
+# meant for unattended runs. That refusal is not a security control: anything that gives it a terminal can run it.
 #
 # What it does:
 #   1. Checks for softhsm2-util, pkcs11-tool and the SoftHSM2 module. If any is missing it shows the install command for the packages
@@ -22,9 +23,10 @@
 # Nothing is ever deleted: a second run refuses to make a key where one exists, and --rotate moves the old token folder, its
 # configuration and the saved public key to ~/.config/sterling-signing/softhsm/.archive/<UTC time>/ before making a new one.
 #
-# --test (for deploy/test/dev-site-key.test.mjs only) runs without a terminal, and only when SOFTHSM2_CONF names a softhsm2.conf inside a
-# temporary folder ($TMPDIR or /tmp) that is not ~/.config/sterling-signing. STERLING_PKCS11_MODULE names the SoftHSM2 module when it is
-# not in one of the usual places.
+# --test (for deploy/test/dev-site-key.test.mjs only) runs without a terminal, and only when SOFTHSM2_CONF names a softhsm2.conf in a
+# folder strictly inside a temporary folder ($TMPDIR or /tmp) that is not the home folder and holds neither the home folder nor
+# ~/.config/sterling-signing, and nothing it would write resolves into ~/.config/sterling-signing (inside_temporary below).
+# STERLING_PKCS11_MODULE names the SoftHSM2 module when it is not in one of the usual places.
 set -eu
 umask 077
 
@@ -54,39 +56,72 @@ for arg in "$@"; do
   esac
 done
 
-# True when $1 is an absolute softhsm2.conf path, with no . or .. parts, whose sterling-signing folder exists inside $TMPDIR or /tmp and
-# is not the owner's ~/.config/sterling-signing.
+# The absolute path $1 with its longest existing folder part resolved through symlinks (pwd -P) and the rest appended as written.
+resolved() {
+  rest=""
+  dir=$1
+  while [ ! -d "$dir" ]; do
+    rest="/$(basename "$dir")$rest"
+    dir=$(dirname "$dir")
+  done
+  top=$(cd -P "$dir" && pwd)
+  [ "$top" = / ] && top=""
+  printf '%s%s\n' "$top" "$rest"
+}
+
+# True when the path $1 is the folder $2 or lies under it.
+within() {
+  [ "$1" = "$2" ] && return 0
+  case "$1/" in
+    "$2"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# True only when --test may use $1 as SOFTHSM2_CONF: an absolute softhsm2.conf path with no . or .. parts, where
+#   - nothing the script writes (the configuration, the tokens folder beside it, site-key.pub.pem in the folder above) resolves into the
+#     owner's ~/.config/sterling-signing, itself resolved through symlinks, and none of them is a symlink;
+#   - the folder above the configuration exists, is not the owner folder or any folder above it, and lies strictly inside $TMPDIR or /tmp;
+#   - that temporary folder is not the home folder and holds neither the home folder nor the owner folder.
 inside_temporary() {
   case "$1" in
     /*) ;;
     *) return 1 ;;
   esac
   case "$1/" in
-    */./* | */../*) return 1 ;;
+    */./* | */../* | *//*) return 1 ;;
   esac
   [ "$(basename "$1")" = softhsm2.conf ] || return 1
-  real=$(cd -P "$(dirname "$(dirname "$1")")" 2>/dev/null && pwd) || return 1
-  owner=$(cd -P "${HOME:-/nonexistent}/.config/sterling-signing" 2>/dev/null && pwd) || owner="${HOME:-/nonexistent}/.config/sterling-signing"
-  case "$real/" in
-    "$owner"/*) return 1 ;;
-  esac
+  home=$(resolved "${HOME:-/nonexistent}")
+  owner=$(resolved "${HOME:-/nonexistent}/.config/sterling-signing")
+  conf_dir=$(dirname "$1")
+  base_given=$(dirname "$conf_dir")
+  [ -d "$base_given" ] || return 1
+  base=$(cd -P "$base_given" && pwd)
+  for target in "$1" "$conf_dir/tokens" "$base_given/site-key.pub.pem"; do
+    [ -L "$target" ] && return 1
+    within "$(resolved "$target")" "$owner" && return 1
+  done
+  within "$owner" "$base" && return 1
   for tmp in "${TMPDIR:-/tmp}" /tmp; do
-    top=$(cd -P "$tmp" 2>/dev/null && pwd) || continue
-    case "$real/" in
-      "$top"/?*) return 0 ;;
-    esac
+    [ -d "$tmp" ] || continue
+    top=$(cd -P "$tmp" && pwd)
+    [ "$top" = "$home" ] && continue
+    within "$home" "$top" && continue
+    within "$owner" "$top" && continue
+    if [ "$base" != "$top" ] && within "$base" "$top"; then return 0; fi
   done
   return 1
 }
 
 if [ "$TEST" = yes ]; then
   inside_temporary "${SOFTHSM2_CONF:-}" \
-    || fail "--test needs SOFTHSM2_CONF set to a softhsm2.conf inside a temporary folder (\$TMPDIR or /tmp), never ~/.config/sterling-signing"
+    || fail "--test needs SOFTHSM2_CONF set to a softhsm2.conf in a folder strictly inside a temporary folder (\$TMPDIR or /tmp) that is not your home folder and does not hold it, and never in or above ~/.config/sterling-signing"
   CONF=$SOFTHSM2_CONF
   SOFTHSM_DIR=$(dirname "$CONF")
   BASE=$(dirname "$SOFTHSM_DIR")
 else
-  [ -t 0 ] || fail "run this yourself in a terminal: it asks for the token PINs, and it refuses to run without a terminal so that no agent or script can make or change your key"
+  [ -t 0 ] || fail "run this yourself in a terminal: it asks for the token PINs in the token tools' own prompts, so it does not run unattended (this check is not a security control)"
   BASE=$HOME/.config/sterling-signing
   SOFTHSM_DIR=$BASE/softhsm
   CONF=$SOFTHSM_DIR/softhsm2.conf
@@ -158,7 +193,11 @@ key_present() {
 
 # Reads the public key out of the token (no login: it is a public object) and sets PEM and URI.
 read_public_key() {
-  b64=$(pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --read-object --type pubkey --label "$KEY_LABEL" --id "$KEY_ID" | base64 | tr -d '\n')
+  # There is no pipefail in POSIX sh, so the read is checked on its own first, then piped through base64.
+  pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --read-object --type pubkey --label "$KEY_LABEL" --id "$KEY_ID" > /dev/null \
+    || fail "pkcs11-tool could not read the public key $KEY_LABEL from token $TOKEN_LABEL"
+  b64=$(pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --read-object --type pubkey --label "$KEY_LABEL" --id "$KEY_ID" | base64 | tr -d '\n') \
+    || fail "could not encode the public key $KEY_LABEL read from token $TOKEN_LABEL"
   case "$b64" in
     "$P256_SPKI_PREFIX"*) ;;
     *) fail "the token did not return an EC P-256 public key for $KEY_LABEL" ;;
@@ -211,7 +250,8 @@ create_key() {
 
   say "Step 1 of 2: initialise the token $TOKEN_LABEL. softhsm2-util asks for a security officer (SO) PIN and then the token (user) PIN,"
   say "each twice. Use at least 4 characters and keep both in your password manager; this script never sees them."
-  softhsm2-util --init-token --free --label "$TOKEN_LABEL" >&2 || fail "softhsm2-util could not initialise the token; nothing else was changed"
+  softhsm2-util --init-token --free --label "$TOKEN_LABEL" >&2 \
+    || fail "softhsm2-util could not initialise the token. Left behind: the configuration file $CONF and the tokens folder $TOKENS; run sh $SELF --rotate to archive them and start again"
 
   say "Step 2 of 2: make the key inside the token. Type the token (user) PIN and press Enter (it is not shown)."
   out=$(pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --login --keypairgen --key-type EC:prime256v1 \

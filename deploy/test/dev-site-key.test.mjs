@@ -28,8 +28,10 @@ function sandbox({ installed = true, packageManager = false } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'dev-site-key-'));
   const bin = path.join(root, 'bin');
   const home = path.join(root, 'home');
-  const base = path.join(root, 'sterling-signing');
-  for (const dir of [bin, home, base]) mkdirSync(dir);
+  // The script's temporary folder is a sibling of the fake home, so it never contains the owner's folder.
+  const temp = path.join(root, 'tmp');
+  const base = path.join(temp, 'sterling-signing');
+  for (const dir of [bin, home, temp, base]) mkdirSync(dir);
   for (const name of UTILITIES) {
     const found = ['/usr/bin', '/bin'].map((dir) => path.join(dir, name)).find((file) => existsSync(file));
     assert.ok(found, `base utility ${name}`);
@@ -44,7 +46,7 @@ function sandbox({ installed = true, packageManager = false } = {}) {
   const env = {
     PATH: packageManager ? `${path.join(FAKES, 'pkg')}:${bin}` : bin,
     HOME: home,
-    TMPDIR: tmpdir(),
+    TMPDIR: temp,
     LC_ALL: 'C',
     FAKE_LOG: log,
     FAKE_FIXTURES: FAKES,
@@ -55,7 +57,7 @@ function sandbox({ installed = true, packageManager = false } = {}) {
   };
   const run = (args, input = '', extra = {}) => spawnSync('/bin/sh', [SCRIPT, ...args], { env: { ...env, ...extra }, input, encoding: 'utf8' });
   const calls = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((line) => line.split('|')) : []);
-  return { root, home, base, module, env, run, calls };
+  return { root, home, temp, base, module, env, run, calls };
 }
 
 /** Every file under a folder, as paths relative to it. */
@@ -171,6 +173,31 @@ test('refuses before any tool runs without a terminal, or with --test outside a 
   }
   assert.deepEqual(box.calls(), [], 'no tool ran');
   assert.deepEqual(files(box.base), [], 'nothing written');
+});
+
+test('--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it', async (t) => {
+  // Review of #194: the check compared only the configuration's grandparent, so each of these wrote into the owner's real folder.
+  const box = sandbox();
+  const owner = path.join(box.home, '.config', 'sterling-signing');
+  mkdirSync(owner, { recursive: true });
+  mkdirSync(path.join(box.home, 'work', 'sterling-signing'), { recursive: true });
+  const linkParent = path.join(box.temp, 'a');
+  mkdirSync(linkParent);
+  symlinkSync(owner, path.join(linkParent, 'link'));
+  const cases = [
+    ['the shallow owner path, with TMPDIR=$HOME', path.join(owner, 'softhsm2.conf'), { TMPDIR: box.home }],
+    ['the configuration directly in the owner folder, with a temporary folder that holds the home', path.join(owner, 'softhsm2.conf'), { TMPDIR: box.root }],
+    ['TMPDIR=$HOME, away from the owner folder', path.join(box.home, 'work', 'sterling-signing', 'softhsm', 'softhsm2.conf'), { TMPDIR: box.home }],
+    ['a symlink into the owner folder', path.join(linkParent, 'link', 'softhsm2.conf'), {}]
+  ];
+  for (const [name, conf, extra] of cases) await t.test(name, () => {
+    const result = box.run(['--test'], PINS, { SOFTHSM2_CONF: conf, ...extra });
+    assert.notEqual(result.status, 0, name);
+    assert.match(result.stderr, /temporary folder/, name);
+    assert.deepEqual(box.calls(), [], `${name}: no tool ran`);
+    assert.deepEqual(files(owner), [], `${name}: nothing written in the owner folder`);
+    assert.deepEqual(files(path.join(box.home, 'work')), [], `${name}: nothing written under the home`);
+  });
 });
 
 test('a second run, or --show, creates nothing and prints the existing public key and URI', () => {
