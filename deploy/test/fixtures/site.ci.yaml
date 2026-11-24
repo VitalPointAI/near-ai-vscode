@@ -22,6 +22,6 @@
   "stepUpAcr": "webauthn-fresh",
   "stepUpMaxAgeSeconds": 300,
   "hubs": [
-    { "name": "hub-a" }
+    { "name": "hub-a", "publicAddress": "hub-a.site.example:30843", "nodePort": 30843, "storage": "20Gi" }
   ]
 }
