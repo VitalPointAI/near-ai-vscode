@@ -8,6 +8,10 @@
 //
 // Quarantine (D-43): a writer is quarantined while it has a place (stream and seq) with an equivocation proof the hub stored, or a device.quarantine
 // the roster recorded, and the roster has no device.release for that place. A device.revoke ends the device itself, which the standing reports first.
+//
+// Session keys (Phase 33 D-62): the fold places each session.certify beside the roster line (sessionKeys.ts), so the hub reads a certified session key
+// from the same fold as every client. A session key stands where its certifying device stands, and is on the access list of every stream that device
+// is; it stops when the device is revoked, removed or quarantined, when its own log forks, and, by the hub's clock, at its certificate's notAfter.
 import type { KeyObject } from 'node:crypto';
 import { readGrant, unwrapEpochKey } from '@ext/domain/replica/cellKeys';
 import type { CellGrant } from '@ext/domain/replica/cellKeys';
@@ -19,6 +23,8 @@ import type { RosterAnchor, RosterState } from '@ext/domain/replica/roster';
 import { epochAt } from '@ext/domain/replica/rosterCells';
 import { deviceAt, deviceKeyOf } from '@ext/domain/replica/rosterMembers';
 import type { KeyRing, ReplicaContext, RosterView } from '@ext/domain/replica/rosterView';
+import { certifiedWriter } from '@ext/domain/replica/sessionKeys';
+import type { SessionCertificate } from '@ext/domain/replica/sessionKeys';
 import { StoreError } from '../store/hubStore';
 import type { HubStore, StoredEntry } from '../store/hubStore';
 
@@ -36,6 +42,8 @@ export interface Place {
 }
 
 export type Standing = 'admitted' | 'not-admitted' | 'revoked' | 'quarantined';
+/** A standing at the hub's clock: a certified session key past its certificate's notAfter is session-expired (Phase 33 D-62). */
+export type ClockStanding = Standing | 'session-expired';
 
 export interface RosterInput {
   project: string;
@@ -209,7 +217,28 @@ export class ProjectRoster {
    *  the hub does not have. */
   accessList(stream: string): readonly string[] | undefined {
     if (!this.streamKnown(stream)) return undefined;
-    return this.view.cellGrantees?.(stream, this.head);
+    const grantees = this.view.cellGrantees?.(stream, this.head);
+    if (grantees === undefined || this.state.sessions.size === 0) return grantees;
+    // A certified session key reads and writes where its certifying device does (Phase 33 D-62).
+    const sessions = [...this.state.sessions.values()].filter((certificate) => grantees.includes(certificate.device) && this.standing(certificate.writer) === 'admitted');
+    return [...grantees, ...sessions.map((certificate) => certificate.writer)];
+  }
+
+  /** The certificate the fold placed for a session key, or undefined when the writer is a roster device or no certificate names it (D-62). */
+  sessionOf(writer: string): SessionCertificate | undefined {
+    return deviceKeyOf(this.state.members, writer) === undefined ? this.view.sessionCertificate?.(writer) : undefined;
+  }
+
+  /** How many of a device's session key certificates are still before their notAfter at the hub's clock (LIMITS.liveSessionKeysPerDevice). */
+  liveSessionsOf(device: string, now: number): number {
+    return [...this.state.sessions.values()].filter((certificate) => certificate.device === device && Date.parse(certificate.notAfter) > now).length;
+  }
+
+  /** standing, and for a certified session key also its certificate's notAfter against the hub's clock: session-expired once it has passed. */
+  standingAt(writer: string, now: number): ClockStanding {
+    const standing = this.standing(writer);
+    const certificate = this.sessionOf(writer);
+    return standing === 'admitted' && certificate !== undefined && Date.parse(certificate.notAfter) <= now ? 'session-expired' : standing;
   }
 
   /** The places this writer is quarantined at: stored proofs and roster quarantines without a device.release for that place. */
@@ -225,10 +254,20 @@ export class ProjectRoster {
   }
 
   standing(writer: string): Standing {
+    const certificate = this.sessionOf(writer);
+    if (certificate !== undefined) return this.sessionStanding(certificate);
     if (deviceKeyOf(this.state.members, writer) === undefined) return 'not-admitted';
     if (deviceAt(this.state.members, writer, this.headPosition) === undefined) return 'revoked';
     if (this.quarantinedAt(writer).length > 0) return 'quarantined';
     return 'admitted';
+  }
+
+  /** A certified session key's standing at the head, without the clock: its own log's places, then its certifying device, then the fold's rule. */
+  private sessionStanding(certificate: SessionCertificate): Standing {
+    if (this.quarantinedAt(certificate.writer).length > 0) return 'quarantined';
+    const device = this.standing(certificate.device);
+    if (device !== 'admitted') return device === 'quarantined' ? 'quarantined' : 'revoked';
+    return certifiedWriter(this.view, certificate.writer, this.head) === undefined ? 'revoked' : 'admitted';
   }
 
   /** May this device write the roster at the head: a device of the staff lead or the deputy lead there. */

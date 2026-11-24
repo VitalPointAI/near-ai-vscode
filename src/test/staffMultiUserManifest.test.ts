@@ -22,6 +22,7 @@ test.after(() => { hosts.configureStaffHosts(undefined); uninstall(); });
 interface Manifest {
   contributes: {
     commands: Array<{ command: string; title: string; category?: string }>;
+    keybindings: Array<{ command: string; key: string; mac?: string; linux?: string; win?: string; when: string }>;
     menus: { commandPalette?: Array<{ command: string; when?: string }> };
     configuration: { properties: Record<string, { type?: string; default?: unknown; scope?: string; description?: string }> };
   };
@@ -33,6 +34,8 @@ const EM_DASH = '—';
 const IDS = Object.values(STAFF_MULTI_USER_COMMANDS);
 const REPLICA_DIR = path.join(path.resolve(__dirname, '..'), 'staff', 'replica') + path.sep;
 const WHEN = 'config.nearAi.staff.multiUserPreview';
+const SHOW_ATTRIBUTION = 'nearAi.staff.showWhoWroteThis';
+const EDITOR_HISTORY = ['nearAi.staff.undoMyChange', 'nearAi.staff.redoMyChange'];
 
 const TITLES: Readonly<Record<string, string>> = {
   'nearAi.staff.makeMultiUser': 'Staff: Make This Staff Project Multi-User',
@@ -132,12 +135,36 @@ test('each multi-user command is contributed under NEAR AI with its "Staff: " ti
   }
 });
 
-test('the Command Palette shows each command only when the setting is on, and nothing else in the palette changed for staff commands', () => {
+test('the Command Palette gates multi-user commands and hides editor history commands', () => {
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const id of IDS) assert.deepEqual(palette.filter((entry) => entry.command === id), [{ command: id, when: WHEN }], id);
   const staffEntries = palette.filter((entry) => entry.command.startsWith('nearAi.staff.'));
-  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS].sort(), 'only the multi-user staff commands are hidden behind a when clause');
+  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS, ...EDITOR_HISTORY, SHOW_ATTRIBUTION].sort());
+  for (const command of EDITOR_HISTORY) assert.deepEqual(staffEntries.filter((entry) => entry.command === command), [{ command, when: 'false' }]);
   assert.equal(JSON.stringify(manifest).split(WHEN).length - 1, IDS.length, 'each when clause names the setting exactly');
+});
+
+test('the attribution command appears only for a bound editor', () => {
+  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => command === SHOW_ATTRIBUTION), [
+    { command: SHOW_ATTRIBUTION, title: 'Staff: Show Who Wrote This', category: 'NEAR AI' }
+  ]);
+  assert.deepEqual(manifest.contributes.menus.commandPalette?.filter(({ command }) => command === SHOW_ATTRIBUTION), [
+    { command: SHOW_ATTRIBUTION, when: 'nearAi.staffBoundEditor' }
+  ]);
+});
+
+test('shared history shortcuts only resolve when the bound text editor has focus', () => {
+  const [undo, redo] = EDITOR_HISTORY;
+  const when = 'editorTextFocus && nearAi.staffBoundEditor';
+  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => EDITOR_HISTORY.includes(command)), [
+    { command: undo, title: 'Staff: Undo My Change', category: 'NEAR AI' },
+    { command: redo, title: 'Staff: Redo My Change', category: 'NEAR AI' }
+  ]);
+  assert.deepEqual(manifest.contributes.keybindings.filter(({ command }) => EDITOR_HISTORY.includes(command)), [
+    { command: undo, key: 'ctrl+z', mac: 'cmd+z', when },
+    { command: redo, key: 'ctrl+shift+z', mac: 'cmd+shift+z', when },
+    { command: redo, key: '', linux: 'ctrl+y', win: 'ctrl+y', when }
+  ]);
 });
 
 test('none of the commands is a Staff Room person decision or an existing staff command, and no agent source names one', () => {

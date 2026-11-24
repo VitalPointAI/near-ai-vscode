@@ -6,7 +6,7 @@
 // Every witness function takes a state and returns a new state and its findings; the input state is never changed. The state is a plain value that
 // serialises and reads back, one per hub per project (Phase 33 keeps it). Findings are values for the caller to show or count: the only thing this
 // module decides is to stop trusting a hub's checkpoints once it has shown two versions of the project (forked-view), until the lead admits the hub
-// again (Phase 33).
+// again: readmitWitness, given the hash of a folded hub.readmit entry (Phase 33 D-42), clears the mark once per entry.
 //
 // Imports stay on hub-side modules (entry, checkpoint, chain and transport types, rosterView types, team helpers), so the hub's own test suite may
 // load this file without Yjs or the fold (D-27, D-52). The hub never runs it, so it is not on the HUB_SIDE list.
@@ -73,6 +73,8 @@ export interface WitnessState {
   replayed: number;
   distrusted: boolean;
   proof?: WitnessProof;
+  // The hub.readmit entry hashes this witness already applied, sorted (Phase 33 D-42). Each clears a distrusted hub once; absent when none.
+  readmitted?: string[];
 }
 
 export interface WitnessResult { state: WitnessState; findings: HubFinding[] }
@@ -93,6 +95,8 @@ export const WITNESS_MAX_BYTES = 256 * 1024;
 export const MAX_SEEN_HEADS = 400;
 export const MAX_WAITING = 128;
 export const MAX_OWN_WAITS = 64;
+// At most this many re-admissions of one hub are remembered. Past it a further hub.readmit clears nothing (it fails closed): admit a new hub instead.
+export const MAX_READMITTED = 64;
 
 const isHash = (value: unknown): value is string => typeof value === 'string' && HASH_PATTERN.test(value);
 const isStream = (value: unknown): value is string => typeof value === 'string' && STREAM_ID_PATTERN.test(value);
@@ -121,6 +125,7 @@ function make(base: WitnessState, changes: Partial<WitnessState> = {}): WitnessS
   const state: WitnessState = { v: 1, hub: merged.hub, project: merged.project, seen: merged.seen, waiting: merged.waiting, own: merged.own, replayed: merged.replayed, distrusted: merged.distrusted };
   if (merged.newest !== undefined) state.newest = merged.newest;
   if (merged.proof !== undefined) state.proof = merged.proof;
+  if (merged.readmitted !== undefined && merged.readmitted.length > 0) state.readmitted = merged.readmitted;
   return state;
 }
 
@@ -212,17 +217,30 @@ export function witnessCheckpoint(state: WitnessState, signed: unknown, roster: 
   return accept();
 }
 
+// The lead trusted the hub again (Phase 33 D-42): readmitHash is the hash of a hub.readmit entry for this hub that the roster folded (rosterView
+// hubReadmits). Applied once per entry hash: a distrusted hub becomes trusted, its proof and the checkpoint and heads it showed before are dropped
+// (a hub restored from a backup legitimately shows an older copy, and the lead compared its pin before re-admitting it), and the hash is
+// remembered. The same hash again changes nothing, so after a later finding only a new hub.readmit clears it. The caller passes only hashes the
+// folded roster names for this hub; the witness holds no roster.
+export function readmitWitness(state: WitnessState, readmitHash: string): WitnessResult {
+  const readmitted = state.readmitted ?? [];
+  if (!isHash(readmitHash) || readmitted.includes(readmitHash) || readmitted.length >= MAX_READMITTED) return { state: make(state), findings: [] };
+  const next = make(state, { distrusted: false, proof: undefined, newest: undefined, seen: [], readmitted: [...readmitted, readmitHash].sort() });
+  return { state: next, findings: [] };
+}
 
 // The heads the hub reports (D-50). Each head below the mark this hub already showed for that writer log is rolled-back (one finding, the first
 // named, the count of all); higher heads raise the mark. Only writers the roster knows are tracked, and only heads in a valid shape, so a hub cannot
 // fill the marks with made-up writers. A same-seq head with another hash is a writer fork, which the chain stage handles, and changes no mark.
 // heads.checkpoint is not read here: pass it to witnessCheckpoint.
-export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<RosterView, 'deviceKey'>): WitnessResult {
+export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<RosterView, 'deviceKey' | 'sessionCertificate'>): WitnessResult {
   const rows: SeenHead[] = [];
   for (const stream of Array.isArray(heads?.streams) ? heads.streams : []) {
     if (!isStream(stream?.stream) || !Array.isArray(stream.heads)) continue;
     for (const head of stream.heads) {
-      if (!isHash(head?.writer) || !isSeq(head.seq) || !isHash(head.hash) || roster.deviceKey(head.writer) === undefined) continue;
+      // A person's session key the roster vouches for is tracked like a device (Phase 33 D-62).
+      const known = isHash(head?.writer) && (roster.deviceKey(head.writer) !== undefined || roster.sessionCertificate?.(head.writer) !== undefined);
+      if (!known || !isSeq(head.seq) || !isHash(head.hash)) continue;
       rows.push({ stream: stream.stream, writer: head.writer, seq: head.seq });
     }
   }
@@ -407,7 +425,7 @@ export function readWitness(text: string, expect: { hub: string; project: string
   if (typeof text !== 'string') return refuse('malformed');
   if (Buffer.byteLength(text, 'utf8') > WITNESS_MAX_BYTES) return refuse('too-large');
   try {
-    const value = exactKeys(JSON.parse(text), ['v', 'hub', 'project', 'seen', 'waiting', 'own', 'replayed', 'distrusted'], ['newest', 'proof']);
+    const value = exactKeys(JSON.parse(text), ['v', 'hub', 'project', 'seen', 'waiting', 'own', 'replayed', 'distrusted'], ['newest', 'proof', 'readmitted']);
     const { hub, project } = value;
     if (value.v !== 1 || typeof hub !== 'string' || !ID_PATTERN.test(hub) || typeof project !== 'string' || !ID_PATTERN.test(project)) return refuse('malformed');
     if (hub !== expect.hub) return refuse('other-hub');
@@ -433,6 +451,11 @@ export function readWitness(text: string, expect: { hub: string; project: string
       const reason = proof.reason;
       need(isStream(proof.stream) && typeof reason === 'string' && Object.prototype.hasOwnProperty.call(WITNESS_PROOF_REASONS, reason), null);
       state.proof = { a: readKept(proof.a, project), b: readKept(proof.b, project), stream: proof.stream as string, reason: reason as WitnessProofReason };
+    }
+    if (value.readmitted !== undefined) {
+      const readmitted = readList(value.readmitted, MAX_READMITTED, (item) => need(isHash(item), item as string));
+      need(readmitted.length > 0 && readmitted.every((hash, index) => index === 0 || readmitted[index - 1] < hash), null);
+      state.readmitted = readmitted;
     }
     // A distrusted hub always has its proof and no newest checkpoint; a trusted one has no proof.
     need(state.distrusted === (state.proof !== undefined) && !(state.distrusted && state.newest !== undefined), null);

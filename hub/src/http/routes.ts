@@ -40,6 +40,7 @@ import { PresenceHub } from '../live/presence';
 import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
 import { StoreError } from '../store/hubStore';
+import type { RestoreMode } from '../restore';
 import type { HubStore } from '../store/hubStore';
 import { BASE_HEADERS, sendJson } from './server';
 import type { HubHandler } from './server';
@@ -66,6 +67,8 @@ export interface RouteDeps {
   onEquivocation?: (project: string, proofs: readonly EquivocationProof[]) => void;
   /** A route that failed with 500, by route id and error name only. */
   onFailure?: (route: RouteId, error: unknown) => void;
+  /** Restore mode (Phase 33 D-32): appends outside checkpoint coverage wait, and every checkpoint ask counts towards its end. */
+  restore?: RestoreMode;
 }
 
 export type RouteId =
@@ -183,7 +186,12 @@ const APPEND_STATUS: Readonly<Partial<Record<AppendRefusal, number>>> = {
   'unknown-project': 404,
   'batch-too-large': 413,
   'rate-limited': 429,
-  'blob-missing': 409,
+  // POST-01 (D-07): this hub lacks a feature the project requires. A missing blob is answered per entry in a 200 (D-28), never for the batch.
+  'needs-update': 403,
+  // Restore mode (Phase 33 D-32): retryable, with Retry-After and retryAfterSeconds in the body.
+  restoring: 503,
+  // A person's session key past its certificate's notAfter (Phase 33 D-62): not retryable; the person signs in again.
+  'session-expired': 403,
 };
 
 interface Matched {
@@ -306,11 +314,12 @@ export function createRoutes(deps: RouteDeps): HubHandler {
         ...(value.grants === undefined ? {} : { grants: value.grants as unknown[] }),
         ...(value.blobRefs === undefined ? {} : { blobRefs: value.blobRefs as Array<{ entry: string; blob: string }> }),
       },
-      { store, cache, limits, now: deps.now() },
+      { store, cache, limits, now: deps.now(), ...(deps.restore === undefined ? {} : { restore: deps.restore }) },
     );
     if (!outcome.ok) {
       const extra: Record<string, string> = outcome.retryAfterSeconds === undefined ? {} : { 'retry-after': String(outcome.retryAfterSeconds) };
-      sendJson(res, APPEND_STATUS[outcome.reason] ?? 400, JSON.stringify({ error: outcome.reason, message: outcome.message }), extra);
+      const retry = outcome.reason === 'restoring' ? { retryAfterSeconds: outcome.retryAfterSeconds } : {};
+      sendJson(res, APPEND_STATUS[outcome.reason] ?? 400, JSON.stringify({ error: outcome.reason, message: outcome.message, ...retry }), extra);
       return;
     }
     // Answered only now, after COMMIT: everything in accepted is on disk.
@@ -484,6 +493,8 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       // Below every held checkpoint that covers at least as much; otherwise after all of them. The store places it with one query (WR-05).
       if (store.putHandedBackCheckpoint(project, { hash: item.hash, body: item.text }, now) === 'stored') kept += 1;
     }
+    // A session key asks for its person's device (Phase 33 D-62), so a hosted session counts toward ending restore mode.
+    await deps.restore?.noteAsk(project, (await cache.get(project)).sessionOf(auth.writer)?.device ?? auth.writer);
     sendJson(res, 200, JSON.stringify({ project, kept, ...checkpointOf(project) }));
     events.channel.emit('checkpoint', project);
   };

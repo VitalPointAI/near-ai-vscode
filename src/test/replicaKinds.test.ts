@@ -61,7 +61,9 @@ const PROJECT_AND_ROSTER: Sample[] = [
   { kind: 'lead.handover', data: { to: 'mbr-deputy', reason: 'lead-lost', rosterPrev: PREV }, required: ['to', 'reason', 'rosterPrev'] },
   { kind: 'roster.choose', data: { chosen: HASH('8'), rosterPrev: PREV }, required: ['chosen', 'rosterPrev'] },
   { kind: 'deputy.name', data: { member: 'mbr-deputy', rosterPrev: PREV }, required: ['member', 'rosterPrev'] },
-  { kind: 'invite.void', data: { invite: 'inv-1', rosterPrev: PREV }, required: ['invite', 'rosterPrev'] }
+  { kind: 'invite.void', data: { invite: 'inv-1', rosterPrev: PREV }, required: ['invite', 'rosterPrev'] },
+  { kind: 'roster.require', data: { features: ['positions@1', 'require@1'], rosterPrev: PREV }, required: ['features', 'rosterPrev'] },
+  { kind: 'hub.readmit', data: { hub: 'hub-main', certPin: HASH('9'), fromCheckpoint: HASH('a'), rosterPrev: PREV }, required: ['hub', 'certPin', 'rosterPrev'] }
 ];
 
 function reasonOf(kind: string, data: unknown): string {
@@ -72,8 +74,8 @@ function reasonOf(kind: string, data: unknown): string {
 
 // ---- project and roster schemas ----
 
-test('one valid sample per project and roster kind (20 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
-  assert.equal(PROJECT_AND_ROSTER.length, 20);
+test('one valid sample per project and roster kind (22 kinds) passes, and a missing field, an extra field and a __proto__ key each fail with a reason naming the path', () => {
+  assert.equal(PROJECT_AND_ROSTER.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   for (const sample of PROJECT_AND_ROSTER) {
     assert.deepEqual(validateData(sample.kind, sample.data), { ok: true }, sample.kind);
     for (const key of sample.required) {
@@ -88,9 +90,9 @@ test('one valid sample per project and roster kind (20 kinds) passes, and a miss
   }
 });
 
-test('every one of the 18 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
+test('every one of the 20 roster kinds requires rosterPrev as a 64-hex hash (DESIGN 7.1)', () => {
   const roster = PROJECT_AND_ROSTER.filter((sample) => !sample.kind.startsWith('project.'));
-  assert.equal(roster.length, 18);
+  assert.equal(roster.length, 20, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   for (const sample of roster) {
     assert.ok(sample.required.includes('rosterPrev'), sample.kind);
     for (const bad of ['1'.repeat(63), '1'.repeat(65), 'G'.repeat(64), 5, null, '', HASH('A')]) {
@@ -554,11 +556,11 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list has 51 kinds and the 20 project and roster samples are all of them', () => {
-  assert.equal(REPLICA_KINDS.length, 51);
-  assert.equal(new Set(REPLICA_KINDS).size, 51);
+test('the closed kind list has 54 kinds and the 22 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 54, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33');
+  assert.equal(new Set(REPLICA_KINDS).size, 54, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33');
   const owned = REPLICA_KINDS.filter((kind) => kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind));
-  assert.equal(owned.length, 20);
+  assert.equal(owned.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
 });
 

@@ -253,11 +253,11 @@ test('project.import scope: the fold lists a scopeless import as whole and a cel
 
 // ---- Task 2: the base cell (D-15, D-16, D-22 revised) -------------------------------------------------------------------------------------------
 
-test('baseCellAllows: every roster kind, project.genesis and the integrity kinds; never a product, text or import kind, and the closed list stays at 51', () => {
-  assert.equal(REPLICA_KINDS.length, 51);
+test('baseCellAllows: every roster kind, project.genesis, the integrity kinds and session.certify; never a product, text or import kind, and the closed list stays at 54', () => {
+  assert.equal(REPLICA_KINDS.length, 54, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33');
   for (const kind of REPLICA_KINDS) {
     const family = kindFamily(kind);
-    if (family === 'roster' || family === 'integrity') assert.equal(baseCellAllows(kind), true, kind);
+    if (family === 'roster' || family === 'integrity' || family === 'session') assert.equal(baseCellAllows(kind), true, kind);
     if (family === 'versions' || family === 'doc') assert.equal(baseCellAllows(kind), false, kind);
   }
   for (const kind of ['project.genesis', 'equivocation.proof', 'digest.report', 'member.admit', 'cell.create', 'hub.grant']) assert.equal(baseCellAllows(kind), true, kind);

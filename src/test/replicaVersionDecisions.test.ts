@@ -485,7 +485,7 @@ test('D12: a fresh decision that saw only one of the contested acts leaves the v
   assert.deepEqual(view.decision.contested, [partial.hash, reject.hash].sort());
 });
 
-test('D15: a decision under a checkpoint prefix and a late concurrent reject still contest, and only finalBeforeDispute is set', () => {
+test('D15: a decision under a checkpoint prefix and a late concurrent reject still contest, and track which decision awaits server confirmation', () => {
   const f = fixture();
   const chain = toAwaiting(f, f.kit, [f.kit.typed]);
   const approve = decide(f, 'C', 'approve', chain, [chain.submit]);
@@ -496,6 +496,12 @@ test('D15: a decision under a checkpoint prefix and a late concurrent reject sti
   const view = versionsOf(result)[0];
   assert.deepEqual([view.state, view.overlay, view.decision.status, view.decision.finalBeforeDispute], ['awaiting-decision', 'contested', 'contested', true]);
   assert.deepEqual(view.decision.contested, [approve.hash, late.hash].sort());
+  assert.deepEqual(view.decisionsSinceCheckpoint, [late.hash]);
+  const uncheckpointed = versionsOf(foldAll(f, [approve, late]))[0];
+  assert.deepEqual(uncheckpointed.decisionsSinceCheckpoint, [approve.hash, late.hash].sort());
+  const confirmed = versionsOf(f.fold(f.world.entries.filter((entry) => entry !== late.entry), f.ctx, { checkpoints: [signed] }))[0];
+  assert.deepEqual(confirmed.decision.effective, [approve.hash]);
+  assert.deepEqual(confirmed.decisionsSinceCheckpoint, []);
   // Without the checkpoint the same entries contest and nothing is final.
   assert.equal(versionsOf(f.fold())[0].decision.finalBeforeDispute, false);
 });

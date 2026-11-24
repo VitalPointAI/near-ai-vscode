@@ -6,6 +6,15 @@ export const DECISION_OUTCOMES = ['approve', 'reject', 'release', 'withdraw', 's
 export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
 export type DecisionClass = 'APPROVE' | 'REJECT' | 'WITHDRAW' | 'SUPERSEDE';
 
+/** The decision outcome recorded by a version act. */
+export function recordedDecisionOutcome(kind: string, outcome: unknown): DecisionOutcome | undefined {
+  if (kind === 'version.release') return 'release';
+  if (kind === 'version.withdraw') return 'withdraw';
+  if (kind === 'version.supersede') return 'supersede';
+  if (kind !== 'version.decide') return undefined;
+  return outcome === 'approve' || outcome === 'reject' || outcome === 'decline' ? outcome : undefined;
+}
+
 /** `decline` has no class: it settles unconfirmed acts back to none. */
 export const OUTCOME_CLASS: Readonly<Record<string, DecisionClass>> = Object.freeze({
   approve: 'APPROVE', release: 'APPROVE', reject: 'REJECT', withdraw: 'WITHDRAW', supersede: 'SUPERSEDE',

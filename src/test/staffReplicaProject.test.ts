@@ -69,6 +69,13 @@ function productOf(fold: { families: Record<string, unknown> }): ProductTextOutp
 
 // ---- Task 1: create, reopen, fold ------------------------------------------------------------------------------------------------------------------
 
+/** The one roster.require the project wrote right after its genesis (Phase 33 D-08), so the roster line is origin, genesis, then it. */
+async function armedHash(shared: ReplicaProject): Promise<string> {
+  const armed = await shared.findOwnAll('roster.require', () => true);
+  assert.equal(armed.length, 1, 'one roster.require, written right after the genesis (Phase 33 D-08)');
+  return armed[0].hash;
+}
+
 test('createSharedProject makes the device key, the encryption key, a base cell key, the founding grant and the genesis; pins it outside the project; project.json names the same genesis', async () => {
   const lead = install('create');
   const shared = await created(lead);
@@ -87,7 +94,7 @@ test('createSharedProject makes the device key, the encryption key, a base cell 
   // The store holds the genesis, in the base cell's stream, written by this device.
   assert.ok(existsSync(path.join(lead.root, ...REPLICA_DIR.split('/'), 'streams', shared.projectId, `${shared.deviceWriter}.jsonl`)));
   const { roster, fold } = await shared.state();
-  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, shared.anchor.genesisHash]);
+  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, shared.anchor.genesisHash, await armedHash(shared)], 'roster.require follows the genesis (Phase 33 D-08)');
   assert.ok(fold.applied.includes(shared.anchor.genesisHash));
   assert.deepEqual(roster.refused, []);
 });
@@ -98,7 +105,7 @@ test('open on the same folder folds origin then genesis, and the fold shows the 
   const again = project(await ReplicaProject.open(lead.root, lead.deps));
   assert.equal(again.projectId, first.projectId);
   const { roster, fold } = await again.state();
-  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, first.anchor.genesisHash]);
+  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, first.anchor.genesisHash, await armedHash(again)], 'roster.require follows the genesis (Phase 33 D-08)');
   const output = projectOutput(fold, first.projectId);
   assert.equal(output?.name, 'Exercise Northwind');
   assert.equal(output?.profile, 'j2');
@@ -177,8 +184,9 @@ test('createSharedProject run again after a crash before project.json uses the g
   assert.equal(second.projectId, first.projectId);
   assert.equal(second.anchor.genesisHash, first.anchor.genesisHash);
   const { roster, fold } = await second.state();
-  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, first.anchor.genesisHash]);
-  assert.equal(fold.order.length, 1, 'one genesis');
+  assert.deepEqual(roster.positions, [ORIGIN_ROSTER, first.anchor.genesisHash, await armedHash(second)], 'roster.require follows the genesis once (Phase 33 D-08)');
+  assert.equal(fold.order.length, 2, 'one genesis and one roster.require (Phase 33 D-08)');
+  assert.equal((await second.findOwnAll('project.genesis', () => true)).length, 1, 'one genesis');
   // And once project.json is back, a third call returns the same project.
   const third = await created(lead);
   assert.equal(third.anchor.genesisHash, first.anchor.genesisHash);
@@ -403,8 +411,9 @@ test('CR-02: an entry claiming this device\'s writer id without its signature ne
   appendFileSync(path.join(lead.root, REPLICA_DIR, 'streams', shared.projectId, `${shared.deviceWriter}.jsonl`), `${JSON.stringify(forged)}\n`);
   const written = await shared.appendOwn('doc.client', { product: PRODUCT, clientId: clientIdOf(1, 0), actor: { kind: 'person' } });
   assert.ok('ok' in written, 'the next own entry is written');
-  assert.equal(written.built.entry.header.seq, 1);
-  assert.equal(written.built.entry.header.prev, shared.anchor.genesisHash);
+  // seq 1 is the roster.require written right after the genesis (Phase 33 D-08); the forged entry at seq 999 is not the head.
+  assert.equal(written.built.entry.header.seq, 2);
+  assert.equal(written.built.entry.header.prev, await armedHash(shared));
   const reopened = project(await ReplicaProject.open(lead.root, lead.deps));
   const { fold } = await reopened.state();
   assert.ok(fold.applied.includes(written.hash));

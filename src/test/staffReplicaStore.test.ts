@@ -350,6 +350,56 @@ test('appendOwn skips an entry already stored, refuses one that does not follow 
   assert.equal(readFileSync(streamFile(root, lead.writer), 'utf8').split('\n').length, 4, 'nothing refused was written');
 });
 
+test('guarded append refuses another writer’s new entry before writing its own entry or blob', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const other = fixedSigner('guard-other-writer');
+  const second = await opened(root, depsFor(other, secrets));
+  const expected = first.appendSnapshot();
+  const ownHead = first.head(STREAM, lead.writer);
+  const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
+  assert.equal(candidate.blobs.length, 1);
+
+  assert.deepEqual(await second.appendOwn(chain(other, 1)), { ok: true, written: 1 });
+  assert.deepEqual(await first.appendOwn([candidate], expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(first.head(STREAM, lead.writer), ownHead);
+  assert.equal(first.has(candidate.hash), false);
+  assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
+  assert.deepEqual(await first.appendOwn([candidate], first.appendSnapshot()), { ok: true, written: 1 });
+});
+
+test('guarded append detects another window recording a roster head even when writer logs stay unchanged', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const second = await opened(root, depsFor(lead, secrets));
+  const expected = first.appendSnapshot();
+  const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash } });
+  assert.deepEqual(await second.recordRosterHead(built[1].hash), { ok: true });
+  assert.deepEqual(await first.appendOwn([candidate], expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.equal(first.has(candidate.hash), false);
+  assert.deepEqual(await first.appendOwn([candidate]), { ok: true, written: 1 }, 'ordinary appends need no snapshot');
+});
+
+test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const second = await opened(root, depsFor(lead, secrets));
+  const expected = first.appendSnapshot();
+  assert.equal(expected, second.appendSnapshot());
+  const from = { seq: 2, hash: built[2].hash };
+  const [candidate] = chain(lead, 1, { from, tag: 'first' });
+  const [rival] = chain(lead, 1, { from, tag: 'second' });
+  const results = await Promise.all([first.appendOwn([candidate], expected), second.appendOwn([rival], expected)]);
+  assert.equal(results.filter(result => 'ok' in result).length, 1);
+  const refused = results.find(result => 'refused' in result);
+  assert.ok(refused && 'refused' in refused);
+  assertRefused(refused, 'snapshot-changed');
+  const reopened = await opened(root, depsFor(lead, secrets));
+  assert.ok(reopened.has(candidate.hash) !== reopened.has(rival.hash));
+});
+
 test('a symbolic link on the way to the store, or as a stream file, is refused and nothing is written through it', async () => {
   const root = project();
   const elsewhere = project();

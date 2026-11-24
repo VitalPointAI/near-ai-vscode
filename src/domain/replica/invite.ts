@@ -409,6 +409,18 @@ function sealedBlobOf(value: unknown): SealedBlob | undefined {
 
 export type WelcomeRead = { ok: true; welcome: WelcomeFile; entries: SealedEntry[] } | InviteFailure;
 
+/** The project a welcome file names (its genesis stream), read only to find the pin; readWelcome checks everything else. Never throws. */
+export function welcomeProjectOf(file: unknown): string | undefined {
+  try {
+    const value: unknown = typeof file === 'string' ? (Buffer.byteLength(file, 'utf8') <= WELCOME_MAX_BYTES ? JSON.parse(file) : undefined) : file;
+    if (!isRecord(value) || !isRecord(value.genesis) || !isRecord(value.genesis.header)) return undefined;
+    const stream = value.genesis.header.stream;
+    return typeof stream === 'string' && STREAM_ID_PATTERN.test(stream) ? stream : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // The joining device's read of a welcome file (its JSON text or its parsed content) against the genesis hash it pinned from the invite and its own
 // writer id. Checks, in order: size, shape (entries, blobs and grants each read as hostile input; every roster entry in the genesis stream; every
 // blob's bytes match its name), the genesis hash (wrong-project), every grant's signature, and that every wrap of every grant names this device

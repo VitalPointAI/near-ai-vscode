@@ -569,6 +569,11 @@ export class HubStore {
     );
   }
 
+  /** Every project this hub holds, by id (restore mode asks each one's roster, Phase 33 D-32). */
+  projectIds(): string[] {
+    return (this.sql('SELECT project FROM projects ORDER BY project').all() as Row[]).map((row) => row.project as string);
+  }
+
   project(project: string): ProjectRecord | undefined {
     checkProject(project);
     const row = this.sql('SELECT * FROM projects WHERE project = ?').get(project) as Row | undefined;

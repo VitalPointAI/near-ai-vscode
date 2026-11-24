@@ -12,11 +12,12 @@ import type { ImportScope } from './kindSchemas/project';
 // The label a product gets when it is converted or created with none in its header (D-17): today's host default (staffHost.ts propose).
 export const DEFAULT_PRODUCT_LABEL = 'org/Internal';
 
-// What the base cell (stream id = project id) may carry (D-15, D-16): the roster, the integrity kinds and the project genesis. Never a product, its
+// What the base cell (stream id = project id) may carry (D-15, D-16): the roster, the integrity kinds, the project genesis and the session key
+// certificates (Phase 33 D-62). Never a product, its
 // text or a legacy import, so granting the hub the base cell (D-40) exposes no product text. kinds.ts does not import this file, so there is no cycle.
 export const BASE_CELL_KINDS: readonly string[] = Object.freeze([
   'project.genesis',
-  ...REPLICA_KINDS.filter((kind) => kindFamily(kind) === 'roster' || kindFamily(kind) === 'integrity')
+  ...REPLICA_KINDS.filter((kind) => kindFamily(kind) === 'roster' || kindFamily(kind) === 'integrity' || kindFamily(kind) === 'session')
 ]);
 const BASE_CELL_KIND_SET: ReadonlySet<string> = new Set(BASE_CELL_KINDS);
 

@@ -17,20 +17,24 @@
 //    roster.choose citing the split point and naming one of its branches, from an allowed chooser, takes the next position and the chosen branch
 //    the one after it; the other branches and everything chained after them stay unapplied (notChosen, rosterBranchPending);
 // 5. after the line, places each grant it was given (signer a roster writer and every wrap a device admitted at the roster the grant names; a founding
-//    grant equal to its commitment).
+//    grant equal to its commitment);
+// 6. after the line, places each session.certify (Phase 33 D-62) by the rules in sessionKeys.ts, oldest cited roster first, and refuses a roster
+//    change or certificate written by a certified session key with person-key-required (D-60). Certificates never take a position.
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
-// kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose), and rosterView builds every answer from query
+// kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
 // functions those modules export.
-import { GENESIS_PREV, parseHeaderShape, entryHash } from './entry';
+import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
 import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
-import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubSignerAt, memberAt, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
+import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, quarantinesOf, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
+import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
+import type { SessionCertificate, SessionCertifyData } from './sessionKeys';
 import { verifyEntry } from './verify';
 import type { VerifiedEntry } from './verify';
 
@@ -42,7 +46,7 @@ export interface RosterAnchor { genesisHash: string; project: string; lead: { me
 
 export type RosterKindOwner = 'members' | 'cells' | 'roster';
 
-// Every roster kind (18) and project.genesis, each routed to exactly one owner module.
+// Every roster kind (20) and project.genesis, each routed to exactly one owner module.
 export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Object.freeze({
   'project.genesis': 'roster',
   'member.invite': 'members',
@@ -57,12 +61,14 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'hub.admit': 'members',
   'hub.grant': 'members',
   'hub.revoke': 'members',
+  'hub.readmit': 'members',
   'invite.void': 'members',
   'cell.create': 'cells',
   'cell.rekey': 'cells',
   'lead.handover': 'roster',
   'roster.choose': 'roster',
-  'deputy.name': 'roster'
+  'deputy.name': 'roster',
+  'roster.require': 'roster'
 });
 
 export const ROSTER_REFUSALS = {
@@ -118,6 +124,11 @@ export interface RosterState {
   // Splits a person chose: the roster.choose took the position after the split point and the chosen branch the one after it; the other branches stay
   // unapplied and are listed here.
   choices: Array<{ at: string; branches: string[]; chosen: string; choose: string }>;
+  // The features the project requires (POST-01, D-04): the sorted union of every applied roster.require. It never shrinks. Whether this build knows
+  // them is the host's question (requireGate.ts against KNOWN_REPLICA_FEATURES), never the fold's.
+  required: readonly string[];
+  // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
+  sessions: Map<string, SessionCertificate>;
   // Every roster hash on a branch nobody chose (pending or set aside by a choice), with every roster entry chained after it (D-11).
   notChosen: Set<string>;
   refused: RosterRefused[];
@@ -135,6 +146,8 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     deputies: [],
     pending: [],
     choices: [],
+    required: Object.freeze([]),
+    sessions: new Map(),
     notChosen: new Set(),
     refused: [],
     held: []
@@ -217,7 +230,14 @@ export function rosterView(state: RosterState): RosterView {
       const position = at(hash);
       return position === undefined ? undefined : granteesAt(state.cells, cell, position, (writer) => deviceAt(state.members, writer, position) !== undefined);
     },
-    rosterBranchPending: (hash) => state.notChosen.has(hash)
+    rosterBranchPending: (hash) => state.notChosen.has(hash),
+    hubPin(hub, hash) {
+      const position = at(hash);
+      return position === undefined ? undefined : hubAt(state.members, hub, position)?.certPin;
+    },
+    hubReadmits: (hub) => hubReadmitPositions(state.members, hub).map((position) => state.positions[position]),
+    sessionCertificate: (writer) => state.sessions.get(writer),
+    deviceQuarantines: (writer) => quarantinesOf(state.members, writer)
   };
 }
 
@@ -293,6 +313,15 @@ function applyHandover(state: RosterState, entry: VerifiedEntry, position: numbe
   return { status: 'applied' };
 }
 
+// roster.require (POST-01, D-04): the driver already allowed only a lead device and a person. The required set grows by the union and never shrinks; an
+// entry whose features are all required already applies as a no-op and keeps its place in the line, so two leads arming at once never conflict.
+function applyRequire(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+  // The closed schema checked the ids (name@N, distinct, sorted) at verification.
+  const features = (entry.data as { features: readonly string[] }).features;
+  state.required = Object.freeze([...new Set([...state.required, ...features])].sort());
+  return { status: 'applied' };
+}
+
 function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
@@ -305,6 +334,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
+  if (entry.body.kind === 'roster.require') return applyRequire(state, entry);
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
@@ -347,6 +377,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
     if (!waiting.has(hash)) waiting.set(hash, raw);
   }
   const ready: VerifiedEntry[] = [];
+  const certificates: VerifiedEntry[] = [];
   const refuse = (hash: string, kind: string, reason: string): void => { state.refused.push({ hash, kind, reason }); };
 
   for (;;) {
@@ -364,6 +395,7 @@ export function foldRoster(input: RosterFoldInput): RosterState {
         continue;
       }
       const entry = outcome.entry;
+      if (entry.body.kind === 'session.certify') certificates.push(entry);
       if (entry.keep === 'newer-version' || !isRouted(entry.body.kind)) continue;
       const settled = settledRefusal(state, entry);
       if (settled !== undefined) refuse(hash, entry.body.kind, settled);
@@ -433,13 +465,43 @@ export function foldRoster(input: RosterFoldInput): RosterState {
   }
 
   markNotChosen(state, ready);
-  for (const hash of waiting.keys()) state.held.push({ hash, reason: 'unknown-writer' });
+  placeSessions(state, certificates);
+  // A roster change or certificate by a certified session key: refused for good (D-60). Anything else still waiting is held as an unknown writer.
+  const settledView: ReplicaContext = { roster: rosterView(state), keys: input.keys, blobs: input.blobs, now: input.now };
+  for (const [hash, raw] of waiting) {
+    const outcome = state.sessions.size === 0 ? undefined : verifyEntry(raw, settledView);
+    const entry = outcome?.status === 'verified' ? outcome.entry : undefined;
+    if (entry !== undefined && entry.session !== undefined && (isRouted(entry.body.kind) || entry.body.kind === 'session.certify')) refuse(hash, entry.body.kind, 'person-key-required');
+    else state.held.push({ hash, reason: 'unknown-writer' });
+  }
   // Verified entries that never reached the head: on a branch nobody chose (D-11), or following a roster that is not on this machine's line.
   for (const entry of ready) state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.hash) ? 'roster-branch-not-chosen' : 'roster-prev-not-applied' });
   state.held.sort(byHash);
 
   placeGrants(state, input.grants);
   return state;
+}
+
+// Places the session certificates (Phase 33 D-62) against the settled line, oldest cited roster first and then by hash, so every machine and the
+// server place the same ones. A certificate citing a roster off the line waits; one sessionKeys.ts or its signed lifetime refuses is refused.
+function placeSessions(state: RosterState, certificates: readonly VerifiedEntry[]): void {
+  const view = rosterView(state);
+  const on = (entry: VerifiedEntry): number => state.positionOf.get(entry.body.roster) ?? Number.MAX_SAFE_INTEGER;
+  for (const entry of [...certificates].sort((a, b) => on(a) - on(b) || byHash(a, b))) {
+    if (!state.positionOf.has(entry.body.roster)) {
+      state.held.push({ hash: entry.hash, reason: state.notChosen.has(entry.body.roster) ? 'roster-branch-not-chosen' : 'missing-roster' });
+      continue;
+    }
+    const data = entry.data as SessionCertifyData;
+    const lifetime = Date.parse(data.notAfter) - Date.parse(entry.body.at);
+    const problem = lifetime > 0 && lifetime <= SESSION_MAX_LIFETIME_MS ? certificateProblem(view, entry, state.anchor.project, state.sessions) : 'session-certificate-invalid';
+    if (problem !== undefined) {
+      state.refused.push({ hash: entry.hash, kind: entry.body.kind, reason: problem });
+      continue;
+    }
+    const writer = writerIdOf(data.sessionKey);
+    state.sessions.set(writer, { hash: entry.hash, writer, member: data.member, device: data.device, sessionKey: data.sessionKey, slot: data.slot, notAfter: data.notAfter, roster: entry.body.roster });
+  }
 }
 
 function append(state: RosterState, hash: string): void {

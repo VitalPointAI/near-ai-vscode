@@ -37,6 +37,11 @@ export const LIMITS = Object.freeze({
   eventStreamsPerAddress: 300,
   /** One presence heartbeat (D-38). */
   presenceBytes: 2 * KIB,
+  /**
+   * Live session keys one person device may certify at a time (Phase 33 D-62): a fifth session.certify while four of its certificates are before
+   * their notAfter is refused too-many-sessions. Certificates past notAfter do not count; they stay in the log.
+   */
+  liveSessionKeysPerDevice: 4,
   /** Per pushing device: 50 entries a second, a burst of 200 (D-39). */
   writerPerSecond: 50,
   writerBurst: 200,
@@ -48,6 +53,14 @@ export const LIMITS = Object.freeze({
   sessionCallsPerSession: 2,
   joinPerMinute: 10,
   enrolPerMinute: 10,
+  /**
+   * Join requests waiting at the hub (D-30, IN-06): distinct requests received within the 7-day keep, per invitation and per project. Beyond either
+   * the hub refuses invite-full, so anyone holding an invitation cannot flood the lead with requests from ever new device keys.
+   */
+  pendingJoinsPerInvite: 8,
+  pendingJoinsPerProject: 64,
+  /** Restore mode (Phase 33 D-32): the Retry-After of a restoring answer, and how often the hub looks whether the operator removed the marker. */
+  restoreRetrySeconds: 30,
   /** The most buckets one map keeps. */
   maxTrackedBuckets: 10_000,
 });

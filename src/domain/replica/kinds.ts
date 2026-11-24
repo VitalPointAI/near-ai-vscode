@@ -12,6 +12,7 @@ import { validateProjectData } from './kindSchemas/project';
 import { validateRegistersData } from './kindSchemas/registers';
 import { validateRosterData } from './kindSchemas/roster';
 import { validateRunsData } from './kindSchemas/runs';
+import { validateSessionData } from './kindSchemas/session';
 import { SCHEMA_PENDING, isActor, isDep, isIsoTime } from './kindSchemas/shared';
 import { validateVersionsData } from './kindSchemas/versions';
 import { validateWatchesData } from './kindSchemas/watches';
@@ -21,21 +22,24 @@ export { SCHEMA_PENDING };
 
 const KINDS_BY_FAMILY = {
   project: ['project.genesis', 'project.import'],
-  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void'],
+  roster: ['member.invite', 'member.admit', 'member.update', 'member.remove', 'device.add', 'device.rotate', 'device.revoke', 'device.quarantine', 'device.release', 'hub.admit', 'hub.grant', 'hub.revoke', 'cell.create', 'cell.rekey', 'lead.handover', 'roster.choose', 'deputy.name', 'invite.void', 'roster.require', 'hub.readmit'],
   doc: ['doc.client', 'doc.update', 'doc.compact'],
   versions: ['product.create', 'product.owner', 'version.propose', 'version.verdict', 'version.submit', 'version.withdraw', 'version.decide', 'version.release', 'version.supersede'],
   registers: ['register.row', 'pir.decide', 'watch.decide'],
   watches: ['watch.define', 'watch.assign', 'watch.match', 'watch.state', 'watch.killSwitch'],
   runs: ['run.start', 'run.lane', 'run.claim', 'run.release', 'run.summary', 'run.end'],
   obs: ['obs.segment', 'obs.coalesced', 'obs.pruned'],
-  integrity: ['equivocation.proof', 'digest.report']
+  integrity: ['equivocation.proof', 'digest.report'],
+  // A person device's certificate for a session key (Phase 33 D-62): in the roster cell, folded beside the roster line and never on it.
+  session: ['session.certify']
 } as const;
 
 export type KindFamily = keyof typeof KINDS_BY_FAMILY;
 export type ReplicaKind = typeof KINDS_BY_FAMILY[KindFamily][number];
 
 // The closed list: DESIGN 4.3 plus deputy.name (DESIGN 7.1), so a deputy lead can be honoured without a format change (D-27), plus the roster kind that
-// voids an open invite (D-17, D-49): 51 kinds.
+// voids an open invite (D-17, D-49), plus roster.require (the feature check, POST-01) and hub.readmit (trusting
+// your organization's server again, Phase 33 D-42), plus session.certify (a person's session key, Phase 33 D-62): 54 kinds.
 export const REPLICA_KINDS: readonly ReplicaKind[] = (Object.values(KINDS_BY_FAMILY) as ReadonlyArray<readonly ReplicaKind[]>).flat();
 
 // A Map, because a kind is chosen by whoever wrote the entry.
@@ -110,7 +114,8 @@ const FAMILY_VALIDATORS: Readonly<Record<KindFamily, (kind: string, data: unknow
   watches: validateWatchesData,
   runs: validateRunsData,
   obs: validateObsData,
-  integrity: validateIntegrityData
+  integrity: validateIntegrityData,
+  session: validateSessionData
 };
 
 // Validates the data of a known kind. Unknown kinds are not checked here (the caller keeps them).
