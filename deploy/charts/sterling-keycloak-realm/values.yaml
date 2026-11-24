@@ -1,0 +1,12 @@
+# The checked, substituted realm JSON; only deploy/keycloak/apply.mjs sets it (--set-file realm=...).
+realm: ""
+# The keycloak-config-cli image, set by digest from deploy/bundle/images.lock.json.
+image: ""
+# Keycloak inside the cluster, over TLS with the site CA.
+keycloakUrl: ""
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 768Mi

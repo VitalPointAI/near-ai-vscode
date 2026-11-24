@@ -1,0 +1,11 @@
+{
+  "chart": "path:deploy/hub",
+  "namespace": "sterling-hubs",
+  "order": 70,
+  "values": ["deploy/values/sterling-hub.yaml"],
+  "instances": "hubs",
+  "images": [
+    { "lock": "sterling/near-ai-hub", "set": { "image": "ref" } }
+  ],
+  "note": "One sync hub per item of the site setting hubs (D-42 to D-44); the Compose path in relay/compose.yaml stays as it is (D-46)."
+}

@@ -1,0 +1,25 @@
+{{- /*
+Every namespace the site's releases install into, with its Pod Security labels (D-14): restricted unless the namespace is one of the exempt
+namespaces in deploy/rke2/psa.yaml, which carry privileged so the label says what the node configuration allows. Namespaces with create: false
+exist before this release (the registry's, made by the install script before anything can be pulled, and this release's own); the install
+script labels them the same way. The namespaces are kept when the release is uninstalled.
+*/ -}}
+{{- range .Values.namespaces }}
+{{- if not (has .podSecurity (list "restricted" "privileged")) }}{{ fail (printf "namespace %s: podSecurity must be restricted or privileged" .name) }}{{ end }}
+{{- if .create }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .name }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    pod-security.kubernetes.io/enforce: {{ .podSecurity }}
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: {{ .podSecurity }}
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: {{ .podSecurity }}
+    pod-security.kubernetes.io/warn-version: latest
+{{- end }}
+{{- end }}

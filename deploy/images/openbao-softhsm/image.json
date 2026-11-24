@@ -1,0 +1,7 @@
+{
+  "name": "openbao-softhsm",
+  "containerfile": "deploy/images/openbao-softhsm/Containerfile",
+  "context": "deploy/images/openbao-softhsm",
+  "tools": [{ "pin": "kms-pkcs11", "dir": "plugins" }, { "pin": "softhsm2", "dir": "softhsm" }],
+  "buildArgs": { "OPENBAO_IMAGE": "quay.io/openbao/openbao-ubi:2.7.3@sha256:bb94f6b1f1a3fbb7538d17d1c0509a13f1c2b382ebc1a67b99286b12c9628f71" }
+}

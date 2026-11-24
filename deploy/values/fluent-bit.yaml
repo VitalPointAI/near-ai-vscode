@@ -13,3 +13,109 @@ testFramework:
 # No config reloader sidecar (its configmap-reload image is not bundled).
 hotReload:
   enabled: false
+
+# The log shipper (D-26, D-35, D-37): one pod per node, in sterling-log-shipper (Pod Security exempt, because it reads host log folders), shipping
+# every container log (Keycloak's JSON events, OpenBao's audit device on stdout, the registry, the hubs) and, on control-plane nodes, the
+# Kubernetes API audit log to the site's own OpenSearch, and nowhere else: one output.
+kind: DaemonSet
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/etcd
+    operator: Exists
+    effect: NoExecute
+daemonSetVolumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: rke2-server-logs
+    hostPath:
+      path: /var/lib/rancher/rke2/server/logs
+      type: DirectoryOrCreate
+  - name: opensearch-ca
+    configMap:
+      name: sterling-site-ca
+  - name: state
+    hostPath:
+      path: /var/lib/sterling-fluent-bit
+      type: DirectoryOrCreate
+daemonSetVolumeMounts:
+  - name: varlog
+    mountPath: /var/log
+    readOnly: true
+  - name: rke2-server-logs
+    mountPath: /var/lib/rancher/rke2/server/logs
+    readOnly: true
+  - name: opensearch-ca
+    mountPath: /fluent-bit/site-ca
+    readOnly: true
+  - name: state
+    mountPath: /fluent-bit/state
+env:
+  - name: OPENSEARCH_USER
+    valueFrom:
+      secretKeyRef: { name: opensearch-writer, key: username }
+  - name: OPENSEARCH_PASSWORD
+    valueFrom:
+      secretKeyRef: { name: opensearch-writer, key: password }
+config:
+  inputs: |
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/*.log
+        multiline.parser  cri
+        Tag               kube.*
+        DB                /fluent-bit/state/containers.db
+        Mem_Buf_Limit     32MB
+        Skip_Long_Lines   On
+
+    [INPUT]
+        Name              tail
+        Path              /var/lib/rancher/rke2/server/logs/audit.log
+        Parser            k8s_audit_json
+        Tag               audit.kubernetes
+        DB                /fluent-bit/state/audit.db
+        Mem_Buf_Limit     32MB
+        Skip_Long_Lines   On
+  filters: |
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Merge_Log           On
+        Keep_Log            Off
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude Off
+
+    [FILTER]
+        Name    modify
+        Match   kube.*
+        Add     sterling_index logs
+
+    [FILTER]
+        Name    modify
+        Match   audit.*
+        Add     sterling_index audit
+  # Exactly one output: the site OpenSearch over verified TLS, as the audit-writer role. sterling_index picks audit-* or logs-*.
+  outputs: |
+    [OUTPUT]
+        Name                opensearch
+        Match               *
+        Host                opensearch-cluster-master.sterling-logging.svc
+        Port                9200
+        tls                 On
+        tls.verify          On
+        tls.ca_file         /fluent-bit/site-ca/ca.crt
+        HTTP_User           ${OPENSEARCH_USER}
+        HTTP_Passwd         ${OPENSEARCH_PASSWORD}
+        Logstash_Format     On
+        Logstash_Prefix     logs
+        Logstash_Prefix_Key sterling_index
+        Suppress_Type_Name  On
+        Retry_Limit         False
+  customParsers: |
+    [PARSER]
+        Name        k8s_audit_json
+        Format      json
+        Time_Key    requestReceivedTimestamp
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ

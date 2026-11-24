@@ -7,11 +7,19 @@ imagePullPolicy: IfNotPresent
 # name ingress-nginx; they are removed.
 expose:
   type: ingress
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls
   ingress:
     className: haproxy
+    hosts:
+      core: "registry.${site.domain}"
     annotations:
       nginx.ingress.kubernetes.io/ssl-redirect: null
       nginx.ingress.kubernetes.io/proxy-body-size: null
+      cert-manager.io/cluster-issuer: site-pki
 
 # Trivy off: its vulnerability database is downloaded from the internet, which an air-gapped site cannot reach (T-47-09; a condition on the
 # Harbor entries, 47-04). Scanning happens on the connected side before the bundle is built.
@@ -22,8 +30,54 @@ trivy:
 metrics:
   enabled: false
 
-# Harbor's own database and Redis-compatible cache run inside the release.
+# Harbor's own database and Redis-compatible cache run inside the release. Both images are Photon OS based, not UBI (a recorded condition on
+# the Harbor entries). The database superuser password has no existing-Secret option in this chart: the install script (47-16) passes it with
+# --set database.internal.password from OpenBao kv/apps/harbor, and the chart's public default ("changeit") is never rendered.
 database:
   type: internal
+  internal:
+    password: ""
 redis:
   type: internal
+
+# HQ and large sites (D-15, research Decision 8): https://registry.<domain> through HAProxy, with the certificate from the site PKI (cert-manager
+# ClusterIssuer site-pki, 47-13). Projects are created by the import script with cosign signature enforcement on (47-06 --registry-kind harbor).
+externalURL: "https://registry.${site.domain}"
+# Every built-in credential comes from a Secret the install script writes from OpenBao kv/apps/harbor; none of the chart's public defaults
+# (Harbor12345, not-a-secure-key, harbor_registry_password) is used.
+existingSecretAdminPassword: harbor-admin
+existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD
+existingSecretSecretKey: harbor-secret-key
+core:
+  existingSecret: harbor-core
+  existingXsrfSecret: harbor-core
+  existingXsrfSecretKey: CSRF_KEY
+  # Sign-in through the site Keycloak realm sterling (OIDC, no local accounts beyond the import robot). The chart only takes this as a value, so
+  # the install script passes it with --set-file core.configureUserSettings=<the JSON from OpenBao kv/apps/harbor-oidc>, which carries
+  # auth_mode oidc_auth, oidc_endpoint https://keycloak.<domain>/realms/sterling, the client id and secret and oidc_verify_cert true.
+  configureUserSettings: ""
+jobservice:
+  existingSecret: harbor-jobservice
+registry:
+  existingSecret: harbor-registry
+  credentials:
+    password: ""
+    existingSecret: harbor-registry-credentials
+
+persistence:
+  enabled: true
+  resourcePolicy: keep
+  persistentVolumeClaim:
+    registry:
+      storageClass: "${site.storageClass}"
+    jobservice:
+      jobLog:
+        storageClass: "${site.storageClass}"
+    database:
+      storageClass: "${site.storageClass}"
+    redis:
+      storageClass: "${site.storageClass}"
+
+# Logs go to stdout, which Fluent Bit ships to the site log store.
+log:
+  level: info

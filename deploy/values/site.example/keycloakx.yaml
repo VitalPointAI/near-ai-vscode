@@ -1,0 +1,17 @@
+{
+  "note": {
+    "about": "Per-site Keycloak settings, written by the site's operator from this example. JSON syntax (valid YAML), because deploy/keycloak/apply.mjs reads the sterling section too. Sized for an HQ of about 400 people with sign-in bursts of about 200; provisional until Phase 48 measures it.",
+    "replicas": "Keycloak nodes; two keep sign-in available while one restarts.",
+    "sterling.attestation": "Under signInKeys hardware-only: direct, or enterprise where the approved key models support it. Ignored under passkeys.",
+    "sterling.attestationRootsConfigMap": "Under signInKeys hardware-only: the ConfigMap holding the vendor attestation roots of the approved key models, which the install script builds from the FIDO Metadata Service snapshot carried in the bundle (no online MDS fetch). Required under hardware-only, unused under passkeys."
+  },
+  "replicas": 2,
+  "resources": {
+    "requests": { "cpu": "500m", "memory": "1Gi" },
+    "limits": { "memory": "2Gi" }
+  },
+  "sterling": {
+    "attestation": "direct",
+    "attestationRootsConfigMap": ""
+  }
+}
