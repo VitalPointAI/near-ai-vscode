@@ -1225,7 +1225,7 @@ Plans:
 
 ### Phase 70.1: Classification engine (INSERTED)
 **Goal**: One pure engine decides what any classification proposal may do to a label, under your organization's signed policy, and records what it did: automatic steps only raise or keep, everything lower goes to a person with the authority, and content above what the system may hold is a possible spill.
-**Inserted**: 2026-11-24 from the AI classification research (`.planning/research/ai-classification/RESEARCH.md`, section 7.1). Owner decision D1 (AI proposes data attributes only) is accepted; D2 to D6 and D8 to D14 are planned at the research defaults, owner to confirm (`70.1-CONTEXT.md`).
+**Inserted**: 2026-11-24 from the AI classification research (`.planning/research/ai-classification/RESEARCH.md`, section 7.1). Owner decision D1 (AI proposes data attributes only) is accepted; D2 to D6 and D8 to D14 are owner-confirmed 2026-11-24 at the research defaults (`70.1-CONTEXT.md`).
 **Depends on**: Phase 70 (all 32 plans merged: PR 4b #85 writes labels to disk, PR 4c #87 the session mark) and Phase 41 (the v2 policy document). No model and no network. Runs beside Phase 71 (core) and Phase 33.
 **Requirements**: CLSF-01, CLSF-02, CLSF-03, CLSF-04, CLSF-05
 **Success Criteria** (what must be TRUE):
@@ -1235,7 +1235,7 @@ Plans:
   4. Your organization's guide and compilation rules, code words, fact types, model roles and enforcing levels live in the signed `classification@1` section, are evaluated by pure code over typed facts and a session's running fact set, and newer or lower layers can only tighten them. (CLSF-04)
   5. `label.auto-raised`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower` and `label.affirmed` are named and recorded, and anything above the system-high gives a possible spill: raised to the system-high with `local-only` and `no-agent-tools`, frozen and queued. (CLSF-05)
 **Undo cost**: High. The proposal record, the event ids, the basis kinds and the section keys are permanent once shipped; 70.1-01 ends with the owner's shapes checkpoint.
-**Plans:** 5 plans in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner items in `70.1-CONTEXT.md`)
+**Plans:** 5 plans in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner-confirmed items in `70.1-CONTEXT.md`)
 
 Plans:
 - [ ] 70.1-01-PLAN.md: Wave 1. Tracer: a marking raises a label through `classification@1`, the engine and the record; record v1, the five events, the owner's shapes checkpoint
@@ -1393,7 +1393,7 @@ Plans:
 
 ### Phase 74.3: Classification assistant (INSERTED)
 **Goal**: A local Western model proposes labels with their bases as people write; the originator affirms the label in one signed step when they submit or release; only a person holding a `ClassificationAuthorityCredential` lowers it; content above what the system may hold is frozen and reported. AI proposes data attributes only, never person attributes.
-**Inserted**: 2026-11-24 from the AI classification research (section 7.1). Owner decision D1 is accepted and D7 is revised: gpt-oss (20b primary, 120b at HQ), Nemotron 3 Nano, IBM Granite including Granite Guardian, and Command A+ only through the approved Cohere Model Vault endpoint or under a commercial licence; each model gets a role only after evaluation and red-team at that level; no PRC models. The other owner decisions are planned at the research defaults, owner to confirm (`74.3-CONTEXT.md`).
+**Inserted**: 2026-11-24 from the AI classification research (section 7.1). Owner decision D1 is accepted and D7 is revised: gpt-oss (20b primary, 120b at HQ), Nemotron 3 Nano, IBM Granite including Granite Guardian, and Command A+ only through the approved Cohere Model Vault endpoint or under a commercial licence; each model gets a role only after evaluation and red-team at that level; no PRC models. The other owner decisions are owner-confirmed 2026-11-24 at the research defaults (`74.3-CONTEXT.md`); the UI design pass is not waived.
 **Depends on**: Phase 70.1; Phase 74.1 (passports enforced, use tiers, the family rule; 0 plans today, the critical dependency); Phase 71 (core) 71-03, 71-05 to 71-08, 71-12 and 71-13 (the research's "plans 1 to 5 and 7", mapped through `PLAN-IDS.md`); Phase 46 (46-01 to 46-08, `KeyService` and step-up in 46-07); Phase 33 (33-21 `session.certify` and the version acts, 33-23 the engine entry); Phase 33.1's marking plans 33.1-01 and 33.1-18 to 33.1-21 (74.3-13 only); a model server your organization lists (Phase 85's host or its own; Phase 74.2 for `org-tee`; Phase 36 for Command A+ through Model Vault).
 **Requirements**: CLSF-06, CLSF-07, CLSF-08, CLSF-09, CLSF-10, CLSF-11, CLSF-12, CLSF-13, CLSF-14
 **Success Criteria** (what must be TRUE):
@@ -1408,7 +1408,7 @@ Plans:
   9. Proposals arrive a few seconds after edits settle and never block typing; the sizing estimates for an HQ of about 400 people are recorded as estimates until Phase 85 measures them, and the operator guide states no capacity figure. (CLSF-14)
 **Research flags**: (1) llama.cpp token probabilities under grammar-constrained output on quantized gpt-oss (74.3-01; agreement signals are the fallback). (2) Command A+'s exact licence id and the Granite and Granite Guardian model ids (74.3-02). (3) Phase 85's throughput numbers. (4) Your organization's security classification guide format.
 **Undo cost**: Medium to high. The affirmation, lowering approval, evaluation report and request formats are signed and stored; each is settled in its plan.
-**Plans:** 14 plans in 9 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-30 and six owner items in `74.3-CONTEXT.md`)
+**Plans:** 14 plans in 9 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-30 and six owner-confirmed items in `74.3-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
