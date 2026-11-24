@@ -82,7 +82,8 @@ export function substituteSite(text, site, file) {
 
 /** Splits rendered YAML into its documents (on `---` document lines), dropping empty ones. */
 export function splitDocs(text) {
-  return text.split(/^---[ \t]*$/m).map((doc) => doc.trim()).filter((doc) => doc && !/^(#[^\n]*\n?)*$/.test(doc));
+  // A document of only comment lines is dropped. Checked line by line, not with a nested-repetition pattern (CodeQL js/redos).
+  return text.split(/^---[ \t]*$/m).map((doc) => doc.trim()).filter((doc) => doc && !doc.split('\n').every((line) => line.startsWith('#')));
 }
 
 /** Every release descriptor, sorted by order then name. Refuses a descriptor that is not well formed. */

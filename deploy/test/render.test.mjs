@@ -23,6 +23,19 @@ function helmFound() {
   return !run.error && run.status === 0;
 }
 
+/** The `metadata.name` of a rendered document: the first indented `name:` line under a top-level `metadata:` line (line by line, no backtracking). */
+function metadataName(doc) {
+  const lines = doc.split('\n');
+  const start = lines.findIndex((line) => /^metadata:[ \t]*$/.test(line));
+  if (start < 0) return '';
+  for (const line of lines.slice(start + 1)) {
+    if (!/^[ \t]/.test(line)) break;
+    const match = /^[ \t]+name:[ \t]*(\S+)/.exec(line);
+    if (match) return match[1];
+  }
+  return '';
+}
+
 test('helm is available for the render tests', () => {
   assert.ok(helmFound(), `helm was not found (${HELM}); set HELM to the helm binary (sh compliance/ci/install-tool.sh helm compliance/out/tools) or put it on PATH.`);
 });
@@ -41,7 +54,7 @@ test('every rendered release meets the global invariants', (t) => {
   for (const { name, yaml } of rendered) {
     for (const doc of splitDocs(yaml)) {
       const kind = /^kind:[ \t]*(\S+)/m.exec(doc)?.[1] ?? '(no kind)';
-      const where = `${name}: ${kind} ${/^metadata:\n(?:[ \t]+.*\n)*?[ \t]+name:[ \t]*(\S+)/m.exec(doc)?.[1] ?? ''}`;
+      const where = `${name}: ${kind} ${metadataName(doc)}`;
       for (const [, ref] of doc.matchAll(IMAGE_LINE)) {
         checked += 1;
         const { name: imageName, digest } = splitRef(ref);
