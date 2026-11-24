@@ -1,6 +1,7 @@
 import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
 import type URI from '@theia/core/lib/common/uri.js';
+import { AbstractDialog, ConfirmDialog } from '@theia/core/lib/browser/dialogs.js';
 import { ClipboardService } from '@theia/core/lib/browser/clipboard-service.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
@@ -10,7 +11,8 @@ import { FileOperationError, FileOperationResult } from '@theia/filesystem/lib/c
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service.js';
 import { WorkspaceTrustService } from '@theia/workspace/lib/browser/workspace-trust-service.js';
 import {
-  inventoryDirectory, inventoryFileName, inventoryReference, inventorySizeLimit, inventoryStatuses, parseInventorySnapshot
+  inventoryDirectory, inventoryFileName, inventoryImageSizeLimit, inventoryMediaDirectory, inventoryReference,
+  inventorySizeLimit, inventoryStatuses, parseInventorySnapshot
 } from '../common/sterling-resource-inventory.js';
 import type { InventoryLinkRequest, InventoryRecord, InventorySnapshot } from '../common/sterling-resource-inventory.js';
 import './sterling-portfolio.css';
@@ -71,6 +73,53 @@ function field(label: string, value: string | HTMLElement): HTMLElement {
   return result;
 }
 
+class CatalogueRecordDialog extends AbstractDialog<InventoryRecord> {
+  private readonly inputs = {
+    name: node('input'), category: node('input'), lifecycle: node('input'),
+    sourceRef: node('input'), stockNumber: node('input'), imageRef: node('input'),
+    description: node('textarea'), reviewNote: node('textarea')
+  };
+
+  constructor(private readonly record: InventoryRecord) {
+    super({ title: record.name ? 'Edit catalogue entry' : 'Add catalogue entry' });
+    const form = node('div', undefined, 'sterling-resource-edit');
+    const labels = {
+      name: 'Name', category: 'Category', lifecycle: 'Public evidence', sourceRef: 'Evidence source',
+      stockNumber: 'NATO stock number', imageRef: 'Image reference', description: 'Description', reviewNote: 'Review note'
+    };
+    for (const key of Object.keys(this.inputs) as (keyof typeof this.inputs)[]) {
+      const input = this.inputs[key];
+      input.value = record[key] ?? '';
+      this.addAction(input, () => void this.validate(), 'input');
+      form.append(labelled(labels[key], input));
+    }
+    this.contentNode.append(form);
+    this.appendCloseButton('Cancel');
+    this.appendAcceptButton('Save entry');
+  }
+
+  get value(): InventoryRecord {
+    const { name, category, lifecycle, sourceRef, stockNumber, imageRef, description, reviewNote } = this.inputs;
+    return {
+      ...this.record,
+      name: name.value.trim(), category: category.value.trim(), lifecycle: lifecycle.value.trim(),
+      sourceRef: sourceRef.value.trim(), stockNumber: stockNumber.value.trim() || undefined,
+      imageRef: imageRef.value.trim() || undefined, description: description.value.trim() || undefined,
+      reviewNote: reviewNote.value.trim() || undefined
+    };
+  }
+
+  protected override isValid(value: InventoryRecord): string {
+    if (!value.name || !value.category || !value.lifecycle || !value.sourceRef) {
+      return 'Enter a name, category, public evidence label, and evidence source.';
+    }
+    if (value.stockNumber && !/^(?:\d{13}|\d{4}-\d{2}-\d{3}-\d{4})$/.test(value.stockNumber)) {
+      return 'Enter a 13-digit NATO stock number or leave it blank.';
+    }
+    return '';
+  }
+}
+
 function quantity(record: InventoryRecord): string {
   if (record.quantity === undefined) return notReported;
   const formatted = quantityFormatter.format(record.quantity);
@@ -85,9 +134,8 @@ class SterlingResourceInventory extends BaseWidget {
   @inject(ClipboardService) protected readonly clipboard!: ClipboardService;
 
   private readonly folder = node('select');
-  private readonly load = button('Load snapshot');
+  private readonly sourceFolder = labelled('Inventory folder', this.folder);
   private readonly refresh = button('Refresh');
-  private readonly disconnect = button('Disconnect');
   private readonly guidance = node('p', undefined, 'sterling-portfolio-guidance');
   private readonly status = node('p', undefined, 'sterling-portfolio-message');
   private readonly provenance = node('dl', undefined, 'sterling-portfolio-provenance');
@@ -95,6 +143,9 @@ class SterlingResourceInventory extends BaseWidget {
   private readonly search = node('input');
   private readonly category = node('select');
   private readonly state = node('select');
+  private readonly add = button('Add catalogue entry');
+  private readonly archived = node('input');
+  private readonly archivedFilter = labelled('Show archived entries', this.archived);
   private readonly results = node('p', undefined, 'sterling-portfolio-guidance');
   private readonly list = node('ul', undefined, 'sterling-portfolio-list');
   private readonly details = node('section', undefined, 'sterling-resource-detail');
@@ -110,6 +161,8 @@ class SterlingResourceInventory extends BaseWidget {
   private selected?: string;
   private linkRequest?: InventoryLinkRequest;
   private linkAction?: object;
+  private editingCatalogue = false;
+  private imageUrl?: string;
   private visible = pageSize;
 
   @postConstruct()
@@ -127,31 +180,32 @@ class SterlingResourceInventory extends BaseWidget {
     const source = node('section', undefined, 'sterling-portfolio-source');
     const tools = node('div', undefined, 'sterling-portfolio-source-controls');
     const actions = node('div', undefined, 'sterling-portfolio-buttons');
-    actions.append(this.load, this.refresh, this.disconnect);
-    tools.append(labelled('Workspace folder', this.folder), actions);
+    actions.append(this.refresh);
+    tools.append(this.sourceFolder, actions);
     this.status.setAttribute('role', 'status');
     this.linkFeedback.setAttribute('role', 'status');
-    source.append(node('h2', 'Local inventory snapshot'), this.guidance, tools, this.status, this.linkFeedback, this.provenance);
+    source.append(node('h2', 'Inventory source'), this.guidance, tools, this.status, this.linkFeedback, this.provenance);
 
     const filters = node('div', undefined, 'sterling-portfolio-filters');
     this.search.type = 'search';
     this.search.placeholder = 'Name, ID, DID, stock number or policy';
     this.state.append(option('All statuses', ''), ...Object.entries(inventoryStatuses).map(([id, label]) => option(label, id)),
       option(notReported, 'unreported'));
-    filters.append(labelled('Search resources', this.search), labelled('Category', this.category), labelled('Reported status', this.state));
+    this.archived.type = 'checkbox';
+    filters.append(labelled('Search resources', this.search), labelled('Category', this.category),
+      labelled('Reported status', this.state), this.archivedFilter);
     const layout = node('div', undefined, 'sterling-portfolio-layout');
     const records = node('section');
-    records.append(node('h2', 'Resources'), this.results, this.list, this.more);
+    records.append(node('h2', 'Resources'), this.add, this.results, this.list, this.more);
     layout.append(records, this.details);
     this.content.append(filters, layout);
     page.append(heading, source, this.content);
     this.node.append(page);
 
-    this.load.addEventListener('click', () => this.connect());
     this.refresh.addEventListener('click', () => void this.read(false));
-    this.disconnect.addEventListener('click', () => this.clear());
-    this.folder.addEventListener('change', () => this.clear());
-    for (const control of [this.search, this.category, this.state]) {
+    this.folder.addEventListener('change', () => this.connect());
+    this.add.addEventListener('click', () => void this.editCatalogue());
+    for (const control of [this.search, this.category, this.state, this.archived]) {
       control.addEventListener('input', () => { this.visible = pageSize; this.renderResults(); });
     }
     this.more.addEventListener('click', () => { this.visible += pageSize; this.renderResults(); });
@@ -182,7 +236,7 @@ class SterlingResourceInventory extends BaseWidget {
     if (request === this.linkRequest) return;
     this.linkRequest = request;
     this.renderFolders();
-    this.clear();
+    this.connect();
   }
 
   private allowedRoots(): URI[] {
@@ -199,7 +253,7 @@ class SterlingResourceInventory extends BaseWidget {
 
   private setTrust(trusted: boolean): void {
     this.trusted = trusted;
-    if (trusted) this.renderSource();
+    if (trusted) this.connect();
     else this.clear();
   }
 
@@ -209,17 +263,19 @@ class SterlingResourceInventory extends BaseWidget {
     this.linkFeedback.textContent = '';
     this.updatePoll();
     this.search.value = '';
+    this.archived.checked = false;
     this.state.value = '';
     this.setSnapshot(undefined);
-    this.status.textContent = 'No resource inventory snapshot is loaded.';
+    this.status.textContent = '';
     this.status.classList.remove('is-warning');
     this.renderSource();
   }
 
   private connect(): void {
     const root = this.allowedRoots().find(candidate => candidate.toString() === this.folder.value);
-    if (!root || !this.trusted) return;
     this.clear();
+    if (!root || !this.trusted || this.isDisposed) return;
+    this.status.textContent = 'Reading inventory…';
     this.connection = { root, file: root.resolve(inventoryDirectory).resolve(inventoryFileName) };
     this.renderSource();
     this.updatePoll();
@@ -228,19 +284,17 @@ class SterlingResourceInventory extends BaseWidget {
 
   private renderSource(): void {
     const roots = this.allowedRoots();
-    this.load.disabled = !this.trusted || !roots.length;
-    this.folder.disabled = this.load.disabled || Boolean(this.linkRequest);
-    this.load.hidden = Boolean(this.connection);
-    this.refresh.hidden = this.disconnect.hidden = !this.connection;
+    this.sourceFolder.hidden = roots.length < 2;
+    this.folder.disabled = !this.trusted;
+    this.refresh.hidden = !this.connection;
     if (this.linkRequest && !roots.length) {
       this.guidance.textContent = 'Open the work-area folder again to link a resource from its inventory.';
     } else if (!roots.length) {
-      this.guidance.textContent = 'Open a local workspace folder to load an approved export.';
+      this.guidance.textContent = 'Open a workspace folder to view its inventory.';
     } else if (!this.trusted) {
-      this.guidance.textContent = 'Resource Inventory imports are disabled in Restricted Mode.';
+      this.guidance.textContent = 'Trust this workspace to view its inventory.';
     } else {
-      const action = this.linkRequest ? 'Load the work-area snapshot to select a resource.' : 'Quantity and status come from the file.';
-      this.guidance.textContent = `Load an approved non-sensitive export from ${snapshotPath}. ${action}`;
+      this.guidance.textContent = '';
     }
   }
 
@@ -260,15 +314,17 @@ class SterlingResourceInventory extends BaseWidget {
     }
   }
 
+  private async hasRegularSnapshotParents(source: Connection): Promise<boolean> {
+    for (const parent of [source.root, source.root.resolve('.planning'), source.file.parent]) {
+      const stat = await this.files.resolve(parent);
+      if (!this.trusted || this.connection !== source || !stat.isDirectory || stat.isSymbolicLink) return false;
+    }
+    return true;
+  }
+
   private async readCurrentSource(source: Connection, skipUnchanged: boolean): Promise<void> {
     const current = (): boolean => !this.isDisposed && this.trusted && this.connection === source;
-    const localPath = async (): Promise<boolean> => {
-      for (const parent of [source.root, source.root.resolve('.planning'), source.file.parent]) {
-        const stat = await this.files.resolve(parent);
-        if (!current() || !stat.isDirectory || stat.isSymbolicLink) return false;
-      }
-      return true;
-    };
+    const localPath = () => this.hasRegularSnapshotParents(source);
     const fail = (text: string): void => {
       if (!current()) return;
       source.etag = undefined;
@@ -298,7 +354,9 @@ class SterlingResourceInventory extends BaseWidget {
       if (!snapshot) { fail('The file does not contain a valid resource inventory snapshot.'); return; }
       source.etag = after.etag;
       this.setSnapshot(snapshot);
-      this.status.textContent = `Local snapshot loaded. Changes are checked every ${pollSeconds} seconds while visible.`;
+      this.status.textContent = snapshot.catalogueOnly
+        ? 'Provisional public catalogue. DND verification is pending. Records represent equipment types.'
+        : `Local inventory. Checks for changes every ${pollSeconds} seconds while visible.`;
       this.status.classList.remove('is-warning');
     } catch (error) {
       const missing = error instanceof FileOperationError && error.fileOperationResult === FileOperationResult.FILE_NOT_FOUND;
@@ -308,6 +366,9 @@ class SterlingResourceInventory extends BaseWidget {
 
   private setSnapshot(snapshot: InventorySnapshot | undefined): void {
     this.snapshot = snapshot;
+    this.add.hidden = !snapshot?.catalogueOnly || Boolean(this.linkRequest);
+    this.archivedFilter.hidden = !snapshot?.catalogueOnly;
+    this.add.disabled = this.editingCatalogue;
     this.content.hidden = !snapshot;
     const selectedCategory = this.category.value;
     this.ordered = snapshot ? [...snapshot.resources].sort((a, b) =>
@@ -317,12 +378,15 @@ class SterlingResourceInventory extends BaseWidget {
     if (categories.includes(selectedCategory)) this.category.value = selectedCategory;
     this.provenance.replaceChildren();
     if (snapshot) {
+      this.state.disabled = snapshot.catalogueOnly === true;
+      if (snapshot.catalogueOnly) this.state.value = '';
       this.provenance.append(field('Reported source', snapshot.source), field('Export generated', date(snapshot.generatedAt)),
         field('Read locally', date(new Date().toISOString())));
       this.renderResults();
     } else {
       this.selected = undefined;
       this.list.replaceChildren();
+      this.releaseImage();
       this.details.replaceChildren();
       this.results.textContent = '';
       this.visible = pageSize;
@@ -334,9 +398,10 @@ class SterlingResourceInventory extends BaseWidget {
     if (!snapshot) return;
     const query = this.search.value.trim().toLocaleLowerCase();
     const matches = this.ordered.filter(record =>
+      (!record.archived || this.archived.checked) &&
       (!this.category.value || record.category === this.category.value) &&
       (!this.state.value || (record.status ?? 'unreported') === this.state.value) &&
-      (!query || [record.name, record.id, record.assetDid, record.stockNumber, record.usagePolicyRef, record.description, record.imageRef]
+      (!query || [record.name, record.id, record.assetDid, record.stockNumber, record.usagePolicyRef, record.description, record.imageRef, record.lifecycle, record.reviewNote]
         .some(value => value?.toLocaleLowerCase().includes(query))));
     const displayed = matches.slice(0, this.visible);
     this.more.hidden = matches.length <= this.visible;
@@ -348,7 +413,10 @@ class SterlingResourceInventory extends BaseWidget {
       const row = node('li');
       const select = button(record.name);
       select.className = 'sterling-resource-row';
-      select.append(node('small', record.category), node('span', record.status ? inventoryStatuses[record.status] : notReported, 'sterling-resource-state'));
+      const reportedStatus = record.status ? inventoryStatuses[record.status] : notReported;
+      const catalogueStatus = record.archived ? 'Archived' : record.lifecycle;
+      select.append(node('small', record.category), node('span', snapshot.catalogueOnly ? catalogueStatus : reportedStatus,
+        'sterling-resource-state'));
       select.setAttribute('aria-pressed', String(inventoryReference(snapshot, record) === this.selected));
       select.addEventListener('click', () => {
         this.selected = inventoryReference(snapshot, record);
@@ -361,20 +429,78 @@ class SterlingResourceInventory extends BaseWidget {
     this.renderDetails(snapshot, chosen);
   }
 
+  private releaseImage(): void {
+    if (this.imageUrl) URL.revokeObjectURL(this.imageUrl);
+    this.imageUrl = undefined;
+  }
+
+  private async renderStoredImage(figure: HTMLElement, record: InventoryRecord, digest: string): Promise<void> {
+    const source = this.connection;
+    if (!source) return;
+    const current = () => this.connection === source && this.trusted && figure.isConnected && !this.isDisposed;
+    const folder = source.file.parent.resolve(inventoryMediaDirectory);
+    const file = folder.resolve(digest);
+    try {
+      if (!await this.hasRegularSnapshotParents(source) || !current()) return;
+      const parent = await this.files.resolve(folder, { resolveMetadata: true });
+      if (!current() || !parent.isDirectory || parent.isSymbolicLink) throw new Error();
+      const before = await this.files.resolve(file, { resolveMetadata: true });
+      if (!current() || !before.isFile || before.isSymbolicLink || before.size > inventoryImageSizeLimit) throw new Error();
+      const content = await this.files.readFile(file, { limits: { size: inventoryImageSizeLimit } });
+      const after = await this.files.resolve(file, { resolveMetadata: true });
+      const afterParent = await this.files.resolve(folder, { resolveMetadata: true });
+      if (!await this.hasRegularSnapshotParents(source) || !current()) return;
+      if (!after.isFile || after.isSymbolicLink || after.etag !== before.etag || content.etag !== after.etag
+        || !afterParent.isDirectory || afterParent.isSymbolicLink || afterParent.etag !== parent.etag) throw new Error();
+      const bytes = Uint8Array.from(content.value.buffer);
+      const startsWith = (header: number[], offset = 0) => header.every((byte, index) => bytes[offset + index] === byte);
+      let type: string;
+      if (startsWith([255, 216, 255])) type = 'image/jpeg';
+      else if (startsWith([137, 80, 78, 71, 13, 10, 26, 10])) type = 'image/png';
+      else if (startsWith([82, 73, 70, 70]) && startsWith([87, 69, 66, 80], 8)) type = 'image/webp';
+      else throw new Error();
+      const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      if (Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('') !== digest) throw new Error();
+      if (!current()) return;
+      const image = node('img');
+      image.alt = `Reference image of ${record.name}`;
+      image.addEventListener('error', () => {
+        if (!current()) return;
+        this.releaseImage();
+        figure.textContent = 'Stored image could not be displayed.';
+      }, { once: true });
+      this.imageUrl = URL.createObjectURL(new Blob([bytes], { type }));
+      image.src = this.imageUrl;
+      const caption = node('figcaption', 'Stored reference image');
+      figure.replaceChildren(image, caption);
+    } catch {
+      if (current()) figure.textContent = 'Stored image unavailable.';
+    }
+  }
+
   private renderDetails(snapshot: InventorySnapshot, record?: InventoryRecord): void {
+    this.releaseImage();
     this.details.hidden = !record;
     this.details.replaceChildren();
     if (!record) return;
     const reference = inventoryReference(snapshot, record);
     const data = node('dl', undefined, 'sterling-resource-fields');
-    data.append(field('Category', record.category), field('Reported status', record.status ? inventoryStatuses[record.status] : notReported),
-      field('Reported quantity', quantity(record)), field('Record as of', record.asOf ? date(record.asOf) : notReported));
+    data.append(field('Category', record.category));
+    if (snapshot.catalogueOnly) {
+      data.append(field('Public evidence', record.lifecycle ?? notReported),
+        field('NATO stock number', record.stockNumber ?? 'Pending item-level verification'));
+    } else {
+      data.append(field('Reported status', record.status ? inventoryStatuses[record.status] : notReported),
+        field('Reported quantity', quantity(record)), field('Record as of', record.asOf ? date(record.asOf) : notReported));
+    }
     const reported = [
       ['Reported asset DID', record.assetDid],
       ['Reported policy reference', record.usagePolicyRef],
-      ['Reported catalogue stock number', record.stockNumber],
+      ['Reported catalogue stock number', snapshot.catalogueOnly ? undefined : record.stockNumber],
       ['Reported description', record.description],
-      ['Reported image reference', record.imageRef]
+      ['Image source', record.imageRef],
+      ['Evidence source', record.sourceRef],
+      ['Review note', record.reviewNote]
     ] as const;
     for (const [label, value] of reported) {
       if (value !== undefined) data.append(field(label, value));
@@ -400,21 +526,92 @@ class SterlingResourceInventory extends BaseWidget {
       }
     });
     controls.append(copy);
-    if (this.linkRequest) {
+    if (snapshot.catalogueOnly && !this.linkRequest) {
+      const edit = button('Edit entry');
+      const archive = button(record.archived ? 'Restore entry' : 'Archive entry');
+      edit.disabled = archive.disabled = this.editingCatalogue;
+      edit.addEventListener('click', () => void this.editCatalogue(record));
+      archive.addEventListener('click', () => void this.editCatalogue(record, true));
+      controls.append(edit, archive);
+    }
+    if (this.linkRequest && !snapshot.catalogueOnly) {
       const link = button('Link resource');
       link.disabled = Boolean(this.linkAction);
       link.addEventListener('click', () => void this.linkRecord(snapshot, record));
       controls.append(link);
     }
     controls.append(feedback);
-    this.details.append(node('h2', record.name), data, labelled('Resource reference', input), controls);
+    this.details.append(node('h2', record.name));
+    if (record.imageDigest) {
+      const figure = node('figure', 'Loading stored image…', 'sterling-resource-image');
+      this.details.append(figure);
+      void this.renderStoredImage(figure, record, record.imageDigest);
+    }
+    this.details.append(data, labelled('Resource reference', input), controls);
+  }
+
+  private async editCatalogue(record?: InventoryRecord, toggleArchive = false): Promise<void> {
+    const source = this.connection;
+    const etag = source?.etag;
+    if (!source || !etag || !this.snapshot?.catalogueOnly || this.linkRequest || this.editingCatalogue) return;
+    const current = () => this.trusted && this.connection === source && !this.linkRequest && !this.isDisposed;
+    this.editingCatalogue = true;
+    this.add.disabled = true;
+    this.renderResults();
+    try {
+      let updated: InventoryRecord | undefined;
+      if (record && toggleArchive) {
+        const action = record.archived ? 'Restore entry' : 'Archive entry';
+        const confirmed = await new ConfirmDialog({ title: action, ok: action, msg: record.name }).open();
+        if (confirmed) updated = { ...record, archived: record.archived ? undefined : true };
+      } else {
+        const draft = record ?? { id: `candidate-${crypto.randomUUID()}`, name: '', category: '', lifecycle: 'Lifecycle needs review' };
+        updated = await new CatalogueRecordDialog(draft).open();
+      }
+      if (!updated || !current()) return;
+      const conflict = 'The catalogue changed. Refresh it before applying your edit again.';
+      if (!await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
+      const before = await this.files.resolve(source.file, { resolveMetadata: true });
+      if (!current() || before.etag !== etag || !before.isFile || before.isSymbolicLink || before.size > inventorySizeLimit) {
+        throw new Error(conflict);
+      }
+      const content = await this.files.read(source.file, { limits: { size: inventorySizeLimit } });
+      const parsed = parseInventorySnapshot(content.value);
+      if (content.etag !== etag || !parsed?.catalogueOnly || !await this.hasRegularSnapshotParents(source)) throw new Error(conflict);
+
+      const raw = JSON.parse(content.value) as InventorySnapshot;
+      const index = record ? raw.resources.findIndex(entry => entry.id === record.id) : -1;
+      if (record && index < 0) throw new Error(conflict);
+      if (index < 0) raw.resources.push(updated);
+      else raw.resources[index] = { ...raw.resources[index], ...updated };
+      const output = JSON.stringify(raw, undefined, 2) + '\n';
+      if (!parseInventorySnapshot(output) || new TextEncoder().encode(output).length > inventorySizeLimit) {
+        throw new Error('The entry exceeds the catalogue limits. Shorten its fields or use a smaller snapshot.');
+      }
+      const latest = await this.files.resolve(source.file, { resolveMetadata: true });
+      if (!current() || latest.etag !== etag || !latest.isFile || latest.isSymbolicLink) throw new Error(conflict);
+      await this.files.write(source.file, output, { etag, mtime: before.mtime });
+      if (!current()) return;
+      this.selected = inventoryReference(parsed, updated);
+      await this.read(false);
+      this.linkFeedback.textContent = 'Catalogue entry saved.';
+    } catch (error) {
+      if (!current()) return;
+      this.linkFeedback.textContent = error instanceof FileOperationError
+        ? 'The catalogue could not be saved. Refresh it and try again.'
+        : error instanceof Error ? error.message : 'The catalogue could not be saved.';
+    } finally {
+      this.editingCatalogue = false;
+      this.add.disabled = false;
+      this.renderResults();
+    }
   }
 
   private async linkRecord(snapshot: InventorySnapshot, record: InventoryRecord): Promise<void> {
     const request = this.linkRequest;
     const connection = this.connection;
     const reference = inventoryReference(snapshot, record);
-    if (!request || !connection || this.linkAction || !this.trusted
+    if (!request || !connection || snapshot.catalogueOnly || this.linkAction || !this.trusted
       || this.snapshot !== snapshot || this.selected !== reference || connection.root.toString() !== request.rootUri) return;
     const action = {};
     this.linkAction = action;
@@ -425,7 +622,8 @@ class SterlingResourceInventory extends BaseWidget {
     try {
       await this.read(false);
       if (!current()) return;
-      if (this.snapshot?.sourceId !== snapshot.sourceId || !this.snapshot.resources.some(candidate => candidate.id === record.id)
+      if (this.snapshot?.sourceId !== snapshot.sourceId || this.snapshot.catalogueOnly
+        || !this.snapshot.resources.some(candidate => candidate.id === record.id)
         || this.selected !== reference) {
         this.linkFeedback.textContent = 'The selected resource changed. Select a record to try again.';
         return;

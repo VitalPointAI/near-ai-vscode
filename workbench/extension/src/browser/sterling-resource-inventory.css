@@ -46,3 +46,29 @@
   .sterling-resource-fields { grid-template-columns: 1fr; }
 }
 .sterling-resource-inventory .sterling-portfolio-guidance:empty { display: none; }
+
+.sterling-resource-edit {
+  display: grid;
+  gap: 8px;
+  width: min(420px, 70vw);
+  max-height: 65vh;
+  overflow: auto;
+}
+.sterling-resource-edit label { display: grid; gap: 4px; }
+.sterling-resource-edit input, .sterling-resource-edit textarea {
+  background: var(--theia-input-background);
+  color: var(--theia-input-foreground);
+  border: 1px solid var(--theia-input-border, transparent);
+  padding: 5px 8px;
+}
+
+.sterling-resource-image { margin: 0 0 14px; }
+.sterling-resource-image img {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--theia-editor-background);
+}
+.sterling-resource-image figcaption { color: var(--theia-descriptionForeground); font-size: 12px; margin-top: 4px; }
