@@ -1,9 +1,68 @@
-# HAProxy Kubernetes Ingress 3.4.1 (chart deploy/charts/vendored/kubernetes-ingress-1.57.1.tgz), the settings that decide which images render.
-# The descriptor sets controller.image.repository and controller.image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). The
-# controller image is the only one the chart renders: the CRD job hook runs it too, and chart 1.57.1 has no default backend. Later plans add
-# the rest of the ingress settings here and must keep these.
+# HAProxy Kubernetes Ingress 3.4.1 (chart deploy/charts/vendored/kubernetes-ingress-1.57.1.tgz), the site's only ingress (D-07). The descriptor
+# sets controller.image.repository and controller.image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-20). The controller image
+# is the only one the chart renders: the CRD job hook runs it too, and chart 1.57.1 has no default backend (47-03). Per-site settings (node
+# ports, replicas, the smart-card switch) are in deploy/values/site.example/kubernetes-ingress.yaml.
+#
+# TLS: every Ingress names its own certificate from the site PKI (ClusterIssuer site-pki, 47-13); HAProxy 3.x accepts TLS 1.2 and later
+# by default (no TLS 1.0 or 1.1), checked in the lab (spike S4). The sync hubs are never published here: each hub ends TLS itself behind its
+# own NodePort (D-44, 47-11).
 controller:
   image:
     pullPolicy: IfNotPresent
   # No init container (the chart's commented sysctl example would add a busybox image).
   initContainers: []
+
+  # Pod Security restricted (haproxy-controller is not exempt): the chart runs unprivileged as uid 1000 with RuntimeDefault seccomp, no
+  # privilege escalation, every capability dropped but NET_BIND_SERVICE (allowed under restricted), and no privileged port (8080, 8443).
+  unprivileged: true
+  allowPrivilegedPorts: false
+  enableRuntimeDefaultSeccompProfile: true
+  allowPrivilegeEscalation: false
+  # No pprof debug endpoint.
+  pprof:
+    enabled: false
+
+  # haproxy is the cluster's default ingress class: an Ingress without a class is served here, and there is no other controller.
+  ingressClass: haproxy
+  ingressClassResource:
+    name: haproxy
+    default: true
+
+  # RKE2 ships no load balancer, and host ports are refused under restricted Pod Security, so the controller is reached on node ports
+  # (the per-site file sets them). Only HTTP (redirected to HTTPS) and HTTPS are published: no QUIC, no stats or admin port.
+  service:
+    type: NodePort
+    enablePorts:
+      http: true
+      https: true
+      quic: false
+      stat: false
+      admin: false
+
+  # The controller's settings, rendered with the chart's tpl so the smart-card switch can add the client-certificate settings.
+  # Smart cards (D-32), off by default: when the per-site smartCards.enabled is true, the HTTPS frontend asks every client for a
+  # certificate, accepts the connection without one (client-crt-optional, so passkey sign-in and sessions still work), refuses a
+  # certificate that does not chain to the smart-card CA bundle in Secret smartCards.caSecret (key tls.crt), and the Keycloak Ingress
+  # forwards a verified certificate to Keycloak (deploy/values/keycloakx.yaml). HAProxy Kubernetes Ingress 3.4.1 can only set this on the
+  # whole HTTPS frontend (client-ca is a ConfigMap setting), not per host; only the Keycloak Ingress forwards the certificate.
+  # Forwarded headers: HAProxy sets X-Forwarded-For, -Host, -Proto and -Uri itself on every request, replacing whatever a client sent, and
+  # does not append to a client's X-Forwarded-For (forwarded-for off). oauth2-proxy in each session trusts these headers only from the pod
+  # network and matches its sign-in exemptions against X-Forwarded-Uri, so a client-supplied value must never reach it (Phase 46 finding,
+  # workbench/README.md "What Phase 47 closes"). An Ingress with its own request-set-header replaces this list and must repeat it
+  # (deploy/values/keycloakx.yaml does).
+  config: |
+    ssl-redirect: "true"
+    forwarded-for: "false"
+    request-set-header: |
+      X-Forwarded-For %[src]
+      X-Forwarded-Host %[req.hdr(host)]
+      X-Forwarded-Proto %[ssl_fc,iif(https,http)]
+      X-Forwarded-Uri %[url]
+    {{- if .Values.smartCards.enabled }}
+    client-ca: {{ .Release.Namespace }}/{{ required "smartCards.caSecret (the smart-card CA bundle Secret) is required when smartCards.enabled is true" .Values.smartCards.caSecret }}
+    client-crt-optional: "true"
+    {{- end }}
+
+smartCards:
+  enabled: false
+  caSecret: ""

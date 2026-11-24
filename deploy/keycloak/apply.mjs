@@ -11,6 +11,9 @@
 //                  empty: an empty allowlist accepts every authenticator, self-attestation included) and the vendor attestation roots
 //                  ConfigMap (keycloakx site file sterling.attestationRootsConfigMap) from the bundled FIDO MDS snapshot.
 // Both levels: no password, OTP or recovery code anywhere; user verification and resident keys required; the one shared rpId (D-08).
+// HQ brokering (D-36): identity provider hq is in every realm and off unless the per-site realm file turns hqBroker on (an edge site linked
+// to HQ). It is never the default: HQ is used only when a person picks it or a link names it (kc_idp_hint), and its first sign-in only links
+// the local person with the same email, never creates one. Local people keep signing in with their keys when the link is down.
 // --dry-run prints the checked realm's summary and installs nothing. Node built-ins only; helm from $HELM or PATH.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -27,6 +30,14 @@ export const SIGN_IN_KEYS = Object.freeze(['passkeys', 'hardware-only']);
 export const FORBIDDEN_AUTHENTICATOR = /password(?!less)|otp|recovery|reset-credential|kerberos|spnego|http-basic/i;
 const BINDINGS = ['browserFlow', 'directGrantFlow', 'resetCredentialsFlow', 'firstBrokerLoginFlow', 'dockerAuthenticationFlow'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const HQ_BROKER = 'hq';
+export const HQ_FIRST_LOGIN_FLOW = 'sterling-hq-first-login';
+/** The applier Job environment variable that carries the client secret HQ issued for this site (Secret keycloak-hq-broker). */
+export const HQ_SECRET_ENV = 'STERLING_HQ_BROKER_CLIENT_SECRET';
+/** The issuer a site without the broker renders: a reserved name that never resolves (RFC 2606), so Keycloak's URL checks pass. */
+export const HQ_PLACEHOLDER_ISSUER = 'https://hq.invalid/realms/sterling';
+const HQ_FIRST_LOGIN_STEPS = JSON.stringify([['idp-detect-existing-broker-user', 'REQUIRED'], ['idp-auto-link', 'REQUIRED']]);
+const ENV_SECRET = /^\$\(env:[A-Z0-9_]+\)$/;
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
@@ -39,6 +50,9 @@ export function realmSettings(site, realmSite, keycloakxSite = {}) {
   const hardware = site.signInKeys === 'hardware-only';
   const x509 = realmSite.x509 ?? {};
   const orNotSet = (value) => (typeof value === 'string' && value.trim() ? value : 'not-set');
+  const brokered = realmSite.hqBroker?.enabled === true;
+  let issuer = brokered ? orNotSet(realmSite.hqBroker.issuer).trim() : HQ_PLACEHOLDER_ISSUER;
+  while (issuer.endsWith('/')) issuer = issuer.slice(0, -1);
   return {
     ...site,
     webAuthnAttestation: hardware ? (keycloakxSite.sterling?.attestation || 'direct') : 'none',
@@ -55,7 +69,8 @@ export function realmSettings(site, realmSite, keycloakxSite = {}) {
         crlCheckingEnabled: String(x509.enabled === true && x509.revocation === 'crl'),
         ocspResponderUri: orNotSet(x509.ocspResponderUri),
         crlPath: orNotSet(x509.crlPath)
-      }
+      },
+      hq: { enabled: brokered, issuer, clientId: brokered ? orNotSet(realmSite.hqBroker.clientId) : 'not-set', clientSecret: brokered ? `$(env:${HQ_SECRET_ENV})` : 'not-set' }
     }
   };
 }
@@ -98,6 +113,8 @@ export function checkRealm(realm, settings) {
   for (const flow of flows.values()) {
     for (const execution of flow.authenticationExecutions ?? []) {
       need(!FORBIDDEN_AUTHENTICATOR.test(execution.authenticator ?? ''), `flow ${flow.alias} uses ${execution.authenticator}, which is not a WebAuthn step`);
+      need(execution.authenticator !== 'idp-create-user-if-unique', `flow ${flow.alias} creates people from an identity provider; brokering only links people who exist here`);
+      if (execution.authenticator === 'identity-provider-redirector') need(!execution.authenticatorConfig, `flow ${flow.alias}: the identity provider redirector must name no default provider; HQ is used only when asked for`);
       if (execution.authenticatorFlow) need(flows.has(execution.flowAlias), `flow ${flow.alias} names the subflow ${execution.flowAlias}, which realm.json does not define`);
     }
   }
@@ -107,6 +124,24 @@ export function checkRealm(realm, settings) {
   for (const binding of ['directGrantFlow', 'resetCredentialsFlow', 'firstBrokerLoginFlow', 'dockerAuthenticationFlow']) need(realm[binding] === 'sterling-no-credentials', `${binding} must be sterling-no-credentials`);
   need(realm.browserFlow === (settings.realm?.x509?.enabled ? 'sterling-x509' : 'sterling-browser'), 'the browser flow is sterling-browser, or sterling-x509 when the site turns smart cards on');
   need(flows.has('sterling-x509'), 'the optional smart-card flow sterling-x509 must exist (D-32)');
+  // HQ brokering (D-36).
+  const brokers = realm.identityProviders ?? [];
+  need(brokers.length === 1 && brokers[0].alias === HQ_BROKER, `the only identity provider must be ${HQ_BROKER} (HQ brokering)`);
+  for (const broker of brokers) {
+    const config = broker.config ?? {};
+    need(broker.enabled === (settings.realm?.hq?.enabled === true), `identity provider ${broker.alias} must be on exactly when the realm site file turns hqBroker on`);
+    need(broker.firstBrokerLoginFlowAlias === HQ_FIRST_LOGIN_FLOW && !broker.postBrokerLoginFlowAlias, `identity provider ${broker.alias}'s first sign-in must be ${HQ_FIRST_LOGIN_FLOW}, with no post-login flow`);
+    need(broker.authenticateByDefault !== true, `identity provider ${broker.alias} must not be the default`);
+    need(config.syncMode === 'IMPORT', `identity provider ${broker.alias} must not overwrite local people at each sign-in (syncMode IMPORT; FORCE would let HQ change a local email)`);
+    need(ENV_SECRET.test(config.clientSecret ?? '') || (broker.enabled === false && config.clientSecret === 'not-set'), `identity provider ${broker.alias}'s client secret must come from the applier Job environment, never be written in realm.json`);
+    if (broker.enabled) {
+      need(String(config.issuer).startsWith('https://') && config.issuer !== HQ_PLACEHOLDER_ISSUER && config.clientId && config.clientId !== 'not-set',
+        'the HQ broker is on: hqBroker needs the https issuer of HQ\'s realm and the client id HQ registered for this site');
+    }
+  }
+  const firstLogin = flows.get(HQ_FIRST_LOGIN_FLOW);
+  need(Boolean(firstLogin?.topLevel) && JSON.stringify((firstLogin?.authenticationExecutions ?? []).map((execution) => [execution.authenticator, execution.requirement])) === HQ_FIRST_LOGIN_STEPS,
+    `flow ${HQ_FIRST_LOGIN_FLOW} must only find the local person with the same email and link them (idp-detect-existing-broker-user, then idp-auto-link), never create one`);
   // Required actions.
   const actions = new Map((realm.requiredActions ?? []).map((action) => [action.alias, action]));
   for (const alias of ['UPDATE_PASSWORD', 'CONFIGURE_TOTP', 'CONFIGURE_RECOVERY_AUTHN_CODES']) need(actions.get(alias)?.enabled === false, `required action ${alias} must be listed and disabled`);
@@ -135,7 +170,7 @@ export function checkRealm(realm, settings) {
   if (sessions) {
     need(sessions.publicClient === false && sessions.standardFlowEnabled === true && sessions.implicitFlowEnabled === false && sessions.serviceAccountsEnabled === false,
       'sterling-sessions must be confidential with the standard flow only');
-    need(/^\$\(env:[A-Z0-9_]+\)$/.test(sessions.secret ?? ''), 'the sterling-sessions secret must come from the applier Job environment, never be written in realm.json');
+    need(ENV_SECRET.test(sessions.secret ?? ''), 'the sterling-sessions secret must come from the applier Job environment, never be written in realm.json');
     const mapper = (type, check) => (sessions.protocolMappers ?? []).some((entry) => entry.protocolMapper === type && check(entry.config ?? {}));
     need(mapper('oidc-audience-mapper', (config) => config['included.client.audience'] === 'sterling-sessions' && config['access.token.claim'] === 'true'), 'sterling-sessions must add its own audience to the access token (OpenBao bound_audiences)');
     need(mapper('oidc-acr-mapper', (config) => config['access.token.claim'] === 'true'), 'acr must be in the access token');

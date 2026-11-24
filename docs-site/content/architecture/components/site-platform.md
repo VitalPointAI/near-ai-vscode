@@ -285,7 +285,7 @@ Conditions:
 
 - Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.
 - Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.
-- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.
+- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
 
 ## image:ghcr.io/project-zot/zot
@@ -315,6 +315,7 @@ Conditions:
 - Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
 - Runs with http.compat docker2s2 so Red Hat images keep their digests (spike S1).
+- Its own pod is admitted by its exact pinned digest rather than by signature (the signature lives in this registry, which is down while it restarts); the digest is the one the signed bundle's import verified, preloaded on each node.
 
 ## image:quay.io/jetstack/cert-manager-cainjector
 
@@ -453,7 +454,7 @@ Conditions:
 
 - Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.
 - Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.
-- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.
+- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
 
 ## image:reg.kyverno.io/kyverno/kyvernopre
@@ -481,7 +482,7 @@ Conditions:
 
 - Image signatures are copied into the site registry beside the images and checked with your organization's cosign public key at import and again at admission.
 - Go cryptography in these components is not FIPS-validated (a GOFIPS140 build is unverified); Phase 48 records the gap.
-- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike.
+- The admission policy fails closed (failurePolicy: Fail, validationActions: \[Deny\]) with kube-system and Kyverno's own namespace excluded; ctlog.insecureIgnoreTlog is confirmed in the lab spike. On a Zot site the registry's own pod is admitted by its exact pinned reference (tag and digest from the image lock), in sterling-registry only, because its signature cannot be read while the registry restarts; every other pod keeps the signature check.
 - The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.
 
 ## chart:cert-manager

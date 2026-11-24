@@ -3,7 +3,8 @@
 // profile, Canal, no bundled ingress and secrets encryption, registries.yaml mirrors only to the site registry, and k3s never appears in
 // production files. The coverage test renders sterling-network and fails when a release's namespace has no egress policy (needs helm).
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -133,5 +134,60 @@ test('the rendered network release has one site-only egress policy per namespace
     const name = /^ {2}name: (\S+)$/m.exec(doc)[1];
     const level = exempt.has(name) ? 'privileged' : 'restricted';
     assert.match(doc, new RegExp(`pod-security\\.kubernetes\\.io/enforce: "?${level}"?$`, 'm'), `${name} Pod Security ${level}`);
+  }
+});
+
+test('admission exempts only the Zot pod, by its exact pinned digest in its own namespace, never on a Harbor site, and refuses a wider exception', () => {
+  const site = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+  const render = (siteFile = site) => splitDocs(renderRelease(ROOT, 'sterling-admission', { site: siteFile, helm: HELM }));
+  const named = (docs, name) => docs.find((doc) => new RegExp(`^ {2}name: ${name}$`, 'm').test(doc));
+  // The registry pod as the zot release renders it: the one reference the exception may name.
+  const zot = splitDocs(renderRelease(ROOT, 'zot', { site, helm: HELM })).find((doc) => /^kind: StatefulSet$/m.test(doc));
+  const zotImages = [...zot.matchAll(/^\s+image: "?([^\s"]+)"?$/gm)].map((match) => match[1]);
+  assert.equal(zotImages.length, 1);
+  assert.ok(zotImages[0].startsWith(`${site.registry}/`), 'served by the site registry');
+  assert.match(zotImages[0], /@sha256:[0-9a-f]{64}$/);
+  const docs = render();
+  const signed = named(docs, 'site-images-signed');
+  assert.equal((signed.match(/^ {2}matchConditions:$/gm) ?? []).length, 1);
+  const conditions = [...signed.matchAll(/^ {6}expression: (".*")$/gm)].map((match) => JSON.parse(match[1]));
+  assert.equal(conditions.length, 1, 'one match condition');
+  const [condition] = conditions;
+  assert.deepEqual([...condition.matchAll(/request\.namespace == '([^']*)'/g)].map((match) => match[1]), ['sterling-registry'], 'exactly one namespace');
+  assert.deepEqual([...condition.matchAll(/c\.image == '([^']*)'/g)].map((match) => match[1]), zotImages, 'exactly the one pinned Zot image');
+  assert.ok(condition.startsWith("!(request.namespace == 'sterling-registry' && object.spec.containers.all(c, c.image == '"), 'skipped only when every container is that image');
+  assert.ok(condition.includes('(!has(object.spec.initContainers) || size(object.spec.initContainers) == 0)'), 'no init container rides along');
+  assert.ok(condition.includes('(!has(object.spec.ephemeralContainers) || size(object.spec.ephemeralContainers) == 0)'), 'no ephemeral container rides along');
+  assert.equal((condition.match(/\|\|/g) ?? []).length, 2, 'the only alternatives are the two empty-list checks');
+  assert.doesNotMatch(condition, /startsWith|endsWith|matches\(|contains\(|\*/, 'equality only, no pattern');
+  // The signature check itself and the registry-only policy are unchanged.
+  assert.match(signed, /validationActions: \[Deny\]\n\s+failurePolicy: Fail/);
+  assert.match(signed, /verifyImageSignatures\(image, \[attestors\.organization\]\)/);
+  assert.doesNotMatch(named(docs, 'site-registry-only'), /matchConditions/);
+  // A Harbor site has no exception at all.
+  assert.ok(!render({ ...site, registryKind: 'harbor' }).some((doc) => doc.includes('matchConditions')), 'Harbor: no exception');
+  // A reference without a digest, outside the site registry or with a pattern, or an excluded namespace, stops the render.
+  const descriptor = listReleases(ROOT).find((item) => item.name === 'sterling-admission');
+  const split = zotImages[0].lastIndexOf(':', zotImages[0].indexOf('@'));
+  const [name, tagAtDigest] = [zotImages[0].slice(0, split), zotImages[0].slice(split + 1)];
+  const scratch = mkdtempSync(path.join(tmpdir(), 'admission-'));
+  try {
+    for (const [index, registryPod] of [
+      { image: { name, tagAtDigest: tagAtDigest.split('@')[0] } },
+      { image: { name: name.replace(site.registry, 'docker.io'), tagAtDigest } },
+      { image: { name: `${name}*`, tagAtDigest } },
+      { namespace: 'kube-system', image: { name, tagAtDigest } },
+    ].entries()) {
+      const file = path.join(scratch, `pod-${index}.yaml`);
+      writeFileSync(file, JSON.stringify({ registryPod }));
+      const values = [...descriptor.values, path.relative(ROOT, file)];
+      assert.throws(() => renderRelease(ROOT, { ...descriptor, images: [], values }, { site, helm: HELM }), /registryPod/, JSON.stringify(registryPod));
+    }
+    // The same values with the lock's own reference render (so each refusal above is the change it names).
+    const good = path.join(scratch, 'pod-good.yaml');
+    writeFileSync(good, JSON.stringify({ registryPod: { image: { name, tagAtDigest } } }));
+    assert.match(renderRelease(ROOT, { ...descriptor, images: [], values: [...descriptor.values, path.relative(ROOT, good)] }, { site, helm: HELM }), /matchConditions/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

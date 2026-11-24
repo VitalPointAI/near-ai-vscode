@@ -1,0 +1,23 @@
+# The site PKI (deploy/charts/sterling-pki), D-16 and D-50. The site settings come from the site file; the chain and the certificate
+# durations from the per-site file deploy/values/site.example/sterling-pki.yaml.
+domain: "${site.domain}"
+registry: "${site.registry}"
+registryKind: "${site.registryKind}"
+
+trust:
+  # Every namespace whose workloads verify site TLS: sessions (OpenBao, Keycloak), Keycloak and its realm applier, OpenBao's Raft peers, the
+  # hubs, OpenSearch and Fluent Bit, the registry, Kyverno's signature lookups, HAProxy's backends and cert-manager's issuers.
+  namespaces:
+    - theia-cloud
+    - sterling-identity
+    - sterling-openbao
+    - sterling-hubs
+    - sterling-logging
+    - sterling-log-shipper
+    - sterling-registry
+    - kyverno
+    - haproxy-controller
+    - cert-manager
+  # The namespaces whose services HAProxy re-encrypts to and verifies (haproxy.org/server-ca): Keycloak.
+  backendNamespaces:
+    - sterling-identity
