@@ -164,7 +164,8 @@ test('hosted, with the pod IP in STERLING_LISTEN_HOST: the tracker answers on th
   }
   assert.ok(podIp, 'a docker network with a free subnet');
   t.after(async () => {
-    await removeOwn();
+    // Only this test's container (the monitor runs are --rm), so the network can go; the suite's image stays for the tests after this one.
+    await run('docker', ['rm', '-f', containerName('podip')]);
     await run('docker', ['network', 'rm', network]);
   });
   const secret = randomBytes(24).toString('hex');
