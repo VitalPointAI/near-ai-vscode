@@ -57,6 +57,25 @@ server:
           tls_min_version    = "tls12"
         }
 
+        # Metrics for the site Prometheus only (48.1-02, D-16): a listener that serves /v1/sys/metrics and refuses every other request, with
+        # the same TLS certificate. The prometheus release's openbao job reads it with the site CA; no token is needed for metrics alone.
+        listener "tcp" {
+          address            = "[::]:9101"
+          tls_cert_file      = "/openbao/userconfig/openbao-tls/tls.crt"
+          tls_key_file       = "/openbao/userconfig/openbao-tls/tls.key"
+          tls_min_version    = "tls12"
+          telemetry {
+            metrics_only                   = true
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        # Prometheus-format metrics without the host name in their names (https://openbao.org/docs/configuration/telemetry/).
+        telemetry {
+          prometheus_retention_time = "1h"
+          disable_hostname          = true
+        }
+
         storage "raft" {
           path = "/openbao/data"
           {{- range $index := until (int .Values.server.ha.replicas) }}

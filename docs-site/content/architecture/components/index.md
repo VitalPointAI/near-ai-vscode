@@ -13,7 +13,7 @@ Nothing here is typed by hand. The pages are generated from the compliance fit r
 
 This catalogue is evidence for these controls in the compliance package: CM-8 and CM-8(1) (the inventory, kept current with each change), CM-7 (why each component is needed), SA-4 (the review before a component is used), SA-5 (this documentation) and SR-3 (exact pins). It is evidence only: your organization decides what it accepts.
 
-There are 140 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
+There are 141 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
 
 ## How to read an entry
 
@@ -58,7 +58,7 @@ OpenBao holds each site's secrets and keys, and the site's internal certificate 
 
 Longhorn gives the site encrypted storage for workspaces, databases and logs. Fluent Bit collects logs and audit records from every node and sends them to OpenSearch at the site; nothing is sent outside. Prometheus collects metrics about the nodes and Kubernetes, which the load tests read.
 
-23 components: image:cr.fluentbit.io/fluent/fluent-bit, image:docker.io/longhornio/backing-image-manager, image:docker.io/longhornio/csi-attacher, image:docker.io/longhornio/csi-node-driver-registrar, image:docker.io/longhornio/csi-provisioner, image:docker.io/longhornio/csi-resizer, image:docker.io/longhornio/csi-snapshotter, image:docker.io/longhornio/livenessprobe, image:docker.io/longhornio/longhorn-engine, image:docker.io/longhornio/longhorn-instance-manager, image:docker.io/longhornio/longhorn-manager, image:docker.io/longhornio/longhorn-share-manager, image:docker.io/longhornio/longhorn-ui, image:docker.io/longhornio/support-bundle-kit, image:docker.io/opensearchproject/opensearch, image:quay.io/prometheus-operator/prometheus-config-reloader, image:quay.io/prometheus/node-exporter, image:quay.io/prometheus/prometheus, image:registry.k8s.io/kube-state-metrics/kube-state-metrics, chart:fluent-bit, chart:longhorn, chart:opensearch, chart:prometheus.
+24 components: image:cr.fluentbit.io/fluent/fluent-bit, image:docker.io/longhornio/backing-image-manager, image:docker.io/longhornio/csi-attacher, image:docker.io/longhornio/csi-node-driver-registrar, image:docker.io/longhornio/csi-provisioner, image:docker.io/longhornio/csi-resizer, image:docker.io/longhornio/csi-snapshotter, image:docker.io/longhornio/livenessprobe, image:docker.io/longhornio/longhorn-engine, image:docker.io/longhornio/longhorn-instance-manager, image:docker.io/longhornio/longhorn-manager, image:docker.io/longhornio/longhorn-share-manager, image:docker.io/longhornio/longhorn-ui, image:docker.io/longhornio/support-bundle-kit, image:docker.io/opensearchproject/opensearch, image:quay.io/prometheus-operator/prometheus-config-reloader, image:quay.io/prometheus/alertmanager, image:quay.io/prometheus/node-exporter, image:quay.io/prometheus/prometheus, image:registry.k8s.io/kube-state-metrics/kube-state-metrics, chart:fluent-bit, chart:longhorn, chart:opensearch, chart:prometheus.
 
 ### [Release and supply chain](./release-and-supply-chain.md)
 

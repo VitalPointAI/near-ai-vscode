@@ -1,5 +1,5 @@
 # Prometheus v3.16.0 (chart deploy/charts/vendored/prometheus-30.0.0.tgz with its bundled subcharts), the settings that decide which images
-# render. The descriptor sets the server, config reloader, kube-state-metrics and node-exporter images by digest from
+# render. The descriptor sets the server, config reloader, kube-state-metrics, node-exporter and Alertmanager images by digest from
 # deploy/bundle/images.lock.json (D-19, D-20). Later plans add the rest of the metrics settings here and must keep these.
 # Site-local metrics only (D-19, D-01): the chart's in-cluster scrape jobs, no remote write or read anywhere, data on the site's encrypted class.
 # Retention and size per site (deploy/values/site.example/prometheus.yaml).
@@ -11,6 +11,13 @@ server:
   persistentVolume:
     enabled: true
     storageClass: "${site.storageClass}"
+  # The site CA (ConfigMap sterling-site-ca from sterling-pki, 47-13), so the openbao scrape job verifies OpenBao's TLS (48.1-02).
+  extraConfigmapMounts:
+    - name: sterling-site-ca
+      mountPath: /etc/sterling-site-ca
+      subPath: ""
+      configMap: sterling-site-ca
+      readOnly: true
 configmapReload:
   prometheus:
     enabled: true
@@ -26,8 +33,65 @@ prometheus-node-exporter:
   image:
     pullPolicy: IfNotPresent
 
-# No alertmanager and no pushgateway (two images fewer; alerts are a Phase 48 item).
+# OpenBao's metrics (48.1-02): its metrics-only listener on 9101 serves TLS with the site certificate, which the chart's annotation-driven
+# pod job cannot verify, so this job reads it with the site CA. The certificate names the openbao service, not the pod address.
+extraScrapeConfigs: |
+  - job_name: openbao
+    scheme: https
+    metrics_path: /v1/sys/metrics
+    params:
+      format:
+        - prometheus
+    tls_config:
+      ca_file: /etc/sterling-site-ca/ca.crt
+      server_name: openbao.sterling-openbao.svc
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - sterling-openbao
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_label_component]
+        action: keep
+        regex: openbao;server
+      - source_labels: [__meta_kubernetes_pod_ip]
+        action: replace
+        regex: (.+)
+        replacement: $1:9101
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+
+# Alertmanager is on for the alert rules in deploy/values/prometheus-alerts.yaml (48.1-02, D-16): one receiver, email to your organization's
+# security operators (site setting alertRecipients) through the site's own mail server (deploy/values/site.example/prometheus.yaml). No
+# webhook, chat or remote receiver. The pushgateway stays off.
 alertmanager:
-  enabled: false
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+  configmapReload:
+    enabled: true
+    image:
+      pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    storageClass: "${site.storageClass}"
+    size: 2Gi
+  config:
+    global:
+      resolve_timeout: 5m
+    receivers:
+      - name: site-security-operators
+        email_configs:
+          - to: "${site.alertRecipients}"
+            send_resolved: true
+    route:
+      receiver: site-security-operators
+      group_by: [alertname, source]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
 prometheus-pushgateway:
   enabled: false

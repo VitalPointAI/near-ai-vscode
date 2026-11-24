@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "mp-06"
+  ],
+  "gap": "G405",
+  "id": "g405",
+  "milestones": [
+    {
+      "targetDate": "2027-02-26",
+      "title": "The authorizing official accepts the limit, or per-person volume keys are designed"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "One LUKS class key encrypts every workspace volume, so a departed person's volume cannot be erased by destroying its own key; the disks follow your organization's media handling. Record the authorizing official's acceptance of this limit, or design per-person volume keys.",
+  "title": "Removing a workspace volume does not cryptographically erase it"
+}

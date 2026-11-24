@@ -2775,7 +2775,7 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Prometheus 3.16.0: site metrics, needed by Phase 48's load test.",
-      "role": "Collects metrics about the site's nodes and Kubernetes objects. The Phase 48 load tests read them to measure a site. Alertmanager is off.",
+      "role": "Collects metrics about the site's nodes, Kubernetes objects, OpenBao and the log shipper, and evaluates the alert rules of deploy/values/prometheus-alerts.yaml. The Phase 48 load tests read its metrics to measure a site.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
@@ -2794,7 +2794,37 @@
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
         "Loki is AGPL and is not used (D-19).",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Alertmanager is off; metrics stay on the site."
+        "Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/prometheus/alertmanager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Alertmanager 0.35.0: sends the site's alerts (audit shipping, OpenBao seal and audit device, and later rules) to your organization's security operators by email.",
+      "role": "Receives the alerts Prometheus raises from deploy/values/prometheus-alerts.yaml and emails them to the site setting alertRecipients through the site's own mail server. It has one receiver and no webhook, chat or remote receiver.",
+      "architectureArea": "storage-logging-monitoring",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-05",
+        "si-04.05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock; deploy/test/alerting.test.mjs checks that email to the site mail server is its only receiver.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "One receiver: email to the site setting alertRecipients through the site's own mail server, which the site lists in egressAllow when it is outside the cluster; no webhook, chat or remote receiver (48.1-02, D-16).",
+        "Mail uses STARTTLS (smtp_require_tls). The mail server's certificate must chain to a CA the image trusts; a site whose mail server uses only its own CA mounts that CA for Alertmanager or relays through a server the image trusts, or alerts are not delivered.",
+        "Alert text names pods, nodes and alert names only; it carries no record content, secrets or personal information.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -2808,7 +2838,7 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Reloads the Prometheus configuration when it changes.",
-      "role": "Reloads Prometheus when its configuration changes, without a restart.",
+      "role": "Reloads Prometheus and Alertmanager when their configuration changes, without a restart.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
@@ -2827,7 +2857,7 @@
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
         "Loki is AGPL and is not used (D-19).",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Alertmanager is off; metrics stay on the site."
+        "Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"

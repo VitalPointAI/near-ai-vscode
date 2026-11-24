@@ -875,15 +875,15 @@ Plans:
   3. Audit failures raise alerts that cannot be silently broken by a missing input; audit records are archived daily to write-once object storage with a signed, chained manifest whose signing is restricted to the archive's service account (a cluster administrator could sign the current day's manifest but cannot alter a day already archived, and a second signature in a day raises an alert), are kept 1,825 days, and leave the online store only after the archive holds them.
   4. Every hosted key is inventoried from code with its lifecycle; the supplier release key and the organization site key are separated as the owner decided, with the development site key in SoftHSM2 refused at production sites.
   5. Every 48.1 obligation shows on the hosted dashboard from current documents and passing tests, and its gap closes only on that evidence.
-**Plans:** 23 plans in 7 waves (planned 2026-11-24, revised the same day after the independent plan check and the owner's decisions a to d, all answered; decisions D-01 to D-27 in `48.1-CONTEXT.md`; cross-phase items in `48.1-HANDOFFS.md`; each wave lands as one combined pull request with one owner gate approval)
+**Plans:** 6/23 plans executed in 7 waves (planned 2026-11-24, revised the same day after the independent plan check and the owner's decisions a to d, all answered; decisions D-01 to D-27 in `48.1-CONTEXT.md`; cross-phase items in `48.1-HANDOFFS.md`; each wave lands as one combined pull request with one owner gate approval)
 
 Plans:
-- [ ] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
-- [ ] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
-- [ ] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
-- [ ] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
-- [ ] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
-- [ ] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
+- [x] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
+- [x] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
+- [x] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
+- [x] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
+- [x] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
+- [x] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
 - [ ] 48.1-06-PLAN.md: Wave 2. External services as a fit-checked `service` kind and their register; model-endpoints and the Controlled Goods and ITAR overlays in the hosted scope
 - [ ] 48.1-07-PLAN.md: Wave 2. Hosted threat model by trust boundary (every T-47 row), criticality analysis, hosted data flows
 - [ ] 48.1-08-PLAN.md: Wave 2. Key management plan and a code-checked key inventory; the cosign, timestamp and crypto-erase limits
@@ -2083,7 +2083,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
-| 48.1. Hosted SA&A completeness | 0/23 | Planned 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
+| 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

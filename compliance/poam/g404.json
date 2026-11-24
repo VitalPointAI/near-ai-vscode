@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sc-12",
+    "sr-11"
+  ],
+  "gap": "G404",
+  "id": "g404",
+  "milestones": [
+    {
+      "targetDate": "2027-02-26",
+      "title": "Owner decision on a site timestamp authority recorded"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Our signatures carry no trusted time (the cosign signing configuration is empty), so after a key compromise no signature can be dated before it and every signed item is re-issued. Decide whether a site timestamp authority is added.",
+  "title": "No timestamp authority dates our signatures"
+}

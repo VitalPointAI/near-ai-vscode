@@ -6,7 +6,8 @@ registryKind: "${site.registryKind}"
 
 trust:
   # Every namespace whose workloads verify site TLS: sessions (OpenBao, Keycloak), Keycloak and its realm applier, OpenBao's Raft peers, the
-  # hubs, OpenSearch and Fluent Bit, the registry, Kyverno's signature lookups, HAProxy's backends and cert-manager's issuers.
+  # hubs, OpenSearch and Fluent Bit, the registry, Kyverno's signature lookups, HAProxy's backends, cert-manager's issuers and the site
+  # Prometheus reading OpenBao's metrics listener (48.1-02).
   namespaces:
     - theia-cloud
     - sterling-identity
@@ -18,6 +19,7 @@ trust:
     - kyverno
     - haproxy-controller
     - cert-manager
+    - sterling-monitoring
   # The namespaces whose services HAProxy re-encrypts to and verifies (haproxy.org/server-ca): Keycloak.
   backendNamespaces:
     - sterling-identity

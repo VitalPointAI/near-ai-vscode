@@ -1,0 +1,20 @@
+{
+  "controls": [
+    "au-09.04"
+  ],
+  "gap": "G406",
+  "id": "g406",
+  "milestones": [
+    {
+      "phase": "48.1",
+      "title": "The daily signature watch (48.1-14) detects a second manifest signature"
+    },
+    {
+      "targetDate": "2027-02-26",
+      "title": "The authorizing official accepts the residual risk, or a manifest signer outside the cluster's administration is designed"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Signing is restricted to the archive job's account, but a cluster administrator could sign that day's manifest; a day already archived on write-once storage cannot be changed. Detect a second signature with the daily signature watch, then record the authorizing official's acceptance of the residual risk, or design a manifest signer outside the cluster's administration.",
+  "title": "A cluster administrator can sign the current day's audit archive manifest"
+}
