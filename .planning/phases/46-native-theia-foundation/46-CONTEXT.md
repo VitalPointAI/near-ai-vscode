@@ -111,6 +111,9 @@ Phase 47's assumptions, each confirmed or corrected. Phase 46 produces these; Ph
 </interface_contract>
 
 <canonical_refs>
+- **Step-up enforcement (reconciled with Phase 47, 2026-11-23):** signing logs in to the jwt role `sterling-workbench-stepup` (bound `acr`, TTL no longer than the step-up window; defined in 47-07) with the fresh forwarded token for each signature and revokes that token after use; the ordinary `sterling-workbench` session token never signs. Setting `STERLING_OPENBAO_STEPUP_ROLE` names the role.
+- **Third-party images:** Phase 47's tag-triggered `deploy-images.yml` publishes rebuilt third-party images (Theia Cloud, oauth2-proxy, Postgres) with the same organization key in the same `container-release` environment; the workbench image itself is published only by the Release workflow.
+
 ## Canonical References
 - `.planning/research/multiuser-hosting/DESIGN.md` (sections 2, 6, 7, 8, 9, 10, 13, 14, 15) and `RESEARCH.md`.
 - Spike: `git show docs/theia-container-release:.planning/spikes/theia-team-studio/<path>` (README.md, MIGRATION.md, Dockerfile, package.json, extension/); PR #162 (`feat/theia-foundation-review`) and its review comments (`gh pr view 162 --comments`).
