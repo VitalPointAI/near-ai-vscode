@@ -6,11 +6,12 @@
 // purpose, so it can never pass silently), review the diff of src/test/copy-lint-baseline.json, and run it again without the flag. A new hit is fixed in the
 // copy with the glossary's user word, never by raising the baseline; re-record only to move a count with code that moved, or to drop counts a fix removed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { MODES, ModeId, ModeRow } from '../domain/org/modes';
+import { applyFolderWords, FOLDER_NOUN_TEXT } from '../domain/setup/words';
 import {
   ALLOWED_CLAIM_CONTEXTS, ALLOWED_CONTEXTS, BASELINE_PATH, COMPLIANCE_CLAIMS, COPY_RULES, CopyCounts, DISTINCTIVE_MODE_WORDS, GLOSSARY_WORDS, MODEL_INSTRUCTIONS,
   REPO_ROOT, baselineText, checkTightness, compareWithBaseline, copySourceFiles, countHits, extractCopy, extractPackage, increaseMessage, modeWordsFromTable,
@@ -315,6 +316,42 @@ test('D-45 pattern: the tightness check fails on a stale count only when the bas
   checkTightness(stale, false, (note) => notes.push(note));
   assert.ok(notes.some((note) => note.includes('a.ts  glossary  3 -> 1')) && notes.some((note) => note.includes('b.ts  brand  1 -> 0')));
   checkTightness([], true, (note) => notes.push(note));
+});
+
+test('owner D10, D-59: every setup *_TEXT constant has a Defence wording that never calls the folder a project', () => {
+  // The one category left out: the kind-of-work answer labels, where "project" names a kind of work (D-59 keeps it), not the folder.
+  const kindLabels = 'src/domain/setup/words.ts QUESTION_TEXT.q1.choices';
+  const left: string[] = [];
+  const hits: string[] = [];
+  const nouns = Object.values(FOLDER_NOUN_TEXT);
+  const visit = (value: unknown, where: string): void => {
+    if (where.startsWith(`${kindLabels}.`)) { if (!left.includes(kindLabels)) left.push(kindLabels); return; }
+    if (typeof value === 'string') {
+      for (const noun of nouns) {
+        const shown = applyFolderWords(value, noun).split('program, product or project').join('');
+        if (/\bprojects?\b/i.test(shown)) hits.push(`${where} (${noun}): ${value}`);
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, inner] of Object.entries(value)) visit(inner, `${where}.${key}`);
+    }
+  };
+  let modules = 0;
+  for (const dir of ['domain/setup', 'services/setup']) {
+    for (const file of readdirSync(path.join(REPO_ROOT, 'src', dir)).filter((name) => name.endsWith('.ts')).sort()) {
+      const source = `src/${dir}/${file}`;
+      if (source === 'src/services/setup/getStarted.ts') {
+        // The one file that imports vscode is read, not loaded: it must hold no exported text constant.
+        assert.doesNotMatch(readFileSync(path.join(REPO_ROOT, source), 'utf8'), /export const [A-Z0-9_]+_TEXT\b/);
+        continue;
+      }
+      const loaded = require(path.join(__dirname, '..', dir, file.replace(/\.ts$/, '.js'))) as Record<string, unknown>;
+      modules += 1;
+      for (const [name, value] of Object.entries(loaded)) if (name.endsWith('_TEXT')) visit(value, `${source} ${name}`);
+    }
+  }
+  assert.ok(modules > 40, `loaded ${String(modules)} setup modules`);
+  assert.deepEqual(left, [kindLabels]);
+  assert.deepEqual(hits, []);
 });
 
 test('D-45 pattern: the baseline is tight (enforced at the close of a phase with NEAR_AI_BASELINE_TIGHT=1)', (t) => {

@@ -6,7 +6,7 @@ import { optionIdOf } from '../../domain/setup/ids';
 import { MODEL_SERVER_PORTS } from '../../domain/setup/servers';
 import type { Identification, IdentifyServer, ProbeTarget, ServerKind, ServerModel, ServerProbeRow } from '../../domain/setup/servers';
 import {
-  initialViability, nextViability, NO_LOCAL_SERVER_TEXT, SERVER_NEEDS_KEY_TEXT,
+  HOSTED_NO_LOOPBACK_TEXT, initialViability, nextViability, NO_LOCAL_SERVER_TEXT, SERVER_NEEDS_KEY_TEXT,
   SERVER_NO_ALLOWED_MODEL_TEXT, SERVER_TEST_FAILED_TEXT, UNKNOWN_SERVER_TEXT,
 } from '../../domain/setup/viability';
 import type { OptionCheckInput, OptionSource, ViabilityEvent, ViabilityResult } from '../../domain/setup/viability';
@@ -53,6 +53,13 @@ function namedTarget(endpoint: PolicyEndpoint): ProbeTarget | undefined {
 
 type FoundServer = { readonly target: ProbeTarget; readonly identity: Identification };
 
+function hostedLocal(input: OptionCheckInput): ViabilityResult {
+  const at = input.now();
+  const started = nextViability({ ...initialViability(optionIdOf('this-computer'), 'this-computer', input.hostKind), policyHash: input.policyHash },
+    { type: 'start', at });
+  return nextViability(started, { type: 'failed', at, check: 'detected', reasonCode: 'not-detected', sentence: HOSTED_NO_LOOPBACK_TEXT });
+}
+
 export function createLocalServersSource(deps: LocalServersDeps): OptionSource {
   const ports = deps.rows ? [...new Set(deps.rows.flatMap((row) => row.ports))] : MODEL_SERVER_PORTS;
   const targets: readonly ProbeTarget[] = ports.map((port) => ({
@@ -62,7 +69,8 @@ export function createLocalServersSource(deps: LocalServersDeps): OptionSource {
     id: 'local-servers',
     kinds: ['this-computer', 'org-server'],
     async check(input, signal) {
-      const local = checkOption(input, signal, deps, targets).then((result) => {
+      // Owner D7, D-49: a hosted session's loopback is the pod's own (sidecars), so it is never probed.
+      const local = (input.hostKind === 'hosted' ? Promise.resolve(hostedLocal(input)) : checkOption(input, signal, deps, targets)).then((result) => {
         input.progress(result);
         return result;
       });

@@ -245,9 +245,17 @@ export type ContactTopic = (typeof CONTACT_TOPICS)[number];
 export const LOCKABLE_ANSWERS = Object.freeze(['canada'] as const);
 export type LockableAnswer = (typeof LOCKABLE_ANSWERS)[number];
 
-/** The kinds of work the guided setup offers, in its default order. */
-export const KINDS_OF_WORK = Object.freeze(['software', 'staff', 'analysis', 'capital-projects', 'writing'] as const);
+/**
+ * The kinds of work a policy may list. D-50 (owner N2) appends the four Defence work areas; appending keeps every existing policy's meaning, and a
+ * kind outside this list is still refused.
+ */
+export const KINDS_OF_WORK = Object.freeze([
+  'software', 'staff', 'analysis', 'capital-projects', 'writing',
+  'capability-development', 'planning', 'resource-management', 'exercises-training'
+] as const);
 export type KindOfWork = (typeof KINDS_OF_WORK)[number];
+/** What the guided setup offers, in this order, when a policy lists no kinds of work. The Defence edition supplies its work areas itself (D-50). */
+export const DEFAULT_KINDS_OF_WORK: readonly KindOfWork[] = Object.freeze(['software', 'staff', 'analysis', 'capital-projects', 'writing'] as const);
 
 export interface PolicyContact {
   readonly topic: ContactTopic;
@@ -346,7 +354,7 @@ function parseLocked(value: unknown, path: string): Parsed<Readonly<Partial<Reco
   return { ok: true, value: Object.freeze(out) };
 }
 
-/** kindsOfWork: one to five kinds from KINDS_OF_WORK, in the order the setup should offer them, none twice. */
+/** kindsOfWork: one or more kinds from KINDS_OF_WORK (at most its length), in the order the setup should offer them, none twice. */
 function parseKindsOfWork(value: unknown, path: string): Parsed<readonly KindOfWork[]> {
   if (!Array.isArray(value)) return refused('wrong-type', path);
   if (value.length === 0) return refused('empty-list', path);
@@ -448,7 +456,7 @@ export function parseOnboardingSection(value: unknown, scales: ScaleTable, path 
     if (!parsed.ok) return parsed;
     locked = parsed.value;
   }
-  let kindsOfWork: readonly KindOfWork[] = Object.freeze([...KINDS_OF_WORK]);
+  let kindsOfWork: readonly KindOfWork[] = Object.freeze([...DEFAULT_KINDS_OF_WORK]);
   if (has(opened, 'kindsOfWork')) {
     const parsed = parseKindsOfWork(ownValue(opened, 'kindsOfWork'), childPath(path, 'kindsOfWork'));
     if (!parsed.ok) return parsed;

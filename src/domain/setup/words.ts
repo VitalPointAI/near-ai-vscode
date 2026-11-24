@@ -26,7 +26,10 @@ export const QUESTION_TEXT = Object.freeze({
     choices: {
       software: 'Write or review software', staff: 'Staff work in a headquarters section',
       analysis: 'Analyse information and data', 'capital-projects': 'Plan or manage capital projects',
-      writing: 'Write and research documents', 'something-else': 'Something else',
+      writing: 'Write and research documents',
+      'capability-development': 'Capability development: programs, products and projects',
+      planning: 'Planning: operational or administrative', 'resource-management': 'Resource management',
+      'exercises-training': 'Exercises and training', 'something-else': 'Something else',
     },
     staffSections: {
       j1: 'J1', j2: 'J2', j3: 'J3', j4: 'J4', j5: 'J5', j6: 'J6', j7: 'J7', j8: 'J8', j9: 'J9', joint: 'Joint staff',
@@ -85,3 +88,56 @@ export const RECOMMEND_REASON_TEXT: Readonly<Record<RecommendReason, string>> = 
   'protected-c': STOP_CLASSIFIED_TEXT,
   'contract-unapproved': STOP_CONTRACT_TEXT,
 });
+
+/**
+ * Owner D10, D-59: in the Defence edition the guide never calls the workspace folder "this project". It names the chosen work area's own kind of
+ * work, or "this folder" when the kind is not known. "Project" stays only as a Capability Development kind of work.
+ */
+export const FOLDER_NOUN_TEXT = Object.freeze({
+  planning: 'plan',
+  'resource-management': 'inventory',
+  'exercises-training': 'exercise or training',
+  'capability-development': 'program, product or project',
+  folder: 'folder'
+});
+
+/** The word for the workspace folder, or undefined outside the Defence edition (no rewrite there). */
+export function folderNoun(edition: 'ca-defence' | undefined, kindOfWork?: string): string | undefined {
+  if (edition !== 'ca-defence') return undefined;
+  const { folder, ...byKind }: Readonly<Record<string, string>> = FOLDER_NOUN_TEXT;
+  return kindOfWork !== undefined && Object.hasOwn(byKind, kindOfWork) ? byKind[kindOfWork] : folder;
+}
+
+const oneWord = (noun: string): boolean => /^[a-z]+$/.test(noun);
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+const possessive = (noun: string): string => oneWord(noun) ? `${noun}'s` : "folder's";
+const titled = (noun: string): string => oneWord(noun) ? capital(noun) : 'Folder';
+
+/** Whole phrases, tried in this order at each position. A text with none of them is returned unchanged. */
+export const FOLDER_PHRASES: readonly { readonly phrase: string; to(noun: string): string }[] = Object.freeze([
+  { phrase: "this project's", to: (noun: string) => `this ${possessive(noun)}` },
+  { phrase: "This project's", to: (noun: string) => `This ${possessive(noun)}` },
+  { phrase: 'this project’s', to: (noun: string) => `this ${possessive(noun).replace("'", '’')}` },
+  { phrase: 'This project’s', to: (noun: string) => `This ${possessive(noun).replace("'", '’')}` },
+  { phrase: 'a project folder', to: () => 'a folder' },
+  { phrase: 'your project files', to: () => 'the files in this folder' },
+  { phrase: 'the project files', to: () => 'the files in this folder' },
+  { phrase: 'shared project settings', to: () => 'shared settings' },
+  { phrase: 'These project settings', to: () => 'These settings' },
+  { phrase: 'your project team', to: () => 'your software team' },
+  { phrase: 'every project on this computer', to: () => 'every folder on this computer' },
+  { phrase: 'this project', to: (noun: string) => `this ${noun}` },
+  { phrase: 'This project', to: (noun: string) => `This ${noun}` },
+  { phrase: 'the project', to: (noun: string) => `the ${noun}` },
+  { phrase: 'The project', to: (noun: string) => `The ${noun}` },
+  { phrase: 'Project label', to: (noun: string) => `${titled(noun)} label` },
+  { phrase: 'Project mode', to: (noun: string) => `${titled(noun)} mode` }
+].map((entry) => Object.freeze(entry)));
+
+const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const PHRASE_PATTERN = new RegExp(`(?<![\\w-])(?:${FOLDER_PHRASES.map(({ phrase }) => escape(phrase)).join('|')})(?![\\w-])`, 'g');
+
+/** User text only: one pass, so a replacement is never matched again. Code identifiers never pass through here (plan 23). */
+export function applyFolderWords(text: string, noun: string): string {
+  return text.replace(PHRASE_PATTERN, (found) => FOLDER_PHRASES.find(({ phrase }) => phrase === found)?.to(noun) ?? found);
+}

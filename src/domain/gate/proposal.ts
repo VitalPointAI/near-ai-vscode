@@ -132,7 +132,9 @@ const TOPIC_WORDS: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const WORK_WORDS: Readonly<Record<string, string>> = Object.freeze({
-  software: 'Software', staff: 'Staff work', analysis: 'Analysis', 'capital-projects': 'Capital projects', writing: 'Writing'
+  software: 'Software', staff: 'Staff work', analysis: 'Analysis', 'capital-projects': 'Capital projects', writing: 'Writing',
+  'capability-development': 'Capability development', planning: 'Planning', 'resource-management': 'Resource management',
+  'exercises-training': 'Exercises and training'
 });
 
 function labelsShown(keys: readonly unknown[], scales: ScaleTable): string {

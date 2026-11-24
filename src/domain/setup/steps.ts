@@ -1,5 +1,5 @@
 // GUIDE-03, GUIDE-06. Pure: no I/O, no clock, no vscode, no package.
-type KindOfWorkAnswer = 'software' | 'analysis' | 'writing' | 'staff' | 'capital-projects' | 'something-else';
+import type { KindOfWorkAnswer } from './answers';
 export interface StepContext { readonly root?: string; readonly kind?: KindOfWorkAnswer; setting(key: string): unknown; readonly facts: Record<string, unknown>; }
 export const STEP_STATES = Object.freeze(['to-do', 'done', 'waiting', 'not-available'] as const);
 export type StepState = (typeof STEP_STATES)[number];

@@ -13,7 +13,7 @@ import type { PolicyDocument, PolicyLayerState } from '../domain/gate/policyDocu
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { parsePeopleSection } from '../domain/org/peopleSection';
 import {
-  CONTACT_TOPICS, EXPORT_REGIMES, KINDS_OF_WORK, LOCKABLE_ANSWERS, RESIDENCY_REGIONS, parseContacts, parseExportControlSection, parseLimitsSection,
+  CONTACT_TOPICS, DEFAULT_KINDS_OF_WORK, EXPORT_REGIMES, KINDS_OF_WORK, LOCKABLE_ANSWERS, RESIDENCY_REGIONS, parseContacts, parseExportControlSection, parseLimitsSection,
   parseOnboardingSection, parseRegimes, parseResidencySection
 } from '../domain/gate/sections';
 import { signPayload } from '../domain/team/signedPayload';
@@ -286,7 +286,9 @@ test('D-28, D-63: onboarding fills contacts [], locked {} and all five kinds of 
   const filled = parseOnboardingSection({ v: 1 }, SCALE_PRESETS);
   assert.ok(filled.ok);
   if (filled.ok) {
-    assert.deepEqual(filled.value, { v: 1, contacts: [], locked: {}, kindsOfWork: [...KINDS_OF_WORK] });
+    assert.deepEqual(filled.value, { v: 1, contacts: [], locked: {}, kindsOfWork: [...DEFAULT_KINDS_OF_WORK] });
+    // D-50: a policy that names no kinds keeps offering the same five, in the same order; the work areas are offered by the edition.
+    assert.deepEqual([...DEFAULT_KINDS_OF_WORK], ['software', 'staff', 'analysis', 'capital-projects', 'writing']);
     assert.equal(filled.value.discovery, undefined);
   }
   const discovery = parseOnboardingSection({ v: 1, discovery: {} }, SCALE_PRESETS);
@@ -301,6 +303,14 @@ test('D-28, D-63: onboarding fills contacts [], locked {} and all five kinds of 
   assert.equal(o({ v: 1, kindsOfWork: [] }), 'empty-list onboarding.kindsOfWork');
   assert.equal(o({ v: 1, kindsOfWork: ['software', 'software'] }), 'duplicate onboarding.kindsOfWork[1]');
   assert.equal(o({ v: 1, kindsOfWork: ['gaming'] }), 'not-allowed-here onboarding.kindsOfWork[0]');
+  // D-50, owner N2: the four Defence work areas are kinds of work a policy may list; the list is appended to, never loosened.
+  assert.equal(o({ v: 1, kindsOfWork: ['capability-development', 'planning'] }), 'ok');
+  assert.equal(o({ v: 1, kindsOfWork: ['resource-management', 'exercises-training', 'software'] }), 'ok');
+  assert.equal(o({ v: 1, kindsOfWork: ['operations'] }), 'not-allowed-here onboarding.kindsOfWork[0]');
+  assert.equal(o({ v: 1, kindsOfWork: ['planning', 'planning'] }), 'duplicate onboarding.kindsOfWork[1]');
+  assert.equal(KINDS_OF_WORK.length, 9);
+  assert.equal(o({ v: 1, kindsOfWork: [...KINDS_OF_WORK] }), 'ok');
+  assert.equal(o({ v: 1, kindsOfWork: [...KINDS_OF_WORK, 'software'] }), 'not-allowed-here onboarding.kindsOfWork');
   assert.equal(o({ v: 1, defaultScale: 'ca-protected' }), 'ok');
   assert.equal(o({ v: 1, defaultScale: 'planet' }), 'not-allowed-here onboarding.defaultScale');
   assert.equal(o({ v: 1, roles: ['software'] }), 'unknown-field onboarding.roles');
@@ -386,7 +396,7 @@ test('residency, onboarding and limits are read in the document at their own pat
   });
   const ok = parsePolicyDocument(with3(() => undefined));
   assert.ok(ok.ok, ok.ok ? '' : ok.message);
-  if (ok.ok) assert.deepEqual(ok.value.onboarding?.kindsOfWork, [...KINDS_OF_WORK]);
+  if (ok.ok) assert.deepEqual(ok.value.onboarding?.kindsOfWork, [...DEFAULT_KINDS_OF_WORK]);
   const at = (edit: (d: Loose) => void): string => { const parsed = parsePolicyDocument(with3(edit)); return parsed.ok ? 'ok' : `${parsed.reason} ${parsed.path}`; };
   assert.equal(at((d) => { d.residency.required = ['unstated']; }), 'not-allowed-here residency.required[0]');
   assert.equal(at((d) => { d.onboarding.contacts = Array.from({ length: 9 }, (_, i) => ({ topic: 'it', name: `Desk ${String(i)}`, how: 'it@example.org' })); }), 'not-allowed-here onboarding.contacts');

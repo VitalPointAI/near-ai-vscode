@@ -3,7 +3,8 @@ export const DEVICE_CLASSES = Object.freeze(['unified', 'discrete', 'cpu-only', 
 export type DeviceClass = (typeof DEVICE_CLASSES)[number];
 export const MEMORY_SOURCES = Object.freeze(['os-total', 'meminfo', 'gtt-plus-vram', 'vram', 'apple-working-set', 'not-measured'] as const);
 export type MemorySource = (typeof MEMORY_SOURCES)[number];
-export const HOST_KINDS = Object.freeze(['desktop', 'remote', 'container', 'unknown'] as const);
+// 'hosted' (owner D7, D-49): a Sterling session on your organization's servers. Appended, so earlier records keep their meaning.
+export const HOST_KINDS = Object.freeze(['desktop', 'remote', 'container', 'unknown', 'hosted'] as const);
 export type HostKind = (typeof HOST_KINDS)[number];
 export const DEVICE_PLATFORMS = Object.freeze(['darwin', 'linux', 'win32', 'unknown'] as const);
 export interface DeviceFacts { readonly class: DeviceClass; readonly platform: (typeof DEVICE_PLATFORMS)[number]; readonly totalMemoryBytes: number; readonly gpuUsableBytes?: number; readonly gpuUsableSource: MemorySource; readonly estimate: boolean; readonly gpuName?: string; readonly fix?: string; readonly hostKind: HostKind; readonly providerId: string; }

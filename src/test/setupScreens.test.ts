@@ -4,7 +4,7 @@ import { cardFor, type CardOutcome } from '../domain/setup/cards';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import { DEFAULT_ROUTING } from '../domain/gate/routing';
 import type { OptionOutcome } from '../domain/setup/recommend';
-import { GET_STARTED_BODY, screenFor, type ScreenInputs } from '../domain/setup/screens';
+import { CHECKED_IN_SESSION_TEXT, GET_STARTED_BODY, screenFor, type ScreenInputs } from '../domain/setup/screens';
 import { STOP_CLASSIFIED_TEXT } from '../domain/setup/words';
 import { startSession } from '../domain/setup/session';
 
@@ -123,6 +123,21 @@ test('check page renders label names and describes a run with nothing to apply',
 test('page skeleton has one polite region and a focusable heading', () => {
   assert.equal((GET_STARTED_BODY.match(/aria-live="polite"/g) ?? []).length, 1);
   assert.match(GET_STARTED_BODY, /<h1 id="heading" tabindex="-1">/);
+});
+
+test('owner D7, D-49: a hosted run says the checks ran in the Sterling session and names no machine', () => {
+  const checking = { ...startSession({ now: 0 }), state: 'checking', screen: 'checking' } as const;
+  const hosted = screenFor(checking, { ...inputs, hostKind: 'hosted', checkedOn: 'pod-7f9c' });
+  assert.equal(hosted.kind, 'checking');
+  assert.ok('checkedOn' in hosted);
+  assert.equal(hosted.checkedOn, CHECKED_IN_SESSION_TEXT);
+  assert.equal(CHECKED_IN_SESSION_TEXT, 'Checked in your Sterling session');
+  assert.doesNotMatch(JSON.stringify(hosted), /pod-7f9c/);
+  for (const hostKind of ['desktop', 'container', undefined] as const) {
+    const shown = screenFor(checking, { ...inputs, hostKind });
+    assert.ok('checkedOn' in shown);
+    assert.equal(shown.checkedOn, 'Checked on: development computer');
+  }
 });
 
 test('checking and options preserve the same help and surface scan text', () => {

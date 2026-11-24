@@ -193,7 +193,7 @@ export function createGuideController(deps: GuideControllerDeps): GuideControlle
     }
     const screen = screenFor(current, {
       cards, candidates: visit?.rows ?? [], scan: visit?.offer ?? scanOff,
-      checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice
+      checkedOn, policy, contacts: policy.contacts, startingRules: false, modeRow, landing, approvedDevice, hostKind: kind
     });
     deps.post({ type: 'screen', screen: projectName && screen.kind !== 'fix'
       ? { ...screen, heading: `${screen.heading} · ${projectName}` } : screen });

@@ -45,6 +45,8 @@ export function createOptionSourceRegistry(): OptionSourceRegistry {
   };
 }
 export const NO_LOCAL_SERVER_TEXT = 'No local AI server was found. This computer has {memory} of memory.';
+/** Owner D7, D-49: a hosted session never probes its own loopback; only the servers your organization lists are checked. */
+export const HOSTED_NO_LOOPBACK_TEXT = "This Sterling session runs on your organization's servers, so it checks only the AI servers your organization's rules list.";
 export const NO_ADAPTER_TEXT = 'This version cannot connect to it yet. Update the extension.';
 export const NOT_IN_POLICY_TEXT = 'This option is not in your organization\'s rules.';
 export const STILL_CHECKING_TEXT = 'Still checking {option}.';

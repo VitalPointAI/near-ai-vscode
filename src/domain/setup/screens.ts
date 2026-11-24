@@ -1,5 +1,6 @@
-import type { PolicyContact } from '../gate/sections';
-import { fillSlots, KIND_OF_WORK_ANSWERS, MAX_OTHER_KIND_CHARS, type KindOfWorkAnswer } from './answers';
+import { DEFAULT_KINDS_OF_WORK, type PolicyContact } from '../gate/sections';
+import { fillSlots, MAX_OTHER_KIND_CHARS, type KindOfWorkAnswer } from './answers';
+import type { HostKind } from './device';
 import { choiceNeedsReason, type OptionCard } from './cards';
 import { applyStepPending, CHANGE_TEXT, type ApplyStepReport, type ChangeItem } from './changes';
 import type { GuideAnswerEvent, QuestionScreen } from './guideMessages';
@@ -75,7 +76,11 @@ export interface ScreenInputs {
   readonly policy?: GuidePolicy;
   readonly kindsOfWork?: readonly KindOfWorkAnswer[];
   readonly fixedKindSource?: string;
+  /** Owner D7, D-49: a hosted run names no machine; the checks ran in the person's Sterling session. */
+  readonly hostKind?: HostKind;
 }
+
+export const CHECKED_IN_SESSION_TEXT = 'Checked in your Sterling session';
 
 export const SCREEN_TEXT = Object.freeze({
   step: 'Step {n} of {m}: {question}',
@@ -237,7 +242,7 @@ function questionFields(screen: QuestionScreen, session: GuideSession, inputs: S
   const { answers } = session;
   switch (screen) {
     case 'kind-of-work': {
-      const kinds = inputs.kindsOfWork ?? (inputs.policy?.state === 'ready' ? inputs.policy.kindsOfWork : KIND_OF_WORK_ANSWERS);
+      const kinds = inputs.kindsOfWork ?? (inputs.policy?.state === 'ready' ? inputs.policy.kindsOfWork : DEFAULT_KINDS_OF_WORK);
       const choices = Object.fromEntries([...new Set([...kinds, 'something-else' as const])].map((kind) => [kind, QUESTION_TEXT.q1.choices[kind]]));
       const fields = [field('kindOfWork', choices, answers.kindOfWork)];
       if (answers.kindOfWork === 'staff') fields.push(field('staffSection', QUESTION_TEXT.q1.staffSections, answers.staffSection, 'radio', SCREEN_TEXT.staffSection));
@@ -323,7 +328,7 @@ export function screenFor(session: GuideSession, inputs: ScreenInputs): GuideScr
     backText: (isQuestion && step <= 1) || total === 0 ? undefined : SCREEN_TEXT.back,
     startingRules: (policy?.startingRules ?? inputs.startingRules) ? STARTING_RULES_TEXT : undefined,
   };
-  const checkedOn = fillSlots(SCREEN_TEXT.checkedOn, { machine: inputs.checkedOn });
+  const checkedOn = inputs.hostKind === 'hosted' ? CHECKED_IN_SESSION_TEXT : fillSlots(SCREEN_TEXT.checkedOn, { machine: inputs.checkedOn });
   if (isQuestion) {
     const screen = session.screen as QuestionScreen;
     const { heading, fields } = questionFields(screen, session, inputs);

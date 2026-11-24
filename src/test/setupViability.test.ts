@@ -8,7 +8,7 @@ import type { ModelEndpoint } from '../domain/provider/endpoint';
 import type { ModelInfo } from '../domain/provider/messages';
 import { optionIdOf } from '../domain/setup/ids';
 import type { OptionCheckInput, OptionSource, ViabilityResult } from '../domain/setup/viability';
-import { FLOOR_ON_TEXT, NO_LOCAL_SERVER_TEXT, SERVER_NEEDS_KEY_TEXT, initialViability, isChoosable, nextViability } from '../domain/setup/viability';
+import { FLOOR_ON_TEXT, HOSTED_NO_LOOPBACK_TEXT, NO_LOCAL_SERVER_TEXT, SERVER_NEEDS_KEY_TEXT, initialViability, isChoosable, nextViability } from '../domain/setup/viability';
 import { NearAiClient, SpendLimitError } from '../services/nearAiClient';
 import { pinnedFetch } from '../services/connectionBinding';
 import { hostKindOf, memoryOnlyDeviceProvider } from '../services/setup/deviceFacts';
@@ -228,6 +228,31 @@ test('D-41: memory only and the missing local server sentence', async () => {
   assert.equal(result.state, 'not-detected');
   assert.equal(result.sentence, NO_LOCAL_SERVER_TEXT.replace('{memory}', '16 GB'));
   assert.equal(result.fix?.action, 'configure');
+});
+
+test('owner D7, D-49: a hosted run probes only the servers your organization lists, never the session loopback', async () => {
+  const listed: PolicyEndpoint = {
+    id: 'org-ollama', class: 'org-plain', region: 'CA', host: 'models.example.org', scheme: 'https', tlsPins: [], maxLabel: []
+  };
+  const probed: string[] = [];
+  const source = createLocalServersSource({
+    identify: async (target) => { probed.push(`${target.host}:${String(target.port)}`); return { state: 'no-answer' }; },
+    listModels: async () => [],
+    localClient: () => ({ completeOnce: async () => assert.fail('no server answered') })
+  });
+  const hosted = await runViability({ sources: [source], input: { ...input, hostKind: 'hosted', endpoints: [listed] } });
+  hosted.dispose();
+  assert.deepEqual(probed, ['models.example.org:443']);
+  const local = hosted.results.find(({ kind }) => kind === 'this-computer');
+  assert.equal(local?.state, 'not-detected');
+  assert.equal(local?.sentence, HOSTED_NO_LOOPBACK_TEXT);
+  assert.equal(local?.fix, undefined);
+
+  probed.length = 0;
+  const desktop = await runViability({ sources: [source], input: { ...input, endpoints: [listed] } });
+  desktop.dispose();
+  assert.ok(probed.includes('models.example.org:443'));
+  assert.ok(probed.filter((entry) => entry.startsWith('127.0.0.1:')).length > 0, 'the desktop run still probes loopback ports');
 });
 
 test('D-08: host kind identifies the machine where the extension runs', async () => {
