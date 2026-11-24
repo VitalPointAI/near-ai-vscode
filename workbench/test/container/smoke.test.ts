@@ -3,7 +3,7 @@
 // and serves Get Started to a real browser. Run it with `npm run test:container`; it is not part of `npm test`. Hygiene: test/helpers/docker.ts.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { mustRun, removeOwn, runContainer, testImage } from '../helpers/docker';
+import { freePort, mustRun, removeOwn, runContainer, runPlaywright, testImage, waitHealthy } from '../helpers/docker';
 
 const MARKER = 'STERLING-PTY-OK';
 // Run inside the image with node from /app: the natives as the backend's own node_modules have them, and the Node it runs on.
@@ -50,4 +50,16 @@ test('in local mode a non-loopback bind refuses to start without STERLING_PREVIE
   assert.equal(result.code, 1);
   assert.match(result.stderr, /no sign-in and includes a terminal/);
   assert.match(result.stderr, /Publish it on 127\.0\.0\.1 only/);
+});
+
+test('a real browser opens Get Started against the started image (D-34, FND-T-07)', async () => {
+  const port = await freePort();
+  const started = await runContainer('browser', ['-d', '-p', `127.0.0.1:${port}:3000`,
+    '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
+  assert.equal(started.code, 0, started.stderr);
+  const url = `http://127.0.0.1:${port}`;
+  await waitHealthy('browser', url);
+  const result = await runPlaywright('smoke.spec.ts', { WORKBENCH_URL: url });
+  assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
+  assert.match(result.stdout, /\b1 passed\b/);
 });

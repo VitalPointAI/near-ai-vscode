@@ -1,6 +1,6 @@
 # Compatibility inventory: the existing extension in Theia
 
-**Direction (owner, 2026-11-23):** Theia, in the Sterling edition, is the only development target, and Phases 32.1 and 33 are built **natively** in Theia, not through the VSIX compatibility host. See the hosting design at [`.planning/research/multiuser-hosting/DESIGN.md`](../../research/multiuser-hosting/DESIGN.md) and Phases 46 to 48 in the [roadmap](../../ROADMAP.md).
+**Direction (owner, 2026-11-23):** Theia, in the Sterling edition, is the only development target, and Phases 32.1 and 33 are built **natively** in Theia, not through the VSIX compatibility host. See the hosting design at [`.planning/research/multiuser-hosting/DESIGN.md`](../.planning/research/multiuser-hosting/DESIGN.md) and Phases 46 to 48 in the [roadmap](../.planning/ROADMAP.md).
 
 This page is an **inventory, not a cutover plan.** It records which current workflows run through the pinned compatibility host, which have native ports, and which are blocked. Use it to decide what each native port replaces, and to keep existing behaviour checked while the native workbench is built. Keep the TypeScript engine and project files shared. The VSIX in the compatibility host is a reference and a parity check. It is not the shipping path.
 
