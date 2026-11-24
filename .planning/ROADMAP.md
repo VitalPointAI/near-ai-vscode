@@ -321,7 +321,8 @@ Plans:
 **Design**: `.planning/research/portfolio-and-assignment/DESIGN.md`, Part A (sections 3 and 4) and 10.2.
 **Depends on**: Phase 33 (live roster host flows, hub append checks, POST-01); Phase 41 (mode table and `term()`, moved there from Phase 32.1 by the coherence review).
 **Inserted**: 2026-11-20 by owner decision D1 in the design (accepted with all its defaults the same day).
-**Requirements**: POST-01 (planned into Phase 33), POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (defined in `.planning/research/portfolio-and-assignment/DESIGN.md`; added to REQUIREMENTS.md when Phase 33.1 is planned)
+**Requirements**: POST-02, POST-03, POST-04, POST-05, POST-06, POST-07, POST-08 (in REQUIREMENTS.md since 2026-11-24)
+**Prerequisite**: POST-01 belongs to Phase 33; this phase registers `positions@1` on it.
 **Success Criteria** (what must be TRUE):
   1. A J1 delegate posts a person to "Watch Officer, night" from 1 December; the person proves their computer by safety code, sees no Decline, and reports for duty on 1 December; the roster records the J1 as orderer and the lead's delegation as authority. (POST-02, POST-03, POST-04, POST-05)
   2. A report-unable reason reaches only the tasker; Confirm, Defer and Reassign each lead to their state; an unanswered posting becomes overdue after 2 days (owner decision D4; a policy may set another number) with the tasker's actions. (POST-04, POST-08)
@@ -330,11 +331,24 @@ Plans:
   5. An existing multi-user project switched to Military mode gives the same decisions and grants after migration from seats; invitation-mode projects are unchanged. (POST-08)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 0 plans
+**Plans:** 12 plans in 9 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, D-01 to D-25 and 16 owner items)
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 33.1 to break down)
+- [ ] 33.1-01-PLAN.md: Wave 1. Tracer and the permanent shapes (checkpoint): a person-key order and the member's own report on two replicas and the real hub
+- [ ] 33.1-02-PLAN.md: Wave 2. The words that follow how a person serves in the Defence Team mode, and the terms register check
+- [ ] 33.1-03-PLAN.md: Wave 2. `positions@1`, the shared project's signed mode and settings, and the person-key rule for every posting act
+- [ ] 33.1-04-PLAN.md: Wave 3. Delegation under `mayDelegate`, who may be posted, device proof by file and through your organization's server
+- [ ] 33.1-05-PLAN.md: Wave 4. Atomic handover: staged key changes, who prepares them, restaging, offline convergence
+- [ ] 33.1-06-PLAN.md: Wave 5. Report unable, the personnel key group, Confirm, Defer, Reassign and overdue
+- [ ] 33.1-07-PLAN.md: Wave 6. Acting, temporary, relief and vacancy; decisions that name their position; scope at the fold and the hub
+- [ ] 33.1-08-PLAN.md: Wave 7. Migration from seats, one record for the lead, team files that name positions
+- [ ] 33.1-09-PLAN.md: Wave 7. Native: posting cards and tasker actions in the Sterling Staff Room
+- [ ] 33.1-10-PLAN.md: Wave 8. Native: the posting file, your organization's rules in the workbench, Share with people in assignment modes
+- [ ] 33.1-11-PLAN.md: Wave 8. Native: the position workspace, rechecks in an open session, presence with positions
+- [ ] 33.1-12-PLAN.md: Wave 9. Close-out on the built image: criteria 1 to 5 in two browsers, SECURITY.md, the full suites once
+
+**Re-planned for native Theia (2026-11-24)**: Codex's plans are kept where they hold (D-01 to D-05) and re-aimed: native Theia sections in place of VS Code screens, engine code host-neutral, every posting act signed by the person key after a fresh passkey confirmation, and Defence edition text that never calls the folder a project. Criterion 5's "switched to Military mode" reads "switched to an assignment mode" (Defence Team in the Defence edition). It runs beside Phase 33's native waves on its own integration branch and lands with or after Phase 33's PR.
 
 ### Phase 34: Offline transports for staff projects
 **Goal**: Staff projects keep syncing where the hub cannot be reached: through any git server your organization runs, between machines in one room, and by file across an air gap.
@@ -1888,7 +1902,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/TBD | Not started (after Phase 33, before drop B) | - |
+| 33.1. Assigned positions and handover | 0/12 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
