@@ -816,7 +816,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-24 from the owner's decision O3 (`.planning/research/data-centric-access/RESEARCH.md` section 10), when Phase 33.2 was planned.
 
-- [ ] **WRAP-01**: Cell epoch keys are wrapped with `near-ai/cell-wrap/v2`: P-256 ECDH and ML-KEM-768 joined by HKDF-SHA256 (the SP 800-56C two-step KDF) and AES-256-GCM, bound to the cell, the epoch, the device and both recipient keys, with frozen test vectors; version 1 wraps stay readable.
+- [x] **WRAP-01**: Cell epoch keys are wrapped with `near-ai/cell-wrap/v2`: P-256 ECDH and ML-KEM-768 joined by HKDF-SHA256 (the SP 800-56C two-step KDF) and AES-256-GCM, bound to the cell, the epoch, the device and both recipient keys, with frozen test vectors; version 1 wraps stay readable.
 - [ ] **WRAP-02**: Every device, hosted person and hub publishes a P-256 key and an ML-KEM-768 key bound to its Ed25519 key (`device.kem`, or `kem` in its descriptor); the safety words cover them; the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file.
 - [ ] **WRAP-03**: An epoch grant may span several signed pages, each within the grant size limit, all committed by the founding roster entry.
 - [ ] **WRAP-04**: The `wrap@2` feature goes through `roster.require`: new shared projects require it at creation, a lead switches an existing project in one step, each cell moves at its next epoch, late devices get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap.

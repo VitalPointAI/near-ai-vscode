@@ -376,11 +376,11 @@ Plans:
   4. New shared work starts switched; a lead switches an existing project in one step, each cell moves at its next epoch, late computers get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap. (WRAP-04)
   5. A Protected B cell is never wrapped with X25519; a CI check fails if any wrap path bypasses the one entry point; SECURITY.md says which wrap protects shared work, and ML-KEM-1024 with P-384 is reserved for Protected C and classified work. (WRAP-05)
 **Undo cost**: High. The wire format, `device.kem` and grant pages are permanent in shared logs; they are settled at 33.2-01's checkpoint.
-**Plans:** 8 plans in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
+**Plans:** 1/8 plans executed in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
+- [x] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
 - [ ] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
 - [ ] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
 - [ ] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
@@ -2019,7 +2019,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
 | 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
-| 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
+| 33.2. Post-quantum cell keys (cell-wrap/v2) | 1/8 | In Progress 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
