@@ -5702,6 +5702,32 @@
       "poam": "g388",
       "remediation": "Plan 33.1-01 keeps the typed-in clearance field of Phase 31's member invite and admit entries readable, so existing logs still replay. It grants nothing: access comes only from verified credentials. Remove it once no log from before Phase 33.1 remains. Source: .planning/phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md.",
       "title": "Phase 31's typed-in clearance stays readable for replay"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "cp-09"
+      ],
+      "id": "G419",
+      "ownerRole": "maintainers",
+      "remediation": "The daily sterling-escrow-currency CronJob (deploy/charts/sterling-storage, 47-25) is the signal that 48.1-16's escrow-currency alert reads, but it has only been rendered and tested offline: its image, our sterling/openbao, is not published yet, and the air-gapped lab VM has no registry. On the lab run with the published digest (47-18), start one Job from the CronJob and show it pass on a current escrow and fail, naming the key, after longhorn-crypto changes. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-25-SUMMARY.md.",
+      "title": "The escrow-currency check has not run in a cluster"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "47",
+      "controls": [
+        "sc-12",
+        "sc-28",
+        "cp-09"
+      ],
+      "id": "G420",
+      "ownerRole": "maintainers",
+      "remediation": "Escrow records hold a SHA-256 of each longhorn-crypto value, and the ConfigMap sterling-escrow-record holds the same digests in the cluster, so a record kept with the runbook records reveals nothing only while CRYPTO_KEY_VALUE is random. Nothing generates that value yet: the storage class says the install script (47-16) writes it from OpenBao kv/apps/storage. 47-16 generates it with at least 256 random bits, never a typed passphrase, and its preflight refuses a shorter value. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-25-SUMMARY.md.",
+      "title": "The volume encryption key must be random for digest-only escrow records to be safe"
     }
   ]
 }
