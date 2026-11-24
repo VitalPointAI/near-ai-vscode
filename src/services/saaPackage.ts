@@ -179,6 +179,46 @@ async function readForms(root: string): Promise<ArchiveEntry[]> {
 
 const dashboardFile = 'release-package/evidence/bundle/dashboard/dashboard.json';
 const installerSbomFile = 'evidence/bundle/vsix-sbom.cdx.json';
+/** The assessor package's component inventory (compliance/src/inventory.ts), from the register the release was built from. */
+const componentInventoryFile = 'readable/component-inventory.csv';
+const MAX_INVENTORY_BYTES = 2 * 1024 * 1024;
+const MAX_INVENTORY_ROWS = 5000;
+
+/**
+ * Reads the package's component inventory CSV (RFC 4180: quoted cells, doubled quotes, CRLF rows) into rows for the workbook. A malformed
+ * or oversized file is refused rather than half-read. Releases built before the inventory have no such file and get no sheet.
+ */
+export function parseInventoryCsv(bytes: Buffer): string[][] {
+  if (bytes.length > MAX_INVENTORY_BYTES) throw new Error('The release component inventory is too large.');
+  const text = bytes.toString('utf8');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  let started = false;
+  let closed = false;
+  const malformed = () => new Error('The release component inventory is not a well-formed CSV.');
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) {
+      if (char !== '"') cell += char;
+      else if (text[index + 1] === '"') { cell += '"'; index++; }
+      else { quoted = false; closed = true; }
+      continue;
+    }
+    if (char === ',') { row.push(cell); cell = ''; started = false; closed = false; }
+    else if (char === '\r' && text[index + 1] === '\n') {
+      row.push(cell); rows.push(row); row = []; cell = ''; started = false; closed = false; index++;
+      if (rows.length > MAX_INVENTORY_ROWS) throw new Error('The release component inventory has too many rows.');
+    } else if (closed || char === '\r' || char === '\n' || (char === '"' && started)) throw malformed();
+    else if (char === '"') { quoted = true; started = true; }
+    else { cell += char; started = true; }
+  }
+  if (quoted) throw malformed();
+  if (started || row.length) { row.push(cell); rows.push(row); }
+  if (!rows.length || rows.some((line) => line.length !== rows[0].length)) throw malformed();
+  return rows;
+}
 
 // Mirror the published snapshot's Phase 44 windows when labeling individual rule results.
 const day = 24 * 60 * 60 * 1000;
@@ -261,6 +301,12 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
     index.push(['EV-REL-07', 'CI installer software inventory', `release-package/${installerSbomFile}`, release.commit,
       'Software shipped in the installer built for this commit. Confirm the deployed configuration separately.']);
   }
+  const inventoryBytes = release.files.get(componentInventoryFile);
+  const inventory = inventoryBytes ? parseInventoryCsv(inventoryBytes) : undefined;
+  if (inventory) {
+    index.push(['EV-REL-08', 'Third-party component inventory', `release-package/${componentInventoryFile}`, release.commit,
+      'Each third-party component the release uses, with its pin, role and compliance fit. Reconcile it with what the deployment installs.']);
+  }
   index.push(['EV-DEP-___', 'Deployment evidence reference', '', '', 'Record permitted IDs and repository links after assessment.']);
   const snapshot = Date.parse(dashboard.generatedAt);
   const profiles: SaaSponsorReportInput['profiles'][number][] = [];
@@ -340,7 +386,8 @@ function traceabilityTables(dashboard: Dashboard, release: SaaReleaseEvidence): 
     { title: 'Control traceability', file: 'control-traceability.csv', rows: controls },
     { title: 'Component evidence', file: 'component-evidence.csv', rows: components },
     { title: 'Evidence index', file: 'evidence-index.csv', rows: index },
-    { title: 'Product gaps', file: 'gap-and-action-register.csv', rows: actions }
+    { title: 'Product gaps', file: 'gap-and-action-register.csv', rows: actions },
+    ...(inventory ? [{ title: 'Component inventory', file: 'component-inventory.csv', rows: inventory }] : [])
   ];
   return { tables, profiles };
 }
@@ -441,7 +488,7 @@ This export uses the product evidence published for NEAR AI for VS Code v${evide
 
 The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
-- The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps.
+- The [workbook](SA-and-A-control-and-evidence-workbook.xlsx) and CSVs contain editable traceability, component evidence, the evidence index and product gaps, and, when the release carries it, the third-party component inventory.
 - The coverage tab counts missing product and deployment evidence paths. The product gaps tab labels these actions Unassigned or Unassigned deployment. Each applicable row is to receive a role, milestone, and closure evidence or approved tailoring decision.
 - The [published assessor archive](${evidence.fileName}) and its [SHA-256](${evidence.fileName}.sha256) accompany the unchanged [extracted release records](release-package/).
 - ${approval

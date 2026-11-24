@@ -775,7 +775,15 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **MUS-10**: Git per-writer refs, sealed bundle files and LAN peer links, converging with the hub.
 - [ ] **MUS-11**: Shared run summaries and claims; observation slices with coalescing and budgets.
 - [ ] **MUS-12**: Standing watches on the hub under draft-only, rate, spend, route and kill-switch guards.
-- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1; POST-02 to POST-08 are added when Phase 33.1 is planned).
+- [ ] **POST-01**: `roster.require` feature check: a client, or your organization's server, that lacks a feature a project requires refuses to fold it with the update sentence instead of ignoring entries it does not know (defined in `.planning/research/portfolio-and-assignment/DESIGN.md` 3.9 and 10.2; planned into Phase 33 so it is in the field before Phase 33.1).
+- [ ] **POST-02**: Positions as roster objects with title, section, shift, decision roles, required clearance, key groups, acting and dual-hat flags and the ways of serving they are open to; history answers who held what when.
+- [ ] **POST-03**: Signed authority to post: held by the lead position, delegated with scope, kinds, expiry and depth under the one pure delegation rule (`mayDelegate`, shared with Phase 71); every posting records who ordered it, under whose authority, and when, derived from the verified signer.
+- [ ] **POST-04**: Posting machine (portfolio DESIGN 3.8): ordered, device proven, unable reported, decided (confirm, defer, reassign), in effect, overdue, away, relieved, cancelled; no decline path in assignment modes, enforced by the fold from the shared project's signed mode.
+- [ ] **POST-05**: Device proof by safety code as key delivery, with the "not consent" sentence, by posting file or your organization's server; in a hosted session the device is the person's key in your organization's key store; expired secrets never cancel a posting.
+- [ ] **POST-06**: Atomic handover: authority switches at the incoming's report entry; staged key changes activate at the same point; stale staging refused and restaged; writes held until the staged epoch is folded; a client or server without the positions feature stops.
+- [ ] **POST-07**: Acting, temporary and dual-hatted postings with the single-authority invariant, decisions that name their position, and separation-of-duty checks.
+- [ ] **POST-08**: Personnel key group for report-unable reasons and order references; migration from seats with parity; silent positions per seat in invitation mode; team files name positions, never people; Staff Room screens in the mode's words and, in the Defence Team mode, the words that follow how a person serves.
+- [ ] **POST-09**: Observer positions for industry, allied military members and others invited to observe and give feedback (owner, 2026-11-24): placed by invitation into an Observer position; time-limited; receive no roster (no name, position, member key or personnel attribute) and see only the copies staff release to them from the key groups the position lists that their approved releasability allows (checked at the release and at every key grant to an outside member); comment in their own stream, which no other observer can read; never edit, decide, approve or post; allied-military and industry observers, and the markings that open key groups to outside people, approved by your organization's security contact. Outside observers sign in with Phase 47 guest accounts (planned).
 
 | Requirement | Phase |
 |-------------|-------|
@@ -783,6 +791,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | MUS-04 … MUS-06 | Phase 31 |
 | MUS-07, MUS-08 | Phase 32 |
 | MUS-09, POST-01 | Phase 33 |
+| POST-02 … POST-09 | Phase 33.1 |
 | MUS-10 | Phase 34 |
 | MUS-11, MUS-12 | Phase 35 |
 
@@ -828,6 +837,23 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | GUIDE-01 … GUIDE-08 | Phase 32.1: planned |
 | ORG-01 … ORG-03 | Phase 41: complete (FND-07); success criterion 7 of Phase 32.1 checks them on screen |
 | ORG-04 | Phase 32.1: planned |
+
+## Version safety requirements (Phases 32.1, 46, 47 and 48)
+
+**Defined:** 2026-11-24, approved by the owner ("go"), from the owner's principle "the application should always keep itself up to date". People never update anything. An administrator updates a site by importing a signed bundle, so a disconnected edge site can briefly run an older release than HQ. Decisions 32.1 D-60 to 32.1 D-69 in `.planning/phases/32.1-guided-setup-with-viable-options-and-a-plain-recommendation/32.1-CONTEXT.md`.
+**Core value:** a site never applies part of something it cannot read, nobody is asked to update anything, and every session follows its site's release on its own.
+
+- [ ] **VSAFE-01**: The tool your organization uses to write and sign its rules refuses to sign rules that use a feature some target site cannot read yet, and names each such site and the release it needs. Site releases come from the signed site evidence exports; a site with no recent export counts as unknown and is refused unless the author excludes it, with the reason recorded in the signed rules. Every policy feature has a `name@N` id in one registry, named by what a document uses.
+- [ ] **VSAFE-02**: A release that receives rules needing a feature it does not read refuses the whole file and keeps enforcing the last good signed rules, never no rules; a refused update applies itself after the site is updated. People see one plain status line that asks their administrator to update the site; the administrator sees the missing features. No user text tells a person to update the extension or Sterling, for any shared, signed format.
+- [ ] **VSAFE-03**: When a site's image is updated, running sessions show "A new version of Sterling is ready. Save your work; it will reload when you're idle" and move to the new image at the next idle stop or sign-in, never mid-work without warning.
+- [ ] **VSAFE-04**: The signed site evidence export carries the site's Sterling release and the features it reads.
+
+| Requirement | Phase |
+|-------------|-------|
+| VSAFE-01 | Phase 32.1: planned (32.1-30) |
+| VSAFE-02 | Phase 32.1: planned (32.1-31, 32.1-32) |
+| VSAFE-03 | Phases 46 and 47: planned (46-09, 47-32) |
+| VSAFE-04 | Phase 48: planned (48-11) |
 
 ## Phase 32.2 requirements: Local model manager (0.4.x)
 

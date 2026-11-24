@@ -31,9 +31,17 @@ test('package checksums name every package file except themselves', () => {
   assert.ok(sums.split('\n').filter(Boolean).every((line) => /^[a-f0-9]{64}  \S/.test(line)));
 });
 
-test('package output includes a draft SSP for the fixture level', () => {
+test('package output includes a draft SSP for the fixture level, with the register inventory as SSP items and a readable CSV', () => {
   const result = buildPackage({ release: 'v0.4.99', bundle: fixture, out: output() });
-  assert.ok(readFileSync(path.join(result.directory, 'oscal/ssp/protected-b.json'), 'utf8').length > 0);
+  const ssp = JSON.parse(readFileSync(path.join(result.directory, 'oscal/ssp/protected-b.json'), 'utf8'))['system-security-plan'];
+  const ids = ssp['system-implementation']['inventory-items'].map((item: { props: { name: string; value: string }[] }) => item.props.find((prop) => prop.name === 'resource-id')?.value);
+  // The fixture level holds only the extension: its entries are listed, and a release-pipeline entry stays out of its boundary.
+  assert.ok(ids.includes('vendor:yjs') && ids.includes('npm:yjs'));
+  assert.ok(!ids.includes('npm:typescript'));
+  const csv = readFileSync(path.join(result.directory, 'readable/component-inventory.csv'), 'utf8');
+  assert.match(csv, /^"Resource","Kind","Architecture area",/);
+  assert.match(csv, /"vendor:yjs","vendored","Workbench, sessions and extension","extension"/);
+  assert.match(readFileSync(path.join(result.directory, 'SHA256SUMS'), 'utf8'), / {2}readable\/component-inventory\.csv\n/);
 });
 
 test('package checksum detects a changed byte', () => {
