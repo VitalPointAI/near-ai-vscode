@@ -4,6 +4,7 @@ import { BinaryBuffer } from '@theia/core/lib/common/buffer.js';
 import { URI } from '@theia/core/lib/common/uri.js';
 import { FileType, etag } from '@theia/filesystem/lib/common/files.js';
 import { linkWorkAreaResource } from '../extension/src/browser/sterling-work-area-resource-links.ts';
+import { parseWorkArea } from '../extension/src/common/sterling-work-areas.ts';
 
 const scope = new URI('file:///workspace');
 const child = scope.resolve('work-area-0123456789abcdef');
@@ -93,4 +94,19 @@ test('refuses linked components, malformed metadata and a same-length rewrite af
   };
   await assert.rejects(linkWorkAreaResource(raced.files, scope, child, second), /details changed/);
   assert.deepEqual(raced.writes, []);
+});
+
+test('a capability record keeps its components, as labels and titles, for Get Started to list', () => {
+  const capability = { version: 1, kind: 'capability-development', title: 'Example capability' };
+  const parsed = parseWorkArea(JSON.stringify({ ...capability, components: [
+    { kind: 'program', title: 'Example program' }, { kind: 'minor-capital', title: 'Example upgrade', status: 'ignored' }
+  ] }));
+  assert.equal(parsed?.detail, '2 components');
+  assert.deepEqual(parsed?.components, [
+    { label: 'Program', title: 'Example program' }, { label: 'Minor capital project', title: 'Example upgrade' }
+  ]);
+  assert.equal(parseWorkArea(JSON.stringify({ version: 1, kind: 'training', title: 'Example exercise' }))?.components, undefined);
+  for (const bad of [{ kind: 'unknown', title: 'Example' }, { kind: 'program', title: ' padded ' }, { kind: 'program', title: 'line\nbreak' }]) {
+    assert.equal(parseWorkArea(JSON.stringify({ ...capability, components: [bad] })), undefined);
+  }
 });

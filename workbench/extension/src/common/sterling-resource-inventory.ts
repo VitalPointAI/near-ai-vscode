@@ -1,5 +1,7 @@
 export const inventoryDirectory = '.planning/.near-ai';
 export const inventoryFileName = 'resource-inventory.snapshot.json';
+export const inventoryMediaDirectory = 'resource-inventory-media';
+export const inventoryImageSizeLimit = 5 * 1024 * 1024;
 export const inventorySizeLimit = 512 * 1024;
 export const inventoryStatuses = {
   available: 'Available',
@@ -21,12 +23,18 @@ export interface InventoryRecord {
   stockNumber?: string;
   description?: string;
   imageRef?: string;
+  imageDigest?: string;
+  sourceRef?: string;
+  lifecycle?: string;
+  reviewNote?: string;
+  archived?: true;
 }
 
 export interface InventorySnapshot {
   sourceId: string;
   source: string;
   generatedAt: string;
+  catalogueOnly?: true;
   resources: InventoryRecord[];
 }
 
@@ -82,7 +90,12 @@ function resource(value: unknown): value is InventoryRecord {
     && (value.usagePolicyRef === undefined || label(value.usagePolicyRef, 192))
     && (value.stockNumber === undefined || catalogueStockNumber(value.stockNumber))
     && (value.description === undefined || label(value.description, 400))
-    && (value.imageRef === undefined || label(value.imageRef, 192));
+    && (value.imageRef === undefined || label(value.imageRef, 192))
+    && (value.imageDigest === undefined || (typeof value.imageDigest === 'string' && /^[0-9a-f]{64}$/.test(value.imageDigest)))
+    && (value.sourceRef === undefined || label(value.sourceRef, 300))
+    && (value.lifecycle === undefined || label(value.lifecycle, 80))
+    && (value.reviewNote === undefined || label(value.reviewNote, 400))
+    && (value.archived === undefined || value.archived === true);
 }
 
 /** Read only the approved fields in a bounded local export. Source and status are claims supplied by the file. */
@@ -93,6 +106,10 @@ export function parseInventorySnapshot(text: string): InventorySnapshot | undefi
   if (!record(value) || value.schemaVersion !== 1 || !id(value.sourceId) || !label(value.source) || !timestamp(value.generatedAt)
     || !Array.isArray(value.resources) || value.resources.length > 1200 || !value.resources.every(resource)) return undefined;
   const resources: InventoryRecord[] = value.resources;
+  if (value.catalogueOnly !== undefined && (value.catalogueOnly !== true || resources.some(item =>
+    !item.sourceRef || !item.lifecycle || item.quantity !== undefined || item.status !== undefined
+    || item.assetDid !== undefined || item.usagePolicyRef !== undefined))) return undefined;
+  if (value.catalogueOnly !== true && resources.some(item => item.archived)) return undefined;
   if (new Set(resources.map(item => item.id)).size !== resources.length) return undefined;
   const reportedDids = resources.flatMap(item => item.assetDid === undefined ? [] : [item.assetDid]);
   if (new Set(reportedDids).size !== reportedDids.length) return undefined;
@@ -100,9 +117,11 @@ export function parseInventorySnapshot(text: string): InventorySnapshot | undefi
     sourceId: value.sourceId,
     source: value.source,
     generatedAt: value.generatedAt,
+    ...(value.catalogueOnly === true ? { catalogueOnly: true } : {}),
     resources: resources.map(({
-      id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef
-    }) => ({ id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef }))
+      id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef, imageDigest, sourceRef, lifecycle, reviewNote, archived
+    }) => ({ id, name, category, quantity, unit, status, asOf, assetDid, usagePolicyRef, stockNumber, description, imageRef, imageDigest,
+      sourceRef, lifecycle, reviewNote, archived }))
   };
 }
 

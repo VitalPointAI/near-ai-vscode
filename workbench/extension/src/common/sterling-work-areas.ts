@@ -18,10 +18,17 @@ export interface WorkAreaResourceRef {
 
 const resourceId = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 
+/** One part of a capability (a program, a project, an initiative or a product), as Get Started lists it: its kind's label and its title. */
+export interface WorkAreaComponent {
+  readonly label: string;
+  readonly title: string;
+}
+
 export interface WorkAreaRecord {
   readonly kind: WorkAreaKind;
   readonly title: string;
   readonly detail?: string;
+  readonly components?: readonly WorkAreaComponent[];
   readonly resourceRefs?: readonly WorkAreaResourceRef[];
 }
 
@@ -67,7 +74,11 @@ export function parseWorkArea(text: string): WorkAreaRecord | undefined {
     const components = data.components;
     if (!Array.isArray(components) || components.length > 50 || !components.every(item =>
       record(item) && componentKind(item.kind) && Boolean(titleOf(item.title)))) return undefined;
-    return { ...metadata, detail: `${components.length} ${components.length === 1 ? 'component' : 'components'}` };
+    return {
+      ...metadata,
+      detail: `${components.length} ${components.length === 1 ? 'component' : 'components'}`,
+      components: components.map(item => ({ label: componentLabels[item.kind as ComponentKind], title: item.title as string }))
+    };
   }
   return metadata;
 }
