@@ -43,6 +43,10 @@ import { localKeyStatus } from '../team/keyHistory';
 import { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
 import { chatLoweringKeys, judgeChatLowering, loweringRejectedText, signChatLowering } from './chatLabel';
 import type { ChatLowering } from './chatLabel';
+import { clearancesInForce } from './clearances';
+import type { ClearanceWalletView, ClearancesInForce } from './clearances';
+import { walletStateAt } from './wallet';
+import type { WalletView } from './wallet';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -83,6 +87,8 @@ export const RUNTIME_START_WAIT_MS = 5000;
 
 export interface GateHostOptions {
   readonly globalStorageDir: string;
+  /** Phase 71: the person's wallet, whose verified view gives the clearances under your organization's credentials@1. */
+  readonly wallet?: { verifiedView(): WalletView };
   readonly secrets: SecretStorageLike;
   readonly productVersion: string;
   /**
@@ -304,7 +310,7 @@ export class GateHost {
   /** What labels are judged by now: the valid policy's scales, mappings, clearances and default label, or a failed-closed policy's (no clearances). */
   public labelPolicy(): { readonly valid: boolean; readonly scales: ScaleTable; readonly mappings: readonly ScaleMapping[]; readonly clearances: readonly Clearance[]; readonly defaultLabel: Label } {
     const state = this.bundleState();
-    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: state.bundle.clearances, defaultLabel: state.bundle.defaultLabel };
+    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: this.clearancesNow().clearances, defaultLabel: state.bundle.defaultLabel };
     return { valid: false, scales: SCALE_PRESETS, mappings: [], clearances: [], defaultLabel: SHIPPED_DEFAULT_LABEL };
   }
 
@@ -745,7 +751,22 @@ export class GateHost {
    */
   private routePolicyNow(now: number): RoutePolicyNow | undefined {
     const layers = this.policyLayers();
-    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
+    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers), this.walletAt(now));
+  }
+
+  /**
+   * Phase 71 (D-08, D-19): where the clearances decisions use come from now, with the sentence to show: the verified wallet under your organization's
+   * policy with credentials@1, else the person's own declared clearances. The wallet's view is read from memory, so no decision waits on I/O.
+   */
+  public clearancesNow(): ClearancesInForce {
+    const layers = this.policyLayers();
+    const organization = layers.organization.state === 'valid' ? layers.organization.document : undefined;
+    return clearancesInForce(layers.effective, organization, this.walletAt(this.now()));
+  }
+
+  private walletAt(now: number): ClearanceWalletView | undefined {
+    const view = this.options.wallet?.verifiedView();
+    return view === undefined ? undefined : { state: walletStateAt(view, now), clearances: view.clearances };
   }
 
   /**
