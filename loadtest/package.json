@@ -1,0 +1,16 @@
+{
+  "name": "near-ai-loadtest",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Load-test harness for a Theia Cloud site on your organization's own hardware: staged sessions, one hashed run file per run, and the generated capacity page. Has no dependencies.",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "lint": "node ../compliance/node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test": "node ../scripts/run-tests.mjs test/*.test.ts",
+    "cli": "node src/cli.ts"
+  }
+}
