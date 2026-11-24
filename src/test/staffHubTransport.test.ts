@@ -25,7 +25,8 @@ import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { DEMO_CLEARANCE, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { canonicalBytes, fingerprintOf } from '../domain/team/canonical';
 import type { PayloadSigner } from '../domain/team/signedPayload';
-import { APPEND_MAX_ENTRIES, CONNECT_TIMEOUT_MS, HubTransport, HubTransportError, RESPONSE_MAX_BYTES, appendBatches } from '../staff/replica/hubTransport';
+import { APPEND_MAX_ENTRIES, CONNECT_TIMEOUT_MS, HubTransport, HubTransportError, PRESENCE_BODY_MAX_BYTES, RESPONSE_MAX_BYTES, appendBatches } from '../staff/replica/hubTransport';
+import { KNOWN_REPLICA_FEATURES } from '../domain/replica/features';
 import type { EventReport, HubTransportOptions } from '../staff/replica/hubTransport';
 import { FIXTURE_CA, FIXTURE_CERT, FakeHubServer, fakeHubState, hubRoutes, seedGrants, seedHub } from './helpers/fakeHubServer';
 import type { FakeAnswer, FakeHandler, FakeHubOptions, FakeHubState } from './helpers/fakeHubServer';
@@ -1225,5 +1226,69 @@ test('append: a 200 refusing an entry blob-missing (Phase 33 D-28) puts the batc
   }, async (_fake, transport) => {
     const answer = await transport.append({ entries: [entry], blobRefs: [{ entry: HASH_A, blob: blob.hash }] }, (hash) => (hash === blob.hash ? blob : undefined));
     assert.deepEqual([answer.accepted, answer.refused, answer.blobsPut, appends], [[HASH_A], [], true, 2]);
+  });
+});
+
+test('features: every session answer announces KNOWN_REPLICA_FEATURES, sorted, signed with the rest (POST-01, D-07)', async () => {
+  await withFake({ handle: routes({ [`GET /v1/projects/${PROJECT}/heads`]: () => ({ json: headsBody() }) }) }, async (fake, transport) => {
+    await transport.hubHeads();
+    assert.equal(fake.sessions.length, 1);
+    assert.deepEqual(fake.sessions[0]?.features, [...KNOWN_REPLICA_FEATURES].sort());
+  });
+});
+
+test('features: the features option is what the session answer announces, so a test stands in for an older client with []', async () => {
+  await withFake({ handle: routes({ [`GET /v1/projects/${PROJECT}/heads`]: () => ({ json: headsBody() }) }) }, async (fake, transport) => {
+    await transport.hubHeads();
+    assert.deepEqual(fake.sessions[0]?.features, []);
+  }, { features: [] });
+});
+
+const CELL = sha256('hub-transport/cell').toString('hex').slice(0, 32);
+
+test('presence: postPresence sends one POST {cell, sealed} on the session\'s own connection, and leavePresence sends {cell, leave: true}', async () => {
+  const bodies: unknown[] = [];
+  await withFake({
+    handle: routes({ [`POST /v1/projects/${PROJECT}/presence`]: (req) => { bodies.push(req.json()); return { json: { project: PROJECT, cell: CELL } }; } })
+  }, async (fake, transport) => {
+    await transport.postPresence(CELL, 'c2VhbGVkLWZpY3Rpb25hbA');
+    await transport.leavePresence(CELL);
+    assert.deepEqual(bodies, [{ cell: CELL, sealed: 'c2VhbGVkLWZpY3Rpb25hbA' }, { cell: CELL, leave: true }]);
+    const posts = fake.requests.filter((req) => req.path.endsWith('/presence'));
+    assert.equal(posts.length, 2);
+    for (const req of posts) assert.equal(req.tokenOf, req.connection, 'the token of the connection it came on');
+    assert.equal(fake.sessions.length, 1, 'a session first, then both posts on it');
+  });
+});
+
+test('presence: a 403 is not-on-access-list, and a body over the hub\'s 2 KiB presence limit is refused before anything is sent', async () => {
+  await withFake({ handle: routes({ [`POST /v1/projects/${PROJECT}/presence`]: () => ({ status: 403, json: { error: 'forbidden', message: 'No.' } }) }) }, async (fake, transport) => {
+    const refused = await failure(transport.postPresence(CELL, 'AAAA'));
+    assert.deepEqual([refused.failure, refused.detail.reason], ['hub-error', 'not-on-access-list']);
+    const before = fake.requests.length;
+    const large = await failure(transport.postPresence(CELL, 'A'.repeat(PRESENCE_BODY_MAX_BYTES)));
+    assert.equal(large.failure, 'too-large');
+    assert.equal(fake.requests.length, before, 'nothing was sent');
+  });
+});
+
+test('presence: a new connection opens a new session before its first presence post', async () => {
+  await withFake({ handle: routes({ [`POST /v1/projects/${PROJECT}/presence`]: () => ({ json: { project: PROJECT, cell: CELL }, closeAfter: true }) }) }, async (fake, transport) => {
+    await transport.postPresence(CELL, 'AAAA');
+    // Wait until the client has seen the close, as the new-session test does.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await transport.postPresence(CELL, 'BBBB');
+    assert.equal(fake.sessions.length, 2, 'one session per connection');
+    assert.ok(fake.requests.every((req) => req.tokenOf === undefined || req.tokenOf === req.connection), 'no token was sent on another connection');
+  });
+});
+
+test('restore mode: a 503 restoring append is a hub-error with reason restoring and the Retry-After the hub gave', async () => {
+  const entry = { header: { v: 2, stream: PROJECT, writer: DEVICE.writer, seq: 0, prev: '0'.repeat(64), epoch: 1, body: { hash: HASH_A, size: 1 }, sig: 'x' }, body: 'AA' } as never;
+  await withFake({
+    handle: routes({ [`POST /v1/projects/${PROJECT}/append`]: () => ({ status: 503, headers: { 'retry-after': '30' }, json: { error: 'restoring', message: 'Restoring.', retryAfterSeconds: 30 } }) })
+  }, async (_fake, transport) => {
+    const error = await failure(transport.append({ entries: [entry] }));
+    assert.deepEqual([error.failure, error.detail.reason, error.detail.retryAfterSeconds], ['hub-error', 'restoring', 30]);
   });
 });

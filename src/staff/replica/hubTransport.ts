@@ -40,6 +40,7 @@ import type { TLSSocket } from 'node:tls';
 import { readGrant } from '../../domain/replica/cellKeys';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, entryHash } from '../../domain/replica/entry';
+import { KNOWN_REPLICA_FEATURES } from '../../domain/replica/features';
 import type { SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { SESSION_KEYING_BYTES, SESSION_KEYING_LABEL, buildSessionAnswer, certPinOf, enrolmentMac } from '../../domain/replica/hubFile';
 import type { HeadSet, PullRequest, PushResult, ReplicaTransport, Unsubscribe } from '../../domain/replica/transport';
@@ -116,7 +117,12 @@ export interface HubTransportOptions {
    * replica can say which blob an entry uses, and the hub keeps and serves a blob only for the entries that name it (WR-06).
    */
   blobsCitedBy?: (entryHashes: readonly string[]) => Promise<Array<{ entry: string; blob: string }>>;
+  /** The replica features this device announces in its signed session answer (POST-01, D-07); KNOWN_REPLICA_FEATURES when absent. */
+  features?: readonly string[];
 }
+
+/** The most bytes one presence post may carry: the hub's LIMITS.presenceBytes (D-21, D-38). */
+export const PRESENCE_BODY_MAX_BYTES = 2 * 1024;
 
 export interface HubHeads extends HeadSet {
   project: string;
@@ -445,6 +451,7 @@ export class HubTransport implements ReplicaTransport {
   private readonly connectTimeoutMs: number;
   private readonly cap: number;
   private readonly blobsCitedBy: HubTransportOptions['blobsCitedBy'];
+  private readonly features: readonly string[];
   private main: HubConnection | undefined;
   private opening: Promise<HubConnection> | undefined;
   private readonly readers = new Set<{ close(): void }>();
@@ -465,6 +472,7 @@ export class HubTransport implements ReplicaTransport {
     this.connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
     this.cap = options.responseMaxBytes ?? RESPONSE_MAX_BYTES;
     this.blobsCitedBy = options.blobsCitedBy;
+    this.features = options.features ?? KNOWN_REPLICA_FEATURES;
   }
 
   /** How many TLS connections this transport opened, the event reader's included. */
@@ -683,6 +691,32 @@ export class HubTransport implements ReplicaTransport {
     return result;
   }
 
+  /**
+   * POST presence {cell, sealed}: this device's heartbeat in one cell, sealed under the cell's key, on the pinned session-bound connection like every
+   * other call (D-21, D-49). The body is checked against the hub's 2 KiB presence limit before it is sent. A cell this device is not on the access
+   * list of is a HubTransportError hub-error with reason not-on-access-list.
+   */
+  public async postPresence(cell: string, sealed: string): Promise<void> {
+    if (!isStream(cell)) throw new Error('A cell is named by its 32 lowercase hex characters.');
+    if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed)) throw new Error('A presence heartbeat is sealed bytes as base64url.');
+    await this.presence({ cell, sealed });
+  }
+
+  /** POST presence {cell, leave: true}: this device leaves the cell's presence at once. */
+  public async leavePresence(cell: string): Promise<void> {
+    if (!isStream(cell)) throw new Error('A cell is named by its 32 lowercase hex characters.');
+    await this.presence({ cell, leave: true });
+  }
+
+  private async presence(json: Record<string, unknown>): Promise<void> {
+    if (Buffer.byteLength(JSON.stringify(json), 'utf8') > PRESENCE_BODY_MAX_BYTES) throw new HubTransportError('too-large');
+    const answer = await this.call('POST', `/v1/projects/${this.project}/presence`, { json });
+    if (answer.status === 403) this.hubError(403, 'not-on-access-list');
+    const value = this.answerJson(answer, 200);
+    if (!isRecord(value)) throw new HubTransportError('malformed');
+    this.checkLabel(value);
+  }
+
   /** POST enrol: needs no session. Runs on a connection of its own, closed afterwards. Returns the project, the roster head and the hub id. */
   public async enrol(request: unknown): Promise<EnrolAnswer> {
     const connection = await this.openConnection();
@@ -791,7 +825,7 @@ export class HubTransport implements ReplicaTransport {
     if (challenge.hub !== this.hub) throw new HubTransportError('wrong-hub');
     let answer: unknown;
     try {
-      answer = buildSessionAnswer(this.signer, { hub: this.hub, project: this.project, challenge: challenge.challenge, keying: connection.keying(), now: this.now() });
+      answer = buildSessionAnswer(this.signer, { hub: this.hub, project: this.project, challenge: challenge.challenge, keying: connection.keying(), features: this.features, now: this.now() });
     } catch {
       throw new HubTransportError('malformed');
     }
@@ -858,6 +892,8 @@ export class HubTransport implements ReplicaTransport {
     if (status === 403 && error === 'session-refused') throw new HubTransportError('session-refused', { status, ...(reason === undefined ? {} : { reason }) });
     if (status === 401 && (reason === 'revoked' || reason === 'quarantined')) throw new HubTransportError('session-refused', { status, reason });
     if (status === 403 && reason === 'wrong-project') throw new HubTransportError('wrong-project', { status, label: { project: '' } });
+    // Restore mode at the hub (Phase 33 D-32): retryable, with the time the hub gives.
+    if (status === 503 && error === 'restoring') throw new HubTransportError('hub-error', { status, reason: 'restoring', retryAfterSeconds: retryAfterOf(answer.headers) ?? 30 });
     return this.hubError(status, error ?? reason);
   }
 

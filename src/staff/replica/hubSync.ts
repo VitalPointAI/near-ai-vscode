@@ -22,7 +22,8 @@ import type { Checkpoint, SignedCheckpoint } from '../../domain/replica/checkpoi
 import type { Citation } from '../../domain/replica/chain';
 import { GENESIS_PREV, entryHash, parseHeaderShape, sha256Hex, verifyHeader } from '../../domain/replica/entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from '../../domain/replica/entry';
-import { createWitness, findingSentence, readWitness, serializeWitness, witnessBlob, witnessCheckpoint, witnessCitations, witnessEntry, witnessHeads, witnessOwn, witnessResponse } from '../../domain/replica/hubWitness';
+import { UPDATE_SENTENCE } from '../../domain/replica/features';
+import { createWitness, findingSentence, readWitness, readmitWitness, serializeWitness, witnessBlob, witnessCheckpoint, witnessCitations, witnessEntry, witnessHeads, witnessOwn, witnessResponse } from '../../domain/replica/hubWitness';
 import type { HubFinding, HubFindingKind, WitnessResult, WitnessState } from '../../domain/replica/hubWitness';
 import type { RosterView } from '../../domain/replica/rosterView';
 import type { HeadSet } from '../../domain/replica/transport';
@@ -101,7 +102,10 @@ export function hubMemoryOf(secrets: WitnessSecrets): HubMemory {
   };
 }
 
-export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention';
+export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention' | 'needs-update';
+
+/** What a person sees while your organization's server is in restore mode (D-32): offline-like, never attention. */
+export const RESTORING_SENTENCE = 'Your organization\'s server is being restored. Your changes are kept here.';
 
 export interface SyncReport {
   outcome: SyncOutcome;
@@ -137,6 +141,11 @@ export interface SyncReport {
 
 export interface SyncOptions {
   now?: () => Date;
+  /**
+   * A late joiner (D-43, F5): a writer log this computer holds nothing of starts at the head a trusted version 2 checkpoint of this hub names,
+   * instead of seq 0, and its first pulled entry must follow that head. Without such a checkpoint the log is pulled from 0 as before.
+   */
+  startFromBase?: boolean;
 }
 
 /** The transport calls one exchange makes. HubTransport has them all. */
@@ -145,7 +154,8 @@ export type SyncTransport = Pick<HubTransport, 'project' | 'hub' | 'hubHeads' | 
 const ATTENTION_FINDINGS: ReadonlySet<HubFindingKind> = new Set(['rolled-back', 'forked-view', 'wrong-project']);
 const COUNTED_BY_WITNESS: ReadonlySet<HubFindingKind> = new Set(['withheld', 'delayed', 'rolled-back']);
 /** Refusals that may clear once the rest of a push is in (an admission, a grant or an earlier entry in another batch). */
-const RETRY_REFUSALS: ReadonlySet<string> = new Set(['not-admitted', 'unknown-stream', 'not-on-access-list', 'seq-gap', 'prev-mismatch']);
+// blob-missing (Phase 33 D-28): the hub refuses only that entry; the transport puts the batch's blobs and the next pass sends it again.
+const RETRY_REFUSALS: ReadonlySet<string> = new Set(['not-admitted', 'unknown-stream', 'not-on-access-list', 'seq-gap', 'prev-mismatch', 'blob-missing']);
 const MAX_PAGES_PER_WRITER = 10_000;
 const MAX_BLOBS_PER_EXCHANGE = 256;
 const PUSH_PASSES = 3;
@@ -194,6 +204,12 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
   let state = await memory.load(hub, project);
   let rolledBack = false;
   let roster = await local.roster();
+  // The lead's re-admission (D-42): each folded hub.readmit for this hub clears a distrusted witness once, before the witness is used.
+  const readmit = (): void => {
+    const member = roster.deviceKey(hub)?.member;
+    for (const hash of member === undefined ? [] : roster.hubReadmits?.(member) ?? []) state = readmitWitness(state, hash).state;
+  };
+  readmit();
 
   const apply = (result: WitnessResult): HubFinding[] => {
     state = result.state;
@@ -235,6 +251,13 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     // Session and heads.
     const heads = await transport.hubHeads();
     apply(witnessResponse(state, heads, []));
+    // A distrusted server cannot forge a change (every one is signed by a member's device), so its roster changes are still read: that is how
+    // the lead's hub.readmit reaches this computer and clears the mark (D-42). Nothing else is taken from it until then.
+    if (state.distrusted) {
+      await pull(heads.streams.filter((stream) => stream.stream === project));
+      roster = await local.roster();
+      readmit();
+    }
     if (apply(witnessHeads(state, heads, roster)).some((item) => item.kind === 'rolled-back')) rolledBack = true;
     const keptBefore = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
     let hubLatest: Checkpoint | undefined;
@@ -254,6 +277,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
       await local.putGrants(fetched);
       report.grants += fetched.length;
       roster = await local.roster();
+      readmit();
     }
 
     // Hand-back (D-70): when the hub's latest is older than the newest this computer kept, the newer hub checkpoints it holds go back to the hub.
@@ -310,6 +334,23 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
       report.reason = error.detail.reason ?? error.failure;
       report.message = HUB_TRANSPORT_FAILURES[error.failure];
       if (error.detail.retryAfterSeconds !== undefined) report.retryAfterSeconds = error.detail.retryAfterSeconds;
+      // POST-01 (D-07): this computer, or the hub, lacks a feature the shared work requires. Plain words, never attention.
+      if ((error.failure === 'hub-error' || error.failure === 'session-refused') && error.detail.reason === 'needs-update') {
+        report.outcome = 'needs-update';
+        report.message = UPDATE_SENTENCE;
+      }
+      // Restore mode at the hub (D-32): offline with the time to try again, the entries stay queued. The checkpoint ask still goes, because every
+      // member's ask is what ends restore mode at the hub.
+      if (error.failure === 'hub-error' && error.detail.reason === 'restoring') {
+        report.outcome = 'offline';
+        report.message = RESTORING_SENTENCE;
+        try {
+          const asked = await transport.askCheckpoint([]);
+          if (asked.checkpoint !== undefined) await seeCheckpoint(asked.checkpoint);
+        } catch (late) {
+          if (!(late instanceof HubTransportError) && !(late instanceof Stop)) throw late;
+        }
+      }
     } else if (!(error instanceof Stop)) {
       await memory.save(state);
       throw error;
@@ -352,9 +393,20 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     for (const item of pending) apply(witnessEntry(state, { hash: item.hash, verified: false, reason: 'unknown-writer' }));
   }
 
+  /** The head a trusted version 2 checkpoint of this hub names for a writer log, for a late joiner (startFromBase, D-43). */
+  function baseHeadOf(stream: string, writer: string): { seq: number; hash: string } | undefined {
+    if (options.startFromBase !== true || state.newest === undefined) return undefined;
+    const checkpoint = readCheckpoint(state.newest.payload);
+    if (checkpoint === undefined || checkpoint.v !== 2) return undefined;
+    const head = checkpoint.streams.find((item) => item.stream === stream)?.heads.find((item) => item.writer === writer);
+    return head === undefined ? undefined : { seq: head.seq, hash: head.hash };
+  }
+
   /** One writer's log, page by page from this computer's head: sorted by seq, each prev checked against the head, each header verified. */
   async function pullWriter(stream: string, writer: string): Promise<number> {
-    let head = await local.head(stream, writer);
+    // A late joiner holds nothing of this log: it starts after the head a trusted checkpoint names (already kept by seeCheckpoint), and the first
+    // entry pulled must follow exactly that head.
+    let head = (await local.head(stream, writer)) ?? baseHeadOf(stream, writer);
     let stored = 0;
     for (let page = 0; page < MAX_PAGES_PER_WRITER; page += 1) {
       const answer = await transport.entries(stream, writer, head === undefined ? 0 : head.seq + 1);
