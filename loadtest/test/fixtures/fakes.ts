@@ -26,6 +26,8 @@ export interface FakeServiceOptions {
   readonly fails?: (call: number, user: string) => boolean;
   /** Called before each start, with the number of the call; can abort or advance time. */
   readonly onStart?: (call: number, user: string) => void;
+  /** False for the session addresses that never answer. */
+  readonly answers?: (url: string) => boolean;
 }
 
 export interface FakeService extends SessionDriver {
@@ -55,7 +57,7 @@ export function fakeService(clock: FakeClock, options: FakeServiceOptions = {}):
       running.add(sessionName);
       return { sessionName, url: `https://site.example/${sessionName}/` };
     },
-    probe: async () => true,
+    probe: async (url) => options.answers?.(url) ?? true,
     reportActivity: async (_user, sessionName) => { activity.push(sessionName); },
     stopSession: async (_user, sessionName) => { running.delete(sessionName); stopped.push(sessionName); }
   };
