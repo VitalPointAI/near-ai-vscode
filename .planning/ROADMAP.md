@@ -332,11 +332,11 @@ Plans:
   6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 26 plans in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
+**Plans:** 1/26 plans executed in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
 **UI hint**: yes
 
 Plans:
-- [ ] 33.1-01-PLAN.md: Wave 1. Tracer and the permanent shapes (checkpoint): a person-key order and the member's own report on two replicas and the real hub
+- [x] 33.1-01-PLAN.md: Wave 1. Tracer and the permanent shapes (checkpoint): a person-key order and the member's own report on two replicas and the real hub
 - [ ] 33.1-02-PLAN.md: Wave 2. The words that follow how a person serves in the Defence Team mode, and the terms register check
 - [ ] 33.1-03-PLAN.md: Wave 2. `positions@1`, the shared project's signed mode and settings, and the person-key rule for every posting act
 - [ ] 33.1-04-PLAN.md: Wave 3. Delegation under `mayDelegate`, who may be posted, device proof by the posting file
@@ -2062,7 +2062,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
-| 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.1. Assigned positions and handover | 1/26 | In Progress (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |

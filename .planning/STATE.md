@@ -4,15 +4,15 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: Completed 47-15-PLAN.md
-last_updated: "2026-11-24T17:19:36.868Z"
-state_head: 3ef10383eced827c70c7da97655fbb74c8d339e8
+stopped_at: Completed 33.1-01-PLAN.md
+last_updated: "2026-11-24T21:27:19.169Z"
+state_head: 8228a7b1a2e388d70da85d202800403bb4267c30
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 1
-  total_plans: 55
+  total_plans: 69
   completed_plans: 67
-  percent: 11
+  percent: 10
 last_activity: 2026-11-19
 current_phase: 70
 current_phase_name: Capability vocabulary, manifests and one gate with a floor
@@ -158,6 +158,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
+- 33.1-15 waits for 32.1-24 (nearAi.setup.message) on the base; 33.1-17 Tasks 1-2 wait for #187 (Phase 46 workbench) and 33-23 (personSigner)
 
 ### Quick Tasks Completed
 
@@ -172,8 +173,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T17:19:36.678Z
-**Stopped at:** Completed 47-15-PLAN.md
+**Last session:** 2026-11-24T21:27:18.928Z
+**Stopped at:** Completed 33.1-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -211,6 +212,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 69 P01 | 25min | 2 tasks | 10 files |
 | Phase 47 P13 | ~4h | 3 tasks | 24 files |
 | Phase 47 P15 | ~3h | 3 tasks | 21 files |
+| Phase 33.1 P01 | 23 min | 3 tasks | 14 files |
 
 ## Decisions
 
@@ -302,3 +304,4 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-13: pki_int CRL lifetime is the site setting crlExpiry, default 720h
 - [Phase 47]: 47-15: Spike S7 passed; Theia Cloud runs under Pod Security restricted only with the carried patches (security contexts for operator, service, landing page, webhook); oauth2-proxy alpha config, secrets from files
 - [Phase 47]: 47-15: forged X-Forwarded-Uri bypass closed: trusted_proxy_ips per site (fails closed), HAProxy overwrites forwarded headers, session NetworkPolicy (HAProxy and operator only)
+- [Phase 33.1]: 33.1-01: owner answered the permanent-shapes checkpoint 'as listed' (D-43); positionWriteProblem is the one write rule for positions kinds, run by the fold and the hub
