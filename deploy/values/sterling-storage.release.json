@@ -5,5 +5,8 @@
   "values": ["deploy/values/sterling-storage.yaml"],
   "site": "deploy/values/site.example/longhorn.yaml",
   "enabledWhen": { "storageProvider": "longhorn" },
-  "note": "The encrypted reference storage class and the recurring snapshots and backups of every volume (D-17, D-54); right after Longhorn."
+  "images": [
+    { "lock": "sterling/openbao", "set": { "escrowCurrency.image": "ref" } }
+  ],
+  "note": "The encrypted reference storage class and the recurring snapshots and backups of every volume (D-17, D-54), and the daily escrow-currency check of longhorn-crypto on our sterling/openbao image (D-73); right after Longhorn."
 }

@@ -3,12 +3,14 @@
 // checked for the Secret's values.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { checkEscrow, exportEscrow, main, recordKeyBackup } from '../bundle/escrow.mjs';
+import { loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NODE_SCRIPT = path.join(ROOT, 'deploy/rke2/escrow-node.sh');
@@ -156,4 +158,52 @@ test('record-key-backup writes an hsm-key-backup record and refuses anything tha
     assert.equal(code, 2, flag);
   }
   assert.ok(lines.every((line) => /not an option of this command; the record holds no key material, PIN or key file/.test(line)));
+});
+
+test('the longhorn-crypto record holds one digest per key, over the decoded value', () => {
+  const { run } = fakeKubectl({ data: { ...SECRET_DATA } });
+  const { record } = exportEscrow({ out: path.join(temp('escrow-'), 'media'), run });
+  assert.deepEqual(record.keys.map((key) => key.name), ['CRYPTO_KEY_PROVIDER', 'CRYPTO_KEY_VALUE', 'CRYPTO_PBKDF']);
+  for (const key of record.keys) {
+    const decoded = Buffer.from(SECRET_DATA[key.name], 'base64');
+    assert.equal(key.sha256, createHash('sha256').update(decoded).digest('hex'), key.name);
+  }
+});
+
+test('export applies the in-cluster record ConfigMap on stdin, holding digests and names and no value', () => {
+  const { run, calls } = fakeKubectl({ data: { ...SECRET_DATA } });
+  const { record } = exportEscrow({ out: path.join(temp('escrow-'), 'media'), run });
+  const applies = calls.filter((call) => call.args[0] === 'apply');
+  assert.equal(applies.length, 1);
+  assert.deepEqual(applies[0].args, ['apply', '-f', '-'], 'the manifest goes on stdin, never in an argument');
+  const configMap = JSON.parse(applies[0].input);
+  assert.deepEqual({ kind: configMap.kind, name: configMap.metadata.name, namespace: configMap.metadata.namespace },
+    { kind: 'ConfigMap', name: 'sterling-escrow-record', namespace: 'longhorn-system' });
+  for (const key of record.keys) assert.equal(configMap.data[`${key.name}.sha256`], key.sha256);
+  assert.deepEqual(JSON.parse(configMap.data['escrow-record.json']), record);
+  for (const value of VALUES) assert.ok(!applies[0].input.includes(value), 'no Secret value in the ConfigMap');
+  // A failed apply is reported: the escrow-currency check could not see this escrow.
+  const failing = (command, args, options) => (args[0] === 'apply' ? { status: 1, stdout: '', stderr: 'forbidden' } : run(command, args, options));
+  assert.throws(() => exportEscrow({ out: path.join(temp('escrow-'), 'media'), run: failing }), /in-cluster record longhorn-system\/sterling-escrow-record was not applied/);
+});
+
+test('the rendered escrow-currency CronJob mounts the key and the record read-only and runs no command naming a value', () => {
+  const site = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+  const docs = splitDocs(renderRelease(ROOT, 'sterling-storage', { site, helm: process.env.HELM || 'helm' }));
+  const cron = docs.find((doc) => /^kind: CronJob$/m.test(doc) && /^ {2}name: sterling-escrow-currency$/m.test(doc));
+  assert.ok(cron, 'CronJob sterling-escrow-currency is rendered with the storage class');
+  assert.match(cron, /^ {2}schedule: "0 5 \* \* \*"$/m);
+  assert.match(cron, /^ {2}timeZone: Etc\/UTC$/m);
+  assert.match(cron, /^ {2}concurrencyPolicy: Forbid$/m);
+  assert.match(cron, /image: "registry\.site\.example\/sterling\/openbao@sha256:[0-9a-f]{64}"/);
+  for (const [volume, source] of [['key', 'secretName: longhorn-crypto'], ['record', 'name: sterling-escrow-record']]) {
+    assert.match(cron, new RegExp(`- name: ${volume}\\n {18}mountPath: /escrow/${volume}\\n {18}readOnly: true`), `${volume} is mounted read-only`);
+    assert.ok(cron.includes(source), `${volume} comes from ${source}`);
+  }
+  for (const rule of ['runAsNonRoot: true', 'readOnlyRootFilesystem: true', 'allowPrivilegeEscalation: false', 'drop: [ALL]', 'type: RuntimeDefault',
+    'automountServiceAccountToken: false']) assert.ok(cron.includes(rule), rule);
+  assert.doesNotMatch(cron, /secretKeyRef|envFrom|^ +env:/m, 'no Secret value reaches the environment');
+  assert.doesNotMatch(cron, /cat "\$key|echo "\$\(cat/, 'the script never prints a key file');
+  assert.match(cron, /exit "\$status"/);
+  for (const value of VALUES) assert.ok(!docs.join('\n').includes(value));
 });

@@ -13,7 +13,9 @@
 //
 // The escrow folder is made 0700 and the key file 0600. No value is printed, logged or passed as a command argument: the Secret is read with
 // `kubectl get -o json` and parsed in memory. The record holds one SHA-256 per data key, over the decoded value, so a custodian can keep it with
-// the runbook records while the values stay on the media. The RKE2 token and encryption configuration are node files: deploy/rke2/escrow-node.sh.
+// the runbook records while the values stay on the media. Export also applies the same digests as the ConfigMap sterling-escrow-record in
+// longhorn-system, which the daily sterling-escrow-currency CronJob (deploy/charts/sterling-storage) checks the live Secret against; its failure
+// is the signal of 48.1-16's escrow-currency alert. The RKE2 token and encryption configuration are node files: deploy/rke2/escrow-node.sh.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -24,6 +26,8 @@ export const FORMAT = 'sterling-escrow/1';
 export const SECRET = Object.freeze({ namespace: 'longhorn-system', name: 'longhorn-crypto' });
 export const RECORD_FILE = 'escrow-record.json';
 export const KEY_FILE = 'longhorn-crypto.json';
+/** The in-cluster digest-only record the escrow-currency CronJob (deploy/charts/sterling-storage) compares longhorn-crypto against. */
+export const RECORD_CONFIGMAP = 'sterling-escrow-record';
 
 const defaultRun = (command, args, { input } = {}) => spawnSync(command, args, { encoding: 'utf8', input, timeout: 120_000 });
 const kubectlOf = (kubectl) => kubectl || process.env.KUBECTL || 'kubectl';
@@ -90,7 +94,32 @@ export function exportEscrow({ out, run = defaultRun, kubectl, now } = {}) {
   };
   const recordFile = path.join(out, RECORD_FILE);
   writeFileSync(recordFile, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  applyRecord(record, { run, kubectl });
   return { record, files: [keyFile, recordFile] };
+}
+
+/**
+ * The ConfigMap sterling-escrow-record for a longhorn-crypto record: <key>.sha256 per data key (what the CronJob compares) and the record itself.
+ * Digests and names only.
+ */
+export function recordConfigMap(record) {
+  const data = { [RECORD_FILE]: `${JSON.stringify(record, null, 2)}\n` };
+  for (const key of record.keys) data[`${key.name}.sha256`] = key.sha256;
+  return {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: RECORD_CONFIGMAP, namespace: SECRET.namespace, labels: { 'app.kubernetes.io/part-of': 'sterling-escrow' } },
+    data,
+  };
+}
+
+/** Applies the in-cluster record through `kubectl apply -f -`, the manifest on stdin. */
+function applyRecord(record, { run, kubectl }) {
+  const result = run(kubectlOf(kubectl), ['apply', '-f', '-'], { input: JSON.stringify(recordConfigMap(record)) });
+  if (result.error || result.status !== 0) {
+    throw new Error(`The escrow files are written, but the in-cluster record ${SECRET.namespace}/${RECORD_CONFIGMAP} was not applied `
+      + `(${result.error?.message || `exit ${result.status}`}), so the escrow-currency check cannot see this escrow. Make the escrow again in a new folder.`);
+  }
 }
 
 /** Compares the cluster's longhorn-crypto with a record. Returns { ok, problems }; problems name keys, never values. */
