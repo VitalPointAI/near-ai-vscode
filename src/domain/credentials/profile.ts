@@ -39,11 +39,11 @@ const PROFILE_ONLY_REFUSALS = {
   'wrong-context': 'This credential\'s @context must be exactly the two allowed contexts, in order, and nothing else.',
   'wrong-type': 'This credential must name VerifiableCredential and exactly one credential type this version knows.',
   'bad-id': 'The credential\'s id must be short text, and a status list must have one.',
-  'bad-issuer': 'The credential\'s issuer must be a DID.',
+  'bad-issuer': 'The credential must name whoever issued it by a DID.',
   'bad-dates': 'validFrom and validUntil must both be UTC times, with validFrom first.',
   'bad-status': 'A credential needs exactly one revocation entry and one suspension entry in a status list; a status list needs none.',
   'bad-claims': 'The credential\'s claims are not exactly the ones its type allows.',
-  'issuer-mismatch': 'The proof was made with a key that does not belong to the credential\'s issuer.',
+  'issuer-mismatch': 'The proof was made with a key that does not belong to whoever the credential says issued it.',
   'suite-key-mismatch': 'The issuer\'s key is not the kind of key the proof\'s suite uses.',
   'not-yet-valid': 'This credential is not valid yet.',
   'expired': 'This credential has expired.'
