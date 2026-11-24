@@ -160,6 +160,25 @@ test('connection refused and a slow answer are unreachable', async () => {
   assertNoToken(slow);
 });
 
+test('a request that fails before it is sent is unreachable, and nothing fires when its timeout would have', async () => {
+  // A header value Node refuses makes request() throw before it returns; found by 46-08, where a refused connect did the same and the
+  // timeout listener later threw a ReferenceError in the running backend.
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown): void => { uncaught.push(error); };
+  process.on('uncaughtException', onUncaught);
+  try {
+    const calls = fake.calls.length;
+    const early = await rejection(createOpenBaoClient({ addr: fake.url, timeoutMs: 200 }).request('GET', 'auth/token/lookup-self', { token: `${TOKEN}\nX-Other: 1` }));
+    assert.equal(early.kind, 'unreachable');
+    assertNoToken(early);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.deepEqual(uncaught, [], 'nothing was thrown after the call had settled');
+    assert.equal(fake.calls.length, calls, 'nothing reached OpenBao');
+  } finally {
+    process.off('uncaughtException', onUncaught);
+  }
+});
+
 test('a 403 on login is refused with its status; a 500 is a bad response', async () => {
   const client = createOpenBaoClient({ addr: fake.url, timeoutMs: 1000 });
   const login = await rejection(client.request('POST', 'auth/jwt/login', { body: { role: 'sterling-workbench', jwt: TOKEN } }));

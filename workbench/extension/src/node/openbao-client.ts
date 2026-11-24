@@ -84,13 +84,14 @@ export function createOpenBaoClient(options: OpenBaoClientOptions): OpenBaoClien
 
       return new Promise<OpenBaoResponse>((resolve, reject) => {
         let settled = false;
+        let request: http.ClientRequest | undefined;
         const signal = AbortSignal.timeout(timeoutMs);
         const finish = (outcome: OpenBaoResponse | OpenBaoError): void => {
           if (settled) return;
           settled = true;
           signal.removeEventListener('abort', onAbort);
           if (outcome instanceof OpenBaoError) {
-            request.destroy();
+            request?.destroy();
             reject(outcome);
           } else {
             resolve(outcome);
@@ -100,43 +101,50 @@ export function createOpenBaoClient(options: OpenBaoClientOptions): OpenBaoClien
         const onAbort = (): void => finish(unreachable(`no answer within ${timeoutMs} ms`));
         signal.addEventListener('abort', onAbort);
 
-        const request = transport.request(target, {
-          method,
-          headers,
-          agent: false,
-          ...(secure ? { ca, minVersion: 'TLSv1.2' as const } : {}),
-        }, (response) => {
-          const status = response.statusCode ?? 0;
-          const chunks: Buffer[] = [];
-          let size = 0;
-          response.on('data', (chunk: Buffer) => {
-            size += chunk.length;
-            if (size > MAX_ANSWER_BYTES) {
-              finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with more than 1 MiB.`, status));
-              return;
-            }
-            chunks.push(chunk);
+        // request() can throw before it returns (an invalid header value, or a connect refused at once); that settles the call here, and
+        // the timeout listener is removed with it, so nothing fires later against a request that was never made.
+        try {
+          request = transport.request(target, {
+            method,
+            headers,
+            agent: false,
+            ...(secure ? { ca, minVersion: 'TLSv1.2' as const } : {}),
+          }, (response) => {
+            const status = response.statusCode ?? 0;
+            const chunks: Buffer[] = [];
+            let size = 0;
+            response.on('data', (chunk: Buffer) => {
+              size += chunk.length;
+              if (size > MAX_ANSWER_BYTES) {
+                finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with more than 1 MiB.`, status));
+                return;
+              }
+              chunks.push(chunk);
+            });
+            response.on('error', () => finish(unreachable('the answer was cut off')));
+            response.on('end', () => {
+              if (status === 404) { finish({ status, json: undefined }); return; }
+              if (status === 400 || status === 401 || status === 403) {
+                finish(new OpenBaoError('refused', `OpenBao refused ${shown} (status ${status}).`, status));
+                return;
+              }
+              if (status < 200 || status > 299) {
+                finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with status ${status}.`, status));
+                return;
+              }
+              const text = Buffer.concat(chunks).toString('utf8');
+              if (text.trim() === '') { finish({ status, json: undefined }); return; }
+              try {
+                finish({ status, json: JSON.parse(text) as unknown });
+              } catch {
+                finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with something that is not JSON.`, status));
+              }
+            });
           });
-          response.on('error', () => finish(unreachable('the answer was cut off')));
-          response.on('end', () => {
-            if (status === 404) { finish({ status, json: undefined }); return; }
-            if (status === 400 || status === 401 || status === 403) {
-              finish(new OpenBaoError('refused', `OpenBao refused ${shown} (status ${status}).`, status));
-              return;
-            }
-            if (status < 200 || status > 299) {
-              finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with status ${status}.`, status));
-              return;
-            }
-            const text = Buffer.concat(chunks).toString('utf8');
-            if (text.trim() === '') { finish({ status, json: undefined }); return; }
-            try {
-              finish({ status, json: JSON.parse(text) as unknown });
-            } catch {
-              finish(new OpenBaoError('bad-response', `OpenBao answered ${shown} with something that is not JSON.`, status));
-            }
-          });
-        });
+        } catch (error) {
+          finish(unreachable((error as NodeJS.ErrnoException).code ?? 'request failed'));
+          return;
+        }
         // Only the error's code is kept (ECONNREFUSED, a TLS verification code): a Node error message can quote the address but never a header.
         request.on('error', (error: NodeJS.ErrnoException) => finish(unreachable(error.code ?? 'connection failed')));
         request.end(payload);
