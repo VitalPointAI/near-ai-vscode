@@ -332,7 +332,7 @@ Plans:
   6. An industry observer invited into an Observer position until an end date is admitted only after your organization's security contact approves; they see only the copies staff release to them from key groups whose approved releasability allows their nationality or organization, and nothing of the roster (no name, position or member key); they comment in their own stream, which no other observer can read, and cannot edit, decide or post; after the end date your organization's server refuses their writes. (POST-09)
 **Research flags**: (1) Military and public service terms (handover, relief in place, transfer of authority, acting, temporary duty) checked against doctrine and policy sources in the terms register before shipping (owner decision D11).
 **Undo cost**: Medium: new roster kinds are permanent in shared logs, so settle their schemas in the first plan.
-**Plans:** 1/26 plans executed in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
+**Plans:** 2/26 plans executed in 13 waves (Codex planned eight on 2026-11-23; re-planned for native Theia on 2026-11-24: engine plans host-neutral, native Staff Room sections, signing through the Phase 46 key service; details in `33.1-CONTEXT.md`, 33.1 D-01 to 33.1 D-37 and 21 owner items, 17 of them accepted and item 21 answered by the owner; 33.1 D-36, 33.1 D-37 and plan 26 added 2026-11-24; revised the same day for credentials, 33.1 D-38 to 33.1 D-40)
 **UI hint**: yes
 
 Plans:
@@ -352,7 +352,7 @@ Plans:
 - [ ] 33.1-14-PLAN.md: Wave 7. The acting position checked at your organization's server, on replay and before signing
 - [ ] 33.1-15-PLAN.md: Wave 1. Your organization's people rules handed to the workbench by one hidden extension command
 - [ ] 33.1-16-PLAN.md: Wave 7. Presence that shows each person once, in the position they work in, and grants nothing
-- [ ] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
+- [x] 33.1-17-PLAN.md: Wave 1. One passkey confirmation per person action, and only the person signer for person-key kinds
 - [ ] 33.1-18-PLAN.md: Wave 3. Observer shapes, the observer invitation and one fold of an observer stream
 - [ ] 33.1-19-PLAN.md: Wave 8. Observers placed into Observer positions with their own cell; releasability and signer-approved markings at the key grant
 - [ ] 33.1-20-PLAN.md: Wave 11. A holder of your organization's security contact credential approves outside observers, bound to their credential evidence; release markings approved by a release authority; nothing widens without a new approval
@@ -2062,7 +2062,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
 | 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
-| 33.1. Assigned positions and handover | 1/26 | In Progress (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
+| 33.1. Assigned positions and handover | 2/26 | In Progress (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
 | 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
