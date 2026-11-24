@@ -1418,9 +1418,10 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## Get started in two minutes
 
-1. Install **NEAR AI for VS Code** and open a project folder. From 0.4.37 each release also ships
+1. Install **NEAR AI for VS Code** and open a project folder. From 0.4.38 each release also ships
    as the Sterling workbench container image on the GitHub Container Registry, recorded by digest
-   on the GitHub release; the image has no sign-in of its own, so run it on `127.0.0.1` only.
+   on the GitHub release (0.4.37's image is on the registry without one); the image has no
+   sign-in of its own, so run it on `127.0.0.1` only.
 2. Open the **NEAR AI** chat and choose **Set up a new profile** (or run
    **NEAR AI: Set Up a New Profile** from the Command Palette). A profile is
    your NEAR AI key or local runtime for this project; it is working once the

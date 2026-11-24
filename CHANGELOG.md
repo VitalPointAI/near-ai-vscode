@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.38
+
+This is the first complete container release. 0.4.37's image reached the registry, but its last
+publication check failed, so it has no GitHub release and no assessor package. 0.4.38 carries
+the same product with that fixed.
+
+### Released as a container image
+
+- **Each release now finishes with its GitHub release and assessor package.** Before, the step
+  that confirms the pushed image is the tested one compared the wrong digest on newer Docker
+  versions and stopped the release after the image was already published. It now accepts the
+  registry copy only when it is exactly the tested image, under either way Docker reports an
+  image's identity.
+- **The OSCAL import check runs again.** The check that imports the assessor package into
+  Compliance Trestle unpacked it inside Trestle's own workspace, which Trestle refuses. It now
+  unpacks beside it, so the import and validation results appear in each release run.
+
+### Compliance and documentation
+
+- **The hosted compliance views show their first evidence.** For the planned on-premise
+  deployment, three statements now rest on a checked test of the site stack: it renders no k3s
+  and no ingress-nginx, and no certificate issuer uses a public ACME service. Everything else
+  in those views still shows No statement yet or a dated gap, never Met without evidence.
+- **The documentation matches how Sterling ships.** Getting started covers both the extension
+  and the workbench image, and the architecture, release and security pages describe the
+  approved container publication and the planned hosting for your organization's own sites.
+
 ## 0.4.37
 
 This is the first release shipped as a Sterling container image instead of a Marketplace
