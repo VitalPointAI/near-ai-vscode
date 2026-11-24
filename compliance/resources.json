@@ -80,7 +80,7 @@
         "sa-15",
         "sr-03"
       ],
-      "evidence": "The credential conformance tests in the test CI job (dist/test/credentialsConformance.test.js).",
+      "evidence": "The status list cross-check tests in the test CI job (dist/test/credentialsStatusList.test.js).",
       "crypto": "none",
       "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
       "airGap": "ok",
