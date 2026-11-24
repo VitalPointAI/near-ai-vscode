@@ -60,7 +60,10 @@ export interface PayloadSigner { readonly fingerprint: string; readonly publicKe
 // A signer that signs later (Phase 33 D-60): your organization's key store signs a person-key entry over the network after a fresh step-up. It may
 // answer a refusal instead of a signature; the refusal's text is passed through unchanged to the person.
 export interface SignRefused { refused: string }
-export interface AsyncPayloadSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): Promise<string | SignRefused> }
+// action names the one person action these bytes belong to (33.1 D-09): the person signer signs them only under the step-up bound to that action. It
+// is never part of the signed bytes, so an envelope signed with or without it is the same.
+export interface SignOptions { readonly action?: string }
+export interface AsyncPayloadSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer, options?: SignOptions): Promise<string | SignRefused> }
 // memberId is left out when absent: the canonical form refuses an undefined value.
 export interface PayloadSignerRef { fingerprint: string; publicKey: string; memberId?: string }
 
