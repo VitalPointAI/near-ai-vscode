@@ -177,6 +177,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
+      # 48.1-01 (D-09): the generated blocks of the hosted SA&A documents match their sources, and the exchange register names every deploy
+      # module that signs or verifies a file. Node alone: the command imports only Node built-ins.
+      - name: Check the generated blocks of the hosted SA&A documents
+        working-directory: .
+        run: node compliance/src/cli.ts hosted-docs --check
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
       - name: Test the documentation site
