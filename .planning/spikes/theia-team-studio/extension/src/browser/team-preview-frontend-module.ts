@@ -37,7 +37,7 @@ class TeamPreviewWidget extends BaseWidget {
     const shell = element('main', 'near-team-shell');
     const header = element('header', 'near-team-header');
     const label = element('label', 'near-project-field');
-    label.append(element('span', undefined, 'Sample project'), this.projects);
+    label.append(element('span', undefined, 'Sample'), this.projects);
     header.append(element('h1', undefined, 'Team Studio'), label);
     shell.append(header, this.body);
     this.node.append(shell);
@@ -52,7 +52,7 @@ class TeamPreviewWidget extends BaseWidget {
   }
 
   private async loadProjects(): Promise<void> {
-    this.showMessage('Loading projects…');
+    this.showMessage('Loading samples…');
     try {
       const projects = await this.service.listProjects();
       for (const project of projects) {
@@ -60,11 +60,11 @@ class TeamPreviewWidget extends BaseWidget {
         option.value = project.id;
         this.projects.append(option);
       }
-      if (!projects.length) { this.showMessage('No sample projects are available.'); return; }
+      if (!projects.length) { this.showMessage('No samples are available.'); return; }
       this.projects.disabled = false;
       await this.showProject();
     } catch {
-      this.showMessage('Team Studio could not load the projects.');
+      this.showMessage('Team Studio could not load the samples.');
     }
   }
 
@@ -77,7 +77,7 @@ class TeamPreviewWidget extends BaseWidget {
       if (result.kind === 'ready') this.showTeam(result.team);
       else this.showMessage(result.message);
     } catch {
-      if (request === this.request && !this.isDisposed) this.showMessage('Team Studio could not read this project.');
+      if (request === this.request && !this.isDisposed) this.showMessage('Team Studio could not read this sample.');
     }
   }
 

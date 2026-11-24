@@ -1,6 +1,6 @@
 # Sterling in Eclipse Theia
 
-The local workbench opens to Sterling Sovereign AI Canadian Defence Edition. Get Started shows the Sterling logo for the active theme and offers a native Team Studio sample with four packaged projects.
+The local workbench opens to Sterling Sovereign AI Canadian Defence Edition. Get Started shows the Sterling logo for the active theme and opens a native Team Studio preview with four packaged samples.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ docker run --detach --name near-ai-theia-team-preview \
   --publish 127.0.0.1:18771:3000 near-ai-theia-preview:local
 ```
 
-Open [Get Started](http://127.0.0.1:18771/) and select **Explore a sample team**. Reopen the page with the home icon at the top of the right sidebar or **SovAI: Get Started** in the command palette. **SovAI: Open Team Studio Preview** also opens the sample. Use the project picker to switch between two valid teams, a project without a team, and a project with an invalid team. Select a member to see their role, reporting line, and instructions.
+Open [Get Started](http://127.0.0.1:18771/) and select **Explore a sample team**. Reopen the page with the home icon at the top of the right sidebar or **SovAI: Get Started** in the command palette. **SovAI: Open Team Studio Preview** also opens the sample. Use the sample picker to switch between two valid teams, a sample without a team, and a sample with an invalid team. Select a member to see their role, reporting line, and instructions.
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
