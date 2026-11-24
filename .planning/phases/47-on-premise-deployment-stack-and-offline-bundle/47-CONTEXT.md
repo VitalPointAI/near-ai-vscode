@@ -4,6 +4,7 @@
 **Status:** Ready for planning. Decided on the owner's behalf from the accepted hosting design; nobody could be asked questions during planning. The owner's decisions D1 to D11 and the defaults O2 to O6 (DESIGN.md sections 2 and 14) were accepted on 2026-11-23 and are binding here. Points the design leaves open are decided below with the recommended default and listed at the end under "For the owner to confirm".
 **Source:** written by hand from `.planning/research/multiuser-hosting/DESIGN.md` sections 2, 4 to 8, 10, 11 and 14 and `RESEARCH.md` beside it. The GSD ADR ingest (`--ingest ... --ingest-format narrative`) parsed DESIGN.md but found **0 decisions** (the decisions are in tables), so the express path would have fallen back to discuss-phase; the coordinator approved writing this file by hand instead. Also read: the Phase 47 entry in `.planning/ROADMAP.md`, `compliance/README.md` ("Adding a resource"), `compliance/resources.json` and `compliance/schemas/resources.schema.json`, `scripts/resource-check.mjs`, `relay/compose.yaml`, `hub/Dockerfile`, and `.planning/research/multiuser-sync/DESIGN.md` section 10 (the sync hub).
 **Revised:** 2026-11-24 (owner): D-02. The first goal is one HQ with about 400 concurrent people, not thousands. No plan's values change: every size is a per-site value.
+**Revised:** 2026-11-24 (owner): guest accounts for outside observers, the Phase 47 follow-up that Phase 33.1 D-33 names. Added D-58 to D-65, requirement DEP-13, success criterion 7 and plans 47-19 to 47-21. Decided on the owner's behalf from the owner's brief and 33.1 D-27 to D-34 (read on `origin/docs/phase-33.1-observers`); the defaults are listed under "For the owner to confirm", items 12 to 20.
 
 <domain>
 ## Phase Boundary
@@ -17,6 +18,7 @@ In scope (DESIGN.md section 8 "Deployment work", section 11 hardening list, sect
 - The deployment half of the session lifecycle (section 7): `sessionsPerUser: 1`, timeouts, idle settings, prewarm pool at 0, persistent workspace volumes, backups.
 - Theia Cloud hardening items 1 to 12 (section 11).
 - A passing compliance fit entry for every component, image and chart (section 10, D9).
+- Guest accounts for outside observers (added 2026-11-24, owner; DEP-13, D-58 to D-65). This is the deployment half of Phase 33.1 D-33. Observer positions, feedback and the signed observer approval are Phase 33.1's.
 
 Not in this phase:
 - Product code: the Theia extension package, backend JSON-RPC pattern, `OpenBaoKeyStoreService`, `KeyService`, session identity, session sub-keys, hub roster changes, mirror-configurable addresses inside the image, the Sterling image build and its release pipeline (P1 to P11: Phase 46, and P6/P7 with Phase 33). Phase 47 consumes Phase 46's interface (below).
@@ -108,6 +110,69 @@ Not in this phase:
 - **D-56:** Static checks in CI: render every chart with our values offline (no repository fetch) and assert the hardening invariants on the rendered output (no ACME issuer, no `ingress-nginx`, no image without a digest, no `imagePullPolicy: Always`, oauth2-proxy flags as D-22, `sessionsPerUser: 1`, persistence on, prewarm 0, no password or OTP authenticator in the realm, OpenBao ACLs templated). Tests are added only for these invariants and for the extended resource checker; no tests restate schemas.
 - **D-57 (owner, 2026-11-23: no hardware keys available yet, "can we implement phone passkeys first?"):** Sign-in strength is a site policy setting `signInKeys: passkeys | hardware-only` in the site file (47-02, 47-12), applied by the realm as code (47-08). `passkeys` accepts any WebAuthn passkey: phone platform passkeys including synced iCloud Keychain or Google Password Manager passkeys, device-bound passkeys and hardware keys; attestation not required, no AAGUID allowlist. `hardware-only` requires attestation, an AAGUID allowlist of approved hardware key models and device-bound keys. Default `passkeys` for development, the lab and the Phase 47 lab run; `hardware-only` is the recommended production setting for defence sites once they have keys (recorded, not forced). No passwords at either level; two keys per person and administrator-attested re-enrolment apply at both. **Caveat:** cross-device sign-in (a phone signing in on a different device through the "hybrid" QR flow) needs Bluetooth proximity and a tunnel relay run by Apple or Google on the internet, so it does not work at air-gapped sites and counts as commercial cloud at connected sites (allowed only where policy allows); a passkey used on the same device (the phone's own browser, or a laptop's platform authenticator) needs no internet. The air-gapped lab run therefore uses a same-device passkey (47-18); a hardware-key run is a follow-up when keys exist.
 
+### Guest accounts for outside observers (owner, 2026-11-24; plans 47-19 to 47-21)
+Phase 33.1 adds Observer positions (33.1 D-27 to D-34) for industry, allied military and other people who observe and give feedback. 33.1 D-33 says an outside observer signs in with a site guest account and leaves the account type to Phase 47. The merged Phase 47 has none. These decisions add it.
+- **D-58 (owner, 2026-11-24):** A site has a guest account type for outside observers (DEP-13). Guests sign in only with passkeys or hardware security keys under the site's `signInKeys`, exactly as staff do (D-05, D-31, D-57): same flows, same relying-party id, no other method.
+- **D-59 (guest identity in the realm as code):** Realm `sterling` gains a top-level group `guests` with no realm roles, no client roles and no subgroups. Membership of it is what makes an account a guest, and nothing else does. A second group, `security-contacts`, also with no roles, lists the people who may approve allied-military and industry guests. The declarative user profile gains attributes that only administrators can view or edit:
+  - `guestUntil`: the end, an ISO 8601 UTC instant;
+  - `serves`: one of the six ways of serving in 33.1 D-29 (`regular-force`, `reserve-force`, `public-servant`, `contractor`, `allied-military`, `industry`);
+  - `nationality` and `organization`: releasability tokens matching `LABEL_TOKEN_PATTERN` in `src/domain/gate/labels.ts`, never `RELEASABLE-TO-NONE`, required for `allied-military` and `industry` (33.1 D-30);
+  - `guestRequestedBy`, `guestApprovedBy` and `guestApprovalRef`: who asked, who approved and the approval's reference;
+  - `guestEndedAt` and `guestEndedReason`: set when the account ends.
+  The profile cannot make attributes required by group, so the guest script enforces them (D-61).
+- **D-60 (what a guest may sign; the owner's brief checked against 33.1):** A guest's person key signs only what every member's person key must sign to work at all:
+  - the `session.certify` that admits each session key (33 D-60, D-62). Without it, a guest's comments are refused, because comments are session-key entries (33.1 D-31);
+  - the hosted "Confirm it is you" proof at admission (33.1 D-17, D-33).
+  The fold and the hub refuse every deciding, approving, posting or tasking act from an observer posting (33.1 D-27), whatever key signs it. OpenBao signs bytes and cannot tell a session certificate from a decision. A guest therefore logs in through the same two jwt roles as staff (`sterling-workbench` and `sterling-workbench-stepup`) with the same entity-templated policies (D-39, D-40). A guest:
+  - gets no other OpenBao policy and joins no OpenBao identity group (never `key-custodians`);
+  - holds no Keycloak administrator role (no `realm-management` client role) and belongs to no group except `guests`.
+  A guest-only step-up role would need the workbench to choose its OpenBao role per person. Today the role names are one site setting each (`STERLING_OPENBAO_JWT_ROLE`, `STERLING_OPENBAO_STEPUP_ROLE`, 46-07), so that would be a Phase 46 change, and it would restrict nothing more. Owner item 12.
+- **D-61 (enrolment):**
+  - **Who creates the account.** The site operator runs `deploy/keycloak/guests.mjs create`, which needs:
+    - the lead who asked (`--requested-by`): an enabled account outside `guests`;
+    - for `allied-military` and `industry` guests, the security contact's approval: `--approved-by`, an enabled member of `security-contacts` who is neither the lead nor the guest, and `--approval-ref`, the reference of the written approval the runbook files.
+    The site approval admits the person to the site. The signed `observer.approve` (33.1 D-32) admits them to one shared project. Both are needed.
+  - **Keys and the registration link.** The account gets the `webauthn-register-passwordless` required action. The guest registers two keys, like staff (D-33). The registration link goes through the site's mail server to the address on the account. By default a guest enrols in person at the site with an identity check, using a site-issued guest address read at the enrolment desk. Owner items 14 and 15.
+  - **OpenBao.** `deploy/openbao/enrol.mjs enrol` is the same command for guests. For a member of `guests` it names the entity `guest-<Keycloak user id>` (staff: `keycloak-<id>`). It refuses a guest whose `guestUntil` is missing or past, and it refuses to turn a staff entity into a guest entity or back.
+  - **Two-person rules** apply where 47-07 has them. A guest's keys are exported or moved only through the `key-move` Control Group (two key custodians), and a guest's keys never move between sites (D-64). Creating a guest needs no Control Group. Owner item 13.
+- **D-62 (OpenBao):**
+  - **Guest records.** A guest has their own entity (`guest-<id>`), their own KV path `kv/users/<entity>/` and their own non-exportable Transit keys `person-<entity>` and `kek-<entity>`. These are reached only through the staff policies, which are templated on the entity (D-40), so a guest cannot reach another guest's paths or a staff member's.
+  - **Ending.** Ending a guest disables the entity, so every token it holds stops working at once. Its keys stay but cannot be used while the entity is disabled: that is what "retired" means.
+  - **New policy `guest-expiry`.** It reads guest entities and disables them, and nothing else: `identity/entity/name/guest-*`, with `allowed_parameters` limited to `disabled = [true]`.
+  - **New jwt role `guest-expiry`.** It is on the existing jwt mount, used by the expiry job's Keycloak service account: `bound_audiences` and `bound_claims.azp` are `sterling-guest-expiry`, and its token lives 5 minutes and cannot be renewed.
+  - **New policy `guest-removal`.** It deletes a guest's entity, KV data and Transit keys, and every delete waits for two approvals from the `key-custodians` group through a Control Group (the runbook's approval step, D-63).
+- **D-63 (expiry and offboarding):**
+  - **The end date.** Every guest has an end date. When it is set (by create, extend or import), it may be no later than the site's `guests.maxDays` from that moment. The setting is in the realm site file; guests stay off at a site until it is set.
+  - **Automatic end.** No operator is needed. The CronJob `sterling-guest-expiry`, part of the realm release and rendered only when the site turns guests on, runs `guests.mjs expire` every `guests.checkMinutes` (default 15). It uses:
+    - the Keycloak client `sterling-guest-expiry`. Its service account may only view and manage members of `guests`, through Keycloak's fine-grained admin permissions v2; it never gets realm-wide `manage-users`;
+    - the OpenBao role `guest-expiry`, logged in with the same Keycloak token;
+    - a ServiceAccount that may list and delete Theia Cloud Session records in the sessions namespace only.
+  - **What ending does.** For each guest past `guestUntil`, the job:
+    - disables the Keycloak account and ends its Keycloak sessions;
+    - disables the OpenBao entity;
+    - stops the guest's Theia sessions. Deleting a Session record stops the pod; the Workspace and its volume stay;
+    - records `guestEndedAt` and `guestEndedReason`.
+  - **Fail closed.** The job also ends any guest it finds holding an administrator role, a group other than `guests`, or an OpenBao policy or group, and records why.
+  - **By hand.** `guests.mjs end` does the same at once (an early end). `guests.mjs extend` moves the end date under the create rules and re-enables an ended guest.
+  - **Lag.** An end takes effect at most `checkMinutes` late. The hub refuses an observer's writes from the posting's end exactly (33.1 D-28).
+  - **Nothing is deleted by these scripts.** A guest's account, entity, KV data, Transit keys and workspace volume are removed only through the runbook's removal step. That step comes after your organization's retention period, needs the written approval of the security contact and the site administrator, and goes through OpenBao's two-custodian Control Group (D-62). Owner items 16, 17 and 19.
+- **D-64 (federation; amends D-36 for guests):**
+  - **Guests are per site.** `users.mjs export` (47-14) refuses a guest unless `--include-guests` names them. A guest's record carries `guest { until, serves, nationality, organization, requestedBy, approvedBy, approvalRef }`, so the person stays a guest.
+  - **Import.** `users.mjs import` refuses a file with guest records unless `--include-guests` names them. It then creates each one as a member of `guests` under the destination's own rules: the destination's `guests.maxDays`, a lead who exists there, and for allied military and industry the destination's own security contact (`--approved-by`). The end date is never later than the source's.
+  - **Keys.** A guest's Transit keys never move. The destination enrols the guest with its own entity and keys (`enrol.mjs enrol`).
+  - **Why this is needed.** Without it, 47-14's import would create a guest as an ordinary person with no end date. Owner item 18.
+- **D-65 (compliance; Phase 48 impact):**
+  - **The image.** The expiry job runs in one image we build, `sterling/guest-expiry`. Its base is the UBI 9 Node.js 22 image already assessed for the landing page, at the same digest, so there is no new third-party resource. That base's register entry gains the new `where` and is reviewed for use at run time. The deploy-images workflow builds, signs and attaches an SBOM to the image (D-23).
+  - **No new component id.** The guest type belongs to `keycloak` and `openbao`.
+  - **For Phase 48.** Implementation statements on those two components for:
+    - AC-2: the guest account type and its conditions;
+    - AC-2(2): automatic disabling of temporary accounts;
+    - AC-2(4): admin events for creating, extending and ending a guest;
+    - IA-8: people from outside your organization;
+    - IA-12: in-person identity proofing at enrolment;
+    - PS-7: external personnel.
+  These are candidates; Phase 48 confirms each against the catalog. Owner item 20 is the gate approval.
+
 ### Claude's Discretion
 - Exact file names under `deploy/`, script language (Node scripts in the repository's style preferred, no new runtime), and how plans split the work into waves.
 - Which of Kyverno or the sigstore policy-controller, which Postgres method, which reference storage class, which non-AGPL log store and shipper (within D-19's criteria), which bundle copy tool: decided by the research step on fit, air-gap, FIPS and footprint, one each, recorded in RESEARCH.md.
@@ -159,6 +224,14 @@ Not assumed: session sub-keys and hub roster changes (P6, P7) are not needed for
   - **DEP-10** Compliance fit: an entry for every component, image, chart and tool under the shared component ids (D-53); resource checker extended with `chart` and `tool` kinds and `deploy/` discovery (gate files, owner approval).
   - **DEP-11** Runbooks: install, update, key ceremony, enrolment, re-enrolment and recovery, moving a person, backup and restore, session states.
   - **DEP-12** Verification: CI render-and-assert of the hardening invariants, and a repeatable air-gapped lab install from the bundle with an egress-deny check; end-to-end sign-in with Phase 46's image when available.
+  - **DEP-13** Guest accounts for outside observers (owner, 2026-11-24; D-58 to D-65):
+    - a guest account type in the realm as code: passkeys or hardware keys only, a `guests` group with no roles, an end date, how the person serves, nationality and organization;
+    - creation at the lead's request, with the security contact's approval for allied-military and industry guests;
+    - an OpenBao entity with its own KV path and Transit keys under the staff policies;
+    - an automatic end at the end date: account disabled, sessions stopped, entity disabled, keys retired;
+    - nothing deleted outside the runbook's two-person removal step;
+    - guests per site unless a signed user export explicitly includes them;
+    - a runbook, tests, and the compliance register entries.
 - Session lifecycle mapping (section 7) for deployment: `requested`→`refused` is Theia Cloud refusing at `maxInstances` (the message text "All sessions are in use. Try again in a few minutes, or ask your administrator." is set where Theia Cloud lets us; if the landing page or service cannot be configured, it is recorded as a Phase 46 or upstream item); `starting`→`failed` uses the operator's start timeout; `identity` is Phase 46; `idle-warned`/`stopping` use `notifyAfter`/`timeoutAfter`; `stopped` keeps the volume.
 </specifics>
 
@@ -189,6 +262,12 @@ Not assumed: session sub-keys and hub roster changes (P6, P7) are not needed for
 4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, oauth2-proxy defaults fixed, the sign-in token forwarded.
 5. HQ and an edge site trust each other through PKI and signed bundles only; the hub runs as a Kubernetes workload, several per site.
 6. Every component has a compliance fit entry; key ceremony and recovery runbooks exist.
+7. (Added 2026-11-24, owner.) An outside observer signs in to a site with a guest account:
+   - with a passkey or hardware key only;
+   - created at the lead's request, with the security contact's approval for allied military and industry;
+   - with their own OpenBao entity and keys;
+   - and never with an administrator role.
+   At its end date the account is disabled, its sessions are stopped and its entity is disabled, without an operator. Nothing is deleted except through the runbook's two-person step. A guest reaches another site only when a signed user export explicitly includes them.
 
 ## Risk Summary
 - Theia Cloud project health (bus factor about 3, last stable release 2026-04): pinned, rebuilt, fork only if needed.
@@ -214,3 +293,14 @@ Each has the default the plans use. (The log store was decided by the owner on 2
 9. **Refusal message at capacity:** not a chart value; recorded as a Phase 46 or upstream item.
 10. **The shared parent domain for the rpId** (D-08, O3 accepted): one value for your organization, entered in every site's install file and identical at HQ and edge; no default domain is shipped.
 11. **Sign-in level (D-57, decided 2026-11-23):** `signInKeys: passkeys` for the lab and the Phase 47 lab run (no hardware keys yet). Owner item: when hardware keys arrive, choose the approved models (AAGUIDs) and run the hardware-key follow-up in 47-18; production defence sites are recommended to set `hardware-only`.
+
+**Guest accounts (added 2026-11-24; open until the owner accepts them).** Plans 47-19 to 47-21 use these defaults. Each line gives the default, then the alternative.
+12. **D-60, guests use the staff OpenBao roles.** A guest's person key must certify each session key (33 D-62) and confirm admission (33.1 D-17). The fold and the hub, not OpenBao, refuse an observer's deciding acts (33.1 D-27). So guests log in through `sterling-workbench` and `sterling-workbench-stepup` with the same entity-scoped policies, and never hold an administrator role, another policy or another group. (Alternative: separate guest roles. That needs a Phase 46 change so the workbench can choose its role per person, and restricts nothing more.)
+13. **D-61, site approval is a recorded approval.** The security contact is named and must be a member of `security-contacts`. Their written approval is filed under the reference stored on the account, and Keycloak's admin events log who created the guest. (Alternative: an OpenBao Control Group approval by a security contact. That needs the approver sign-in path that the key custodians also need, which is not built yet.)
+14. **D-61, two keys per guest, as for staff.** (Alternative: one key for guests. A lost key then means enrolling again.)
+15. **D-61, guests enrol in person.** The registration link goes to a site-issued guest address, read at the enrolment desk with an identity check against the visit request. A guest's own email address is used only where the site's mail server reaches it and your organization's policy allows it. At an air-gapped site, guests use site-issued security keys or a passkey on the same device; the cross-device QR flow needs an internet relay (D-57). (Alternative: always email the guest's own address.)
+16. **D-63, `guests.maxDays` 90 in the site example; the expiry job runs every 15 minutes.** (Alternative: other values per site.)
+17. **D-63, the automatic end runs in the cluster with limited access.** The Keycloak service account may only view and manage members of `guests` (fine-grained admin permissions v2). The OpenBao role may only disable guest entities. The ServiceAccount may only stop Session records in the sessions namespace. (Alternative: the operator runs `guests.mjs expire` on a schedule from the admin host. That puts no credential in the cluster, but the end then depends on that host being on.)
+18. **D-64, guests are per site.** An export includes a guest only when named with `--include-guests`, and the import names them again. The destination applies its own maximum length and, for allied military and industry, its own security contact. Keys never move; the destination enrols its own. (Alternative: never export guests at all.)
+19. **D-63, ended guests' records are kept** until your organization's retention period ends. They are then removed only by the runbook's step, with written approval from the security contact and the site administrator and two key custodians approving in OpenBao. (Alternative: remove them at the end date. That would need deletion without a second person.)
+20. **Gate approval.** 47-20 changes `compliance/resources.json`, a gate path: the UBI 9 Node.js 22 base gains the new image as a `where` entry and is reviewed for use at run time. (Alternative: a different base, which would need a new fit entry.)

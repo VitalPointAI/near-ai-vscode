@@ -737,7 +737,7 @@ Plans:
 ### Phase 47: On-premise deployment stack and offline bundle
 **Goal**: Your organization can install and run the Sterling workbench for many people at a site it owns, connected or fully disconnected: RKE2, a local image registry, HAProxy ingress, cert-manager with an OpenBao CA, Keycloak with sign-in by passkeys or hardware keys only, self-hosted Theia Cloud (one session per person), OpenBao with HSM unseal, and the sync hub, all from a signed offline bundle with no outbound calls.
 **Depends on**: the hosting design (DESIGN.md sections 4 to 7, 10, 11; decisions O2 to O6 accepted 2026-11-23); the compliance fit check (every component needs a passing entry); Phase 46's image only for the end-to-end run. Runs beside Phase 46 from day one.
-**Requirements**: DEP-01 to DEP-12 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list)
+**Requirements**: DEP-01 to DEP-13 (defined in `47-CONTEXT.md`, from DESIGN.md section 8's deployment work and section 11's Theia Cloud hardening list; DEP-13, guest accounts for outside observers, added 2026-11-24 by the owner for Phase 33.1 D-33)
 **Success Criteria** (what must be TRUE):
   1. A site installs from one signed offline bundle (images, vendored charts, realm and policy as code) on air-gapped hardware, and nothing in the running stack calls out.
   2. A person signs in with a passkey or a hardware security key, as the site's policy sets, never a password; a lost key is replaced by administrator-attested re-enrolment; two keys are registered per person.
@@ -745,7 +745,7 @@ Plans:
   4. Theia Cloud runs from images we rebuilt, signed and published with an SBOM, with the oauth2-proxy defaults fixed and the sign-in token forwarded to the session.
   5. HQ and an edge site trust each other through PKI and signed bundles only, with no shared database; the sync hub runs as a Kubernetes Deployment, several per site.
   6. Every component has a compliance fit entry and the key ceremony and recovery runbooks exist.
-**Plans:** 12/18 plans executed in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-12 and decisions D-01 to D-57 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values)
+**Plans:** 12/21 plans executed in 7 waves (planned 2026-11-23; requirements DEP-01 to DEP-13 and decisions D-01 to D-65 in `47-CONTEXT.md`; D-57, 2026-11-23: sign-in strength is the site setting `signInKeys`, `passkeys` by default, `hardware-only` recommended for production; D-02 revised 2026-11-24, owner: the first goal is one HQ with about 400 concurrent people, sizes stay per-site values; 47-19 to 47-21 added 2026-11-24, owner: guest accounts for outside observers, D-58 to D-65, owner items 12 to 20 open)
 
 Plans:
 - [x] 47-01-PLAN.md: Wave 1. Pin tools and artifacts; spikes S1 (cosign key mode with hauler) and S3 (Postgres image source); pinned image bases
@@ -766,6 +766,9 @@ Plans:
 - [ ] 47-16-PLAN.md: Wave 6. Site install script with preflight refusals; published digests recorded
 - [ ] 47-17-PLAN.md: Wave 6. Operator runbooks: install, update, key ceremony, enrolment, recovery, moves, backup
 - [ ] 47-18-PLAN.md: Wave 7. Air-gapped lab end-to-end run from the signed bundle
+- [ ] 47-19-PLAN.md: Wave 6. Guest accounts by hand: `guests` group and attributes in the realm, `guests.mjs` create, extend, end, list, the guest path in `enrol.mjs`, OpenBao `guest-expiry` and `guest-removal` policies
+- [ ] 47-20-PLAN.md: Wave 7. Automatic end at the guest's end date: CronJob with limited access in Keycloak, OpenBao and Kubernetes, the `guest-expiry` image, compliance register (gate path)
+- [ ] 47-21-PLAN.md: Wave 7. Guests per site unless named in a signed user export (`--include-guests`); the guest accounts runbook
 
 **Tracked follow-up**: Phase 47 guest accounts (planned). A site guest account type for outside observers: the realm-as-code group, the enrolment script's guest path and the runbook entry. Phase 33.1's outside observers (POST-09, 33.1 D-33) are not usable on a real site until it ships; it is planned separately as a Phase 47 plan.
 
