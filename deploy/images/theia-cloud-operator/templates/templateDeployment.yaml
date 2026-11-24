@@ -107,6 +107,12 @@ spec:
             value: placeholder-keycloak-env-realm
           - name: THEIACLOUD_KEYCLOAK_CLIENT_ID
             value: placeholder-keycloak-env-clientid
+          # The workbench (Phase 46) binds one address, 127.0.0.1 unless this is set. The oauth2-proxy sidecar reaches it on 127.0.0.1 and
+          # the operator's activity monitor on the pod IP (the session's -int Service), so it must bind both: 0.0.0.0 is exactly the pod's
+          # loopback and its pod IP. The pod IP alone (status.podIP) would cut the sidecar off. Who may reach the pod IP, and on which port,
+          # is the sterling-session-ingress NetworkPolicy (HAProxy to the sidecar only, the operator to this port only).
+          - name: STERLING_LISTEN_HOST
+            value: "0.0.0.0"
           securityContext:
             runAsNonRoot: true
             runAsUser: placeholder-uid

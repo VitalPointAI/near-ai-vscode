@@ -156,9 +156,14 @@ test('no client-supplied header can change the path oauth2-proxy authorizes: tru
   assert.ok(policy, 'sterling-sessions renders the session NetworkPolicy');
   assert.match(policy, /podSelector:\n\s+matchLabels:\n\s+sterling-session: "true"/);
   assert.match(policy, /policyTypes:\n\s+- Ingress/);
-  assert.match(policy, /kubernetes\.io\/metadata\.name: haproxy-controller/);
-  assert.match(policy, /- podSelector:\n\s+matchLabels:\n\s+app: operator/);
-  assert.equal((policy.match(/^ {4}- from:$/gm) ?? []).length, 1, 'one rule: HAProxy or the operator, nothing else');
+  // Two rules, each one source to one port: HAProxy to the oauth2-proxy sidecar only, the operator to the workbench's port only (the
+  // workbench binds the pod IP too, STERLING_LISTEN_HOST), so nothing reaches the workbench past oauth2-proxy but the activity monitor.
+  assert.equal((policy.match(/^ {4}- from:$/gm) ?? []).length, 2, 'two rules: HAProxy and the operator, nothing else');
+  assert.match(policy, /- from:\n\s+- namespaceSelector:\n\s+matchLabels:\n\s+kubernetes\.io\/metadata\.name: haproxy-controller\n\s+ports:\n\s+- protocol: TCP\n\s+port: 5000\n/);
+  assert.match(policy, /- from:\n\s+- podSelector:\n\s+matchLabels:\n\s+app: operator\n\s+ports:\n\s+- protocol: TCP\n\s+port: 3000$/m);
+  assert.equal((policy.match(/^ {10}port: /gm) ?? []).length, 2, 'one port per rule');
+  const template = readFileSync(path.join(ROOT, 'deploy/images/theia-cloud-operator/templates/templateDeployment.yaml'), 'utf8');
+  assert.match(template, /- containerPort: 5000\n\s+name: web/, 'the sidecar port the policy opens to HAProxy');
 });
 
 test('the service and the operator verify TLS with the site chain: both mount sterling-site-ca, and the operator JVM trusts only its truststore', () => {
