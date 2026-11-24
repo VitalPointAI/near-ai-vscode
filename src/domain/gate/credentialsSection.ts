@@ -230,10 +230,16 @@ export function parseCredentialsSection(value: unknown, scales: ScaleTable, path
  * `active` requires there. A requirement dropped, or moved to another level only, is a loosening. No active section means nothing to keep.
  */
 export function requirementsOnlyTighten(active: CredentialsSection | undefined, next: CredentialsSection | undefined): boolean {
+  return requirementMapsOnlyTighten(active?.requiredBySensitivity, next?.requiredBySensitivity);
+}
+
+/** The same rule on the requirement maps alone (the organization store keeps the map of the layer in force beside its pin). */
+export function requirementMapsOnlyTighten(
+  active: Readonly<Record<string, readonly string[]>> | undefined, next: Readonly<Record<string, readonly string[]>> | undefined
+): boolean {
   if (active === undefined) return true;
-  if (next === undefined) return Object.values(active.requiredBySensitivity).every((types) => types.length === 0);
-  for (const [level, types] of Object.entries(active.requiredBySensitivity)) {
-    const kept = Object.prototype.hasOwnProperty.call(next.requiredBySensitivity, level) ? next.requiredBySensitivity[level] ?? [] : [];
+  for (const [level, types] of Object.entries(active)) {
+    const kept = next !== undefined && Object.prototype.hasOwnProperty.call(next, level) ? next[level] ?? [] : [];
     if (!types.every((type) => kept.includes(type))) return false;
   }
   return true;

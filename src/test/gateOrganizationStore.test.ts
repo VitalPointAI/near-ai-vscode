@@ -845,3 +845,28 @@ test('D-12: an update that loosens the credentials required by sensitivity is re
     assert.equal((await host.acceptOrganizationFile(rulesTextFor(issuerKey(), stricter, { now: FIXED_NOW + DAY_MS }), {})).state, 'valid');
   });
 });
+
+test('D-12: a newer signed layer put on disk that loosens the requirements fails the whole policy closed at the next start; one that adds is taken', async () => {
+  await withWorld(async (world) => {
+    const strict = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential'] }) });
+    await enrolled(world, { sections: strict });
+    assert.deepEqual(pinOf(world)?.['requirements'], { 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential'] }, 'the pin keeps the requirements in force');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const looser = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential'] }) });
+    await writeFile(layerFile(world), rulesTextFor(issuerKey(), looser, { now: FIXED_NOW + DAY_MS }));
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.reason, 'replaced');
+    assert.match(failed.sentence, /security officer/);
+    assert.equal(next.policyLayers().failedLayer, 'organization');
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin did not move to the looser layer');
+
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    const stricter = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] }) });
+    await writeFile(layerFile(world), rulesTextFor(issuerKey(), stricter, { now: FIXED_NOW + 2 * DAY_MS }));
+    const later = hostOf(world);
+    assert.equal((await later.start()).state, 'valid');
+    assert.deepEqual(pinOf(world)?.['requirements'], { 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] });
+  });
+});

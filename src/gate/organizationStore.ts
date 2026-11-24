@@ -37,7 +37,7 @@ import type { IgnoredSetting } from '../domain/gate/layers';
 import { MAX_ORGANIZATION_LAYER_BYTES, bundleViewOf, parsePolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { parseContacts } from '../domain/gate/sections';
-import { CREDENTIALS_LOOSENED_TEXT, requirementsOnlyTighten } from '../domain/gate/credentialsSection';
+import { CREDENTIALS_LOOSENED_TEXT, requirementMapsOnlyTighten } from '../domain/gate/credentialsSection';
 import type { PolicyContact } from '../domain/gate/sections';
 import { migrateLocalHosts } from '../domain/gate/endpoints';
 import type { MigrationChange } from '../domain/gate/endpoints';
@@ -132,6 +132,38 @@ export interface OrganizationPin {
   readonly layerHash: string;
   readonly enrolledAt: string;
   readonly pending?: PendingOrganizationPin;
+  /**
+   * Phase 71 (D-12): the credentials required by sensitivity of the layer in force, kept beside the pin so a newer layer found on disk is compared with
+   * them even after it replaced the file. Absent when the layer in force requires none (every pin written before credentials@1 existed).
+   */
+  readonly requirements?: Readonly<Record<string, readonly string[]>>;
+}
+
+const MAX_REQUIREMENT_LEVELS = 256;
+
+/** The pin's requirement map: `scale/level` keys to sorted lists of credential type names. Undefined when it is not one. */
+function requirementsOf(value: unknown): Readonly<Record<string, readonly string[]>> | undefined {
+  if (!isRecord(value) || Object.keys(value).length > MAX_REQUIREMENT_LEVELS) return undefined;
+  const out: Record<string, readonly string[]> = {};
+  for (const key of Object.keys(value)) {
+    const list = own(value, key);
+    if (key.length > 200 || !Array.isArray(list) || list.length > 32 || !list.every((entry) => typeof entry === 'string' && /^[A-Za-z]{1,64}$/.test(entry))) return undefined;
+    out[key] = Object.freeze([...(list as string[])]);
+  }
+  return Object.freeze(out);
+}
+
+/** The requirement map of a layer's document, or undefined when it requires nothing. */
+function requirementsOfDocument(document: PolicyDocument | undefined): Readonly<Record<string, readonly string[]>> | undefined {
+  const map = document?.credentials?.requiredBySensitivity;
+  if (map === undefined || Object.values(map).every((types) => types.length === 0)) return undefined;
+  return map;
+}
+
+function withRequirements(pin: OrganizationPin, document: PolicyDocument | undefined): OrganizationPin {
+  const { requirements: _old, ...rest } = pin;
+  const requirements = requirementsOfDocument(document);
+  return Object.freeze(requirements === undefined ? rest : { ...rest, requirements });
 }
 
 /** What SecretStorage holds. A stored value that does not parse is `damaged`, never "not enrolled": the load fails closed for it. */
@@ -174,18 +206,24 @@ function pinOf(text: string): OrganizationPinRead {
     const pending = pendingOf(own(value, 'pending'));
     return pending !== undefined && pending.kind === 'enrol' ? { state: 'pending-enrol', pending } : { state: 'damaged' };
   }
-  if (!exactKeys(value, ['v', 'publicKey', 'serial', 'lastIssuedAt', 'layerHash', 'enrolledAt'], ['pending'])) return { state: 'damaged' };
+  if (!exactKeys(value, ['v', 'publicKey', 'serial', 'lastIssuedAt', 'layerHash', 'enrolledAt'], ['pending', 'requirements'])) return { state: 'damaged' };
   const publicKey = own(value, 'publicKey');
   const serial = own(value, 'serial');
   const lastIssuedAt = own(value, 'lastIssuedAt');
   const layerHash = own(value, 'layerHash');
   const enrolledAt = own(value, 'enrolledAt');
   if (!isPublicKey(publicKey) || !isSerial(serial) || !isTime(lastIssuedAt) || !isHash(layerHash) || !isTime(enrolledAt)) return { state: 'damaged' };
-  if (!Object.prototype.hasOwnProperty.call(value, 'pending')) return { state: 'pinned', pin: Object.freeze({ v: 1, publicKey, serial, lastIssuedAt, layerHash, enrolledAt }) };
+  let requirements: Readonly<Record<string, readonly string[]>> | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'requirements')) {
+    requirements = requirementsOf(own(value, 'requirements'));
+    if (requirements === undefined) return { state: 'damaged' };
+  }
+  const base = { v: 1 as const, publicKey, serial, lastIssuedAt, layerHash, enrolledAt, ...(requirements === undefined ? {} : { requirements }) };
+  if (!Object.prototype.hasOwnProperty.call(value, 'pending')) return { state: 'pinned', pin: Object.freeze(base) };
   const pending = pendingOf(own(value, 'pending'));
   // A pending first enrolment beside a committed pin is not a state this store writes.
   if (pending === undefined || pending.kind === 'enrol') return { state: 'damaged' };
-  return { state: 'pinned', pin: Object.freeze({ v: 1, publicKey, serial, lastIssuedAt, layerHash, enrolledAt, pending }) };
+  return { state: 'pinned', pin: Object.freeze({ ...base, pending }) };
 }
 
 /** Reads the pin. A secret store that cannot be read throws, and the caller fails closed (like readLastValid). */
@@ -205,7 +243,10 @@ async function storePinText(secrets: SecretStorageLike, text: string | undefined
 }
 
 function committedPin(pin: OrganizationPin): OrganizationPin {
-  return Object.freeze({ v: 1, publicKey: pin.publicKey, serial: pin.serial, lastIssuedAt: pin.lastIssuedAt, layerHash: pin.layerHash, enrolledAt: pin.enrolledAt });
+  return Object.freeze({
+    v: 1, publicKey: pin.publicKey, serial: pin.serial, lastIssuedAt: pin.lastIssuedAt, layerHash: pin.layerHash, enrolledAt: pin.enrolledAt,
+    ...(pin.requirements === undefined ? {} : { requirements: pin.requirements })
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -553,9 +594,9 @@ export class OrganizationStore {
     if (pending !== undefined) {
       const forward = verifyOrganizationLayer(raw.value, { issuerPublicKey: pending.publicKey, now: effective, lastIssuedAt: pin.lastIssuedAt });
       if (forward.ok && forward.hash === pending.layerHash) {
-        const next: OrganizationPin = Object.freeze({
+        const next: OrganizationPin = withRequirements({
           v: 1, publicKey: pending.publicKey, serial: pending.serial, lastIssuedAt: pending.issuedAt, layerHash: pending.layerHash, enrolledAt: pin.enrolledAt
-        });
+        }, forward.document);
         await this.commitFound(pin, next);
         return { ...this.validOf(forward, pending.publicKey, record), event: updatedEvent(forward.issuedAt, pending.publicKey) };
       }
@@ -564,8 +605,13 @@ export class OrganizationStore {
     if (!layer.ok) return failedFromRead(layer, raw.value, record);
     if (layer.hash === pin.layerHash) return this.validOf(layer, pin.publicKey, record);
     if (timeOf(layer.issuedAt) > timeOf(pin.lastIssuedAt)) {
+      // Phase 71 (D-12): a newer file put on disk may not lower what sensitive data asks of a person either. The file in force is gone, so the whole
+      // policy fails closed rather than run on the looser rules; the pin stays.
+      if (!requirementMapsOnlyTighten(pin.requirements, layer.document.credentials?.requiredBySensitivity)) {
+        return failedOrganization('credentials-loosened', 'replaced', `${CREDENTIALS_LOOSENED_TEXT} ${askFor(contactShown(record?.contacts))}`, true, facts);
+      }
       // A newer layer signed by the pinned key: accepted, and the pin moves to it (D-14).
-      const next: OrganizationPin = Object.freeze({ ...committedPin(pin), lastIssuedAt: layer.issuedAt, layerHash: layer.hash });
+      const next: OrganizationPin = withRequirements({ ...committedPin(pin), lastIssuedAt: layer.issuedAt, layerHash: layer.hash }, layer.document);
       await this.commitFound(pin, next);
       return { ...this.validOf(layer, pin.publicKey, record), event: updatedEvent(layer.issuedAt, pin.publicKey) };
     }
@@ -703,8 +749,10 @@ export class OrganizationStore {
       }
       // D-12, 48.1 D-25: a layer that replaces the one in force may raise what sensitive data asks of a person, never lower it; the active layer stays.
       if ((facts.kind === 'update' || facts.kind === 'rotate') && context.pin.state === 'pinned') {
-        const active = await this.documentInForce(context.pin.pin, nowMs);
-        if (active !== undefined && !requirementsOnlyTighten(active.credentials, facts.document?.credentials)) {
+        // The map kept beside the pin is the record of the rules in force; the file is read only for a pin written before it was kept.
+        const kept = context.pin.pin.requirements;
+        const active = kept ?? (await this.documentInForce(context.pin.pin, nowMs))?.credentials?.requiredBySensitivity;
+        if (!requirementMapsOnlyTighten(active, facts.document?.credentials?.requiredBySensitivity)) {
           throw new OrganizationStoreError(`Nothing was changed. ${CREDENTIALS_LOOSENED_TEXT}`, { reason: 'credentials-loosened', refused: true });
         }
       }
@@ -810,7 +858,7 @@ export class OrganizationStore {
       if (!back.ok || back.hash !== facts.layerHash) throw new Error('Your organization\'s rules did not read back as written.');
       for (const entry of files) if ((await readFile(entry.file, 'utf8')) !== entry.text) throw new Error('A file did not read back as written.');
       const enrolledAt = facts.kind === 'enrol' || pinned === undefined ? new Date(nowMs).toISOString() : pinned.enrolledAt;
-      const committed: OrganizationPin = { v: 1, publicKey: facts.publicKey, serial: facts.serial, lastIssuedAt: facts.issuedAt, layerHash: facts.layerHash, enrolledAt };
+      const committed = withRequirements({ v: 1, publicKey: facts.publicKey, serial: facts.serial, lastIssuedAt: facts.issuedAt, layerHash: facts.layerHash, enrolledAt }, facts.document);
       await storePinText(this.secrets, JSON.stringify(committed));
       await probeStep('pin-committed', facts.kind);
     } catch (error) {
