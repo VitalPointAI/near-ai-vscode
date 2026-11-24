@@ -1,0 +1,1404 @@
+{
+  "schemaVersion": 1,
+  "sourceId": "caf-public-catalogue",
+  "source": "CAF public sources · provisional equipment catalogue",
+  "generatedAt": "2026-11-23T21:45:56Z",
+  "catalogueOnly": true,
+  "resources": [
+    {
+      "id": "aircraft-be-350-king-air",
+      "name": "BE-350 King Air",
+      "category": "Aircraft",
+      "lifecycle": "Retired or contract ended",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/news/2024/02/statement-by-the-commander-of-the-royal-canadian-air-force-on-the-multi-engine-utility-flight-contract.html",
+      "description": "Former contract-operated transport and pilot-proficiency aircraft.",
+      "reviewNote": "The RCAF did not renew the lease and announced functions would transfer effective March 31, 2024."
+    },
+    {
+      "id": "aircraft-bombardier-global-6500",
+      "name": "Bombardier Global 6500",
+      "category": "Aircraft",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/services/defence/defence-equipment-purchases-upgrades/air-equipment-procurement/airlift-capability-project-acp-mfs.html",
+      "description": "Future utility and administrative transport aircraft.",
+      "reviewNote": "DND confirmed the contract. Receipt unconfirmed in sources reviewed."
+    },
+    {
+      "id": "aircraft-cc-130h-hercules",
+      "name": "CC-130H Hercules",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-130h.html",
+      "description": "Fixed-wing search-and-rescue and transport aircraft.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-130h-hercules-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-130j-hercules",
+      "name": "CC-130J Hercules",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-130j.html",
+      "description": "Tactical airlift aircraft.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-130j-hercules-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-138-twin-otter",
+      "name": "CC-138 Twin Otter",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-138.html",
+      "description": "Utility transport and search-and-rescue aircraft.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-138-twin-otter-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-144-challenger",
+      "name": "CC-144 Challenger",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-144.html",
+      "description": "Passenger transport and utility aircraft.",
+      "reviewNote": "Replacement contracted under the separate Global 6500 acquisition.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-144-challenger-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-150-polaris",
+      "name": "CC-150 Polaris",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-150.html",
+      "description": "Long-range tanker and transport aircraft.",
+      "reviewNote": "RCAF still lists the model. The CC-330 is the announced replacement, without a sourced fleet-wide retirement date.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-150-polaris-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-177-globemaster-iii",
+      "name": "CC-177 Globemaster III",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-177.html",
+      "description": "Strategic cargo and personnel airlift aircraft.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-177-globemaster-III-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-295-kingfisher",
+      "name": "CC-295 Kingfisher",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-295.html",
+      "description": "Fixed-wing search-and-rescue aircraft.",
+      "reviewNote": "The CAF CSV uses future language, but DND reports operational service began in 2025.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-295-kingfisher-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cc-330-husky",
+      "name": "CC-330 Husky",
+      "category": "Aircraft",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cc-330husky.html",
+      "description": "Strategic tanker and transport aircraft.",
+      "reviewNote": "Some aircraft have been delivered, with modification work still under way. Project size is separate from delivered holdings.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cc-330-husky-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cf-188-hornet",
+      "name": "CF-188 Hornet",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cf-188.html",
+      "description": "Multi-role fighter aircraft.",
+      "reviewNote": "RCAF lists the model. The CF-35A procurement is separate.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cf-188-hornet-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cf-35a-lightning-ii",
+      "name": "CF-35A Lightning II",
+      "category": "Aircraft",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/services/procurement/fighter-jets/future-fighter-capability-project.html",
+      "description": "Planned successor to the CF-188 Hornet.",
+      "reviewNote": "Project lists the first delivery milestone for 2026 but receipt is unconfirmed in sources reviewed."
+    },
+    {
+      "id": "aircraft-ch-139-jet-ranger",
+      "name": "CH-139 Jet Ranger",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ch-139.html",
+      "description": "Rotary-wing pilot trainer.",
+      "reviewNote": "Identified as current training equipment by 2 CAD. The CT-153 is the planned replacement.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ch-139-jet-ranger-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ch-146-griffon",
+      "name": "CH-146 Griffon",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ch-146.html",
+      "description": "Utility helicopter supporting transport and search and rescue.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ch-146-griffon-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ch-147f-chinook",
+      "name": "CH-147F Chinook",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ch-147f.html",
+      "description": "Heavy-lift helicopter for transport.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ch-147f-chinook-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ch-148-cyclone",
+      "name": "CH-148 Cyclone",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ch-148.html",
+      "description": "Shipborne maritime helicopter.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ch-148-cyclone-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ch-149-cormorant",
+      "name": "CH-149 Cormorant",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ch-149.html",
+      "description": "Search-and-rescue helicopter.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ch-149-cormorant-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cp-140-aurora",
+      "name": "CP-140 Aurora",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/cp-140.html",
+      "description": "Long-range maritime patrol aircraft.",
+      "reviewNote": "The CP-8A is a future replacement. Official DND reporting places its first Canadian arrival in 2027.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/cp-140-aurora-thumb.jpg"
+    },
+    {
+      "id": "aircraft-cp-8a-poseidon",
+      "name": "CP-8A Poseidon",
+      "category": "Aircraft",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/services/defence/defence-equipment-purchases-upgrades/air-equipment-procurement/canadian-multi-mission-aircraft-project.html",
+      "description": "Future maritime patrol aircraft replacing the CP-140.",
+      "reviewNote": "DND publicly identifies the first delivery milestone as 2027."
+    },
+    {
+      "id": "aircraft-ct-102a-astra",
+      "name": "CT-102A Astra",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-102a.html",
+      "description": "Basic fixed-wing trainer used through contracted flying training.",
+      "reviewNote": "2 CAD explicitly provides the Grob-to-CT-102A designation crosswalk.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-102a-astra-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-102b-astra-ii",
+      "name": "CT-102B Astra II",
+      "category": "Aircraft",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-102b.html",
+      "description": "Basic fixed-wing trainer for the Future Aircrew Training program.",
+      "reviewNote": "DND confirmed first delivery in September 2025. Initial cadre flights began under a Specific Purpose Flight Permit. This is not full program operation.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-102b-astra-II-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-114-tutor",
+      "name": "CT-114 Tutor",
+      "category": "Aircraft",
+      "lifecycle": "Lifecycle needs review",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-114.html",
+      "description": "Snowbirds air-demonstration aircraft.",
+      "reviewNote": "2026 is the final announced air-show season. The announcement does not establish the administrative disposition of the fleet.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-114-tutor-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-142-gonzo",
+      "name": "CT-142 Gonzo",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-142.html",
+      "description": "Turboprop aircrew training aircraft.",
+      "reviewNote": "CT-142Q is a separate future model.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-142-dash-8-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-142q-citadel",
+      "name": "CT-142Q Citadel",
+      "category": "Aircraft",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/working-for/training-professional-development/fact/ct-142q.html",
+      "description": "Future trainer for air combat systems officers and airborne electronic sensor operators.",
+      "reviewNote": "Scheduled replacement for the CT-142. Receipt unconfirmed in sources reviewed."
+    },
+    {
+      "id": "aircraft-ct-145-king-air",
+      "name": "CT-145 King Air",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-145.html",
+      "description": "Multi-engine trainer used through contracted flying training.",
+      "reviewNote": "2 CAD explicitly maps the C-90B trainer to CT-145. The distinct BE-350 lease ended in 2024.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-145-king-air-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-145e-expeditor-ii",
+      "name": "CT-145E Expeditor II",
+      "category": "Aircraft",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/working-for/training-professional-development/fact/ct-145e.html",
+      "description": "Future multi-engine fixed-wing trainer.",
+      "reviewNote": "Scheduled replacement for the CT-145. Receipt unconfirmed in sources reviewed."
+    },
+    {
+      "id": "aircraft-ct-146",
+      "name": "CT-146",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-146.html",
+      "description": "Advanced rotary-wing pilot trainer.",
+      "reviewNote": "2 CAD explicitly provides the Bell 412-CF designation crosswalk. CH-146 Griffon is a separate role and designation.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/bell-412cf-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-153-juno",
+      "name": "CT-153 Juno",
+      "category": "Aircraft",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-153.html",
+      "description": "Rotary-wing trainer for the Future Aircrew Training program.",
+      "reviewNote": "The prime contractor confirmed the first aircraft passed Canadian acceptance and ownership transferred to the RCAF in June 2026. This does not establish full training service.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-153-juno-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-155-hawk",
+      "name": "CT-155 Hawk",
+      "category": "Aircraft",
+      "lifecycle": "Retired or contract ended",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-155.html",
+      "description": "Former flying trainer now used in ground instruction or display.",
+      "reviewNote": "Retired from flying training in 2024. RCAF reports continued ground instruction and display use."
+    },
+    {
+      "id": "aircraft-ct-156-harvard-ii",
+      "name": "CT-156 Harvard II",
+      "category": "Aircraft",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-156.html",
+      "description": "Fixed-wing aircraft used for military pilot training.",
+      "reviewNote": "2 CAD lists it and DND says the current training contract runs into 2027. That contract date does not establish individual aircraft disposition.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft/ct-156-harvard-II-thumb.jpg"
+    },
+    {
+      "id": "aircraft-ct-157-siskin-ii",
+      "name": "CT-157 Siskin II",
+      "category": "Aircraft",
+      "lifecycle": "Lifecycle needs review",
+      "sourceRef": "https://www.canada.ca/en/air-force/services/aircraft/ct-157.html",
+      "description": "Future fixed-wing advanced trainer and air-demonstration aircraft.",
+      "reviewNote": "The prime contractor confirmed arrival in Canada in September 2026 and described final RCAF delivery as a subsequent step. Final acceptance and operational service are unconfirmed in the sources reviewed.",
+      "imageRef": "https://www.canada.ca/content/dam/rcaf-arc/images/aircraft-current/siskin-II-900.jpg"
+    },
+    {
+      "id": "army-equipment-81-mm-mortar",
+      "name": "81-mm Mortar",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/81-mm-mortar.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/81-mm-mortar-index.jpg"
+    },
+    {
+      "id": "army-equipment-c15a2-calibre-long-range-sniper-weapon",
+      "name": "C15A2 Calibre Long Range Sniper Weapon",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c15-sniper-rifle.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c15-sniper-tac-50.jpg"
+    },
+    {
+      "id": "army-equipment-c20-semi-automatic-sniper-weapon",
+      "name": "C20 Semi-Automatic Sniper Weapon",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c20-sniper-weapon.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c20-sniper.jpg"
+    },
+    {
+      "id": "army-equipment-c22-full-frame-modular-pistol",
+      "name": "C22 Full Frame Modular Pistol",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c22-modular-pistol.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c22-pistols-firing.png"
+    },
+    {
+      "id": "army-equipment-c3-105-mm-howitzer",
+      "name": "C3 105-mm Howitzer",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c3-105mm-howitzer.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c3-105-mm-howitzer-index.jpg"
+    },
+    {
+      "id": "army-equipment-c6-and-c6a1-7-62-mm-medium-machine-gun",
+      "name": "C6 and C6A1 7.62-mm Medium Machine Gun",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c6-general-purpose-machine-gun.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c6-medium-machine-gun-index.jpg"
+    },
+    {
+      "id": "army-equipment-c7a2-5-56-mm-automatic-rifle",
+      "name": "C7A2 5.56-mm Automatic Rifle",
+      "category": "Army equipment",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c7a2-automatic-rifle.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND announced the CMAR replacement in March 2026, with rollout expected from 2027.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c7a2-automatic-rifle-03b.jpg"
+    },
+    {
+      "id": "army-equipment-c8a3-carbine-rifle",
+      "name": "C8A3 Carbine Rifle",
+      "category": "Army equipment",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/carabine-c8a3.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND announced the CMAR replacement in March 2026, with rollout expected from 2027.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c8a3-carbine-rifle-index.jpg"
+    },
+    {
+      "id": "army-equipment-c9a2-light-machine-gun",
+      "name": "C9A2 Light Machine Gun",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/c9a2-light-machine-gun.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/c9a2-light-machine-gun-index.jpg"
+    },
+    {
+      "id": "army-equipment-canadian-modular-assault-rifle-cmar",
+      "name": "Canadian Modular Assault Rifle (CMAR)",
+      "category": "Army equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/defence-investment-agency/news/2026/03/defence-investment-agency-awards-contract-to-replace-current-canadian-armed-forces-assault-rifles.html",
+      "description": "Contracted replacement program for the C7/C8 family.",
+      "reviewNote": "Evidence shows a contract award. Confirm deliveries and variant identifiers."
+    },
+    {
+      "id": "army-equipment-fn-herstal-m2hb-qcb-50-cal-heavy-machine-gun",
+      "name": "FN Herstal M2HB-QCB .50-Cal. Heavy Machine Gun",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/mshb-qcb50-cal.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/browning-m2-50-cal-index.jpg"
+    },
+    {
+      "id": "army-equipment-m777-lightweight-155-mm-towed-howitzer",
+      "name": "M777 Lightweight 155-mm Towed Howitzer",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/m777-howitzer.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/m777-howitzer-index.jpg"
+    },
+    {
+      "id": "army-equipment-the-m72-light-anti-tank-weapon",
+      "name": "The M72 Light Anti-Tank Weapon",
+      "category": "Army equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/weapons/m72-law.html",
+      "description": "Army equipment type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/weapons/m72-law.jpg"
+    },
+    {
+      "id": "army-vehicle-armoured-combat-support-vehicle-acsv",
+      "name": "Armoured Combat Support Vehicle (ACSV)",
+      "category": "Army vehicle",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/drr-2025-26.html",
+      "description": "Armoured support vehicle family.",
+      "reviewNote": "DND results report additional deliveries in 2025–26 and qualification work for remaining variants. Confirm variant at reconciliation.",
+      "imageRef": "https://www.canada.ca/content/dam/dnd-mdn/images/procurement/projects/2021-07-12-acsv-vbsc.jpg"
+    },
+    {
+      "id": "army-vehicle-bison-armoured-vehicle",
+      "name": "Bison Armoured Vehicle",
+      "category": "Army vehicle",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/bison-armoured-vehicle.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND documents ACSV deliveries as replacement evidence. Confirm disposition of remaining Bison variants.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/bison-index.jpg"
+    },
+    {
+      "id": "army-vehicle-bv-206-tracked-carrier",
+      "name": "BV 206 Tracked Carrier",
+      "category": "Army vehicle",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/bv-206-tracked-carrier.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND reports continued use in its 2024–25 results. Domestic Arctic Mobility Enhancement is the replacement project.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/bv-206-index.jpg"
+    },
+    {
+      "id": "army-vehicle-coyote-armoured-vehicle",
+      "name": "Coyote Armoured Vehicle",
+      "category": "Army vehicle",
+      "lifecycle": "Lifecycle needs review",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/coyote.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND describes an aging fleet and cancelled the LRSS replacement project. The public listing does not resolve current disposition.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/coyote-index.jpg"
+    },
+    {
+      "id": "army-vehicle-domestic-arctic-mobility-enhancement-carrier",
+      "name": "Domestic Arctic Mobility Enhancement carrier",
+      "category": "Army vehicle",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/2024-25-index.html",
+      "description": "Planned all-terrain carrier replacing the BV 206.",
+      "reviewNote": "DND projected introduction starting in 2030 in its 2024–25 results."
+    },
+    {
+      "id": "army-vehicle-g-wagon-light-utility-vehicle-wheeled",
+      "name": "G Wagon - Light Utility Vehicle Wheeled",
+      "category": "Army vehicle",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/g-wagon.html",
+      "description": "Light wheeled utility vehicle family.",
+      "reviewNote": "DND identified the military G-Wagon as in service but approaching end of life in its procurement briefing. Verify disposition.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/g-wagon-index.jpg"
+    },
+    {
+      "id": "army-vehicle-heavy-logistics-vehicle-wheeled-hlvw",
+      "name": "Heavy Logistics Vehicle Wheeled (HLVW)",
+      "category": "Army vehicle",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/vehicle-hlvw.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "Logistics Vehicle Modernization is a future replacement project. Verify the current HLVW variants and holdings.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/hlvw-landing.jpg"
+    },
+    {
+      "id": "army-vehicle-lav-reconnaissance-surveillance-system",
+      "name": "LAV Reconnaissance Surveillance System",
+      "category": "Army vehicle",
+      "lifecycle": "Project cancelled",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/drr-2025-26.html",
+      "description": "Former reconnaissance surveillance project based on a LAV 6.0 variant.",
+      "reviewNote": "DND cancelled the project. Reconcile any remnant inventory through approved records."
+    },
+    {
+      "id": "army-vehicle-leopard-2-family-of-vehicles",
+      "name": "Leopard 2 Family of Vehicles",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/leopard-2a4-tank.html",
+      "description": "Army tracked armoured vehicle family. Catalogue and inventory matching must identify the exact variant.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/leopard-2a4-index.jpg"
+    },
+    {
+      "id": "army-vehicle-light-armoured-vehicle-lav-6-0",
+      "name": "Light Armoured Vehicle (LAV) 6.0",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/light-armoured-vehicle-upgrade.html",
+      "description": "Army wheeled armoured vehicle family. The reconnaissance surveillance project was a separate procurement.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/lav6-landing.jpg"
+    },
+    {
+      "id": "army-vehicle-light-support-vehicle-wheeled-lsvw",
+      "name": "Light Support Vehicle Wheeled (LSVW)",
+      "category": "Army vehicle",
+      "lifecycle": "Lifecycle needs review",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/vehicle-lsvw.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "Published in the Army equipment list. Verify remaining holdings and service status.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/lsvw-landing.JPG"
+    },
+    {
+      "id": "army-vehicle-light-tactical-vehicle-ltv",
+      "name": "Light Tactical Vehicle (LTV)",
+      "category": "Army vehicle",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/drr-2025-26.html",
+      "description": "Light vehicle in the Light Forces Enhancement project.",
+      "reviewNote": "DND results report deliveries. The public report does not establish current asset records."
+    },
+    {
+      "id": "army-vehicle-light-utility-vehicle-replacement",
+      "name": "Light Utility Vehicle replacement",
+      "category": "Army vehicle",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/proactive-disclosure/mnd-mandate-priorities-10-october-2024/procurement.html",
+      "description": "Planned light wheeled vehicle family replacing earlier LUVW platforms."
+    },
+    {
+      "id": "army-vehicle-logistics-vehicle-modernization-vehicles",
+      "name": "Logistics Vehicle Modernization vehicles",
+      "category": "Army vehicle",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-plans/departmental-plan-2026-27/status-report-transformational-major-capital-projects.html",
+      "description": "Replacement light and heavy logistics vehicle families.",
+      "reviewNote": "Project procurement milestones are kept separate from equipment received."
+    },
+    {
+      "id": "army-vehicle-medium-support-vehicle-system-msvs",
+      "name": "Medium Support Vehicle System (MSVS)",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/vehicle-msvs.html",
+      "description": "Medium logistics vehicle family that includes standard military pattern and militarized commercial variants.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/msvs-landing.JPG"
+    },
+    {
+      "id": "army-vehicle-tactical-armoured-patrol-vehicle-tapv",
+      "name": "Tactical Armoured Patrol Vehicle (TAPV)",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/vehicle-tapv.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/tapv-landing.jpg"
+    },
+    {
+      "id": "army-vehicle-the-buffalo",
+      "name": "The Buffalo",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/buffalo.html",
+      "description": "Army route clearance vehicle family.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/buffalo-01.jpg"
+    },
+    {
+      "id": "army-vehicle-the-cougar",
+      "name": "The Cougar",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/cougar.html",
+      "description": "Army protected vehicle family.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/cougar-01.jpg"
+    },
+    {
+      "id": "army-vehicle-the-husky",
+      "name": "The Husky",
+      "category": "Army vehicle",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/husky.html",
+      "description": "Army route clearance vehicle family.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/husky-02.jpg"
+    },
+    {
+      "id": "army-vehicle-tracked-light-armoured-vehicle-tlav",
+      "name": "Tracked Light Armoured Vehicle (TLAV)",
+      "category": "Army vehicle",
+      "lifecycle": "Replacement underway",
+      "sourceRef": "https://www.canada.ca/en/army/services/equipment/vehicles/vehicle-tlav.html",
+      "description": "Army vehicle type listed by the Canadian Army in its public equipment catalogue.",
+      "reviewNote": "DND identifies the ACSV as the replacement. Confirm remaining TLAVs against departmental records.",
+      "imageRef": "https://www.canada.ca/content/dam/army-armee/migration/assets/army_internet/images/pages/vehicles/tlav-landing.jpg"
+    },
+    {
+      "id": "historical-vehicle-family-agricultural-tractor",
+      "name": "Agricultural tractor",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "76 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-all-terrain-vehicles",
+      "name": "All terrain vehicles",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "94 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-ambulance",
+      "name": "AMBULANCE",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "3 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-any-construction-equip",
+      "name": "Any construction equip.",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "26 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-auto-sedan",
+      "name": "AUTO SEDAN",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "50 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-automobile-utility-crossover",
+      "name": "Automobile Utility Crossover",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "12 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-bomb-lift",
+      "name": "BOMB LIFT",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "6 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-bus-motor",
+      "name": "BUS MOTOR",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "18 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-cargo-truck-3-to-7-5-ton",
+      "name": "Cargo truck 3 to 7.5 ton",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "22 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-carrier-tracked-articulated",
+      "name": "Carrier tracked articulated",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "1 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-carry-all-up-to-15-pax",
+      "name": "CARRY ALL UP TO 15 PAX",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "7 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-carry-all-up-to-9-pax",
+      "name": "Carry all up to 9 pax",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "13 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-crane",
+      "name": "CRANE",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "18 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-cube-van-multistop-vehicle",
+      "name": "Cube van / multistop vehicle",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "1 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-de-icer-vehicles",
+      "name": "De-icer vehicles",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "7 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-excavator",
+      "name": "Excavator",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "20 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-fire-fighting-truck",
+      "name": "Fire fighting truck",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "35 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-fork-lift",
+      "name": "Fork lift",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "250 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-golf-cart",
+      "name": "Golf Cart",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "6 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-grader",
+      "name": "GRADER",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "18 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-heavy-engineer-support-vehicle",
+      "name": "Heavy Engineer Support Vehicle",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "4 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-highway-tractor",
+      "name": "HIGHWAY TRACTOR",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "21 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-improved-land-mine-detection-system",
+      "name": "Improved Land Mine Detection System",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "2 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-industrial-tractor",
+      "name": "INDUSTRIAL TRACTOR",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "46 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-loader",
+      "name": "Loader",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "69 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-maintenance-wrecker",
+      "name": "MAINTENANCE WRECKER",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "7 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-over-snow-vehicles",
+      "name": "OVER SNOW VEHICLES",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "28 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-palletizer",
+      "name": "Palletizer",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "21 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-panel",
+      "name": "Panel",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "23 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-pickup-truck",
+      "name": "Pickup truck",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "18 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-shelter-ecc-17-series",
+      "name": "Shelter (ECC 17.... series)",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "2 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-snow-blower",
+      "name": "Snow blower",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "19 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-snow-plows",
+      "name": "SNOW PLOWS",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "5 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-special-equipment-vehicle",
+      "name": "Special equipment vehicle",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "19 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-sport-utility-vehicle",
+      "name": "SPORT UTILITY VEHICLE",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "46 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-spreader-loose-material",
+      "name": "Spreader loose material",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "5 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-station-wagon",
+      "name": "STATION WAGON",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "15 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-sweeper-rotary-ded",
+      "name": "SWEEPER ROTARY DED",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "23 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-tractor-a-c-towing",
+      "name": "Tractor a/c towing",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "14 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-tractor-warehouse",
+      "name": "Tractor warehouse",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "12 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-tractor-tracked",
+      "name": "Tractor,tracked",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "21 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-trailer",
+      "name": "TRAILER",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "970 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-troop-carrying-vehicle-standa-eac31726",
+      "name": "Troop Carrying Vehicle (Standard Commercial)",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "4 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-a-c-handling-equipt",
+      "name": "TRUCK A/C HANDLING EQUIPT",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "12 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-cargo-crew-cab",
+      "name": "Truck cargo crew cab",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "22 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-dump",
+      "name": "Truck dump",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "29 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-other-heavy",
+      "name": "TRUCK OTHER HEAVY",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "11 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-other-light",
+      "name": "TRUCK OTHER LIGHT",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "7 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-servicing-platform",
+      "name": "TRUCK SERVICING PLATFORM",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "52 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-tank-gas-diesel",
+      "name": "Truck tank gas/diesel",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "16 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-truck-vans",
+      "name": "Truck vans",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "21 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-warhouse-passenger-vehicle",
+      "name": "Warhouse passenger vehicle",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "11 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "historical-vehicle-family-zamboni",
+      "name": "Zamboni",
+      "category": "Historical vehicle family",
+      "lifecycle": "Historical export",
+      "sourceRef": "https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086",
+      "description": "Vehicle or equipment family present in the public 2021 CAF vehicle export.",
+      "reviewNote": "7 distinct published make/model combinations. See the historical model index. Current holdings require verification."
+    },
+    {
+      "id": "logistics-equipment-msvs-baseline-shelter-v4",
+      "name": "MSVS baseline shelter V4",
+      "category": "Logistics equipment",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/77757/w8486-260543_a---rcn-istar-uas-maintenance-shelter---rfp.pdf",
+      "description": "MSVS shelter variant identified in a DND request for proposals. Reference 101854.",
+      "reviewNote": "The source pairs this specific variant with the NSN. Confirm holdings separately.",
+      "stockNumber": "5411-20-005-2073"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-cargo-flatbed-ladder",
+      "name": "MSVS SMP Cargo flatbed ladder",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number M0038834.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "2540-14-607-5389"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-hoop-assembly",
+      "name": "MSVS SMP Hoop assembly",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number K557873.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "5340-99-671-2865"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-hydraulic-pipe",
+      "name": "MSVS SMP Hydraulic pipe",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 78503732.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "4710-14-602-2927"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-loudspeaker-cover",
+      "name": "MSVS SMP Loudspeaker cover",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 5010628089.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "5965-14-574-8852"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-mudflap",
+      "name": "MSVS SMP Mudflap",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number M0021765.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "2540-99-508-3679"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-radiator-piping",
+      "name": "MSVS SMP Radiator piping",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 20780868.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "4720-14-588-0652"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-rubber-stop",
+      "name": "MSVS SMP Rubber stop",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 5010383951.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "5340-14-591-6800"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-sleeve-bushing",
+      "name": "MSVS SMP Sleeve bushing",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 7420929989.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "3120-12-400-3311"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-trailer-quick-release-pin",
+      "name": "MSVS SMP Trailer quick-release pin",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number 800-05M-033.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "5315-20-010-2582"
+    },
+    {
+      "id": "logistics-spare-part-msvs-smp-webbing-strap",
+      "name": "MSVS SMP Webbing strap",
+      "category": "Logistics spare part",
+      "lifecycle": "Procurement reference",
+      "sourceRef": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/69223/w8486-260349b-rfi-msvs-smp-tdp-questions-en_0.pdf",
+      "description": "MSVS SMP component, part number K518981.",
+      "reviewNote": "The DND request for information pairs this part number and NSN. Confirm variant compatibility and holdings separately.",
+      "stockNumber": "5340-99-481-9773"
+    },
+    {
+      "id": "personal-equipment-army-patrol-day-pack",
+      "name": "Army patrol day pack",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-ballistic-eyewear",
+      "name": "Ballistic eyewear",
+      "category": "Personal equipment",
+      "lifecycle": "Deliveries reported",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-cbrn-coverall-renewal",
+      "name": "CBRN coverall renewal",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-contoured-ballistic-armour-carrier-system",
+      "name": "Contoured ballistic armour carrier system",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-extreme-cold-sleeping-bag-system",
+      "name": "Extreme cold sleeping bag system",
+      "category": "Personal equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-gas-mask-carrier",
+      "name": "Gas mask carrier",
+      "category": "Personal equipment",
+      "lifecycle": "Deliveries reported",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-hearing-protection",
+      "name": "Hearing protection",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-high-cut-helmet-phase-2",
+      "name": "High-cut helmet phase 2",
+      "category": "Personal equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-infantry-body-armour-load-carriage-and-packs",
+      "name": "Infantry body armour load carriage and packs",
+      "category": "Personal equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-recruit-patrol-packs-and-rucksacks",
+      "name": "Recruit patrol packs and rucksacks",
+      "category": "Personal equipment",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-snowshoe-and-ski-systems",
+      "name": "Snowshoe and ski systems",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-thermal-blanket",
+      "name": "Thermal blanket",
+      "category": "Personal equipment",
+      "lifecycle": "Deliveries reported",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "personal-equipment-toboggan-system",
+      "name": "Toboggan system",
+      "category": "Personal equipment",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/army/services/line-sight/articles/2023/02/soldier-system-deliveries.html",
+      "description": "Personal equipment type identified in the Army delivery schedule.",
+      "reviewNote": "April 2026 schedule. The lifecycle label reflects the public wording and timing."
+    },
+    {
+      "id": "vessel-halifax-class",
+      "name": "Halifax class",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/surface/halifax-class.html",
+      "description": "Multi-role frigate class.",
+      "imageRef": "https://www.canada.ca/content/dam/rcn-mrc/images/fleet-specialized-units/fleet-illustration/halifax-sil.png"
+    },
+    {
+      "id": "vessel-harry-dewolf-class",
+      "name": "Harry DeWolf class",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/surface/harry-dewolf-class.html",
+      "description": "Arctic and offshore patrol vessel class.",
+      "imageRef": "https://www.canada.ca/content/dam/rcn-mrc/images/fleet-specialized-units/fleet-illustration/hdw-sil.png"
+    },
+    {
+      "id": "vessel-hmcs-oriole",
+      "name": "HMCS Oriole",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/training-auxiliary-fleet/hmcs-oriole.html",
+      "description": "Sail-training and public outreach vessel.",
+      "reviewNote": "This public source names a vessel rather than a class. The seed entry still carries no individual asset identity or authoritative inventory association."
+    },
+    {
+      "id": "vessel-kingston-class",
+      "name": "Kingston class",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/surface/kingston-class.html",
+      "description": "Maritime coastal defence vessel class.",
+      "reviewNote": "RCN still lists the class and announced phased divestment starting in 2025. Listing does not establish surviving hull counts.",
+      "imageRef": "https://www.canada.ca/content/dam/rcn-mrc/images/fleet-specialized-units/fleet-illustration/kingston-sil.png"
+    },
+    {
+      "id": "vessel-mv-asterix",
+      "name": "MV Asterix",
+      "category": "Vessel",
+      "lifecycle": "Contracted service",
+      "sourceRef": "https://www.canada.ca/en/public-services-procurement/services/acquisitions/defence-marine/marine-initiatives/oiler-replenishment-vessel.html",
+      "description": "Interim replenishment service vessel.",
+      "reviewNote": "Commercially owned and operated under a service contract extended through January 2028."
+    },
+    {
+      "id": "vessel-naval-large-tugs",
+      "name": "Naval Large Tugs",
+      "category": "Vessel",
+      "lifecycle": "Delivery documented",
+      "sourceRef": "https://www.canada.ca/en/public-services-procurement/services/acquisitions/defence-marine/national-shipbuilding-strategy/projects/small-vessels/naval-large-tugs.html",
+      "description": "Harbour and coastal support vessel class.",
+      "reviewNote": "DND confirms deliveries from 2024. The original CSV gives an obsolete schedule."
+    },
+    {
+      "id": "vessel-orca-class",
+      "name": "Orca class",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/training-auxiliary-fleet/orca-class.html",
+      "description": "Patrol craft used for naval training."
+    },
+    {
+      "id": "vessel-protecteur-class",
+      "name": "Protecteur class",
+      "category": "Vessel",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/surface/protecteur-class.html",
+      "description": "Future joint support ship class.",
+      "reviewNote": "This is the replacement class rather than the retired namesake ships. DND briefed expected first delivery in 2027."
+    },
+    {
+      "id": "vessel-river-class",
+      "name": "River class",
+      "category": "Vessel",
+      "lifecycle": "Planned acquisition",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/surface/river-class-destroyer.html",
+      "description": "Future destroyer class.",
+      "reviewNote": "Listed by RCN under Future Fleet."
+    },
+    {
+      "id": "vessel-victoria-class",
+      "name": "Victoria class",
+      "category": "Vessel",
+      "lifecycle": "Publicly listed",
+      "sourceRef": "https://www.canada.ca/en/navy/corporate/fleet-units/submarines/victoria-class.html",
+      "description": "Conventional submarine class.",
+      "imageRef": "https://www.canada.ca/content/dam/rcn-mrc/images/fleet-specialized-units/fleet-illustration/victoria-sil.png"
+    }
+  ]
+}

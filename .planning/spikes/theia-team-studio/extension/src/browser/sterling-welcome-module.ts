@@ -39,7 +39,7 @@ const componentLabels = new Map([
 const workAreas = [
   { label: 'Capability Development', icon: 'project', description: 'Organize the programs, projects, and products that deliver a capability.', kind: 'capability-development' },
   { label: 'Exercises & Training', icon: 'mortar-board', description: 'Prepare exercises and organize training.', kind: 'training' },
-  { label: 'Operations', icon: 'briefcase', description: 'Organize coordination, reporting, and records.', kind: 'operations' },
+  { label: 'Planning', icon: 'checklist', description: 'Develop strategic, operational, and tactical plans.', kind: 'operations' },
   { label: 'Resource Management', icon: 'layers', description: 'Coordinate people, equipment, and capacity.', kind: 'resources' }
 ];
 

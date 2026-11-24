@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 16
 status: executing
-stopped_at: Phase 70 executed (part 4e merged as #95); 0.4.33 release in preparation; data platform adopted as the plan of record on docs/data-platform-research (PR #97)
-last_updated: "2026-11-18T23:30:00.000Z"
-state_head: 40a3182d32b057cb0afad76a4cc002590245202d
+stopped_at: Phase 70 executed (part 4e merged as
+last_updated: "2026-11-23T22:48:56.184Z"
+state_head: 9893c76b2f597f9684747b3a3d87ed84a65365b3
 progress:
   total_phases: 21
   completed_phases: 1
@@ -15,8 +15,8 @@ progress:
   percent: 5
 last_activity: 2026-11-19
 current_phase: 70
-current_phase_name: "Capability vocabulary, manifests and one gate with a floor"
-last_activity_desc: Owner decisions on the data platform (2026-11-18); its milestone (Phases 85-101) adopted after Stage 1 and before the relay, which became its own milestone; milestone versions renumbered to start at 0.5; Phase 70 part 4e merged (#95)
+current_phase_name: Capability vocabulary, manifests and one gate with a floor
+last_activity_desc: "Owner decisions on the data platform (2026-11-18); its milestone (Phases 85-101) adopted after Stage 1 and before the relay, which became its own milestone; milestone versions renumbered to start at 0.5; Phase 70 part 4e merged (#95)"
 ---
 
 # Project State
@@ -69,6 +69,11 @@ Next, in order (owner, 2026-11-18):
 - Phase numbering starts at 68: branch-shipped phases end at 26; the unmerged `feat/team-fix-pass` branch claims Phases 60-67 for v0.6.0; 68 keeps both honest.
 - Phase 26 completed on branch perf/research-runs: Performance, faster agent and research runs (PERF-01…07, 5 plans, verified).
 - Phase 25 (Cybersecurity harness, CYBER-01…12) moved 2026-11-13 out of the 0.4.x line into its own milestone v0.8.0 Cybersecurity. All 8 plans are executed; 25-UAT.md is parked at test 2, and the owner's review of the 12 regional disclaimers is still to do. Owner 2026-11-15: deferred until everything else in this plan is finished; it may move to its own product.
+- Phase 71 edited: Defence inventory coherence review: requirements and acceptance criteria
+- Phase 74 edited: Defence inventory coherence review: requirements and acceptance criteria
+- Phase 88 edited: Defence inventory coherence review: requirements and acceptance criteria
+- Phase 100 edited: Defence inventory coherence review: requirements and acceptance criteria
+- Phase 39 records DND/CAF institutional Planning and its C5ISR execution boundary. Phase 100 records the planning handoff, outcomes, and lessons-learned feedback.
 
 - Phase 88 planned in 8 plans and 5 waves. Independent plan review passed. Phase 85 and Stage 1 remain prerequisites for deployment.
 

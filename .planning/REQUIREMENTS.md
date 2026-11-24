@@ -58,6 +58,8 @@
 - [ ] **OFFL-03**: The bundle carries a version, expiry, issuer and reserved fields for anchor roots with inclusion proofs, status list references and a maximum offline age per level, so the anchoring and edge milestones (L4, L5) add freshness without a format change. *(Revised 2026-11-15; was: reserved fields for chain anchoring and revocation lists.)*
 - [ ] **OFFL-04**: Run admission (a contract and its chain of grants and credentials up to the person's signed policy, with status checked from cached status lists) needs no network, and anything the local copy cannot cover fails closed. *(Revised 2026-11-15 to name credentials and status lists.)*
 
+- [ ] **INV-02**: Gate asset assignment and use on a signed policy revision and scoped, fresh identity and credential evidence. Enforce offline age and revocation. A resource link grants no authority.
+
 ### Delegation (Phase 71)
 
 - [ ] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
@@ -78,6 +80,8 @@
 - [ ] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
 - [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
 - [ ] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). A person with no organization issues their own credentials from their device DID, so a fresh install works with no HQ; in your organization the issuer is your organization's DID.
+
+- [ ] **INV-01**: Specify and prove private, controller-managed W3C DID resolution for passive assets, plus revocable issuer VCs referencing the asset DID. Test controller rotation and deny unauthorized lookup. Synthetic fixtures keep this independent of Phase 88.
 
 ### Execution backends (Phases 72 and 77)
 
@@ -246,6 +250,7 @@
 | OFFL-02 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | OFFL-03 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | OFFL-04 | Phase 74: Run contracts | Pending |
+| INV-02 | Phase 74: Run contracts | Pending |
 | CLAS-01 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-02 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-03 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
@@ -269,6 +274,7 @@
 | VCRD-05 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
 | VCRD-06 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
 | VCRD-07 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
+| INV-01 | Phase 71: Identities, credentials and delegation that only narrows | Pending |
 | EXEC-01 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-02 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
 | EXEC-03 | Phase 72: Execution backends on a copy, with a guarded apply | Pending |
@@ -362,7 +368,7 @@
 | OPS-06 | Phase 84: Ops, onboarding and release | Pending |
 | OPS-07 | Phase 84: Ops, onboarding and release | Pending |
 
-Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 130 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84).
+Coverage: 136 of 136 active requirements of v0.5.0 and v0.7.0 Messaging relay (one milestone, numbered v0.7.0, until 2026-11-18) mapped, each to exactly one phase (Phase 68: 4 complete; Phases 69-84: 132 pending). RUNL-05 is retired. Amended 2026-11-15 with the identity design: CLAS-01 … CLAS-07 added to Phase 70, DLGT-08 and VCRD-01 … VCRD-07 added to Phase 71 (117 to 132); nothing was re-mapped. Amended 2026-11-16 by the owner: CLAS-08 (the trust badge) added to Phase 70 and CLAS-05 ratified with the pre-send connection check (132 to 133). Amended 2026-11-16 with the owner's agent authorization decisions: CRED-08 (signed, request-bound invocations checked by the broker) added to Phase 73 (133 to 134); nothing was re-mapped, and the L4 drafts ANCH-09 … ANCH-15 are not counted. Re-mapped on 2026-11-15 from the old numbering: AUTH from 69 to 75, IDNT from 70 to 76, RUNL-01/03 and TEAM from 71 to 77, SETUP from 71.1 to 78, BUDG from 72 to 79, RUNL-02/04/06/07 and CMND from 73 to 80, GRP from 74 to 81, SGNL from 75 to 82, TGRM from 75.1 to 83, OPS from 76 to 84. Split on 2026-11-18 with no re-mapping: 67 in v0.5.0 Governed agent platform (Phases 68-74) and 67 in v0.7.0 Messaging relay (Phases 75-84).
 
 ## Milestone v0.6.0: Data platform (Phases 85-101)
 
@@ -420,6 +426,10 @@ Coverage: 134 of 134 active requirements of v0.5.0 and v0.7.0 Messaging relay (o
 - [ ] **DATA-31**: Databases: directory-first discovery; network scanning off by default; dlt backfill and Debezium CDC, with abandoned replication slots monitored; each database approved on its own.
 - [ ] **DATA-32**: The importers carried from paused Phase 15 (CSV, STIX, GeoJSON) and the offline gazetteer.
 - [ ] **DATA-33**: PIA and DPIA packs generated from catalog facts; monitoring-policy text; SECURITY.md and README updated (including plaintext on the host's encrypted disk and what clearances guarantee); the operator runbook for the host.
+
+- [ ] **INV-03**: Stage public candidates with field provenance and support scoped steward create, read, update, archive and restore. Reject stale or unauthorized mutations. A verified asset has one stable DID and links to a versioned shared model for specifications and media. Store approved image copies under governed media IDs and display them from internal storage. Preserve source evidence and lifecycle history.
+- [ ] **INV-04**: Run the governed API and PostgreSQL as separate services. Apply bulk inventory changes in bounded, resumable chunks with record version checks, ordered locks for cross-record invariants, backpressure and conflict review. Commit signed transitions and outbox entries atomically with state, with replay and retry idempotency. Only the governed host accesses PostgreSQL. Theia uses the scoped API.
+- [ ] **INV-05**: Import authorized departmental and licensed catalogue sources with exact and ambiguous match review, scoped provenance, idempotent refresh and visible freshness. Automatically display and update the latest authorized inventory when Resource Management opens. Show stale sources and keep type and aggregate evidence separate from serialized holdings.
 
 ### One-click connection (Phases 89-91)
 
@@ -550,6 +560,8 @@ Added 2026-11-18 (owner: collectors must be super simple to install).
 | DATA-06 | Phase 88: Ingestion core, governed store and the data map | Pending |
 | DATA-07 | Phase 88: Ingestion core, governed store and the data map | Pending |
 | DATA-08 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| INV-03 | Phase 88: Ingestion core, governed store and the data map | Pending |
+| INV-04 | Phase 88: Ingestion core, governed store and the data map | Pending |
 | DATA-09 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
 | DATA-10 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
 | DATA-11 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
@@ -574,6 +586,7 @@ Added 2026-11-18 (owner: collectors must be super simple to install).
 | DATA-30 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
 | DATA-31 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
 | DATA-32 | Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases | Pending |
+| INV-05 | Phase 100: Easy sources | Pending |
 | DATA-33 | Phase 101: End-to-end hardening and release | Pending |
 | CONN-01 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
 | CONN-02 | Phase 89: Microsoft 365 connector with one-click connection | Pending |
@@ -653,7 +666,7 @@ Added 2026-11-18 (owner: collectors must be super simple to install).
 | OPP-06 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
 | OPP-07 | Phase 99: Opportunity agent, data-gap planning and specialists from organization data | Pending |
 
-Coverage: 119 of 119 data platform requirements mapped, each to exactly one phase, all pending (SPIKE 9, DATA 33, CONN 4, COLL 6, TAG 8, DSEC 13, MARK 5, HOLD 10, KB 15, FAC 9, OPP 7; 17 phases). Nothing in v0.5.0 or v0.7.0 was re-mapped.
+Coverage: 122 of 122 data platform requirements mapped, each to exactly one phase, all pending (SPIKE 9, DATA 33, CONN 4, COLL 6, TAG 8, DSEC 13, MARK 5, HOLD 10, KB 15, FAC 9, OPP 7, INV 3; 17 phases). Nothing in v0.5.0 or v0.7.0 was re-mapped.
 
 ## Phase 25 requirements: Cybersecurity harness (milestone v0.8.0)
 
@@ -899,7 +912,7 @@ Drafted 2026-11-15 with the outlines in ROADMAP.md, "Later milestones". Ids are 
 
 Split 2026-11-18 (owner, data platform decision 1): L1a, the host and local inference, is built in v0.6.0 Data platform (Phase 85 and the host parts of Phase 88), where SPIKE-01 and SPIKE-02 meet the AMD and amd64 half of APPL-02, APPL-03 and APPL-05 and the single-machine half of INFR-01 and INFR-03. Everything else below is L1b, the Theia appliance, and stays a later milestone.
 
-- **APPL-01**: One Compose stack holds Theia in the browser, the agent engine, the relay, a local inference service and an optional OpenShell gateway on the host side; it replaces today's code-server setup, and the current VSIX bridges the first release.
+- **APPL-01**: One Compose stack holds Theia in the browser, the agent engine, the relay, a local inference service and an optional OpenShell gateway on the host side; it replaces today's code-server setup. The current VSIX is the compatibility bridge inside Theia. The release gate is verified browser workflow parity.
 - **APPL-02**: Images build for arm64 (DGX Spark class GB10) and amd64 (Strix Halo class) from one definition, pinned by manifest-list digest, and install offline from a signed bundle with checksums.
 - **APPL-03**: GPU passthrough is optional and vendor-neutral: NVIDIA through the Container Toolkit and CDI, AMD through ROCm device passthrough (`/dev/kfd`, `/dev/dri`), and a CPU or Vulkan fallback; the stack says what it found.
 - **APPL-04**: A sandbox gets exactly the GPU devices a grant names and none otherwise, proven by tests on an NVIDIA GB10 machine and an AMD Strix Halo machine.

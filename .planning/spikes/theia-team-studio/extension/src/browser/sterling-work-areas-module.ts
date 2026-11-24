@@ -54,11 +54,12 @@ const pages: Record<WorkAreaKind, AreaPage> = {
       { label: 'Open Staff Room', command: 'nearAi.openStaffRoom', currentProject: true }
     ]
   },
+  // Keep the stored work-area kind so existing records open in Planning.
   operations: {
-    title: 'Operations',
-    description: 'Organize coordination, reporting, and records.',
-    image: 'sterling-area-operations.webp',
-    create: 'Create operations work area',
+    title: 'Planning',
+    description: 'Develop strategic, operational, and tactical plans. Use outcomes and lessons learned to inform future plans and courses of action.',
+    image: 'sterling-area-planning.webp',
+    create: 'Create planning work area',
     shortcuts: [
       { label: 'Open Staff Center', command: 'nearAi.openStaffRoom', args: ['war-room'], currentProject: true },
       { label: 'Open Agent Activity', command: 'nearAi.openAgentActivity', currentProject: true }

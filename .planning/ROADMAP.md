@@ -532,6 +532,7 @@ Plans:
 - [ ] TBD (run /gsd-plan-phase 38 to break down)
 
 ### Phase 39: Portfolio Room, prioritization and scenarios
+**Institutional planning**: Sterling supports DND/CAF strategic, operational, and tactical planning. Start a cycle from a verified issued order, directive or administrative tasking, or a signed decision to initiate under the authorized official's own authority. Track issued revisions, parent direction, approval, delivery and acknowledgement. Reuse Phase 33.1 postings to staff the cycle. Exercise issuance and staffing with synthetic records before connecting the governed Personnel category in Phases 88 and 100. The Staff Center tracks the shared cycle. People open position-specific workspaces based on current signed assignments resolved from their authenticated DID, with scoped hub presence. The separate C5ISR system owns operational execution. See [planning setup and issuance](research/staff-teams/10-STAFF-TEAMS-DESIGN.md#211-issued-direction-and-planning-area-setup).
 **Goal**: The portfolio office sets weighted criteria, people score with agent-drafted evidence, and scenarios with the efficient frontier are compared and decided by named people.
 **Depends on**: Phase 38.
 **Requirements**: PORT-07, PORT-08, PORT-09
@@ -549,7 +550,7 @@ Plans:
 **Goal**: Demand and supply across units are matched by skill, clearance and period, reallocations become taskings each unit fills in its own mode, and cross-unit dependencies and gate calendars show what will slip.
 **Depends on**: Phase 38 (and Phase 39 for decisions).
 **Requirements**: PORT-10, PORT-11, PORT-12
-**Resource Inventory**: Capability Development, Exercises & Training, Operations, and Resource Management work areas refer to the same authorized resource records by source and stable ID. Approved allocation remains a separate signed decision. Connect authoritative asset, facilities, personnel-capacity, and other approved resource systems through the Phase 100 source catalog.
+**Resource Inventory**: Capability Development, Exercises & Training, Planning, and Resource Management work areas refer to the same authorized resource records by source and stable ID. Approved allocation remains a separate signed decision. Prove the resource-reference contract and signed allocation with synthetic inventory. Phase 88 supplies the governed service and Phase 100 onboards approved asset, facility, and personnel-capacity sources.
 **Success Criteria** (what must be TRUE):
   1. A Secret demand is never matched by Protected B supply; an approved reallocation reaches a unit as a tasking, its tasker posts two people, and the next supply publication shows the change. (PORT-10)
   2. A viewer who cannot see an upstream milestone sees their own item at risk only through its own published forecast, with no hint of the hidden edge. (PORT-11)
@@ -961,10 +962,10 @@ Plans:
 - The full gate passes once inside the cap: lint and suite, e2e under xvfb with the Wayland variables removed, verify:release and the range secret scan (D-34).
 
 ### Phase 71: Identities, credentials and delegation that only narrows
-**Asset identity**: Issue one opaque DID per tracked asset through the organization's identity authority. Link the asset to the applicable catalogue item and authorized custodian in governed records. Record custody changes and retirement as signed lifecycle events. Keep serials, holdings, and locations in permissioned records.
+**Asset identity**: Issue one opaque DID per tracked asset through the organization's identity authority. Define and test the controller-managed asset DID and a private resolver contract with synthetic records. Phase 88 integrates it with the governed master record. Reference the DID from scoped verifiable credentials. Record assignment, use, custody changes and retirement as signed ledger events. Keep instance details and history in permissioned records.
 **Goal**: An agent can never hold more than it was delegated: every person, agent and machine acts under its own standard DID, authority, clearance, roles and compartments are signed credentials that can be revoked, a lead passes only a subset of what it holds and every link of the chain is checked, grants expire, depth and fan-out are capped, and members report results in a declared shape.
 **Depends on**: Phase 70 (and Phase 69's signer and key status)
-**Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07
+**Requirements**: DLGT-01, DLGT-02, DLGT-03, DLGT-04, DLGT-05, DLGT-06, DLGT-07, DLGT-08, VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06, VCRD-07, INV-01
 **From the portfolio design (2026-11-20)**: positions and portfolio publishers become verified credentials here, so a posting and a publication can be checked against a person's credential, not only the device key (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
 **Builds on Phase 69 (unchanged, executing)**: the payload signer accepts any Ed25519 signer object (69 D-20) and every check honours one key-status lookup (69 D-09, D-21). The `eddsa-jcs-2022` proof is a second proof format beside Phase 69's signed-payload envelope, using the same signer object, the same raw key and the same canonical JSON, so there is still one signer (69 D-10); the envelope keeps signing policy bundles and approval answers, its `grant` purpose stays reserved, and grants become delegation credentials. Phase 69's device key becomes the device's `did:key` with no key change; 69 D-06's wording about a `did:near` identity is superseded by decision 10; 69-CONTEXT.md D-06 carries a note saying so. Phase 69's build is unaffected: it creates the Ed25519 device key that becomes a `did:key`.
 **Research step (first, before the other plans are written)**: (a) JCS conformance: run the existing canonical JSON and our `eddsa-jcs-2022` signing input against the W3C test vectors and Digital Bazaar's cryptosuite, confirm the integer-only subset equals RFC 8785 for every input the profile allows (research risk 12), and confirm a Data Integrity signing input (two SHA-256 digests) can never equal a Phase 69 signed-payload or team-event input. (b) `did:webvh` hosting and caching: until HQ hosts logs (L4), where people's and your organization's logs live and how they travel (candidates: beside the policy bundle, or over Phase 69's coordination transport); how a log verifies from a cached copy and resumes from cached verified state; the SCID and domain in the identifier; pre-rotation with an offline root key; witnesses. (c) Status list sizing: the 131,072-entry minimum, compressed size, random index allocation, lists per issuer, `validUntil` and cache lifetime, and how a solo install publishes and refreshes its own list.
@@ -976,6 +977,7 @@ Plans:
   5. A member asked for a declared result shape returns it or gets one correction turn, a restart reports an unfinished result as unknown rather than guessing, and the Agent Activity view shows for each agent what it may do in plain words, the level, roles and compartments it holds, and its DID for anyone who wants to inspect it. (DLGT-06, DLGT-07)
   6. Authority, clearance, roles and compartments arrive only as credentials in our narrow VC 2.0 profile (`eddsa-jcs-2022`, no new runtime dependency) that pass the W3C test vectors and cross-verify both ways with Digital Bazaar's libraries in tests; revoking or suspending a credential in its status list takes effect at the next check, a lost device is cut off by revoking its binding, and a holder shows only the atomic or threshold credentials a check asks for. (VCRD-01, VCRD-02, VCRD-03, VCRD-04, VCRD-05, VCRD-06)
   7. The gate builds each actor's clearance only from verified, unrevoked credentials; a chain that widens level, roles, compartments, expiry or depth at any link, or holds a revoked or suspended credential anywhere, is refused with a plain reason; a person with no organization issues their own credentials from their device DID, so a fresh install still works. (VCRD-07, DLGT-08)
+  8. A controller-managed asset DID resolves only under the approved profile, survives controller rotation, requires no private key per passive asset, and supports an issuer credential that can be revoked. Verify with synthetic subjects before Phase 88. (INV-01)
 **Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`, whose name two incompatible specifications already hold (research risk 4). The spike's draft DID (`openshell-spike/did/`, an `agentGuardrails` member with `authority` and `sandbox` sections) is replaced: authority moves into credentials and the sandbox policy hash into the grant (ANCH-04). The NEAR implicit account stays derivable offline from the same key, but nothing uses it on chain. (2) Identity lifetime: decided (persistent per member, per-run grants); work out rotation (`did:webvh` pre-rotation for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (3) Spend in grants needs a running total held by the parent, not a static comparison of amounts and periods (spike finding). (4) Existing teams that nest deeper than the new default get a clear message, not a silent failure. (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a revoked credential keeps working until the cached list's `validUntil`, so list lifetimes are set deliberately; the per-level offline age is L5 (risk 5). (7) Not post-quantum: Ed25519 proofs will need a migration, so every proof names its cryptosuite and a second suite can sit beside it (risk 10). (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens (risk 8). (9) On-chain keys come in L4 (owner, 2026-11-16, PROJECT.md decision 14; ANCH-14): each is a dedicated key bound to an agent's or node's DID by a credential, never the device key, so keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods, and L4 needs no profile change.
 **Undo cost**: High. The DID methods, the credential profile, the status list format and the grant format are what edge devices hold offline and what the anchoring milestone's roots commit to; only roots go on chain.
 **Plans:** 0 plans
@@ -1022,16 +1024,17 @@ Plans:
 - [ ] TBD (run /gsd-plan-phase 73 to break down)
 
 ### Phase 74: Run contracts
-**Asset usage**: Resolve the target asset DID and check a signed, versioned usage policy at the existing gate. A work-area resource reference carries provenance for that check. It grants no permission by itself.
+**Asset usage**: Evaluate the target asset DID and signed usage policy at the existing gate. Offline admission uses scoped cached evidence within its allowed age. A work-area resource reference carries provenance for that check. It grants no permission by itself.
 **Goal**: Every run no person started from the chat carries a signed contract with caps on cost, tool calls, time and sub-agents; a contract wider than its issuer's authority is refused before anything runs, and run admission works offline.
 **Depends on**: Phase 71, Phase 72, Phase 73
-**Requirements**: CTRT-01, CTRT-02, CTRT-03, CTRT-04, CTRT-05, CTRT-06, OFFL-04
+**Requirements**: CTRT-01, CTRT-02, CTRT-03, CTRT-04, CTRT-05, CTRT-06, OFFL-04, INV-02
 **Success Criteria** (what must be TRUE):
   1. A contract names allowed capabilities, a cost cap, a tool-call cap, a wall-clock cap, the largest sub-agent tree, the backend required, whether approvals may wait or must deny, and an expiry, and it is signed by its issuer. (CTRT-01)
   2. A contract wider than its issuer holds (capabilities, budget, backend) is refused before anything runs, with the reason in plain words; admission needs no network and checks the chain of grants and credentials up to the person's signed policy, with status from cached status lists, and anything the local copy cannot cover fails closed. (CTRT-02, OFFL-04)
   3. Each cap stops the run at the next turn or tool call with an honest report naming partial results, and the effective cost cap is the smallest of the contract, the run budget and the daily limit. (CTRT-03)
   4. Unattended sub-agent runs in the editor get a contract derived from the lead's grant, and an approval nobody answers in a contract run expires to deny, never to allow. (CTRT-04, CTRT-05)
   5. The contract's hash and issuer are in the signed log at start and end, with actual use against each cap. (CTRT-06)
+  6. An inventory reference, stale proof, revoked credential, or missing policy cannot authorize assignment or use. A fresh scoped offline proof is accepted under the same rules as online evidence. (INV-02)
 **Research flags**: (1) Reconcile with today's caps (`nearAi.agent.maxRunCostUsd`, the daily limit, `maxRunTokens`, the loop guard, the turn limit, Phase 26's unattended approval rules) so there is one effective cap, not two that disagree. (2) Clock trust: expiry on an edge device with no network time needs a rule (a monotonic counter, or a time vouched for by the last signed bundle); Phase 71's credential and grant expiry checks use the same rule (`identity-research.md`, risk 8).
 **Undo cost**: Medium to high: the relay and routines store contracts.
 **Plans:** 0 plans
@@ -1085,13 +1088,13 @@ Plans:
 | 68 Relay foundation | RELAY-01 … RELAY-04 | 4 |
 | 69 Team Mode reconciliation | TMR-01 … TMR-05 | 5 |
 | 70 Capability vocabulary, manifests and one gate | GATE-01 … GATE-07, OFFL-01 … OFFL-03, CLAS-01 … CLAS-08 | 18 |
-| 71 Identities, credentials and delegation that only narrows | DLGT-01 … DLGT-08, VCRD-01 … VCRD-07 | 15 |
+| 71 Identities, credentials and delegation that only narrows | DLGT-01 … DLGT-08, VCRD-01 … VCRD-07, INV-01 | 16 |
 | 72 Execution backends on a copy, with a guarded apply | EXEC-01 … EXEC-10 | 10 |
 | 73 Credential broker | CRED-01 … CRED-08 | 8 |
-| 74 Run contracts | CTRT-01 … CTRT-06, OFFL-04 | 7 |
+| 74 Run contracts | CTRT-01 … CTRT-06, OFFL-04, INV-02 | 8 |
 | 74.1 Model passports, use tiers and Western defaults | MPRV-01 … MPRV-10 | 10 |
 | 74.2 Your organization's attested model hosting | OTEE-01 … OTEE-04 | 4 |
-| **Total** | | **81** |
+| **Total** | | **83** |
 
 Before the split of 2026-11-18 one table covered Phases 68 to 84 with 134 requirements; 67 stay here and 67 moved with Phases 75 to 84 to v0.7.0 Messaging relay (its table is at the end of that milestone). RUNL-05 (approvals in the private chat) is retired: APRV-01 … APRV-04 replace it with request-bound, signed approvals. The identity amendment of 2026-11-15 added CLAS-01 … CLAS-07 (Phase 70), DLGT-08 and VCRD-01 … VCRD-07 (Phase 71): 117 to 132. The owner added CLAS-08 (the trust badge, Phase 70) on 2026-11-16: 133. The owner's agent authorization decisions of 2026-11-16 added CRED-08 (signed, request-bound invocations checked by the broker, Phase 73): 134 in total. The L4 drafts ANCH-09 … ANCH-15 are not counted. The model provenance amendment of 2026-11-19 added MPRV-01 … MPRV-10 (Phase 74.1) and OTEE-01 … OTEE-04 (Phase 74.2): 81 in this milestone; their full text is drafted in the design and goes into REQUIREMENTS.md when the phases are planned.
 
@@ -1207,19 +1210,22 @@ Plans:
 ### Stage B: the data map and the sources (Phases 88-92)
 
 ### Phase 88: Ingestion core, governed store and the data map
-**Defence digital twin**: Use the same governed store and ledger for catalogue items, individual asset DIDs, custody and provenance. Preserve source checkpoints and issue asset identities in retryable batches. See [digital twin foundation](research/data-platform/05-defence-digital-twin.md).
+**Defence digital twin**: Use the same governed store and ledger for catalogue items, individual asset DIDs, custody and provenance. Seed provisional model references from corroborated public data. Give stewards access-scoped create, read, update, archive and restore actions, versioned corrections, and a review queue for reconciliation with approved departmental sources. Preserve source checkpoints and issue asset identities in retryable batches. See [digital twin foundation](research/data-platform/05-defence-digital-twin.md).
 **Goal**: Your organization sees a live map of what data exists, where, how big, who owns it and how fresh it is (inventory and metadata only, no content), and everything shown is filtered by the viewer's clearance and the source's permissions from the first screen.
 **Depends on**: Phase 85; the Stage 1 gate (Phases 70, 71, 73 and 74).
-**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-08, DSEC-01, DSEC-02, DSEC-03
+**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-08, DSEC-01, DSEC-02, DSEC-03, INV-03, INV-04
 **Success Criteria** (what must be TRUE):
   1. Pointing the host at a folder tree fills the data map within the measured time, the source moving from `proposed` through `backfilling` to `live` with each state's reason shown; deleting, renaming and re-permissioning files there shows up within the freshness target. (DATA-03, DATA-05, DATA-06, DATA-08)
   2. Killing the host mid-batch replays that batch with no duplicate and no gap, and a forced "missed something" signal moves the source to `degraded` and resyncs it with nothing lost. (DATA-01, DATA-02, DATA-04)
   3. Two people with different clearances and permissions see different maps, each identical to the map of a base that never held the other's items (the indistinguishability test), and an item whose permission snapshot is stale is hidden, never shown. (DSEC-01, DSEC-02, DATA-08)
   4. No content is read in dry-run mode, every discovered item carries the ingest-default label from its first moment, every label, permission and lifecycle event is in the signed governance log, and the canary scan finds no content in the store, logs or caches. (DATA-07, DSEC-03)
+  5. Two verified assets retain distinct DIDs and share a versioned model. Seed candidates carry field provenance and remain unassignable until matched to an approved asset. Scoped stewards can create, read, update, archive and restore. Unauthorized or stale edits fail. The master record displays the internal copy of an approved photo even after the source URL stops working. (INV-03)
+  6. The API and database run as separate services on the Phase 85 stack. A synthetic 10,000-change burst under concurrent interactive load preserves accepted state, signed events, outbox entries and checkpoints across crashes and retries. Concurrent allocation never oversubscribes stock. Measure lock waits, backlog drain time and read and write latency on the Phase 85 host. Theia consumes scoped API views when integrated in L1b. (INV-04)
 **Research flags**: Standard patterns documented in the research; plan without a research step. The host parts of L1a land here (the governed store and its RLS on the Phase 85 stack).
 **Undo cost**: High: the connector contract, the item ledger keys and the label store format are what every connector and every later phase writes to.
 **Plans:** 8 plans across 5 waves. Synthetic verification can run before the deployment prerequisites. Real sources require the Phase 85 host and verified Stage 1 gate.
 **UI hint**: yes
+**Data Management**: The native view shows source ingestion progress, review and error states, and the resulting records. Use the supplied knowledge interface motion references as design input.
 
 Plans:
 - [ ] [88-01-PLAN.md](phases/88-ingestion-core-governed-store-and-the-data-map/88-01-PLAN.md) — Synthetic PostgreSQL-to-Data Map path and cold extension activation
@@ -1364,6 +1370,7 @@ Plans:
 **Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
 **Plans:** 0 plans
 **UI hint**: yes
+**Graph interaction**: Use the supplied `docs/specs/knowledge.mp4` and `docs/specs/knowledge 2.mp4` as design references for visible placement of newly ingested records and an optional rotating graph overview. Motion can be paused or reduced. Every view uses the same scoped graph results.
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 96 to break down)
@@ -1400,6 +1407,7 @@ Plans:
 **Research flags**: The pinned ROCm and PyTorch pairing from Phase 85.
 **Plans:** 0 plans
 **UI hint**: yes
+**Theia**: Open native Model Factory from the product rail with the same model approvals, provenance and access scope as the governed service.
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 98 to break down)
@@ -1424,16 +1432,18 @@ Plans:
 ### Stage F: continual sources and release (Phases 100-101)
 
 ### Phase 100: Easy sources: catalog, manifest connectors, agent-written connectors, databases
+**Planning exchange**: Verify the handoff and feedback loop with synthetic records. A receiving system can correlate an approved planning revision with the returned outcome and lessons learned. Preserve source, access scope and approval evidence. Make failed exchanges visible and keep retries from duplicating accepted records.
 **Goal**: Adding a new source takes a few clicks, and agents can write new connectors safely.
 **Depends on**: Phase 88; Phases 72 and 73. May start any time after Phase 92 if capacity allows.
-**Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32
+**Requirements**: DATA-27, DATA-28, DATA-29, DATA-30, DATA-31, DATA-32, INV-05
 **From the portfolio design (2026-11-20)**: financial, procurement and schedule sources feed the portfolio's publications (Phases 38 to 40) as released, labelled items, never as raw cross-unit access (`.planning/research/portfolio-and-assignment/DESIGN.md`, 10.4).
-**Defence Resource Inventory**: approved inventory sources contribute records with stable source IDs, category, freshness, and viewer permissions. The Resource Management search and filters show only records the viewer can read. Work-area references resolve against those same records.
+**Defence Resource Inventory**: approved inventory sources contribute records with stable source IDs, category, freshness, and viewer permissions. The Resource Management search and filters show only records the viewer can read. Work-area references resolve against those same records. Show a Personnel category with permitted directory-backed person DIDs, staffing qualifications, eligibility and availability. Use the same scoped view for Planning staff selection.
 **Success Criteria** (what must be TRUE):
   1. An agent writes a connector for a REST source that passes conformance and runs after one approval. (DATA-28, DATA-29, DATA-30)
   2. A connector that tries an undeclared host is blocked and recorded. (DATA-29)
   3. A Postgres source reaches `live` through CDC, and dropping its connection releases the replication slot. (DATA-31)
   4. The source catalog shows each source in plain words with its exact scopes, their reasons and an estimated backfill time, and CSV, STIX and GeoJSON imports and the offline gazetteer from the paused knowledge base work through it. (DATA-27, DATA-32)
+  5. An approved export reconciles exact, ambiguous, and unmatched catalogue aliases without converting an aggregate count into individual assets. Repeat import preserves decisions and source history. Resource Management automatically shows the latest authorized inventory and subscribed changes on opening, with visible source freshness and stale states. Authorized changes also appear in scoped L0–L5 projections. (INV-05)
 **Research flags**: Standard patterns documented in the research; plan without a research step.
 **Plans:** 0 plans
 **UI hint**: yes
@@ -1478,7 +1488,7 @@ Sequential links that cannot be split: 93 waits for 92 (classification needs tex
 | 85 Host and local inference on Strix Halo (L1a) | SPIKE-01 … SPIKE-03 | 3 |
 | 86 Microsoft 365 connector spike | SPIKE-04 … SPIKE-06, SPIKE-09 | 4 |
 | 87 Extraction and OCR throughput spike | SPIKE-07, SPIKE-08 | 2 |
-| 88 Ingestion core, governed store and the data map | DATA-01 … DATA-08, DSEC-01 … DSEC-03 | 11 |
+| 88 Ingestion core, governed store and the data map | DATA-01 … DATA-08, DSEC-01 … DSEC-03, INV-03 … INV-04 | 13 |
 | 89 Microsoft 365 connector with one-click connection | DATA-09 … DATA-13, CONN-01, CONN-02 | 7 |
 | 90 Google Workspace connector with one-click connection | DATA-14 … DATA-16, CONN-03 | 4 |
 | 91 Endpoint collectors, file shares and simple install | DATA-17 … DATA-21, CONN-04, COLL-01 … COLL-06 | 12 |
@@ -1490,9 +1500,9 @@ Sequential links that cannot be split: 93 waits for 92 (classification needs tex
 | 97 Analytics, reports, insights and views | KB-09 … KB-14 | 6 |
 | 98 Model factory v1 | FAC-01 … FAC-09 | 9 |
 | 99 Opportunity agent and data-gap planning | OPP-01 … OPP-07 | 7 |
-| 100 Easy sources | DATA-27 … DATA-32 | 6 |
+| 100 Easy sources | DATA-27 … DATA-32, INV-05 | 7 |
 | 101 End-to-end hardening and release | DSEC-11 … DSEC-13, DATA-33 | 4 |
-| **Total** | | **119** |
+| **Total** | | **122** |
 
 The draft had 106. Adopting it added SPIKE-09 and CONN-01 … CONN-04 (decision 14 as changed), COLL-01 … COLL-06 (collector packaging and enrolment), FAC-09 (training only on your organization's own machines or hardware endpoints it controls) and KB-15 (decision 7's opt-in placeholder, which no draft requirement built): 119.
 
@@ -1726,7 +1736,6 @@ Outlines, not plans: each gets a version number, requirements and phases (number
 
 ### L1b: Theia appliance on one machine
 **Release gate**: Verify Theia workflow parity using the local development build and the [workflow matrix](spikes/theia-team-studio/MIGRATION.md). Build and test the versioned image in GitHub CI. Publish an approved image by digest and link it from the GitHub release. The VSIX is bundled for compatibility inside the image. Production Theia integration stays on the L1b stack and consumes Phase 88 and 100 services when available.
-
 
 **Development target (owner, 2026-11-23).** Start the [browser migration and extension parity checks](spikes/theia-team-studio/MIGRATION.md) now. Use the existing VSIX bridge and native ports to bring current workflows into Theia. Make Theia the sole development target once current workflows pass parity.
 

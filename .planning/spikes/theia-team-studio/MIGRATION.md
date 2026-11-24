@@ -31,10 +31,10 @@ The locally built VSIX with both command fixes passed the same four webview chec
 
 Chromium opened Get Started, Chat, Team Studio, Compliance, and Documentation from the Sterling rail. Theia's Outline moved to the left editor rail on a fresh layout and stayed there after reload. The First Project page opened its Cloud, Local runtime, and Hybrid provider picker and the Team Studio builder. The Projects shortcut opened the existing Project Setup checklist.
 
-An isolated browser and a deterministic keyless provider verified model selection, a streamed Chat reply, and reopening the conversation from Chat History after reload. The live preview uses the local VSIX bridge. It can be built and tested without publishing to the VS Code Marketplace.
+An isolated browser and a deterministic keyless provider verified model selection, a streamed Chat reply, and reopening the conversation from Chat History after reload. The local development build uses the local VSIX bridge. It can be built and tested without publishing to the VS Code Marketplace.
 
 From the command palette, **SovAI: Generate SA&A Package…** accepted the published v0.4.36 evidence, honored save cancellation, and delivered a valid ZIP through **Download ZIP**.
 
-An isolated browser verified that **Sync Project Now** writes an encrypted state branch to a synthetic Git remote and reconnects after a container replacement using a dedicated test keyring. The code branch stayed intact. The default preview still uses an in-memory keyring. Two-device recovery and the Phase 33 live hub need separate browser checks.
+An isolated browser verified that **Sync Project Now** writes an encrypted state branch to a synthetic Git remote and reconnects after a container replacement using a dedicated test keyring. The code branch stayed intact. The default local development build still uses an in-memory keyring. Two-device recovery and the Phase 33 live hub need separate browser checks.
 
 Retest the rail and restored layout, the plugin commands, and the workflow matrix above when changing the pinned Theia version.

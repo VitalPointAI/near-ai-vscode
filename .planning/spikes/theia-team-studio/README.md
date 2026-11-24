@@ -4,7 +4,7 @@ The Docker workbench opens to Sterling Get Started. Set up Sterling or open Chat
 
 ## Run locally
 
-From the root of this checkout, build and start the preview with Docker.
+From the root of this checkout, build and start the local development build with Docker.
 
 ```sh
 docker build -f .planning/spikes/theia-team-studio/Dockerfile -t near-ai-theia-preview:local .
@@ -16,7 +16,7 @@ Open [Get Started](http://127.0.0.1:18771/). The home icon at the top of the rig
 
 Use `docker stop near-ai-theia-team-preview` and `docker start near-ai-theia-team-preview` to stop and restart the same container.
 
-The container runs as the unprivileged Node user and binds to localhost on the host. The examples are synthetic. This preview has no host workspace mounts, provider credentials, or agent run controls.
+The container runs as the unprivileged Node user and binds to localhost on the host. The examples are synthetic. This sample container has no host workspace mounts, provider credentials, or agent run controls.
 
 ## Run the existing extension in Theia
 
@@ -69,9 +69,9 @@ Use levels L0 through L5, with each child linked to a parent at the preceding le
 
 ## Resource Inventory
 
-Place an approved non-sensitive export at `.planning/.near-ai/resource-inventory.snapshot.json` in the trusted folder that contains the work areas. Open **Resource Management** and choose **Open resource inventory**, then load the snapshot. Search by resource ID or name, and filter by category and reported status.
+Place an approved non-sensitive export at `.planning/.near-ai/resource-inventory.snapshot.json` in the trusted folder that contains the work areas. Open **Resource Management** and choose **Open resource inventory**. The inventory appears automatically in a trusted workspace and refreshes while visible. Search by resource ID or name, and filter by category and reported status.
 
-Use **Link a resource** on an existing work area to open the inventory scoped to that folder. Pick an item and choose **Link resource**. The work area stores the source ID and resource ID in its local metadata while the inventory retains the source record. Allocation belongs to the signed approval workflow in Phase 40. The preview reads an optional reported `assetDid`, `usagePolicyRef`, `stockNumber`, `description`, and `imageRef` from the inventory source. Durable identity issuance and usage policy checks belong in the governed host.
+Use **Link a resource** on an existing work area to open the inventory scoped to that folder. Pick an item and choose **Link resource**. The work area stores the source ID and resource ID in its local metadata while the inventory retains the source record. Allocation belongs to the signed approval workflow in Phase 40. The local build reads an optional reported `assetDid`, `usagePolicyRef`, `stockNumber`, `description`, and `imageRef` from the inventory source. Durable identity issuance and usage policy checks belong in the governed host.
 
 A synthetic inventory export has this shape:
 
@@ -94,6 +94,18 @@ A synthetic inventory export has this shape:
   ]
 }
 ```
+
+### Public CAF starter catalogue
+
+Copy [caf-public-catalogue.snapshot.json](extension/fixtures/caf-public-catalogue.snapshot.json) into a trusted folder at `.planning/.near-ai/resource-inventory.snapshot.json` when starting from an empty workspace. Keep any existing inventory snapshot in place. Resource Inventory opens the catalogue automatically. Choose a folder only when the workspace has several roots. The public catalogue shows evidence and a lifecycle label per record and leaves asset linking for authorized inventory sources.
+
+The seed combines the CAF equipment export, current service catalogues, results reports, procurement notices and supplier acceptance evidence where official service listings lag. Public listings, documented deliveries, contracted services, acquisitions and retirement evidence receive separate labels. Catalogue entries include source links and official image references where matched. Stock numbers are populated only for the exact item named in the source, such as a logistics spare in a DND request for information. The public catalogue carries no unit availability, serial data or asset DIDs. The local development build keeps copied reference images in the persistent workspace volume under `.planning/.near-ai/resource-inventory-media/`. A record’s `imageDigest` names the local bytes by SHA-256, and `imageRef` records their source. The view displays the stored copy and keeps working without a connection to the source. Approved exports can supply the same photo files beside their snapshot. [CAF equipment export](https://open.canada.ca/data/en/dataset/18beb583-8dbe-434e-ba49-970658fcd6ef?wbdisable=true) · [RCAF aircraft](https://www.canada.ca/en/air-force/services/aircraft.html) · [RCN fleet](https://www.canada.ca/en/navy/corporate/fleet-units.html) · [Army vehicles](https://www.canada.ca/en/army/services/equipment/vehicles.html) · [DND 2025–26 results](https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/drr-2025-26.html)
+
+Cross-checks changed several public labels. Departmental results establish that the Kingfisher entered operational service and that ACSV deliveries continued. The Juno supplier documented formal RCAF acceptance, while the Siskin II supplier reported Canadian arrival ahead of acceptance. The Navy's Kingston class listing remains useful for identification during its announced divestment. [DND results](https://www.canada.ca/en/department-national-defence/corporate/reports-publications/departmental-results-report/drr-2025-26.html) · [Juno acceptance](https://skyalyne.ca/latest-updates/skyalyne-celebrates-delivery-of-first-ct-153-juno-helicopter-for-fact-program/) · [Siskin II arrival](https://skyalyne.ca/latest-updates/in-photos-welcome-to-canada-rcaf-ct-157-siskin-ii/) · [Kingston divestment](https://www.canada.ca/en/department-national-defence/news/2025/07/royal-canadian-navy-to-pay-off-kingston-class-vessels.html)
+
+Use **Add catalogue entry** or **Edit entry** to curate a candidate in the trusted local snapshot. **Archive entry** removes it from the default view. Enable **Show archived entries** to review or restore it. These actions are available in the provisional catalogue. Approved asset snapshots retain their read-only import workflow.
+
+The [historical vehicle model index](extension/fixtures/caf-vehicle-historical-model-index.csv) consolidates published make and model aliases across construction years. It excludes rows with unnamed equipment families and omits the historical counts from the starter catalogue. Use it to propose matches when current departmental records arrive. [CAF vehicle equipment export](https://open.canada.ca/data/en/dataset/1270405b-fa35-49a5-800e-a8ddac54a086)
 
 ### Equipment catalogues and asset identity
 
@@ -146,9 +158,9 @@ The [Defence Edition hero](extension/assets/sterling-hero-ca-defence.webp) adds 
 
 ### Defence work-area heroes
 
-Sterling uses built-in ImageGen illustrations for the four landing pages. The common prompt requested a wide 16:9 realistic editorial photograph shaped for dark left-side web copy, cool steel and navy lighting, and an unoccupied scene without people or uniforms.
+Sterling uses built-in ImageGen illustrations for the four landing pages. The equipment scenes used a common prompt that requested a wide 16:9 realistic editorial photograph shaped for dark left-side web copy, cool steel and navy lighting, and an unoccupied scene without people or uniforms.
 
 - **Capability Development** shows a scale model of the Harry DeWolf-class ship in a naval design studio. [Asset](extension/assets/sterling-area-capability.webp) · [Royal Canadian Navy reference](https://www.canada.ca/en/navy/corporate/fleet-units/surface/harry-dewolf-class.html)
-- **Exercises & Training** shows a parked yellow and red CH-149 Cormorant in an empty search-and-rescue training bay. [Asset](extension/assets/sterling-area-training.webp) · [Royal Canadian Air Force reference](https://www.canada.ca/en/air-force/services/aircraft/ch-149.html)
-- **Operations** shows a parked CC-177 Globemaster III from an empty coordination room at blue hour. [Asset](extension/assets/sterling-area-operations.webp) · [Royal Canadian Air Force reference](https://www.canada.ca/en/air-force/services/aircraft/cc-177.html)
+- **Exercises & Training** shows a Canadian Army mountain training group crossing a rocky ridge in the Canadian Rockies. The built-in ImageGen prompt placed four distant, backlit figures with backpacks to the right of the page copy and kept faces, uniform details, and insignia indistinguishable. [Asset](extension/assets/sterling-area-training.webp)
+- **Planning** shows an empty Canadian government planning room at blue hour. The built-in ImageGen prompt requested abstract Canadian maps and planning sheets on a table, quiet space for the heading, and cool steel-blue light with a muted amber accent. [Asset](extension/assets/sterling-area-planning.webp)
 - **Resource Management** shows the Canadian Army's Mack Defence MSVS Standard Military Pattern truck in an empty logistics depot. The edit used the official vehicle photo as a reference for the cab profile, four axles, flat deck, and stowed crane. [Asset](extension/assets/sterling-area-resources.webp) · [DND reference](https://www.canada.ca/en/department-national-defence/services/procurement/medium-support-vehicle-system-project.html)
