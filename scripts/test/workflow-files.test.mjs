@@ -183,7 +183,7 @@ test('the review\'s shared time budget ends inside the review job\'s limit, so a
 test('compliance is a report-only aggregate job with safe evidence handling', () => {
   const job = jobs(read('ci.yml')).get('compliance');
   assert.ok(job, 'compliance job exists');
-  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'relay-image-scan']) assert.match(job, new RegExp(`\\b${need}\\b`));
+  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'deploy', 'relay-image-scan']) assert.match(job, new RegExp(`\\b${need}\\b`));
   assert.match(job, /if:\s*always\(\)/);
   assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
   assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
@@ -201,9 +201,9 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   assert.match(job, /npm audit[\s\S]*continue-on-error: true|continue-on-error: true[\s\S]*npm audit/);
 });
 
-test('root, relay and hub test reports are always uploaded without changing required checks', async () => {
+test('root, relay, hub and deploy test reports are always uploaded without changing required checks', async () => {
   const all = jobs(read('ci.yml'));
-  for (const id of ['test', 'relay', 'hub']) {
+  for (const id of ['test', 'relay', 'hub', 'deploy']) {
     const job = all.get(id);
     assert.match(job, /NEAR_AI_TEST_REPORT/);
     assert.match(job, /actions\/upload-artifact@[0-9a-f]{40}/);
@@ -220,7 +220,7 @@ test('root, relay and hub test reports are always uploaded without changing requ
 test('scheduled and CodeQL workflows are pinned, least-privilege and never PR-triggered evidence jobs', async () => {
   const scheduled = read('compliance-scheduled.yml');
   const codeql = read('codeql.yml');
-  for (const text of [read('ci.yml'), scheduled, codeql, read('release.yml')]) {
+  for (const text of [read('ci.yml'), scheduled, codeql, read('release.yml'), read('deploy-images.yml')]) {
     for (const match of text.matchAll(/^\s*-\s+uses:\s*([^\s#]+)/gm)) assert.match(match[1], /@[0-9a-f]{40}$/);
   }
   assert.doesNotMatch(block(scheduled, 'on'), /pull_request/);
@@ -450,10 +450,46 @@ test('CODEOWNERS routes all compliance gate paths to one owner', () => {
 });
 
 test('new workflow shell scripts receive GitHub values only through env', () => {
-  for (const name of ['ci.yml', 'compliance-scheduled.yml', 'codeql.yml', 'release.yml']) {
+  for (const name of ['ci.yml', 'compliance-scheduled.yml', 'codeql.yml', 'release.yml', 'deploy-images.yml']) {
     for (const [id, job] of jobs(read(name))) for (const step of steps(job)) {
       const run = /\n\s+run: ?\|?([\s\S]*)$/.exec(step)?.[1] ?? '';
       assert.doesNotMatch(run, /\$\{\{/, `${name} ${id}: no GitHub expression inside a run script`);
     }
   }
+});
+
+test('the deploy check renders the vendored charts offline with the pinned helm, as a required check', async () => {
+  const job = jobs(read('ci.yml')).get('deploy');
+  assert.ok(job, 'deploy job exists');
+  assert.match(job, /permissions:\s*\n\s*contents: read\s*\n/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(job, /compliance\/ci\/install-tool\.sh helm /);
+  assert.match(job, /node deploy\/charts\/vendor\.mjs --check/);
+  assert.match(job, /node scripts\/run-tests\.mjs deploy\/test\/\*\.test\.mjs/);
+  const { CI_CHECKS } = await import('../lib/workflow.mjs');
+  assert.ok(CI_CHECKS.includes('deploy'));
+});
+
+test('rebuilt images are signed with your organization\'s key only on a release tag in container-release, never on a pull request', () => {
+  const text = read('deploy-images.yml');
+  const on = block(text, 'on');
+  assert.match(on, /^ {2}pull_request:$/m);
+  assert.match(on, /^ {2}push:\n {4}tags: \['v\*\.\*\.\*'\]$/m);
+  assert.doesNotMatch(on, /pull_request_target|workflow_dispatch|schedule|workflow_run/);
+  assert.match(block(text, 'permissions'), /permissions:\s*\n\s*contents: read\s*$/);
+  const all = jobs(text);
+  assert.deepEqual([...all.keys()], ['plan', 'build', 'publish', 'digests']);
+  const publish = all.get('publish');
+  assert.match(publish, /^ {4}if: github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/v'\)/m);
+  assert.match(publish, /^ {4}environment: container-release$/m);
+  assert.match(publish, /permissions:\s*\n\s*contents: read\s*\n\s*packages: write\s*\n\s*id-token: write\s*\n\s*attestations: write/);
+  assert.match(publish, /cosign sign --key env:\/\/COSIGN_PRIVATE_KEY --signing-config /);
+  // No keyless signing anywhere: every cosign sign carries a key.
+  for (const line of text.split('\n').filter((l) => /\bcosign sign\b/.test(l) && !/^\s*#/.test(l))) assert.match(line, /--key /, line.trim());
+  assert.match(all.get('build'), /^ {4}if: github\.event_name == 'pull_request'/m);
+  for (const [id, job] of all) {
+    if (id === 'publish') continue;
+    assert.doesNotMatch(job, /environment:|secrets\.|packages: write|id-token: write/, `${id} holds no secret, environment or write permission`);
+  }
+  assert.equal((text.match(/^\s*environment:/gm) ?? []).length, 1, 'only the publish job names an environment');
 });

@@ -62,13 +62,14 @@ A PR can merge only when all of these hold:
 | `relay` | CI: the messaging relay in `relay/` on Node 26.13.1: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests and the container hardening tests |
 | `hub` | CI: your organization's sync hub in `hub/` on Node 26.13.1, built like `relay`: `npm ci --ignore-scripts`, `npm audit`, type check, unit tests, the image build and the container and Compose hardening tests |
 | `docs` | CI: the documentation site in `docs-site/`: `npm ci --ignore-scripts`, `npm audit`, and a build that fails on a broken link or anchor |
+| `deploy` | CI: the on-premise deployment stack in `deploy/`: installs the pinned helm and cosign with `compliance/ci/install-tool.sh`, checks the vendored chart tarballs against `deploy/charts/charts.lock.json` offline, renders every chart offline and checks the hardening invariants (`deploy/test`) |
 | `agent-review` | Commit status set by `near-ai-reviewer` from `.github/workflows/agent-review.yml` after CI passes (section 4) |
 | One approval | Branch protection: one approving review, posted by `near-ai-reviewer` when the review passes; for a change to the gates, only after the owner approves (section 7) |
 | Up to date | Branch protection ("require branches to be up to date"): rebase onto `main` and re-run |
 | No conflicts | GitHub reports the PR mergeable |
 | Conversations resolved | Branch protection: every review thread resolved |
 
-These ten check names are the required status checks in the branch protection (section 8).
+These eleven check names are the required status checks in the branch protection (section 8).
 Renaming a CI job means updating branch protection, `scripts/lib/workflow.mjs` (`CI_CHECKS`) and
 this page in the same PR.
 
@@ -374,7 +375,8 @@ job on every branch, `hotfix/x.y.z` included, because its base commit still has 
 
 The `hub` job follows the same rule, keyed on `hub/package.json`: on a hotfix from a tag older than
 the sync hub it passes with the note "hub checks skipped", and a change that deletes
-`hub/package.json` fails it on every branch.
+`hub/package.json` fails it on every branch. The `deploy` job does the same, keyed on
+`deploy/charts/charts.lock.json`.
 
 Check the staged diff before committing: it should only add or update workflow and gate files.
 If `main` changed a script the old code still relies on (for example the vendoring or SBOM
@@ -595,7 +597,7 @@ never change it. Until a setting is applied, GitHub does not enforce it, so chec
 - `main` protection: a PR is required with one approving review (the owner cannot approve their
   own PRs, so the approval comes from `near-ai-reviewer`, posted by the agent review workflow),
   required checks `lint`, `test`, `e2e`,
-  `release-content`, `audit`, `secret-scan`, `relay`, `hub` and `docs` from GitHub Actions, plus `agent-review`;
+  `release-content`, `audit`, `secret-scan`, `relay`, `hub`, `docs` and `deploy` from GitHub Actions, plus `agent-review`;
   branches must be up to date; admins included; linear history; no force pushes or deletion;
   conversations must be resolved.
 - Merging: squash only, branches deleted after merge. The squash commit's subject is the PR

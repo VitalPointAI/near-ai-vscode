@@ -2217,6 +2217,7 @@
         ".github/workflows/ci.yml",
         ".github/workflows/codeql.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -2243,6 +2244,7 @@
         ".github/workflows/agent-review.yml",
         ".github/workflows/ci.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -2268,6 +2270,7 @@
       "where": [
         ".github/workflows/ci.yml",
         ".github/workflows/compliance-scheduled.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -2293,6 +2296,7 @@
       "kind": "action",
       "where": [
         ".github/workflows/ci.yml",
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
@@ -2386,11 +2390,12 @@
       "id": "action:actions/attest",
       "kind": "action",
       "where": [
+        ".github/workflows/deploy-images.yml",
         ".github/workflows/release.yml"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Creates GitHub artifact attestations (build provenance) for the VSIX and the compliance package.",
+      "purpose": "Creates GitHub artifact attestations: build provenance for the VSIX and the compliance package, and provenance and SBOM attestations for the rebuilt deployment images (deploy-images, tag-triggered).",
       "licence": "MIT",
       "controls": [
         "sa-10",
@@ -2407,7 +2412,7 @@
         "Attestations are signed through GitHub's Sigstore service (commercial cloud, not a FIPS 140 validated module): treat them as supplementary provenance beside the release SHA-256 checksum, and download the attestation bundle with the release for offline verification at an air-gapped site."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
-      "reviewedAt": "2026-11-23"
+      "reviewedAt": "2026-11-24"
     },
     {
       "id": "action:github/codeql-action/init",
