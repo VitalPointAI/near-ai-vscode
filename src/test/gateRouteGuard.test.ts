@@ -235,6 +235,8 @@ const REQUEST_SITES: Readonly<Record<string, Placement>> = {
   'src/services/chatParticipant.ts': { self: true },
   'src/services/cyberAssembly.ts': { self: true },
   'src/services/cyberHandoff.ts': { self: true },
+  // Phase 32.1: Get Started's one fixed test request. Its route is a required argument the guide binds from the project's runtime (guideFacts.ts).
+  'src/services/setup/testRequest.ts': { self: true },
   'src/services/teamStudioPanel.ts': { self: true },
   'src/services/generationService.ts': { dormant: true }
 };

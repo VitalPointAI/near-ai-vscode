@@ -13,6 +13,7 @@ import { KIND_OF_WORK_STATE_KEY } from '../domain/setup/ids';
 import { createSetupRegistries } from '../domain/setup/registries';
 import type { OptionCheckInput } from '../domain/setup/viability';
 import { GATE_DIR_NAME } from '../gate/bundleStore';
+import { currentSessionRoute, type SessionRoute } from '../gate/sessionMark';
 import { projectLogKey } from '../gate/decisionLog';
 import { SETUP_AUDIT_DIR } from '../gate/setupAuditLog';
 import { AuthService } from '../services/auth';
@@ -99,6 +100,17 @@ test('Gate-backed checks use the current signed snapshot and cancel the register
   assert.deepEqual(sourceInput.candidates, []);
   assert.deepEqual(progress, []);
   assert.equal(sourceCalls, 1);
+  // CLAS-06: a source's test request runs inside this project's own session route, as the person in Get Started, under the snapshot's policy.
+  let seen: SessionRoute | undefined;
+  const outcome = await sourceInput.testRequest({ async completeOnce() {
+    seen = currentSessionRoute();
+    return { text: 'OK', usage: { latencyMs: 0, verificationStatus: 'unknown' } };
+  } }, 'fixture-model', new AbortController().signal);
+  assert.deepEqual(outcome, { ok: true });
+  assert.equal(seen?.actor.kind, 'person');
+  assert.equal(seen?.actor.sessionId, 'get-started');
+  const routed = seen?.bundleState();
+  assert.equal(routed?.state === 'valid' ? routed.hash : undefined, snapshot.hash);
 });
 
 test('the Get Started run factory binds profile, writes and cancellation to the captured project', async () => {

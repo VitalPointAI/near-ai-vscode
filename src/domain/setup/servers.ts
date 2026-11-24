@@ -56,6 +56,9 @@ export interface ProbeTarget { readonly host: string; readonly port: number; rea
 export interface ServerCandidate { readonly target: ProbeTarget; readonly foundBy: 'announced' | 'scanned'; readonly name?: string; readonly foundAt: number; }
 export type Identification = { readonly state: 'identified'; readonly kind: ServerKind; readonly version?: string } | { readonly state: 'unknown-server' } | { readonly state: 'needs-key' } | { readonly state: 'no-answer' };
 export type IdentifyServer = (target: ProbeTarget, signal: AbortSignal) => Promise<Identification>;
+export type TestOutcome = { readonly ok: true } | { readonly ok: false; readonly cause: string };
+/** Sends the one fixed test request to a model a check just found. The guide gives it with its own session route bound in (CLAS-06). */
+export type TestRequest = (client: Pick<ModelEndpoint, 'completeOnce'>, model: string, signal: AbortSignal) => Promise<TestOutcome>;
 export interface ServerAdapter { readonly endpoint: ModelEndpoint; readonly admin?: LocalServerAdmin; }
 export type ServerAdapterFactory = (target: ProbeTarget) => ServerAdapter;
 export interface ServerAdapterRegistry { register(kind: ServerKind, factory: ServerAdapterFactory): { dispose(): void }; get(kind: ServerKind): ServerAdapterFactory | undefined; }

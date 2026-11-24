@@ -14,12 +14,14 @@ import type { SetupRegistries } from '../../domain/setup/registries';
 import type { IdentifyServer } from '../../domain/setup/servers';
 import type { StartSessionInput } from '../../domain/setup/session';
 import { CHECKING_CEILING_MS, type OptionSource, type ViabilityResult } from '../../domain/setup/viability';
-import type { GateHost } from '../../gate/host';
+import type { GateHost, RuntimeRequest } from '../../gate/host';
+import { sessionRouteFrom } from '../../gate/sessionMark';
 import { floorFor } from '../privateRoute';
 import { memoryOnlyDeviceProvider } from './deviceFacts';
 import type { GuideControllerDeps } from './guideController';
 import { readProjectLayer } from './projectStore';
 import { withCheckTimeout } from './probe';
+import { runTestRequest } from './testRequest';
 import { runViability } from './viabilityRunner';
 
 export function routeFactsOf(result: ViabilityResult, now: number): RouteFacts | undefined {
@@ -60,10 +62,15 @@ export function guideSessionPrefill(request?: OpenGetStartedRequest): StartSessi
   return projectName === undefined ? undefined : { projectName };
 }
 
+/** Who Get Started acts as in a project: the person, in that project's policy and log. Its policy reads and its test requests use the same one. */
+function guideRuntime(root: string): RuntimeRequest {
+  return { root, actor: { kind: 'person', sessionId: 'get-started' }, presence: 'person', context: 'interactive' };
+}
+
 /** Adapter for the guide's decisions. Expired or unreadable policies never supply a usable route. */
 export function gateGuidePolicy(gate: GateHost, root: string, privacy: () => PrivacyModeSetting): GuideControllerDeps['readPolicy'] {
   return async (now) => {
-    const runtime = await gate.runtimeFor({ root, actor: { kind: 'person', sessionId: 'get-started' }, presence: 'person', context: 'interactive' });
+    const runtime = await gate.runtimeFor(guideRuntime(root));
     const initial = runtime.bundleState();
     const label = initial.state === 'valid' ? await gate.labelsFor(root).view(initial.bundle.scales) : undefined;
     const state = runtime.bundleState();
@@ -123,6 +130,9 @@ export function createGateGuideChecks(deps: {
           !isDeepStrictEqual(current.projectLabel, snapshot.projectLabel)) {
         throw new Error('The project rules changed before checking connections.');
       }
+      // CLAS-06: each test request runs inside this project's session route, so its policy, residency and labels decide it and its log records it.
+      const route = sessionRouteFrom(await gate.runtimeFor(guideRuntime(root)));
+      signal.throwIfAborted();
       const sources = registries.options.active();
       const { projectSource } = deps;
       const useProjectSource = projectSource && !sources.some(({ id, supersedes }) =>
@@ -131,6 +141,7 @@ export function createGateGuideChecks(deps: {
         sources: useProjectSource ? [...sources, projectSource] : sources, signal, onProgress: progress,
         input: {
           now: clock, hostKind, device, identify, candidates: [], endpoints: current.route.endpoints,
+          testRequest: (client, model, testSignal) => runTestRequest(client, model, { route, signal: testSignal }),
           policyHash: current.hash, floorOn: current.floor !== undefined,
         },
       });

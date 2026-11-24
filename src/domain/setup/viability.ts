@@ -2,7 +2,7 @@
 import type { ConnectionBindingFact } from '../gate/routing';
 import type { EndpointClass, EndpointRegion, EndpointScheme, PolicyEndpoint } from '../gate/endpoints';
 import type { DeviceFacts, HostKind } from './device';
-import type { IdentifyServer, ServerCandidate, ServerIdentity, ServerModel } from './servers';
+import type { IdentifyServer, ServerCandidate, ServerIdentity, ServerModel, TestRequest } from './servers';
 import type { OptionKind } from './ids';
 
 export const VIABILITY_STATES = Object.freeze(['unknown', 'checking', 'viable', 'not-detected', 'not-configured', 'not-allowed', 'test-failed', 'stale'] as const);
@@ -23,7 +23,7 @@ export function initialViability(optionId: string, kind: OptionKind, hostKind: H
 const stale = (current: ViabilityResult, reasonCode: ViabilityReasonCode, policyHash = current.policyHash): ViabilityResult => ({ ...current, state: 'stale', reasonCode, policyHash });
 export function nextViability(current: ViabilityResult, event: ViabilityEvent): ViabilityResult { switch (event.type) { case 'start': return { ...current, state: 'checking', checkedAt: event.at, reasonCode: undefined, failedAt: undefined }; case 'answered': return { ...current, state: 'viable', answeredAt: event.at, models: event.models, server: event.server, endpoint: event.endpoint, routeFacts: event.routeFacts, reasonCode: undefined }; case 'failed': return { ...current, state: event.check === 'detected' ? 'not-detected' : event.check === 'configured' ? 'not-configured' : event.check === 'allowed' ? 'not-allowed' : 'test-failed', failedAt: event.check, reasonCode: event.reasonCode, sentence: event.sentence, fix: event.fix }; case 'tick': return current.answeredAt !== undefined && event.at - current.answeredAt >= VIABILITY_MAX_AGE_MS ? stale(current, 'stale-time') : current; case 'ceiling': return current.state === 'checking' ? { ...current, reasonCode: 'still-checking' } : current; case 'network-changed': return stale(current, 'stale-network'); case 'server-stopped': return stale(current, 'stale-server'); case 'policy-changed': return stale(current, 'stale-policy', event.policyHash); } }
 export function isChoosable(result: ViabilityResult, now: number): boolean { return result.state === 'viable' && result.answeredAt !== undefined && now - result.answeredAt < VIABILITY_MAX_AGE_MS; }
-export interface OptionCheckInput { now(): number; readonly hostKind: HostKind; readonly device: DeviceFacts; readonly endpoints: readonly PolicyEndpoint[]; readonly policyHash: string; readonly candidates: readonly ServerCandidate[]; readonly floorOn: boolean; readonly identify: IdentifyServer; progress(result: ViabilityResult): void; }
+export interface OptionCheckInput { now(): number; readonly hostKind: HostKind; readonly device: DeviceFacts; readonly endpoints: readonly PolicyEndpoint[]; readonly policyHash: string; readonly candidates: readonly ServerCandidate[]; readonly floorOn: boolean; readonly identify: IdentifyServer; readonly testRequest: TestRequest; progress(result: ViabilityResult): void; }
 export interface OptionSource { readonly id: string; readonly kinds: readonly OptionKind[]; readonly supersedes?: readonly string[]; check(input: OptionCheckInput, signal: AbortSignal): Promise<ViabilityResult>; }
 export interface OptionSourceRegistry { register(source: OptionSource): { dispose(): void }; active(): readonly OptionSource[]; }
 export function createOptionSourceRegistry(): OptionSourceRegistry {

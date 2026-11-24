@@ -18,9 +18,12 @@ import { createNearAiSource, createScopedNearAiSource } from '../services/setup/
 import { runTestRequest } from '../services/setup/testRequest';
 import { runViability } from '../services/setup/viabilityRunner';
 import { currentSpendTag } from '../services/spendLedger';
+import { currentSessionRoute, sessionRouteFrom } from '../gate/sessionMark';
+import { testGateRuntime } from './helpers/gatedRuns';
 import { createFakeModelServer, MODEL_TEST_CA, MODEL_TEST_PIN, startFakeModelServer } from './helpers/fakeModelServers';
 
 const NOW = 1_000;
+const ROUTE = sessionRouteFrom(testGateRuntime());
 const input: OptionCheckInput = {
   now: () => NOW, hostKind: 'desktop', policyHash: 'example-policy', endpoints: [], candidates: [],
   device: {
@@ -28,6 +31,7 @@ const input: OptionCheckInput = {
     estimate: false, hostKind: 'desktop', providerId: 'memory-only',
   },
   floorOn: false, identify: async () => ({ state: 'no-answer' }), progress: () => {},
+  testRequest: (client, model, signal) => runTestRequest(client, model, { route: ROUTE, signal }),
 };
 
 test('NEAR setup checks use only the selected project profile and its endpoint-bound key', async () => {
@@ -133,15 +137,18 @@ test('loopback transport: an Ollama server answers the setup test over HTTP', as
   assert.deepEqual(server.messages, [[{ role: 'user', content: 'Reply with the single word OK.' }]]);
 });
 
-test('D-37: spend tag', async () => {
+test('D-37: spend tag, and CLAS-06: the request runs inside the route it is given', async () => {
   let tag: ReturnType<typeof currentSpendTag> | undefined;
+  let route: ReturnType<typeof currentSessionRoute>;
   await runTestRequest({
     completeOnce: async () => {
       tag = currentSpendTag();
+      route = currentSessionRoute();
       return completion;
     },
-  }, 'example-model', { projectId: 'example-project' });
+  }, 'example-model', { route: ROUTE, projectId: 'example-project' });
   assert.deepEqual(tag, { kind: 'eval', projectId: 'example-project' });
+  assert.equal(route, ROUTE);
 });
 
 test('a local server which needs a key receives only the keyless signature request', async () => {

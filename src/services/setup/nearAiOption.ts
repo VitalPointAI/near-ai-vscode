@@ -13,7 +13,6 @@ import type { NearAiClient } from '../nearAiClient';
 import type { ProfileStore } from '../profileStore';
 import { createProfilePrimaryClient, type CreateNearAiProviderOptions } from '../providerFactory';
 import { withCheckTimeout } from './probe';
-import { runTestRequest } from './testRequest';
 
 type NearClientLike = Pick<NearAiClient, 'listModels' | 'completeOnce' | 'cachedTeeModel'>;
 const NEAR_KINDS = ['near-private', 'near-all'] as const;
@@ -141,7 +140,7 @@ export function createNearAiSource(deps: NearAiOptionDeps): OptionSource {
       const proof = binding && await withCheckTimeout(signal, DETECTION_TIMEOUT_MS, () => binding.refresh(host)).catch(() => undefined);
       if (!binding || !boundTo(proof, host, input.now())) return failTest(PRIVATE_CHECK_FAILED_TEXT);
 
-      const test = await runTestRequest(client, model.id, { signal });
+      const test = await input.testRequest(client, model.id, signal);
       if (!test.ok) return failTest(test.cause);
       // The client can invalidate the binding when its connection changes during the test.
       const current = binding.current(host) ?? proof;

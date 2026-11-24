@@ -96,6 +96,13 @@ test('Phase 33 overlap: a legacy step adapts into the new contract', async () =>
   assert.deepEqual(await step.viability(context), { available: true });
   await step.run(context);
   assert.deepEqual(calls, ['example.run']);
+  // A live detail (the Policy step reads the gate) is read when shown, not when adapted during activation, so it is never stale.
+  let reads = 0;
+  let sentence = 'Starting';
+  const live = fromLegacyStep({ id: 'live', label: 'Live', get detail() { reads += 1; return sentence; }, icon: 'symbol-event', command: 'live.run', isDone: () => false }, async () => undefined);
+  assert.equal(reads, 0, 'adapting the step does not read its detail');
+  sentence = 'Your policy is signed and valid.';
+  assert.equal(live.detail, 'Your policy is signed and valid.');
 });
 
 test('32.2 D-27: one row per server and ports are data', () => {

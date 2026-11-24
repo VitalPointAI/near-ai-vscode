@@ -262,6 +262,8 @@ const settings: Record<string, unknown> = {};
 let quickPick: (items: Array<Record<string, unknown>>) => Record<string, unknown> | undefined = () => undefined;
 let infoChoice: string | undefined;
 let inputBoxes: string[] = [];
+/** The options of each input box shown, so a test can try a prompt's own check. */
+const boxes: Array<{ prompt?: string; validateInput?: (value: string) => string | undefined }> = [];
 
 const vscodeStub = {
   ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
@@ -282,7 +284,7 @@ const vscodeStub = {
     showErrorMessage: async (text: string) => { throw new Error(`unexpected error: ${text}`); },
     showInformationMessage: async (text: string, ...items: string[]) => { infos.push({ text, items }); return infoChoice; },
     showQuickPick: async (items: Array<Record<string, unknown>>, options: Record<string, unknown>) => { picks.push({ items, options }); return quickPick(items); },
-    showInputBox: async () => inputBoxes.shift(),
+    showInputBox: async (options: { prompt?: string; validateInput?: (value: string) => string | undefined }) => { boxes.push(options); return inputBoxes.shift(); },
     withProgress: async (_options: unknown, task: () => Promise<unknown>) => task(),
     createWebviewPanel: () => webviewPanel,
     createOutputChannel: () => ({ appendLine() {}, dispose() {} })
@@ -302,7 +304,7 @@ function load<T>(id: string): T {
   nodeModule._load = (request, parent, isMain) => request === 'vscode' ? vscodeStub : originalLoad(request, parent, isMain);
   try { return require(id) as T; } finally { nodeModule._load = originalLoad; }
 }
-const reset = () => { executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; for (const key of Object.keys(settings)) delete settings[key]; };
+const reset = () => { executed.length = 0; infos.length = 0; picks.length = 0; infoChoice = undefined; quickPick = () => undefined; inputBoxes = []; boxes.length = 0; for (const key of Object.keys(settings)) delete settings[key]; };
 const secrets = new MemorySecrets();
 const context = { subscriptions: [] as unknown[], secrets };
 let chatOnScreen = false;
@@ -437,6 +439,11 @@ test('after setup in a project without a team, nothing opens over the editor: th
   assert.equal(picks.length, 1, 'only "Where should models run?" was asked; no What next? menu');
   assert.deepEqual(infos, [{ text: 'NEAR AI is ready for “Demo (local)”. Your next steps are in the NEAR AI chat.', items: [] }]);
   assert.deepEqual(executed, [], 'no command runs by itself');
+  // D-37: NEAR AI: Set Up's runtime prompt accepts what isSecureEndpoint accepts (an https host your organization may name) and no plain http elsewhere.
+  const check = boxes.find((box) => box.prompt?.startsWith('Local runtime URL ('))?.validateInput;
+  assert.ok(check);
+  assert.equal(check('https://named.example/v1'), undefined);
+  assert.equal(check('http://192.0.2.5:11434/v1'), 'Use http://localhost, http://127.0.0.1, or an https:// URL.');
 });
 
 test('after setup in a project that has a team, a short ready message offers to review it or see the other steps', async () => {
@@ -566,6 +573,11 @@ test('explicit connection setup refuses mismatched cloud and named local endpoin
     inputBoxes = ['Profile name', '', 'https://named.example/v1', 'fixture-local-key'];
     await configureApiKey(app, auth, sidebar, { projectRoot: root });
     assert.deepEqual(inputBoxes, ['fixture-local-key']);
+    // Get Started's runtime prompt itself refuses any address that is not on this computer, not only the check after it.
+    const check = boxes.find((box) => box.prompt?.startsWith('Local runtime URL on this computer'))?.validateInput;
+    assert.ok(check);
+    assert.equal(check('https://named.example/v1'), 'Use a local runtime address on this computer.');
+    assert.equal(check('http://127.0.0.1:11434/v1'), undefined);
     const pickerCount = picks.length;
     await configureApiKey(app, auth, sidebar, {
       projectRoot: root, reviewedConnection: { provider: 'local', localBaseUrl: 'https://named.example/v1' }

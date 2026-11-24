@@ -339,15 +339,17 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
   let localBaseUrl = fixedLocal;
   let localApiKey = '';
   if (usesLocal && localBaseUrl === undefined) {
-    const validEndpoint = scoped ? isLoopbackConnection : isSecureEndpoint;
-    const invalidEndpoint = scoped ? 'Use a local runtime address on this computer.' : 'Use http://localhost, http://127.0.0.1, or an https:// URL.';
-    const prompt = scoped
-      ? 'Local runtime URL on this computer (OpenAI-compatible, ending in /v1).'
-      : 'Local runtime URL (OpenAI-compatible, ending in /v1). Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.';
-    const entered = (await vscode.window.showInputBox({
-      title: title(), prompt, value: 'http://localhost:11434/v1', ignoreFocusOut: true,
-      validateInput: (value) => validEndpoint(value.trim()) ? undefined : invalidEndpoint
-    }))?.trim();
+    // Two prompts, each with its own check written out (D-37): Get Started's accepts only a runtime on this computer; NEAR AI: Set Up's accepts what
+    // isSecureEndpoint accepts and says which of those count as local.
+    const entered = (scoped
+      ? await vscode.window.showInputBox({
+        title: title(), prompt: 'Local runtime URL on this computer (OpenAI-compatible, ending in /v1).', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
+        validateInput: (value) => isLoopbackConnection(value.trim()) ? undefined : 'Use a local runtime address on this computer.'
+      })
+      : await vscode.window.showInputBox({
+        title: title(), prompt: 'Local runtime URL (OpenAI-compatible, ending in /v1). Only a runtime on this computer (localhost or 127.0.0.1) counts as local for content that must stay on this computer, unless your organization names its host in the policy.', value: 'http://localhost:11434/v1', ignoreFocusOut: true,
+        validateInput: (value) => isSecureEndpoint(value.trim()) ? undefined : 'Use http://localhost, http://127.0.0.1, or an https:// URL.'
+      }))?.trim();
     if (!entered) return;
     if (scoped && !isLoopbackConnection(entered)) return;
     localBaseUrl = entered.replace(/\/$/, '');

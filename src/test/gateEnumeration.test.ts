@@ -998,6 +998,9 @@ const PROCESS_IMPORTERS: Readonly<Record<string, string>> = {
   'src/services/cyberSandbox.ts': 'the cyber harness\'s container runtime wrapper; its steps are tool runs decided at the gated cyberRun.ts site',
   'src/services/cyberTools.ts': 'fixed `--version` detection of host security tools; the extension\'s own helper',
   'src/services/onlineHome.ts': 'the GitHub CLI calls of the person\'s own "online home" click; the extension\'s own helper',
+  // Phase 32.1 plan 06 (D-44): no listed runner fits (the others are --version probes or git), so the reader is listed itself; setupScan.test.ts holds its
+  // fixed commands, arguments and limits.
+  'src/services/setup/networkFacts.ts': 'reads the default gateway and DNS search list on macOS (route, scutil) and Windows (one constant PowerShell command) with fixed arguments, no shell, a 3 second limit and 64 KB of output, only while your organization\'s discovery rules list networks; the extension\'s own helper, never a model call',
   'src/services/stateGit.ts': 'the one place project sync starts git; the extension\'s own helper',
   'src/staff/replica/decodeHost.ts': 'forks the extension\'s own decode child (dist/staff/replica/decodeWorker.js) with fixed heap, stack and time limits to check updates from other machines before they are decoded; started by the replica store, never by a model call',
   'src/staff/feedImport/runner.ts': 'the feed importer\'s own parser process (the extension\'s worker.js, heap, size and time limits), started only by the person-run Import Feed File command; not a model call',

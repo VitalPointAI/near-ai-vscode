@@ -13,7 +13,6 @@ import type { OptionCheckInput, OptionSource, ViabilityEvent, ViabilityResult } 
 import { fetchForTarget } from './identify';
 import type { IdentifyDeps } from './identify';
 import { probeOrigin } from './probe';
-import { runTestRequest } from './testRequest';
 
 const SET_UP_LOCAL_AI_TEXT = 'Set up local AI';
 const ASK_ADMINISTRATOR_TEXT = 'Ask your administrator';
@@ -136,9 +135,7 @@ async function checkOption(
     const fetch = fetchForTarget(target, { fetch: deps.fetch ?? globalThis.fetch, fetchForPin: deps.fetchForPin });
     return fetch(request, { ...init, redirect: 'error', credentials: 'omit' });
   };
-  const test = await runTestRequest({
-    completeOnce: (...args) => deps.localClient(host, sameOriginFetch).completeOnce(...args),
-  }, model.id, { signal });
+  const test = await input.testRequest(deps.localClient(host, sameOriginFetch), model.id, signal);
   if (!test.ok) {
     return fail({
       check: 'answered', reasonCode: 'test-failed', fix: { action: 'retry', label: RETRY_TEST_TEXT },
