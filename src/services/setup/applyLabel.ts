@@ -2,11 +2,13 @@ import { dominates } from '../../domain/gate/dominance';
 import { setProjectLabel } from '../../domain/gate/labelMap';
 import { raiseOnly, type LabelProposal } from '../../domain/setup/map';
 import type { GateHost } from '../../gate/host';
+import { MirrorBusyError } from '../stateMirrorLock';
 import type { ApplyStep } from './apply';
 import { WAITS_SHARED_TEXT } from './projectLayerSink';
 import { isSharedProject } from './projectStore';
 
 export const SIGN_LABEL_FILE_TEXT = 'Sign the label file again with Set Label first, then run Get Started again.';
+export const LABEL_BUSY_TEXT = "Another window is changing this project's labels. Nothing was written. Apply again in a moment.";
 const WAITS_RULES_TEXT = 'Waits for a rules change that covers this label.';
 export type LabelHost = Pick<GateHost, 'changeLabels' | 'recordLabelEvent' | 'labelPolicy' | 'labelsFor'>;
 
@@ -57,6 +59,8 @@ export function labelStep(input: {
       } catch (failure) {
         if (failure === alreadyKept) return { id: 'label', outcome: 'already-done' };
         if (failure === needsClearance) return { id: 'label', outcome: 'waiting', message: WAITS_RULES_TEXT };
+        // The writer's lock wait is bounded and ends before anything is written, so a re-run can finish the label.
+        if (failure instanceof MirrorBusyError) return { id: 'label', outcome: 'failed', message: LABEL_BUSY_TEXT };
         return { id: 'label', outcome: 'failed', message: SIGN_LABEL_FILE_TEXT };
       }
     }

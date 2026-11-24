@@ -17,7 +17,8 @@ import { createProjectLayerSource, readProjectLayer, readSetupGuide } from '../s
 import { singleMachineSink } from '../services/setup/projectLayerSink';
 import { APPLY_TEXT, planApply, runApply, type ApplyContext, type ApplyDeps, type ApplyRunDeps, type ApplyStep } from '../services/setup/apply';
 import { connectionStep } from '../services/setup/applyConnection';
-import { labelStep, SIGN_LABEL_FILE_TEXT } from '../services/setup/applyLabel';
+import { LABEL_BUSY_TEXT, labelStep, SIGN_LABEL_FILE_TEXT } from '../services/setup/applyLabel';
+import { MirrorBusyError } from '../services/stateMirrorLock';
 import { clearanceProposalFor } from '../services/setup/proposals';
 import { remainingAfter, type ChangeItem } from '../domain/setup/changes';
 import type { OrganizationProfile } from '../domain/auth';
@@ -434,4 +435,30 @@ test('a stopped classified setup can raise an approved label without opening a c
   assert.deepEqual(result.steps, [{ id: 'label', outcome: 'done' }]);
   const policy = labelHost.labelPolicy();
   assert.equal((await labelHost.labelsFor(root).view(policy.scales)).resolve('', policy.defaultLabel).mark[0].level, 'Secret');
+});
+
+test('a label file another window holds reports a retryable wait at the write boundary, not a signing problem', async () => {
+  const { deps } = await setup();
+  const real = await startLabelHost(deps.root);
+  const { defaultLabel, scales } = real.labelPolicy();
+  await real.changeLabels(deps.root, (map) => setProjectLabel(map, defaultLabel));
+  let attempted = 0;
+  const labelHost: ApplyDeps['labelHost'] = {
+    labelPolicy: () => real.labelPolicy(),
+    labelsFor: (root) => real.labelsFor(root),
+    recordLabelEvent: (root, event) => real.recordLabelEvent(root, event),
+    // The writer's bounded lock wait ended before anything was written.
+    async changeLabels() { attempted += 1; throw new MirrorBusyError(); }
+  };
+  const input: ApplyDeps = { ...deps, labelHost };
+  const context = applyContext({ ...defaultLabel, level: 'Internal' }, { mode: 'corporate' });
+  const items = [change('label'), change('mode')];
+  const result = await runApply(planApply(items, context, input), input);
+  assert.equal(attempted, 1);
+  assert.deepEqual(result.steps[0], { id: 'label', outcome: 'failed', message: LABEL_BUSY_TEXT });
+  assert.equal(result.steps[1]?.outcome, 'done');
+  assert.deepEqual(remainingAfter(result, items).map(({ id }) => id), ['label']);
+  const view = await real.labelsFor(deps.root).view(scales);
+  assert.equal(view.state, 'verified');
+  assert.equal(view.resolve('', defaultLabel).mark[0]?.level, defaultLabel.level);
 });
