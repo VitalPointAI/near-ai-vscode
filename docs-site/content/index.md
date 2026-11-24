@@ -26,6 +26,7 @@ pages says which file it comes from: edit that file, never the copy on this site
 | See everything it does and every setting | [Features and settings](./using/features.synced.md) |
 | Know where your data goes and what the agent may do | [The trust model in plain words](./security/trust-model.md) |
 | Understand how it is put together | [Architecture overview](./architecture/overview.md) |
+| See every third-party component, its pinned version and why it is needed | [Component catalogue](./architecture/components/index.md) |
 | Make a change and get it released | [Development workflow](./developing/development-workflow.synced.md) |
 | See what changed in each version | [Changelog](./releases/changelog.synced.md) |
 

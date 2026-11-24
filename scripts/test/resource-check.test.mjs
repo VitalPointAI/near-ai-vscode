@@ -20,7 +20,7 @@ function fixture(files) {
 }
 
 const entry = (id, kind, where, extra = {}) => ({
-  id, kind, where, component: 'extension', scope: 'build', purpose: 'p', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
+  id, kind, where, component: 'extension', scope: 'build', purpose: 'p', role: 'r', architectureArea: 'build-and-test', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
   cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', ...extra
 });
 
@@ -36,7 +36,7 @@ const CLEAN = [
 ];
 const run = (files, resources) => {
   const root = fixture(files);
-  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'cert-manager', 'offline-bundle', 'openbao']) });
+  return check({ resources }, discover(root), { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'cert-manager', 'offline-bundle', 'openbao']), areas: new Set(['build-and-test', 'workbench']) });
 };
 const CHART_LOCK = 'deploy/charts/charts.lock.json';
 const TOOL_PINS = 'compliance/ci/tool-pins.json';
@@ -75,6 +75,28 @@ test('missing or invalid fields, unknown controls and components, and an out-of-
   for (const expected of [/needs licence/, /control "zz-99" is not in the catalogues/, /component "nowhere"/, /reviewedAt must be a date/, /crypto must be/, /where lists relay\/package.json but it is used in package.json/]) {
     assert.match(problems, expected);
   }
+});
+
+test('an entry without a role or an architecture area fails closed, and an area outside the fixed set fails', () => {
+  const { role, architectureArea, ...bare } = CLEAN[0];
+  assert.ok(role && architectureArea);
+  const problems = run(REPO, [bare, ...CLEAN.slice(1)]).join('\n');
+  assert.match(problems, /npm:typescript: needs a role/);
+  assert.match(problems, /npm:typescript: needs an architectureArea/);
+  assert.match(run(REPO, [{ ...CLEAN[0], role: ' ' }, ...CLEAN.slice(1)]).join('\n'), /npm:typescript: needs a role/);
+  assert.match(run(REPO, [{ ...CLEAN[0], role: 'p' }, ...CLEAN.slice(1)]).join('\n'), /role repeats purpose/);
+  assert.match(run(REPO, [{ ...CLEAN[0], architectureArea: 'somewhere' }, ...CLEAN.slice(1)]).join('\n'), /architectureArea "somewhere" is not one of build-and-test, workbench/);
+  assert.match(run(REPO, [{ ...CLEAN[0], roleNeedsReview: false }, ...CLEAN.slice(1)]).join('\n'), /roleNeedsReview is true when present/);
+  assert.deepEqual(run(REPO, [{ ...CLEAN[0], roleNeedsReview: true }, ...CLEAN.slice(1)]), []);
+});
+
+test('the check fails when the architecture area list is missing', () => {
+  const root = fixture({ ...REPO, 'compliance/resources.json': { resources: CLEAN } });
+  const errors = [];
+  const write = process.stderr.write;
+  process.stderr.write = (text) => { errors.push(text); return true; };
+  try { assert.equal(main([], root), 1); } finally { process.stderr.write = write; }
+  assert.match(errors.join(''), /compliance\/architecture-areas\.json is missing or lists no areas/);
 });
 
 test('an action not pinned to a full commit SHA, or an image without a digest, fails', () => {
