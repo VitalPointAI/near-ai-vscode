@@ -150,5 +150,20 @@ export function syncAccessibleName(status: SentenceStatus, context: SentenceCont
   return `Sync: ${SYNC_WORDS[status.state]}. ${syncSentence(status, context)}`;
 }
 
+/** What the people list shows for one person (D-21): live and what they work on, or when they were last seen. */
+export interface PresenceLine { live: boolean; lastSeen: number; product?: string; runs?: number }
+
+/**
+ * The people list's hover text (D-21): "Working on {product}. Running {n} agents." while live in a product this device may see, "Live" otherwise,
+ * and "Last seen HH:MM" once the person is gone. productTitle gives the product's shown name (its id when absent).
+ */
+export function presenceText(person: PresenceLine, productTitle: (product: string) => string = (product) => product): string {
+  if (!person.live) return `Last seen ${clock(person.lastSeen)}`;
+  if (person.product === undefined) return 'Live';
+  const working = `Working on ${productTitle(person.product)}.`;
+  if (person.runs === undefined || person.runs === 0) return working;
+  return `${working} Running ${person.runs === 1 ? '1 agent' : `${person.runs} agents`}.`;
+}
+
 /** Every state has a word: a new state without words fails the sentences test. */
 export const SENTENCE_STATES: readonly SyncState[] = SYNC_STATES;

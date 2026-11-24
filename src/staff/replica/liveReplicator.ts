@@ -31,7 +31,7 @@ import { HubTransport, HubTransportError } from './hubTransport';
 import type { EventReader, HubTransportOptions } from './hubTransport';
 
 /** What the replicator needs of HubTransport: what syncOnce calls, the event stream and close. */
-export type LiveTransport = SyncTransport & Pick<HubTransport, 'events' | 'close'>;
+export type LiveTransport = SyncTransport & Pick<HubTransport, 'events' | 'close' | 'postPresence' | 'leavePresence'>;
 
 /** The timers the replicator uses; tests give a manual clock (liveWorld FakeTimers). */
 export interface LiveTimers {
@@ -158,6 +158,7 @@ export class LiveReplicator {
     const address = this.options.hub === undefined ? undefined : await this.options.address();
     if (!this.started) return;
     this.fire({ kind: 'start', hasHub: this.options.hub !== undefined && address !== undefined });
+    if (this.machine.state === 'single-machine') return;
     this.lastTick = this.now().getTime();
     this.network = this.options.networkProbe?.();
     this.armTick();
@@ -182,6 +183,18 @@ export class LiveReplicator {
   /** The network changed (a new address, back from sleep): an offline project tries again at once. */
   public networkChanged(): void {
     this.fire({ kind: 'network-change' });
+  }
+
+  /** Posts this device's sealed presence in one cell through the one transport while live; does nothing otherwise (33-12, D-21). */
+  public async postPresence(cell: string, sealed: string): Promise<void> {
+    if (this.machine.state !== 'live' || this.transport === undefined) return;
+    await this.transport.postPresence(cell, sealed);
+  }
+
+  /** Leaves one cell's presence while live; does nothing otherwise. */
+  public async leavePresence(cell: string): Promise<void> {
+    if (this.machine.state !== 'live' || this.transport === undefined) return;
+    await this.transport.leavePresence(cell);
   }
 
   /** This build now folds the features the shared work requires (an update): a project in needs-update connects again. */
