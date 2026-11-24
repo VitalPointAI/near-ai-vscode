@@ -274,6 +274,8 @@ export class LiveReplicator {
     this.clearTimer('stateTimer');
     if (!this.started) return;
     const machine = this.machine;
+    // A session key that has ended waits for the person to sign in again: looking again cannot help (Phase 33 D-62).
+    if (machine.state === 'refused' && machine.reason === 'session-expired') return;
     if (machine.state === 'attention' || machine.state === 'refused') {
       // These wait for the lead; looking again now and then is how the lead's action (a hub.readmit, an admission) reaches this device.
       this.stateTimer = this.timers.setTimeout(() => {

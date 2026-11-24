@@ -233,12 +233,14 @@ export function readmitWitness(state: WitnessState, readmitHash: string): Witnes
 // named, the count of all); higher heads raise the mark. Only writers the roster knows are tracked, and only heads in a valid shape, so a hub cannot
 // fill the marks with made-up writers. A same-seq head with another hash is a writer fork, which the chain stage handles, and changes no mark.
 // heads.checkpoint is not read here: pass it to witnessCheckpoint.
-export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<RosterView, 'deviceKey'>): WitnessResult {
+export function witnessHeads(state: WitnessState, heads: HeadSet, roster: Pick<RosterView, 'deviceKey' | 'sessionCertificate'>): WitnessResult {
   const rows: SeenHead[] = [];
   for (const stream of Array.isArray(heads?.streams) ? heads.streams : []) {
     if (!isStream(stream?.stream) || !Array.isArray(stream.heads)) continue;
     for (const head of stream.heads) {
-      if (!isHash(head?.writer) || !isSeq(head.seq) || !isHash(head.hash) || roster.deviceKey(head.writer) === undefined) continue;
+      // A person's session key the roster vouches for is tracked like a device (Phase 33 D-62).
+      const known = isHash(head?.writer) && (roster.deviceKey(head.writer) !== undefined || roster.sessionCertificate?.(head.writer) !== undefined);
+      if (!known || !isSeq(head.seq) || !isHash(head.hash)) continue;
       rows.push({ stream: stream.stream, writer: head.writer, seq: head.seq });
     }
   }

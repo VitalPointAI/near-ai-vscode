@@ -298,6 +298,21 @@ test('refused shows the session reason (revoked), and the replicator looks again
   await replicator.stop();
 });
 
+test('session-expired (Phase 33 D-62): a person\'s ended session key shows refused with that reason, and the replicator does not look again', async () => {
+  const timers = new FakeTimers();
+  const server = scriptedServer();
+  server.heads = () => { throw new HubTransportError('session-refused', { status: 403, reason: 'session-expired' }); };
+  const replicator = new LiveReplicator({ local: memoryLocal(() => rosterWith()), memory: memoryOf(), hub: { id: HUB_MEMBER, writer: HUB.writer, certPin: 'f'.repeat(64) }, address: () => Promise.resolve('127.0.0.1:9'), signer: ME.signer, open: server.open, timers, now: () => timers.date() });
+  await replicator.start();
+  await settle();
+  assert.deepEqual([replicator.status.state, replicator.status.reason], ['refused', 'session-expired']);
+  const opened = server.opened;
+  await timers.advance(LEAD_PROBE_MS * 3);
+  assert.equal(server.opened, opened, 'an ended session key is never tried again; the person signs in again');
+  assert.equal(replicator.status.state, 'refused');
+  await replicator.stop();
+});
+
 test('quarantined: a session refused quarantined shows refused with reason quarantined', async () => {
   const timers = new FakeTimers();
   const server = scriptedServer();

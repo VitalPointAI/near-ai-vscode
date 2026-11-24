@@ -52,7 +52,9 @@ const REFUSAL_TEXT: Readonly<Record<string, string>> = Object.freeze({
   'not-admitted': 'Your organization\'s server does not know this computer for this shared work. Ask the {lead} to give it access.',
   revoked: 'This computer no longer has access to this shared work. Ask the {lead} if you still need it.',
   'not-a-person-device': 'Only a person\'s computer can work on this shared work. Ask the {lead} for help.',
-  'unknown-project': 'Your organization\'s server does not hold this shared work. Ask the {lead} to connect it.'
+  'unknown-project': 'Your organization\'s server does not hold this shared work. Ask the {lead} to connect it.',
+  // A person's session key past its certificate's end (Phase 33 D-62).
+  'session-expired': 'Your session key has ended. Sign in again.'
 });
 const REFUSAL_OTHER = 'Your organization\'s server did not accept this computer. Ask the {lead} for help.';
 

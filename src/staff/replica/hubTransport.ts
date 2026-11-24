@@ -119,6 +119,11 @@ export interface HubTransportOptions {
   blobsCitedBy?: (entryHashes: readonly string[]) => Promise<Array<{ entry: string; blob: string }>>;
   /** The replica features this device announces in its signed session answer (POST-01, D-07); KNOWN_REPLICA_FEATURES when absent. */
   features?: readonly string[];
+  /**
+   * For a person's session key (Phase 33 D-62): the session.certify entry that vouches for the key in `signer`. The session answer names it and
+   * carries it, so the hub checks the chain to the person's device before the first push has stored the certificate. Absent for a device.
+   */
+  certificate?: SealedEntry;
 }
 
 /** The most bytes one presence post may carry: the hub's LIMITS.presenceBytes (D-21, D-38). */
@@ -452,6 +457,7 @@ export class HubTransport implements ReplicaTransport {
   private readonly cap: number;
   private readonly blobsCitedBy: HubTransportOptions['blobsCitedBy'];
   private readonly features: readonly string[];
+  private readonly certificate: SealedEntry | undefined;
   private main: HubConnection | undefined;
   private opening: Promise<HubConnection> | undefined;
   private readonly readers = new Set<{ close(): void }>();
@@ -473,6 +479,7 @@ export class HubTransport implements ReplicaTransport {
     this.cap = options.responseMaxBytes ?? RESPONSE_MAX_BYTES;
     this.blobsCitedBy = options.blobsCitedBy;
     this.features = options.features ?? KNOWN_REPLICA_FEATURES;
+    this.certificate = options.certificate;
   }
 
   /** How many TLS connections this transport opened, the event reader's included. */
@@ -825,7 +832,7 @@ export class HubTransport implements ReplicaTransport {
     if (challenge.hub !== this.hub) throw new HubTransportError('wrong-hub');
     let answer: unknown;
     try {
-      answer = buildSessionAnswer(this.signer, { hub: this.hub, project: this.project, challenge: challenge.challenge, keying: connection.keying(), features: this.features, now: this.now() });
+      answer = buildSessionAnswer(this.signer, { hub: this.hub, project: this.project, challenge: challenge.challenge, keying: connection.keying(), features: this.features, ...(this.certificate === undefined ? {} : { certificateEntry: this.certificate }), now: this.now() });
     } catch {
       throw new HubTransportError('malformed');
     }
@@ -892,6 +899,8 @@ export class HubTransport implements ReplicaTransport {
     if (status === 403 && error === 'session-refused') throw new HubTransportError('session-refused', { status, ...(reason === undefined ? {} : { reason }) });
     if (status === 401 && (reason === 'revoked' || reason === 'quarantined')) throw new HubTransportError('session-refused', { status, reason });
     if (status === 403 && reason === 'wrong-project') throw new HubTransportError('wrong-project', { status, label: { project: '' } });
+    // A person's session key past its certificate's notAfter (Phase 33 D-62): refused for good, the person signs in again.
+    if (status === 403 && error === 'session-expired') throw new HubTransportError('session-refused', { status, reason: 'session-expired' });
     // Restore mode at the hub (Phase 33 D-32): retryable, with the time the hub gives.
     if (status === 503 && error === 'restoring') throw new HubTransportError('hub-error', { status, reason: 'restoring', retryAfterSeconds: retryAfterOf(answer.headers) ?? 30 });
     return this.hubError(status, error ?? reason);

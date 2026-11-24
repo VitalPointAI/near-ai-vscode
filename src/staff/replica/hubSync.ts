@@ -106,6 +106,8 @@ export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention' | 'need
 
 /** What a person sees while your organization's server is in restore mode (D-32): offline-like, never attention. */
 export const RESTORING_SENTENCE = 'Your organization\'s server is being restored. Your changes are kept here.';
+/** A person's session key has passed its certificate's notAfter at your organization's server (Phase 33 D-62). Refused, never retried. */
+export const SESSION_EXPIRED_SENTENCE = 'Your session key has ended. Sign in again.';
 
 export interface SyncReport {
   outcome: SyncOutcome;
@@ -179,11 +181,16 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 /** Thrown inside the exchange to end it where a finding stops it. */
 class Stop extends Error {}
 
+/** The key a writer signs with: a roster device's, or a person's session key the roster fold placed a certificate for (Phase 33 D-62). */
+function writerKey(roster: RosterView, writer: string): string | undefined {
+  return roster.deviceKey(writer)?.publicKey ?? roster.sessionCertificate?.(writer)?.sessionKey;
+}
+
 /** One header and body checked against the roster: signed by the writer's admitted key, and the body exactly what the header names. */
 function verifyDelivered(header: EntryHeader, body: unknown, roster: RosterView): string | undefined {
-  const device = roster.deviceKey(header.writer);
-  if (device === undefined) return 'unknown-writer';
-  if (!verifyHeader(header, device.publicKey)) return 'bad-signature';
+  const publicKey = writerKey(roster, header.writer);
+  if (publicKey === undefined) return 'unknown-writer';
+  if (!verifyHeader(header, publicKey)) return 'bad-signature';
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return 'body-mismatch';
   const bytes = Buffer.from(body, 'base64url');
   if (bytes.toString('base64url') !== body || bytes.length !== header.body.size || sha256Hex(bytes) !== header.body.hash) return 'body-mismatch';
@@ -300,7 +307,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     if (!rolledBack) {
       const cited: Citation[] = [];
       for (const stream of heads.streams) {
-        for (const head of stream.heads) if (roster.deviceKey(head.writer) !== undefined) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+        for (const head of stream.heads) if (writerKey(roster, head.writer) !== undefined) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
       }
       const newest = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
       for (const stream of newest?.streams ?? []) for (const head of stream.heads) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
@@ -339,6 +346,8 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
         report.outcome = 'needs-update';
         report.message = UPDATE_SENTENCE;
       }
+      // A person's session key that has ended (D-62): refused with its own sentence, never attention.
+      if (error.failure === 'session-refused' && error.detail.reason === 'session-expired') report.message = SESSION_EXPIRED_SENTENCE;
       // Restore mode at the hub (D-32): offline with the time to try again, the entries stay queued. The checkpoint ask still goes, because every
       // member's ask is what ends restore mode at the hub.
       if (error.failure === 'hub-error' && error.detail.reason === 'restoring') {
@@ -379,7 +388,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     }
     pending.sort((a, b) => Number(b.stream === project) - Number(a.stream === project) || compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
     for (;;) {
-      const ready = pending.filter((item) => roster.deviceKey(item.writer) !== undefined);
+      const ready = pending.filter((item) => writerKey(roster, item.writer) !== undefined);
       if (ready.length === 0) break;
       let stored = 0;
       for (const item of ready) {
@@ -387,7 +396,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
         stored += await pullWriter(item.stream, item.writer);
       }
       if (stored > 0) roster = await local.roster();
-      else if (pending.every((item) => roster.deviceKey(item.writer) === undefined)) break;
+      else if (pending.every((item) => writerKey(roster, item.writer) === undefined)) break;
     }
     // A writer the roster does not know after everything was pulled: what the hub says it holds from it is not taken.
     for (const item of pending) apply(witnessEntry(state, { hash: item.hash, verified: false, reason: 'unknown-writer' }));
@@ -482,7 +491,9 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     const localStreams = [...(await local.heads())].sort((a, b) => Number(b.stream === project) - Number(a.stream === project) || compareText(a.stream, b.stream));
     let entries: SealedEntry[] = [];
     for (const stream of localStreams) {
-      for (const head of [...stream.heads].sort((a, b) => compareText(a.writer, b.writer))) {
+      // Devices before session keys (Phase 33 D-62): a session.certify in the base stream reaches the hub before the session key's own entries.
+      const sessionLast = (writer: string): number => Number(roster.deviceKey(writer) === undefined);
+      for (const head of [...stream.heads].sort((a, b) => sessionLast(a.writer) - sessionLast(b.writer) || compareText(a.writer, b.writer))) {
         const above = hubSeq.get(`${stream.stream}/${head.writer}`) ?? -1;
         if (head.seq > above) entries.push(...(await local.entriesAfter(stream.stream, head.writer, above)));
       }
