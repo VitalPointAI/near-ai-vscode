@@ -55,6 +55,7 @@
 !src/domain/replica/transport.ts
 !src/domain/replica/updateGuard.ts
 !src/domain/replica/verify.ts
+!src/domain/replica/wrapFormat.ts
 !src/domain/staff/doctrine.ts
 !src/domain/state/keys.ts
 !src/domain/team/canonical.ts

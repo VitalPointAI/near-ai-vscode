@@ -30,6 +30,7 @@ import type { SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import type { CellGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
+import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -132,6 +133,8 @@ export interface RosterState {
   // The features the project requires (POST-01, D-04): the sorted union of every applied roster.require. It never shrinks. Whether this build knows
   // them is the host's question (requireGate.ts against KNOWN_REPLICA_FEATURES), never the fold's.
   required: readonly string[];
+  // The roster position at which each required feature was first required (33.2 D-06 reads wrap@2's).
+  requiredFrom: Map<string, number>;
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
   // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
@@ -154,6 +157,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     pending: [],
     choices: [],
     required: Object.freeze([]),
+    requiredFrom: new Map(),
     sessions: new Map(),
     kems: new Map(),
     notChosen: new Set(),
@@ -323,9 +327,10 @@ function applyHandover(state: RosterState, entry: VerifiedEntry, position: numbe
 
 // roster.require (POST-01, D-04): the driver already allowed only a lead device and a person. The required set grows by the union and never shrinks; an
 // entry whose features are all required already applies as a no-op and keeps its place in the line, so two leads arming at once never conflict.
-function applyRequire(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+function applyRequire(state: RosterState, entry: VerifiedEntry, position: number): ApplyOutcome {
   // The closed schema checked the ids (name@N, distinct, sorted) at verification.
   const features = (entry.data as { features: readonly string[] }).features;
+  for (const feature of features) if (!state.requiredFrom.has(feature)) state.requiredFrom.set(feature, position);
   state.required = Object.freeze([...new Set([...state.required, ...features])].sort());
   return { status: 'applied' };
 }
@@ -342,7 +347,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (owner === 'cells') return applyCellEntry(state.cells, entry, { position, roster: entry.body.roster });
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
-  if (entry.body.kind === 'roster.require') return applyRequire(state, entry);
+  if (entry.body.kind === 'roster.require') return applyRequire(state, entry, position);
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
@@ -585,6 +590,13 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
     const position = state.positionOf.get(read.grant.roster);
     if (position === undefined) {
       state.held.push({ hash: read.hash, reason: 'missing-roster' });
+      continue;
+    }
+    // The cutover rule (33.2 D-06), the same function your organization's server calls: no v1 wrap for an epoch founded after the switch.
+    const founded = state.cells.cells.get(read.grant.cell)?.epochs.find((epoch) => epoch.epoch === read.grant.epoch)?.from;
+    const format = founded === undefined ? undefined : wrapFormatProblem(read.grant, founded, state.requiredFrom.get(WRAP_FEATURE));
+    if (format !== undefined) {
+      state.refused.push({ hash: read.hash, kind: 'grant', reason: format });
       continue;
     }
     const outcome = addGrant(state.cells, {

@@ -46,7 +46,7 @@ export const HUB_SIDE: readonly string[] = [
   // Session key certificates (Phase 33 D-62): the hub folds them with the roster and checks session writers with the same rules as every client.
   'domain/replica/sessionKeys',
   // Post-quantum cell keys (33.2): the v2 wrap, the device key binding the hub checks on append, and the grant pages the hub keeps and folds.
-  'domain/replica/cellWrapV2', 'domain/replica/deviceKem', 'domain/replica/grantPages'
+  'domain/replica/cellWrapV2', 'domain/replica/deviceKem', 'domain/replica/grantPages', 'domain/replica/wrapFormat'
 ];
 
 interface ImportRef { line: number; specifier: string; typeOnly: boolean }
