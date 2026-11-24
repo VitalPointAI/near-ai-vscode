@@ -21,6 +21,14 @@ body.theia-dark .sterling-ca {
 .sterling-rail-shortcuts {
   display: grid;
   flex: 0 0 auto;
+  max-height: calc(100dvh - 112px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* The Chat shortcut opens this panel through its VS Code focus command. */
+.sterling-managed-rail [id="shell-tab-plugin-view-container:workbench.view.extension.nearAiSecondaryViewContainer"] {
+  display: none;
 }
 
 .sterling-rail-shortcut {
@@ -39,8 +47,13 @@ body.theia-dark .sterling-ca {
   font-size: var(--theia-private-sidebar-icon-size, 20px);
 }
 
-.sterling-rail-shortcut:hover,
-.sterling-rail-shortcut:focus-visible {
+.sterling-rail-shortcut[aria-disabled="true"] {
+  color: var(--theia-disabledForeground);
+  cursor: default;
+}
+
+.sterling-rail-shortcut:not([aria-disabled]):hover,
+.sterling-rail-shortcut:not([aria-disabled]):focus-visible {
   color: var(--theia-activityBar-foreground);
 }
 
@@ -225,7 +238,7 @@ body.theia-dark .sterling-ca {
 
 .sterling-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
 
-.sterling-primary {
+.sterling-actions button {
   display: inline-flex;
   justify-content: center;
   align-items: center;
@@ -237,16 +250,50 @@ body.theia-dark .sterling-ca {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
-  background: #d6edff;
-  color: #092348;
 }
 
+.sterling-primary { background: #d6edff; color: #092348; }
 .sterling-primary:hover { background: #fff; }
-.sterling-primary:focus-visible { outline: 2px solid #b7dbff; outline-offset: 3px; }
-.sterling-hero .sterling-status { margin: 16px 0 0; }
+.sterling-actions .sterling-secondary { background: #14233caa; border-color: #a4bddb75; color: #edf6ff; }
+.sterling-secondary:hover { background: #24426a; }
+
+.sterling-welcome button:focus-visible { outline: 2px solid var(--theia-focusBorder, #4296f2); outline-offset: 3px; }
+.sterling-actions button:focus-visible { outline-color: #b7dbff; }
+.sterling-status { margin: 16px 0 0; color: var(--theia-descriptionForeground); }
+
+.sterling-destinations { margin-top: 30px; }
+.sterling-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.sterling-section-heading h2 { margin: 0; font-size: 20px; font-weight: 730; letter-spacing: -.02em; }
+.sterling-active-area,
+.sterling-area-components { margin: 0 0 14px; color: var(--theia-descriptionForeground); overflow-wrap: anywhere; }
+.sterling-destination-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+
+.sterling-destination {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 130px;
+  padding: 16px;
+  border: 1px solid var(--theia-widget-border, var(--theia-panel-border, #7b879c55));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--theia-editor-background) 92%, var(--theia-foreground));
+  color: var(--theia-foreground);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sterling-destination:hover { border-color: var(--theia-focusBorder); }
+.sterling-destination-icon { color: var(--theia-textLink-foreground); font-size: 19px; }
+.sterling-destination strong { font-size: 15px; overflow-wrap: anywhere; }
+.sterling-destination span { overflow-wrap: anywhere; color: var(--theia-descriptionForeground); line-height: 1.4; }
 
 @container (max-width: 760px) {
   .sterling-page { width: calc(100% - 40px); }
+  .sterling-destination-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @container (max-width: 440px) {
@@ -261,4 +308,10 @@ body.theia-dark .sterling-ca {
   .sterling-hero::after { background: linear-gradient(0deg, #060f20 45%, #0812249e 69%, transparent 89%); }
   .sterling-hero-copy { padding: 28px 20px 60px; }
   .sterling-hero h1 { font-size: clamp(32px, 11cqw, 45px); }
+  .sterling-section-heading { align-items: flex-start; flex-direction: column; gap: 0; }
+  .sterling-destination { min-height: 115px; padding: 12px; }
+}
+
+@container (max-width: 340px) {
+  .sterling-destination-grid { grid-template-columns: minmax(0, 1fr); }
 }
