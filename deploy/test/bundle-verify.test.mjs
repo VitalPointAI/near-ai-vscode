@@ -118,7 +118,7 @@ test('a manifest of another format is refused', async () => {
   const { dir, items } = await bundle({ manifest: { format: 'sterling-bundle/0' } });
   const { result, loads } = await importWithSpy(dir, { listed: asStored(items) });
   assert.equal(result.ok, false);
-  assert.match(result.problems[0], new RegExp(`format is "sterling-bundle/0", not ${FORMAT.replace('/', '\\/')}`));
+  assert.ok(result.problems[0].includes(`format is "sterling-bundle/0", not ${FORMAT}`), result.problems[0]);
   assert.equal(loads, 0);
 });
 

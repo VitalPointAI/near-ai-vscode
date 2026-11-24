@@ -4,7 +4,8 @@
     "eventsExpirationSeconds": "How long Keycloak keeps login events in its own database; the site log store keeps them longer (D-35).",
     "smtp": "The site's own mail server, which carries the passwordless registration link an administrator sends (D-33). A person can also enrol in person.",
     "redirectUris": "Where the sterling-sessions client may return after sign-in: the oauth2-proxy callback of every session host and the landing page.",
-    "x509": "The optional smart-card sign-in (D-32), off by default. When enabled it becomes the browser flow; revocation is checked by a local OCSP responder or a CRL file refreshed on a schedule. webauthnRequired says whether the card is followed by a WebAuthn ceremony. The ingress must request and forward client certificates (47-13). The step-up level is not in this flow, so signing is refused while it is the browser flow."
+    "x509": "The optional smart-card sign-in (D-32), off by default. When enabled it becomes the browser flow; revocation is checked by a local OCSP responder or a CRL file refreshed on a schedule. webauthnRequired says whether the card is followed by a WebAuthn ceremony. The ingress must request and forward client certificates (47-13). The step-up level is not in this flow, so signing is refused while it is the browser flow.",
+    "hqBroker": "Optional sign-in through HQ's Keycloak for an edge site linked to HQ (D-36), off by default. issuer is HQ's realm address (https://keycloak.<HQ domain>/realms/sterling) and clientId the client HQ registered for this site; the client secret goes in the Secret keycloak-hq-broker (key client-secret) in sterling-identity, never in this file. HQ's first sign-in only links the local person with the same email (people arrive by signed user export, deploy/keycloak/users.mjs) and never creates one. People keep signing in here with their own keys when the link is down, and signing always needs a fresh ceremony with a key registered here."
   },
   "eventsExpirationSeconds": 7776000,
   "smtp": {
@@ -19,5 +20,10 @@
     "ocspResponderUri": "",
     "crlPath": "",
     "webauthnRequired": true
+  },
+  "hqBroker": {
+    "enabled": false,
+    "issuer": "",
+    "clientId": ""
   }
 }

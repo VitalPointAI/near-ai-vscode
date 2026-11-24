@@ -1,0 +1,32 @@
+# Per-site HAProxy Kubernetes Ingress settings, written by the site's operator from this example (the release descriptor names this file as
+# its site file). The example is sized for an HQ of about 400 people with sign-in bursts of about 200; sizes are provisional until Phase 48
+# measures them, and no capacity is claimed.
+controller:
+  # Two controllers keep the site reachable while one restarts.
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  service:
+    # The node ports browsers and members' computers reach; the site's DNS points the site's host names at the nodes (or at the site's own
+    # load balancer in front of them). Port 30080 only redirects to HTTPS.
+    nodePorts:
+      http: 30080
+      https: 30443
+
+# The optional smart-card sign-in (D-32), off by default. Turning it on also needs, before anything else:
+#   - Secret <caSecret> in this release's namespace (haproxy-controller) with key tls.crt: the PEM bundle of the CAs that issue your
+#     organization's smart-card certificates (the same CAs go into Keycloak's truststore);
+#   - the realm's x509 setting on (deploy/values/site.example/sterling-keycloak-realm.yaml), which makes the X.509 flow the browser flow;
+#   - Keycloak reading the forwarded certificate: --spi-x509cert-lookup--provider=haproxy (a build option),
+#     --spi-x509cert-lookup--haproxy--ssl-client-cert=Client-Cert, --spi-x509cert-lookup--haproxy--ssl-cert-chain=Client-Cert-Chain and
+#     --spi-x509cert-lookup--haproxy--certificate-chain-length set to the card chain's length (Keycloak 26.8.2 reverse proxy guide), with
+#     trust-proxy-verification left off so Keycloak checks the chain and revocation itself;
+#   - a NetworkPolicy so Keycloak accepts connections only from HAProxy and its own namespace: the certificate travels in a request header,
+#     and Keycloak cannot tell a forwarded header from one a pod inside the cluster made up.
+smartCards:
+  enabled: false
+  caSecret: smart-card-ca

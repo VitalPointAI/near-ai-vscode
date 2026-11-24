@@ -605,6 +605,7 @@ Conditions:
 
 - Owner to confirm (E1, D-10): the operator, service, conversion webhook and landing page are rebuilt from the Theia Cloud 1.2.0 source on UBI 9, signed with your organization's key, with an SBOM and attestations; the upstream images are not used.
 - Installed only with our carried oauth2 chart patch and custom operator pod template, which carry the session hardening items.
+- Upstream turns TLS verification off in the service (quarkus.oidc.tls.verification=none) and in the operator's session probe (a trust-all JVM default). Our service entrypoint and operator build turn both back on against the site chain only (ConfigMap sterling-site-ca), and the service no longer logs its secrets at start; recorded as upstream issues.
 - Project health risk: about three active maintainers (bus factor about 3); fixes after 1.2.0 are assessed one commit at a time.
 - The upstream Debian and Alpine based images fail SC-13 at Protected B; only our UBI 9 rebuilds are deployed.
 

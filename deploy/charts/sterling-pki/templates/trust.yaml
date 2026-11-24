@@ -1,0 +1,32 @@
+{{- /*
+The site CA trust (D-50): ConfigMap sterling-site-ca in every namespace whose workloads verify site TLS. ca.crt is the PEM chain (your
+organization's HQ offline root and this site's intermediate, plus the bootstrap CA only while it is still in use); truststore.p12 is the same
+chain as a password-less PKCS12 for Java clients (keycloak-config-cli, 47-08), which the install script makes from the chain. An empty chain
+trusts nothing, so every TLS check fails closed rather than falling back to a public root.
+HAProxy reads a backend CA only from a Secret (key tls.crt, annotation haproxy.org/server-ca), so the namespaces whose services HAProxy
+re-encrypts to get the same chain as Secret sterling-site-ca (public certificates only, no key).
+*/ -}}
+{{- $bundle := include "sterling-pki.trustBundle" . -}}
+{{- range .Values.trust.namespaces }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sterling-site-ca
+  namespace: {{ . }}
+data:
+  ca.crt: {{ $bundle | quote }}
+binaryData:
+  truststore.p12: {{ $.Values.siteCaTruststore | default "" | quote }}
+{{- end }}
+{{- range .Values.trust.backendNamespaces }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sterling-site-ca
+  namespace: {{ . }}
+type: Opaque
+stringData:
+  tls.crt: {{ $bundle | quote }}
+{{- end }}

@@ -8,3 +8,14 @@ admission:
   timeoutSeconds: 15
 # Namespaces the policies never apply to: RKE2's own (images preloaded from its tarballs) and Kyverno's (so admission can always start).
 excludedNamespaces: [kube-system, kyverno]
+# The site registry kind, the site setting registryKind: zot or harbor (templates/image-policies.yaml).
+registryKind: ""
+# On a Zot site the registry's own pod cannot have its signature checked while it restarts: the signature is read from the registry, which
+# is the pod being started. That pod is admitted by its exact pinned reference instead (<name>:<tag>@sha256:<digest>, set by the release
+# descriptor from deploy/bundle/images.lock.json, the digest the bundle import verified against the signed bundle), in this one namespace,
+# and only when every container of the pod is that image. Nothing else is exempt, and site-registry-only still applies to it.
+registryPod:
+  namespace: sterling-registry
+  image:
+    name: ""
+    tagAtDigest: ""
