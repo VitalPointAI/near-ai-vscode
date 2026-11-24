@@ -10,7 +10,7 @@
 1. **Theia is now the only development target.** The product ships as a Sterling-branded Theia container image, published by digest. No more VS Code Marketplace releases.
 2. **One person, one Theia session.** A Theia backend is single-user by design (`RESEARCH.md` section 1). Each person gets their own pod from self-hosted Eclipse Theia Cloud on your organization's Kubernetes.
 3. **Every site runs the same stack, connected or not:** RKE2, a local image registry, an HAProxy or Traefik ingress, cert-manager with an OpenBao CA, Keycloak, Theia Cloud, OpenBao with an HSM, and the sync hub. HQ and edge sites trust each other through PKI and signed files, never through a shared database.
-4. **No passwords.** People sign in with a hardware security key or a device-bound passkey through Keycloak. Smart cards are a hardware option.
+4. **No passwords.** People sign in with a passkey or a hardware security key through Keycloak, as the site's sign-in policy sets (`passkeys` or `hardware-only`, section 6). Smart cards are a hardware option.
 5. **Secrets live in OpenBao, per person.** One backend contribution rebinds Theia's `KeyStoreService`, so every extension secret and AI service key is stored per person and survives restarts. A separate `KeyService` signs and unwraps through OpenBao Transit, so long-term private keys never enter the session.
 6. **Phases 32.1 and 33 are rebuilt natively in Theia now,** not through the VSIX compatibility layer. Most of their executed work is host-neutral engine code and carries over unchanged.
 7. **A native Theia foundation comes first.** Backend services, the key store, the key service and session identity are what both phases need. The deployment stack and the offline bundle can be built in parallel from day one.
@@ -28,7 +28,7 @@ These are settled.
 | D3 | Scale: hundreds to thousands of concurrent people; connected HQ and disconnected edge sites. | Per-site capacity planning, a load test to 1,000+ sessions, and several hubs per site (section 12). |
 | D4 | Self-hosted Eclipse Theia Cloud on your organization's Kubernetes is approved as the session orchestrator, one Theia session per person. | `sessionsPerUser: 1`; the hardening list in section 11 applies. |
 | D5 | Secrets: an OS-keyring sidecar or your organization's KMS, working connected and disconnected. Research recommends OpenBao (MPL-2.0) with HSM auto-unseal per site. | One OpenBao cluster per site. Single-machine installs fall back to the OS keyring through the same interface. |
-| D6 | Sign-in by passkeys or hardware security keys only, no passwords (Keycloak WebAuthn passwordless; PKI smart cards as a hardware option). | Password and OTP authenticators are disabled. "Passkeys" means device-bound passkeys where the policy requires hardware keys (section 6). |
+| D6 | Sign-in by passkeys or hardware security keys only, no passwords (Keycloak WebAuthn passwordless; PKI smart cards as a hardware option). Amended 2026-11-23 (owner: no hardware keys available yet, phone passkeys first): sign-in strength is a site policy setting, `signInKeys: passkeys \| hardware-only`. | Password and OTP authenticators are disabled at both levels. `passkeys` (default for development, the lab and the Phase 47 lab run) accepts any WebAuthn passkey: phone platform passkeys including synced ones (iCloud Keychain, Google Password Manager), device-bound passkeys and hardware keys; no attestation, no AAGUID allowlist. `hardware-only` (the recommended production setting for defence sites once they have keys; not forced) requires attestation, an AAGUID allowlist of approved hardware key models and device-bound keys (section 6). |
 | D7 | Model servers on the network come from your organization's policy (policy-listed servers). The session states which checks run in the session. | Hosted sessions do not scan or listen for servers; they offer only servers the policy lists, and the checks run in the session backend (section 9.1). |
 | D8 | Phases 32.1 (guided setup) and 33 (live multi-user staff projects) are built natively in Theia now. 32.1 integrates with the existing Sterling Get Started page: the guide is what "Set up Sterling" opens; the checklist becomes a section of that page; no VS Code walkthrough; no second home page. | Section 9. |
 | D9 | Every resource adopted must help pass the compliance requirements, checked before use. A compliance fit check is being built separately (`compliance/resources.json` and `scripts/resource-check.mjs`). | Section 10 lists the verdicts each entry starts from. |
@@ -53,7 +53,7 @@ HQ and every edge site run the same stack. A small site may shrink it (one contr
 | Image registry | **Harbor** at HQ and large sites; **Zot** at small edge sites | Images enter only through the signed offline bundle. Signatures are checked on import and again at admission (Kyverno or the sigstore policy-controller). |
 | Ingress | **HAProxy Kubernetes Ingress** (Theia Cloud's default) or **RKE2's FIPS-built Traefik** | Not ingress-nginx: its repository was archived after its final release in 2026-03. Traefik with Theia Cloud is untested. |
 | Certificates | **cert-manager** with a CA issuer chained to the site's OpenBao PKI intermediate | No ACME, no Let's Encrypt. HQ holds the offline root. |
-| Sign-in | **Keycloak 26.8.x** with Postgres | WebAuthn passwordless, attested hardware keys, AAGUID allowlist, X.509 smart-card flow, no passwords; one realm per site. |
+| Sign-in | **Keycloak 26.8.x** with Postgres | WebAuthn passwordless; per-site `signInKeys` policy (`passkeys`, or `hardware-only` with attestation and an AAGUID allowlist); X.509 smart-card flow; no passwords; one realm per site. |
 | Sessions | **Theia Cloud** (pinned release or our own build) | One AppDefinition for the Sterling image; one pod per person (Theia plus a hardened oauth2-proxy sidecar), a workspace volume, idle timeout. |
 | Secrets and keys | **OpenBao** 3-node Raft cluster, HSM auto-unseal (PKCS#11 KMS plugin) or Shamir at sites without an HSM | KV v2 for extension secrets, Transit for per-person signing keys and key-encryption keys, PKI for TLS and device certificates, jwt auth bound to Keycloak. |
 | Sync | **Sync hub** (existing `hub/`) | Moves from Compose to a Kubernetes Deployment with its own volume. Several hubs per site, each serving a set of projects. Ends TLS itself (MUS 10.1), so the ingress passes TCP through. |
@@ -72,7 +72,7 @@ flowchart LR
   end
 
   subgraph EDGE["Edge site (connected or air-gapped)"]
-    person(["Person with a<br/>hardware security key"])
+    person(["Person with a passkey<br/>or hardware security key"])
     ing["Ingress<br/>HAProxy or RKE2 Traefik"]
     kc["Keycloak<br/>WebAuthn, no passwords"]
     tc["Theia Cloud<br/>operator + service"]
@@ -113,21 +113,25 @@ There is no cross-site database replication. OpenBao has none, Keycloak's multi-
 2. **Signed offline bundles.** Images, charts, the policy bundle, Keycloak user records and revocation lists travel as signed files (for example an OCI layout copied with `oras` or `skopeo` to media). The site checks the signature before import. The same bundle format serves the first install and every update.
 3. **The sync hub.** Each hub keeps signed per-writer logs. When a link exists, hubs exchange entries; when it does not, a sealed bundle file carries the same logs (MUS section 9). Trust comes from signatures, so a hub never needs to call HQ. Hub-to-hub federation is L5; until L5, an edge hub and an HQ hub exchange through sealed bundles.
 
-**People across sites.** Each person's keys are homed at one site. Signing and key-encryption keys live in that site's OpenBao Transit and are non-exportable. Moving a person to another site exports a wrapped key through Transit's import and export with a two-person Control Group approval **[design inference]**. For a hardware key to work at HQ and at an edge site, the sites must share a WebAuthn relying-party ID (a common parent domain), and the person's credential records must exist in each site's Keycloak, carried by signed export. Otherwise the person registers their key again at each site (open decision O3).
+**People across sites.** Each person's keys are homed at one site. Signing and key-encryption keys live in that site's OpenBao Transit and are non-exportable. Moving a person to another site exports a wrapped key through Transit's import and export with a two-person Control Group approval **[design inference]**. For a passkey or hardware key to work at HQ and at an edge site, the sites must share a WebAuthn relying-party ID (a common parent domain), and the person's credential records must exist in each site's Keycloak, carried by signed export. Otherwise the person registers their key again at each site (open decision O3).
 
 **Sign-in across sites.** When linked, the edge realm may broker HQ as an OIDC identity provider; local users and their keys keep working when the link is down. Realm partial export does not include users, so the signed user export needs the admin REST API or a user-storage extension **[unverified detail]**.
 
 ## 6. Identity and key flow
 
-1. **Sign in.** The person opens the site address. oauth2-proxy sends them to Keycloak. Keycloak runs a WebAuthn ceremony with user verification required (PIN or biometric on the key), attestation `direct`, and the AAGUID allowlist of approved models. No password step exists in any flow.
+1. **Sign in.** The person opens the site address. oauth2-proxy sends them to Keycloak. Keycloak runs a WebAuthn passwordless ceremony with user verification required (PIN or biometric on the phone, laptop or key) and resident keys required. What else it checks follows the site's `signInKeys` setting:
+   - `passkeys` (default for development, the lab and the Phase 47 lab run): attestation `none`, no AAGUID allowlist. Any passkey works: a phone's platform passkey (including synced iCloud Keychain or Google Password Manager passkeys), a device-bound passkey, or a hardware key.
+   - `hardware-only` (recommended for production defence sites once they have keys; the site chooses it): attestation `direct` (or `enterprise`), the vendor roots from a bundled FIDO metadata (MDS) snapshot, and the AAGUID allowlist of approved hardware key models. Only device-bound keys pass; synced passkeys cannot produce attestation, so they fail the allowlist.
+
+   No password step exists in any flow at either level. **Caveat (cross-device sign-in):** using a phone to sign in on a *different* device (the "hybrid" QR-code flow) needs Bluetooth proximity and a tunnel relay that Apple or Google runs on the internet. It does not work at air-gapped sites, and at connected sites it counts as commercial cloud, allowed only where your organization's policy allows it. Signing in with a passkey *on the same device* (the phone's own browser, or a laptop's platform authenticator) needs no internet.
 2. **Session.** Theia Cloud starts or resumes the person's session pod. oauth2-proxy checks the person against the session's owner list and forwards the access token (`pass_access_token`, `set_xauthrequest`; not in the default template, section 11).
 3. **Session identity.** A backend contribution reads the forwarded token and `THEIACLOUD_SESSION_USER`, checks they name the same person, and logs in to OpenBao with **auth/jwt** (`bound_audiences`, `user_claim=sub`). It gets a short-lived OpenBao token whose entity is the person, and renews it while the session is active. The token stays in backend memory only.
 4. **Secrets.** `OpenBaoKeyStoreService` replaces Theia's `KeyStoreService` binding (`rebind(KeyStoreService)` in a backend module). Every `SecretStorage` call from the compatibility host and every Theia AI credential store then reads and writes `kv/users/<entity>/<service>/<account>`. A templated ACL lets each person reach only their own path. On a single-machine install (L1b, L6) the same interface falls back to the OS keyring.
 5. **Long-term keys.** `KeyService` calls Transit: `transit/sign/<person>` for signatures, `transit/datakey/wrapped/<kek>` and `transit/decrypt` for wrapped data keys. The private keys stay in OpenBao, or in the HSM through External Keys.
 6. **Device sub-keys [design inference].** Signing each typing batch through Transit would put a network call on the hot path. So at session start the session makes a fresh Ed25519 key in memory, and `KeyService` asks the person's Transit key to sign a short-lived certificate for it. The hub checks the chain from the person's key to the session key. The roster lists the person's key once per site, not each session, so session restarts do not churn the roster's device lifecycle (MUS 15.2). This needs a hub change (section 9.2).
 7. **Cell keys [design inference].** Today each device has an X25519 key that cell keys are wrapped to (MUS 7.4, 8.2). For hosted people, cell keys are wrapped to the person's key-encryption key in Transit and unwrapped through `KeyService`, so a new session needs no rekey.
-8. **Re-authenticate before signing decisions.** Approvals, version acts, roster changes and anything else signed with the person's long-term key need a fresh WebAuthn step: the workbench starts an OIDC re-authentication with `acr_values` or `max_age`, and `KeyService` refuses to sign unless the token's `acr` and `auth_time` are fresh. Theia Cloud has no step-up hook, so the workbench drives it **[how this passes through the oauth2-proxy sidecar is unverified]**.
-9. **Enrolment and recovery.** An administrator creates the person with the required action `webauthn-register-passwordless`; the link goes through the site's own mail server, or the person enrols in person with a smart card and then registers their key. Two registered keys are required before signing keys are usable. Recovery is an administrator-attested re-enrolment that revokes old credentials and re-binds the person's OpenBao entity; there is no recovery code where policy says hardware only (open decision O4).
+8. **Re-authenticate before signing decisions.** Approvals, version acts, roster changes and anything else signed with the person's long-term key need a fresh WebAuthn step (the same at both `signInKeys` levels; the step-up `acr` means "fresh WebAuthn", not "hardware"): the workbench starts an OIDC re-authentication with `acr_values` or `max_age`, and `KeyService` refuses to sign unless the token's `acr` and `auth_time` are fresh. Theia Cloud has no step-up hook, so the workbench drives it **[how this passes through the oauth2-proxy sidecar is unverified]**.
+9. **Enrolment and recovery.** An administrator creates the person with the required action `webauthn-register-passwordless`; the link goes through the site's own mail server, or the person enrols in person with a smart card and then registers their key. Two registered keys are required before signing keys are usable; under `passkeys` a phone passkey plus a second passkey or device counts. Recovery is an administrator-attested re-enrolment that revokes old credentials and re-binds the person's OpenBao entity; there is no recovery code where policy says hardware only (open decision O4).
 
 ## 7. Session lifecycle
 
@@ -181,7 +185,7 @@ No state waits silently: `starting` and `identity` have timeouts, and `refused` 
 **Deployment work** (our charts and runbooks, not product code):
 - Helm values for Theia Cloud, Keycloak, OpenBao, cert-manager and the ingress, with mirrored images, the CA issuer, persistent storage and the oauth2-proxy fixes.
 - Vendored chart tarballs in the bundle; no chart pulled from the internet at install.
-- Keycloak realm as code (flows without passwords, the WebAuthn policy, the AAGUID allowlist, events to the audit store).
+- Keycloak realm as code (flows without passwords, the WebAuthn policy chosen by the site's `signInKeys` value, the AAGUID allowlist under `hardware-only`, events to the audit store).
 - OpenBao policies as code (templated per-person ACLs, Transit keys, PKI roles, Control Groups for key moves, audit device).
 - The signed offline bundle pipeline and its import and check scripts.
 - The hub as a Kubernetes Deployment, several per site.
@@ -293,7 +297,8 @@ Open evidence work: an OSCAL component per row; evidence rules for Keycloak even
 | Theia Cloud project health | Bus factor about 3; last stable release 2026-04. We pin, and can fork the operator library (EPL-2.0) if needed. Fallback: our own broker modelled on KubeSpawner (about 4 to 8 engineer-weeks **[estimate]**) |
 | Prewarm pool with personal volumes | How a pooled pod gets the person's volume at claim; pool stays at 0 until shown |
 | Step-up re-authentication through the sidecar | That the workbench can force a fresh WebAuthn step and see the new `acr` |
-| Synced passkeys | They cannot produce attestation, so they fail a hardware allowlist. Where policy says hardware only, "passkeys" means device-bound |
+| Synced passkeys | They cannot produce attestation, so they fail a hardware allowlist. They are accepted under `signInKeys: passkeys` and refused under `hardware-only` |
+| Cross-device (hybrid) passkey sign-in | Needs Bluetooth and an Apple or Google internet relay: unavailable air-gapped, commercial cloud where connected. Same-device passkeys need no internet |
 | Shared relying-party ID across sites | DNS layout per deployment (O3) |
 | Large smart-card revocation lists | A local OCSP responder or scheduled CRL refresh at each site |
 | Theia 1.77 supported Node range | Before settling P11 |
@@ -313,6 +318,8 @@ Numbers are assigned when each is planned; Phases 32.1 and 33 keep theirs.
 Sequential because of real dependencies: (b) and (c) need (a)'s service pattern and key store; (e) needs a running stack.
 
 ## 14. Owner decisions still open
+
+Owner, 2026-11-23 (later): phone passkeys first; sign-in strength is the site setting `signInKeys` (`passkeys` default, `hardware-only` recommended for production), D6 and section 6.
 
 Owner, 2026-11-23: the defaults for O2 to O6 are accepted as listed (HAProxy until Traefik is tested; one shared parent domain for passkeys; re-enrolment only where policy says hardware only; pin Theia Cloud upstream and fork only if needed; volume size and idle timeout set per site after the load test). O1 is decided in section 9.1 except the Defence Team words (O1b), which are confirmed when that mode is planned.
 
