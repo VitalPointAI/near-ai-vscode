@@ -890,8 +890,8 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 - [x] **FND-T-01**: The workbench lives in the `workbench/` package with its own lockfile, build, tests and CI job; nothing remains only under `.planning/spikes/`; the #162 review fixes are applied (localhost bind by default, no dev dependencies at run time, build writes only inside the package). (P1)
 - [x] **FND-T-02**: Native widgets call engine code in the backend through one shared JSON-RPC service pattern, and refusals cross it as plain data with their reason. (P2)
-- [ ] **FND-T-03**: Secrets saved through Theia's `KeyStoreService` (VSIX `SecretStorage` and Theia AI credentials) are stored per person in OpenBao KV, or the OS keyring on a single machine, survive a restart, and are never held only in memory. (P3)
-- [ ] **FND-T-04**: `KeyService` signs, makes wrapped data keys and unwraps through OpenBao Transit; private keys never enter the session; signing is refused without a fresh `acr` and `auth_time`. (P4)
+- [x] **FND-T-03**: Secrets saved through Theia's `KeyStoreService` (VSIX `SecretStorage` and Theia AI credentials) are stored per person in OpenBao KV, or the OS keyring on a single machine, survive a restart, and are never held only in memory. (P3)
+- [x] **FND-T-04**: `KeyService` signs, makes wrapped data keys and unwraps through OpenBao Transit; private keys never enter the session; signing is refused without a fresh `acr` and `auth_time`. (P4)
 - [x] **FND-T-05**: The session identifies the person from the forwarded sign-in token and `THEIACLOUD_SESSION_USER`, logs in to OpenBao with jwt auth, renews and revokes its token with the session, shows `failed` with a reason and Retry, and can start a step-up sign-in. (P5)
 - [x] **FND-T-06**: Open VSX and model server addresses come from configuration; telemetry and every update check are off; the running image makes no outbound connection outside the configured addresses, proven by a container test. (P8)
 - [x] **FND-T-07**: A Playwright browser harness runs against the built container in CI. (P9)
