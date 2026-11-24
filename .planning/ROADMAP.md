@@ -703,10 +703,19 @@ Plans:
   1. A repeatable load test on our own hardware reaches the target concurrent sessions (1,000 or more) and records session start time, steady-state resource use per person, operator throughput and ingress behaviour; capacity figures in docs come only from it.
   2. Each component of Phases 46 and 47 has an OSCAL component definition and evidence rules, and the dashboard shows its controls from collected evidence, never assumed.
   3. The open verification items in DESIGN.md section 12 are each closed with evidence or recorded as a gap with an owner and date (Keycloak CVE-2026-6856 fix version, HSM and Go FIPS certificate status, Traefik with Theia Cloud).
-**Plans:** 0 plans
+**Plans:** 10 plans in 4 waves (planned 2026-11-23; requirements VER-01 to VER-09 and decisions D-01 to D-27 in `48-CONTEXT.md`)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 48 to break down)
+- [ ] 48-01-PLAN.md: Wave 1. Hosted levels and overlay, 13 component definitions with no statements yet, control text, hosted docs pages
+- [ ] 48-02-PLAN.md: Wave 1. Signed site evidence export and the `deployment` collector (7-day window, trust file, `site-export`)
+- [ ] 48-03-PLAN.md: Wave 1. Load-test harness core: stages, measurements, hashed run file, generated capacity page, docs check that refuses hand-typed figures
+- [ ] 48-05-PLAN.md: Wave 1. Verification register, the design's section 10 conditions, gaps and POA&M items with owners and dates
+- [ ] 48-04-PLAN.md: Wave 2. Hub load driver and a browser sample with a WebAuthn virtual authenticator (needs Phase 46's workbench package)
+- [ ] 48-06-PLAN.md: Wave 2. CI wiring for deployment evidence, the load-test step and the workbench and deploy test reports; gate PR 1
+- [ ] 48-07-PLAN.md: Wave 3. Phase 46 components: workbench statements and evidence rules, release pipeline re-assessed for the image; gate PR 2
+- [ ] 48-08-PLAN.md: Wave 3. Phase 47 components and the hub: statements and evidence rules, Met/Stale/missing test, section 10 switch; gate PR 3
+- [ ] 48-09-PLAN.md: Wave 3. Rig load run to 1,000+ sessions, capacity page and sizing defaults, reference site export; gate PR 4
+- [ ] 48-10-PLAN.md: Wave 4. Rig experiments (Traefik vs HAProxy, prewarm and cold start, step-up, kms-pkcs11, revocation lists), register closure, owner decisions
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -1852,7 +1861,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
 | 46. Native Theia foundation | 0/TBD | Planning 2026-11-23 (beside 47) | - |
 | 47. On-premise deployment stack and offline bundle | 0/TBD | Planning 2026-11-23 (beside 46) | - |
-| 48. Load and accreditation verification | 0/TBD | Planning 2026-11-23 (after 46 and 47) | - |
+| 48. Load and accreditation verification | 0/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
