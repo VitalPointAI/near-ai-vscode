@@ -1,0 +1,11 @@
+{
+  "chart": "path:deploy/charts/sterling-postgres",
+  "namespace": "sterling-identity",
+  "order": 50,
+  "values": ["deploy/values/sterling-postgres.yaml"],
+  "site": "deploy/values/site.example/sterling-postgres.yaml",
+  "images": [
+    { "lock": "sterling/postgres", "set": { "image": "ref" } }
+  ],
+  "note": "Keycloak's Postgres, TLS only (D-18); before Keycloak."
+}

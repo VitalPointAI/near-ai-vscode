@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-postgres
+description: Keycloak's Postgres on our UBI 9 image, TLS only, one replica, with a nightly dump (D-18).
+type: application
+version: 0.1.0

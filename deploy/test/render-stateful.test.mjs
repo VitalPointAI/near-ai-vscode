@@ -71,3 +71,24 @@ test('sessions reach a hub by its cluster address and members by its node port, 
   assert.match(certificate, /- server auth/);
   assert.throws(() => renderHubs([{ ...TWO[0], nodePort: undefined }]), /nodePort is not set/);
 });
+
+test('Keycloak\'s Postgres is one TLS-only replica with its certificate, a nightly dump, and both volumes on the site class', () => {
+  const docs = splitDocs(renderRelease(ROOT, listReleases(ROOT).find((release) => release.name === 'sterling-postgres'), { site: SITE, helm: HELM }));
+  const set = docs.find((doc) => kindOf(doc) === 'StatefulSet');
+  assert.match(set, /^ {2}replicas: 1$/m);
+  assert.match(set, /readOnlyRootFilesystem: true/);
+  assert.match(set, /runAsUser: 26/);
+  assert.match(set, /storageClassName: "sterling-encrypted"/);
+  assert.ok(set.includes(`{ name: POSTGRES_ALLOW_CIDRS, value: "${SITE.clusterCidrs.pod}" }`), 'only the pod range may connect');
+  assert.match(set, /pg_isready/);
+  const certificate = docs.find((doc) => kindOf(doc) === 'Certificate');
+  assert.match(certificate, /secretName: sterling-postgres-tls/);
+  assert.match(certificate, /kind: ClusterIssuer\n\s+name: site-pki$/m);
+  assert.match(certificate, /- sterling-postgres\.sterling-identity\.svc$/m);
+  const dump = docs.find((doc) => kindOf(doc) === 'CronJob');
+  assert.ok(dump, 'a nightly dump');
+  assert.match(dump, /sslmode=verify-full/);
+  const claim = docs.find((doc) => kindOf(doc) === 'PersistentVolumeClaim');
+  assert.match(claim, /storageClassName: "sterling-encrypted"/);
+  assert.ok(docs.some((doc) => kindOf(doc) === 'Service' && /^ {2}name: sterling-postgres$/m.test(doc)));
+});

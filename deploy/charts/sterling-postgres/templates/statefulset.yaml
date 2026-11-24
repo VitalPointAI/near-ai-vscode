@@ -1,0 +1,92 @@
+{{- /*
+Keycloak's Postgres (D-18, research Decision 2): one replica on our UBI 9 image (a single point of failure, a recorded condition on the
+keycloak entry), TLS only with the certificate from site-pki, SCRAM passwords from Secret postgres-superuser (written by the install script
+from OpenBao kv/apps/postgres), data on the site's encrypted class.
+*/ -}}
+{{- if not .Values.image }}{{ fail "image is not set" }}{{ end -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sterling-postgres
+  labels:
+    app.kubernetes.io/name: sterling-postgres
+spec:
+  replicas: 1
+  serviceName: sterling-postgres
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sterling-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sterling-postgres
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 26
+        fsGroup: 26
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: postgres, containerPort: 5432, protocol: TCP }
+          env:
+            - { name: PGDATA, value: /var/lib/pgsql/data/pgdata }
+            - { name: POSTGRES_ALLOW_CIDRS, value: {{ .Values.allowCidrs | join "," | quote }} }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["/usr/pgsql-18/bin/pg_isready", "-h", "/run/postgresql", "-p", "5432"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["/usr/pgsql-18/bin/pg_isready", "-h", "/run/postgresql", "-p", "5432"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/pgsql/data }
+            - { name: tls, mountPath: /etc/postgres-tls, readOnly: true }
+            - { name: passwords, mountPath: /etc/postgres-secrets, readOnly: true }
+            - { name: run, mountPath: /run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tls
+          secret:
+            secretName: sterling-postgres-tls
+            defaultMode: 0440
+        - name: passwords
+          secret:
+            secretName: postgres-superuser
+            defaultMode: 0440
+            items:
+              - { key: superuser-password, path: superuser-password }
+              - { key: keycloak-password, path: keycloak-password }
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ .Values.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.dataSize | quote }}

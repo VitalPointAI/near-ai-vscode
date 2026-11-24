@@ -1,0 +1,6 @@
+# Per-site Postgres settings, written by the site operator from this example (sized for an HQ of about 400 people; provisional until
+# Phase 48).
+dataSize: 20Gi
+dump:
+  size: 20Gi
+  retainDays: 14
