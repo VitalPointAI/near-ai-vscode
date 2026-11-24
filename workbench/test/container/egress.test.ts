@@ -162,7 +162,11 @@ test('in the browser smoke the backend calls out to nothing and the page makes o
   assert.equal(started.code, 0, started.stderr);
   const url = `http://127.0.0.1:${port}`;
   await waitHealthy(name, url);
-  const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: url });
+  // Theia deploys each entry of /plugins (THEIA_DEFAULT_PLUGINS=local-dir:///plugins on the release target); the spec waits until it has
+  // started that many before it watches the page. The development target has no /plugins.
+  const plugins = await mustRun('docker', ['exec', containerName(name), 'node', '-e',
+    "const fs = require('fs'); console.log(fs.existsSync('/plugins') ? fs.readdirSync('/plugins').filter((entry) => !entry.startsWith('.')).length : 0)"]);
+  const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: url, STERLING_EXPECT_PLUGINS: plugins.stdout.trim() });
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   assert.match(result.stdout, /\b1 passed\b/);
   assertNoOutbound(await copiedLog(name), 'during the browser smoke');
