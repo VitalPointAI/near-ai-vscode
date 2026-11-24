@@ -669,7 +669,7 @@ gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 JSON
 ```
 
-The `container-release` environment (the older `marketplace` environment and its `VSCE_PAT` secret are no longer used and can be removed by the owner):
+The `container-release` environment (the `marketplace` environment and its `VSCE_PAT` secret stay in place, unused by this workflow, for a possible future NEAR AI extension on the Marketplace):
 
 ```bash
 repo=VitalPointAI/near-ai-vscode
