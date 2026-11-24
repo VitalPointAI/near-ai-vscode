@@ -129,7 +129,7 @@ completed: 2026-11-24
 | rke2 asset: rke2-selinux-0.24-1.el9.noarch.rpm (release v0.24.stable.1) | 0.24-1 | f220147db3e6 | `sha256sum-centos9-noarch.txt`, the rpm.rancher.io stable EL9 repo metadata and the GitHub asset digest (all three equal) |
 | kms-pkcs11 (tarball) | 0.3.0 | c112c670e1bc | `checksums-kms-pkcs11.txt` |
 | kms-pkcs11 `binSha256` (extracted `openbao-plugin-kms-pkcs11_linux_amd64_v1`) | 0.3.0 | 96fefa80e721 | `checksums-kms-pkcs11.txt` line for the binary (re-hashed after extraction) |
-| softhsm2 (GitHub tag archive) | 2.7.0 | be14a5820ec4 | no publisher checksum: hash taken on first download; the tag points at commit 13e6e86b83748fef74046dbf0c91f664b7acc1c3, which the GitHub API reports `verified: true, reason: valid` |
+| softhsm2 (GitHub archive of the commit, `pinKind` `commit`, `scope` `test`) | 2.7.0 | e7577582ff8a | no publisher checksum or release tarball on GitHub. Pinned to commit 13e6e86b83748fef74046dbf0c91f664b7acc1c3 (the lightweight tag 2.7.0; GitHub API `verified: true, reason: valid`) and its tree 33f59215337436c2. The uncompressed tar (`tarSha256` 1b349304606d) is reproduced offline with `git archive --format=tar --prefix=SoftHSMv2-<commit>/ <commit>`; the gzip bytes are GitHub's. The first pin (the tag archive, be14a5820ec4) was replaced in review: tag archives are not byte-stable. |
 
 The rke2-selinux choice: RKE2 1.37's `rke2-common` RPM requires `rke2-selinux >= 0.12`, and the Rancher stable EL9 channel's newest is 0.24-1, the asset of GitHub release `v0.24.stable.1`. A release `v0.24.latest.1` carries a file of the same name; the pin is the stable one.
 
@@ -411,11 +411,20 @@ None.
 ## Next Phase Readiness
 
 - 47-02: implement `sitePath` as "strip the source host, keep the repository path"; site Zot needs `http.compat: ["docker2s2"]`.
-- 47-03: pin third-party images by linux/amd64 manifest digest.
+- 47-03: pin third-party images by linux/amd64 manifest digest. This includes re-pinning the four cert-manager entries 47-02 wrote in `deploy/bundle/images.lock.json` (controller, webhook, cainjector, startupapicheck) to their linux/amd64 manifest digests (spike S1).
 - 47-04: `install-tool.sh` needs kinds `binary` and `file`, `assets[]`, versions `x.y` and `x.y.z+build`, hosts `get.helm.sh` and `download.postgresql.org`; asset entries may carry an extra `checksumUrl` or `fingerprint` field; the publish job's cosign flags are the S1 ones.
 - 47-06: verify with cosign before `hauler store add image` (no `--key`, no `--platform`), sign blobs with `sign-blob --bundle`, verify at import with `--insecure-ignore-tlog`.
 - 47-11: PostgreSQL 18.7 recipe above, plus `tzdata`.
 - S2 (Kyverno) must verify the cosign v3 bundle-referrer form; the legacy `.sig` tag is not written.
+
+## Landing condition (review, 2026-11-23)
+
+`compliance/test/toolPins.test.ts` fails on this branch until 47-04 lands; 47-04 (the gate plan) owns that test and `compliance/ci/install-tool.sh`, so wave 1 does not change them. The two failing tests:
+
+- "exactly the three CI binaries are pinned: oscal-cli, syft and grype": tool-pins.json now also holds cosign, hauler, helm, rke2, kms-pkcs11, softhsm2 and postgresql.
+- "every tool has a semantic version, an https address on Maven Central or GitHub, a 64-hex SHA-256 and a known archive kind": the new archive kinds `binary` and `file`, the hosts `get.helm.sh` and `download.postgresql.org`, and versions like `1.37.2+rke2r1` are not yet allowed.
+
+Wave 1 therefore lands only together with 47-04, in the one D-52 gate PR, never on its own.
 
 ## Self-Check: PASSED
 

@@ -15,7 +15,8 @@
 //
 // Site file: JSON syntax (valid YAML), parsed with JSON.parse. A values file names a setting as ${site.<dotted key>}; a token that is a whole
 // double-quoted string ("${site.key}") is replaced together with its quotes by the JSON of the value (so a JSON file stays valid JSON), anywhere
-// else a string is inserted as is and a list or object as JSON flow text. A setting the site file lacks stops the render with a plain message.
+// else a string is inserted as is and a list or object as JSON flow text. A setting the site file lacks, or leaves empty, stops the render with a plain
+// message: required settings have no silent default (D-11). Only the settings in OPTIONAL_EMPTY may be an empty string.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,13 +33,28 @@ const DESCRIPTOR_FIELDS = new Set(['chart', 'namespace', 'order', 'values', 'sit
 const RELEASE_NAME = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const TOKEN = /("?)\$\{site\.([A-Za-z0-9_.-]+)\}("?)/g;
 
-/** Reads a site file (JSON syntax, which is also YAML). */
+/** The site settings every site file must set to a non-empty value (deploy/values/site.example.yaml ships them empty, D-11). */
+export const REQUIRED_SITE_SETTINGS = Object.freeze(['siteName', 'domain', 'rpId', 'registry', 'registryKind', 'clusterCidrs.pod', 'clusterCidrs.service',
+  'clusterCidrs.nodes', 'storageClass', 'requestedStorage', 'signInKeys', 'organizationPublicKey', 'stepUpAcr']);
+/** The only settings an empty string is a meaningful value for (storageEncryptionAtRest is empty for the reference Longhorn class). */
+export const OPTIONAL_EMPTY = new Set(['storageEncryptionAtRest']);
+
+const isBlank = (value) => value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+
+/** Reads a site file (JSON syntax, which is also YAML) and refuses it when a required setting is missing or empty. */
 export function loadSite(file) {
+  let site;
   try {
-    return JSON.parse(readFileSync(file, 'utf8'));
+    site = JSON.parse(readFileSync(file, 'utf8'));
   } catch (error) {
     throw new Error(`${file}: the site file could not be read as JSON (${error.message}).`);
   }
+  const blank = REQUIRED_SITE_SETTINGS.filter((key) => isBlank(siteValue(site, key)));
+  if (blank.length) {
+    throw new Error(`${file}: the site setting${blank.length > 1 ? 's' : ''} ${blank.join(', ')} ${blank.length > 1 ? 'are' : 'is'} missing or empty; `
+      + 'each is required and has no default (D-11). Set it in the site file (its note says what it is).');
+  }
+  return site;
 }
 
 /** The site setting at a dotted key, or undefined. */
@@ -56,6 +72,7 @@ export function substituteSite(text, site, file) {
   return text.replace(TOKEN, (_whole, open, key, close) => {
     const value = siteValue(site, key);
     if (value === undefined || value === null) throw new Error(`${file}: \${site.${key}} is not set in the site file.`);
+    if (isBlank(value) && !OPTIONAL_EMPTY.has(key)) throw new Error(`${file}: \${site.${key}} is empty in the site file; it is required and has no default (D-11).`);
     if (open && close) return JSON.stringify(value);
     const inserted = typeof value === 'string' ? value : JSON.stringify(value);
     return `${open}${inserted}${close}`;

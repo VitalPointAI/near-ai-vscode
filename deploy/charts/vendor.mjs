@@ -19,6 +19,18 @@ import { CHARTS_LOCK, readChartsLock } from '../bundle/lib/locks.mjs';
 export const VENDORED_DIR = 'deploy/charts/vendored';
 const sha256 = (buffer) => createHash('sha256').update(buffer).digest('hex');
 
+/**
+ * The absolute path of a lock entry's `file`, or '' when it is not a plain relative .tgz path that stays inside deploy/charts/vendored/
+ * (an absolute path, a `..` segment or a backslash is refused), so a lock entry can never make this script read or write outside that folder.
+ */
+export function vendoredPath(root, file) {
+  if (typeof file !== 'string' || !file.startsWith(`${VENDORED_DIR}/`) || !file.endsWith('.tgz') || file.includes('\\')) return '';
+  if (path.isAbsolute(file) || file.split('/').some((part) => part === '..' || part === '.' || part === '')) return '';
+  const dir = path.resolve(root, VENDORED_DIR);
+  const target = path.resolve(root, file);
+  return path.dirname(target) === dir ? target : '';
+}
+
 /** Problems with the vendored tarballs of the repository at `root` (empty when every one matches the lock). Reads no network. */
 export function checkVendored(root) {
   const problems = [];
@@ -26,12 +38,12 @@ export function checkVendored(root) {
   const named = new Set();
   for (const chart of charts) {
     if (!/^[0-9a-f]{64}$/.test(chart.sha256 ?? '')) problems.push(`${CHARTS_LOCK}: ${chart.name} has no 64-hex sha256.`);
-    if (typeof chart.file !== 'string' || !chart.file.startsWith(`${VENDORED_DIR}/`) || !chart.file.endsWith('.tgz')) {
-      problems.push(`${CHARTS_LOCK}: ${chart.name} must name a .tgz file under ${VENDORED_DIR}/.`);
+    const file = vendoredPath(root, chart.file);
+    if (!file) {
+      problems.push(`${CHARTS_LOCK}: ${chart.name} must name a .tgz file directly under ${VENDORED_DIR}/.`);
       continue;
     }
     named.add(chart.file);
-    const file = path.join(root, chart.file);
     if (!existsSync(file)) problems.push(`${chart.file} is missing; run node deploy/charts/vendor.mjs on a connected host.`);
     else if (sha256(readFileSync(file)) !== chart.sha256) problems.push(`${chart.file} does not match the SHA-256 in ${CHARTS_LOCK}; refusing it.`);
   }
@@ -45,7 +57,9 @@ export function checkVendored(root) {
 export async function vendor(root) {
   const problems = [];
   for (const chart of readChartsLock(root).charts) {
-    const target = path.join(root, chart.file);
+    // The path is checked before anything is read, downloaded or written.
+    const target = vendoredPath(root, chart.file);
+    if (!target) { problems.push(`${CHARTS_LOCK}: ${chart.name} must name a .tgz file directly under ${VENDORED_DIR}/; nothing written.`); continue; }
     if (existsSync(target) && sha256(readFileSync(target)) === chart.sha256) continue;
     if (!String(chart.url).startsWith('https://')) { problems.push(`${chart.name}: the url must be https.`); continue; }
     let body;

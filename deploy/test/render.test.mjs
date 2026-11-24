@@ -4,14 +4,14 @@
 // it fails, never skips, when helm is missing. Run: env HELM=compliance/out/tools/linux-amd64/helm node scripts/run-tests.mjs deploy/test/*.test.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { checkVendored } from '../charts/vendor.mjs';
+import { checkVendored, vendor } from '../charts/vendor.mjs';
 import { DIGEST, UNPUBLISHED_DIGEST, allImages, readImagesLock, splitRef } from '../bundle/lib/locks.mjs';
-import { listReleases, loadSite, renderRelease, renderSite, splitDocs, substituteSite } from '../bundle/lib/render.mjs';
+import { OPTIONAL_EMPTY, REQUIRED_SITE_SETTINGS, listReleases, loadSite, renderRelease, renderSite, splitDocs, substituteSite } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
@@ -110,4 +110,41 @@ test('site substitution keeps JSON valid and a local chart renders once per inst
     assert.match(doc, /greeting: "ci"/);
     assert.match(doc, new RegExp(`image: "registry\\.site\\.example/example/app@${DIGEST_A}"`));
   }
+});
+
+test('a required site setting left empty is refused, never rendered as an empty default (D-11)', () => {
+  const ci = JSON.parse(readFileSync(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'), 'utf8'));
+  const example = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example.yaml'), 'utf8'));
+  const write = (site) => path.join(fixture({ 'site.yaml': site }), 'site.yaml');
+  for (const [key, value] of [['rpId', ''], ['requestedStorage', '  '], ['siteName', null]]) {
+    assert.throws(() => loadSite(write({ ...ci, [key]: value })), new RegExp(`the site setting ${key} is missing or empty; each is required and has no default \\(D-11\\)`));
+  }
+  assert.throws(() => loadSite(write({ ...ci, clusterCidrs: { ...ci.clusterCidrs, nodes: '' } })), /the site setting clusterCidrs\.nodes is missing or empty/);
+  const { rpId: _rpId, ...withoutRpId } = ci;
+  assert.throws(() => loadSite(write(withoutRpId)), /the site setting rpId is missing or empty/);
+  // The shipped example leaves every operator-chosen setting empty, so rendering it unedited stops with their names.
+  assert.throws(() => loadSite(write(example)), /rpId, registry, .*clusterCidrs\.nodes, .*requestedStorage, organizationPublicKey are missing or empty/);
+  assert.deepEqual(REQUIRED_SITE_SETTINGS.filter((key) => !Object.hasOwn(ci, key.split('.')[0])), [], 'every required setting is in the CI site file');
+  // A values file naming an empty setting is refused too; only the settings in OPTIONAL_EMPTY may be empty.
+  assert.throws(() => substituteSite('a: "${site.rpId}"\n', { rpId: '' }, 'v.yaml'), /v\.yaml: \$\{site\.rpId\} is empty in the site file; it is required/);
+  assert.ok(OPTIONAL_EMPTY.has('storageEncryptionAtRest'));
+  assert.equal(substituteSite('a: "${site.storageEncryptionAtRest}"\n', { storageEncryptionAtRest: '' }, 'v.yaml'), 'a: ""\n');
+});
+
+test('vendor refuses a lock entry whose file leaves deploy/charts/vendored/ before reading, downloading or writing anything', async () => {
+  const bad = ['../evil.tgz', '/tmp/evil.tgz', 'deploy/charts/vendored/../../../evil.tgz', 'deploy/charts/vendored/sub/../../x.tgz', 'deploy/charts/vendored/a\\b.tgz'];
+  const root = fixture({ 'deploy/charts/charts.lock.json': { charts: bad.map((file, index) => ({ name: `c${index}`, url: 'https://charts.invalid/c.tgz', sha256: 'a'.repeat(64), file })) } });
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = async () => { fetched += 1; throw new Error('no network in this test'); };
+  try {
+    const problems = await vendor(root);
+    assert.equal(problems.length, bad.length);
+    for (const problem of problems) assert.match(problem, /must name a \.tgz file directly under deploy\/charts\/vendored\/; nothing written/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(fetched, 0, 'no download was attempted');
+  assert.ok(!existsSync(path.join(root, '..', 'evil.tgz')) && !existsSync(path.join(root, 'x.tgz')));
+  assert.equal(checkVendored(root).filter((problem) => /directly under/.test(problem)).length, bad.length);
 });

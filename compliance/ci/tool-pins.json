@@ -108,9 +108,14 @@
   },
   "softhsm2": {
     "version": "2.7.0",
-    "url": "https://github.com/softhsm/SoftHSMv2/archive/refs/tags/2.7.0.tar.gz",
-    "sha256": "be14a5820ec457eac5154462ffae51ba5d8a643f6760514d4b4b83a77be91573",
+    "scope": "test",
+    "pinKind": "commit",
+    "url": "https://github.com/softhsm/SoftHSMv2/archive/13e6e86b83748fef74046dbf0c91f664b7acc1c3.tar.gz",
+    "sha256": "e7577582ff8a39477aa8ddc31d88dcb85b32ac7a6ebdcfe358595bfc6445bcf0",
     "archive": "file",
-    "commit": "13e6e86b83748fef74046dbf0c91f664b7acc1c3"
+    "commit": "13e6e86b83748fef74046dbf0c91f664b7acc1c3",
+    "tree": "33f59215337436c21bcf2ec6634282aa599e4744",
+    "tarSha256": "1b349304606d883cf543b564327c6afd89fe7e88f0ef61a564a457b10a89b645",
+    "note": "Test scope only (D-38): the OpenBao SoftHSM2 lab/CI image, never production values. Upstream publishes no release tarball or checksum on GitHub (the 2.7.0 release has no assets; the tag 2.7.0 is a lightweight tag on this commit, whose signature GitHub reports as verified on 2026-11-23), so the pin is the commit, not the tag archive. The url is GitHub's archive of the commit; its gzip bytes (sha256) are GitHub's and could change, the commit and tree cannot. Reproduce the uncompressed tar offline: git fetch --depth 1 https://github.com/softhsm/SoftHSMv2 <commit>; git rev-parse <commit>^{tree} must equal tree; git archive --format=tar --prefix=SoftHSMv2-<commit>/ <commit> | sha256sum must equal tarSha256 (checked 2026-11-23 with git 2.53.0, and gzip -dc of the url gives the same hash). If sha256 ever stops matching, confirm tarSha256 and tree as above before re-hashing; never re-hash from a download alone."
   }
 }
