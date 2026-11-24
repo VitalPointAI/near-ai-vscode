@@ -114,6 +114,23 @@ export class StaffLiveEngine {
     if (live !== undefined) live.bound = new Set(products);
   }
 
+  /** The projection input of an open project (the fold, its entries and labels), for the editor binding's product lookup (33-25). */
+  public async projectionInput(id: string): Promise<unknown> {
+    const live = this.find(id);
+    return live === undefined ? undefined : this.options.engine.projectionInputOf(live.project as never, live.deps as never);
+  }
+
+  /** The open project with the deps it was opened with (the engine's SharedProjectHost), for the Staff Room's acts (33-26). */
+  public shared(id: string): { readonly project: EngineProject; readonly deps: object; readonly root: string } | undefined {
+    const live = this.find(id);
+    return live === undefined ? undefined : { project: live.project, deps: live.deps, root: live.root };
+  }
+
+  /** A bound editor wrote changes (33-25): the replicator pushes them. */
+  public localAppended(id: string): void {
+    this.find(id)?.replicator?.localAppended();
+  }
+
   /** Runs one exchange for the project now; undefined when it is not open here. */
   public syncNow(id: string): StaffStatusRow | undefined {
     const live = this.find(id);
