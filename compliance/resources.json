@@ -96,17 +96,18 @@
         "compliance/package.json",
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub and compliance package.",
+      "purpose": "Type definitions for Node.js, used by the TypeScript type check of the extension, relay, hub, compliance package and workbench.",
       "licence": "MIT",
       "controls": [
         "sa-15",
         "sr-03"
       ],
-      "evidence": "Type-check results of the lint, relay and hub CI jobs.",
+      "evidence": "Type-check results of the lint, relay, hub and workbench CI jobs.",
       "crypto": "none",
       "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
       "airGap": "ok",
@@ -209,11 +210,12 @@
       "where": [
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Bundles the relay and hub, and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.",
+      "purpose": "Bundles the relay, the hub, the workbench engine bundle and test build (workbench/tools/build-engine.mjs, workbench/scripts/build.mjs), and the vendored libraries (pptxgenjs, the MCP client, Yjs) in scripts/vendor-libs.mjs.",
       "licence": "MIT",
       "controls": [
         "sa-15",
@@ -323,17 +325,18 @@
         "compliance/package.json",
         "hub/package.json",
         "package.json",
-        "relay/package.json"
+        "relay/package.json",
+        "workbench/package.json"
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Type-checks and compiles the extension, relay, hub and compliance package.",
+      "purpose": "Type-checks and compiles the extension, relay, hub, compliance package and the Sterling workbench extension. In the workbench image it also stays as a runtime dependency of @theia/filesystem (through opfs-worker).",
       "licence": "Apache-2.0",
       "controls": [
         "sa-15",
         "sr-03"
       ],
-      "evidence": "Type-check results of the lint, relay, hub and compliance CI jobs.",
+      "evidence": "Type-check results of the lint, relay, hub, compliance and workbench CI jobs.",
       "crypto": "none",
       "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
       "airGap": "ok",
@@ -719,6 +722,329 @@
       "fit": "pass",
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-23"
+    },
+    {
+      "id": "npm:@theia/core",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The Theia application framework the workbench runs on: the browser shell, the backend, JSON-RPC between them, the connection token and the preferences and command services every Sterling page uses.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "cm-07",
+        "sa-15",
+        "sc-08",
+        "sc-13",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "uses-platform",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Its tree holds jschardet 2.3.0 (LGPL-2.1+, unmodified): keep its licence notice and offer its source with the image; the owner confirms the LGPL terms for a bundled JavaScript library before the first hosted release.",
+        "Its tree holds @vscode/codicons 0.0.45 (CC-BY-4.0 icon font: keep the attribution in the image notices).",
+        "The lockfile records no licence for fuzzy 0.1.3 and xmlhttprequest-ssl 2.1.2 (through @theia/core and socket.io-client); confirm each package's own licence file before the first release that ships it.",
+        "Its cryptography (connection token, TLS on the backend) is the upstream Node OpenSSL, not a FIPS 140 validated module (gap X8): not a validated-crypto claim for Protected B."
+      ]
+    },
+    {
+      "id": "npm:@theia/editor",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The editor framework the workbench opens files in (text editors, editor navigation).",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/filesystem",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The file tree service, file upload and download, and file dialogs over the workspace folder in the container.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "The lockfile records no licence for busboy 1.6.0 and streamsearch 1.1.0 (through @theia/filesystem and multer, for file upload); confirm each package's own licence file before the first release that ships it."
+      ]
+    },
+    {
+      "id": "npm:@theia/monaco",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The Monaco editor integration: syntax colouring, search and the editing widgets of the workbench.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/navigator",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The file explorer view of the workspace folder.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/plugin-ext-vscode",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Runs VS Code extensions in the workbench; the Sterling extension (the VSIX) runs through it in the release image.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "cm-07",
+        "cm-11",
+        "sa-15",
+        "sc-07",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one."
+      ]
+    },
+    {
+      "id": "npm:@theia/preferences",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The settings service and settings editor; the workbench ships telemetry off as a default preference.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/terminal",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The terminal view of the workbench (a shell inside the container).",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "ac-03",
+        "ac-17",
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24",
+      "conditions": [
+        "Gives a shell to whoever reaches the workbench; hosted sites put it behind sign-in (Phase 47) and the image binds 127.0.0.1 by default."
+      ]
+    },
+    {
+      "id": "npm:@theia/workspace",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "Opens the workspace folder (/home/sterling/workspace) and keeps the recent-workspace and trust state.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "si-02",
+        "sr-03",
+        "sr-11"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; workbench CI job unit, container and browser tests; image SBOM and scan",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@theia/cli",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "build",
+      "purpose": "theia build: generates and bundles the workbench frontend and backend in the image build stage; never in the runtime image.",
+      "licence": "EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception)",
+      "controls": [
+        "cm-07",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "pinned at exactly 1.77.0 in workbench/package-lock.json; the container suite checks the runtime image holds no @theia/cli",
+      "crypto": "none",
+      "cveResponse": "exact pin; npm audit in the workbench job and the image scan; upgraded only in its own reviewed change (D-14)",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "The lockfile records no licence for buffers 0.1.1 and union 0.5.0 (build-only, through @theia/ffmpeg and http-server); confirm each package's own licence file before the first release that ships it.",
+        "Installed with --ignore-scripts, so it downloads no browser or ffmpeg build; build stage only."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@near-ai/sterling-workbench-extension",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "runtime",
+      "purpose": "The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services; this repository's own code in workbench/extension.",
+      "licence": "MIT (this repository)",
+      "controls": [
+        "sa-11",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "workbench CI job lint, unit, container and browser tests; image SBOM and scan",
+      "crypto": "uses-platform",
+      "cveResponse": "First-party code: fixed in a reviewed change; its dependencies are the pinned @theia/* packages.",
+      "airGap": "ok",
+      "fit": "pass",
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@playwright/test",
+      "kind": "npm",
+      "where": [
+        "workbench/package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "Drives the built workbench image in Chromium for the browser tests (owner-approved at 1.65.0, 2026-11-24).",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-11",
+        "sr-03"
+      ],
+      "evidence": "exact pin 1.65.0 in workbench/package-lock.json with npm provenance from github.com/microsoft/playwright; the workbench CI job browser test result",
+      "crypto": "none",
+      "cveResponse": "Exact pin; npm audit in the workbench job; bumped by hand in a reviewed change.",
+      "airGap": "needs-mirror:Playwright browser builds (downloaded from the Playwright CDN at test time; air-gapped runs use PLAYWRIGHT_BROWSERS_PATH)",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Test only; never in the image. Air-gapped test runs point PLAYWRIGHT_BROWSERS_PATH at a mirrored browser build of the pinned release."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
     },
     {
       "id": "image:docker.io/library/node",
