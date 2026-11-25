@@ -1613,7 +1613,7 @@
       "id": "G119",
       "ownerRole": "shared",
       "poam": "g119",
-      "remediation": "Component maintainers and deployment security owners map management functions separately from user functions and inventory shared storage, cache, compute and messaging resources. Document the effective privilege and isolation boundaries. In approved fixtures, verify an ordinary role cannot use the management path and distinct principals do not receive each other’s synthetic data through resource reuse.",
+      "remediation": "Component maintainers and deployment security owners map management functions separately from user functions and inventory shared storage, cache, compute and messaging resources. Document the effective privilege and isolation boundaries. In approved fixtures, verify an ordinary role cannot use the management path and distinct principals do not receive each other\u2019s synthetic data through resource reuse.",
       "title": "Management separation and shared-resource isolation need scoped evidence"
     },
     {
@@ -1640,7 +1640,7 @@
       "id": "G121",
       "ownerRole": "shared",
       "poam": "g121",
-      "remediation": "The deployment network authority and component maintainers inventory external and key internal interfaces, authorized access points, public subnet separation and managed connections for each assessed telecom service. Review confidentiality, integrity and control-plane restrictions, evidence of required external operator notices, and each flow exception’s business reason, duration and reapproval. Use scoped route and X4 evidence for only the restrictions the product enforces.",
+      "remediation": "The deployment network authority and component maintainers inventory external and key internal interfaces, authorized access points, public subnet separation and managed connections for each assessed telecom service. Review confidentiality, integrity and control-plane restrictions, evidence of required external operator notices, and each flow exception\u2019s business reason, duration and reapproval. Use scoped route and X4 evidence for only the restrictions the product enforces.",
       "title": "Managed boundary interfaces and telecom service exceptions need reviewed evidence"
     },
     {
@@ -1729,7 +1729,7 @@
       "id": "G128",
       "ownerRole": "shared",
       "poam": "g128",
-      "remediation": "Deployment key custodians and component maintainers inventory assessed key uses and locations and approve generation, agreement, distribution, access, rotation, revocation and retirement. Review an authorized recovery exercise for applicable information after loss of a synthetic user key and prove access remains denied to an unauthorized role. Keep all key material out of evidence and retain X8’s scope for algorithm guidance.",
+      "remediation": "Deployment key custodians and component maintainers inventory assessed key uses and locations and approve generation, agreement, distribution, access, rotation, revocation and retirement. Review an authorized recovery exercise for applicable information after loss of a synthetic user key and prove access remains denied to an unauthorized role. Keep all key material out of evidence and retain X8\u2019s scope for algorithm guidance.",
       "title": "Key lifecycle and authorized recovery need deployment evidence"
     },
     {
@@ -1741,7 +1741,7 @@
       "id": "G129",
       "ownerRole": "shared",
       "poam": "g129",
-      "remediation": "The sponsor cryptographic authority and component maintainers map each assessed use to an approved algorithm, key strength, provider, version and operating mode. Reconcile effective settings with the build inventory and document the required validation or accepted exception with its authority and expiry. Retain X8’s comparable-strength evaluation as an input for its stated scope.",
+      "remediation": "The sponsor cryptographic authority and component maintainers map each assessed use to an approved algorithm, key strength, provider, version and operating mode. Reconcile effective settings with the build inventory and document the required validation or accepted exception with its authority and expiry. Retain X8\u2019s comparable-strength evaluation as an input for its stated scope.",
       "title": "Approved cryptography by use and deployed configuration need evidence"
     },
     {
@@ -1859,7 +1859,7 @@
       "id": "G138",
       "ownerRole": "shared",
       "poam": "g138",
-      "remediation": "Deployment runtime operators and component maintainers inventory assessed processes and their execution domains, privileges and shared resources. Review the effective isolation settings at each applicable host, service, container or VM boundary. Verify that distinct synthetic principals cannot read each other’s test process data through reuse of shared resources. Record any dependency on inherited host protection.",
+      "remediation": "Deployment runtime operators and component maintainers inventory assessed processes and their execution domains, privileges and shared resources. Review the effective isolation settings at each applicable host, service, container or VM boundary. Verify that distinct synthetic principals cannot read each other\u2019s test process data through reuse of shared resources. Record any dependency on inherited host protection.",
       "title": "Process execution domains need independent boundary evidence"
     },
     {
@@ -3621,7 +3621,7 @@
       "profiles": [
         "itsp-10-171"
       ],
-      "remediation": "The sponsor maintenance access owner approves personnel and contractor organizations, keeps the authorized list current, and validates access for unescorted personnel. Sample an authorized visit and a supervised visit with the assigned supervisor’s required authorization and documented technical competence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "remediation": "The sponsor maintenance access owner approves personnel and contractor organizations, keeps the authorized list current, and validates access for unescorted personnel. Sample an authorized visit and a supervised visit with the assigned supervisor\u2019s required authorization and documented technical competence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 maintenance personnel authorization and supervision need operating records"
     },
     {
@@ -3723,7 +3723,7 @@
       "profiles": [
         "itsp-10-171"
       ],
-      "remediation": "The sponsor assessment lead and control owners reconcile each identifier with the checked-in ITSP.10.171 catalogue, which labels these entries unallocated and notes NIST withdrawal. Record the source edition and the accountable authority’s separate disposition for every listed identifier, including any successor that applies to the deployment. Leave the assessment rows open pending that authoritative decision. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
+      "remediation": "The sponsor assessment lead and control owners reconcile each identifier with the checked-in ITSP.10.171 catalogue, which labels these entries unallocated and notes NIST withdrawal. Record the source edition and the accountable authority\u2019s separate disposition for every listed identifier, including any successor that applies to the deployment. Leave the assessment rows open pending that authoritative decision. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 unallocated configuration, identity, maintenance and media entries need sponsor reconciliation"
     },
     {
@@ -6183,7 +6183,7 @@
       ],
       "id": "G450",
       "ownerRole": "maintainers",
-      "remediation": "The release image has no browser check for what the bundled extension does in the workbench: a streamed Chat reply, the conversation after a reload, Stop, closing the last conversation hiding the chat drawer, and Download ZIP after SovAI: Generate SA&A Package…. Each is covered by unit tests only. Add a Playwright spec under workbench/test/e2e that runs on the release image (STERLING_BUNDLED_EXTENSION=1, as get-started.spec.ts's create test does) with a fake model server on the test's internal network, in place of Codex's Puppeteer tool (01a9f155, 5a04d3d3). Source: .planning/CODEX-PORT-AUDIT.md (Left over).",
+      "remediation": "The release image has no browser check for what the bundled extension does in the workbench: a streamed Chat reply, the conversation after a reload, Stop, closing the last conversation hiding the chat drawer, and Download ZIP after SovAI: Generate SA&A Package\u2026. Each is covered by unit tests only. Add a Playwright spec under workbench/test/e2e that runs on the release image (STERLING_BUNDLED_EXTENSION=1, as get-started.spec.ts's create test does) with a fake model server on the test's internal network, in place of Codex's Puppeteer tool (01a9f155, 5a04d3d3). Source: .planning/CODEX-PORT-AUDIT.md (Left over).",
       "title": "Chat, the drawer close and the SA&A download have no browser check in the release image"
     },
     {
@@ -6411,7 +6411,7 @@
       ],
       "id": "G528",
       "ownerRole": "shared",
-      "remediation": "Software cannot prove where a facility is, who operates it or what hardware it holds. Phase 48.4 adds the signed site sovereignty declaration (sterling-site-sovereignty/1): the facility country and province, the operator and its jurisdiction, the administrator screening reference, the hardware inventory with its supply chain integrity review, the HSM model and its CMVP certificate, and the countries of the backups and the off-site copy, signed with an operator key your site trust document names and declared again at least every 180 days. Each site's operator signs and publishes one (deploy/runbooks/site-evidence.md); until then the card shows those rows as Unknown. It is part of the evidence G111 asks for. Sovereignty: data-stored, keys, hardware, operator.",
+      "remediation": "Software cannot prove where a facility is, who operates it or what hardware it holds. Phase 48.4 adds the signed site sovereignty declaration (sterling-site-sovereignty/1): the facility country and province, the operator and its jurisdiction, the administrator screening reference, the hardware inventory with its supply chain integrity review, the HSM model and its CMVP certificate, and the countries of the backups and the off-site copy, signed with an operator key your site trust document names and declared again at least every 180 days. Each site's operator signs and publishes one (deploy/runbooks/site-evidence.md); until then the card shows those rows as Unknown. It is part of the evidence G111 asks for. The mapping of each outside egress destination (a CIDR) to the register entry it reaches is declared too: software cannot check that an address belongs to the named service, so the card and the SA-9(8) detail label that mapping Declared, never Verified. Sovereignty: data-stored, keys, hardware, operator.",
       "title": "No site declares its facility country, operator, administrator screening, hardware or backup location"
     },
     {
