@@ -81,8 +81,9 @@ test('a contested version gives one card with both names, both reasons and the t
   try {
     const cards = (await room()).view.cards.filter((card) => card.kind === 'contested');
     assert.equal(cards.length, 1);
-    assert.match(cards[0].text, /^Contested: .+ approved v1 and .+ rejected it at the same time\. Neither applies\. A new decision is needed\.$/);
-    assert.deepEqual(cards[0].decisions?.map((item) => item.reasons), [['Fuel figures check out.'], ['Water is missing.']]);
+    // The two decisions come in the fold's order, which either may lead.
+    assert.match(cards[0].text, /^Contested: .+ (approved|rejected) v1 and .+ (approved|rejected) it at the same time\. Neither applies\. A new decision is needed\.$/);
+    assert.deepEqual(cards[0].decisions?.map((item) => item.reasons[0]).sort(), ['Fuel figures check out.', 'Water is missing.']);
     assert.deepEqual(cards[0].actions.map((action) => action.label), ['Approve v1', 'Reject v1']);
   } finally {
     await live.stop();
@@ -175,9 +176,11 @@ test('only a person decides: the room\'s acts write as a person, and an agent ac
     const begun = await service.beginDecision(project, target.product, target.hash, false);
     assert.ok(begun.kind === 'ok');
     assert.equal((await service.decide(begun.value.ticket, 'approve', [], '/')).kind, 'ok');
-    const versions = (await lead.p.state()).fold.families.versions as Array<{ product: string; records: Array<{ acts: Array<{ kind: string; actor: { kind: string } }> }> }>;
+    const shared = live.shared(project);
+    assert.ok(shared);
+    const versions = (await shared.project.state() as unknown as { fold: { families: Record<string, unknown> } }).fold.families.versions as Array<{ product: string; records: Array<{ acts: Array<{ kind: string; actor: { kind: string } }> }> }>;
     const decisions = versions.find((item) => item.product === PRODUCT)?.records.flatMap((record) => record.acts).filter((act) => act.kind === 'version.decide');
-    assert.deepEqual(decisions?.map((act) => act.actor.kind), ['person']);
+    assert.deepEqual(decisions?.map((act) => act.actor.kind), ['person'], JSON.stringify(versions.flatMap((item) => item.records.flatMap((record) => record.acts.map((act) => [act.kind, act.actor])))));
   } finally {
     await live.stop();
   }

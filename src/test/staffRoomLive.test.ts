@@ -150,7 +150,7 @@ test('a shared work that needs a newer Sterling shows the D-67 sentence; a previ
 });
 
 test('agent cards carry the one trust line only where TrustFacts exist', () => {
-  const trust: TrustFacts = { place: { class: 'local', region: 'unknown' } as TrustFacts['place'], verification: 'not-checked', allowedBy: [], wouldRefuse: [] };
+  const trust: TrustFacts = { place: { class: 'local', region: 'CA' }, verification: 'not-checked', allowedBy: [], wouldRefuse: [] };
   const view = staffRoomLive(input({ agents: [{ run: 'run-1', name: 'Logistics drafter', trust }, { run: 'run-2', name: 'Fuel checker' }], scales: SCALE_PRESETS }));
   const [withTrust, without] = view.cards;
   assert.ok(withTrust.kind === 'agent' && without.kind === 'agent');
