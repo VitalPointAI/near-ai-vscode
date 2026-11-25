@@ -785,7 +785,7 @@ Plans:
 
 Plans:
 - [ ] 45.2-01-PLAN.md: Wave 1. Tracer: our own narrow XML reader and writer (4778.2 normalization); one label out as ADatP-4774 and back
-- [ ] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value (executed 2026-11-25; the separate gap rows of Task 3 wait for gap ids)
+- [x] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value (done 2026-11-25)
 - [ ] 45.2-13-PLAN.md: Wave 1. Inbound adapter interface, the record values checkpoint, tracer: an unlabelled partner file held and labelled by a person; never more trusted, never lower
 - [x] 45.2-14-PLAN.md: Wave 1. One hardened archive reader for arrivals and the Office tools; the no-fetch rule for inbound adapters (done 2026-11-25)
 - [ ] 45.2-02-PLAN.md: Wave 2. The `labelXml` table adopting the profiles, every 4774 structure from the text's examples, labels coming in
