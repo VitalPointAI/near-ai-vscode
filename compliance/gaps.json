@@ -6443,6 +6443,44 @@
       ],
       "remediation": "48.3-12 checks the CycloneDX SBOMs syft writes against the 2026 joint Minimum Elements for an SBOM (co-issued by the Canadian Centre for Cyber Security) and turns on every field syft can produce; a field it cannot produce is reported to the owner. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-31, D-33. Sovereignty: software.",
       "title": "Our SBOMs are not yet checked field by field against the 2026 Minimum Elements for an SBOM"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "ra-05.02",
+        "sr-03",
+        "sr-05"
+      ],
+      "id": "G519",
+      "ownerRole": "owner",
+      "poam": "g519",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The daily Grype database is downloaded only by the gather host, checked against Anchore's listing checksum and signed with your organization's site key before any scanner uses it. Building it with grype-db and vunnel at HQ is the option for independence, after its own fit check (vunnel had a SUS legitimacy verdict on 2026-11-25). Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-07, D-26. Sovereignty: software.",
+      "title": "The vulnerability database is built by Anchore in the US; your organization checks and signs it but does not build it"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "sr-11",
+        "si-07"
+      ],
+      "id": "G520",
+      "ownerRole": "maintainers",
+      "poam": "g520",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The intake verifies and records npm provenance where it exists and treats provenance present on the previous approved version and absent now as a review flag. Maven artefacts are checked only by the SHA-256 recorded at intake, because Maven Central's checksum files come from the same server. Add PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-16, D-21. Sovereignty: software.",
+      "title": "Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required"
     }
   ]
 }

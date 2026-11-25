@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sr-04",
+    "sr-11",
+    "si-07"
+  ],
+  "gap": "G520",
+  "id": "g520",
+  "milestones": [
+    {
+      "title": "Maven publisher signature check designed",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Provenance is recorded where present and its regression is a review flag; Maven is checked only by the SHA-256 recorded at intake. Design PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows.",
+  "title": "Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required"
+}

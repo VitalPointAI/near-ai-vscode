@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 437 items, 404 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 439 items, 404 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -25,7 +25,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 | --- | --- | --- |
 | [Now, at every level](#now) | 82 | 15 |
 | [From Protected A](#protected-a) | 306 | 4 |
-| [From Protected B](#protected-b) | 12 | 3 |
+| [From Protected B](#protected-b) | 12 | 5 |
 | [From Protected C](#protected-c) | 0 | 1 |
 | [From Confidential](#confidential) | 0 | 1 |
 | [From Secret](#secret) | 0 | 0 |
@@ -483,6 +483,8 @@ These matter from Protected B, where validated cryptography and hardened base im
 - **G404. No timestamp authority dates our signatures.** Our signatures carry no trusted time (the cosign signing configuration is empty), so after a key compromise no signature can be dated before it and every signed item is re-issued. Decide whether a site timestamp authority is added. Controls: SC-12, SR-11. Owner role: owner. Tracked as POA&M item g404; first milestone: Owner decision on a site timestamp authority recorded (by 2027-02-26).
 - **G405. Removing a workspace volume does not cryptographically erase it.** One LUKS class key encrypts every workspace volume, so a departed person's volume cannot be erased by destroying its own key; the disks follow your organization's media handling. Record the authorizing official's acceptance of this limit, or design per-person volume keys. Controls: MP-6. Owner role: owner. Tracked as POA&M item g405; first milestone: The authorizing official accepts the limit, or per-person volume keys are designed (by 2027-02-26).
 - **G406. A cluster administrator can sign the current day's audit archive manifest.** Signing is restricted to the archive job's account, but a cluster administrator could sign that day's manifest; a day already archived on write-once storage cannot be changed. Detect a second signature with the daily signature watch, then record the authorizing official's acceptance of the residual risk, or design a manifest signer outside the cluster's administration. Controls: AU-9(4). Owner role: owner. Tracked as POA&M item g406; first milestone: The daily signature watch (48.1-14) detects a second manifest signature (Phase 48.1).
+- **G519. The vulnerability database is built by Anchore in the US; your organization checks and signs it but does not build it.** The daily Grype database is downloaded only by the gather host, checked against Anchore's listing checksum and signed with your organization's site key before any scanner uses it. Building it with grype-db and vunnel at HQ is the option for independence, after its own fit check (vunnel had a SUS legitimacy verdict on 2026-11-25). Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-07, D-26. Sovereignty: software. Controls: RA-5(2), SR-3, SR-5. Owner role: owner. Tracked as POA&M item g519; first milestone: Owner decision on building the database at HQ (by 2027-05-31).
+- **G520. Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required.** The intake verifies and records npm provenance where it exists and treats provenance present on the previous approved version and absent now as a review flag. Maven artefacts are checked only by the SHA-256 recorded at intake, because Maven Central's checksum files come from the same server. Add PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-16, D-21. Sovereignty: software. Controls: SR-4, SR-11, SI-7. Owner role: maintainers. Tracked as POA&M item g520; first milestone: Maven publisher signature check designed (by 2027-05-31).
 
 ## From Protected C {#protected-c}
 
