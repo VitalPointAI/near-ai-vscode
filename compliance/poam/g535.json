@@ -15,7 +15,7 @@
   "milestones": [
     {
       "phase": "48.4",
-      "title": "The owner's decision on selecting SA-400(1) to SA-400(9), and their statements if selected (48.4-04, 48.4-15)"
+      "title": "Hosted Protected B selects SA-400(3) to SA-400(9) (O4, accepted 2026-11-25) and 48.4-15 adds their statements"
     },
     {
       "targetDate": "2027-05-31",
@@ -23,6 +23,6 @@
     }
   ],
   "ownerRole": "owner",
-  "remediation": "The Medium profile selects SA-400 without its nine enhancements, which are the clearest Canadian statement of what sovereign means, and the sovereignty card uses them as its criteria. The owner decides whether the hosted levels select them as organization-defined additions (48.4-04); if they do, 48.4-15 adds their statements and evidence rules from the same facts the card reads, and SA-400(1) and SA-400(2) stay your organization's assessments. Sovereignty: assessments.",
+  "remediation": "The Medium profile selects SA-400 without its nine enhancements, which are the clearest Canadian statement of what sovereign means, and the sovereignty card uses them as its criteria. The owner decided on 2026-11-25 (O4) that hosted Protected B selects SA-400(3) to SA-400(9) as organization-defined additions; 48.4-15 adds their statements and evidence rules from the same facts the card reads, and SA-400(1) and SA-400(2) stay your organization's assessments. Sovereignty: assessments.",
   "title": "The SA-400 enhancements are not selected or assessed for the hosted levels"
 }
