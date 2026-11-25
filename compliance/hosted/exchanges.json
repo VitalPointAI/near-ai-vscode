@@ -259,12 +259,13 @@
       "direction": "one-way",
       "data": "Our built and released images, pulled by their recorded digests. No site data.",
       "format": "OCI images over HTTPS.",
-      "protection": "Pulled by digest over TLS, signed with the release key in the container-release environment when published, and re-signed with your organization's key at bundle build.",
+      "protection": "Pulled by digest over TLS, signed with the release key in the container-release environment when published, and re-signed with your organization's key at bundle build. A published digest enters the image lock only after its signature verifies (deploy/bundle/record-digests.mjs), and the workbench only from the Release workflow's GHCR repository.",
       "frequency": "Each bundle build.",
       "status": "implemented",
       "implementedBy": [
         ".github/workflows/deploy-images.yml",
-        "deploy/bundle/build.mjs"
+        "deploy/bundle/build.mjs",
+        "deploy/bundle/record-digests.mjs"
       ],
       "siteSettings": [],
       "controls": [
@@ -356,12 +357,22 @@
       "to": "cluster nodes",
       "direction": "one-way",
       "data": "Time. No site data.",
-      "format": "As the Phase 47 follow-up for time at air-gapped sites defines it.",
-      "protection": "As 47-22 defines it; until then this is the open condition G367 (no trusted time source at air-gapped sites).",
+      "format": "NTP (chrony), optionally with Network Time Security; or a reference clock attached to a node (PHC, SHM or SOCK).",
+      "protection": "Every node's chrony.conf is generated from the site file and names only the site's own sources (no pool, no allow, command port off); NTS trusts the site CA when time.nts is on; with two or more sources chrony needs two to agree. The node install refuses a clock that is not synchronised, follows its own local clock or exceeds time.maxClockErrorMs, before RKE2 is installed, and the install preflight refuses the same on the import host.",
       "frequency": "Continuously.",
-      "status": "planned",
-      "plannedIn": "47-22",
-      "siteSettings": [],
+      "status": "implemented",
+      "implementedBy": [
+        "deploy/bundle/lib/clock.mjs",
+        "deploy/rke2/check-time.sh",
+        "deploy/rke2/install-node.sh",
+        "deploy/bundle/lib/preflight.mjs"
+      ],
+      "siteSettings": [
+        "site.example.yaml#time.servers",
+        "site.example.yaml#time.refclocks",
+        "site.example.yaml#time.nts",
+        "site.example.yaml#time.maxClockErrorMs"
+      ],
       "controls": [
         "ca-03",
         "au-08"

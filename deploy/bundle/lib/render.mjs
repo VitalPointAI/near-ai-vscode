@@ -178,11 +178,18 @@ const resolveRelease = (root, release) => {
   return found;
 };
 
+/** The per-site values file of a release: the descriptor's site example, or the file of the same name in `siteDir` (a site's own folder). */
+export function siteValuesFile(root, descriptor, siteDir) {
+  if (!descriptor.site) return null;
+  return siteDir ? path.resolve(siteDir, path.basename(descriptor.site)) : path.join(root, descriptor.site);
+}
+
 /**
- * Renders one release (a descriptor from listReleases, or its name) for a site (an object, or a site file path). Returns the YAML of every
- * instance, or '' when the release's enabledWhen does not match the site and `all` is not set. Throws with a plain message on any refusal.
+ * What helm needs for one release, after every refusal: { descriptor, chart, enabled, sets, instances, texts }, texts being the
+ * site-substituted values files in order ({ file, text }). The render harness and the site install (install.mjs apply) both use it, so a
+ * site installs exactly what CI renders. `siteDir` replaces deploy/values/site.example/ with a site's own folder of per-release files.
  */
-export function renderRelease(root, release, { site, helm = process.env.HELM || 'helm', all = false } = {}) {
+export function releaseInputs(root, release, { site, siteDir } = {}) {
   const descriptor = resolveRelease(root, release);
   const settings = typeof site === 'string' ? loadSite(site) : site;
   if (!settings || typeof settings !== 'object') throw new Error('renderRelease needs a site (a site file path or its parsed settings).');
@@ -191,25 +198,45 @@ export function renderRelease(root, release, { site, helm = process.env.HELM || 
   const enabled = isEnabled(descriptor, settings);
   const sets = imageSets(root, descriptor, settings);
   const instances = expandInstances(descriptor, settings);
-  const sources = [...descriptor.values, ...(descriptor.site ? [descriptor.site] : [])];
-  const texts = sources.map((file) => {
-    if (!existsSync(path.join(root, file))) throw new Error(`${descriptor.file}: the values file ${file} does not exist.`);
-    return { file, text: substituteSite(readFileSync(path.join(root, file), 'utf8'), settings, file) };
+  const sources = [...descriptor.values.map((file) => ({ file, full: path.join(root, file) })),
+    ...(descriptor.site ? [{ file: descriptor.site, full: siteValuesFile(root, descriptor, siteDir) }] : [])];
+  const texts = sources.map(({ file, full }) => {
+    if (!existsSync(full)) throw new Error(`${descriptor.file}: the values file ${full === path.join(root, file) ? file : full} does not exist.`);
+    return { file, text: substituteSite(readFileSync(full, 'utf8'), settings, file) };
   });
+  return { descriptor, chart, enabled, sets, instances, texts };
+}
+
+/** Writes the values texts into `dir` in order and returns their -f arguments. */
+export function writeValues(dir, texts) {
+  return texts.flatMap(({ file, text }, index) => {
+    const copy = path.join(dir, `${String(index).padStart(2, '0')}-${path.basename(file)}`);
+    writeFileSync(copy, text);
+    return ['-f', copy];
+  });
+}
+
+/** An environment that keeps helm away from any configured chart repository: empty Helm folders under `home`. */
+export function helmEnv(home) {
+  mkdirSync(home, { recursive: true });
+  return { ...process.env, HELM_CACHE_HOME: path.join(home, 'cache'), HELM_CONFIG_HOME: path.join(home, 'config'), HELM_DATA_HOME: path.join(home, 'data') };
+}
+
+/**
+ * Renders one release (a descriptor from listReleases, or its name) for a site (an object, or a site file path). Returns the YAML of every
+ * instance, or '' when the release's enabledWhen does not match the site and `all` is not set. Throws with a plain message on any refusal.
+ * `sets` adds --set-string values (install.mjs apply renders admission in Audit until the import found every signature).
+ */
+export function renderRelease(root, release, { site, siteDir, helm = process.env.HELM || 'helm', all = false, sets: extra = [] } = {}) {
+  const { descriptor, chart, enabled, sets, instances, texts } = releaseInputs(root, release, { site, siteDir });
   if (!enabled && !all) return '';
   const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-render-'));
   try {
-    const home = path.join(scratch, 'helm-home');
-    mkdirSync(home);
-    const copies = texts.map(({ file, text }, index) => {
-      const copy = path.join(scratch, `${String(index).padStart(2, '0')}-${path.basename(file)}`);
-      writeFileSync(copy, text);
-      return copy;
-    });
-    const env = { ...process.env, HELM_CACHE_HOME: path.join(home, 'cache'), HELM_CONFIG_HOME: path.join(home, 'config'), HELM_DATA_HOME: path.join(home, 'data') };
+    const env = helmEnv(path.join(scratch, 'helm-home'));
+    const files = writeValues(scratch, texts);
     const outputs = instances.map(({ name, instance }) => {
       const args = ['template', name, chart, '--namespace', descriptor.namespace, '--include-crds', '--kube-version', KUBE_VERSION,
-        ...copies.flatMap((copy) => ['-f', copy]), ...sets, ...(instance ? ['--set-json', `instance=${JSON.stringify(instance)}`] : [])];
+        ...files, ...sets, ...extra.flatMap((set) => ['--set-string', set]), ...(instance ? ['--set-json', `instance=${JSON.stringify(instance)}`] : [])];
       const run = spawnSync(helm, args, { env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
       if (run.error?.code === 'ENOENT') throw new Error(`helm was not found (${helm}); set HELM to the helm binary or put helm on PATH.`);
       if (run.error) throw run.error;
@@ -223,7 +250,7 @@ export function renderRelease(root, release, { site, helm = process.env.HELM || 
 }
 
 /** Renders every release for a site: [{ name, release, yaml }] for each rendered instance, in install order. Refuses two with one name. */
-export function renderSite(root, { site, helm, all = false } = {}) {
+export function renderSite(root, { site, siteDir, helm, all = false } = {}) {
   const settings = typeof site === 'string' ? loadSite(site) : site;
   const releases = listReleases(root);
   const owner = new Map();
@@ -233,7 +260,7 @@ export function renderSite(root, { site, helm, all = false } = {}) {
       owner.set(name, release.file);
     }
   }
-  return releases.map((release) => ({ name: release.name, release, yaml: renderRelease(root, release, { site: settings, helm, all }) })).filter((item) => item.yaml);
+  return releases.map((release) => ({ name: release.name, release, yaml: renderRelease(root, release, { site: settings, siteDir, helm, all }) })).filter((item) => item.yaml);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

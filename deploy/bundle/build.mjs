@@ -14,9 +14,10 @@
 //   - every vendored chart of deploy/charts/charts.lock.json, after the same hash check as vendor.mjs --check;
 //   - the rke2 pin with its assets, and helm, cosign and hauler, downloaded from their pinned addresses and checked against the pinned SHA-256;
 //   - deploy-tree.tar: deploy/ without deploy/test/, deploy/lab/ and deploy/charts/vendored/ (realm, policies, values, local charts, node
-//     files and scripts).
-//     Before it is packed, deploy/tools/credential-checker.engine.mjs is generated from src/domain/ (build-credential-engine.mjs), so the
-//     credential check tool works on an air-gapped operator machine (Phase 71 plan 08).
+//     files and scripts). Before it is packed, deploy/tools/credential-checker.engine.mjs is generated from src/domain/
+//     (build-credential-engine.mjs), so the credential check tool works on an air-gapped operator machine (Phase 71 plan 08);
+//   - registry-images.tar: the registry's own images (Zot, and the Harbor set) as a site-neutral OCI layout, named for the site's registry
+//     by install.mjs node-files before it goes to the nodes (Pitfall 8). Tool items carry their pin's version.
 //
 //   node deploy/bundle/build.mjs --out <dir> --key <cosign key> --staging-registry <host:port> [--version <x.y.z>] [--ci-registry <host/prefix>]
 //        [--omit <name,...>] [--build-local] [--images <name,...>] [--files <path,...>] [--public-key <cosign pub>] [--plain-http]
@@ -36,6 +37,7 @@ import { runCosign, signImage, verifyImage } from './lib/cosign.mjs';
 import { runHauler } from './lib/hauler.mjs';
 import { imageName, readChartsLock, readImagesLock, readToolPins, sitePath, splitRef } from './lib/locks.mjs';
 import { ARCHIVE, MANIFEST, sha256File, writeManifest } from './lib/manifest.mjs';
+import { REGISTRY_IMAGES, registryImages, writeRegistryLayout } from './lib/registry-images.mjs';
 import { signFile } from './signed-file.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -93,14 +95,15 @@ export function planCharts(root) {
   return readChartsLock(root).charts.map((chart) => ({ kind: 'chart', path: path.join(root, chart.patch?.output ?? chart.file) }));
 }
 
-/** The pinned downloads of the site tools as [{ url, sha256, name }]: each tool's own address and its assets. */
+/** The pinned downloads of the site tools as [{ url, sha256, name, version }]: each tool's own address and its assets, with the pin's version
+ * (recorded on the manifest item, so the upgrade check, 47-28, knows the bundle's RKE2 version). */
 export function planTools(root, tools = SITE_TOOLS) {
   const pins = readToolPins(root);
   return tools.flatMap((tool) => {
     const pin = pins[tool];
     if (!pin) throw new Error(`compliance/ci/tool-pins.json has no pin for ${tool}.`);
     return [{ url: pin.url, sha256: pin.sha256 }, ...(pin.assets ?? []).map((asset) => ({ url: asset.url, sha256: asset.sha256 }))]
-      .map((download) => ({ ...download, name: decodeURIComponent(new URL(download.url).pathname.split('/').pop()) }));
+      .map((download) => ({ ...download, name: decodeURIComponent(new URL(download.url).pathname.split('/').pop()), version: pin.version }));
   });
 }
 
@@ -135,6 +138,16 @@ function deployTree(root, dir) {
 export async function deployTreeWithEngine(root, dir) {
   await buildCredentialEngine(root);
   return deployTree(root, dir);
+}
+
+/** registry-images.tar: the registry's own images as a site-neutral OCI layout for the nodes (lib/registry-images.mjs, Pitfall 8). */
+function registryArchive(root, dir) {
+  const lock = readImagesLock(root);
+  const store = path.join(dir, 'registry-store');
+  for (const image of lock.images.filter((entry) => entry.component === 'image-registry')) {
+    runHauler(['store', 'add', 'image', image.ref, '-s', store]);
+  }
+  return writeRegistryLayout(store, registryImages(lock), path.join(dir, REGISTRY_IMAGES));
 }
 
 /** Runs podman under the heavy-run lock (one heavy run at a time on the build host). */
@@ -217,7 +230,7 @@ export async function buildBundle({ out, key, staging, images, files, version = 
       const kind = file.kind ?? 'file';
       const filePath = file.path ?? file;
       runHauler(['store', 'add', 'file', filePath, '-s', bundleStore], { hauler });
-      items.push({ kind, name: path.basename(filePath), digest: await sha256File(filePath) });
+      items.push({ kind, name: path.basename(filePath), digest: await sha256File(filePath), ...(file.version ? { version: file.version } : {}) });
     }
     const names = items.map((item) => `${item.kind === 'image' ? 'image' : 'file'}:${item.name}`);
     const duplicate = names.find((name, index) => names.indexOf(name) !== index);
@@ -240,9 +253,9 @@ export async function buildWholeBundle(root, { out, key, staging, version, ciReg
   const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-build-files-'));
   try {
     const tools = [];
-    for (const download of downloads) tools.push({ kind: 'tool', path: await fetchPinned(download, scratch) });
+    for (const download of downloads) tools.push({ kind: 'tool', path: await fetchPinned(download, scratch), version: download.version });
     const built = toBuild.length ? buildLocal(root, toBuild, { staging, plainHttp, scratch }) : [];
-    const files = [...charts, ...tools, { kind: 'file', path: await deployTreeWithEngine(root, scratch) }];
+    const files = [...charts, ...tools, { kind: 'file', path: await deployTreeWithEngine(root, scratch) }, { kind: 'file', path: registryArchive(root, scratch) }];
     return await buildBundle({ out, key, staging, images: [...images, ...built], files, version, omitted, plainHttp, publicKey });
   } finally {
     rmSync(scratch, { recursive: true, force: true });
