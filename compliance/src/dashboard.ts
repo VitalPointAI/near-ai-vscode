@@ -6,6 +6,7 @@ import { gapCoversRow, gapStates, type Gap, type Poam } from './gaps.ts';
 import { loadRiskAcceptances } from './riskAcceptance.ts';
 import { resolveResponsibility, type ResponsibilityTable } from './responsibility.ts';
 import { notApplicableFor, removalsFor, type Tailoring } from './tailoring.ts';
+import type { ApplicabilityIndex } from './applicability.ts';
 import { REASONS, STATES, type ComponentRow, type DashboardInput, type DashboardRow, type EvidenceRule, type Responsibility, type RuleResult, type State } from './model.ts';
 type LevelNotes = Readonly<{ text?: string; profileDifferences?: readonly string[] }>;
 
@@ -17,6 +18,8 @@ export interface DashboardBuildInput extends DashboardInput {
   readonly gapRegister?: { readonly gaps: readonly Gap[]; readonly poam: readonly Poam[]; readonly attestationsDir: string };
   readonly responsibilityTable?: ResponsibilityTable;
   readonly tailoring?: Tailoring;
+  /** The component applicability map (44.1, D-06 to D-13). Absent, every cell is assessed as before. */
+  readonly applicability?: ApplicabilityIndex;
   readonly levels: readonly (DashboardInput['levels'][number] & { readonly kind?: 'level' | 'overlay'; readonly profile?: string; readonly claim?: boolean; readonly overlays?: readonly string[]; readonly notes?: LevelNotes })[];
 }
 export type DashboardCounts = Readonly<Record<State, number>> & Readonly<{ notMetTotal: number; metTotal: number }>;
@@ -58,6 +61,8 @@ function controlState(components: readonly ComponentRow[], level: string, contro
     const outcome = computeStatus({ control, component: '', level, responsibility, statements: [], rulesByStatement: {}, results: {}, head: input.head, now: input.now });
     return { state: outcome.state, reason: outcome.reason, ...(outcome.detail ? { detail: outcome.detail } : {}) };
   }
+  // A row whose every component has no part (signed) is your organization's, never Not applicable: the map cannot exclude a row (44.1, D-13).
+  if (components.every((row) => row.reason === 'component-not-applicable')) return { state: 'your-organizations-responsibility', reason: 'no-component-applies' };
   const applicable = components.filter((row) => row.state !== 'not-applicable');
   // A reviewed exclusion does not dilute assessment of any remaining components. Keep its
   // reason if all are excluded. An unreviewed exclusion remains a gap in the aggregate.
@@ -115,21 +120,26 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
         // reviewed responsibility), so one component's evidence never makes the whole control Met while another in-scope component is silent.
         // A component the control does not apply to needs a reviewed tailoring record, as any other Not applicable does.
         const declared = Boolean(implemented || tailoring || exception);
-        const responsibility = configuredResponsibility(control, componentId, input.responsibilityTable, implemented?.responsibility);
+        const configured = configuredResponsibility(control, componentId, input.responsibilityTable, implemented?.responsibility);
+        // A component with an implemented requirement has a part whatever the map says (D-08); only a silent component asks the map.
+        const applicability = implemented ? undefined : input.applicability?.for(level.id, control, componentId);
         const statements = implemented?.statements ?? [];
         const rulesByStatement = implemented ? rulesFor(input.rules, componentId, control) : {};
         const outcome = computeStatus({
           control,
           component: componentId,
           level: level.id,
-          responsibility,
           statements,
+          responsibility: configured,
           tailoring,
           rulesByStatement,
           results,
           head: input.head,
-          now: input.now
+          now: input.now,
+          ...(applicability ? { applicability } : {})
         });
+        // A signed exclusion's responsibility reads not-applicable; an unsigned one keeps its family's, so it stays a gap (D-11, D-13).
+        const responsibility = outcome.reason === 'component-not-applicable' ? 'not-applicable' : configured;
         const evidence = Object.values(rulesByStatement).flat().map((rule) => results[rule.id]).filter((result): result is RuleResult => result !== undefined);
         const statement = statements[0];
         const component: DashboardComponentRow = {
@@ -139,6 +149,7 @@ export function buildDashboard(input: DashboardBuildInput): Dashboard {
           ...(outcome.detail ? { detail: outcome.detail } : {}),
           reasonText: fillReason(outcome.reason, outcome.reason === 'inherited' ? { ...(outcome.detail ?? {}), provider: implemented?.inheritedFrom ?? '' } : outcome.detail),
           responsibility,
+          ...(applicability ? { applicability: applicability.class } : {}),
           evidence,
           ...(statement ? { statement: statement.description } : {}),
           ...(statement?.limitation ? { limitation: statement.limitation } : {}),

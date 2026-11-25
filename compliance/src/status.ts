@@ -46,6 +46,12 @@ function applyHonestyRules(input: StatusInput, statements: readonly Statement[],
 export function computeStatus(input: StatusInput): StatusOutcome {
   if (input.responsibility === 'your-organization') return { state: 'your-organizations-responsibility', reason: 'your-organization' };
   if (input.responsibility === 'inherited') return { state: 'your-organizations-responsibility', reason: 'inherited' };
+  // A component the signed applicability map says has no part reads Not applicable with its reason; while the map section is not signed off for
+  // this level it counts as not met (44.1, D-11, D-13).
+  const applicability = input.applicability;
+  if (applicability?.class === 'not-applicable') return applicability.reviewed
+    ? { state: 'not-applicable', reason: 'component-not-applicable', detail: { reason: applicability.reason } }
+    : withRiskAcceptance(input, { state: 'not-met', reason: 'component-not-applicable-unreviewed', detail: { reason: applicability.reason } });
   const tailoring = input.tailoring;
   const reviewed = tailoring !== undefined && tailoring.reason.trim() !== '' && tailoring.reviewer.trim() !== '' && /^\d{4}-\d{2}-\d{2}$/.test(tailoring.reviewedAt);
   if (input.responsibility === 'not-applicable' || tailoring !== undefined) return reviewed ? { state: 'not-applicable', reason: 'not-applicable', detail: { reason: tailoring!.reason } } : withRiskAcceptance(input, { state: 'not-met', reason: 'not-applicable-unreviewed' });
