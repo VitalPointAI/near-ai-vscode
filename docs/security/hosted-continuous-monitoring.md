@@ -22,7 +22,7 @@ This is the continuous monitoring strategy for hosted sites your organization ru
 | Site evidence export | At least weekly, inside its 7-day window: an export older than 7 days reads Stale | The site operator makes it; the security officer reviews the dashboard |
 | Credential status lists | Refreshed within the policy's time to live (example: 15 minutes at a connected HQ) | Automatic at a connected site; see "Disconnected sites" |
 | Monthly checklist | Monthly, and after every key rotation | The site operator, signed off by the security officer |
-| Access review | Quarterly, against the roles and separation of duties matrix (`hosted-roles-and-duties.md`, 48.1-10) | The security officer with the staff leads |
+| Access review | Quarterly, against the roles and separation of duties matrix. That matrix (`hosted-roles-and-duties.md`) is planned in 48.1-10 and not written yet (gap G401); until it exists, review against your organization's own role list | The security officer with the staff leads |
 | Documents | Each within its 365-day review window | The document's owner |
 | Reassessment | Yearly, and on any trigger below | Your organization's authorizing official, with the security officer |
 
