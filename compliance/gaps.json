@@ -6177,6 +6177,18 @@
     {
       "appliesAt": "now",
       "blocksProduction": false,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G445",
+      "ownerRole": "shared",
+      "remediation": "pkcs11-tool --keypairgen --usage-sign only adds CKA_SIGN to the private key template and never sets the other usages false (OpenSC 0.27 gen_keypair), so SoftHSM2's defaults leave the development site key's private key with decrypt and unwrap usage as well (Usage: decrypt, sign, signRecover, unwrap; seen on a real token by deploy/test/dev-site-key-softhsm.test.mjs, 48.1-22 field fix). SoftHSM2 has no EC decrypt or unwrap mechanism and CKA_DERIVE is false, so the extra flags cannot be used in development, and the script still requires the key to be sensitive and never extractable. Production: generate the site key in your organization's HSM with a template that sets CKA_SIGN true and CKA_DECRYPT, CKA_UNWRAP and CKA_DERIVE false (the HSM vendor's tool, or a PKCS#11 template), record the key's usage attributes in the key ceremony record (deploy/runbooks/key-ceremony.md), and add that step to the ceremony.",
+      "title": "The development site key's private key also carries decrypt and unwrap usage"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
       "closesInPhase": "48",
       "controls": [
         "sa-11"

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake util-linux script(1) for deploy/test/dev-site-key.test.mjs. Records its arguments in $FAKE_LOG and takes only the call shape
+# deploy/keys/new-dev-site-key.sh uses: script -q -e -c <command> <log>. It cannot give the command a terminal, so it sets FAKE_PTY=1,
+# which the fake pkcs11-tool and stty take in place of one. Like the real one, it runs the command with $SHELL, writes what the command
+# prints to <log> with CR LF line ends (a terminal's), shows it on standard output and exits with the command's status.
+set -eu
+printf 'script' >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+
+[ "$#" -eq 5 ] && [ "$1" = -q ] && [ "$2" = -e ] && [ "$3" = -c ] || { echo "fake script: unexpected arguments" >&2; exit 2; }
+status=0
+out=$(FAKE_PTY=1 "${SHELL:-/bin/sh}" -c "$4" 2>&1) || status=$?
+printf '%s\n' "$out" | sed 's/$/\r/' > "$5"
+printf '%s\n' "$out"
+exit "$status"

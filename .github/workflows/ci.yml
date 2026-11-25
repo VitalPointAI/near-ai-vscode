@@ -649,6 +649,11 @@ jobs:
           echo "$PWD/compliance/out/tools/linux-amd64" >> "$GITHUB_PATH"
           echo "$PWD/compliance/out/tools" >> "$GITHUB_PATH"
           echo "HELM=$PWD/compliance/out/tools/linux-amd64/helm" >> "$GITHUB_ENV"
+      # deploy/test/dev-site-key-softhsm.test.mjs runs deploy/keys/new-dev-site-key.sh against the real SoftHSM2 and OpenSC on a terminal
+      # (48.1-22 field fix); the packages come from Ubuntu's signed archive, as deploy/host-packages.json lists them. script is in bsdutils.
+      - name: Install SoftHSM2 and OpenSC
+        if: steps.has_deploy.outputs.present == 'true'
+        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc
       - name: Check the vendored chart tarballs against the chart lock (offline)
         if: steps.has_deploy.outputs.present == 'true'
         run: node deploy/charts/vendor.mjs --check
