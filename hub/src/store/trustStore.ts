@@ -17,6 +17,9 @@ import { keepsRevocations, newerThan, statusAt, verifyStatusList } from '@ext/do
 import type { StatusListState } from '@ext/domain/credentials/statusList';
 import { WEBVH_FAILURES, parseWebvhDid, verifyWebvhLog } from '@ext/domain/did/didWebvh';
 import type { WebvhState } from '@ext/domain/did/didWebvh';
+import { computerSlotsOf } from '@ext/domain/credentials/computerSlots';
+import type { ComputerSlot } from '@ext/domain/credentials/computerSlots';
+import { readDidDocument } from '@ext/domain/did/didDocument';
 import type { HubStore } from './hubStore';
 
 /** How long a verified policy is reused before it is checked again (its expiry included). */
@@ -37,8 +40,18 @@ export const TRUST_REFUSALS = {
   'not-newer': 'This status list is not a newer copy of the one the hub holds.',
   'revocation-cleared': 'This status list clears a revocation, and a revocation can never be undone.',
   'version-conflict': 'Another copy of this status list was stored first. Read the newest copy, then make the change again.',
+  'computer-slots': 'This identity lists its computers in a way that is not allowed: at most five, each with two places for computers, none used twice.',
+  'computer-place-taken': 'A computer this identity lists uses a status list place another person\'s computer already uses. Bind that computer again.',
 } as const;
 export type TrustRefusal = keyof typeof TRUST_REFUSALS;
+
+/** The computer slots of a log's newest document (none for a deactivated DID or one with no computers), or 'invalid' (D-25). */
+function latestComputerSlots(state: WebvhState): readonly ComputerSlot[] | 'invalid' {
+  const version = state.versions[state.versions.length - 1];
+  if (version === undefined || version.deactivated) return [];
+  const read = readDidDocument(version.document, version.did);
+  return read.ok ? computerSlotsOf(read.document) : [];
+}
 
 export type TrustPolicy = { ok: true; section: CredentialsSection; scales: ScaleTable } | { ok: false };
 
@@ -138,6 +151,17 @@ export class TrustStore {
     const verified = verifyWebvhLog(log, { now, ...(witnessFile === undefined ? {} : { witnessFile }) });
     if (!verified.ok) return { ok: false, status: 422, reason: verified.reason, message: WEBVH_FAILURES[verified.reason] };
     if (hostPathOf(verified.state.did) !== path) return refuse(422, 'wrong-path');
+    // D-25, G467: the newest document lists at most five computers, in the computer places, none sharing a place with another person's computer.
+    const slots = latestComputerSlots(verified.state);
+    if (slots === 'invalid') return refuse(422, 'computer-slots');
+    if (slots.length > 0) {
+      const mine = new Set(slots.flatMap((slot) => [slot.revocation, slot.suspension]));
+      for (const state of Object.values(this.didStates(now))) {
+        if (state.scid === verified.state.scid) continue;
+        const theirs = latestComputerSlots(state);
+        if (theirs !== 'invalid' && theirs.some((slot) => mine.has(slot.revocation) || mine.has(slot.suspension))) return refuse(422, 'computer-place-taken');
+      }
+    }
     if (held !== undefined) {
       if (verified.state.scid !== held.scid) return refuse(422, 'wrong-scid');
       if (!log.startsWith(held.log)) return refuse(422, 'not-an-extension');

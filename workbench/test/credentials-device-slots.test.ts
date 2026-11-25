@@ -11,7 +11,9 @@ import { didKeyFromPublicKey } from '../../src/domain/did/didKey.ts';
 import { IDENTITY_TEXT } from '../extension/src/common/identity.ts';
 import { KEY_SERVICE_TEXT } from '../extension/src/common/key-service.ts';
 import { ok, refused } from '../extension/src/common/service-result.ts';
-import { createIdentityService, type IdentityEngine, type IdentityKv } from '../extension/src/node/credentials/identity-service.ts';
+import { createIdentityService, ownRecordPath, type IdentityEngine, type IdentityKv } from '../extension/src/node/credentials/identity-service.ts';
+import { COMPUTER_INDEX_FROM, checkComputerBinding } from '../../src/domain/credentials/computerSlots.ts';
+import { verifyCredential } from '../../src/domain/credentials/profile.ts';
 import {
   DEVICE_INDEX_FROM, MAX_COMPUTERS, deviceSlotAllocator, listComputers, reportLostComputer, slotPath, subjectOf,
 } from '../extension/src/node/credentials/device-slots.ts';
@@ -187,4 +189,29 @@ test('a lost computer is reported once, under the person\'s own entity name; a g
   assert.deepEqual(await reportLostComputer({ ...deps, kv: guest.kv }, 1), ok({ filed: true }));
   assert.ok(guest.kv.data.has(`site/revocation-requests/guest-${SUB}-computer-lost-1`));
   assert.equal(subjectOf(`h.${Buffer.from(JSON.stringify({ sub: SUB })).toString('base64url')}.s`), SUB);
+});
+
+test('G467: binding writes the computer\'s slot into the person\'s own DID document first, so every verifier counts the binding', async () => {
+  const { kv, identity } = await person();
+  assert.equal(DEVICE_INDEX_FROM, COMPUTER_INDEX_FROM, 'the backend and the verifiers agree where computer places start');
+  const did = computer();
+  const bound = await identity.bindComputer(did, wordsOf(did), 'personal');
+  if (bound.kind !== 'ok') return assert.fail(JSON.stringify(bound));
+  const own = kv.data.get(ownRecordPath(ENTITY)) as { log: string; published: boolean; did: string };
+  assert.equal(own.published, false, 'the longer log is posted at the next hub session');
+  const state = realEngine.verifyWebvhLog(own.log, { now: NOW + 60_000 });
+  assert.ok(state.ok);
+  if (!state.ok) return;
+  const credential = JSON.parse(bound.value.text) as Record<string, unknown>;
+  const method = realEngine.methodsAt(state.state, Date.parse(credential.validFrom as string))[0];
+  assert.ok(method);
+  const verified = verifyCredential(credential, { publicKey: realEngine.decodePublicKeyMultibase(method.publicKeyMultibase), scales: realEngine.SCALE_PRESETS });
+  assert.ok(verified.ok);
+  if (!verified.ok) return;
+  assert.equal(checkComputerBinding(verified, state.state, NOW + 60_000), undefined, 'listed in slot 1 with its places');
+  // A second computer adds a second slot; the first stays listed.
+  const second = computer();
+  assert.equal((await identity.bindComputer(second, wordsOf(second), 'managed')).kind, 'ok');
+  const after = realEngine.verifyWebvhLog((kv.data.get(ownRecordPath(ENTITY)) as { log: string }).log, { now: NOW + 60_000 });
+  assert.ok(after.ok && checkComputerBinding(verified, after.state, NOW + 60_000) === undefined);
 });

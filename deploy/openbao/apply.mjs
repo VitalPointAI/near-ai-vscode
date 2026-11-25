@@ -63,6 +63,13 @@ export function crlExpiry(site) {
  * officer comes only from the site file, never from a Keycloak group or a token claim.
  */
 export const ISSUER_ROLE = 'sterling-issuer-stepup';
+/**
+ * The limit on claiming computer places (D-26, G467): each session (one client address per person's session pod) may claim at most this many
+ * places under kv/data/site/status-index/device- per hour; binding a computer claims two, so five computers fit in one hour. A client over the
+ * limit is blocked from all requests for an hour, OpenBao counts it (vault.quota.rate_limit.violation, name computer-places) and audits it, and
+ * the alert rule ComputerPlaceClaimsLimited (deploy/values/prometheus-alerts.yaml) tells the security operators.
+ */
+export const COMPUTER_PLACES_QUOTA = Object.freeze({ name: 'computer-places', path: 'kv/data/site/status-index/device-', rate: 12, interval: 3600, block_interval: 3600 });
 const SITE_NAME = /^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$/;
 const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$/;
 /** The Transit key that signs the site's status lists. */
@@ -142,6 +149,11 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     { what: `kubernetes role ${CERT_MANAGER.role}`, read: `auth/kubernetes/role/${CERT_MANAGER.role}`, write: `auth/kubernetes/role/${CERT_MANAGER.role}`, body: {
       bound_service_account_names: [CERT_MANAGER.serviceAccount], bound_service_account_namespaces: [CERT_MANAGER.namespace], audience: CERT_MANAGER.audience,
       token_policies: ['cert-manager'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 300 } },
+    // D-26 (G467): at most COMPUTER_PLACES_QUOTA.rate computer place claims per session per hour, and rate limit violations in the audit log.
+    { what: `rate limit quota ${COMPUTER_PLACES_QUOTA.name}`, read: `sys/quotas/rate-limit/${COMPUTER_PLACES_QUOTA.name}`, write: `sys/quotas/rate-limit/${COMPUTER_PLACES_QUOTA.name}`,
+      body: { path: COMPUTER_PLACES_QUOTA.path, rate: COMPUTER_PLACES_QUOTA.rate, interval: COMPUTER_PLACES_QUOTA.interval, block_interval: COMPUTER_PLACES_QUOTA.block_interval } },
+    { what: 'quota audit logging', read: 'sys/quotas/config', write: 'sys/quotas/config', body: { enable_rate_limit_audit_logging: true },
+      compare: (current) => current?.enable_rate_limit_audit_logging === true },
     // The approvers of key moves between sites (key-move.hcl); members are added at the key ceremony and never by this script.
     { what: 'identity group key-custodians', read: 'identity/group/name/key-custodians', write: 'identity/group/name/key-custodians', body: { type: 'internal', policies: [] },
       compare: (group) => group?.type === 'internal' }

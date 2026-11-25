@@ -10,7 +10,7 @@ import { encodePublicKeyMultibase } from '../../domain/credentials/multibase';
 import { credentialHash, issueCredential } from '../../domain/credentials/profile';
 import { buildStatusList, listHash, signStatusList } from '../../domain/credentials/statusList';
 import type { IssuerDidState, IssuerPolicy } from '../../domain/credentials/issuerAuthority';
-import { buildGenesisEntry, verifyWebvhLog } from '../../domain/did/didWebvh';
+import { buildGenesisEntry, buildUpdateEntry, verifyWebvhLog } from '../../domain/did/didWebvh';
 import type { WebvhState } from '../../domain/did/didWebvh';
 import { deviceKey, policyDocumentFor } from './policyFixtures';
 
@@ -23,10 +23,14 @@ export function newKey(): Key {
   return { multikey, did, signer: { verificationMethod: `${did}#${multikey}`, suite: 'eddsa-jcs-2022', sign: async (bytes) => new Uint8Array(cryptoSign(null, bytes, privateKey)) } };
 }
 
-export interface Person { did: string; issuing: Key; method: string; state: WebvhState; signer: CredentialSigner; /** The did:webvh log, for a host that serves it. */ log: string }
+export interface Person {
+  did: string; issuing: Key; method: string; state: WebvhState; signer: CredentialSigner; /** The did:webvh log, for a host that serves it. */ log: string;
+  /** The DID's update key, for a later entry (the person's computer slots, D-25). */ update: Key;
+}
 
-function document(assertionKey: string): (did: string) => Record<string, unknown> {
+function document(assertionKey: string, service: (did: string) => Array<Record<string, string>> = () => []): (did: string) => Record<string, unknown> {
   return (did) => ({
+    ...(service(did).length === 0 ? {} : { service: service(did) }),
     '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'], id: did, controller: did,
     verificationMethod: [{ id: `${did}#issuing`, type: 'Multikey', controller: did, publicKeyMultibase: assertionKey }],
     authentication: [`${did}#issuing`], assertionMethod: [`${did}#issuing`]
@@ -39,7 +43,36 @@ export async function person(path: string[], issuing: Key = newKey()): Promise<P
   const result = verifyWebvhLog(genesis.line, { now: Date.UTC(2026, 10, 24) });
   if (!result.ok) throw new Error(result.reason);
   const method = `${genesis.did}#issuing`;
-  return { did: genesis.did, issuing, method, state: result.state, signer: { ...issuing.signer, verificationMethod: method }, log: `${genesis.line}\n` };
+  return { did: genesis.did, issuing, method, state: result.state, signer: { ...issuing.signer, verificationMethod: method }, log: `${genesis.line}\n`, update };
+}
+
+/** A computer slot of a person's DID document (D-25): the binding's device and its two status list places. */
+export interface ComputerSlotFixture { slot: number; device: string; revocation: number; suspension: number }
+
+/** The person's DID with one more entry whose document lists these computer slots (the service entries 71's computerSlots.ts reads). */
+export async function withComputers(p: Person, computers: readonly ComputerSlotFixture[], versionTime = '2026-02-01T00:00:00Z'): Promise<Person> {
+  const service = (did: string): Array<Record<string, string>> => computers.map((computer) => ({
+    id: `${did}#computer-${String(computer.slot)}`, type: 'SterlingComputerSlot',
+    serviceEndpoint: `urn:sterling:computer:${String(computer.revocation)}:${String(computer.suspension)}:${computer.device}`
+  }));
+  const entry = await buildUpdateEntry(p.state, { parameters: {}, versionTime, document: document(p.issuing.multikey, service) }, p.update.signer);
+  const log = `${p.log}${entry.line}\n`;
+  const result = verifyWebvhLog(log, { now: Date.UTC(2026, 10, 24) });
+  if (!result.ok) throw new Error(result.reason);
+  return { ...p, state: result.state, log };
+}
+
+/** A DeviceBindingCredential by `p` for `device` with these exact places (computer places start at 98,304, D-25). */
+export async function bindingWithPlaces(p: Person, device: string, revocation: number, suspension: number, fingerprint = `dev-${'b2'.repeat(16)}`): Promise<Issued> {
+  const credential = await issueCredential(p.signer, {
+    '@context': [...CREDENTIAL_CONTEXTS], type: ['VerifiableCredential', 'DeviceBindingCredential'], issuer: p.did,
+    validFrom: '2026-03-01T00:00:00Z', validUntil: '2027-03-01T00:00:00Z', credentialSubject: { id: device, device: fingerprint, class: 'managed' },
+    credentialStatus: [
+      { type: 'BitstringStatusListEntry', statusPurpose: 'revocation', statusListIndex: String(revocation), statusListCredential: REVOCATIONS },
+      { type: 'BitstringStatusListEntry', statusPurpose: 'suspension', statusListIndex: String(suspension), statusListCredential: SUSPENSIONS }
+    ]
+  }, 'eddsa-jcs-2022', { scales: SCALE_PRESETS });
+  return { credential, hash: credentialHash(credential), revocationIndex: revocation, suspensionIndex: suspension };
 }
 
 export const REVOCATIONS = 'https://hq.example.org/v1/trust/status/revocation-1';

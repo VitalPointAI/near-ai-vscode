@@ -1,6 +1,7 @@
 // The identity engine the workbench backend calls (Phase 71, 71-10 and 71-12): the same pure did:webvh, credential, status list and device-word code
 // the extension, the hub and the fold use, bundled by tools/build-engine.mjs into engine/identity.cjs and loaded by the backend on first use.
-export { buildGenesisEntry, methodsAt, verifyWebvhLog } from '../../src/domain/did/didWebvh';
+export { buildGenesisEntry, buildUpdateEntry, methodsAt, verifyWebvhLog } from '../../src/domain/did/didWebvh';
+export { COMPUTER_INDEX_FROM, computerSlotService } from '../../src/domain/credentials/computerSlots';
 export { decodePublicKeyMultibase, encodePublicKeyMultibase } from '../../src/domain/credentials/multibase';
 export { credentialHash, issueCredential, readCredential, verifyCredential } from '../../src/domain/credentials/profile';
 export { issuerAuthority } from '../../src/domain/credentials/issuerAuthority';

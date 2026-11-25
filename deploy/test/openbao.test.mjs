@@ -441,3 +441,16 @@ test('D-25: officers read people\'s computer slots and free one by removing it; 
   assert.equal(issuerAllows('list', `kv/metadata/site/device-slots/${ADA}/`), true);
   for (const capability of ['create', 'update', 'delete']) assert.equal(issuerAllows(capability, slot), false, capability);
 });
+
+test('D-26 (G467): OpenBao limits each session to a few computer place claims an hour, audits violations, and only on the computer places', async () => {
+  const { COMPUTER_PLACES_QUOTA, planApply } = await import('../openbao/apply.mjs');
+  const operations = planApply(loadSite(SITE_FILE));
+  const quota = operationAt(operations, `sys/quotas/rate-limit/${COMPUTER_PLACES_QUOTA.name}`)?.body;
+  assert.deepEqual(quota, { path: 'kv/data/site/status-index/device-', rate: 12, interval: 3600, block_interval: 3600 });
+  // Five computers (two places each) fit in one hour; officers' places (status-index/<purpose>-...) are outside the limited prefix.
+  assert.ok(quota.rate >= 2 * 5 && quota.rate < 4 * 5, 'room for five bindings, not for a sweep of the index space');
+  assert.ok(!'kv/data/site/status-index/revocation-revocation-1/4000'.startsWith(quota.path));
+  assert.ok('kv/data/site/status-index/device-revocation-revocation-1/120000'.startsWith(quota.path));
+  assert.ok(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/device-revocation-revocation-1/120000'), 'the quota covers the path a session may write');
+  assert.deepEqual(operationAt(operations, 'sys/quotas/config')?.body, { enable_rate_limit_audit_logging: true });
+});

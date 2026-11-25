@@ -20,11 +20,13 @@
 !src/domain/credentials/cacheState.ts
 !src/domain/credentials/clearance.ts
 !src/domain/credentials/clock.ts
+!src/domain/credentials/computerSlots.ts
 !src/domain/credentials/context.ts
 !src/domain/credentials/dataIntegrity.ts
 !src/domain/credentials/ecdsaJcs2019.ts
 !src/domain/credentials/evidence.ts
 !src/domain/credentials/freshness.ts
+!src/domain/credentials/issueForm.ts
 !src/domain/credentials/issuerAuthority.ts
 !src/domain/credentials/mayRelease.ts
 !src/domain/credentials/multibase.ts

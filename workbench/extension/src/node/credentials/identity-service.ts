@@ -30,13 +30,21 @@ import type { ActiveSession } from '../session-identity.js';
 /** The pure code the service runs, from engine/identity.cjs (tools/identity-entry.ts): the extension's own did:webvh and credential code. */
 export interface IdentityEngine {
   buildGenesisEntry(input: Record<string, unknown>, signer: EngineSigner): Promise<{ readonly did: string; readonly line: string }>;
-  verifyWebvhLog(log: string, options: { readonly now: number }): { readonly ok: boolean };
+  verifyWebvhLog(log: string, options: { readonly now: number }): { readonly ok: true; readonly state: EngineDidState } | { readonly ok: false };
+  buildUpdateEntry(state: EngineDidState, input: Record<string, unknown>, signer: EngineSigner): Promise<{ readonly line: string }>;
+  computerSlotService(did: string, slot: { readonly slot: number; readonly device: string; readonly revocation: number; readonly suspension: number }):
+  { readonly id: string; readonly type: string; readonly serviceEndpoint: string };
   encodePublicKeyMultibase(type: 'Ed25519', key: Uint8Array): string;
   issueCredential(signer: EngineSigner, unsigned: Record<string, unknown>, suite: 'eddsa-jcs-2022', options: { readonly scales: unknown }): Promise<Record<string, unknown>>;
   readonly CREDENTIAL_CONTEXTS: readonly string[];
   readonly SCALE_PRESETS: unknown;
   deviceIdentityWords(did: string): string[];
   deviceFingerprint(did: string): string;
+}
+
+/** A verified did:webvh state as the engine answers it: only its versions are read here. */
+export interface EngineDidState {
+  readonly versions: readonly { readonly versionTime: string; readonly document: Readonly<Record<string, unknown>> }[];
 }
 
 export interface EngineSigner {
@@ -267,7 +275,14 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     if (slots === undefined) return refused(IDENTITY_TEXT.noStatusLists);
     const key = await deps.keys.personPublicKey();
     if (key.kind !== 'ok') return key as ServiceResult<never>;
-    const from = now();
+    // D-26 (G467): the computer's slot goes into the person's own DID document before its binding is signed, so every verifier can count it and an
+    // officer can always see it. A slot that already lists this computer with these places is not written again.
+    let from = now();
+    if (slots.slot !== undefined) {
+      const listed = await listComputer(own, entity, engine, { slot: slots.slot, device: didKey, revocation: slots.revocation.index, suspension: slots.suspension.index }, key.value);
+      if (typeof listed !== 'number') return listed;
+      from = Math.max(from, listed);
+    }
     const entry = (purpose: string, slot: StatusSlot): Record<string, unknown> => ({
       type: 'BitstringStatusListEntry', statusPurpose: purpose, statusListIndex: String(slot.index), statusListCredential: slot.list,
     });
@@ -284,6 +299,35 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
       throw error;
     }
     return ok({ fileName: `computer-${engine.deviceFingerprint(didKey).slice(4, 12)}.near-vc`, text: `${JSON.stringify(credential, null, 2)}\n` });
+  }
+
+  /**
+   * Adds (or replaces) the person's computer slot service in their DID document with one log entry signed by their person key (the step-up), keeps
+   * the longer log under their own prefix with published false so the next hub session posts it, and answers the version's time (ms).
+   */
+  async function listComputer(own: OwnRecord, entity: string, engine: IdentityEngine, slot: { slot: number; device: string; revocation: number; suspension: number },
+    key: { readonly publicKey: string; readonly keyVersion: number }): Promise<number | ServiceResult<never>> {
+    const verified = engine.verifyWebvhLog(own.log, { now: now() });
+    if (!verified.ok) return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
+    const last = verified.state.versions[verified.state.versions.length - 1];
+    if (last === undefined) return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
+    const service = engine.computerSlotService(own.did, slot);
+    const current = Array.isArray(last.document.service) ? (last.document.service as Array<Record<string, unknown>>) : [];
+    if (current.some((entry) => entry.id === service.id && entry.type === service.type && entry.serviceEndpoint === service.serviceEndpoint)) return Date.parse(last.versionTime);
+    const document = { ...last.document, service: [...current.filter((entry) => entry.id !== service.id), service] };
+    const time = Math.max(Math.floor(now() / 1000) * 1000, Date.parse(last.versionTime) + 1000);
+    const multikey = engine.encodePublicKeyMultibase('Ed25519', new Uint8Array(Buffer.from(key.publicKey, 'base64url')));
+    let line: string;
+    try {
+      ({ line } = await engine.buildUpdateEntry(verified.state, { parameters: {}, versionTime: iso(time), document: () => document }, signerFor(`did:key:${multikey}#${multikey}`, key.keyVersion)));
+    } catch (error) {
+      if (error instanceof SignRefused) return error.result;
+      throw error;
+    }
+    const log = `${own.log}${line}\n`;
+    if (!engine.verifyWebvhLog(log, { now: now() }).ok) return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
+    await deps.kv.write(ownRecordPath(entity), { format: PERSON_DID_FORMAT, did: own.did, path: own.path, log, published: false });
+    return time;
   }
 
   async function collectInbox(check: InboxCheck): Promise<InboxResult> {
