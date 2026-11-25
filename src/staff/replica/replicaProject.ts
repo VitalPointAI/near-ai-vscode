@@ -164,6 +164,8 @@ export interface AppendOwnOptions {
   stream?: string;
   /** Entries this one depends on, by hash; each must be in the store. */
   deps?: readonly string[];
+  /** A blob already sealed to the cited cell and epoch, stored with this entry after the write check. */
+  contentBlob?: SealedBlob;
   /** The roster cited; the roster head when absent. */
   roster?: string;
   actor?: Actor;
@@ -1141,7 +1143,12 @@ export class ReplicaProject {
       signer, key, stream, seq: head === undefined ? 0 : head.seq + 1, prev: head?.hash ?? GENESIS_PREV, epoch,
       body: { deps, roster: cited, lamport, at: options.at ?? this.now().toISOString(), actor: options.actor ?? { kind: 'person' }, kind, data: body }
     });
-    return 'entry' in built ? built : refuse('signer-refused', built.refused);
+    if (!('entry' in built)) return refuse('signer-refused', built.refused);
+    if (options.contentBlob !== undefined) {
+      if (openBlob(key, stream, epoch, options.contentBlob) === undefined) return refuse('store-refused');
+      built.blobs.push(options.contentBlob);
+    }
+    return built;
   }
 }
 

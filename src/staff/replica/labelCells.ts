@@ -396,7 +396,7 @@ export interface ProposeInput {
 /**
  * Proposes a version of a product in its cell (D-17, D-18): refused label-change when the header's label (read whole: scale, level, compartments and
  * releasability; org/Internal when none) is not the cell's (headerNamesCell), pin-above-cell when the fold would refuse a pin, and as
- * appendProductEntry. The text and header are sealed under the cell's current epoch key into a blob, stored, and version.propose cites the deps given
+ * appendProductEntry. The text and header are sealed under the cell's current epoch key into a blob stored with version.propose, which cites the deps given
  * and each pinned version entry.
  */
 export async function proposeVersion(shared: SharedProjectHost, input: ProposeInput): Promise<ProposeResult> {
@@ -416,13 +416,11 @@ export async function proposeVersion(shared: SharedProjectHost, input: ProposeIn
   const plain = canonicalBytes({ text: input.text, header: input.header });
   if (plain.length + SEALED_OVERHEAD > MAX_STATE_BYTES) return refuse('version-too-large');
   const blob = sealBlob(key, target.stream, epoch, plain);
-  const stored = await project.ingestForeign([], [blob]);
-  if (isProjectRefused(stored)) return { ok: false, reason: stored.refused, message: stored.message };
   const deps = [...new Set([...(input.deps ?? []), ...pinnedEntries(target.fold, pins)])];
   const version = replicaVersionHash(input.text, pins);
   const snapshot = typeof input.snapshot === 'string' ? input.snapshot : Buffer.from(input.snapshot).toString('base64url');
   const written = await project.appendOwn('version.propose', { product: input.product, hash: version, textBlob: blob.hash, snapshot, pins }, {
-    stream: target.stream, roster: head.hash, ...(deps.length === 0 ? {} : { deps }), ...(input.actor === undefined ? {} : { actor: input.actor })
+    stream: target.stream, roster: head.hash, contentBlob: blob, ...(deps.length === 0 ? {} : { deps }), ...(input.actor === undefined ? {} : { actor: input.actor })
   });
   if (isProjectRefused(written)) return { ok: false, reason: written.refused, message: written.message };
   return { ok: true, hash: written.hash, stream: target.stream, version, deps };

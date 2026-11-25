@@ -241,18 +241,17 @@ function fakeProject(fixture: ReturnType<typeof compactionWorld>, rosterHead = f
     context: () => context,
     state: async () => ({ roster, fold: foldEntries(world.entries, context) }),
     entriesAfter: async (stream: string, from: string, seq: number) => world.entries.filter((entry) => entry.header.stream === stream && entry.header.writer === from && entry.header.seq > seq),
-    ingestForeign: async (_entries: readonly unknown[], blobs: readonly SealedBlob[]) => {
-      for (const blob of blobs) world.blobs.set(blob.hash, blob);
-      return { added: 0, held: [] };
-    },
     appendChecked: async (prepare: (state: { roster: RosterState; fold: FoldResult }) => unknown) => {
       before?.();
       before = undefined;
-      const write = prepare({ roster, fold: foldEntries(world.entries, context) }) as { ok: false } | { kind: string; data: unknown; check: (fold: FoldResult, hash: string) => unknown };
+      const write = prepare({ roster, fold: foldEntries(world.entries, context) }) as { ok: false } | { kind: string; data: unknown; options: { contentBlob?: SealedBlob }; check: (fold: FoldResult, hash: string) => unknown };
       if ('ok' in write) return write;
       const written = world.write('test-writer', { kind: write.kind, data: write.data });
-      const refused = write.check(foldEntries(world.entries, context), written.hash);
+      const blob = write.options.contentBlob;
+      const preview = blob === undefined ? context : { ...context, blobs: (hash: string) => hash === blob.hash ? blob : context.blobs(hash) };
+      const refused = write.check(foldEntries(world.entries, preview), written.hash);
       if (refused !== undefined) { world.entries.pop(); return refused; }
+      if (blob !== undefined) world.blobs.set(blob.hash, blob);
       appended.push(written.hash);
       return { ok: true, hash: written.hash, built: { entry: written.entry, hash: written.hash, blobs: [] } };
     }
@@ -297,6 +296,7 @@ test('a moved roster or a compaction the fold refuses writes nothing', async () 
   const prepared = await prepareCompaction(fixture.input);
   assert.ok(prepared);
   const count = fixture.world.entries.length;
+  const blobsBefore = fixture.world.blobs.size;
   const moved = fakeProject(fixture, 'f'.repeat(64));
   assert.deepEqual(await publishCompaction(moved.project, prepared), { ok: false, reason: 'stale', message: COMPACTION_REFUSALS.stale });
   const wrong = { ...prepared, payload: { ...prepared.payload, textHash: '0'.repeat(64) } };
@@ -304,6 +304,7 @@ test('a moved roster or a compaction the fold refuses writes nothing', async () 
   assert.deepEqual(await publishCompaction(project, wrong), { ok: false, reason: 'refused', message: COMPACTION_REFUSALS.refused });
   assert.deepEqual(appended, []);
   assert.equal(fixture.world.entries.length, count);
+  assert.equal(fixture.world.blobs.size, blobsBefore, 'a refused summary never stores its blob');
 });
 
 test('compactAfterCheckpoint compacts each due product from the checkpointed prefix, and nothing when the window is not reached', async () => {
