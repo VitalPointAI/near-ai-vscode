@@ -6,24 +6,35 @@
 //   { v: 1, systemHigh?: [label], thresholds: { 'scale/level': { costRatio, recallTarget, secondFamily } }, shadow: { defaultMode, levels },
 //     roles: [{ passport, role, levels, evaluation, since }], review: { jumpLevels, topLevel, lowerRequestAgeDays }, markings: [{ id, pattern, label }] }
 // `recallTarget` is in basis points (9800 is a recall of 0.98): a policy holds no fractions (Phase 41 D-08), so the arithmetic stays exact. Nothing here
-// ships a threshold as a value: a level with no entry has no automatic model raise (D-07). codeWords, factTypes, guideRules and compilationRules are keys
-// of this section that 70.1-03 parses; until then a section that holds one is refused as not available yet.
+// ships a threshold as a value: a level with no entry has no automatic model raise (D-07).
+// Your organization's guide as signed rules (D-16, D-18, 70.1-03): `factTypes` adds to the shipped base vocabulary; `codeWords` is
+// { listLabel, entries: [{ id, token, label }] }, the list labelled at its own level; `guideRules` and `compilationRules` are
+// [{ id, guideRef, label, description, when: { allOf, sameSubject }, then }], where `label` is the label of the rule's own text and `then` is a label v1
+// (owner-confirmed shape, 2026-11-25). Rule ids are unique across both lists. Guide text itself is never in the bundle.
 // Marking patterns are literal words matched at word boundaries, never regular expressions, so a policy cannot inject one (T-70.1-04).
 import { HEX_64, parseSetList } from './bundle';
-import { labelKey, levelIndex, parseLabel, splitLabelKey } from './labels';
+import { LABEL_TOKEN_PATTERN, labelKey, levelIndex, parseLabel, splitLabelKey } from './labels';
 import type { Label, ScaleTable } from './labels';
 import { PASSPORT_ID_PATTERN } from './models';
 import { openSection } from './sections';
 import { checkKeys, childPath, isRecord, isSafeIntegerInRange, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 
-/** Every key the section may hold, in the order POLICY-SCHEMA lists them (D-16). The last four are parsed by 70.1-03. */
+/** Every key the section may hold, in the order POLICY-SCHEMA lists them (D-16). */
 export const CLASSIFICATION_SECTION_KEYS = Object.freeze([
   'systemHigh', 'thresholds', 'shadow', 'roles', 'review', 'markings', 'codeWords', 'factTypes', 'guideRules', 'compilationRules'
 ] as const);
 
-/** The keys 70.1-03 adds to the parser. A section that holds one before then is refused, never read in part. */
-const LATER_KEYS = Object.freeze(['codeWords', 'factTypes', 'guideRules', 'compilationRules'] as const);
+/**
+ * The shipped fact types (D-18): what a fact about content may be. A fact holds its type and an opaque subject key, never the value. `factTypes` in the
+ * section adds to this list; an addition may not repeat a base type.
+ */
+export const BASE_FACT_TYPES = Object.freeze([
+  'unit', 'location', 'date', 'future-date', 'capability', 'operation', 'named-person', 'codeword', 'marking', 'controlled-item', 'hidden-instruction'
+] as const);
+
+/** A fact type: lowercase letters and digits with `-` between, at most 48 characters. */
+export const FACT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,47}$/;
 
 export const SHADOW_MODES = Object.freeze(['shadow', 'enforce'] as const);
 export type ShadowMode = (typeof SHADOW_MODES)[number];
@@ -78,13 +89,26 @@ export interface MarkingPattern {
   readonly label: Label;
 }
 
-/** The facts a rule needs (70.1-03 parses these). Fact types only, never values. */
+/** The facts a rule needs: every type in `allOf`, and with `sameSubject` all on one subject. Fact types only, never values. */
 export interface FactPattern {
   readonly allOf: readonly string[];
-  readonly sameSubject?: boolean;
+  readonly sameSubject: boolean;
 }
 
-/** A guide or compilation rule (70.1-03 parses these). `label` is the label of the rule's own text; `then` holds only label fields. */
+/** A code word on your organization's list: the token found in content, and the label it implies. The ref a floor names is the entry id. */
+export interface CodeWord {
+  readonly id: string;
+  readonly token: string;
+  readonly label: Label;
+}
+
+export interface CodeWords {
+  /** The label of the list itself: a code-word list is often classified. */
+  readonly listLabel: Label;
+  readonly entries: readonly CodeWord[];
+}
+
+/** A guide or compilation rule. `label` is the label of the rule's own text; `then` is the label the rule implies. */
 export interface ClassificationRule {
   readonly id: string;
   readonly guideRef: string;
@@ -103,6 +127,11 @@ export interface ClassificationSection {
   readonly roles: readonly RoleEntry[];
   readonly review: ReviewSettings;
   readonly markings: readonly MarkingPattern[];
+  readonly codeWords?: CodeWords;
+  /** Additions to BASE_FACT_TYPES, sorted. */
+  readonly factTypes: readonly string[];
+  readonly guideRules: readonly ClassificationRule[];
+  readonly compilationRules: readonly ClassificationRule[];
 }
 
 export const REVIEW_DEFAULTS: ReviewSettings = Object.freeze({ jumpLevels: 1, topLevel: true, lowerRequestAgeDays: 7 });
@@ -114,6 +143,14 @@ const MAX_COST_RATIO = 1_000_000;
 const MAX_JUMP_LEVELS = 16;
 const MAX_REQUEST_AGE_DAYS = 90;
 const MAX_PATTERN = 64;
+const MAX_RULES = 512;
+const MAX_CODE_WORDS = 512;
+const MAX_FACT_TYPES = 64;
+const MAX_ALL_OF = 16;
+const MAX_DESCRIPTION = 280;
+const MAX_GUIDE_REF = 64;
+const LINE_BREAK = /[\r\n\u2028\u2029]/;
+const CONTROL = /[\u0000-\u001F\u007F]/;
 /** An id a record or a basis may name: lowercase letters, digits and `.`, `_`, `-`, at most 64 characters. */
 export const SECTION_ENTRY_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 /** Letters (any script) and digits, single spaces, `-` and `/` between them. No regular-expression syntax has any meaning here. */
@@ -250,21 +287,120 @@ function optional<T>(opened: Fields, key: string, fallback: T, parse: (value: un
   return Object.prototype.hasOwnProperty.call(opened, key) ? parse(ownValue(opened, key)) : { ok: true, value: fallback };
 }
 
-function laterKey(opened: Fields, path: string): Refusal | undefined {
-  const found = LATER_KEYS.find((key) => Object.prototype.hasOwnProperty.call(opened, key));
-  return found === undefined ? undefined : refused('not-available-yet', childPath(path, found));
+function parseFactTypes(value: unknown, path: string): Parsed<readonly string[]> {
+  if (!Array.isArray(value) || value.length > MAX_FACT_TYPES) return refused('wrong-type', path);
+  for (let index = 0; index < value.length; index += 1) {
+    const entry: unknown = value[index];
+    const where = `${path}[${String(index)}]`;
+    if (typeof entry !== 'string' || !FACT_TYPE_PATTERN.test(entry)) return refused('wrong-type', where);
+    if ((BASE_FACT_TYPES as readonly string[]).includes(entry)) return refused('duplicate', where);
+    if (index > 0) {
+      const before = value[index - 1] as string;
+      if (entry === before) return refused('duplicate', where);
+      if (entry < before) return refused('not-sorted', where);
+    }
+  }
+  return { ok: true, value: Object.freeze([...(value as string[])]) };
+}
+
+function parseCodeWord(value: unknown, scales: ScaleTable, path: string): Parsed<CodeWord> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['id', 'token', 'label']);
+  if (keys !== undefined) return keys;
+  const id = ownValue(value, 'id');
+  if (typeof id !== 'string' || !SECTION_ENTRY_ID.test(id)) return refused('wrong-type', childPath(path, 'id'));
+  const token = ownValue(value, 'token');
+  if (typeof token !== 'string' || !LABEL_TOKEN_PATTERN.test(token)) return refused('wrong-type', childPath(path, 'token'));
+  const label = parseLabel(ownValue(value, 'label'), scales, childPath(path, 'label'));
+  if (!label.ok) return label;
+  return { ok: true, value: Object.freeze({ id, token, label: label.value }) };
+}
+
+function parseCodeWords(value: unknown, scales: ScaleTable, path: string): Parsed<CodeWords> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['listLabel', 'entries']);
+  if (keys !== undefined) return keys;
+  const listLabel = parseLabel(ownValue(value, 'listLabel'), scales, childPath(path, 'listLabel'));
+  if (!listLabel.ok) return listLabel;
+  const entries = parseSetList(ownValue(value, 'entries'), childPath(path, 'entries'), MAX_CODE_WORDS, (item, where) => parseCodeWord(item, scales, where), (entry) => entry.id);
+  if (!entries.ok) return entries;
+  const tokens = new Set<string>();
+  for (let index = 0; index < entries.value.length; index += 1) {
+    const token = (entries.value[index] as CodeWord).token;
+    if (tokens.has(token)) return refused('duplicate', `${childPath(path, 'entries')}[${String(index)}].token`);
+    tokens.add(token);
+  }
+  return { ok: true, value: Object.freeze({ listLabel: listLabel.value, entries: entries.value }) };
+}
+
+function plainText(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= max && !LINE_BREAK.test(value) && !CONTROL.test(value) && value.trim() === value;
+}
+
+function parseWhen(value: unknown, factTypes: readonly string[], path: string): Parsed<FactPattern> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['allOf'], ['sameSubject']);
+  if (keys !== undefined) return keys;
+  const known = (type: string): boolean => (BASE_FACT_TYPES as readonly string[]).includes(type) || factTypes.includes(type);
+  const allOf = ownValue(value, 'allOf');
+  const allOfPath = childPath(path, 'allOf');
+  if (!Array.isArray(allOf) || allOf.length > MAX_ALL_OF) return refused('wrong-type', allOfPath);
+  if (allOf.length === 0) return refused('empty-list', allOfPath);
+  for (let index = 0; index < allOf.length; index += 1) {
+    const entry: unknown = allOf[index];
+    const where = `${allOfPath}[${String(index)}]`;
+    if (typeof entry !== 'string') return refused('wrong-type', where);
+    if (!known(entry)) return refused('not-allowed-here', where);
+    if (index > 0) {
+      const before = allOf[index - 1] as string;
+      if (entry === before) return refused('duplicate', where);
+      if (entry < before) return refused('not-sorted', where);
+    }
+  }
+  const sameSubject = Object.prototype.hasOwnProperty.call(value, 'sameSubject') ? ownValue(value, 'sameSubject') : false;
+  if (typeof sameSubject !== 'boolean') return refused('wrong-type', childPath(path, 'sameSubject'));
+  return { ok: true, value: Object.freeze({ allOf: Object.freeze([...(allOf as string[])]), sameSubject }) };
+}
+
+function parseRule(value: unknown, scales: ScaleTable, factTypes: readonly string[], path: string): Parsed<ClassificationRule> {
+  if (!isRecord(value)) return refused('wrong-type', path);
+  const keys = checkKeys(value, path, ['id', 'guideRef', 'label', 'description', 'when', 'then']);
+  if (keys !== undefined) return keys;
+  const id = ownValue(value, 'id');
+  if (typeof id !== 'string' || !SECTION_ENTRY_ID.test(id)) return refused('wrong-type', childPath(path, 'id'));
+  const guideRef = ownValue(value, 'guideRef');
+  if (!plainText(guideRef, MAX_GUIDE_REF)) return refused('wrong-type', childPath(path, 'guideRef'));
+  const label = parseLabel(ownValue(value, 'label'), scales, childPath(path, 'label'));
+  if (!label.ok) return label;
+  const description = ownValue(value, 'description');
+  if (!plainText(description, MAX_DESCRIPTION)) return refused('wrong-type', childPath(path, 'description'));
+  const when = parseWhen(ownValue(value, 'when'), factTypes, childPath(path, 'when'));
+  if (!when.ok) return when;
+  const then = parseLabel(ownValue(value, 'then'), scales, childPath(path, 'then'));
+  if (!then.ok) return then;
+  return { ok: true, value: Object.freeze({ id, guideRef, label: label.value, description, when: when.value, then: then.value }) };
+}
+
+function parseRules(value: unknown, scales: ScaleTable, factTypes: readonly string[], path: string): Parsed<readonly ClassificationRule[]> {
+  return parseSetList(value, path, MAX_RULES, (item, where) => parseRule(item, scales, factTypes, where), (entry) => entry.id);
+}
+
+/** Rule ids are unique across guide and compilation rules, and there are at most 512 rules in all. */
+function checkRuleIds(guide: readonly ClassificationRule[], compilation: readonly ClassificationRule[], path: string): Refusal | undefined {
+  if (guide.length + compilation.length > MAX_RULES) return refused('not-allowed-here', childPath(path, 'compilationRules'));
+  const ids = new Set(guide.map((entry) => entry.id));
+  const clash = compilation.findIndex((entry) => ids.has(entry.id));
+  return clash < 0 ? undefined : refused('duplicate', `${childPath(path, 'compilationRules')}[${String(clash)}]`);
 }
 
 /**
  * Parses the section against the policy's scales. Defaults are filled (shadow mode by default, no level in enforce, no role, the review defaults, no
- * marking), so a parsed section is its own wire form; `systemHigh` stays absent when absent. One plain reason per problem, as every Phase 41 section.
+ * marking, fact type or rule), so a parsed section is its own wire form; `systemHigh` and `codeWords` stay absent when absent. One plain reason per problem, as every Phase 41 section.
  */
 export function parseClassificationSection(value: unknown, scales: ScaleTable, path = 'classification'): Parsed<ClassificationSection> {
   const section = openSection(value, path, [], CLASSIFICATION_SECTION_KEYS);
   if (!section.ok) return section;
   const opened = section.value;
-  const later = laterKey(opened, path);
-  if (later !== undefined) return later;
   const out: Record<string, unknown> = { v: 1 };
   if (Object.prototype.hasOwnProperty.call(opened, 'systemHigh')) {
     const systemHigh = parseSystemHigh(ownValue(opened, 'systemHigh'), scales, childPath(path, 'systemHigh'));
@@ -292,6 +428,24 @@ export function parseClassificationSection(value: unknown, scales: ScaleTable, p
   ));
   if (!markings.ok) return markings;
   out['markings'] = markings.value;
+  if (Object.prototype.hasOwnProperty.call(opened, 'codeWords')) {
+    const codeWords = parseCodeWords(ownValue(opened, 'codeWords'), scales, childPath(path, 'codeWords'));
+    if (!codeWords.ok) return codeWords;
+    out['codeWords'] = codeWords.value;
+  }
+  const factTypes = optional(opened, 'factTypes', Object.freeze([]) as readonly string[], (item) => parseFactTypes(item, childPath(path, 'factTypes')));
+  if (!factTypes.ok) return factTypes;
+  out['factTypes'] = factTypes.value;
+  const guideRules = optional(opened, 'guideRules', Object.freeze([]) as readonly ClassificationRule[],
+    (item) => parseRules(item, scales, factTypes.value, childPath(path, 'guideRules')));
+  if (!guideRules.ok) return guideRules;
+  out['guideRules'] = guideRules.value;
+  const compilationRules = optional(opened, 'compilationRules', Object.freeze([]) as readonly ClassificationRule[],
+    (item) => parseRules(item, scales, factTypes.value, childPath(path, 'compilationRules')));
+  if (!compilationRules.ok) return compilationRules;
+  out['compilationRules'] = compilationRules.value;
+  const clash = checkRuleIds(guideRules.value, compilationRules.value, path);
+  if (clash !== undefined) return clash;
   return { ok: true, value: Object.freeze(out) as unknown as ClassificationSection };
 }
 

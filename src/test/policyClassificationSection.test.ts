@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { CLASSIFICATION_SECTION_KEYS, REVIEW_DEFAULTS, parseClassificationSection } from '../domain/gate/classificationSection';
+import { BASE_FACT_TYPES, CLASSIFICATION_SECTION_KEYS, REVIEW_DEFAULTS, parseClassificationSection } from '../domain/gate/classificationSection';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 
@@ -48,7 +48,7 @@ test('a full section parses, frozen, and is its own wire form; the key list is D
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
   if (!parsed.ok) return;
   assert.ok(Object.isFrozen(parsed.value) && Object.isFrozen(parsed.value.thresholds) && Object.isFrozen(parsed.value.roles[0]));
-  assert.deepEqual(parsed.value, section());
+  assert.deepEqual(parsed.value, { ...section(), factTypes: [], guideRules: [], compilationRules: [] }, 'the 70.1-03 lists are filled empty');
   assert.deepEqual(parseClassificationSection(JSON.parse(JSON.stringify(parsed.value)), SCALE_PRESETS), parsed);
 });
 
@@ -56,8 +56,9 @@ test('the smallest section is { v: 1 }: defaults are filled, and there is no sys
   const parsed = parseClassificationSection({ v: 1 }, SCALE_PRESETS);
   assert.ok(parsed.ok);
   if (!parsed.ok) return;
-  assert.deepEqual(parsed.value, { v: 1, thresholds: {}, shadow: { defaultMode: 'shadow', levels: [] }, roles: [], review: REVIEW_DEFAULTS, markings: [] });
+  assert.deepEqual(parsed.value, { v: 1, thresholds: {}, shadow: { defaultMode: 'shadow', levels: [] }, roles: [], review: REVIEW_DEFAULTS, markings: [], factTypes: [], guideRules: [], compilationRules: [] });
   assert.equal(Object.prototype.hasOwnProperty.call(parsed.value, 'systemHigh'), false, 'absent stays absent: no possible-spill outcome');
+  assert.equal(Object.prototype.hasOwnProperty.call(parsed.value, 'codeWords'), false, 'no code-word list unless one is given');
   assert.deepEqual(REVIEW_DEFAULTS, { jumpLevels: 1, topLevel: true, lowerRequestAgeDays: 7 });
   const partial = parseClassificationSection({ v: 1, review: { jumpLevels: 2 } }, SCALE_PRESETS);
   assert.ok(partial.ok);
@@ -154,10 +155,105 @@ test('roles: a known role, at least one level that has a threshold, an evaluatio
   assert.equal(reasonOf(edited((s) => { s.roles = [s.roles[0], { ...s.roles[0] }]; })), 'duplicate classification.roles[1]');
 });
 
-test('an unknown key and a newer section version are refused; the keys 70.1-03 parses are not available yet', () => {
+test('an unknown key and a newer section version are refused', () => {
   assert.equal(reasonOf(edited((s) => { s.autoLower = true; })), 'unknown-field classification.autoLower');
   assert.equal(reasonOf(edited((s) => { s.v = 2; s.newKey = 1; })), 'unknown-version classification.v');
-  for (const key of ['codeWords', 'factTypes', 'guideRules', 'compilationRules']) {
-    assert.equal(reasonOf(edited((s) => { s[key] = []; })), `not-available-yet classification.${key}`, key);
-  }
+});
+
+// ---- 70.1-03: guide rules, compilation rules, code words and fact types (D-16, D-18) ----
+
+function guideRule(extra: Loose = {}): Loose {
+  return {
+    id: 'scg-4.2', guideRef: 'SCG 4.2', label: label('ca-classified', 'Confidential'), description: 'A unit with its location and a future move date',
+    when: { allOf: ['future-date', 'location', 'unit'], sameSubject: true }, then: label('ca-classified', 'Secret'), ...extra
+  };
+}
+
+function withRules(edit: (value: Loose) => void = () => undefined): Loose {
+  return edited((s) => {
+    s.guideRules = [guideRule()];
+    s.compilationRules = [guideRule({ id: 'comp-1', guideRef: 'SCG 9.1', description: 'A unit, a location and a future date across a session', when: { allOf: ['future-date', 'location', 'unit'] } })];
+    s.codeWords = { listLabel: label('ca-classified', 'Secret'), entries: [{ id: 'cw-1', token: 'NORTHERNEXAMPLE', label: label('ca-classified', 'Secret') }] };
+    s.factTypes = ['convoy-route'];
+    edit(s);
+  });
+}
+
+test('70.1-03: a guide rule, a compilation rule, a code-word list and an added fact type parse, frozen, with sameSubject filled', () => {
+  const parsed = parseClassificationSection(withRules(), SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value.guideRules[0]?.when.sameSubject, true);
+  assert.equal(parsed.value.compilationRules[0]?.when.sameSubject, false, 'filled');
+  assert.equal(parsed.value.codeWords?.entries[0]?.token, 'NORTHERNEXAMPLE');
+  assert.deepEqual(parsed.value.factTypes, ['convoy-route']);
+  assert.ok(Object.isFrozen(parsed.value.guideRules[0]) && Object.isFrozen(parsed.value.codeWords));
+  assert.deepEqual(parseClassificationSection(JSON.parse(JSON.stringify(parsed.value)), SCALE_PRESETS), parsed);
+  assert.deepEqual([...BASE_FACT_TYPES], ['unit', 'location', 'date', 'future-date', 'capability', 'operation', 'named-person', 'codeword', 'marking', 'controlled-item', 'hidden-instruction']);
+});
+
+test('70.1-03: allOf names known fact types only (the base list and the section\'s own), sorted, not empty', () => {
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].when.allOf = ['unit', 'weather']; })), 'not-allowed-here classification.guideRules[0].when.allOf[1]');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].when.allOf = ['convoy-route', 'unit']; })), 'ok', 'an added type');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].when.allOf = []; })), 'empty-list classification.guideRules[0].when.allOf');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].when.allOf = ['unit', 'location']; })), 'not-sorted classification.guideRules[0].when.allOf[1]');
+});
+
+test('70.1-03: then is a label v1 on the policy\'s scales; any other key or an unknown level is refused', () => {
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].then.clearance = 'Secret'; })), 'unknown-field classification.guideRules[0].then.clearance');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].then.level = 'Protected B'; })), 'not-allowed-here classification.guideRules[0].then.level');
+  assert.equal(reasonOf(withRules((s) => { delete s.guideRules[0].then.handling; })), 'missing-field classification.guideRules[0].then.handling');
+});
+
+test('70.1-03: a description is at most 280 characters of one line, and a guide reference one short line', () => {
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].description = 'd'.repeat(281); })), 'wrong-type classification.guideRules[0].description');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].description = 'd'.repeat(280); })), 'ok');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].description = 'first line\nsecond line'; })), 'wrong-type classification.guideRules[0].description');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules[0].guideRef = ''; })), 'wrong-type classification.guideRules[0].guideRef');
+});
+
+test('70.1-03: one id across guide and compilation rules, sorted within each list, at most 512 rules', () => {
+  assert.equal(reasonOf(withRules((s) => { s.compilationRules[0].id = 'scg-4.2'; })), 'duplicate classification.compilationRules[0]');
+  assert.equal(reasonOf(withRules((s) => { s.guideRules = [guideRule({ id: 'scg-5' }), guideRule()]; })), 'not-sorted classification.guideRules[1]');
+  const many = Array.from({ length: 300 }, (_, index) => guideRule({ id: `rule-${String(index).padStart(3, '0')}` }));
+  const more = Array.from({ length: 213 }, (_, index) => guideRule({ id: `comp-${String(index).padStart(3, '0')}` }));
+  assert.equal(reasonOf(edited((s) => { s.guideRules = many; s.compilationRules = more; })), 'not-allowed-here classification.compilationRules');
+  assert.equal(reasonOf(edited((s) => { s.guideRules = many; s.compilationRules = more.slice(1); })), 'ok', '512 in all');
+});
+
+test('70.1-03: a code word is a label token with its label, the list has its own label, and one token is listed once', () => {
+  assert.equal(reasonOf(withRules((s) => { s.codeWords.entries[0].token = 'northern example'; })), 'wrong-type classification.codeWords.entries[0].token');
+  assert.equal(reasonOf(withRules((s) => { delete s.codeWords.listLabel; })), 'missing-field classification.codeWords.listLabel');
+  assert.equal(reasonOf(withRules((s) => { s.codeWords.entries.push({ id: 'cw-2', token: 'NORTHERNEXAMPLE', label: label('ca-classified', 'Secret') }); })), 'duplicate classification.codeWords.entries[1].token');
+});
+
+test('70.1-03: an added fact type may not repeat a base type and is a lowercase token', () => {
+  assert.equal(reasonOf(withRules((s) => { s.factTypes = ['unit']; })), 'duplicate classification.factTypes[0]');
+  assert.equal(reasonOf(withRules((s) => { s.factTypes = ['Convoy']; })), 'wrong-type classification.factTypes[0]');
+  assert.equal(reasonOf(withRules((s) => { s.factTypes = ['convoy-route', 'convoy-route']; })), 'duplicate classification.factTypes[1]');
+});
+
+test('70.1-03: a document with every key of the section parses through the policy reader', () => {
+  const parsed = parseClassificationSection(withRules((s) => { s.roles = []; }), SCALE_PRESETS);
+  assert.ok(parsed.ok);
+  if (parsed.ok) for (const key of CLASSIFICATION_SECTION_KEYS) assert.ok(Object.prototype.hasOwnProperty.call(parsed.value, key), key);
+});
+
+test('70.1-03: Show Policy lists the section in plain words: counts, the system-high and the mode, never a rule description or a code word', async () => {
+  const { policySections, CLASSIFICATION_ROWS_TEXT } = await import('../domain/gate/proposal');
+  const { parsePolicyDocument } = await import('../domain/gate/policyDocument');
+  const { deviceKey, policyDocumentFor } = await import('./helpers/policyFixtures');
+  const doc = JSON.parse(JSON.stringify(policyDocumentFor({ key: deviceKey() }))) as Loose;
+  doc.classification = withRules();
+  doc.requires = [...doc.requires, 'classification@1'].sort();
+  const parsed = parsePolicyDocument(doc);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  if (!parsed.ok) return;
+  const rows = policySections(parsed.value).find((view) => view.id === 'labels')?.rows ?? [];
+  const byName = new Map(rows.map((entry) => [entry.name, entry.value]));
+  assert.equal(byName.get(CLASSIFICATION_ROWS_TEXT.rules), "1 rule from your organization's guide, 1 combination rule, 1 marking, 1 code word");
+  assert.match(byName.get(CLASSIFICATION_ROWS_TEXT.systemHigh) ?? '', /Secret/);
+  assert.match(byName.get(CLASSIFICATION_ROWS_TEXT.assistant) ?? '', /^Trial: it only suggests, except at .*Protected B/);
+  const text = JSON.stringify(rows);
+  assert.ok(!text.includes('NORTHERNEXAMPLE') && !text.includes('future move date'), 'no code word and no rule text');
 });
