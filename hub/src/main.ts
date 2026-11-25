@@ -195,6 +195,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     store,
     cache,
     now,
+    underReview: (project, member) => trust.underReview(project, member, now()),
     ...(parts.deadlineMs === undefined ? {} : { deadlineMs: parts.deadlineMs }),
     ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
   });
@@ -211,8 +212,16 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onJoinLog === undefined ? {} : { log: parts.onJoinLog }),
   });
   join.start(parts.scheduler ?? realScheduler);
+  // A newer list that sets a bit a member's entries cited ends that member's event streams at once; their next call is refused by the session.
+  const endRefused = (): void => {
+    events.end((owner) => {
+      const member = cache.peek(owner.project)?.view.deviceKey(owner.writer)?.member;
+      return member !== undefined && trust.underReview(owner.project, member, now());
+    });
+  };
   const routes = createRoutes({
-    trust: createTrustRoutes({ trust, cache, sessions, now }),
+    trust: createTrustRoutes({ trust, cache, sessions, now, onListStored: endRefused }),
+    evidence: trust,
     store,
     cache,
     sessions,

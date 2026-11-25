@@ -48,10 +48,11 @@ export const SESSION_REFUSALS = {
   'bad-signature': ANSWER_REFUSALS['bad-signature'],
   'challenge-expired': 'The challenge has expired. Open a new session and answer its challenge within a minute.',
   malformed: ANSWER_REFUSALS.malformed,
+  'access-under-review': 'A credential this person relied on in the project was revoked or suspended, so the hub serves them nothing until the staff lead reviews their access.',
 } as const;
 export type SessionRefusal = keyof typeof SESSION_REFUSALS;
 
-/** Why a call with a bearer token is refused: 401 for every reason but wrong-project, which is 403. */
+/** Why a call with a bearer token is refused: 401 for every reason but wrong-project and access-under-review, which are 403. */
 export const AUTH_REFUSALS = {
   'no-token': 'This call needs a session. Open a session with the hub on this connection, then send its token.',
   'unknown-token': 'The hub does not know this session token. Open a new session on this connection.',
@@ -60,6 +61,7 @@ export const AUTH_REFUSALS = {
   revoked: 'This device is no longer admitted to the project. Ask the staff lead.',
   quarantined: SESSION_REFUSALS.quarantined,
   'wrong-project': 'This session is for another project. Open a session for this project.',
+  'access-under-review': SESSION_REFUSALS['access-under-review'],
 } as const;
 export type AuthRefusal = keyof typeof AUTH_REFUSALS;
 
@@ -84,6 +86,11 @@ export interface SessionOptions {
   deadlineMs?: number;
   /** The answer check (readSessionAnswer); injectable so a test can count calls. */
   readAnswer?: (answer: unknown, expected: SessionExpectation) => SessionRead;
+  /**
+   * Whether the hub's newest status list sets a bit for a credential this member's entries cited (71-09, D-16): their sessions are refused
+   * access-under-review until a newer list clears a suspension. A revocation never clears, so a rekey that drops the member leaves it refused.
+   */
+  underReview?: (project: string, member: string) => boolean;
 }
 
 interface OpenChallenge {
@@ -97,7 +104,7 @@ interface TokenRecord extends Session {
 }
 
 const refuse = (reason: SessionRefusal): { ok: false; reason: SessionRefusal; message: string } => ({ ok: false, reason, message: SESSION_REFUSALS[reason] });
-const refuseAuth = (reason: AuthRefusal): Extract<AuthResult, { ok: false }> => ({ ok: false, status: reason === 'wrong-project' ? 403 : 401, reason, message: AUTH_REFUSALS[reason] });
+const refuseAuth = (reason: AuthRefusal): Extract<AuthResult, { ok: false }> => ({ ok: false, status: reason === 'wrong-project' || reason === 'access-under-review' ? 403 : 401, reason, message: AUTH_REFUSALS[reason] });
 const tokenId = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 const sameBytes = (a: Buffer, b: Buffer): boolean => a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 
@@ -108,6 +115,7 @@ export class SessionRegistry {
   private readonly now: () => number;
   private readonly deadlineMs: number;
   private readonly readAnswer: (answer: unknown, expected: SessionExpectation) => SessionRead;
+  private readonly underReview: (project: string, member: string) => boolean;
   private readonly challenges = new WeakMap<TLSSocket, OpenChallenge>();
   private readonly keyings = new WeakMap<TLSSocket, Buffer>();
   private readonly authenticated = new WeakSet<TLSSocket>();
@@ -122,6 +130,7 @@ export class SessionRegistry {
     this.now = options.now ?? Date.now;
     this.deadlineMs = options.deadlineMs ?? AUTH_DEADLINE_MS;
     this.readAnswer = options.readAnswer ?? readSessionAnswer;
+    this.underReview = options.underReview ?? ((): boolean => false);
   }
 
   /** The keying material of this connection, read once per socket. */
@@ -165,6 +174,7 @@ export class SessionRegistry {
     const device = deviceAt(roster.state.members, read.writer, roster.headPosition);
     if (device === undefined || device.publicKey !== read.publicKey) return refuse('not-admitted');
     if (device.kind !== 'person') return refuse('not-a-person-device');
+    if (this.underReview(open.project, device.member)) return refuse('access-under-review');
 
     const token = randomBytes(TOKEN_BYTES).toString('base64url');
     const session: Session = { project: open.project, writer: read.writer, expiresAt: this.now() + TOKEN_TTL_MS };
@@ -208,6 +218,8 @@ export class SessionRegistry {
       this.revokeDevice(record.writer, record.project);
       return refuseAuth('revoked');
     }
+    const member = roster.view.deviceKey(record.writer)?.member;
+    if (member !== undefined && this.underReview(record.project, member)) return refuseAuth('access-under-review');
     return { ok: true, session: { project: record.project, writer: record.writer, expiresAt: record.expiresAt } };
   }
 
