@@ -520,3 +520,44 @@ test('CronJob guest-retention-check reads, writes only the notice, alerts throug
   assert.doesNotMatch(job, /echo[^\n]*(\$key|\$entity|BAO_TOKEN)/, 'it prints the count only');
   assert.ok(docs.some((doc) => /^kind: ServiceAccount$/m.test(doc) && /name: guest-retention-check$/m.test(doc)));
 });
+
+// The supply approvers (48.3-05, D-18): only the people the site file lists, only after a passkey step-up, only through the review client,
+// for 5 minutes, and only to look the token itself up; the review command reads the subject and the sign-in time from that lookup.
+const APPROVERS = ['7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f', '8d2e3f4a-5b6c-4d7e-9f80-1b2c3d4e5f6a'];
+test('apply.mjs binds role supply-approver to the review client, the step-up acr and the listed approvers, with lookup only', () => {
+  const site = { ...loadSite(SITE_FILE), supply: { approvers: APPROVERS } };
+  const operations = planApply(site);
+  assert.ok(POLICIES.includes('supply-approver'));
+  assert.ok(operations.some((operation) => operation.what === 'policy supply-approver'));
+  assert.deepEqual(roleBody(operations, 'auth/jwt/role/supply-approver'), {
+    role_type: 'jwt', bound_audiences: ['sterling-supply-review'], user_claim: 'sub', token_no_default_policy: true,
+    bound_claims: { acr: site.stepUpAcr, azp: 'sterling-supply-review', sub: APPROVERS }, bound_claims_type: 'string',
+    claim_mappings: { sub: 'sub', sterling_auth_time: 'auth_time' },
+    token_policies: ['supply-approver'], token_ttl: 300, token_max_ttl: 300, token_explicit_max_ttl: 300, token_period: 0
+  });
+  // OpenBao copies a mapped claim only when it is a string and refuses the login otherwise, so the numeric auth_time is never mapped.
+  assert.equal(Object.hasOwn(roleBody(operations, 'auth/jwt/role/supply-approver').claim_mappings, 'auth_time'), false);
+  assert.deepEqual(shape('supply-approver'), [['auth/token/lookup-self', ['read'], '']]);
+});
+
+test('with no approver listed, role supply-approver admits nobody; a group or claim is refused before anything is written', () => {
+  const none = planApply({ ...loadSite(SITE_FILE), supply: { approvers: [] } });
+  assert.deepEqual(roleBody(none, 'auth/jwt/role/supply-approver').bound_claims.sub, ['not-set'], 'a stale list never stays admitted');
+  const absent = planApply({ ...loadSite(SITE_FILE), supply: undefined });
+  assert.deepEqual(roleBody(absent, 'auth/jwt/role/supply-approver').bound_claims.sub, ['not-set']);
+  for (const approvers of [['supply-approvers'], ['7C1D2E3F-4A5B-4C6D-8E7F-0A1B2C3D4E5F'], 'not-a-list']) {
+    assert.throws(() => planApply({ ...loadSite(SITE_FILE), supply: { approvers } }),
+      { message: 'supply.approvers must list Keycloak user ids (lowercase UUIDs), never a group or claim.' });
+  }
+});
+
+test('the site example documents supply roles, approvers and policy, and the CI site lists two approvers', () => {
+  const example = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example.yaml'), 'utf8'));
+  assert.deepEqual(example.supply, { roles: [], approvers: [], policy: {} });
+  assert.match(example.note.supply, /approvers/);
+  assert.match(example.note.supply, /G526/);
+  assert.match(example.note.supply, /never a Keycloak group or claim/);
+  const ci = loadSite(SITE_FILE);
+  assert.equal(ci.supply.approvers.length, 2);
+  assert.deepEqual(roleBody(planApply(ci), 'auth/jwt/role/supply-approver').bound_claims.sub, ci.supply.approvers);
+});

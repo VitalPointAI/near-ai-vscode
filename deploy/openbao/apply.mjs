@@ -21,7 +21,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
 export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator', 'guest-expiry',
-  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices', 'guest-account']);
+  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices', 'guest-account', 'supply-approver']);
 /**
  * The policy every guest entity carries, and the only one (D-84; deploy/openbao/enrol.mjs attaches it): it denies the guest the staff KV path
  * kv/users/<entity>/ and gives them kv/guests/<entity>/ instead, so a security officer's removal reaches guests' secrets and nobody else's.
@@ -56,6 +56,20 @@ export function securityOfficers(site) {
     throw new Error('the site setting securityOfficers must list the Keycloak user ids (lowercase UUIDs) of your organization\'s security officers, named at the key ceremony.');
   }
   return officers.length ? [...officers] : [NO_SUBJECT];
+}
+/**
+ * The approvers of your organization's software registry (D-18; 48.3-05): the review client, whose tokens the jwt role supply-approver
+ * admits, and a 5-minute token that can only look itself up. Keycloak puts the sign-in time in the string claim sterling_auth_time (the
+ * client's session-note mapper), because OpenBao refuses a login whose mapped claim is not a string and auth_time is a number.
+ */
+export const SUPPLY_REVIEW = Object.freeze({ role: 'supply-approver', client: 'sterling-supply-review', ttl: 300, authTimeClaim: 'sterling_auth_time' });
+/** The site's supply.approvers: Keycloak user ids, refused unless each is one; none listed binds NO_SUBJECT, so nobody can approve. */
+export function supplyApprovers(site) {
+  const approvers = site.supply?.approvers ?? [];
+  if (!Array.isArray(approvers) || !approvers.every((sub) => typeof sub === 'string' && SUBJECT.test(sub))) {
+    throw new Error('supply.approvers must list Keycloak user ids (lowercase UUIDs), never a group or claim.');
+  }
+  return approvers.length ? [...approvers] : [NO_SUBJECT];
 }
 /**
  * The scheduled Raft snapshot (D-73, 47-24): CronJob openbao-raft-snapshot logs in with a projected token of its own ServiceAccount for this
@@ -97,7 +111,8 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
   const window = Number(site.stepUpMaxAgeSeconds);
   if (!stepUpAcr || !Number.isInteger(window) || window <= 0) throw new Error('the site file needs stepUpAcr and a positive whole stepUpMaxAgeSeconds.');
   const officers = securityOfficers(site);
-  const mount = (where, type, options) => ({ what: `mount ${where}/ (${type})`, read: 'sys/mounts', write: `sys/mounts/${where}`, body: { type, ...(options ? { options } : {}) },
+  const approvers = supplyApprovers(site);
+  const mount =(where, type, options) => ({ what: `mount ${where}/ (${type})`, read: 'sys/mounts', write: `sys/mounts/${where}`, body: { type, ...(options ? { options } : {}) },
     compare: (mounts) => mounts?.[`${where}/`]?.type === type });
   const role = (name, extra) => ({ what: `jwt role ${name}`, read: `auth/jwt/role/${name}`, write: `auth/jwt/role/${name}`, body: {
     role_type: 'jwt', bound_audiences: [AUDIENCE], user_claim: 'sub', token_no_default_policy: true, ...extra } });
@@ -124,6 +139,11 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     // The automatic end of guest accounts: only the client sterling-guest-expiry, only the policy guest-expiry, 5 minutes and no renewal.
     role(GUEST_EXPIRY.role, { bound_audiences: [GUEST_EXPIRY.client], bound_claims: { azp: GUEST_EXPIRY.client }, bound_claims_type: 'string', token_policies: ['guest-expiry'],
       token_ttl: GUEST_EXPIRY.ttl, token_max_ttl: GUEST_EXPIRY.ttl, token_explicit_max_ttl: GUEST_EXPIRY.ttl, token_period: 0 }),
+    // Approvals in your organization's software registry (D-18): only the listed approvers, only through the review client, only after a
+    // passkey step-up; the token can only look itself up, for 5 minutes. sub and the sign-in time become token metadata for the record.
+    role(SUPPLY_REVIEW.role, { bound_audiences: [SUPPLY_REVIEW.client], bound_claims: { acr: stepUpAcr, azp: SUPPLY_REVIEW.client, sub: approvers },
+      bound_claims_type: 'string', claim_mappings: { sub: 'sub', [SUPPLY_REVIEW.authTimeClaim]: 'auth_time' }, token_policies: ['supply-approver'],
+      token_ttl: SUPPLY_REVIEW.ttl, token_max_ttl: SUPPLY_REVIEW.ttl, token_explicit_max_ttl: SUPPLY_REVIEW.ttl, token_period: 0 }),
     // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
     // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10). key_type any: the
     // Certificates cert-manager makes from Ingress annotations (Theia Cloud, Harbor) and the Theia Cloud webhook's use RSA 2048 keys, which
