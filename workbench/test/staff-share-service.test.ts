@@ -29,6 +29,7 @@ import { hubNodeOrSkip, startHubChild } from '../../src/test/helpers/hubChild.ts
 import { MemorySecrets, grantsOn } from '../../src/test/helpers/labelCellWorld.ts';
 import { rosterDevice } from '../../src/test/helpers/replicaRosterWorld.ts';
 import { fixedSigner } from '../../src/test/helpers/replicaWorld.ts';
+import { SECRET_PRODUCT, SEED_PRODUCT, seedStaffWork } from './helpers/staff-world.ts';
 
 type ShareEngine = StaffEngine & StaffShareApi & { x25519BindingBytes(rawX25519: string, writer: string): Buffer };
 // The workbench lint checks that the bundle's entry gives every name the share service types.
@@ -200,6 +201,21 @@ test('a conversion names each product it withheld with its way out (D-31), and t
     const service = new StaffShareService({ engine: { ...engine, makeMultiUser: async () => conversion } as never, live: () => lead.live, root: async () => lead.root });
     const result = value(await service.turnOn({}), 'turn on');
     assert.deepEqual(result.withheld, ['Some history for logistics-estimate was left out because it refers to a product with a higher label. Ask someone cleared for org/Confidential to make a single-machine copy and share it again.']);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('a hosted lead shares staff work that already holds products: each product is converted, with its text, into a part the lead opens (33-30)', async () => {
+  const lead = await person('products', { hosted: true, staff: true });
+  try {
+    await seedStaffWork(lead.root);
+    const shared = value(await lead.service.turnOn({ clearance: { ...INTERNAL, level: 'Confidential' } }), 'turn on');
+    assert.deepEqual(shared.withheld, []);
+    const input = await lead.live.projectionInput(rowOf(lead).project) as { fold: { families: Record<string, unknown> } };
+    const texts = (input.fold.families.doc as Array<{ product: string; text: string }> | undefined) ?? [];
+    assert.deepEqual(texts.map((item) => item.product).sort(), [SECRET_PRODUCT.product, SEED_PRODUCT.product].sort());
+    assert.ok(texts.find((item) => item.product === SEED_PRODUCT.product)?.text.includes('The enemy holds the river crossings.'));
   } finally {
     await lead.live.stop();
   }
