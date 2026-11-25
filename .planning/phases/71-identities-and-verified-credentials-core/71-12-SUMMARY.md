@@ -158,7 +158,7 @@ The issuer token is revoked after every call. `revoke` and `suspend` set the bit
   - The workbench lint (both `tsc` runs) and `npm --prefix workbench test`: 131 of 131. The three new flat files are among them (H-71-01 checked).
   - Root `npm run compile`, then `credentialsIssueForm`, `copyLint` and `architecture`: 54 of 54.
   - `compliance/test/gaps.test.ts`: 20 of 20.
-  - The full root suite: see the hand-off message for its result.
+  - The full root suite (`npm test`, TMPDIR=/tmp as CI): 6,474 tests, 6,465 passed, 1 failed, 8 skipped. The failure was `staffReplicaHubMembership` "not-a-roster-writer", where a random join nonce happened to look secret-like to `signPayload`. That code is not touched here. A rerun of the file passed 48 of 48. It is logged in `deferred-items.md`.
 - **Acceptance greps:**
   - `sterling-issuer-stepup` in `apply.mjs`: 1;
   - the inbox block with `read`, `update`, `delete` or `list`: 0;
