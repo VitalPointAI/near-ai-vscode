@@ -204,8 +204,7 @@
     "bare-team": 14
   },
   "src/services/toolsDirectory.ts": {
-    "bare-team": 3,
-    "glossary": 2
+    "bare-team": 3
   },
   "src/services/usageExport.ts": {
     "glossary": 1

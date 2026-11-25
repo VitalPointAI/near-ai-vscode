@@ -46,10 +46,10 @@ NEAR AI runs some models inside an attested trusted execution environment
 from NEAR's model catalog (`/v1/model/list`) and shows it in the model picker
 and on every reply:
 
-- **Private · NEAR AI private hardware, checked each time it is used**: NEAR
+- **NEAR AI private hardware (checked each time it is used)**: NEAR
   reports attestation support and serves the model itself (for example GLM
   5.3, Kimi K3, Qwen 3.x).
-- **Not private · forwarded to …**: NEAR forwards the request to another
+- **Runs on outside provider (…)**: NEAR forwards the request to another
   provider, named in the label (for example `openrouter.ai` for DeepSeek V4.1
   Flash, `anthropic.com` for Claude models).
 

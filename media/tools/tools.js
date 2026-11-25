@@ -14,7 +14,8 @@
   };
   const GROUP_ORDER = ['Project lifecycle', 'Planning', 'Execution', 'Review and quality', 'Research and context', 'Settings and workspace', 'Other'];
   const STATUS_CLASS = { runs: 'ok', asks: 'ask', 'auto-checked': 'checked', off: 'off', stopped: 'stopped' };
-  const PRIVACY_LABEL = { tee: 'TEE', local: 'Local', forwarded: 'Forwarded', unknown: 'Unknown' };
+  // Runs on words (74.1 D-21): no glossary word and no bare "Private".
+  const PRIVACY_LABEL = { tee: 'NEAR AI private hardware', local: 'This computer', forwarded: 'Outside provider', unknown: 'Place not named' };
 
   const useInChat = (text, name) => button('Use in chat', () => vscode.postMessage({ type: 'use-in-chat', text }), { label: 'Use ' + name + ' in chat' });
   const runCommand = (label, command, secondary) => button(label, () => {
@@ -223,6 +224,8 @@
       top.append(el('code', 'name', model.id), badge(PRIVACY_LABEL[model.privacy], 'privacy ' + model.privacy, model.privacyText));
       for (const use of model.usedFor) top.append(badge(use, 'tier'));
       item.append(top);
+      // 74.1-12 (S5): one facts line under the name, the picker's own words for this model.
+      if (model.facts) item.append(el('p', 'hint model-facts', model.facts));
       const facts = [];
       if (model.contextLength) facts.push(tokens(model.contextLength) + ' context');
       if (model.inputPerMillion !== undefined || model.outputPerMillion !== undefined) facts.push((money(model.inputPerMillion) || '—') + ' in / ' + (money(model.outputPerMillion) || '—') + ' out per 1M tokens');

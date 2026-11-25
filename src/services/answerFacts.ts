@@ -9,10 +9,11 @@ export type AnswerFacts = Omit<TrustBadgeFacts, 'verification' | 'verificationSu
 
 /** Where a model runs, from the page's own privacy words when no catalog entry says (the words come from the same catalog). */
 function boundaryFromPrivacy(privacy: string): { boundary: AnswerFacts['boundary']; forwardedTo?: string } {
-  if (privacy.startsWith('Private')) return { boundary: 'tee' };
-  if (privacy.startsWith('Local')) return { boundary: 'local' };
-  const forwarded = /^Not private · forwarded(?: to (.+))?$/.exec(privacy);
-  if (forwarded) return { boundary: 'cloud', ...(forwarded[1] ? { forwardedTo: forwarded[1] } : {}) };
+  // 74.1-12: the Runs on words (modelPrivacyLabel), and the words of answers kept from before them.
+  if (privacy.startsWith('Private') || privacy.startsWith('Runs on NEAR AI private hardware')) return { boundary: 'tee' };
+  if (privacy.startsWith('Local') || privacy === 'Runs on this computer') return { boundary: 'local' };
+  const forwarded = /^(?:Not private · forwarded(?: to (.+))?|Runs on (?:an outside provider|outside provider \((.+)\)))$/.exec(privacy);
+  if (forwarded) return { boundary: 'cloud', ...((forwarded[1] ?? forwarded[2]) ? { forwardedTo: (forwarded[1] ?? forwarded[2]) as string } : {}) };
   return { boundary: undefined };
 }
 

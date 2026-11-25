@@ -33,6 +33,7 @@ import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routin
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
 import { onReportNoticeChange, reportNoticeStatus, startReportModeNotice } from './reportModeNotice';
+import { setModelRowContext } from './chatBridge';
 import type { GateStatusTimers } from './gateStatusBar';
 import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules, startNotices } from './organizationRules';
 import type { NoticeMemento } from './organizationRules';
@@ -339,6 +340,8 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
     keep({ dispose: () => { bar.dispose(); } });
     // 74.1-13: the report-only notice of this window's session, raised by a would-refuse of route.passport and cleared by enforce.
     keep(startReportModeNotice(host));
+    // 74.1-12: the picker and the model directory read the effective models section and the chat panel's use (agent work) from the host.
+    keep({ dispose: setModelRowContext(() => { const layers = host.policyLayers(); return { ...(layers.effective?.models === undefined ? {} : { section: layers.effective.models }), organization: layers.organization.state === 'valid', use: 'T2', now: clock() }; }) });
     keep(onReportNoticeChange(refresh));
     keep({ dispose: host.onDidChange(refresh) });
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.

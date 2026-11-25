@@ -1552,20 +1552,24 @@
           model.title = '';
           break;
         }
-        const groups = [['local', 'Local · runs on this machine'], ['tee', 'Private · NEAR AI private hardware, checked each time it is used'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
-        model.replaceChildren(...groups.map(([kind, label]) => {
-          const group = el('optgroup');
-          group.label = label;
-          group.append(...models.filter((item) => item.privacy === kind).map((item) => {
-            const option = el('option', '', item.id.split('/').pop() + (kind === 'tee' ? ' 🔒' : ''));
-            option.value = item.id;
-            option.title = item.label;
-            return option;
-          }));
-          return group;
-        }).filter((group) => group.children.length));
+        // 74.1-12 (S4): groups by Runs on in the host's order; each row its words; a model this chat's use forbids is disabled with the reason as text.
+        const groups = [];
+        for (const item of models) {
+          let group = groups.find((entry) => entry.label === item.group);
+          if (!group) { group = el('optgroup'); group.label = item.group || ''; groups.push(group); }
+          const option = el('option', '', item.text || item.id);
+          option.value = item.id;
+          option.title = item.label;
+          option.disabled = item.disabled === true;
+          group.append(option);
+        }
+        model.replaceChildren(...groups);
         modelInfo = new Map(models.map((item) => [item.id, item]));
-        if (saved.model && modelInfo.has(saved.model)) model.value = saved.model;
+        const savedItem = saved.model ? modelInfo.get(saved.model) : undefined;
+        // A saved choice that is now forbidden is not restored: the default stays, and the status line says so.
+        if (savedItem && savedItem.disabled) { if (savedItem.savedForbidden) { status.textContent = savedItem.savedForbidden; announce(savedItem.savedForbidden); } }
+        else if (savedItem) model.value = saved.model;
+        if (model.selectedOptions[0] && model.selectedOptions[0].disabled) { const first = [...model.options].find((option) => !option.disabled); if (first) model.value = first.value; }
         model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }

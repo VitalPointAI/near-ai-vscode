@@ -2626,9 +2626,9 @@ export function visibleTurns(messages: AgentMessage[], display = new Map<string,
 
 /** Where the run's models run, for the Agent Activity badge; sub-agents use models at least as private. */
 function runBoundary(request: Pick<AgentTurnRequest, 'local' | 'privacy'>): AgentBoundary | undefined {
-  if (request.local || request.privacy.startsWith('Local')) return 'local';
-  if (request.privacy.startsWith('Private')) return 'tee';
-  if (request.privacy.startsWith('Not private')) return 'cloud';
+  if (request.local || request.privacy.startsWith('Local') || request.privacy === 'Runs on this computer') return 'local';
+  if (request.privacy.startsWith('Private') || request.privacy.startsWith('Runs on NEAR AI private hardware')) return 'tee';
+  if (request.privacy.startsWith('Not private') || /^Runs on (?:an )?outside provider/.test(request.privacy)) return 'cloud';
   return undefined;
 }
 
