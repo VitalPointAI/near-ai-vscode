@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sa-400.08",
+    "sr-06"
+  ],
+  "gap": "G533",
+  "id": "g533",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "The lab site's hardware models are reviewed and cited in its site sovereignty declaration"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "No Canadian-made general-purpose CPU or GPU exists at scale, so hardware is judged by a supply chain integrity review of each hardware model (the ITSAP.10.071 criteria) plus site isolation, never by the country of manufacture (48.4 D-05). Your organization reviews each hardware model it runs, the lab's AMD Strix Halo and NVIDIA GB10 first, and cites the review in the site sovereignty declaration. Sovereignty: hardware.",
+  "title": "No supply chain integrity review is recorded for any hardware model"
+}

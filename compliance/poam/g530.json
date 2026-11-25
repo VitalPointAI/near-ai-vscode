@@ -1,0 +1,22 @@
+{
+  "controls": [
+    "sa-09",
+    "sa-400.08",
+    "sa-400.09"
+  ],
+  "gap": "G530",
+  "id": "g530",
+  "milestones": [
+    {
+      "phase": "48.3",
+      "title": "Your organization's registry at HQ in Canada is the only source sites take releases from"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "The owner decides when the build and publication move to runners in Canada"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "A site runs offline from signed bundles, but every update is built on GitHub Actions and published through the GitHub Container Registry, operated by GitHub (Microsoft) under US jurisdiction. Phase 48.3 makes your organization's registry at HQ in Canada the only place sites take releases from, and plans moving the build and publication to runners in Canada as the owner's decision. Until both land, the card shows where the software comes from and who can switch it off as Partly met at best. Sovereignty: software, switch-off.",
+  "title": "Every site update starts on GitHub Actions and the GitHub Container Registry, US services"
+}

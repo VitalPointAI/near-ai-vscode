@@ -1514,7 +1514,7 @@
       "id": "G111",
       "ownerRole": "shared",
       "poam": "g111",
-      "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation.",
+      "remediation": "The sponsor data residency authority and service operator map every assessed processing and storage location, including replicas, backups, failover and relevant subprocessors. Obtain provider and deployment configuration evidence for where processing and storage occur, then demonstrate an assessed location restriction. Record and escalate unverified or out-of-bound flows for remediation. Sovereignty: data-stored, ai-runs, assessments.",
       "title": "In-scope processing and storage locations need verified Canadian boundary evidence"
     },
     {
@@ -1588,7 +1588,7 @@
       "id": "G117",
       "ownerRole": "owner",
       "poam": "g117",
-      "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence.",
+      "remediation": "The sponsor business owner and designated security, privacy and legal authorities define the assessed business functions, data and jurisdictions. Assess potential injury from external legal compulsion, document jurisdiction-specific threats and vulnerabilities, and update categorization where supported. Retain reviewed risk and treatment decisions for each relevant jurisdiction. Use G111 for separate processing and storage location evidence. Sovereignty: assessments.",
       "title": "Sovereignty and jurisdiction risk needs an approved sponsor assessment"
     },
     {
@@ -4649,7 +4649,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap.",
+      "remediation": "Choose and buy an HSM model with an active FIPS 140-3 Level 3 certificate, then record the certificate that matches its hardware version, firmware and approved mode, with source and date, in the hosted verification records. SoftHSM2 proves wiring only and never closes this gap. Sovereignty: keys.",
       "title": "The chosen HSM model's FIPS 140-3 certificate is not recorded"
     },
     {
@@ -5073,7 +5073,7 @@
       "id": "G347",
       "ownerRole": "shared",
       "poam": "g347",
-      "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays.",
+      "remediation": "Node's bundled OpenSSL and Electron's BoringSSL run without FIPS mode. The hosted workbench moves to Node with the RHEL 9 OpenSSL FIPS provider on a FIPS host (Phase 46). The desktop extension has no validated path, so your organization uses it only where its policy does not require a validated module, or its authorizing official accepts the condition. X8 covers the same point for the export overlays. Sovereignty: keys.",
       "title": "The extension's Node and Electron cryptography does not run in a validated module"
     },
     {
@@ -5102,7 +5102,7 @@
       ],
       "id": "G349",
       "ownerRole": "maintainers",
-      "remediation": "The current cell key wrap uses X25519, which ITSP.40.111 version 5 does not list. Phase 33.2 replaces it with cell-wrap/v2 (P-256 with ML-KEM-768). The condition closes when Phase 33.2 merges and every project has switched to the new keys.",
+      "remediation": "The current cell key wrap uses X25519, which ITSP.40.111 version 5 does not list. Phase 33.2 replaces it with cell-wrap/v2 (P-256 with ML-KEM-768). The condition closes when Phase 33.2 merges and every project has switched to the new keys. Sovereignty: keys.",
       "title": "X25519 cell key wraps are not listed in ITSP.40.111"
     },
     {
@@ -5116,7 +5116,7 @@
       ],
       "id": "G350",
       "ownerRole": "maintainers",
-      "remediation": "Verified credentials, DID logs and status lists are signed with Ed25519. FIPS 186-5 approves it, but no module in the stack runs it as validated: Node's FIPS mode is off, OpenBao has no FIPS build (issue 1409), the OpenSSL 3.1.2 provider (CMVP 4985) does not allow it, and the RHEL 9 provider (CMVP 5573) does not offer it. A site whose policy requires validated modules uses the fallback from decision O8: ecdsa-jcs-2019 credentials, with P-256 keys for officers and status lists.",
+      "remediation": "Verified credentials, DID logs and status lists are signed with Ed25519. FIPS 186-5 approves it, but no module in the stack runs it as validated: Node's FIPS mode is off, OpenBao has no FIPS build (issue 1409), the OpenSSL 3.1.2 provider (CMVP 4985) does not allow it, and the RHEL 9 provider (CMVP 5573) does not offer it. A site whose policy requires validated modules uses the fallback from decision O8: ecdsa-jcs-2019 credentials, with P-256 keys for officers and status lists. Sovereignty: keys.",
       "title": "Ed25519 does not run in a validated module anywhere in the stack"
     },
     {
@@ -5134,7 +5134,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition.",
+      "remediation": "OpenBao holds each site's secrets, its certificate authority and each person's keys, and it is built without a validated module. The request for a FIPS build (issue 1409) is open, and a third party is evaluating a wolfCrypt FIPS build. Record a validated build when one exists. Until then your organization's authorizing official decides whether to accept the condition. Sovereignty: keys.",
       "title": "OpenBao has no FIPS 140-3 validated build"
     },
     {
@@ -5152,7 +5152,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "In development the organization site key lives in a SoftHSM2 token on the owner's computer. Production needs the key generated inside your organization's HSM. The install check refuses a production site whose signing token is SoftHSM2, and refuses a bundle signed by one. G324 records the HSM model's certificate.",
+      "remediation": "In development the organization site key lives in a SoftHSM2 token on the owner's computer. Production needs the key generated inside your organization's HSM. The install check refuses a production site whose signing token is SoftHSM2, and refuses a bundle signed by one. G324 records the HSM model's certificate. Sovereignty: keys.",
       "title": "The organization site key is in SoftHSM2 until a real HSM is installed"
     },
     {
@@ -5738,7 +5738,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Register each external service (model endpoints, the container registry, CI and the signing transparency service) as a fit-checked resource with its function, data sent, location, jurisdiction and terms, found from the code, and bring the model endpoints into the hosted levels (48.1-06).",
+      "remediation": "Register each external service (model endpoints, the container registry, CI and the signing transparency service) as a fit-checked resource with its function, data sent, location, jurisdiction and terms, found from the code, and bring the model endpoints into the hosted levels (48.1-06). Sovereignty: data-travels, outside-laws.",
       "title": "External services are not fit-checked or in the hosted scope"
     },
     {
@@ -5855,7 +5855,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Separate the supplier release key from the organization site key (owner decision a): sign bundles, re-signed images, person exports, certificate requests and revocation lists with the site key through its PKCS#11 address, kept in SoftHSM2 in development and in the HSM in production (48.1-17, 48.1-22). The SoftHSM2 module itself is G352.",
+      "remediation": "Separate the supplier release key from the organization site key (owner decision a): sign bundles, re-signed images, person exports, certificate requests and revocation lists with the site key through its PKCS#11 address, kept in SoftHSM2 in development and in the HSM in production (48.1-17, 48.1-22). The SoftHSM2 module itself is G352. Sovereignty: keys.",
       "title": "One signing key serves supplier releases and site trust files"
     },
     {
@@ -6384,6 +6384,149 @@
       "poam": "g504",
       "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
       "title": "Some OpenTDF forms are refused as not supported yet"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09.08",
+        "sa-400.06",
+        "sa-400.07"
+      ],
+      "id": "G527",
+      "ownerRole": "owner",
+      "poam": "g527",
+      "remediation": "NEAR AI Cloud's documentation names no data-centre countries, operating entity or jurisdiction, subprocessors or prompt retention, and the roots of trust of its private hardware are US vendors'. Attestation proves the code and the model weights, not the country. Ask NEAR AI in writing, with the existing hosting ask, for the data-centre countries, the operating entity and its jurisdiction, the subprocessors and the retention terms (48.4-04). Until NEAR AI answers, the sovereignty card shows every NEAR AI fact as Unknown, and a site that needs Canadian processing lists only AI services your organization's rules approve. Sovereignty: data-stored, ai-runs, operator, outside-laws.",
+      "title": "NEAR AI Cloud does not publish where its private hardware runs, who operates it, its subprocessors or how long it keeps prompts"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.4",
+      "controls": [
+        "sa-09.08",
+        "sa-400.04",
+        "sa-400.07",
+        "sa-400.08"
+      ],
+      "id": "G528",
+      "ownerRole": "shared",
+      "remediation": "Software cannot prove where a facility is, who operates it or what hardware it holds. Phase 48.4 adds the signed site sovereignty declaration (sterling-site-sovereignty/1): the facility country and province, the operator and its jurisdiction, the administrator screening reference, the hardware inventory with its supply chain integrity review, the HSM model and its CMVP certificate, and the countries of the backups and the off-site copy, signed with an operator key your site trust document names and declared again at least every 180 days. Each site's operator signs and publishes one (deploy/runbooks/site-evidence.md); until then the card shows those rows as Unknown. It is part of the evidence G111 asks for. Sovereignty: data-stored, keys, hardware, operator.",
+      "title": "No site declares its facility country, operator, administrator screening, hardware or backup location"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48.4",
+      "controls": [
+        "cm-08",
+        "sa-09",
+        "sa-400.02",
+        "sa-400.08"
+      ],
+      "id": "G529",
+      "ownerRole": "maintainers",
+      "remediation": "compliance/resources.json gains supplier and supplierJurisdiction for every entry, and compliance/hosted/exchanges.json gains operatorJurisdiction and location for every exchange, with unknown allowed and shown as Unknown (48.4-02, 48.4-03). The values come from each component's SBOM supplier and its publisher's pages, each with the date read. Sovereignty: data-travels, software, switch-off, outside-laws.",
+      "title": "Resources and exchanges record no supplier, supplier jurisdiction, operator jurisdiction or location"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09",
+        "sa-400.08",
+        "sa-400.09"
+      ],
+      "id": "G530",
+      "ownerRole": "owner",
+      "poam": "g530",
+      "remediation": "A site runs offline from signed bundles, but every update is built on GitHub Actions and published through the GitHub Container Registry, operated by GitHub (Microsoft) under US jurisdiction. Phase 48.3 makes your organization's registry at HQ in Canada the only place sites take releases from, and plans moving the build and publication to runners in Canada as the owner's decision. Until both land, the card shows where the software comes from and who can switch it off as Partly met at best. Sovereignty: software, switch-off.",
+      "title": "Every site update starts on GitHub Actions and the GitHub Container Registry, US services"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.08",
+        "sr-04"
+      ],
+      "id": "G531",
+      "ownerRole": "shared",
+      "poam": "g531",
+      "remediation": "The shipped defaults are of PRC origin until Phase 74.1 ships Western defaults, and those (Nemotron 3, gpt-oss-120b, Whisper, FLUX) are of US or German origin, so where models come from reads Partly met at best. Cohere's Command A+ (Apache-2.0) is the only Canadian-origin model family: run it on your organization's server or this computer (Phase 32.2), or in a Cohere vault in Canada (Phase 36, Partly met because Cohere can change the weights it serves), with your organization's passport, the artifact hash and your organization's evaluation, and prefer it where it is reachable (48.4-04). Sovereignty: models.",
+      "title": "No Canadian-origin model is the default for any job; the Western defaults are of allied origin"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-09.08",
+        "sa-400.06"
+      ],
+      "id": "G532",
+      "ownerRole": "shared",
+      "poam": "g532",
+      "remediation": "Data in use has no approved encryption (ITSP.10.033 SA-400(6)), so where AI runs is judged by location and operator. No attested service runs in Canada today: your organization's attested hosting is Phase 74.2, Cohere's Encrypted vault runs only in the US (Phase 37 waits on a Canadian region), and NEAR AI states no locations (G527). Until one exists, Protected B work that needs attested hosting stays on this computer or on your organization's own server at a site declared in Canada. Sovereignty: ai-runs.",
+      "title": "No attested model service runs in Canada"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.08",
+        "sr-06"
+      ],
+      "id": "G533",
+      "ownerRole": "owner",
+      "poam": "g533",
+      "remediation": "No Canadian-made general-purpose CPU or GPU exists at scale, so hardware is judged by a supply chain integrity review of each hardware model (the ITSAP.10.071 criteria) plus site isolation, never by the country of manufacture (48.4 D-05). Your organization reviews each hardware model it runs, the lab's AMD Strix Halo and NVIDIA GB10 first, and cites the review in the site sovereignty declaration. Sovereignty: hardware.",
+      "title": "No supply chain integrity review is recorded for any hardware model"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48.4",
+      "controls": [
+        "sa-400.07",
+        "sa-400.09"
+      ],
+      "id": "G534",
+      "ownerRole": "owner",
+      "remediation": "SA-400(9) and the question of who can switch the system off need the supplier's own facts: Sterling Canada's ownership, control and jurisdiction, and the operator and jurisdiction of the release channel. The owner records them (48.4-04), and the sovereignty card and the documentation page show them with the date recorded (48.4-05, 48.4-10). Sovereignty: switch-off, outside-laws.",
+      "title": "The supplier's ownership, control and jurisdiction are not recorded"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sa-400.01",
+        "sa-400.02",
+        "sa-400.03",
+        "sa-400.04",
+        "sa-400.05",
+        "sa-400.06",
+        "sa-400.07",
+        "sa-400.08",
+        "sa-400.09"
+      ],
+      "id": "G535",
+      "ownerRole": "owner",
+      "poam": "g535",
+      "remediation": "The Medium profile selects SA-400 without its nine enhancements, which are the clearest Canadian statement of what sovereign means, and the sovereignty card uses them as its criteria. The owner decides whether the hosted levels select them as organization-defined additions (48.4-04); if they do, 48.4-15 adds their statements and evidence rules from the same facts the card reads, and SA-400(1) and SA-400(2) stay your organization's assessments. Sovereignty: assessments.",
+      "title": "The SA-400 enhancements are not selected or assessed for the hosted levels"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "ca-02",
+        "sa-400"
+      ],
+      "id": "G536",
+      "ownerRole": "owner",
+      "poam": "g536",
+      "remediation": "Every credible sovereignty label is issued by an assessor at a stated assurance level (CAN/DGSI 100-8 and its SovereignReady programme; the EU framework's assurance levels). The sovereignty card is a self-check from evidence and says so. When the lab site's rows reach Met, the owner decides whether to seek an independent review (48.4-04), and the card's scope line then names that assessment and its level. Sovereignty: assessments.",
+      "title": "No independent sovereignty assessment exists; the sovereignty card is a self-check from evidence"
     }
   ]
 }

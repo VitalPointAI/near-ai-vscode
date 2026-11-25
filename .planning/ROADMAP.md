@@ -996,6 +996,39 @@ Plans:
 - [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
 - [ ] 48.2-15-PLAN.md: Wave 10 (after 48-07 and 48-08). Statements and evidence rules, the documents with the real-time table, the full suites once, the release-preview check and the owner gate
 
+### Phase 48.4: Sovereignty status and the path to full sovereignty (INSERTED)
+**Goal**: Every page of the Sterling workbench and of the desktop extension carries a sovereignty badge in the status bar that opens a card showing, for 14 dimensions in four groups, how far the system meets the published Canadian criteria (ITSP.10.033 SA-400 and its enhancements, SA-9(8), the Treasury Board digital sovereignty framework, the national AI strategy), each row with its evidence, source, time and what moves it to Met; the card is a view over the Phase 48.2 evidence engine and never overclaims; and each dimension has planned or handed-off work that moves it to Met, with the outside parties named where Met needs them.
+**Inserted**: 2026-11-25 from the owner's request ("a badge on every page that acts like a sovereignty status badge ... we pin the credibility of our product on it") and decisions ("accept sovereignty defaults (and let's look to become fully sovereign compliant)"); research `.planning/research/sovereignty-status/RESEARCH.md`.
+**Depends on**: Phase 48.2 (the status engine, the trust document and operator files, the live collector, the evidence service and the Compliance view; 48.4-06 after 48.2-08 and 48.2-13, 48.4-07 after 48.2-09 and 48.2-11, 48.4-09 and 48.4-12 after 48.2-10, 48.4-15 after 48.2-15, 48-07 and 48-08); the coherence review amendment in 48.4-01 before any sovereignty screen; `/gsd-ui-phase 48.4` (an approved `48.4-UI-SPEC.md`) before wave 4. Runs beside Phase 48.3 (software supply registry), coordinated through `48.4-HANDOFFS.md` only. Part B hands work to 32.1, 32.2, 33.2, 36, 37, 47, 48.1, 48.3, 74.1 and 74.2 (H-01 to H-22).
+**Requirements**: SVS-01, SVS-02, SVS-03, SVS-04, SVS-05, SVS-06, SVS-07, SVS-08, SVS-09, SVS-10
+**Success Criteria** (what must be TRUE):
+  1. The glossary, experience map and copy lint are amended first: "Sovereignty" appears only as the badge and card name, and "fully sovereign", "100% Canadian" and the other overclaims are refused in user copy and documentation. (SVS-01)
+  2. One pure lens, called by the desktop extension and by the workbench backend from the 48.2 engine, judges each dimension strictly against its Canadian criterion on what the session can reach now; the badge shows "Sovereignty: {state} · {reason}" with the worst state and counts, never a score; Unknown and Not verified never read as Met; an allowed but unmet row says both. (SVS-02, SVS-07)
+  3. Every resource records its supplier and supplier jurisdiction and every exchange its operator jurisdiction and location; sovereignty gaps are tagged by dimension and kept equal to the card's map by a test. (SVS-03)
+  4. A site's operator signs a site sovereignty declaration (facility, operator, screening reference, hardware and review references, HSM and CMVP certificate, backups, model servers, operating level) that every session verifies, ages after 90 days and is out of date after 180, cross-checked against the collector's egress, node and seal facts. (SVS-04, SVS-05)
+  5. In both editions the badge opens the card in the original theme with lifted cards; each workbench row deep-links to the Compliance view's Sovereignty filter and back; a policy change shows without a reload; an air-gapped site shows its strongest rows from local sources; the desktop never infers location. One focused browser check proves it on the built image. (SVS-06, SVS-07)
+  6. Each of the 14 dimensions has an owning plan or hand-off to Met (`48.4-CONTEXT.md` D-40); the starting rules keep Canada's Protected B, Protected C and Classified content in Canada (owner O2); the owner's items are recorded; statements, evidence rules, the SA-400 assessment input pack, the "How sovereignty is judged" page and gap rows G527 to G536 exist. (SVS-08, SVS-09, SVS-10)
+**Plans:** 16 plans in 7 waves (planned 2026-11-25 on `docs/phase-48.4-plan`; decisions D-01 to D-40, owner items O1 to O5 with defaults, hand-offs H-01 to H-22 in `48.4-CONTEXT.md` and `48.4-HANDOFFS.md`; gap rows G527 to G536 filed with the plans; each wave lands as one combined pull request with one owner gate approval)
+**UI hint**: yes (run `/gsd-ui-phase 48.4` after wave 1; 48.4-11, 48.4-12 and 48.4-13 stop unless `48.4-UI-SPEC.md` is approved on main)
+
+Plans:
+- [ ] 48.4-01-PLAN.md: Wave 1. The coherence amendment (glossary rows, the second status bar item, the review record) and the copy lint's overclaim ban; "Sovereignty" confined to the card's sources
+- [ ] 48.4-02-PLAN.md: Wave 1. Supplier and supplier jurisdiction on every fit register entry; wave 1's gate
+- [ ] 48.4-03-PLAN.md: Wave 1. Operator jurisdiction and location on every exchange and in the interconnections document
+- [ ] 48.4-04-PLAN.md: Wave 1. Owner items O1 to O5 with defaults, and the written request to NEAR AI the owner sends
+- [ ] 48.4-05-PLAN.md: Wave 2. The dimension map, the supplier record and the pure lens for all 14 dimensions; the gap tag drift test
+- [ ] 48.4-06-PLAN.md: Wave 2 (after 48.2-08 and 48.2-13). The signed site sovereignty declaration: format, purpose, freshness, observations, the mount file, publishing and the runbook
+- [ ] 48.4-07-PLAN.md: Wave 2 (after 48.2-09 and 48.2-11). The collector's egress fact and its one extra right, the site's sign-in setting in every session; wave 2's gate
+- [ ] 48.4-08-PLAN.md: Wave 2. The residency rule in the starting rules for Canada's Protected B, Protected C and Classified levels (owner O2)
+- [ ] 48.4-09-PLAN.md: Wave 3. The workbench backend judges sovereignty in the evidence refresh; the gate's report from the bundled VSIX
+- [ ] 48.4-10-PLAN.md: Wave 3. The generated "How sovereignty is judged" documentation page
+- [ ] 48.4-11-PLAN.md: Wave 4 (approved UI-SPEC). The workbench status bar badge and card
+- [ ] 48.4-12-PLAN.md: Wave 4 (approved UI-SPEC). The Compliance view's Sovereignty filter and the links both ways
+- [ ] 48.4-13-PLAN.md: Wave 4 (approved UI-SPEC). The desktop extension's badge and card
+- [ ] 48.4-14-PLAN.md: Wave 5. The one focused browser check on the built image
+- [ ] 48.4-15-PLAN.md: Wave 6 (after 48.2-15, 48-07 and 48-08). Statements and evidence rules (SA-9(8), SC-12, CA-7, CM-8, SR-4, SA-400(3)) and the SA-400 enhancements per owner O4
+- [ ] 48.4-16-PLAN.md: Wave 7. The SA-400 assessment input pack, SECURITY.md, the full suites once, the integration pull request and the owner gate
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -2257,6 +2290,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 48.2. Live compliance evidence in the workbench | 0/17 | Planned 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
+| 48.4. Sovereignty status and the path to full sovereignty | 0/16 | Planned 2026-11-25 (wave 1 can start now; waves 2 and 3 after the named 48.2 plans; wave 4 after an approved UI-SPEC; five owner items with defaults in 48.4-04; gap rows G527 to G536 filed; beside 48.3 through 48.4-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
