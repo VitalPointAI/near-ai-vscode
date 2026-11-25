@@ -3,9 +3,11 @@
 // a release's evidence is judged against the current time wherever it is shown. The dashboard builds its rows through the same functions
 // (dashboard.ts), so the dashboard and a re-judged judgement can never apply different rules.
 // The evidence folder's manifest (D-15, `sterling-evidence/1`) is defined here once, for the release evidence writer (48.2-05) and the
-// session (the workbench backend) alike. This file imports only status.ts and model.ts: the workbench bundles it (engine/compliance.cjs).
-import { aggregateControl, computeStatus, isFresh, summarizeLevel } from './status.ts';
-import { AGEING, FRESHNESS, REASONS, type ComponentRow, type DashboardRow, type FreshnessWindows, type Responsibility, type RuleResult, type StatusInput, type WindowKind } from './model.ts';
+// session (the workbench backend) alike. 48.2-03 adds freshness, the site policy that only tightens, the honest clock and layering.
+// This file imports only status.ts, rules.ts and model.ts, never a loader or a validator: the workbench bundles it (engine/compliance.cjs).
+import { aggregateControl, computeStatus, FUTURE_TOLERANCE_MS, isFresh, summarizeLevel } from './status.ts';
+import { evaluateObservationRule } from './rules.ts';
+import { AGEING, FRESHNESS, REASONS, type ComponentRow, type DashboardRow, type FreshnessWindows, type Observation, type Responsibility, type RuleResult, type StatusInput, type WindowKind } from './model.ts';
 
 export const JUDGEMENT_FORMAT = 'sterling-judgement/1' as const;
 
@@ -69,8 +71,12 @@ export type Freshness = 'current' | 'ageing' | 'out-of-date' | 'unknown';
 /** A row's freshness: the worst of its results, or `none` when it has no evidence. */
 export type RowFreshness = Freshness | 'none';
 export type AgeingThresholds = Readonly<Partial<Record<WindowKind, number>>>;
-/** A result as re-judged: with its freshness. */
-export type FreshResult = RuleResult & Readonly<{ freshness: Freshness }>;
+/** Where a result comes from (D-24): the release, your site, or the supplier's reference site (a release result on a site-only collector). */
+export type EvidenceSource = 'release' | 'site' | 'reference-site';
+/** A result as re-judged: with its freshness and its source. */
+export type FreshResult = RuleResult & Readonly<{ freshness: Freshness; source: EvidenceSource }>;
+/** Collectors whose facts are about a site: a release carries them only from the supplier's reference site. */
+export const SITE_COLLECTORS: ReadonlySet<string> = new Set(['deployment', 'site-live', 'site-agreements']);
 /** A row as re-judged: the dashboard's row, each result with its freshness, the row's worst freshness and its oldest result time. */
 export type FreshRow = Omit<JudgedRow, 'components'> & Readonly<{
   components: readonly (Omit<JudgedComponent, 'evidence'> & Readonly<{ evidence: readonly FreshResult[] }>)[];
@@ -96,7 +102,7 @@ export function freshnessOf(result: RuleResult, options: { readonly head: string
 }
 
 /** A judged row with each result's freshness, the row's worst freshness and the oldest result time. */
-function withFreshness(row: JudgedRow, options: Parameters<typeof freshnessOf>[1]): FreshRow {
+function withFreshness(row: JudgedRow, sources: ReadonlyMap<string, EvidenceSource>, options: Parameters<typeof freshnessOf>[1]): FreshRow {
   let worst: RowFreshness = 'none';
   let asOf: string | undefined;
   const components = row.components.map((component) => ({
@@ -105,7 +111,7 @@ function withFreshness(row: JudgedRow, options: Parameters<typeof freshnessOf>[1
       const freshness = freshnessOf(result, options);
       if (FRESHNESS_RANK[freshness] > FRESHNESS_RANK[worst]) worst = freshness;
       if (asOf === undefined || result.collectedAt < asOf) asOf = result.collectedAt;
-      return { ...result, freshness };
+      return { ...result, freshness, source: sources.get(result.rule) ?? 'release' };
     }),
   }));
   return { ...row, components, freshness: worst, ...(asOf !== undefined ? { asOf } : {}) };
@@ -156,9 +162,9 @@ export function judgementRow(input: JudgementRowInput, presentation: JudgementRo
 }
 
 /** Judges one component now: computeStatus and the reason text, with its evidence and its first statement's presentation. */
-export function judgeComponent(component: JudgementComponent, head: string, now: Date): JudgedComponent {
+export function judgeComponent(component: JudgementComponent, head: string, now: Date, windows?: FreshnessWindows): JudgedComponent {
   const { inheritedFrom, evidenceOrder: _order, ...input } = component;
-  const outcome = computeStatus({ ...input, head, now });
+  const outcome = computeStatus({ ...input, head, now, ...(windows ? { windows } : {}) });
   const statement = component.statements[0];
   return {
     component: component.component,
@@ -202,8 +208,8 @@ export function controlState(components: readonly ComponentRow[], row: Pick<Judg
 }
 
 /** Judges one row now: every component, then the one row rule, then the reason text. */
-export function judgeRow(row: JudgementRow, head: string, now: Date): JudgedRow {
-  const components = row.components.map((component) => judgeComponent(component, head, now));
+export function judgeRow(row: JudgementRow, head: string, now: Date, windows?: FreshnessWindows): JudgedRow {
+  const components = row.components.map((component) => judgeComponent(component, head, now, windows));
   const outcome = controlState(components, row, head, now);
   return {
     level: row.level, control: row.control, label: row.label, family: row.family, title: row.title,
@@ -213,15 +219,131 @@ export function judgeRow(row: JudgementRow, head: string, now: Date): JudgedRow 
   };
 }
 
+/** A site freshness policy (D-13): per kind, hours after which evidence is Ageing and Out of date. It may only tighten the release defaults. */
+export type FreshnessPolicy = Readonly<Partial<Record<Exclude<WindowKind, 'head'>, Readonly<{ ageingAfterHours?: number; outOfDateAfterHours?: number }>>>>;
+export interface EffectivePolicy {
+  readonly windows: Readonly<Record<WindowKind, number | 'head'>>;
+  readonly ageing: Readonly<Record<Exclude<WindowKind, 'head'>, number>>;
+  /** `<kind>.<setting>` for each value looser than the release default, which was kept instead. */
+  readonly clamped: readonly string[];
+  /** Why the whole policy was refused (the release defaults apply), when it was. */
+  readonly refused?: string;
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const POLICY_SETTINGS = new Set(['ageingAfterHours', 'outOfDateAfterHours']);
+
 /**
- * Re-judges a judgement at `now`: the rows and level counts in the dashboard's shape, each result with its freshness and each row with the
- * worst freshness of its results and its oldest result time (D-12).
+ * The windows and ageing thresholds in force (D-13): the release defaults, tightened by the site policy. A value looser than the default is
+ * clamped to it and reported; an unknown kind or setting, a value that is not a positive whole number of hours, or ageing at or after out of
+ * date refuses the whole policy, so the release defaults apply and the refusal is reported. Ageing never comes after out of date.
  */
-export function rejudge(judgement: Judgement, options: { readonly now: Date }): { readonly judgedAt: string; readonly levels: readonly JudgedLevel[]; readonly rows: readonly FreshRow[] } {
+export function effectivePolicy(policy?: unknown): EffectivePolicy {
+  const windows: Record<string, number | 'head'> = { ...FRESHNESS };
+  const ageing: Record<string, number> = { ...AGEING };
+  const defaults = (refused: string): EffectivePolicy => ({ windows: { ...FRESHNESS }, ageing: { ...AGEING }, clamped: [], refused });
+  if (policy === undefined || policy === null) return { windows: windows as EffectivePolicy['windows'], ageing: ageing as EffectivePolicy['ageing'], clamped: [] };
+  if (!isRecord(policy)) return defaults('the freshness policy is not an object');
+  const clamped: string[] = [];
+  for (const [kind, entry] of Object.entries(policy)) {
+    if (!Object.hasOwn(AGEING, kind)) return defaults(`unknown evidence kind ${kind}`);
+    if (!isRecord(entry) || Object.keys(entry).some((key) => !POLICY_SETTINGS.has(key))) return defaults(`unknown setting for ${kind}`);
+    for (const value of Object.values(entry)) if (!Number.isSafeInteger(value) || (value as number) < 1) return defaults(`${kind} needs a positive whole number of hours`);
+    const { ageingAfterHours: soon, outOfDateAfterHours: late } = entry as { ageingAfterHours?: number; outOfDateAfterHours?: number };
+    if (soon !== undefined && late !== undefined && soon >= late) return defaults(`${kind} ages at or after it is out of date`);
+    const key = kind as Exclude<WindowKind, 'head'>;
+    if (late !== undefined) { if (late * HOUR_MS > FRESHNESS[key]) clamped.push(`${kind}.outOfDateAfterHours`); else windows[key] = late * HOUR_MS; }
+    if (soon !== undefined) { if (soon * HOUR_MS > AGEING[key]) clamped.push(`${kind}.ageingAfterHours`); else ageing[key] = soon * HOUR_MS; }
+    ageing[key] = Math.min(ageing[key]!, windows[key] as number);
+  }
+  return { windows: windows as EffectivePolicy['windows'], ageing: ageing as EffectivePolicy['ageing'], clamped };
+}
+
+/** Evidence the engine did not use because it is dated more than FUTURE_TOLERANCE_MS after the session clock (D-14, D-18). */
+export type RefusedEvidence =
+  | { readonly kind: 'result'; readonly rule: string; readonly reason: 'future-dated'; readonly at: string }
+  | { readonly kind: 'observation'; readonly collector: string; readonly subject: string; readonly reason: 'future-dated'; readonly at: string };
+
+export interface RejudgeOptions {
+  readonly now: Date;
+  /** Verified site observations (D-24): each replaces the release's result for the rules on its collector and subject when it is newer. */
+  readonly observations?: readonly Observation[];
+  /** The site's freshness policy, from the verified site trust document (D-13, D-17). */
+  readonly policy?: unknown;
+  /** The release build time; the judgement's generatedAt when absent. A clock earlier than it is the clock case (D-14). */
+  readonly builtAt?: string;
+}
+
+export interface Rejudged {
+  readonly judgedAt: string;
+  readonly levels: readonly JudgedLevel[];
+  readonly rows: readonly FreshRow[];
+  readonly refused: readonly RefusedEvidence[];
+  readonly policy: Readonly<{ clamped: readonly string[]; refused?: string }>;
+  /** Present when the session clock is earlier than the release build: every freshness is Unknown and nothing is Met. */
+  readonly clock?: 'clock-behind-build';
+}
+
+const isFuture = (at: string, now: Date): boolean => Date.parse(at) - now.getTime() > FUTURE_TOLERANCE_MS;
+
+/**
+ * Re-judges a judgement at `now` (D-11 to D-14, D-24): the rows and level counts in the dashboard's shape, each result with its freshness and
+ * its source, each row with the worst freshness of its results and its oldest result time.
+ * - The windows are the release defaults tightened by the site policy, passed to the status engine, so Out of date and Stale agree.
+ * - A clock earlier than the release build is the clock case: every row is shown, every freshness is Unknown and no result counts as fresh,
+ *   so nothing is Met. It is never a refusal.
+ * - Otherwise a result or an observation dated more than five minutes ahead is refused (did not verify) and not used; its rule has no result.
+ * - A site observation with a rule's collector and subject, newer than the release's result, replaces it, with source `site`.
+ * The judgement itself is never changed.
+ */
+export function rejudge(judgement: Judgement, options: RejudgeOptions): Rejudged {
   if (judgement?.format !== JUDGEMENT_FORMAT) throw new Error('unsupported judgement format');
-  const rows = judgement.rows.map((row) => withFreshness(judgeRow(row, judgement.head, options.now), { head: judgement.head, now: options.now }));
+  const { now } = options;
+  const effective = effectivePolicy(options.policy);
+  const clockBehind = isFuture(options.builtAt ?? judgement.generatedAt, now);
+  const refused: RefusedEvidence[] = [];
+  const refusedRules = new Set<string>();
+  const refusedObservations: RefusedEvidence[] = [];
+  const observations: Observation[] = [];
+  for (const observation of options.observations ?? []) {
+    if (isFuture(observation.collectedAt, now)) refusedObservations.push({ kind: 'observation', collector: observation.collector, subject: observation.subject, reason: 'future-dated', at: observation.collectedAt });
+    else observations.push(observation);
+  }
+  const context = { commit: judgement.commit, collectedAt: judgement.generatedAt };
+  const windows: FreshnessWindows = clockBehind ? {} : effective.windows;
+  const rows = judgement.rows.map((row) => {
+    const sources = new Map<string, EvidenceSource>();
+    const components = row.components.map((component) => {
+      const results: Record<string, RuleResult> = { ...component.results };
+      for (const rule of Object.values(component.rulesByStatement).flat()) {
+        const collector = rule.kind === 'observation' ? rule.observation?.collector : undefined;
+        sources.set(rule.id, collector && SITE_COLLECTORS.has(collector) ? 'reference-site' : 'release');
+        const release = Object.hasOwn(results, rule.id) ? results[rule.id] : undefined;
+        if (release && !clockBehind && isFuture(release.collectedAt, now)) {
+          if (!refusedRules.has(rule.id)) { refusedRules.add(rule.id); refused.push({ kind: 'result', rule: rule.id, reason: 'future-dated', at: release.collectedAt }); }
+          delete results[rule.id];
+        }
+        const target = rule.kind === 'observation' ? rule.observation : undefined;
+        const matching = target ? observations.filter((item) => item.collector === target.collector && item.subject === target.subject) : [];
+        if (matching.length === 0) continue;
+        const site = evaluateObservationRule(rule, matching, context);
+        const kept = Object.hasOwn(results, rule.id) ? results[rule.id] : undefined;
+        if (!kept || kept.reason === 'missing-result' || Date.parse(site.collectedAt) > Date.parse(kept.collectedAt)) {
+          results[rule.id] = site;
+          sources.set(rule.id, 'site');
+        }
+      }
+      return { ...component, results };
+    });
+    const judged = judgeRow({ ...row, components }, judgement.head, now, windows);
+    return withFreshness(judged, sources, { head: judgement.head, now, windows: effective.windows, ageing: effective.ageing, clockUnknown: clockBehind });
+  });
   const levels = judgement.levels.map((level) => ({ ...level, counts: summarizeLevel(rows.filter((row) => row.level === level.id)) }));
-  return { judgedAt: options.now.toISOString(), levels, rows };
+  return {
+    judgedAt: now.toISOString(), levels, rows, refused: [...refused, ...refusedObservations],
+    policy: { clamped: effective.clamped, ...(effective.refused ? { refused: effective.refused } : {}) },
+    ...(clockBehind ? { clock: 'clock-behind-build' as const } : {}),
+  };
 }
 
 // ---- The release evidence folder's manifest (D-15) ----

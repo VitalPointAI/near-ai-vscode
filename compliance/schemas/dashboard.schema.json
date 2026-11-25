@@ -49,7 +49,7 @@
         "partly-statements", "limitation", "unsettled", "self-signed", "risk-accepted", "appliance-only"
       ]
     },
-    "window": { "type": "string", "enum": ["head", "audit", "settings", "harness", "document", "attestation"] },
+    "window": { "type": "string", "enum": ["head", "audit", "settings", "harness", "document", "attestation", "vulnerability", "live"] },
     "detail": {
       "description": "The values of the reason sentence's placeholders.",
       "type": "object",
