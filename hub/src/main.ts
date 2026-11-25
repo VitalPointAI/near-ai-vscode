@@ -5,7 +5,8 @@ import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TLSSocket } from 'node:tls';
-import type { SessionExpectation, SessionRead } from '@ext/domain/replica/hubFile';
+import { certPinOf, type SessionExpectation, type SessionRead } from '@ext/domain/replica/hubFile';
+import { serverPinWords } from '@ext/domain/replica/serverWords';
 import { RosterCache } from './append/rosterCache';
 import { Checkpointer, type CheckpointLog } from './checkpoints';
 import { loadConfig, type HubConfig } from './config';
@@ -36,6 +37,9 @@ declare const __HUB_VERSION__: string;
 // hub's identity (keys and certificate pin), roster cache, sessions, routes, the checkpoint signer (32-22, listening on the event channel), server.
 // composeHub is the one place the parts are wired, and the tests' in-process hub (test/helpers/hubHarness.ts) calls it too, so what the tests run
 // is what the binary runs. A stop clears the signer's timers first, then ends event streams, then closes the server and the store.
+//
+// --pin-words (G541) prints the twelve words of the certificate pin on one line: the words a lead compares with the operator before re-admitting
+// the hub, worked out with serverPinWords, the function members' computers use. It reads only the TLS pair, no settings and no state.
 //
 // --hub-file <days> (D-41, default 7) prints one signed hub file for the operator to give the staff lead, and nothing else on stdout: no info line
 // before or after it, only a hub.start_refused line when it cannot.
@@ -328,6 +332,40 @@ async function transfer(flag: string, file: string, store: HubStore, config: Hub
   return logs + lists > 0 ? 0 : 1;
 }
 
+/** The TLS pair alone, read with the same rules as a start: all that --pin-words needs. */
+const TLS_SECRETS = HUB_SECRETS.filter((spec) => spec.name === 'HUB_TLS_CERT' || spec.name === 'HUB_TLS_KEY');
+
+/** --pin-words (G541): one line of the twelve words of the certificate's pin, or one hub.start_refused line. Returns the exit code. */
+export async function printPinWords(argv: readonly string[], logger: Logger, redactor: Redactor): Promise<number> {
+  if (argv.length !== 1) {
+    logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --pin-words, with nothing after it' });
+    return 1;
+  }
+  try {
+    refusePlainSecretEnv(process.env);
+  } catch (error) {
+    logger.error('hub.start_refused', { reason: 'secrets', detail: error instanceof SecretError ? error.message : 'a secret setting is not acceptable' });
+    return 1;
+  }
+  let secrets: ReadonlyMap<string, string>;
+  try {
+    secrets = await loadSecrets(TLS_SECRETS, { env: process.env }, redactor);
+  } catch (error) {
+    logger.error('hub.start_refused', { reason: 'secrets', detail: error instanceof SecretError ? error.message : 'the secrets could not be loaded' });
+    return 1;
+  }
+  const tls: HubTls = { cert: secrets.get('HUB_TLS_CERT') ?? '', key: secrets.get('HUB_TLS_KEY') ?? '' };
+  try {
+    checkTlsPair(tls);
+  } catch (error) {
+    logger.error('hub.start_refused', { reason: 'tls', detail: error instanceof TlsPairError ? error.message : 'the TLS certificate and key could not be used' });
+    return 1;
+  }
+  // The pin the hub's identity carries (hubIdentityOf), so the words are those of the certificate the hub serves.
+  await printKeyFile(serverPinWords(certPinOf(tls.cert)).join(' '));
+  return 0;
+}
+
 /** The days of --hub-file: the default 7 when none is given, a whole number otherwise (issueHubFile checks the range). */
 export function hubFileDays(argv: readonly string[]): number | undefined {
   if (argv.length === 1) return HUB_FILE_DAYS.default;
@@ -341,9 +379,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   const redactor = new Redactor();
   // --hub-file prints the hub file alone: its logger passes warnings and errors only, so stdout holds one hub file or one refusal.
   const hubFileMode = argv[0] === '--hub-file';
+  const pinWordsMode = argv[0] === '--pin-words';
   // --trust-export <file> at HQ and --trust-import <file> at an edge (71-11): one run against this hub's store, then exit; plain lines only.
   const transferMode = argv[0] === '--trust-export' || argv[0] === '--trust-import';
-  const logger = hubFileMode || transferMode
+  const logger = hubFileMode || pinWordsMode || transferMode
     ? new Logger(redactor, (line) => {
         if (!line.includes('"level":"info"')) stdoutLine(line);
       })
@@ -371,6 +410,11 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  if (pinWordsMode) {
+    process.exitCode = await printPinWords(argv, logger, redactor);
+    return;
+  }
+
   const healthcheck = argv.length === 1 && argv[0] === '--healthcheck';
   const days = hubFileMode ? hubFileDays(argv) : undefined;
   if (hubFileMode && days === undefined) {
@@ -384,7 +428,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (argv.length > 0 && !healthcheck && !hubFileMode && !transferMode) {
-    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck, --hub-file, --trust-export, --trust-import or --generate-key' });
+    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck, --hub-file, --pin-words, --trust-export, --trust-import or --generate-key' });
     process.exitCode = 1;
     return;
   }

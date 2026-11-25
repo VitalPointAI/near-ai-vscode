@@ -103,6 +103,7 @@
 !src/domain/replica/rosterView.ts
 !src/domain/replica/safetyCode.ts
 !src/domain/replica/safetyWords.ts
+!src/domain/replica/serverWords.ts
 !src/domain/replica/sessionKeys.ts
 !src/domain/replica/transport.ts
 !src/domain/replica/updateGuard.ts

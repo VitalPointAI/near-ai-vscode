@@ -11,7 +11,6 @@ import type { EntryHeader } from '@ext/domain/replica/entry';
 import { buildSessionAnswer, certPinOf, readHubFile } from '@ext/domain/replica/hubFile';
 import { SERVER_WORD_COUNT, serverPinWords } from '@ext/domain/replica/serverWords';
 import { canonicalize } from '@ext/domain/team/canonical';
-import { readmitWordsMatch } from '@ext/staff/replica/hubReadmit';
 import { hubIdentityOf, issueHubFile } from '../src/enrol';
 import { generateKeyFile, readEncryptionKey, readSigningKey } from '../src/keys';
 import { LIMITS } from '../src/limits';
@@ -496,7 +495,7 @@ function opensslPin(certFile: string): string {
   return createHash('sha256').update(der.stdout).digest('hex');
 }
 
-test('pin-words: --pin-words prints one line, the twelve words SovAI shows for the certificate pin, and a lead comparing them re-admits', async () => {
+test('pin-words: --pin-words prints one line, the twelve words SovAI shows for the certificate pin', async () => {
   // Only the TLS pair: the words need no hub key, no settings and no state folder.
   const run = launchHub({ args: ['--pin-words'], secrets: { HUB_SIGNING_KEY: null, HUB_ENCRYPTION_KEY: null }, env: { HUB_PORT: 'not-a-port' } });
   try {
@@ -507,10 +506,9 @@ test('pin-words: --pin-words prints one line, the twelve words SovAI shows for t
     assert.equal(out.split('\n').length, 2, 'stdout holds one line');
     const pin = opensslPin(run.tls.certFile);
     assert.equal(pin, certPinOf(run.tls.certPem));
+    // The words in SovAI's order, space separated: the form staffHubReadmit.test.ts shows a lead's computer accepts before it writes hub.readmit.
     assert.equal(out.trim(), serverPinWords(pin).join(' '));
     assert.equal(out.trim().split(' ').length, SERVER_WORD_COUNT);
-    // What the lead's computer accepts before it writes hub.readmit for this pin.
-    assert.equal(readmitWordsMatch(pin, out), true);
     assert.equal(run.stderr(), '');
     assert.equal(existsSync(run.stateDir), false, 'it touches no state folder');
   } finally {
