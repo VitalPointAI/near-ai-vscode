@@ -4,7 +4,7 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
+stopped_at: Completed 33-15-PLAN.md and 33.1-03-PLAN.md on feat/phase-33-15-331-03 (from feat/integration-gate-2); 47-20 and 47-21 still blocked
 last_updated: "2026-11-25T12:34:16.032Z"
 state_head: 6c17e4d14812f20a4d762190d920924323e9158a
 progress:
@@ -185,7 +185,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 ## Session
 
 **Last session:** 2026-11-25T12:34:15.827Z
-**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
+**Stopped at:** Completed 33-15-PLAN.md and 33.1-03-PLAN.md on feat/phase-33-15-331-03 (from feat/integration-gate-2); 47-20 and 47-21 still blocked
 **Resume file:** None
 
 ## Performance Metrics
@@ -241,6 +241,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P34 | 1h30m | 3 tasks | 21 files |
 | Phase 33.1 P01 | 23 min | 3 tasks | 14 files |
 | Phase 33.1 P17 | 50 min | 3 tasks | 12 files |
+| Phase 33 P15 | 1h | 3 tasks | 10 files |
+| Phase 33.1 P03 | 1h30m | 3 tasks | 18 files |
 | Phase 45.1 P01 | 70 min | 2 tasks | 11 files |
 | Phase 45.1 P02 | 90 min | 3 tasks | 16 files |
 
@@ -364,6 +366,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 33.2]: 33.2-06: every wrap path through wrapForDevice with wrapPlan.formatFor; new projects start switched; Protected B never v1; architecture check enforces it
 - [Phase 33.2]: 33.2-07: switch, move and give-keys actions and the card model; the native Staff Room wiring waits on 33-24 and 33-26
 - [Phase 33.2]: 33.2-07 Task 3 (2026-11-25, `feat/phase-33.2-07-t3` from `feat/integration-gate-2` 33dddaa3): the Switch, Move and Give keys cards in the native Staff Room; the live engine runs the three actions over the room's channel, refusals come back with their sentences and a stale confirmation answers with the step-up link; Move always offers 'Move it now without waiting' while a part waits; plan complete, WRAP-04 done. The Move button says 'Move all shared work to the new keys' (glossary over the plan's 'every cell')
+- [Phase 33]: 33-15 (2026-11-25, `feat/phase-33-15-331-03` from `feat/integration-gate-2` 72e95c9f): README, SECURITY.md (gate path), relay/README.md, workbench/README.md and CHANGELOG Unreleased describe live sharing as built; presence, native cursors and Show Who Wrote This are stated as not in SovAI yet (G435, 33-29), the late joiner's two limits plainly (G430), G440 and G441 as limits; staffLiveDocs.test.ts imports the fixed sentences and checks every bold label against the built code
+- [Phase 33.1]: 33.1-03 (2026-11-25, same branch after 33-15): positions@1 and verified-clearance@1 registered; no positions kind and no project.mode applies before positions@1 is required; project.mode is the lead's, a mode of the table, settings no looser than the mode, nothing pending; a plain member.invite is refused at the authority step in assignment and appointment modes; turnOnPositions, changeMode, requireVerifiedClearance and settingsLooserThan; PERSON_KEY_KINDS read by family, now with the personnel kinds (43). D-26 wiring at share time waits for 33.1-15's rules command
 - [Phase 45.1]: 45.1-01: a label with handling flags is refused for export; the bound label is our own Label, mapping 0 for release copies
 - [Phase 45.1]: 45.1-02: RSA exports name their OAEP hash (OpenTDF reference needs sha1); the receiving key uses SHA-256, the only hash Transit decrypts (G455)
 - [Phase 45.1]: 45.1-03 (owner, 2026-11-25, D-11): exchange.import gains arrived, stored and conversion?; every arrival quarantined; converting never raises trust; unknown format ids shown, never interpreted
