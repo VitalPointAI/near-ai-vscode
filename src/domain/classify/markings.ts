@@ -13,7 +13,7 @@ export interface Floor {
   readonly basis: Basis;
 }
 
-const INVISIBLE = /[­᠎​-‍⁠﻿]/g;
+const INVISIBLE = /[\u00ad\u180e\u200b-\u200d\u2060\ufeff]/g;
 const SPACE_RUN = /\s+/gu;
 const WORD_CHAR = /[\p{L}\p{N}\p{M}]/u;
 

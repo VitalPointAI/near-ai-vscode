@@ -4,10 +4,10 @@
 // construction. The caller passes `start` as the inherited join (the session's mark, the sources' labels, the project, folder or cell label); an empty
 // start is refused, never read as the lowest level, so text such as "this document is unclassified" can only ever fail to raise.
 // This plan (70.1-01) holds the floor path; the model judgement, thresholds, shadow mode, review and the possible spill are 70.1-02's.
-import type { ClassificationSection } from '../gate/classificationSection';
+import type { ClassificationSection, ShadowMode } from '../gate/classificationSection';
 import { joinLabels, raiseMark, sameMark } from '../gate/dominance';
 import type { Mark } from '../gate/dominance';
-import { levelIndex } from '../gate/labels';
+import { labelKey, levelIndex } from '../gate/labels';
 import type { Label, ScaleTable } from '../gate/labels';
 import type { Floor } from './markings';
 import { PROPOSAL_OUTCOMES } from './record';
@@ -44,7 +44,7 @@ export interface DecideInput {
   /** The policy's scales (labels.scales). */
   readonly scales: ScaleTable;
   /** Shadow or enforce per `scale/level` (D-10), read in 70.1-02. */
-  readonly modes?: Readonly<Record<string, 'shadow' | 'enforce'>>;
+  readonly modes?: Readonly<Record<string, ShadowMode>>;
 }
 
 export type DecideResult =
@@ -102,14 +102,14 @@ export function partOf(start: Mark, proposed: Label, scales: ScaleTable): Propos
   });
 }
 
-/** The proposed label per scale: the join of every floor on that scale, sorted by scale. */
+/** The proposed label per scale: the join of every floor on that scale, in a mark's order (by `scale/level`, as raiseMark sorts). */
 function proposedLabels(floors: readonly Floor[], scales: ScaleTable): readonly Label[] {
   const byScale = new Map<string, Label>();
   for (const floor of floors) {
     const held = byScale.get(floor.label.scale);
     byScale.set(floor.label.scale, held === undefined ? floor.label : (joinLabels(held, floor.label, scales) ?? held));
   }
-  return [...byScale.values()].sort((a, b) => (a.scale < b.scale ? -1 : a.scale > b.scale ? 1 : 0));
+  return [...byScale.values()].sort((a, b) => (labelKey(a) < labelKey(b) ? -1 : labelKey(a) > labelKey(b) ? 1 : 0));
 }
 
 function uniqueBases(floors: readonly Floor[]): readonly Basis[] {

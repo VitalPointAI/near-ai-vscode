@@ -87,8 +87,8 @@ test('markingFloors finds the SECRET banner as one floor with a marking basis na
   const french = markingFloors('PROTÉGÉ B\nNotes de l\'exercice NORTHERN EXAMPLE', section);
   assert.deepEqual(french.map((floor) => floor.basis.ref), ['banner-protected-b-fr']);
   // Decomposed accents, a zero-width space and a non-breaking space still match; the word inside another word and other cases do not.
-  assert.equal(markingFloors('PROTÉGÉ B', section).length, 1);
-  assert.equal(markingFloors('SE​CRET', section).length, 1);
+  assert.equal(markingFloors('PROTE\u0301GE\u0301\u00a0B', section).length, 1);
+  assert.equal(markingFloors('SE\u200bCRET', section).length, 1);
   for (const text of ['SECRETARY of the exercise', 'a secret meeting place', 'TOPSECRET', 'Secret']) assert.equal(markingFloors(text, section).length, 0, text);
 });
 
