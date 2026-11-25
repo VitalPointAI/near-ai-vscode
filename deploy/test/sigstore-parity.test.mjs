@@ -12,6 +12,7 @@ import path from 'node:path';
 import { before, test } from 'node:test';
 import { cosignBinary, signBlob, verifyBlob } from '../bundle/lib/cosign.mjs';
 import { publicKeyFingerprint, verifySigstoreBundle } from '../../compliance/src/sigstoreBundle.ts';
+import { fixtureBundle, fixtureKey, signFixture } from '../../workbench/test/helpers/sigstore-fixture.ts';
 
 process.env.COSIGN_PASSWORD = 'sigstore-parity-test';
 const DIR = mkdtempSync(path.join(tmpdir(), 'sigstore-parity-'));
@@ -70,4 +71,28 @@ test('refuse: a changed byte, another key, a changed signature and a changed dig
   assert.deepEqual(node(content, bundle, 'ed25519.pub'), { ok: false, reason: 'key-type' });
   assert.deepEqual(verifySigstoreBundle(content, { ...bundle, verificationMaterial: { certificate: { rawBytes: 'AA==' } } }, pem('release.pub')), { ok: false, reason: 'not-key-mode' });
   assert.deepEqual(verifySigstoreBundle(content, 'not a bundle', pem('release.pub')), { ok: false, reason: 'bundle-format' });
+});
+
+// The workbench's test-only fixture signer (workbench/test/helpers/sigstore-fixture.ts) signs the browser check's folders with Node crypto,
+// because the workbench CI job has no cosign. The pinned cosign must accept what it writes, and refuse it for a changed byte or another key.
+test('fixture signer: what the workbench\'s Node fixture signer writes, the pinned cosign verifies, with the shape cosign writes', () => {
+  const key = fixtureKey();
+  const pub = file('fixture.pub');
+  writeFileSync(pub, key.publicKeyPem);
+  const content = readFileSync(MANIFEST);
+  const target = file('fixture-manifest.json');
+  writeFileSync(target, content);
+  const bundleFile = signFixture(target, key);
+  assert.equal(bundleFile, `${target}.sigstore.json`, 'the bundle takes cosign\'s default name');
+  const bundle = JSON.parse(readFileSync(bundleFile, 'utf8'));
+  assert.equal(verifyBlob(target, bundleFile, pub).ok, true, 'the pinned cosign verifies the fixture signature');
+  assert.deepEqual(verifySigstoreBundle(content, bundle, key.publicKeyPem), { ok: true });
+  // The same keys and nesting as a bundle the pinned cosign writes, and the same public key hint rule.
+  const real = JSON.parse(readFileSync(BUNDLE, 'utf8'));
+  const shape = (value) => value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((name) => [name, shape(value[name])])) : typeof value;
+  assert.deepEqual(shape(bundle), shape(real));
+  assert.equal(Buffer.from(bundle.verificationMaterial.publicKey.hint, 'base64').toString('hex'), publicKeyFingerprint(key.publicKeyPem));
+  const changed = Buffer.from(content); changed[3] ^= 1;
+  assert.equal(cosign(changed, fixtureBundle(content, key), 'fixture.pub').ok, false, 'cosign refuses a changed byte');
+  assert.equal(cosign(content, fixtureBundle(content, fixtureKey()), 'fixture.pub').ok, false, 'cosign refuses another key');
 });

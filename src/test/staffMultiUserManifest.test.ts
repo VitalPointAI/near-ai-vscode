@@ -22,7 +22,7 @@ test.after(() => { hosts.configureStaffHosts(undefined); uninstall(); });
 interface Manifest {
   contributes: {
     commands: Array<{ command: string; title: string; category?: string }>;
-    keybindings: Array<{ command: string; key: string; mac?: string; linux?: string; win?: string; when: string }>;
+    keybindings?: Array<{ command: string; key: string; mac?: string; linux?: string; win?: string; when: string }>;
     menus: { commandPalette?: Array<{ command: string; when?: string }> };
     configuration: { properties: Record<string, { type?: string; default?: unknown; scope?: string; description?: string }> };
   };
@@ -135,36 +135,33 @@ test('each multi-user command is contributed under SovAI with its "Staff: " titl
   }
 });
 
-test('the Command Palette gates multi-user commands and hides editor history commands', () => {
+test('the Command Palette gates multi-user commands', () => {
   const palette = manifest.contributes.menus.commandPalette ?? [];
   for (const id of IDS) assert.deepEqual(palette.filter((entry) => entry.command === id), [{ command: id, when: WHEN }], id);
   const staffEntries = palette.filter((entry) => entry.command.startsWith('nearAi.staff.'));
-  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS, ...EDITOR_HISTORY, SHOW_ATTRIBUTION].sort());
-  for (const command of EDITOR_HISTORY) assert.deepEqual(staffEntries.filter((entry) => entry.command === command), [{ command, when: 'false' }]);
+  assert.deepEqual(staffEntries.map((entry) => entry.command).sort(), [...IDS].sort());
   assert.equal(JSON.stringify(manifest).split(WHEN).length - 1, IDS.length, 'each when clause names the setting exactly');
 });
 
-test('the attribution command appears only for a bound editor', () => {
-  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => command === SHOW_ATTRIBUTION), [
-    { command: SHOW_ATTRIBUTION, title: 'Staff: Show Who Wrote This', category: 'NEAR AI' }
-  ]);
-  assert.deepEqual(manifest.contributes.menus.commandPalette?.filter(({ command }) => command === SHOW_ATTRIBUTION), [
-    { command: SHOW_ATTRIBUTION, when: 'nearAi.staffBoundEditor' }
-  ]);
-});
-
-test('shared history shortcuts only resolve when the bound text editor has focus', () => {
-  const [undo, redo] = EDITOR_HISTORY;
-  const when = 'editorTextFocus && nearAi.staffBoundEditor';
-  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => EDITOR_HISTORY.includes(command)), [
-    { command: undo, title: 'Staff: Undo My Change', category: 'NEAR AI' },
-    { command: redo, title: 'Staff: Redo My Change', category: 'NEAR AI' }
-  ]);
-  assert.deepEqual(manifest.contributes.keybindings.filter(({ command }) => EDITOR_HISTORY.includes(command)), [
-    { command: undo, key: 'ctrl+z', mac: 'cmd+z', when },
-    { command: redo, key: 'ctrl+shift+z', mac: 'cmd+shift+z', when },
-    { command: redo, key: '', linux: 'ctrl+y', win: 'ctrl+y', when }
-  ]);
+// The VS Code editor binding (33-19) stays in the tree but nothing attaches it: 33-10's editor service was superseded by the native live engine
+// (33-24), so registerStaffEditorBindings never runs in the extension. Its commands, shortcuts and palette entries are therefore not contributed;
+// a contributed command with no handler fails the e2e suite. They come back with the change that attaches the binding.
+test('the editor binding\'s commands are not contributed while nothing attaches the binding', () => {
+  const editorCommands = [...EDITOR_HISTORY, SHOW_ATTRIBUTION];
+  assert.deepEqual(manifest.contributes.commands.filter(({ command }) => editorCommands.includes(command)), []);
+  assert.deepEqual((manifest.contributes.keybindings ?? []).filter(({ command }) => editorCommands.includes(command)), []);
+  assert.deepEqual((manifest.contributes.menus.commandPalette ?? []).filter(({ command }) => editorCommands.includes(command)), []);
+  assert.equal(JSON.stringify(manifest).includes('nearAi.staffBoundEditor'), false, 'no when clause names the binding\'s context');
+  const sources: string[] = [];
+  const walk = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (statSync(full).isDirectory()) { if (name !== 'test') walk(full); } else if (name.endsWith('.ts')) sources.push(full);
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  const callers = sources.filter((file) => !file.endsWith(path.join('services', 'staffEditorBinding.ts')) && readFileSync(file, 'utf8').includes('registerStaffEditorBindings('));
+  assert.deepEqual(callers, [], 'when a caller attaches the binding, contribute its commands again');
 });
 
 test('none of the commands is a Staff Room person decision or an existing staff command, and no agent source names one', () => {

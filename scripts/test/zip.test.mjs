@@ -69,6 +69,11 @@ test('a stored and a deflated entry are listed and read back exactly', () => {
   assert.equal(zip.read('extension/media/map/globe/index.json').toString(), text);
   assert.equal(zip.read('extension/empty.txt').length, 0);
   assert.throws(() => zip.read('extension/absent.txt'), /no entry named extension\/absent\.txt/);
+  // The size report counts what each entry adds to the file: the stored size, not the inflated one.
+  assert.equal(zip.compressedSize('extension/package.json'), Buffer.byteLength('{"name":"x"}'));
+  assert.equal(zip.compressedSize('extension/media/map/globe/index.json'), deflateRawSync(text).length);
+  assert.ok(zip.compressedSize('extension/media/map/globe/index.json') < text.length);
+  assert.equal(zip.compressedSize('extension/absent.txt'), undefined);
 });
 
 test('a damaged or unsupported archive is refused, never read past', () => {
