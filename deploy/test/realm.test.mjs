@@ -245,6 +245,20 @@ test('a notice with only English gives supportedLocales [en]', () => {
   assert.deepEqual(Object.keys(realm.localizationTexts), ['en']);
 });
 
+test('the login theme reaches Keycloak as ConfigMap sterling-login-theme, installed before Keycloak, mounted read-only and not optional (needs helm)', () => {
+  const releases = listReleases(ROOT);
+  const theme = releases.find((release) => release.name === 'sterling-keycloak-theme');
+  assert.ok(theme && theme.namespace === 'sterling-identity' && theme.order < keycloakx().order, 'the theme release is in sterling-identity, before keycloakx');
+  const configMap = renderRelease(ROOT, theme, { site: SITE, helm: HELM });
+  assert.match(configMap, /kind: ConfigMap\n[\s\S]*name: sterling-login-theme/);
+  assert.match(configMap, /\n {2}theme\.properties: \|\n[\s\S]*parent=keycloak\.v2/);
+  assert.match(configMap, /\n {2}footer\.ftl: \|\n[\s\S]*sterlingSystemUseNotice/);
+  assert.doesNotMatch(configMap, /no_esc/, 'HTML escaping stays on');
+  const statefulSet = renderRelease(ROOT, keycloakx(), { site: SITE, helm: HELM });
+  assert.match(statefulSet, /- name: login-theme\n\s+mountPath: \/opt\/keycloak\/themes\/sterling\/login\n\s+readOnly: true/);
+  assert.match(statefulSet, /- name: login-theme\n\s+configMap:\n\s+name: sterling-login-theme\n\s+optional: false/);
+});
+
 test('quotes, an apostrophe, braces and accented letters reach the realm message so the page shows them as typed', () => {
   const text = '« Accès réservé » "quoted" l\'usage {0} ç.';
   const { realm, problems } = withNotice({ en: 'Text.', fr: text });

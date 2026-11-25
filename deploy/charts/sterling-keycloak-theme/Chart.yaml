@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sterling-keycloak-theme
+description: The Sterling login theme, which shows your organization's system use notice on every Keycloak sign-in page (D-76).
+type: application
+version: 0.1.0
