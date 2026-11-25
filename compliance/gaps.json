@@ -6052,6 +6052,19 @@
       "ownerRole": "owner",
       "remediation": "Every verified credential names the context https://w3id.org/sterling/credentials/v1 (Phase 71, D-05). Our own verifiers never fetch it, but a partner's verifier that expands JSON-LD would, and an address nobody controls could be claimed and serve other meanings. Register the address with w3id.org, pointing at the frozen context document in the code, before the first real credential is issued (owner item 3 of the Phase 71 context), or choose an address under your organization's own domain instead.",
       "title": "The credential context address is not registered yet"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "71",
+      "controls": [
+        "ac-03",
+        "si-07"
+      ],
+      "id": "G426",
+      "ownerRole": "maintainers",
+      "remediation": "Three limits of the sync hub as your organization's trust host (Phase 71, 71-09). First, an address for an identity log is first come, first served: a member could post a log for someone else's address before that person does, which blocks that person there until an administrator clears it; people's addresses end in a random id, so the address must be known in advance. Second, a hub that holds no copy of a status list takes the first copy at any version, so a hub started empty (not restored from its backup) could be given an old list by a member before an officer publishes the current one. Third, the hub checks cited evidence only on entries it can open (the project's base part); entries in other cells are checked by the people who read them. Close the first two by having the officer's backend publish each person's log and the current lists when the hub is set up (71-10, 71-12), and record the third in SECURITY.md (71-14).",
+      "title": "The sync hub's trust routes take first copies on trust and check evidence only where they can read"
     }
   ]
 }

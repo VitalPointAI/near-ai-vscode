@@ -16,3 +16,18 @@
   - (b) Widen the runner to `dist/test/**/*.test.js` while keeping `dist/test/container/` out. This changes the workbench `test` script for every phase, so coordinate it first.
 - **Check after either fix:** the run's `ℹ tests` count includes the new file's tests. A test file that compiles but never runs would let a plan's verify step pass with nothing checked.
 - **Status:** open, for 71-10 (the first plan that adds a workbench test).
+
+## H-71-02: the command-line credential check lives at `deploy/tools/credential-check.mjs`, not `scripts/`
+
+- **Found by:** the 71-09 executor, from the 71-08 summary, 2026-11-24.
+- **What is true:** 71-08 built the tool at `deploy/tools/credential-check.mjs`, with its generated engine `deploy/tools/credential-checker.engine.mjs` packed by `deploy/bundle/build.mjs` into the signed offline bundle (PLAN-IDS.md names the same path). Operators run it from the bundle; it needs no checkout and no compile.
+- **Who is affected:** 47-19 (`guests.mjs create --approved-by`) expects `scripts/credential-check.mjs`.
+- **What 47-19's executor does:** call `node deploy/tools/credential-check.mjs --holder <did> --type <Type> --credential <file> --trust <dir> [--scope <s>] [--at <time>] [--holder-name <name>]` (exit 0 holds, 1 refused with one sentence on stderr, 2 usage; the trust folder layout is in the 71-08 summary). Do not move the file: the bundle build and its test pin this path.
+- **Status:** open, for 47-19.
+
+## H-71-03: the sync hub's trust routes and settings, as built by 71-09
+
+- **For:** 71-10 (posting a person's log), 71-11 (export and import), 71-12 (publishing lists), 71-13 (the session), and Phase 47's site values.
+- **Routes:** `GET|POST /v1/trust/did/<path>/did.jsonl`, `GET|PUT /v1/trust/did/<path>/did-witness.json`, `GET|PUT /v1/trust/status/<name>`, where a list's id in `credentials@1.statusLists` is `https://<host>/v1/trust/status/<name>`. Every route needs a hub session of a device whose member holds the `member` role at the hub's roster head; observers and guests get 403 `not-staff`.
+- **Settings:** `HUB_ORGANIZATION_POLICY` (absolute path of your organization's signed rules) and `HUB_ORGANIZATION_KEY` (its issuer key, 43 base64url characters). Without both, or when the rules do not verify or hold no `credentials` section, the trust routes answer 503 `no-policy` and the hub judges no evidence.
+- **Open for 71-10:** a person's backend in a hosted session has no hub session of its own (hub sessions belong to a project device). How the workbench posts a person's first log is a decision for 71-10 (see its summary).

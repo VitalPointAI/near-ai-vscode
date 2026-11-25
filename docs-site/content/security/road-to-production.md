@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 410 items, 392 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 411 items, 392 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -24,7 +24,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 | Level | Blocks production | Does not block production |
 | --- | --- | --- |
 | [Now, at every level](#now) | 75 | 8 |
-| [From Protected A](#protected-a) | 301 | 1 |
+| [From Protected A](#protected-a) | 301 | 2 |
 | [From Protected B](#protected-b) | 12 | 3 |
 | [From Protected C](#protected-c) | 0 | 1 |
 | [From Confidential](#confidential) | 0 | 1 |
@@ -436,6 +436,7 @@ These matter once your organization holds Protected A information.
 ### Does not block production {#protected-a-does-not-block}
 
 - **G398. Observers have no documented releasability vocabulary, agreements or rules of behaviour.** Document the releasability tokens and who sets them, the credentials and agreements an observer needs by sensitivity, and the observer rules of behaviour, then add hub and workbench statements once the release check is on main (48.1-05, 48.1-19). Controls: AC-21, AC-21(400), AC-21(401), AC-16, PS-6, PL-4. Owner role: maintainers. Planned in Phase 48.1.
+- **G426. The sync hub's trust routes take first copies on trust and check evidence only where they can read.** Three limits of the sync hub as your organization's trust host (Phase 71, 71-09). First, an address for an identity log is first come, first served: a member could post a log for someone else's address before that person does, which blocks that person there until an administrator clears it; people's addresses end in a random id, so the address must be known in advance. Second, a hub that holds no copy of a status list takes the first copy at any version, so a hub started empty (not restored from its backup) could be given an old list by a member before an officer publishes the current one. Third, the hub checks cited evidence only on entries it can open (the project's base part); entries in other cells are checked by the people who read them. Close the first two by having the officer's backend publish each person's log and the current lists when the hub is set up (71-10, 71-12), and record the third in SECURITY.md (71-14). Controls: AC-3, SI-7. Owner role: maintainers. Planned in Phase 71.
 
 ## From Protected B {#protected-b}
 
