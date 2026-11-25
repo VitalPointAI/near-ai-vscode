@@ -336,3 +336,19 @@ test('74.1 D-23: a passport gap outside PASSPORT_GAPS, a use outside USE_TIERS, 
   assert.equal(withField('passport', 'Not An Id'), 'not-allowed-here unmapped.nearAi.passport');
   assert.equal(withField('passportGap', 'not-evaluated'), 'ok');
 });
+
+test('74.1 D-23: a checker\'s record carries both families; one whose checker family is a writer\'s is refused; a record without them still passes', () => {
+  const checked = buildDecisionRecord(input('route.any-cloud', { capability: { verb: 'infer' } as never, checkFamilies: { author: ['nemotron'], checker: 'gpt' } }));
+  assert.deepEqual(checked.unmapped.nearAi.checkFamilies, { author: ['nemotron'], checker: 'gpt' });
+  assert.equal(validateDecisionRecord(checked).ok, true);
+  const withFamilies = (value: unknown): string => {
+    const found = validateDecisionRecord({ ...checked, unmapped: { nearAi: { ...checked.unmapped.nearAi, checkFamilies: value } } });
+    return found.ok ? 'ok' : `${found.reason} ${found.path}`;
+  };
+  assert.equal(withFamilies({ author: ['nemotron', 'gpt'], checker: 'gpt' }), 'not-allowed-here unmapped.nearAi.checkFamilies', 'a forged same-family check');
+  assert.equal(withFamilies({ author: 'nemotron', checker: 'gpt' }), 'not-allowed-here unmapped.nearAi.checkFamilies');
+  assert.equal(withFamilies({ author: [], checker: 'Not A Family' }), 'not-allowed-here unmapped.nearAi.checkFamilies');
+  const plain = buildDecisionRecord(input('route.any-cloud', {}));
+  assert.equal(Object.prototype.hasOwnProperty.call(plain.unmapped.nearAi, 'checkFamilies'), false);
+  assert.equal(validateDecisionRecord(plain).ok, true);
+});

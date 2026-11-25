@@ -44,29 +44,63 @@ export type CheckerChoice =
   | { readonly model: string; readonly families: CheckFamilies }
   | { readonly person: true; readonly outcome: CheckOutcome; readonly reason: string; readonly families: CheckFamilies };
 
+/** The choice for a check of work written by several models: the checker and the families on both sides, or a person. */
+export type TeamCheckerChoice =
+  | { readonly model: string; readonly families: { readonly author: readonly string[]; readonly checker: string } }
+  | { readonly person: true; readonly outcome: CheckOutcome; readonly reason: string; readonly families: { readonly author: readonly string[] } };
+
 /**
- * Who checks the work of `authorModelId` in `role`: the first model of `preference` (the role's configured model first, then its preference, as model
- * ids) that has a family, is not of the author's family, and that `allows` (the gate, for a checking job) lets run; otherwise a person, with
- * `check.same-family`. Never a model of the author's family, never a model with no passport. An author with no passport has no family, so any checker
- * of a known family may check it.
+ * Who checks work written by `authorModelIds` (74.1 D-19): the first model of `preference` (the role's configured model first, then its preference, as
+ * model ids) that has a family, is of none of the authors' families, and that `allows` (the gate, for a checking job) lets run; otherwise a person, with
+ * `check.same-family`. Never a model of an author's family, never a model with no passport. Authors with no passport add no family.
  */
-export function checkerFor(
-  role: CheckingRole, authorModelId: string, preference: readonly string[], allows: (modelId: string) => boolean, context: { readonly models: ModelsSection | undefined; readonly now: number }
-): CheckerChoice {
+export function checkerForAuthors(
+  role: CheckingRole, authorModelIds: readonly string[], preference: readonly string[], allows: (modelId: string) => boolean, context: { readonly models: ModelsSection | undefined; readonly now: number }
+): TeamCheckerChoice {
   void role;
-  const author = familyOf(authorModelId, context.models, context.now);
-  let sameFamily: string | undefined;
+  const authors = [...new Set(authorModelIds.flatMap((id) => familyOf(id, context.models, context.now) ?? []))].sort();
+  let sameFamily: { readonly model: string; readonly family: string } | undefined;
   for (const candidate of preference) {
     if (candidate.trim() === '') continue;
     const family = familyOf(candidate, context.models, context.now);
     if (family === undefined) continue;
-    if (author !== undefined && family === author) { sameFamily = sameFamily ?? candidate; continue; }
+    if (authors.includes(family)) { sameFamily = sameFamily ?? { model: candidate, family }; continue; }
     if (!allows(candidate)) continue;
-    return Object.freeze({ model: candidate, families: Object.freeze({ ...(author === undefined ? {} : { author }), checker: family }) });
+    return Object.freeze({ model: candidate, families: Object.freeze({ author: Object.freeze(authors), checker: family }) });
   }
-  const named = sameFamily ?? authorModelId;
-  return Object.freeze({
-    person: true as const, outcome: 'check.same-family' as const, reason: sameFamilyText(named, author ?? 'unknown'),
-    families: Object.freeze(author === undefined ? {} : { author })
-  });
+  const named = sameFamily ?? { model: authorModelIds[0] ?? 'this model', family: authors[0] ?? 'unknown' };
+  return Object.freeze({ person: true as const, outcome: 'check.same-family' as const, reason: sameFamilyText(named.model, named.family), families: Object.freeze({ author: Object.freeze(authors) }) });
+}
+
+/**
+ * Who checks the work of `authorModelId` in `role`: checkerForAuthors for one author. An author with no passport has no family, so any checker of a known
+ * family may check it.
+ */
+export function checkerFor(
+  role: CheckingRole, authorModelId: string, preference: readonly string[], allows: (modelId: string) => boolean, context: { readonly models: ModelsSection | undefined; readonly now: number }
+): CheckerChoice {
+  const choice = checkerForAuthors(role, [authorModelId], preference, allows, context);
+  const author = choice.families.author[0];
+  if ('model' in choice) return Object.freeze({ model: choice.model, families: Object.freeze({ ...(author === undefined ? {} : { author }), checker: choice.families.checker }) });
+  return Object.freeze({ person: true as const, outcome: choice.outcome, reason: choice.reason, families: Object.freeze(author === undefined ? {} : { author }) });
+}
+
+/** The name patterns of checking roles in GSD and staff teams (74.1 D-19): a reviewer, plan checker, verifier, editor, red team, release guard. */
+const CHECKING_NAME = /reviewer|plan-checker|verifier|editor|red-team|release-guard/i;
+
+/** The checking role a sub-agent plays, from its label or its agent file's role; undefined for a writing role. */
+export function checkingRoleOf(label: string, role?: string): CheckingRole | undefined {
+  const name = `${label} ${role ?? ''}`.toLowerCase();
+  if (!CHECKING_NAME.test(name)) return undefined;
+  if (name.includes('tradecraft-reviewer')) return 'tradecraft-reviewer';
+  if (name.includes('release-guard')) return 'release-guard';
+  if (name.includes('plan-checker')) return 'plan-checker';
+  if (name.includes('red-team')) return 'red-team';
+  if (name.includes('editor')) return 'editor';
+  return 'reviewer';
+}
+
+/** Whether a sub-agent plays a checking role (74.1 D-19). */
+export function isCheckingRole(label: string, role?: string): boolean {
+  return checkingRoleOf(label, role) !== undefined;
 }

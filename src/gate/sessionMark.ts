@@ -14,7 +14,7 @@ import type { Mark } from '../domain/gate/dominance';
 import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
+import type { CheckRecordFamilies, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import { ROUTE_REFUSALS, notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutePolicy, RoutingTable, VerifiedAuthorization } from '../domain/gate/routing';
@@ -91,6 +91,8 @@ export interface SessionRoute {
    * is added by the client. Absent: chat you review, raised only by the mark.
    */
   readonly useOf?: () => UseInput;
+  /** A checking route's families (74.1 D-19, D-23): the writers' and the checker's, which every record of the route names. */
+  readonly checkFamilies?: CheckRecordFamilies;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -102,7 +104,7 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  */
 export function sessionRouteFrom(
   runtime: GateRuntime,
-  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute } = {}
+  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute; checkFamilies?: CheckRecordFamilies } = {}
 ): SessionRoute {
   // 74.1 D-13: the runtime's context and the project's facts, then the caller's own facts, which can only add to them (useTierFor takes the highest row).
   const own = options.use;
@@ -119,7 +121,8 @@ export function sessionRouteFrom(
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
     ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice }),
-    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) })
+    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) }),
+    ...(options.checkFamilies === undefined ? {} : { checkFamilies: options.checkFamilies })
   };
   // A sub-agent's route starts at the use its parent is at now: the highest it has asked for, or what its own facts give.
   if (options.parent !== undefined) raiseSessionUse(route, parentUse(options.parent));
@@ -435,7 +438,9 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     // The use, the passport by id and hash, and the gap the passport step found (74.1 D-23).
     ...(decision.useTier === undefined ? {} : { useTier: decision.useTier }),
     ...(decision.passport === undefined ? {} : { passport: decision.passport }),
-    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap })
+    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap }),
+    // The families of a check (74.1 D-23): the writers' and the checker's, so the record shows no work was checked by its own family.
+    ...(route.checkFamilies === undefined ? {} : { checkFamilies: route.checkFamilies })
   });
 }
 

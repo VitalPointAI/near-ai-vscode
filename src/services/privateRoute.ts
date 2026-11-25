@@ -140,8 +140,9 @@ export interface GateAllowsInput {
 
 /**
  * Whether the gate would let a model do a job now (74.1 D-18, D-19): decideRoute itself, at the job's minimum use (the safety job as a checking job), with
- * the run's mark, routing and policy. A preview: it records nothing, raises no session's use and keeps no trigger. No proven connection is assumed, so a
- * label that needs one previews as refused (the request itself still decides). Anything that cannot be read previews as refused.
+ * the run's mark, routing and policy. A preview: it records nothing, raises no session's use and keeps no trigger. The connection's proof is not known
+ * here, so a refusal only for an unproven connection previews as allowed: the request itself decides that one before anything is sent. Anything that
+ * cannot be read previews as refused.
  */
 export function gateAllows(input: GateAllowsInput): (modelId: string, job: ModelJob) => boolean {
   return (modelId, job) => {
@@ -158,7 +159,8 @@ export function gateAllows(input: GateAllowsInput): (modelId: string, job: Model
         attestationFailed: input.route.attestation.failed, binding: { state: 'unknown', host: input.host }, now, localModelAvailable: input.clientRoute === 'local',
         use: JOB_MINIMUM_TIER[job], useInput: { ...own, mark: [...(own.mark ?? []), ...mark.map((label) => ({ scale: label.scale, level: label.level }))], ...(job === 'safety' ? { checkingJob: true } : {}) }
       };
-      return decideRoute(mark, routing, facts, defaultLabel, input.floor, input.route.routePolicy?.(now)).allowed;
+      const decision = decideRoute(mark, routing, facts, defaultLabel, input.floor, input.route.routePolicy?.(now));
+      return decision.allowed || decision.rule === 'route.connection-not-bound';
     } catch {
       return false;
     }
