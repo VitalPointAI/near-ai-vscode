@@ -6107,6 +6107,137 @@
     },
     {
       "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "74.1",
+      "controls": [
+        "sa-04",
+        "sa-09"
+      ],
+      "id": "G407",
+      "ownerRole": "owner",
+      "remediation": "Command A+ (05-2026) is Apache 2.0 (Cohere's blog, docs and Hugging Face, read 2026-11-24 and again 2026-11-25). The owner decided on 2026-11-24 that it runs through Cohere Model Vault or on your organization's own on-premise hosting under your organization's passport with its artifact hash, and not in NEAR AI's private hardware. The shipped approval follows this. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-05.",
+      "title": "Command A+ hosting decided: Model Vault and your organization's on-premise hosting"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "sa-09",
+        "sr-03"
+      ],
+      "id": "G408",
+      "ownerRole": "owner",
+      "poam": "g408",
+      "remediation": "Every chat, embedding, reranking and vision model in NEAR AI's private hardware comes from a developer in the People's Republic of China, so under your organization's rules agent work has no private model there. The owner has asked NEAR AI to host Nemotron 3, Command A+, gpt-oss and Western embedding and reranking models (N1, N2, N2a, N7). Until then use your organization's own attested hosting (Phase 74.2), a Cohere vault, or a model on this computer. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+      "title": "No Western model runs in NEAR AI's private hardware"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-06",
+        "sr-03"
+      ],
+      "id": "G409",
+      "ownerRole": "shared",
+      "poam": "g409",
+      "remediation": "Without your organization's policy, or with it set to report, model approvals are only reported: today's models, including PRC-origin ones, keep doing agent work, every use outside the rules is recorded as would-refuse, and a notice that cannot be dismissed says so. This closes when your organization's policy is in enforce mode with an evaluated Western model for agent work. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-18a and D-22.",
+      "title": "Report mode runs agent work outside your organization's model policy until enforce"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "sa-11",
+        "sr-04"
+      ],
+      "id": "G410",
+      "ownerRole": "shared",
+      "poam": "g410",
+      "remediation": "The shipped approvals carry no evaluation. Under enforce, every role above research needs your organization's own evaluation and red team of the exact model files, cited in its approval. Until one exists, enforce refuses agent work and checks go to a person; report mode keeps the product working. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16.",
+      "title": "No model may take a role under enforce until your organization evaluates it"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "si-07",
+        "sr-04"
+      ],
+      "id": "G411",
+      "ownerRole": "owner",
+      "poam": "g411",
+      "remediation": "An approval for a model in NEAR AI's private hardware binds to its model id, not to the exact weights, because the attestation does not report the weights' hash (N5). A change of weights behind the same id cannot be seen there. Your organization's attested hosting (Phase 74.2) reports it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-15.",
+      "title": "NEAR AI's attestation does not name the model files it runs"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sa-04",
+        "sa-09"
+      ],
+      "id": "G412",
+      "ownerRole": "owner",
+      "poam": "g412",
+      "remediation": "Models used through NEAR AI carry their publishers' licences (for example NVIDIA's Nemotron licence and its dataset terms). Whether and how those terms pass through to your organization is question N8. Record the answer in the approvals and the fit register. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-26.",
+      "title": "How NEAR AI passes model licences through is not answered"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-07",
+        "sc-07",
+        "sc-39"
+      ],
+      "id": "G413",
+      "ownerRole": "maintainers",
+      "poam": "g413",
+      "remediation": "The research workspace keeps adversary models away from project data and tools through the extension's own checks. The cyber harness's scan tools run on this computer with today's approvals and scope checks, not in a separate machine. Phase 72's execution backend and the v0.8.0 enclave add machine isolation. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-17.",
+      "title": "The research workspace is isolated by the extension, not by the operating system"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "au-10",
+        "ia-02"
+      ],
+      "id": "G414",
+      "ownerRole": "maintainers",
+      "poam": "g414",
+      "remediation": "An exception that lets a named senior person allow a model for chat they review exists only under your organization's rules, which list the person's key; that key is the person's device key until a credential replaces it. The roadmap says Phase 71 replaces the signer, but no Phase 71 plan does it yet. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-20.",
+      "title": "Model exceptions are signed with a device key, not a person's credential"
+    },
+    {
+      "appliesAt": "confidential",
+      "blocksProduction": false,
+      "controls": [
+        "sa-11",
+        "sr-03"
+      ],
+      "id": "G415",
+      "ownerRole": "owner",
+      "poam": "g415",
+      "remediation": "NVIDIA trained Nemotron 3 from scratch, but part of its post-training data came from DeepSeek, Qwen and Kimi models (and gpt-oss). This is recorded in its approval's lineage. Before approving it for operational work, your organization's evaluation includes trigger sweeps with Canadian and defence context. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-07.",
+      "title": "Nemotron 3 was post-trained on outputs of models from the People's Republic of China"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ac-03",
+        "cm-06"
+      ],
+      "id": "G417",
+      "ownerRole": "shared",
+      "poam": "g417",
+      "remediation": "A hosted session applies the security officer's switch within a minute; a desktop or edge install applies it at its next policy fetch or rules import. A disconnected edge keeps working under its last rules until then. Your organization's operating procedure says how often edges import rules and who carries the switch to them. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-28.",
+      "title": "An offline edge applies Stop agent work now only at its next rules import"
+    },
+    {
+      "appliesAt": "now",
       "blocksProduction": true,
       "closesInPhase": "71",
       "controls": [

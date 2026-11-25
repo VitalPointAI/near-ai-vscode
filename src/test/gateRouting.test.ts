@@ -121,7 +121,9 @@ test('every rule id can be reached, and every refusing rule has one plain senten
     [markOf(label('ca-protected', 'Protected B')), withLocalHosts('models.example.org'), LOCAL_REMOTE, policyOf({ ...MODELS_PROTECTED_B, tlsPins: [TEST_PIN] })],
     [markOf(label('ca-classified', 'Secret')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), organization: true, requireAccreditedDevice: true }],
     [markOf(org('Internal')), withLocalHosts('models.example.org'), LOCAL_REMOTE, { ...policyOf(MODELS_INTERNAL), residency: { v: 1, required: ['EU'] } }],
-    [markOf(org('Internal')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), clearances: [ORG_PUBLIC_CLEARANCE], rosterClearances: [ORG_PUBLIC_CLEARANCE] }]
+    [markOf(org('Internal')), DEFAULT_ROUTING, LOCAL_OK, { ...policyOf(), clearances: [ORG_PUBLIC_CLEARANCE], rosterClearances: [ORG_PUBLIC_CLEARANCE] }],
+    // Phase 74.1 (D-11): under models.mode enforce, a model with no passport at chat you review is refused.
+    [markOf(org('Public')), DEFAULT_ROUTING, NEAR_CLOUD, { ...policyOf(), models: { v: 1, mode: 'enforce', unknownMaxTier: 'T0', passports: [] } }]
   ];
   for (const [mark, routing, facts, policy] of cases) reached.add(decideRoute(mark, routing, facts, undefined, undefined, policy).rule);
   assert.deepEqual([...reached].sort(), [...ROUTE_RULES].sort());
@@ -607,6 +609,6 @@ test('D-62, D-63: ITAR, CGP and EAR keep content on this computer under the defa
     // The same label without the marking still goes where it does today.
     assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, nearBound, defaultLabel, undefined, policy).allowed, true);
   }
-  assert.deepEqual([...ROUTE_RULES_NAMED_AHEAD], ['route.passport', 'route.export-control']);
+  assert.deepEqual([...ROUTE_RULES_NAMED_AHEAD], ['route.export-control'], 'route.passport moved into ROUTE_RULES in Phase 74.1 (D-11)');
   assert.equal((ROUTE_RULES as readonly string[]).includes('route.export-control'), false);
 });

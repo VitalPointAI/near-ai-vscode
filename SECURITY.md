@@ -783,11 +783,15 @@ computer. When no authorization says your organization approved this
 computer for that work, the request is recorded as one that rule would
 refuse (`route.accredited-device`) and the chat says once that this computer
 is not recorded as accredited for that label; it is not refused unless your organization's
-rules turn on `requireAccreditedDevice`. Model approvals work the same way:
-a model your rules have not approved for the work is recorded
-(`route.passport`) and never refused in this version.
+rules turn on `requireAccreditedDevice`. Model approvals work the same way
+by default: a model your rules have not approved for the work is recorded
+(`route.passport`) and sent, and with no `models` section the shipped
+approvals are used in this report mode. When your organization's `models`
+section says `mode: enforce`, the same request is refused before anything is
+sent, with the reason.
 A step that only records never refuses, even when its check cannot be made;
-it is then recorded as one that would refuse.
+it is then recorded as one that would refuse. Under `mode: enforce` a model
+approval check that cannot be made refuses.
 
 **Authorizations.** An authorization is one signed record that allows one
 thing for a while:

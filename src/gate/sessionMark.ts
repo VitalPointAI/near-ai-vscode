@@ -25,6 +25,9 @@ import type { PolicyLayersView } from './organizationStore';
 import { clearancesInForce } from './clearances';
 import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
+import type { UseTier } from '../domain/gate/models';
+import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
+import type { UseInput } from '../domain/gate/useTier';
 
 /**
  * Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (D-55). `closed` is set when
@@ -82,6 +85,11 @@ export interface SessionRoute {
   readonly onNotice?: (text: string) => void;
   /** The effective policy's inputs to each request's route decision, from the route's own host (GateRuntime.routePolicy, D-36). */
   readonly routePolicy?: GateRuntime['routePolicy'];
+  /**
+   * The local facts of the session's use (74.1 D-13): its tools, writes, checking job, lane, project and feature. Read at each request; the route's mark
+   * is added by the client. Absent: chat you review, raised only by the mark.
+   */
+  readonly useOf?: () => UseInput;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -91,8 +99,14 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  * The route of one run, from its gate runtime: the runtime's policy, actor, sink and clock. `markOf` defaults to the empty mark (the default label);
  * plan 22 gives a chat's runs the chat's mark. `attestation` is the chat's shared object, so a sub-agent and its parent share one route state.
  */
-export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void } = {}): SessionRoute {
-  return {
+export function sessionRouteFrom(
+  runtime: GateRuntime,
+  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute } = {}
+): SessionRoute {
+  // 74.1 D-13: the runtime's context and the project's facts, then the caller's own facts, which can only add to them (useTierFor takes the highest row).
+  const own = options.use;
+  const project = runtime.project?.kind === undefined ? {} : { project: { kind: runtime.project.kind, ...(runtime.project.exercise === true ? { exercise: true } : {}) } };
+  const route: SessionRoute = {
     markOf: options.markOf ?? (() => EMPTY_MARK),
     bundleState: runtime.bundleState,
     actor: runtime.actor,
@@ -103,8 +117,42 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     ...(runtime.routePolicy === undefined ? {} : { routePolicy: runtime.routePolicy }),
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
-    ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice })
+    ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice }),
+    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) })
   };
+  // A sub-agent's route starts at the use its parent is at now: the highest it has asked for, or what its own facts give.
+  if (options.parent !== undefined) raiseSessionUse(route, parentUse(options.parent));
+  return route;
+}
+
+/** The use a parent route passes to a child: its high-water raised by what its own facts and mark give now; operational work if they cannot be read. */
+function parentUse(parent: SessionRoute): UseTier {
+  const held = useHighWater.get(parent) ?? 'T0';
+  try {
+    const own = parent.useOf?.() ?? {};
+    const mark = parent.markOf().map((label) => ({ scale: label.scale, level: label.level }));
+    return raiseUseTier(held, useTierFor({ ...own, mark: [...(own.mark ?? []), ...mark] }));
+  } catch {
+    return 'T3';
+  }
+}
+
+// ---- The use of a session (74.1 D-13) ----
+
+/** The highest use each route has asked for, kept on the route object itself: a session's use only rises, so a later request never checks lower. */
+const useHighWater = new WeakMap<SessionRoute, UseTier>();
+
+/** Raises `route`'s use to at least `use` and returns the use its next request is checked at: the higher of the two. */
+export function raiseSessionUse(route: SessionRoute, use: UseTier): UseTier {
+  const held = useHighWater.get(route);
+  const raised = held === undefined ? use : raiseUseTier(held, use);
+  useHighWater.set(route, raised);
+  return raised;
+}
+
+/** The highest use `route` has asked for so far, or undefined before its first request. A sub-agent's route starts at its parent's (74.1-03). */
+export function sessionUseOf(route: SessionRoute): UseTier | undefined {
+  return useHighWater.get(route);
 }
 
 /** The policy a route reads now, or a failed-closed one when it cannot be read: a state that throws is never treated as valid. */
@@ -255,9 +303,16 @@ export function routePolicyFor(
     organization: organization !== undefined,
     requireAccreditedDevice: effective.agents.requireAccreditedDevice === true,
     deviceId: deviceFingerprint,
+    ...securityContactOf(effective),
     now,
     policyVersion
   });
+}
+
+/** The first security contact of the effective policy, which every passport refusal names (74.1 D-11). */
+function securityContactOf(effective: PolicyDocument): { readonly contact?: { readonly name: string; readonly how: string } } {
+  const contact = effective.onboarding?.contacts.find((entry) => entry.topic === 'security');
+  return contact === undefined ? {} : { contact: Object.freeze({ name: contact.name, how: contact.how }) };
 }
 
 // ---- The record of a model request (GATE-07, D-20, D-52) ----
@@ -362,7 +417,11 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(context.connectionFallback === undefined ? {} : { connectionFallback: context.connectionFallback }),
     ...(context.policyVersion === undefined ? {} : { policyVersion: context.policyVersion }),
     // The report-only rules that would have refused (D-34, D-42), kept so a later version can say what your organization's switch would change.
-    ...(decision.wouldRefuse === undefined ? {} : { wouldRefuse: decision.wouldRefuse })
+    ...(decision.wouldRefuse === undefined ? {} : { wouldRefuse: decision.wouldRefuse }),
+    // The use, the passport by id and hash, and the gap the passport step found (74.1 D-23).
+    ...(decision.useTier === undefined ? {} : { useTier: decision.useTier }),
+    ...(decision.passport === undefined ? {} : { passport: decision.passport }),
+    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap })
   });
 }
 

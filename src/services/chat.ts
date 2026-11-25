@@ -1164,10 +1164,10 @@ function attachmentTeeBlock(staged: StagedAttachment[], modelInfo: ModelInfo | u
   return forwarded ? `TEE-only mode is on, and ${forwarded}, which would read your attachment, does not run in NEAR's TEE.` : undefined;
 }
 
-/** CLAS-06: a person sent these files, so their reads are routed (and recorded) as the person's, with the chat's attestation state. The default route without a gate host. */
-async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute> {
+/** CLAS-06: a person sent these files, read as the person's with the chat's attestation and its run's use (74.1 D-13: agent work); else the default route. */
+export async function attachmentRoute(options: { root: string; conversationId: string; gateHost?: Pick<GateHost, 'runtimeFor'>; attestation?: RouteAttestation }): Promise<SessionRoute> {
   const runtime = await options.gateHost?.runtimeFor({ root: options.root, actor: { kind: 'person', sessionId: options.conversationId }, presence: 'person', context: 'interactive' });
-  return runtime ? sessionRouteFrom(runtime, options.attestation ? { attestation: options.attestation } : {}) : defaultSessionRoute();
+  return runtime ? sessionRouteFrom(runtime, { ...(options.attestation ? { attestation: options.attestation } : {}), use: { inherited: 'T2' } }) : defaultSessionRoute();
 }
 
 /**

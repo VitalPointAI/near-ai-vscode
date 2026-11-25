@@ -852,14 +852,16 @@ test('Phase 41: one list of where AI may run, the Protected B rule, residency an
     assert.ok(known.has(id), `${id} is a rule the code names`);
   }
   for (const id of ['route.endpoint-unknown', 'route.endpoint-ceiling', 'route.endpoint-pin', 'route.authorization-missing', 'route.residency']) assert.ok((ROUTE_RULES as readonly string[]).includes(id), `${id} refuses`);
-  assert.ok((ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes('route.passport'), 'model approvals are still named ahead');
+  // Phase 74.1 (D-11, D-12): model approvals refuse under mode enforce and only record otherwise.
+  assert.ok((ROUTE_RULES as readonly string[]).includes('route.passport'), 'model approvals are a route rule decideRoute reaches');
   const notice = migrationNoticeText([{ host: 'llm.example.test', kind: 'org-plain', lost: [] } as never]) ?? '';
   for (const phrase of [
     notice, '`routing.localHosts`',
     'So Protected B needs a TLS pin or a verified connection plus a Protected B authorization naming that server, for every server that is not this computer.',
     'a place whose region is `unstated` never satisfies such a rule',
     'is not refused unless your organization\'s rules turn on `requireAccreditedDevice`',
-    'is recorded (`route.passport`) and never refused in this version',
+    'is recorded (`route.passport`) and sent, and with no `models` section the shipped approvals are used in this report mode',
+    'When your organization\'s `models` section says `mode: enforce`, the same request is refused before anything is sent, with the reason.',
     'nothing changes where requests go'
   ]) assert.ok(words.includes(flat(phrase)), phrase);
   assert.match(notice, /^Your policy's local servers are now listed with every other place AI may run, with the same effect as before\.$/);

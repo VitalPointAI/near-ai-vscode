@@ -1,4 +1,15 @@
+import { createHash } from 'node:crypto';
+import * as path from 'node:path';
+
 export const CONTEXT_GRAPH_VERSION = 1 as const;
+
+/**
+ * The id of the project at `root`: its memory scope's id, and the project a model request's route policy names (74.1 D-13), so a risk acceptance scoped
+ * to a project covers that project's requests. One formula for both.
+ */
+export function projectScopeId(root: string): string {
+  return `project-${createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 32)}`;
+}
 
 export type MemoryScopeKind = 'private-agent' | 'team-collective' | 'project' | 'shared';
 export type ContextNodeType = 'fact' | 'actor' | 'function' | 'capability' | 'artifact' | 'task';

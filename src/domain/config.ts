@@ -1,4 +1,5 @@
 import { ActionPolicy, ActionPolicyMode, defaultActionPolicy } from './policy';
+import { AGENT_DEFAULTS } from './agentDefaults';
 
 export type AuthMode = 'apiKey' | 'nearAccount';
 /** nearAi.privacyMode (D-37): tee-only is one input of the private floor (floorFor), which decideRoute applies; the values and setting id are unchanged. */
@@ -15,7 +16,8 @@ export interface NearAiSettings {
 }
 
 export const DEFAULT_BASE_URL = 'https://cloud-api.near.ai/v1';
-export const DEFAULT_MODEL = 'z-ai/glm-5.3';
+// Derived (74.1 D-18): chat's report-mode fallback until a run resolves its job models (src/domain/gate/jobModel.ts).
+export const DEFAULT_MODEL: string = AGENT_DEFAULTS.reportFallback.standard;
 
 /**
  * Whether a base URL is NEAR AI Cloud's own endpoint, where a TEE model's attestation can be checked: https on NEAR's API host, default

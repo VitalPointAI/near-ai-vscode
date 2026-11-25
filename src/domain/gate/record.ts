@@ -11,6 +11,10 @@ import type { ActorRef, GateDecision } from './decide';
 import { LABEL_EVENT_IDS } from './labels';
 import type { Label } from './labels';
 import { ROUTE_EVENT_IDS, ROUTE_REFUSALS, ROUTE_REFUSALS_NAMED_AHEAD, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD } from './routing';
+import { USE_TIERS } from './models';
+import type { UseTier } from './models';
+import { PASSPORT_GAPS } from './passportStep';
+import type { PassportGapId } from './passportStep';
 import type { ConnectionBindingState } from './routing';
 import { isRecord, ownValue, refused } from './shape';
 import type { Parsed, Refusal } from './shape';
@@ -120,6 +124,12 @@ export interface DecisionRecordInput {
    * organization turns it on), written sorted to `unmapped.nearAi.wouldRefuse`. Each must be a refusing route rule. Optional: record version 1.
    */
   readonly wouldRefuse?: readonly string[];
+  /** The use the passport step checked (74.1 D-23), written to `unmapped.nearAi.useTier`. Optional: record version 1. */
+  readonly useTier?: UseTier;
+  /** The passport that decided the request, by id, and the SHA-256 of its canonical bytes (D-23). Optional: record version 1. */
+  readonly passport?: { readonly id: string; readonly hash: string };
+  /** Why the passport did not cover the request (D-11), written to `unmapped.nearAi.passportGap`. Optional: record version 1. */
+  readonly passportGap?: PassportGapId;
 }
 
 /**
@@ -197,6 +207,10 @@ export interface DecisionRecord {
       readonly connectionFallback?: 'unpinned';
       /** Report-only route rules that would have refused (D-36), sorted. */
       readonly wouldRefuse?: readonly string[];
+      readonly useTier?: UseTier;
+      readonly passport?: string;
+      readonly passportHash?: string;
+      readonly passportGap?: PassportGapId;
     };
   };
 }
@@ -325,7 +339,10 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.connection === undefined ? {} : { connection: input.connection }),
         ...(input.outboundCause === undefined ? {} : { outboundCause: input.outboundCause }),
         ...(input.connectionFallback === undefined ? {} : { connectionFallback: input.connectionFallback }),
-        ...(input.wouldRefuse === undefined ? {} : { wouldRefuse: [...input.wouldRefuse].sort() })
+        ...(input.wouldRefuse === undefined ? {} : { wouldRefuse: [...input.wouldRefuse].sort() }),
+        ...(input.useTier === undefined ? {} : { useTier: input.useTier }),
+        ...(input.passport === undefined ? {} : { passport: input.passport.id, passportHash: input.passport.hash }),
+        ...(input.passportGap === undefined ? {} : { passportGap: input.passportGap })
       }
     }
   };
@@ -387,6 +404,26 @@ const POLICY_VERSIONS: ReadonlySet<string> = new Set<string>(POLICY_RECORD_VERSI
 // Field paths are joined at run time: the record id scan reads any quoted text that starts with a rule namespace as a rule id.
 const VERSION_FIELD = ['policy', 'version'].join('.');
 const WOULD_REFUSE_FIELD = ['unmapped', 'nearAi', 'wouldRefuse'].join('.');
+const USE_TIER_SET: ReadonlySet<string> = new Set<string>(USE_TIERS);
+const PASSPORT_GAP_SET: ReadonlySet<string> = new Set<string>(PASSPORT_GAPS);
+const PASSPORT_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
+const HEX_64 = /^[0-9a-f]{64}$/;
+
+/** The passport fields of a model request's record (74.1 D-23): each optional, each from its own closed list or shape. */
+function passportFieldsKnown(value: Record<string, unknown>): Refusal | undefined {
+  const checks: ReadonlyArray<readonly [string, (found: unknown) => boolean]> = [
+    ['useTier', (found) => typeof found === 'string' && USE_TIER_SET.has(found)],
+    ['passport', (found) => typeof found === 'string' && PASSPORT_ID.test(found)],
+    ['passportHash', (found) => typeof found === 'string' && HEX_64.test(found)],
+    ['passportGap', (found) => typeof found === 'string' && PASSPORT_GAP_SET.has(found)]
+  ];
+  for (const [key, ok] of checks) {
+    const field = ['unmapped', 'nearAi', key].join('.');
+    const found = readPath(value, field);
+    if (found !== undefined && !ok(found)) return refused('not-allowed-here', field);
+  }
+  return undefined;
+}
 
 /** Every rule a record carries is one of RECORD_RULE_IDS, and its operation is a verb, a policy event or a label event, so no writer can put an id nobody knows on file. */
 function idsKnown(value: Record<string, unknown>): Refusal | undefined {
@@ -407,7 +444,7 @@ function idsKnown(value: Record<string, unknown>): Refusal | undefined {
   }
   const operation = readPath(value, 'api.operation');
   if (typeof operation !== 'string' || !RECORD_OPERATIONS.has(operation)) return refused('not-allowed-here', 'api.operation');
-  return undefined;
+  return passportFieldsKnown(value);
 }
 
 /**
