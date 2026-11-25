@@ -43,6 +43,7 @@ import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
+import { checkpointHash } from '../../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import type { Citation } from '../../domain/replica/chain';
 import type { HeadSet } from '../../domain/replica/transport';
@@ -54,6 +55,7 @@ import * as kemPublish from './kemPublish';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import { foldCheckpoints, trustedCheckpointsOf } from './foldCheckpoints';
 import type { SyncLocal } from './hubSync';
 import { UPDATE_SENTENCE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from './requireGate';
 import { WRAP_V2_FEATURE } from '../../domain/replica/features';
@@ -236,6 +238,10 @@ export class ReplicaProject {
   private readonly grantList: unknown[] = [];
   private readonly lamports = new Map<string, number>();
   private foldState: FoldState | undefined;
+  // The checkpoints the fold uses (foldCheckpoints.ts): what each hub's witness trusts, seeded once from the witness memory, kept by each exchange.
+  private trusted: Map<string, SignedCheckpoint | undefined> | undefined;
+  private stored: SignedCheckpoint[] | undefined;
+  private checkpointKey = '';
   private ctx: ReplicaContext | undefined;
   private ctxKey: string | undefined;
   private rosterState: RosterState | undefined;
@@ -354,7 +360,10 @@ export class ReplicaProject {
     created.lamports.set(genesis.hash, 1);
     // New shared work requires wrap@2 from the start where this computer knows it (33.2 D-05).
     const armed = await ensureRequireArmed(created, { withWrapV2: wrapV2AtCreation(deps) });
-    return isProjectRefused(armed) ? armed : created;
+    if (isProjectRefused(armed)) return armed;
+    // The genesis names only the lead's member id; the name the person gave is the lead's first member.update (33-14), as every other member's is.
+    const named = input.lead.name === undefined ? undefined : await created.appendChecked(() => ({ kind: 'member.update', data: { member: input.lead.member, name: input.lead.name }, options: {}, check: () => undefined }));
+    return named !== undefined && isProjectRefused(named) ? named : created;
   }
 
   /**
@@ -759,8 +768,14 @@ export class ReplicaProject {
   public putCheckpoint(signed: SignedCheckpoint): Promise<{ ok: true; hash: string } | ProjectRefused> {
     return this.exclusive(async () => {
       const stored = await this.store.putCheckpoint(signed);
+      this.stored = undefined;
       return 'ok' in stored ? stored : storeRefused(stored);
     });
+  }
+
+  /** After an exchange: the newest checkpoint this hub's witness trusts, or undefined when it distrusts the hub. The next fold uses it. */
+  public trustCheckpoint(hub: string, newest: SignedCheckpoint | undefined): void {
+    (this.trusted ??= new Map()).set(hub, newest);
   }
 
   /** Every stored checkpoint that reads back. */
@@ -916,8 +931,12 @@ export class ReplicaProject {
       this.ctx = this.buildContext(roster);
       this.ctxKey = ctxKey;
     }
+    // A changed set of usable checkpoints folds everything again under it (the order and the join bases depend on it).
+    const checkpoints = await this.usableCheckpoints(roster);
+    const key = checkpoints.map(checkpointHash).join(',');
+    if (key !== this.checkpointKey) { this.checkpointKey = key; this.foldState = undefined; this.fed.clear(); }
     const fresh = entries.filter((entry) => !this.fed.has(entryHash(entry.header)));
-    if (this.foldState === undefined) this.foldState = createFoldState(this.ctx);
+    if (this.foldState === undefined) this.foldState = createFoldState(this.ctx, { checkpoints });
     if (fresh.length > 0 || this.foldState.ctx !== this.ctx) {
       this.foldState = addEntries(this.foldState, fresh, this.ctx);
       for (const entry of fresh) this.fed.add(entryHash(entry.header));
@@ -929,6 +948,13 @@ export class ReplicaProject {
       this.recordedHead = head;
     }
     return { roster, fold: this.foldState.result };
+  }
+
+  /** The stored checkpoints the witness of an admitted hub trusts (foldCheckpoints.ts); the witness memory is read once, at the first fold. */
+  private async usableCheckpoints(roster: RosterState): Promise<SignedCheckpoint[]> {
+    this.stored ??= (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint);
+    if (this.stored.length > 0) this.trusted ??= await trustedCheckpointsOf(this.deps.secrets, this.projectId, this.stored);
+    return foldCheckpoints(this.stored, this.trusted ?? new Map(), rosterView(roster), this.projectId, roster.positions.at(-1) as string);
   }
 
   /**
@@ -1168,6 +1194,7 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
       settle(await project.putCheckpoint(signed));
     },
     covered: (hub) => project.hubCells(hub),
-    missingDeps: () => project.missingDeps()
+    missingDeps: () => project.missingDeps(),
+    trustCheckpoint: (hub, newest) => project.trustCheckpoint(hub, newest)
   };
 }

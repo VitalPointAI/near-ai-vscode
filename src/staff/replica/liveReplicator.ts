@@ -74,6 +74,8 @@ export interface LiveReplicatorOptions {
   log?: (line: string) => void;
   /** A hosted session's session.certify entry for `signer` (Phase 33 D-62), passed to the transport. */
   certificate?: HubTransportOptions['certificate'];
+  /** A log this computer holds nothing of starts at the newest trusted checkpoint's head (D-43): how a person who joins loads quickly. */
+  startFromBase?: boolean;
 }
 
 export interface LiveStatus {
@@ -399,7 +401,8 @@ export class LiveReplicator {
       let report: SyncReport;
       const newestBefore = await this.newestCheckpoint(transport);
       try {
-        report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now });
+        report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now, startFromBase: this.options.startFromBase === true });
+        if (report.readInFull.length > 0) this.log(`read in full ${report.readInFull.length}`);
       } catch (error) {
         // The local replica failed (syncOnce throws only for that). A fold stopped for a feature this build lacks is needs-update (D-06); anything
         // else means this device cannot sync until a person looks.

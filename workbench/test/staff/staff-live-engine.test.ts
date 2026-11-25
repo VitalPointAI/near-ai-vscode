@@ -187,6 +187,7 @@ test('on the lead\'s device roster.require stays armed once and a member\'s devi
       assert.equal(FakeReplicator.made.length, 1);
       assert.equal(FakeReplicator.made[0].options.signer.publicKey, device.project.signer.publicKey, 'the device key signs on a single machine');
       assert.equal(FakeReplicator.made[0].options.certificate, undefined);
+      assert.equal(FakeReplicator.made[0].options.startFromBase, true, 'a log this computer holds nothing of starts from the newest trusted checkpoint (D-43)');
       await live.stop();
     }
     assert.equal(spies.armed, 2, 'the check runs on every device');

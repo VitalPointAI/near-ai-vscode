@@ -13,7 +13,7 @@ import { createWitness, witnessCheckpoint } from '../domain/replica/hubWitness';
 import type { WitnessState } from '../domain/replica/hubWitness';
 import { staticRosterView } from '../domain/replica/rosterView';
 import type { RosterView } from '../domain/replica/rosterView';
-import { RESTORING_SENTENCE, syncOnce } from '../staff/replica/hubSync';
+import { FULL_REPLAY_SENTENCE, RESTORING_SENTENCE, syncOnce } from '../staff/replica/hubSync';
 import type { HubMemory, SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { HubTransportError } from '../staff/replica/hubTransport';
 import type { AppendAnswer, AppendBatch, EntriesPage, HubHeads } from '../staff/replica/hubTransport';
@@ -281,6 +281,7 @@ test('startFromBase: a fresh device with a trusted checkpoint covering the write
   const transport = scripted({ heads: () => headsAt(checkpoint), entries: (stream, writer, start) => pageFrom(stream, writer, start) });
   const report = await syncOnce(transport, local, memoryOf(), { now: () => NOW, startFromBase: true });
   assert.equal(report.outcome, 'synced', JSON.stringify(report.findings));
+  assert.deepEqual(report.readInFull, [], 'the log started at the base');
   assert.deepEqual(transport.from, [{ writer: WRITER.writer, from: 61 }]);
   assert.deepEqual(local.stored.map((entry) => entry.header.seq), [61, 62]);
   assert.equal(local.kept.length, 1, 'the checkpoint base was kept first');
@@ -299,7 +300,10 @@ test('startFromBase: without a checkpoint, or with one that does not verify for 
   for (const checkpoint of [undefined, checkpointOver(LOG, 60, fixedSigner('sync-live/stranger'))]) {
     const local = memoryLocal(rosterWith());
     const transport = scripted({ heads: () => headsAt(checkpoint), entries: (stream, writer, start) => pageFrom(stream, writer, start) });
-    await syncOnce(transport, local, memoryOf(), { now: () => NOW, startFromBase: true });
+    const report = await syncOnce(transport, local, memoryOf(), { now: () => NOW, startFromBase: true });
+    // Read in full, nothing left out, and said so in plain words (33-14).
+    assert.deepEqual(report.readInFull, [PROJECT]);
+    assert.equal(FULL_REPLAY_SENTENCE, 'Your organization\'s server keeps no summary of this part of the project, so this computer reads all of its history. Nothing is left out.');
     assert.deepEqual(transport.from[0], { writer: WRITER.writer, from: 0 });
     assert.equal(local.stored.length, 63);
   }

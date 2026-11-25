@@ -63,6 +63,8 @@ export interface SyncLocal {
    * covers, a dep is the only sign of an entry the hub withholds while no head names it. Without it only the hub's heads and checkpoint heads are cited.
    */
   missingDeps?(): Promise<Citation[]>;
+  /** After each exchange: the newest checkpoint this hub's witness trusts, or undefined when it distrusts the hub (33-14, D-43). */
+  trustCheckpoint?(hub: string, newest: SignedCheckpoint | undefined): void | Promise<void>;
 }
 
 /** Where the witness state of each hub and project is kept between exchanges. */
@@ -108,6 +110,8 @@ export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention' | 'need
 export const RESTORING_SENTENCE = 'Your organization\'s server is being restored. Your changes are kept here.';
 /** A person's session key has passed its certificate's notAfter at your organization's server (Phase 33 D-62). Refused, never retried. */
 export const SESSION_EXPIRED_SENTENCE = 'Your session key has ended. Sign in again.';
+/** A late joiner in a part of the project your organization's server keeps no summary of (D-43, D-63). Shown as information, never as a fault. */
+export const FULL_REPLAY_SENTENCE = 'Your organization\'s server keeps no summary of this part of the project, so this computer reads all of its history. Nothing is left out.';
 
 export interface SyncReport {
   outcome: SyncOutcome;
@@ -134,6 +138,8 @@ export interface SyncReport {
    * with the rest of their writer's log. They go in a later exchange once the blob is here; the blob's author pushes them meanwhile.
    */
   heldBack: number;
+  /** With startFromBase: the streams whose logs were read from their start because no trusted checkpoint covers them (FULL_REPLAY_SENTENCE). */
+  readInFull: string[];
   /** The transport failure or refusal reason id, when the exchange ended on one. */
   reason?: string;
   /** One plain sentence for the outcome when it was not synced. */
@@ -206,7 +212,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
   const now = options.now ?? ((): Date => new Date());
   const hub = transport.hub;
   const project = transport.project;
-  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [], heldBack: 0 };
+  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [], heldBack: 0, readInFull: [] };
   const noted: HubFinding[] = [];
   let state = await memory.load(hub, project);
   let rolledBack = false;
@@ -366,6 +372,8 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     }
   }
   await memory.save(state);
+  // The fold of this computer uses only what the witness trusts (foldCheckpoints.ts): the newest checkpoint, or none from a distrusted hub.
+  await local.trustCheckpoint?.(hub, state.distrusted || state.proof !== undefined ? undefined : state.newest);
   report.findings = collapse(noted);
   if (report.outcome === 'synced' && report.findings.some((item) => ATTENTION_FINDINGS.has(item.kind))) {
     report.outcome = 'attention';
@@ -415,7 +423,10 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
   async function pullWriter(stream: string, writer: string): Promise<number> {
     // A late joiner holds nothing of this log: it starts after the head a trusted checkpoint names (already kept by seeCheckpoint), and the first
     // entry pulled must follow exactly that head.
-    let head = (await local.head(stream, writer)) ?? baseHeadOf(stream, writer);
+    const holding = await local.head(stream, writer);
+    let head = holding ?? baseHeadOf(stream, writer);
+    // A late joiner reads in full a log no trusted checkpoint covers (a cell your organization's server does not hold, D-63): nothing is left out.
+    if (options.startFromBase === true && holding === undefined && head === undefined && !report.readInFull.includes(stream)) report.readInFull.push(stream);
     let stored = 0;
     for (let page = 0; page < MAX_PAGES_PER_WRITER; page += 1) {
       const answer = await transport.entries(stream, writer, head === undefined ? 0 : head.seq + 1);

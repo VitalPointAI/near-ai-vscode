@@ -193,6 +193,8 @@ export class StaffLiveEngine {
       address: () => Promise.resolve(address?.address),
       signer,
       ...(certificate === undefined ? {} : { certificate }),
+      // A person who joins loads each log this computer holds nothing of from the newest trusted checkpoint (D-43); other logs are untouched.
+      startFromBase: true,
       isLeadDevice: () => this.isLeadDevice(project),
       onJoinRequest: (invite?: string) => this.joinRequest(project, invite),
       onCheckpoint: () => { void this.compact(live, hub, memory); },

@@ -8,19 +8,22 @@
 // The real-hub tests follow the D-46 rule: they run with NEAR_AI_HUB_NODE, are skipped with the printed reason without it, and fail in GitHub Actions
 // without it. Two defects found in 33-24 are covered end to end here: a proposal's text blob reaches the other computers (every scenario's decision
 // needs it), and a device that has not folded a roster change yet does not judge the hub's checkpoint at the new roster head (the roster change).
-// The late joiner scenario is held back (33-14-SUMMARY.md, Open conditions).
+// A late joiner starts from the hub's checkpoint and a compaction, and once the earlier history is served it folds to what the others fold.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import type { TestContext } from 'node:test';
-import type { Actor } from '../domain/replica/entry';
+import type { Actor, SealedBlob, SealedEntry } from '../domain/replica/entry';
 import { entryHash } from '../domain/replica/entry';
 import { rosterView } from '../domain/replica/roster';
+import { COMPACTION_WINDOW } from '../domain/replica/textFold';
 import type { ProductTextOutput } from '../domain/replica/textFold';
 import type { ProductVersions, VersionView } from '../domain/replica/versions';
 import { refusalSentence } from '../domain/staff/liveSentences';
 import { contestedCards } from '../staff/replica/contested';
+import { compactAfterCheckpoint } from '../staff/replica/compactor';
 import { EditorBinding } from '../staff/replica/editorBinding';
+import { grantCellToHub } from '../staff/replica/hubMembership';
 import { SESSION_EXPIRED_SENTENCE } from '../staff/replica/hubSync';
 import { appendProductEntry } from '../staff/replica/labelCells';
 import type { LiveReplicator, LiveStatus } from '../staff/replica/liveReplicator';
@@ -32,6 +35,7 @@ import { FakeBoundDocument } from './helpers/fakeBoundDocument';
 import { hubNodeOrSkip, startHubChild } from './helpers/hubChild';
 import { createLiveWorld } from './helpers/liveWorld';
 import type { LiveDevice, LivePerson, LiveWorld } from './helpers/liveWorld';
+import { rng, shuffled } from './helpers/replicaWorld';
 
 const PRODUCT = 'intel-estimate';
 const LABEL = 'org/Internal';
@@ -367,4 +371,127 @@ test('roster change: a person admitted while two others are live, then a checkpo
       await live(replicator, name);
       assert.deepEqual(replicator.status.findings, [], `${name} has no finding`);
     }
+  }));
+
+test('late joiner: after 60 accepted updates and a hub checkpoint the compactor writes doc.compact; a person who joins starts from the checkpoint, pulls fewer entries than the full history and holds nothing back, and once the earlier history is served has the same text, digests and roster', (t) =>
+  realHub(t, [
+    { label: 'avery', name: 'Avery Lead' },
+    { label: 'blake', name: 'Blake Rivers' }
+  ], async (world) => {
+    const started = Date.now();
+    const a = world.devices[0];
+    const b = await world.hostedStyle(world.devices[1]);
+    const hub = world.hub as NonNullable<LiveWorld['hub']>;
+    const stream = await makeProduct(a);
+    // The lead gives the server the product's cell (the trade-off confirmed, D-40): the server checkpoints only the cells it holds, and a
+    // compaction is made from a checkpointed prefix, so a late joiner starts from a compaction only in such a cell (D-43, D-63).
+    const granted = await grantCellToHub(a.host, { cell: stream, confirmed: true });
+    assert.ok(granted.ok, granted.message);
+    // Avery's computer runs the compactor after each newer checkpoint, as the live engine does.
+    const compacted: string[] = [];
+    const holder: { ra?: LiveReplicator } = {};
+    const [ra, rb] = await goLive(world, [a, b], (device) => (device !== a ? {} : {
+      onCheckpoint: () => {
+        void compactAfterCheckpoint(a.project, { hub: hub.writer, memory: a.memory }).then((result) => {
+          compacted.push(...result.compacted);
+          if (result.compacted.length > 0) holder.ra?.localAppended();
+        });
+      }
+    }));
+    holder.ra = ra;
+
+    // Sixty accepted updates of the product, one at a time, in one editing session.
+    const first = await ProductEditor.open(a.project, { stream, product: PRODUCT, actor: PERSON }, { onAppended: () => ra.localAppended() });
+    try {
+      for (let index = 0; index < 60; index += 1) {
+        first.insert(first.text().length, `Line ${index}: the column moves at dawn. `);
+        assert.deepEqual(await first.flush(), { appended: 1, queued: 0 });
+      }
+    } finally {
+      first.close();
+    }
+    assert.ok(60 >= COMPACTION_WINDOW);
+    const sixty = (await textOn(a.project, stream))?.text as string;
+    await eventually(async () => (await textOn(b.project, stream))?.text, (text) => text === sixty, 'Blake has the sixty updates');
+
+    // The hub signs a checkpoint on an ask at least 10 s after its last ask-signed one; each exchange asks. Wait for Avery's doc.compact.
+    const waitStarted = Date.now();
+    const deadline = Date.now() + 90_000;
+    while ((await a.project.findOwnAll('doc.compact', () => true)).length === 0) {
+      if (Date.now() > deadline) assert.fail(`no doc.compact within 90 s; ${JSON.stringify(ra.status)}`);
+      ra.syncNow();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    console.log(`doc.compact written ${Date.now() - waitStarted} ms after the sixtieth update`);
+    assert.deepEqual(compacted, [PRODUCT]);
+    await eventually(async () => (await textOn(b.project, stream))?.compactions.length ?? 0, (count) => count >= 1, 'Blake has the compaction');
+
+    // A later editing session (it registers its own client id after the compaction) adds three more lines, and a checkpoint covers them.
+    const later = await ProductEditor.open(a.project, { stream, product: PRODUCT, actor: PERSON }, { onAppended: () => ra.localAppended() });
+    try {
+      for (let index = 60; index < 63; index += 1) {
+        later.insert(later.text().length, `Line ${index}: the river is fordable. `);
+        await later.flush();
+      }
+    } finally {
+      later.close();
+    }
+    const finalText = (await textOn(a.project, stream))?.text as string;
+    await eventually(async () => (await textOn(b.project, stream))?.text, (text) => text === finalText, 'Blake has the later updates');
+
+    // Dana joins by the Phase 31 flow; once Avery's replicator has pushed the admission, Dana's replicator starts from the checkpoint base.
+    const pushed = ra.status.pushed;
+    const d = await world.join({ label: 'dana', name: 'Dana Late' });
+    ra.localAppended();
+    await reaches(ra, (status) => status.pushed > pushed, 'Avery pushed the admission');
+    const joinedAt = Date.now();
+    const rd = world.replicator(d, { startFromBase: true });
+    await rd.start();
+    await live(rd, 'Dana');
+    // Dana's logs of the product cell start at the checkpoint's heads: the compaction, the later session's registration and its three updates.
+    await eventually(async () => (await textOn(d.project, stream))?.accepted.length ?? 0, (count) => count === 3, 'Dana holds the later updates');
+    const full = (await a.project.heads()).reduce((sum, row) => sum + row.heads.reduce((inner, head) => inner + head.seq + 1, 0), 0);
+    console.log(`late joiner: pulled ${rd.status.pulled} entries of ${full} in the full history, in ${Date.now() - joinedAt} ms`);
+    assert.ok(rd.status.pulled < full, `Dana pulled ${rd.status.pulled} entries, the full history is ${full}`);
+    const joined = await d.project.state();
+    assert.equal(joined.fold.held.filter((item) => item.stage === 'chain').length, 0, 'nothing waits for an earlier entry: the checkpoint is the base');
+    assert.ok(joined.fold.checkpoint !== null, 'Dana folds under the hub\'s checkpoint');
+    assert.deepEqual(joined.roster.positions, (await a.project.state()).roster.positions, 'Dana has the whole roster');
+    // The compaction's text names clients registered before the checkpoint, so it counts only once their registrations arrive (D-42, CR-01): the
+    // text is complete when the earlier history is served below (G430).
+
+    // The earlier history is served afterwards, in shuffled pieces: Dana then folds the same entries to the same digests and roster as Avery.
+    await rd.stop();
+    const missing: SealedEntry[] = [];
+    for (const row of await a.project.heads()) {
+      for (const head of row.heads) {
+        const log = await a.project.entriesAfter(row.stream, head.writer, -1);
+        const held = await d.project.holds(log.map((entry) => entryHash(entry.header)));
+        missing.push(...log.filter((entry) => !held.has(entryHash(entry.header))));
+      }
+    }
+    const cited = await a.project.blobsCitedBy(missing.map((entry) => entryHash(entry.header)));
+    const blobs: SealedBlob[] = [];
+    for (const hash of new Set(cited.map((item) => item.blob))) {
+      const blob = await a.project.blob(hash);
+      if (blob !== undefined) blobs.push(blob);
+    }
+    const pieces = shuffled(missing, rng(33));
+    const third = Math.ceil(pieces.length / 3);
+    for (let at = 0; at < pieces.length; at += third) await d.project.ingestForeign(pieces.slice(at, at + third), blobs);
+    const [aState, dState] = [await a.project.state(), await d.project.state()];
+    assert.deepEqual(dState.roster.positions, aState.roster.positions, 'the same roster');
+    for (const [name, digest] of Object.entries(dState.fold.digests)) assert.equal(digest, aState.fold.digests[name], `the digest of ${name === stream ? 'the product cell' : name}`);
+    assert.equal(dState.fold.digests[stream], aState.fold.digests[stream]);
+    assert.equal(dState.fold.checkpoint, aState.fold.checkpoint, 'both fold under the same checkpoint');
+    const served = productOutput(dState.fold, stream, PRODUCT);
+    assert.equal(served?.text, finalText, 'the same text');
+    assert.ok((served?.compactions.length ?? 0) >= 1, 'with the compaction');
+
+    for (const [replicator, name] of [[ra, 'Avery'], [rb, 'Blake']] as const) {
+      replicator.syncNow();
+      await live(replicator, name);
+      assert.deepEqual(replicator.status.findings, [], `${name} has no finding`);
+    }
+    console.log(`late joiner scenario done in ${Date.now() - started} ms`);
   }));

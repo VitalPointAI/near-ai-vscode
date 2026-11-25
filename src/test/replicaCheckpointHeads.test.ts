@@ -17,6 +17,9 @@ import { staticRosterView } from '../domain/replica/rosterView';
 import type { ReplicaContext, StaticRosterSpec } from '../domain/replica/rosterView';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
+import { createWitness } from '../domain/replica/hubWitness';
+import type { WitnessState } from '../domain/replica/hubWitness';
+import { foldCheckpoints, trustedCheckpointsOf } from '../staff/replica/foldCheckpoints';
 import { WORLD_AT, createWorld, fixedSigner, rng, shuffled } from './helpers/replicaWorld';
 import type { World, Written } from './helpers/replicaWorld';
 
@@ -442,4 +445,67 @@ test('text a joiner has only from a compaction, its covered updates absent behin
   assert.equal(full.text, text.text);
   assert.deepEqual(full.compactions, [{ entry: compaction.hash, verified: true }]);
   for (const span of full.attribution) assert.notEqual(span.unverified, true);
+});
+
+// ---- Phase 33 plan 14: the checkpoints a computer's fold uses (foldCheckpoints.ts) -----------------------------------------------------------
+
+test('parity: a computer starting from the trusted checkpoint and one replaying the full history fold the same entries, in any order, to the same result', () => {
+  const s = setup();
+  const prefix = s.all.slice(0, 20);
+  const post = s.all.slice(20);
+  const earlier = signHub(s, v2Checkpoint(s, s.all.slice(0, 11)));
+  const newest = signHub(s, v2Checkpoint(s, prefix));
+  const chosen = foldCheckpoints([earlier, newest], new Map([[s.hub.writer, newest]]), s.ctx.roster, PROJECT, s.world.rosterHash);
+  assert.deepEqual(chosen.map(checkpointHash).sort(), [checkpointHash(earlier), checkpointHash(newest)].sort(), 'the newest and the earlier one it nests');
+  const full = foldEntries(sealed(s.all), s.ctx, { checkpoints: chosen });
+  assert.deepEqual([full.held, full.rejected], [[], []]);
+  const random = rng(14);
+  for (let round = 0; round < 6; round += 1) {
+    // The joiner takes the later entries first (from the checkpoint base), then the prefix in pieces, each delivery in a shuffled order.
+    let state = addEntries(createFoldState(s.ctx, { checkpoints: chosen }), sealed(shuffled(post, random)));
+    assert.deepEqual(chainHeld(state.result), [], 'the later entries join at the base');
+    const served = shuffled(prefix, random);
+    for (const piece of [served.slice(0, 7), served.slice(7, 13), served.slice(13)]) state = addEntries(state, sealed(piece));
+    for (const key of ['order', 'applied', 'held', 'rejected', 'refused', 'kept', 'digests', 'families', 'checkpoint'] as const) assert.deepEqual(state.result[key], full[key], `${key}, round ${round}`);
+  }
+});
+
+test('a checkpoint from a hub that is not admitted, of another project, newer than the witness trusts, or from a hub the witness distrusts after a fork or rollback is not used, and the later entries wait for the full history', async () => {
+  const s = setup();
+  const prefix = s.all.slice(0, 20);
+  const post = s.all.slice(20);
+  const signed = signHub(s, v2Checkpoint(s, prefix));
+  const head = s.world.rosterHash;
+  assert.equal(foldCheckpoints([signed], new Map([[s.hub.writer, signed]]), s.ctx.roster, PROJECT, head).length, 1, 'the control: trusted and admitted');
+  const stranger = fixedSigner('A');
+  const strangers = signCheckpoint(stranger.signer, { ...v2Checkpoint(s, prefix), signer: stranger.writer });
+  const notAdmitted = staticRosterView({ ...s.spec, rosters: s.spec.rosters.map((roster) => ({ ...roster, checkpointSigners: [] })) });
+  const otherProject = signHub(s, { ...v2Checkpoint(s, prefix), project: 'project-other' });
+  const larger = signHub(s, v2Checkpoint(s, s.all.slice(0, 25)));
+  const smaller = signHub(s, v2Checkpoint(s, s.all.slice(0, 11)));
+  const cases: Array<[string, ReturnType<typeof foldCheckpoints>]> = [
+    ['the witness distrusts the hub', foldCheckpoints([signed], new Map([[s.hub.writer, undefined]]), s.ctx.roster, PROJECT, head)],
+    ['signed by a device that is no checkpoint signer', foldCheckpoints([strangers], new Map([[stranger.writer, strangers]]), s.ctx.roster, PROJECT, head)],
+    ['the hub is not admitted at the roster head', foldCheckpoints([signed], new Map([[s.hub.writer, signed]]), notAdmitted, PROJECT, head)],
+    ['another project', foldCheckpoints([otherProject], new Map([[s.hub.writer, otherProject]]), s.ctx.roster, PROJECT, head)],
+    ['no witness at all', foldCheckpoints([signed], new Map(), s.ctx.roster, PROJECT, head)]
+  ];
+  for (const [name, chosen] of cases) {
+    assert.deepEqual(chosen, [], name);
+    assert.deepEqual(chainHeld(foldEntries(sealed(post), s.ctx, { checkpoints: chosen })), post.map(() => 'missing-predecessor'), `${name}: full replay`);
+  }
+  // A stored checkpoint larger than the one the witness trusts (one the hub showed and then took back) is evidence only.
+  assert.deepEqual(foldCheckpoints([smaller, larger], new Map([[s.hub.writer, smaller]]), s.ctx.roster, PROJECT, head), [smaller]);
+
+  // The witness memory: its newest checkpoint while trusted; none once it holds a proof or distrusts the hub; none when it cannot be read.
+  const memoryOf = (state: Partial<WitnessState> | 'broken') => ({
+    load: async (hub: string, project: string): Promise<WitnessState> => {
+      if (state === 'broken') throw new Error('unreadable');
+      return { ...createWitness(hub, project), ...state };
+    }
+  });
+  assert.deepEqual(await trustedCheckpointsOf(memoryOf({ newest: signed }), PROJECT, [signed]), new Map([[s.hub.writer, signed]]));
+  assert.deepEqual(await trustedCheckpointsOf(memoryOf({ newest: signed, distrusted: true }), PROJECT, [signed]), new Map([[s.hub.writer, undefined]]));
+  assert.deepEqual(await trustedCheckpointsOf(memoryOf({ newest: signed, proof: { a: signed, b: larger } as never }), PROJECT, [signed]), new Map([[s.hub.writer, undefined]]));
+  assert.deepEqual(await trustedCheckpointsOf(memoryOf('broken'), PROJECT, [signed]), new Map([[s.hub.writer, undefined]]));
 });

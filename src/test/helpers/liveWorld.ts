@@ -218,7 +218,7 @@ export async function createLiveWorld(options: { people: readonly LivePerson[]; 
       const data = sessionCertifyData({ project: target.project.projectId, member: target.member, device: target.project.deviceWriter, sessionKey: key.publicKey, slot, notAfter },
         (bytes) => key.signer.sign(bytes));
       const certified = await target.project.appendOwn('session.certify', data);
-      assert.ok('ok' in certified, 'ok' in certified ? undefined : certified.message);
+      assert.ok('ok' in certified, 'ok' in certified ? '' : certified.message);
       const person = asyncPersonSigner(target.project.signer);
       const hosted = opened(await ReplicaProject.open(target.at.root, { ...target.at.deps, sessionSigner: key.signer, personSigner: person }), `${target.name}'s hosted session opens`);
       replaced.push(target.project);
