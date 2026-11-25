@@ -78,6 +78,14 @@ export interface StaffWorld {
   stop(): Promise<void>;
 }
 
+/** Where the world's folders go: STAFF_WORLD_DIR when set (kept for a person to look at with STAFF_WORLD_KEEP), the temporary folder otherwise. */
+function worldDir(): string {
+  const chosen = process.env.STAFF_WORLD_DIR?.trim();
+  if (!chosen) return tmpdir();
+  mkdirSync(chosen, { recursive: true });
+  return chosen;
+}
+
 /** The first free port from `from` on 127.0.0.1 (the coordinator's range for this plan starts at 18900). */
 async function portFrom(from: number, taken: Set<number>): Promise<number> {
   for (let port = from; port < from + 200; port += 1) {
@@ -157,7 +165,7 @@ export async function startStaffWorld(options: { image: string; hubImage: string
     // Your organization's server: a TLS pair for its network name, its two keys, the files owned by its user, then one hub file for the lead.
     const hubCert = makeTestCertificate({ dnsNames: [HUB_ALIAS] });
     made.certs.push(hubCert);
-    const hubSecrets = mkdtempSync(path.join(tmpdir(), 'sterling-staff-hub-secrets-'));
+    const hubSecrets = mkdtempSync(path.join(worldDir(), 'sterling-staff-hub-secrets-'));
     made.dirs.push(hubSecrets);
     const generated = async (kind: 'signing' | 'encryption'): Promise<string> =>
       (await mustRun('docker', ['run', '--rm', '--network', 'none', '--memory', '128m', options.hubImage, '/app/bin.mjs', '--generate-key', kind])).stdout.trim().split('\n').pop() as string;
@@ -172,10 +180,16 @@ export async function startStaffWorld(options: { image: string; hubImage: string
       CHOWN_IMAGE, '65532:65532', ...HUB_SECRET_FILES.map((name) => `/secrets/${name}`)]);
     const hubMounts = HUB_SECRET_FILES.flatMap((name) => ['-v', `${path.join(hubSecrets, name)}:/run/secrets/${name}:ro`]);
     const hubEnv = ['-e', `HUB_PUBLIC_ADDRESS=${HUB_ALIAS}:8443`];
-    const hubFile = (await mustRun('docker', ['run', '--rm', '--network', 'none', '--memory', '128m', ...hubMounts, ...hubEnv, options.hubImage, '/app/bin.mjs', '--hub-file', '7'])).stdout.trim();
-    assert.ok(hubFile.length > 0, 'the hub printed a hub file');
     const hubStarted = await runContainer('staff-hub', ['-d', '--memory=512m', '--pids-limit', '256', '--network', internal, '--network-alias', HUB_ALIAS, ...hubMounts, ...hubEnv, options.hubImage]);
     assert.equal(hubStarted.code, 0, hubStarted.stderr);
+    // The hub file is printed by the running hub, as its operator does (relay/README.md): the enrolment it carries is the running hub's own.
+    const hubDeadline = Date.now() + 60_000;
+    while (!/hub\.listening/.test((await run('docker', ['logs', containerName('staff-hub')])).stdout)) {
+      if (Date.now() > hubDeadline) assert.fail('your organization\'s server did not start listening within 60 s');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const hubFile = (await mustRun('docker', ['exec', containerName('staff-hub'), '/nodejs/bin/node', '/app/bin.mjs', '--hub-file', '7'])).stdout.trim();
+    assert.ok(hubFile.length > 0, 'the hub printed a hub file');
 
     const hooked = (): string[] => ['-v', `${HOOK}:/test-hook/outbound-hook.mjs:ro`, '-e', 'NODE_OPTIONS=--import=/test-hook/outbound-hook.mjs',
       '-e', 'NEAR_AI_TEST_OUTBOUND_LOG=/tmp/outbound.log', '-e', `NEAR_AI_TEST_OUTBOUND_ALLOW=127.0.0.1,::1,localhost,${openBaoHost},${HUB_ALIAS}`];
@@ -183,7 +197,7 @@ export async function startStaffWorld(options: { image: string; hubImage: string
 
     const person = async (key: StaffPersonKey): Promise<WorldPerson> => {
       const entityId = await entityOf(key);
-      const workspace = mkdtempSync(path.join(tmpdir(), `sterling-staff-${key}-`));
+      const workspace = mkdtempSync(path.join(worldDir(), `sterling-staff-${key}-`));
       made.dirs.push(workspace);
       chmodSync(workspace, 0o775);
       if (key === 'a') await seedStaffWork(workspace);

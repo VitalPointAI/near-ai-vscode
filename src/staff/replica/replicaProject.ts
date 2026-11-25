@@ -651,8 +651,9 @@ export class ReplicaProject {
       const blobs = new Map<string, SealedBlob>();
       for (const entry of own) {
         const opened = await this.openEntry(entry);
-        // The roster line, and each device's post-quantum keys (33.2 D-03), which a device needs to wrap keys to the others.
-        if (opened === undefined || (ROSTER_KIND_OWNER[opened.kind] === undefined && opened.kind !== 'device.kem')) continue;
+        // The roster line, each device's post-quantum keys (33.2 D-03), which a device needs to wrap keys to the others, and each session key's certificate
+        // (D-62): the joiner pulls each log after the last entry it holds, so a certificate left out here is never read and its session's work never taken.
+        if (opened === undefined || (ROSTER_KIND_OWNER[opened.kind] === undefined && opened.kind !== 'device.kem' && opened.kind !== 'session.certify')) continue;
         roster.push(entry);
         if (opened.blob === undefined) continue;
         const blob = this.blobCache.get(opened.blob) ?? await this.store.blob(opened.blob);
