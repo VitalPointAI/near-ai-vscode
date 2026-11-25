@@ -180,9 +180,12 @@ test('features: KNOWN_BUNDLE_FEATURES is FEATURE_IDS, every section but reserved
   assert.deepEqual([...KNOWN_BUNDLE_FEATURES], [...FEATURE_IDS]);
   assert.deepEqual([...FEATURE_IDS], [
     'labels@1', 'endpoints@1', 'authorizations@1', 'residency@1', 'models@1', 'agents@1', 'people@1', 'onboarding@1', 'limits@1', 'layers@1', 'export-control@1',
-    'credentials@1', 'agreements@1'
+    'credentials@1', 'agreements@1', 'label-interop@1'
   ]);
-  assert.deepEqual([...POLICY_SECTIONS], ['labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements']);
+  assert.deepEqual([...POLICY_SECTIONS], [
+    'labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements',
+    'labelInterop'
+  ]);
   assert.equal(featureForSection('reserved'), undefined);
   assert.equal(featureForSection('exportControl'), 'export-control@1');
   for (const section of POLICY_SECTIONS) {
@@ -370,7 +373,12 @@ test('every section: the full document round-trips, and each section without its
     statusTtl: 900, maxOfflineAge: { 'org/Restricted': 86400 }, requiredBySensitivity: { 'ca-classified/Secret': ['ClearanceCredential'] }
   };
   full.agreements = { v: 1, items: [{ id: 'agreement-1', partner: 'Example Partner Organization', tokens: ['GBR'], levelCeiling: 'org/Restricted', compartments: [], until: '2027-11-24T00:00:00.000Z' }] };
-  full.requires = [...full.requires, 'agreements@1', 'credentials@1'].sort();
+  // Phase 45.1 (D-02): the label table for allies, with fictional values only.
+  full.labelInterop = {
+    v: 1, version: 1,
+    scales: { org: { policy: 'EXAMPLE-POLICY', levels: { Internal: 'EXAMPLE-INTERNAL' }, compartments: {}, releasableTo: { category: 'EXAMPLE-RELEASABLE-TO', values: { GBR: 'EXAMPLE-GBR' } } } }
+  };
+  full.requires = [...full.requires, 'agreements@1', 'credentials@1', 'label-interop@1'].sort();
   const parsed = parsePolicyDocument(full);
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
   if (!parsed.ok) return;

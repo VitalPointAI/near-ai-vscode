@@ -28,6 +28,8 @@ import { parseCredentialsSection } from './credentialsSection';
 import type { CredentialsSection } from './credentialsSection';
 import { parseAgreementsSection } from './agreementsSection';
 import type { AgreementsSection } from './agreementsSection';
+import { parseLabelInteropSection } from './labelInteropSection';
+import type { LabelInteropTable } from './labelInteropSection';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
@@ -83,11 +85,14 @@ export interface PolicyDocument {
   readonly credentials?: CredentialsSection;
   /** Agreements with other organizations (Phase 71, D-12). */
   readonly agreements?: AgreementsSection;
+  /** How your organization's labels are written for allies (Phase 45.1, D-02). Absent means no label can be sent to a partner. */
+  readonly labelInterop?: LabelInteropTable;
 }
 
 const ENVELOPE_REQUIRED = ['bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'requires', 'labels', 'agents'] as const;
 const ENVELOPE_OPTIONAL = [
-  'parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements'
+  'parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements',
+  'labelInterop'
 ] as const;
 
 function has(value: Fields, key: string): boolean {
@@ -236,6 +241,11 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     const agreements = parseAgreementsSection(ownValue(value, 'agreements'), scales, childPath(path, 'agreements'));
     if (!agreements.ok) return agreements;
     out['agreements'] = agreements.value;
+  }
+  if (has(value, 'labelInterop')) {
+    const labelInterop = parseLabelInteropSection(ownValue(value, 'labelInterop'), scales, childPath(path, 'labelInterop'));
+    if (!labelInterop.ok) return labelInterop;
+    out['labelInterop'] = labelInterop.value;
   }
   if (has(value, 'onboarding')) {
     const onboarding = parseOnboardingSection(ownValue(value, 'onboarding'), scales, childPath(path, 'onboarding'));

@@ -191,13 +191,16 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
   'credentials.maxOfflineAge': ONLY_TREE,
   'credentials.requiredBySensitivity.*': rule('superset', { absent: 'weakest' }),
   'credentials.fallbackPersonKeys': ONLY,
-  'agreements.items': ONLY_TREE
+  'agreements.items': ONLY_TREE,
+  // Phase 45.1 (D-02): the label table for allies is your organization's security officer's alone.
+  'labelInterop.version': ONLY,
+  'labelInterop.scales': ONLY_TREE
 });
 
 /** Keys kept per layer and never compared: the envelope, and each section's own `v`. */
 export const LAYER_ENVELOPE_KEYS: readonly string[] = Object.freeze([
   'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'parent', 'requires', 'minClient',
-  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v'
+  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v', 'labelInterop.v'
 ]);
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
