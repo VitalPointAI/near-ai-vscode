@@ -91,14 +91,14 @@ A decision takes the version's stamp before its dialog opens and is signed by th
 3. **[Rule 3] D-69's copy-lint extension cannot be done here.** The 32.1 plan 21 "no project in Defence text" check and `applyFolderWords` are not on this branch.
    - Added: the copy-lint source scan that keeps literal sentences out of `workbench/extension/src/browser/staff/`.
    - The new sentences say "shared work", and the model test checks no hub, entries or project.
-   - The rest is G427.
-4. **[Rule 2] The people list has no live source yet.** 33-12 expected the native engine (33-24) to run `LivePresence`, and it does not. The service takes a people source and, until one runs, lists only this person as Live. This is G426.
+   - The rest is G436.
+4. **[Rule 2] The people list has no live source yet.** 33-12 expected the native engine (33-24) to run `LivePresence`, and it does not. The service takes a people source and, until one runs, lists only this person as Live. This is G435.
 5. **Admit, Decline and the single-machine copy** answer with a sentence pointing to Share with People. 33-27 owns the admit flow (the request's name and code) and the copy. Choose (`chooseRosterBranch`) and Propose (`VersionActs.propose`) are wired. An owner prompt put away with Not Now stays away for that version in the session.
 6. **No agent run source exists in the native backend,** so the room has no agent cards today. The model shows the trust line only where TrustFacts exist (tested).
 7. **The room's mode** is the default (Corporate and software) until the native engine reads the shared work's mode; the model already takes it.
 8. **Tests first:** the model test and both workbench tests were written with the code, before the first run.
 9. **Files outside the plan:**
-   - `compliance/gaps.json`: G426 and G427. These are the next free ids above G425, the highest on `origin/*` on 2026-11-24, and above the 74.1 reservation G407 to G418.
+   - `compliance/gaps.json`: G435 and G436. They are in this branch's reserved range G435 to G439 (first taken as G426 and G427, which Phase 71 already holds).
    - `docs-site/content/security/road-to-production.md`: regenerated from the register by `scripts/build-road-to-production.mjs`.
    - `staff-engine.ts` and `staff-engine-entry.ts`: the `StaffRoomApi` names (see 33-25 deviation 7).
 
@@ -112,7 +112,7 @@ All runs used the shared heavy lock, MemoryMax=6G, MemorySwapMax=0, choom and ti
 | Root, run 2: `npm run compile`, then staffRoomLive, copyLint, architecture, staffSharedVersionActs and staffEditorBinding, then `npm run lint` | **97 passed, 0 failed**; lint exit 0 |
 | Workbench focused, runs 2 to 4 | room service: the contested card's two decisions come in the fold's order, which either may lead, so the test now accepts both orders. The person-decides test now reads the decision from the live engine's copy of the project |
 | `npm --prefix workbench run build && npm --prefix workbench test && npm --prefix workbench run lint` | build ok; **178 tests: 178 passed, 0 failed, 0 skipped**, including the bundle scan of `lib/frontend` (no Yjs, replica module or key function in the browser); lint exit 0 |
-| `node scripts/build-road-to-production.mjs` then `--check` | page regenerated with G426 and G427; the check passes and every SUMMARY cites its open conditions |
+| `node scripts/build-road-to-production.mjs` then `--check` | page regenerated with G435 and G436; the check passes and every SUMMARY cites its open conditions |
 
 - `staffRoomLive.test.js` has 14 tests (plan: at least 12). `staff-room-widget.test.ts` has 3 (plan: at least 2) and `staff-room-service.test.ts` 6 (plan: at least 5).
 - Acceptance checks:
@@ -132,7 +132,7 @@ All runs used the shared heavy lock, MemoryMax=6G, MemorySwapMax=0, choom and ti
 ## Known Stubs
 
 - Admit and Decline in a join card, and Make a Single-Machine Copy, answer "Admitting people is done from Share with People." or "Make a single-machine copy from Share with People." until 33-27 (planned) wires them.
-- The people list holds only this person until presence runs (G426).
+- The people list holds only this person until presence runs (G435).
 
 ## Threat Flags
 
@@ -142,8 +142,8 @@ All runs used the shared heavy lock, MemoryMax=6G, MemorySwapMax=0, choom and ti
 
 ## Open conditions
 
-- G426: the native live engine runs no presence yet, so the Staff Room lists only this person.
-- G427: the Defence-text folder-word check does not read the staff sentence constants yet (waits for 32.1 plan 21).
+- G435: the native live engine runs no presence yet, so the Staff Room lists only this person.
+- G436: the Defence-text folder-word check does not read the staff sentence constants yet (waits for 32.1 plan 21).
 
 ## Self-Check: PASSED
 

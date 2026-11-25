@@ -5723,7 +5723,7 @@
       "controls": [
         "sa-04"
       ],
-      "id": "G426",
+      "id": "G435",
       "ownerRole": "maintainers",
       "remediation": "33-12 built the presence loop (src/staff/replica/livePresence.ts) and expected the native engine (33-24) to run it, but StaffLiveEngine starts no LivePresence. The native Staff Room (33-26) takes its people list from a people source and, until one runs, lists only the person at this computer as Live. Start one LivePresence per open shared work in the live engine (the replicator's postPresence and onPresence, the held cells and their epoch keys, the roster's names and positions) and pass its people to the Staff Room service before Phase 33 closes; 33-29's cursors need the same loop. Source: .planning/phases/33-live-multi-user-staff-projects/33-26-SUMMARY.md.",
       "title": "The native live engine does not run presence yet, so the Staff Room shows only this person"
@@ -5735,7 +5735,7 @@
       "controls": [
         "sa-11"
       ],
-      "id": "G427",
+      "id": "G436",
       "ownerRole": "maintainers",
       "remediation": "D-69 asks the copy lint's no-project-in-Defence-text check (Phase 32.1 plan 21) to also read every exported *_TEXT constant in src/domain/staff and src/staff with applyFolderWords. Neither that check nor applyFolderWords is on the Phase 33 branch yet, so 33-26 added only the source scan that keeps sentences out of the native staff widgets, and wrote its own new sentences with 'shared work'. Extend the 32.1 check to those constants when 32.1 plan 21 merges, and change the older constants it finds (for example the binding's header notice). Source: .planning/phases/33-live-multi-user-staff-projects/33-26-SUMMARY.md.",
       "title": "The Defence-text folder-word check does not read the staff sentence constants yet"
