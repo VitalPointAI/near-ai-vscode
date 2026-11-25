@@ -124,16 +124,18 @@ async function notice(text: string, error = false): Promise<void> {
   await post({ type: 'notice', text, error });
 }
 
+class AttachmentReadError extends Error {}
+
 /** Read only the same regular file whose location passed the attachment check. */
 async function readAttachment(file: string, allowed: (resolved: string) => boolean): Promise<Buffer> {
   const resolved = realpathSync(file);
-  const refusal = () => new Error('This attachment changed or is outside the permitted location.');
+  const refusal = () => new AttachmentReadError('the file changed or is outside the permitted location');
   if (!allowed(resolved)) throw refusal();
   const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const opened = await handle.stat({ bigint: true });
-    if (!opened.isFile()) throw new Error('it is not a file');
-    if (opened.size > MAX_FILE_BYTES) throw new Error('it is larger than 2 MB');
+    if (!opened.isFile()) throw new AttachmentReadError('the attachment is not a regular file');
+    if (opened.size > MAX_FILE_BYTES) throw new AttachmentReadError('the file is larger than 2 MB');
     const verifyLocation = () => {
       if (realpathSync(file) !== resolved || !allowed(resolved)) throw refusal();
       const current = lstatSync(resolved, { bigint: true });
@@ -235,7 +237,9 @@ async function send(text: string): Promise<void> {
   try {
     content = await userMessage(text.slice(0, MAX_TEXT), files, workspace);
   } catch (error) {
-    await notice(providerErrorMessage(error), true);
+    if (chat !== currentChat || deps !== workspace || running !== undefined) return;
+    const reason = error instanceof AttachmentReadError ? error.message : 'the file could not be read';
+    await notice(`The attachment could not be sent because ${reason}. Add the file again and try sending.`, true);
     await post({ type: 'returned', text });
     return;
   }
