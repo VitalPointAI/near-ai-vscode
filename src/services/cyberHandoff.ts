@@ -7,6 +7,7 @@ import { cyberRunPrompt, type CyberRunInput, type CyberRunResult } from './cyber
 import type { SecurityAccess } from '../agent/securityTool';
 import {
   cyberAssemblyCore,
+  cyberStorePath,
   cyberToolContext,
   panelTools,
   startCyberRunInPanel,
@@ -68,8 +69,7 @@ export function cyberAssembly(context: {
   toolContext: CyberRunInput['toolContext'];
   tools(engagement: CyberRunInput['engagement']): CyberRunInput['tools'];
 }): CyberRunAssembly {
-  const key = (options.workspaceRoot ?? 'no-workspace').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'root';
-  const storeDirectory = `${context.globalStorageUri.fsPath}/cyber/${key}`;
+  const storeDirectory = cyberStorePath(context.globalStorageUri.fsPath, options.workspaceRoot);
   const model = options.model ?? 'z-ai/glm-5.3';
   const complete = async (requested: string, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, signal?: AbortSignal): Promise<string> => {
     const client = options.client;

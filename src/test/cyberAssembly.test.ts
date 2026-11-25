@@ -6,7 +6,7 @@ import { PROFILE_CONTENT } from '../domain/cyber';
 // the assembly itself, so a regression in the wiring fails here rather than in a user's first run.
 
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -202,20 +202,49 @@ test('the store path and the run root are the same workspace, so an export can f
   const workspaceRoot = path.join(root, 'workspace');
   // The bug this covers: the panel resolved the model client with the globalStorage path while the
   // store was keyed by the workspace, so a run wrote under 'no-workspace' and export never found it.
-  // The key is the whole workspace path, sanitised: two workspaces with the same folder name must
-  // not share a store.
-  const key = workspaceRoot.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-  assert.equal(cyberStorePath(globalStorage, workspaceRoot), path.join(globalStorage, 'cyber', key));
-  assert.notEqual(cyberStorePath(globalStorage, undefined), cyberStorePath(globalStorage, workspaceRoot));
+  // The key itself is covered with fixed paths below, so this test holds however long the temporary folder's path is.
+  const store = cyberStorePath(globalStorage, workspaceRoot);
+  assert.notEqual(cyberStorePath(globalStorage, undefined), store);
   const assembly = cyberAssembly(
     { globalStorageUri: { fsPath: globalStorage }, extension: { packageJSON: { version: '0.4.10' } } },
     { workspaceRoot, client: stepClient, model: 'test-model', toolContext, tools: () => [] }
   );
   try {
-    assert.ok(assembly.ledger.runPath('run-0001-abcdef').startsWith(path.join(globalStorage, 'cyber', key)), 'the ledger lives under the workspace key');
+    assert.ok(assembly.ledger.runPath('run-0001-abcdef').startsWith(`${store}/`), 'the ledger lives under the workspace key');
   } finally {
     assembly.toolContext.shell.dispose();
   }
+});
+
+test('two workspaces never share a store: a long path keeps a readable prefix and a hash of the whole path, a short one keeps its key', async () => {
+  const { root } = await context();
+  const globalStorage = path.join(root, 'globalStorage');
+  // A path that fits keeps the key it always had, so the stores already on disk are still found.
+  assert.equal(cyberStorePath(globalStorage, '/home/user/projects/site'), `${globalStorage}/cyber/home-user-projects-site`);
+  // The bug: the key was cut at 80 characters, so these two shared one store.
+  const common = `/home/user/${'a'.repeat(80)}`;
+  const first = cyberStorePath(globalStorage, `${common}/first`);
+  const second = cyberStorePath(globalStorage, `${common}/second`);
+  assert.notEqual(first, second);
+  for (const store of [first, second]) {
+    const key = path.basename(store);
+    assert.match(key, /^home-user-a{54}-[0-9a-f]{16}$/, 'a readable prefix, then a hash');
+    assert.equal(key.length, 81, 'one longer than any whole key, so a long key never equals a short one');
+  }
+  assert.equal(cyberStorePath(globalStorage, `${common}/first`), first, 'the same workspace always gets the same store');
+
+  // The one-time move: a long workspace's records under its old cut key are copied to its own key, and the old folder stays as it was, because it
+  // may also be another workspace's store.
+  const cut = `${globalStorage}/cyber/${`home-user-${'a'.repeat(80)}`.slice(0, 80)}`;
+  await mkdir(path.join(cut, 'engagements'), { recursive: true });
+  await writeFile(path.join(cut, 'engagements', 'eng-1.json'), '{"id":"eng-1"}');
+  const third = cyberStorePath(globalStorage, `${common}/third`);
+  assert.equal(await readFile(path.join(third, 'engagements', 'eng-1.json'), 'utf8'), '{"id":"eng-1"}', 'the records seen before the fix are kept');
+  assert.equal(await readFile(path.join(cut, 'engagements', 'eng-1.json'), 'utf8'), '{"id":"eng-1"}', 'the old folder is copied, not moved');
+  await writeFile(path.join(cut, 'engagements', 'eng-2.json'), '{"id":"eng-2"}');
+  cyberStorePath(globalStorage, `${common}/third`);
+  await assert.rejects(readFile(path.join(third, 'engagements', 'eng-2.json')), 'the copy happens once: nothing is mixed in afterwards');
+  assert.deepEqual((await readdir(path.dirname(third))).filter((name) => name.includes('.adopting-')), [], 'no half copy is left');
 });
 
 test('a run started for a workspace resolves its client with that workspace, not the store', async () => {
