@@ -118,6 +118,7 @@ export const TRUST_LINE_TEXT = Object.freeze({
   } satisfies Record<TrustVerificationLevel, string>),
   allowedFor: 'Allowed for',
   allowedBy: 'Allowed by',
+  allowedForChat: 'Allowed for chat you review by',
   by: 'by',
   authorization: 'authorization',
   until: 'until',
@@ -140,6 +141,9 @@ function recordShown(record: AllowingRecord, decided: Label | undefined, scales:
     case 'routing':
       return `${TRUST_LINE_TEXT.allowedFor} ${labelShownFor(record.label, decided, scales)}`;
     case 'authorization': {
+      // An exception always covers exactly one use, so it names it (74.1 P20, design 5.3): one string on every surface, and no self-signed form, because
+      // a self-signed exception covers nothing (D-20).
+      if (record.authorizationKind === 't1-risk') return `${TRUST_LINE_TEXT.allowedForChat} ${record.name} ${TRUST_LINE_TEXT.until} ${dateShown(record.expiresAt)}`;
       const opening = record.label === undefined
         ? TRUST_LINE_TEXT.allowedBy
         : `${TRUST_LINE_TEXT.allowedFor} ${labelShownFor(record.label, decided, scales)} ${TRUST_LINE_TEXT.by}`;

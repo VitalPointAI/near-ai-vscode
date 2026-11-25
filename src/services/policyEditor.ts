@@ -11,6 +11,8 @@ import { PayloadError, signPayload } from '../domain/team/signedPayload';
 import type { PayloadSigner } from '../domain/team/signedPayload';
 import { STALE_DRAFT_TEXT } from '../gate/bundleStore';
 import { openPanel } from './webview/openPanel';
+import { exceptionsView, receiveException, resetExceptions } from './policyExceptions';
+import type { ExceptionDeps } from './policyExceptions';
 
 // The policy editor (FND-09, Phase 41 D-44, D-47, D-23): one page, "Your organization's rules" (or "Your rules" without an organization), that shows the
 // rules read only and receives proposals. Every flow that would change the rules calls openPolicyProposal(change). On your own rules, which this device
@@ -83,6 +85,8 @@ export interface PolicyEditorDeps {
   hasDraft?(): boolean;
   /** Shows the waiting draft on this page as a proposal (today's Apply Policy Draft flow). */
   applyDraft?(): Promise<void>;
+  /** The section "Exceptions for chat you review" (74.1-11): the open projects and the clock. Absent: the page shows no such section. */
+  readonly exceptions?: ExceptionDeps;
 }
 
 /** The page's own buttons beyond Show as stored and Reset: each is offered only when this device can sign your own rules (41-15). */
@@ -215,6 +219,7 @@ async function post(): Promise<void> {
     changes: shown.changes.map((change) => ({ section: change.section, key: change.key, direction: change.direction, effect: change.effect }))
   };
   const text = notice ?? (state === undefined ? UNREADABLE_TEXT : shown !== undefined && shown.changes.length === 0 ? NO_CHANGE_TEXT : undefined);
+  const exceptions = host.deps.exceptions === undefined ? undefined : exceptionsView(state, host.deps.signer(), host.deps.exceptions);
   await view.webview.postMessage({
     type: 'state',
     title,
@@ -224,7 +229,8 @@ async function post(): Promise<void> {
     actions: actionsOf(),
     pageActions: pageActionsOf(),
     ...(text === undefined ? {} : { notice: text }),
-    ...(at === undefined ? {} : { at, atSeq })
+    ...(at === undefined ? {} : { at, atSeq }),
+    ...(exceptions === undefined ? {} : { exceptions })
   });
 }
 
@@ -234,11 +240,12 @@ function show(): vscode.WebviewPanel {
   const view = openPanel(host.context, {
     viewType: POLICY_EDITOR_VIEW_TYPE, title: titleOf(host.deps.state()), folder: PAGE, script: `${PAGE}.js`, style: `${PAGE}.css`, probe: PAGE,
     body: '<header><h1 id="title"></h1><p id="set-by" class="hint"></p></header>\n<p id="notice" role="status" aria-live="polite"></p>\n'
-      + '<section id="proposal" hidden></section>\n<div id="sections"></div>\n<div id="page-actions" class="page-actions"></div>'
+      + '<section id="proposal" hidden></section>\n<div id="sections"></div>\n<div id="exceptions"></div>\n<div id="page-actions" class="page-actions"></div>'
   });
   panel = view;
   view.onDidDispose(() => {
     panel = undefined;
+    resetExceptions();
     const shown = pending;
     if (shown === undefined) return;
     if (shown.busy) shown.closed = true;
@@ -277,6 +284,8 @@ async function receive(message: unknown): Promise<void> {
   if (host === undefined || typeof message !== 'object' || message === null || Array.isArray(message)) return;
   const fields = message as Readonly<Record<string, unknown>>;
   const deps = host.deps;
+  // The exception section's messages (74.1-11): checked there, and refused there with no organization layer.
+  if (await receiveException(fields, deps.state(), deps.exceptions === undefined ? undefined : deps.signer(), deps.exceptions, deps.directionOf)) return;
   switch (fields['type']) {
     case 'ready': break;
     case 'apply': {
