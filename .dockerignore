@@ -16,6 +16,7 @@
 !hub/tsconfig.json
 !hub/scripts
 !hub/src
+!src/domain/agentDefaults.ts
 !src/domain/config.ts
 !src/domain/credentials/cacheState.ts
 !src/domain/credentials/clearance.ts
@@ -48,14 +49,18 @@
 !src/domain/gate/endpoints.ts
 !src/domain/gate/enrolment.ts
 !src/domain/gate/features.ts
+!src/domain/gate/labelInteropSection.ts
 !src/domain/gate/labels.ts
 !src/domain/gate/models.ts
+!src/domain/gate/passportStep.ts
+!src/domain/gate/placeWords.ts
 !src/domain/gate/policyDocument.ts
 !src/domain/gate/residency.ts
 !src/domain/gate/routing.ts
 !src/domain/gate/sections.ts
 !src/domain/gate/shape.ts
 !src/domain/gate/shippedPassports.ts
+!src/domain/gate/useTier.ts
 !src/domain/gate/vocabulary.ts
 !src/domain/org/modes.ts
 !src/domain/org/peopleSection.ts
