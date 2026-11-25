@@ -1256,7 +1256,7 @@ test('every store refusal that Start Again resolves names the command, and the o
 test('SECURITY.md has the replica store subsection once, inside the multi-user section, with no em-dash', () => {
   const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
   assert.equal(text.split('\n').filter((line) => line === '### The replica store and rollback detection').length, 1);
-  const section = text.slice(text.indexOf('## Multi-user staff projects (preview)'), text.indexOf('\n## ', text.indexOf('## Multi-user staff projects (preview)') + 1));
+  const section = text.slice(text.indexOf('\n## Multi-user staff projects\n'), text.indexOf('\n## ', text.indexOf('\n## Multi-user staff projects\n') + 1));
   assert.ok(section.includes('### The replica store and rollback detection'));
   assert.doesNotMatch(text, /\u2014/);
   for (const phrase of ['.planning/staff/replica/', 'git', 'secret storage', 'private key', 'set aside']) assert.ok(section.toLowerCase().includes(phrase.toLowerCase()), phrase);

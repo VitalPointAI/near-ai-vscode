@@ -1621,12 +1621,165 @@ own account and run records in `.planning/.near-ai/` stay on this computer by de
 in the chat bar shows a sync problem as a plain sentence under it and never includes a token or
 a password.
 
-## Multi-user staff projects (preview)
+## Multi-user staff projects
 
-Multi-user staff projects, where several people and their agents work on the same staff products
-from their own machines, are being built over several releases. What exists in this release is
-switched off unless a person turns on the preview setting `nearAi.staff.multiUserPreview` (off by
-default). A project that never turns multi-user behaves exactly as before.
+Several people and their agents can work on the same staff products, each in their own SovAI
+session or on their own computer, through your organization's server. A staff project is shared
+only when its lead turns sharing on for that project with **Share with people** on its work-area
+page. A project that never shares behaves exactly as before.
+
+Every result of Share with people shows these three notices, word for word:
+
+- Until verified credentials arrive, your clearance comes from your own policy file, which your
+  own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+- Labels and routing are an organizational control that helps prevent mistakes. They check what
+  NEAR AI itself sends to a model and what its own file tools read, and they cannot see
+  everything a shell command or an add-on server does. They do not make this device accredited
+  for classified information. Until verified credentials arrive, your clearance is the one you
+  declared yourself, so it is not an enforced boundary.
+- People and clearances in this project are declared by the staff lead, not verified.
+
+### Live sharing through your organization's server
+
+- **Local first.** Each session keeps the shared history in its own replica store (below) and
+  writes every change there first. Typing, proposals and decisions go on while the server cannot
+  be reached, and sync when it can.
+- **Sealed before it leaves.** Each change is signed by its writer and sealed under the key of
+  the part of the project it belongs to before it leaves the session. Your organization's server
+  stores and relays the sealed changes and tells the other members' sessions at once; what it can
+  read is listed under "Your organization's sync hub" below.
+- **Checked on arrival.** Every session checks each change it receives (its signature, its
+  writer, its place in the writer's log, the roster it cites, and the decode check below) before
+  it keeps it, whatever the server says (`src/test/staffLiveScenario.test.ts`,
+  `hub/test/liveScenarios.test.ts`).
+- **The shared engine stays in the session backend.** In a hosted session the shared history,
+  the shared text library and the cell keys stay in the session's backend. The browser receives
+  the edits of a product open in the editor and the text the person already has open, never a key;
+  a check of the built browser bundle fails if the shared text library, a replica module or a key
+  function is in it (`workbench/test/staff/staff-live-engine.test.ts`).
+- **Editing a product.** A product opened in the editor is bound to the shared text. Each edit
+  becomes a signed change, other people's changes are applied without adding to your undo stack,
+  and undo and redo take back only your own changes. The header stays as the project keeps it. A
+  change to the product file on disk outside the editor is never shared silently: the person
+  chooses **Take This Change as My Edit** or **Restore**. A second tab of the same session gets
+  the product read-only.
+- **Decisions are stamped.** A decision takes a stamp of the version's decisions before its
+  dialog opens. If another decision on that version arrived meanwhile, the decision is refused
+  with "Someone else decided this version while you were deciding. Look again." and nothing is
+  written.
+- **Contested decisions are kept.** Two decisions on the same version made without seeing each
+  other (for example one made offline) are both kept. Neither applies: the Staff Room shows both
+  names and reasons, and a new decision that lists both settles it. The server does not choose. A
+  decision the server's newest checkpoint does not cover yet is marked "not yet confirmed by your
+  organization's server". The offline banner warns before this can happen: "You are offline. Your
+  changes are kept here and will sync when your organization's server is back. Decisions you make
+  now may become contested if someone else decides the same thing."
+- **One state, one word.** Each shared project is in one sync state at a time, shown as one word
+  on the status bar and in the Staff Room, with a sentence and one action. A state the build does
+  not know is shown as Needs attention, never as calm. The status bar never shows a name, a
+  product, an address or a folder.
+
+### Keys in a hosted session
+
+- **The person key.** Each person's long-term signing key is an Ed25519 key in your
+  organization's key store (OpenBao Transit, `person-<entity>`), and it never leaves that store.
+  It signs every change the roster checks against the person: creating shared work and its first
+  key grant, changes to who is in it and what they may see, cell grants, invitations, join
+  requests, decisions (approve, reject, release, supersede, withdraw), required features
+  (`roster.require`), trusting your organization's server again (`hub.readmit`) and session
+  certificates. The key store signs only after a fresh confirmation with the person's passkey or
+  security key (a sign-in window of 5 minutes unless your organization sets another; see
+  `workbench/README.md`).
+- **Limit: one confirmation, any person-key change in its window.** Within that window any of
+  these changes can be signed: a confirmation is not yet bound to the one action the person was
+  shown.
+- **Session keys.** When a session starts, its backend makes a fresh Ed25519 session key in
+  memory. It is never stored and is dropped when the session stops. The person key vouches for it
+  once per shared project with a `session.certify` entry naming the member, the device, the key,
+  its writing slot and an end time: the workbench asks for 12 hours, and an end more than 24 hours
+  after signing is refused. The session key signs ordinary work (typing, compaction of the text,
+  proposals, verdicts and submissions) and the store's own record, and every member's session
+  credits that work to the person (`src/test/replicaSessionCertify.test.ts`).
+- **A session key cannot act as the person.** A change of any kind the person key signs, written
+  by a session key, is kept and does nothing, on every member's session and at your
+  organization's server: "Only the person's own key can make this change." Revoking or setting
+  aside the person's device stops every session key it vouched for, from that point in the roster
+  on.
+- **The server enforces the end time.** Your organization's server takes a session key's
+  sessions and changes only before its end time by the server's own clock, while the device that
+  vouched for it still stands, and for at most four live session keys per device; its session
+  token never outlives the end time (`hub/test/sessionCertify.test.ts`). The shared history itself
+  reads no clock. After the end the session says "Your session key has ended. Sign in again."
+- **The encryption keys.** Cell keys are wrapped to the person's X25519 key, and post-quantum
+  wraps to their P-256 and ML-KEM-768 keys (see "How cell keys are wrapped"). Your organization's
+  key store has no X25519, so these private keys are kept only as an envelope sealed with a data
+  key that the person's key-encryption key (`kek-<entity>`, in Transit) wraps, in the person's own
+  key store. The session opens it into backend memory at start and drops it when the session
+  stops. Opened cell keys and join secrets are kept in the same person's key store, so they follow
+  the person to every later session.
+- **The store's record.** In a hosted session the replica store's rollback record is signed by
+  the session key and trusted through the person's own path in your organization's key store,
+  which only the person's sign-in can write.
+- **Limit: a conversion trusts any key that signed the old ledgers.** Sharing a staff project from
+  SovAI converts its earlier staff ledgers after checking their hash chain and signatures, but the
+  session cannot read the key history of the extension that signed them, so any key that signed
+  them is accepted as current. Someone who could write the person's workspace could put forged
+  ledger lines into the shared history at conversion.
+
+### Presence
+
+Presence is advisory: who is here, which product a person is in, their cursor and how many agents
+they run. It is built into the shared engine and your organization's server, but SovAI does not
+send it yet, so the Staff Room lists only the person in this session. As built:
+
+- **Sealed per part.** Each presence message is sealed under a key derived from the key of the
+  part of the project it is about (HKDF-SHA256, then AES-256-GCM), and a product's name and cursor
+  travel only in that product's own part, so a person not cleared for the part never learns who
+  works there (`hub/test/liveLeak.test.ts`, the presence row).
+- **Never stored.** The server passes presence on only to the devices on that part and keeps it
+  in memory only: it is never stored (`hub/test/presence.test.ts`).
+- **Never evidence.** Presence is not part of the shared history and is not signed into it; no
+  decision, record or check relies on it.
+
+### Required features and older versions
+
+- **A project lists what it requires.** The lead or deputy adds the features a shared project
+  requires with a `roster.require` entry, signed by the person key; the list only grows. New shared
+  work requires the feature check itself and post-quantum wraps from its creation. Shared work made
+  earlier gets the feature check the next time its lead opens it.
+- **A session without a feature stops the whole project.** A session or computer whose SovAI
+  lacks a required feature stops that shared work before it reads anything else: nothing is shown
+  from it, nothing is written to it and no editor is bound to it. It says "This shared work needs a
+  newer version of Sterling. Ask your administrator to update it." and keeps every entry it holds,
+  so after the update it goes on with nothing lost (`src/test/staffRequireGate.test.ts`).
+- **Why an older computer stalls rather than misreads.** The 0.4.35 preview does not know
+  `roster.require`. It keeps the entry and passes it on, as it does any entry made by a newer
+  version, but it cannot apply the roster changes that come after it, so its view of who is in the
+  project stops at that point instead of going on without the requirement. 0.4.35 has no
+  connection to your organization's server at all.
+- **The server refuses a session that does not cover the project.** Each session announces the
+  features its build knows, and your organization's server refuses a session for a project whose
+  required features it does not cover, with the same update sentence, so an older build cannot
+  write through the server. A server that itself lacks a required feature refuses that project's
+  changes, stores nothing, keeps serving reads and says: "This shared work needs a newer version of
+  your organization's server. Ask its operator to update it." (`hub/test/require.test.ts`).
+
+### A person who joins late
+
+A person who joins a shared project late starts each writer's log from the newest checkpoint your
+organization's server signed and their session trusts, so they need not read the whole history
+before they can work (`src/test/staffLiveScenario.test.ts`, the late joiner). Two limits remain:
+
+- **Only parts the server holds.** It starts from a checkpoint only in the part every member holds
+  and the parts granted to the server, because the server checkpoints no other part. In every other
+  part the history is read in full, nothing is left out, and the person is told: "Your
+  organization's server keeps no summary of this part of the project, so this computer reads all
+  of its history. Nothing is left out."
+- **The text waits for the earlier history.** A summary of a product's text counts only once the
+  registrations of the editing sessions it holds have arrived, and those were written before the
+  checkpoint. So the product's text is complete only once the earlier history has arrived.
+  Fetching that earlier history after the start is not built yet, so until it is, the text a late
+  joiner sees of such a product can be incomplete.
 
 ### Update size limits and the decode worker
 
@@ -1812,7 +1965,7 @@ so a person's computer holds only the products their declared clearance covers.
   No hub is given a part for a label unless the staff lead grants it.
 - **The base part carries only the roster.** The part every member holds names the people, their
   devices, roles and declared clearances, and nothing else. A sync hub given that part, as your
-  organization's hub will be, never reads product text.
+  organization's server is, never reads product text.
 - **`org/Internal` is the default label.** A product made without a label is `org/Internal`. A
   product keeps its label for its whole life; to give it another label, make a new product with
   that label.
@@ -1890,8 +2043,12 @@ to. Both stay on the machine.
 ### Invitations, join secrets and the safety code
 
 People join a multi-user staff project by exchanging three small files and comparing six words.
-Nothing is posted anywhere: the files go from person to person any way they like (email, chat, a
-USB stick), and there is no server to trust.
+The files go from person to person any way they like (email, chat, a USB stick). When the project
+is connected to your organization's server, the invitation's check key and the join request also
+pass through it (see "Joining and enrolment" under "Your organization's sync hub"); the server
+still admits nobody. In a hosted session, where this subsection says a computer's device key or
+the editor's secret storage, read the person key and the person's own key store (see "Keys in a
+hosted session").
 
 - **Invitations are signed files.** A computer of the staff lead or the deputy lead writes a
   `.near-staff-invite` file signed with its device key. It names the project (the hash of its first
@@ -1956,10 +2113,10 @@ only by what the staff lead says about them.
   project are what the staff lead (or the deputy lead) declares when inviting or changing them.
   SovAI does not check who a person is or what clearance they really hold. The six words check
   only that the device that joined is the one the person used.
-- **Every screen says so.** Every multi-user confirmation and result shows three notices: that a
-  clearance is self-declared and not an enforced boundary, that labels and routing help prevent
-  mistakes but are not accreditation, and "People and clearances in this project are declared by
-  the staff lead, not verified."
+- **Every result says so.** Every result of Share with people shows the three notices at the top
+  of this section: that a clearance is self-declared and not an enforced boundary, that labels and
+  routing help prevent mistakes but are not accreditation, and "People and clearances in this
+  project are declared by the staff lead, not verified."
 - **Labels are not accreditation.** A part of the project with a higher label is sealed under its
   own key and given only to the devices whose declared clearance covers it. That helps prevent
   mistakes; it does not make any computer accredited for classified information, and a declared
@@ -1967,19 +2124,20 @@ only by what the staff lead says about them.
 - **Labelled products get a part of their own.** Making a project multi-user puts each product
   in a part of the project for its label, given only to the devices whose declared clearance
   covers that label. See "Labelled products in shared projects" above for who receives what.
-- **Off unless you turn it on.** Everything multi-user is a preview, off unless a person turns on
-  `nearAi.staff.multiUserPreview` in their own settings. The setting applies to the whole editor,
-  so a project folder cannot turn it on for you. While it is off, the multi-user commands are
-  hidden from the Command Palette, a command run anyway only says how to turn it on, no
-  multi-user code is loaded, and no file, folder or secret is made.
-- **Only a person runs these steps.** Making a project multi-user, inviting, joining, admitting,
-  removing, adding a computer, choosing a roster branch, naming the deputy, handing over the lead,
-  changing a member and making a single-machine copy are commands a person runs, each change
-  behind a confirmation. No agent tool runs a command, and none of them is a decision the Staff
-  Room's buttons can run. A person is admitted only after the lead picks "The six words match".
-- **The invitation stays out of the project.** An invitation holds a one-time secret, so the
-  command does not save it inside the project folder, where git could commit it, and saves every
-  invitation, join request and welcome file readable by your own user account only.
+- **Turned on per project.** A staff project is shared only when its lead chooses **Share this
+  work** in Share with people for that project. No setting, project folder or agent turns it on.
+  The earlier preview's setting and commands are not used in SovAI: in the SovAI image the
+  extension registers none of its multi-user preview commands and never starts a second live
+  engine beside SovAI's own (`src/test/staffMultiUserCommands.test.ts`).
+- **Only a person runs these steps.** Sharing a project, inviting, joining, admitting, removing a
+  person, choosing between two roster changes, connecting your organization's server, giving it a
+  part, removing it, trusting it again and making a single-machine copy are actions a person takes
+  in Share with people or the Staff Room. In a hosted session each change is signed by the person
+  key after a fresh confirmation with their passkey or security key. No agent tool runs them. A
+  person is admitted only after the lead picks "The six words match".
+- **The invitation stays out of the project.** An invitation holds a one-time secret, so SovAI
+  hands every invitation, join request and welcome file to the person through their browser's
+  download and never saves one inside the project folder, where git could commit it.
 - **The single-machine copy is honest about what it carries.** Steps other people took in the
   shared project are carried under the name and key of the person who makes the copy, written
   like "A. Person (approved in the shared project, carried by B. Person)". A decision people made
@@ -2289,10 +2447,11 @@ messages.
 ## Your organization's sync hub
 
 `hub/` holds the sync hub: a separate service your organization runs to carry multi-user staff
-projects between people's computers. It is not part of the extension and is never in the VSIX.
-This release ships it for operators only; the editor cannot connect a project to it until a later
-release. How to run it, back it up and restore it is in `relay/README.md`, under "Your
-organization's sync hub". Each point below names the test that shows it: files under `hub/test/`
+projects between people's sessions and computers. It is not part of the extension and is never in
+the VSIX. A lead connects a shared staff project to it with **Connect your organization's server**
+in Share with people, from a hub file the operator prints; SovAI sessions then sync through it live.
+How to run it, back it up and restore it is in `relay/README.md`, under "Your organization's sync
+hub". Each point below names the test that shows it: files under `hub/test/`
 are the hub's own suite, files under `src/test/` the extension's.
 
 ### What the hub stores and what it reads
@@ -2352,14 +2511,27 @@ are the hub's own suite, files under `src/test/` the extension's.
   back the checkpoints the restored hub lost and push again what it lacks; the hub signs nothing
   new until it holds everything those checkpoints cover, and its next checkpoint covers every
   member's changes (`hub/test/restoreDrill.test.ts`).
-- **Limit: an honest restore can look like a fork.** If new work reaches a restored hub before
-  every member's computer has synced, a computer that held a checkpoint the restore lost sees two
-  checkpoints of the hub that disagree, names the hub rolled back and forked, and stops trusting
-  it. To that computer an honest restore and a real fork are the same evidence. The operator guide
-  gives the restore procedure that avoids it (members sync and make no new changes until every
-  device has synced). A member whose computer still names the hub forked keeps working by file or
-  through another hub until the staff lead re-admits the hub, a flow that arrives with the
-  editor's hub commands.
+- **Restore mode: an honest restore done by the procedure no longer looks like a fork.** If new
+  work reached a restored hub before every member's computer had synced, a computer that held a
+  checkpoint the restore lost would see two checkpoints of the hub that disagree, name the hub
+  rolled back and forked, and stop trusting it; to that computer an honest restore and a real fork
+  are the same evidence. So the operator guide's restore procedure writes the marker file
+  `restore-mode` into the hub's state folder, and the hub then starts in restore mode: it takes
+  back only changes that a checkpoint it kept, or one a member hands back, already covers, and
+  answers every other change with a retryable refusal, which members' sessions show as "Your
+  organization's server is being restored. Your changes are kept here." It leaves restore mode by
+  itself once every admitted member device of every project has asked it for a checkpoint since
+  the restart, or when the operator removes the marker (`hub/test/restoreMode.test.ts`,
+  `hub/test/restoreDrill.test.ts`, `hub/test/liveScenarios.test.ts`).
+- **Limit: a restore when the procedure is not followed.** Without the marker, or with the marker
+  removed before every member has synced, the old problem remains: a computer that held a lost
+  checkpoint names the hub rolled back and forked and stops trusting it.
+- **Re-admit your organization's server.** A member whose computer names the hub rolled back or
+  forked keeps refusing it, which is the safe choice, until the staff lead or the deputy re-admits
+  it: in Share with people they compare twelve words from the server's key with its operator and
+  choose **Trust your organization's server again**. That writes one `hub.readmit`, signed by the
+  person key, which clears the finding on every member's computer once
+  (`src/test/replicaHubReadmit.test.ts`, `hub/test/liveScenarios.test.ts`).
 - **Limit: a checkpoint nobody received.** If the hub signed a checkpoint that no member's
   computer received, and later checkpoints come after it, a restore that loses it cannot be
   mended by members: the hub signs nothing more for that project until it is started again on a
@@ -2388,8 +2560,33 @@ member's own record of what it has seen and by citations of changes never delive
 noticed only in the parts a checkpoint covers (`hub/test/maliciousHub.test.ts`, the
 ungranted-part rows).
 
+### Limits that remain
+
+These are kept as documented limits for later work on the hub:
+
+- **Restored changes of a revoked device in parts the hub cannot open.** After a restore, a device
+  revoked since then may push again its earlier changes only where a checkpoint the hub kept covers
+  them. In the parts the hub cannot open no checkpoint names them, so the hub refuses them, and
+  members' computers waiting for changes that cite them may in time name the hub as withholding.
+- **Checkpoints over 64 KiB.** A project whose covered parts pass the size limit above gets no new
+  checkpoint, and members' computers in time report the hub as delayed.
+- **Checkpoint order.** Members' computers do not recompute a checkpoint's order from the changes
+  themselves (the reordered-history limit above).
+- **A deleted store whose record remains.** If a computer's replica store folder is deleted while
+  its signed record remains, and nothing was set aside beside it, Start Again has nothing to carry
+  and a new welcome file is refused too, because starting empty could fork this device's history.
+  That computer cannot take part again until a way out is decided.
+
 ### Connections and sessions
 
+- **Session keys of hosted people.** A hosted person's session key opens sessions and writes only
+  with its `session.certify` entry, before that entry's end time by the hub's own clock, while the
+  device that vouched for it still stands, and for at most four live session keys per device. Its
+  token never outlives that end time, and a change of a kind only the person key may sign is
+  refused from a session key wherever the hub can read the entry (`hub/test/sessionCertify.test.ts`).
+- **Required features.** The hub folds each project's `roster.require` and refuses a session that
+  does not cover it, and refuses that project's changes when it lacks a feature itself (see
+  "Required features and older versions"; `hub/test/require.test.ts`).
 - **TLS ends at the hub, TLS 1.3 only** (`hub/test/tlsServer.test.ts`). Members' computers trust
   it by the pin of its certificate's key, or by your organization's certificate authority, and never
   by the system's list of authorities. A certificate with another pin, or one your organization's

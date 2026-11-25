@@ -527,7 +527,7 @@ test('SECURITY.md has "Labelled products in shared projects" once inside the mul
   const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
   const heading = '### Labelled products in shared projects';
   assert.equal(text.split('\n').filter((line) => line === heading).length, 1, 'the heading appears once');
-  const start = text.indexOf('## Multi-user staff projects (preview)');
+  const start = text.indexOf('\n## Multi-user staff projects\n');
   const end = text.indexOf('\n## ', start + 1);
   const at = text.indexOf(`\n${heading}\n`);
   assert.ok(start >= 0 && at > start && (end === -1 || at < end), 'inside the multi-user section');

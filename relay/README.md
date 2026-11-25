@@ -138,7 +138,7 @@ The reply is 200 when the relay is healthy and 503 when it cannot read its own s
 
 The sync hub carries shared staff projects between the computers of the people who work on them. Your organization runs one hub, as its own service in this Compose file, under the profile `hub`. It runs without the relay, and the relay runs without it. Its code is in `hub/`, it has no runtime dependency, and it is never shipped in the extension's VSIX.
 
-This release ships the hub for operators only. People cannot connect a staff project to it from the editor yet; that arrives in a later release. You can stand the hub up now, back it up and practise a restore, so it is ready when the editor can use it.
+A staff lead connects a shared staff project to the hub in SovAI, with **Connect your organization's server** in Share with people, from a hub file you print (below). The people on that project then sync through it live from their SovAI sessions. Stand the hub up, back it up and practise a restore before people rely on it.
 
 ### What the hub is and what it never does
 
@@ -260,7 +260,7 @@ Nobody can put a project on the hub without a hub file from you. A hub file (`.n
 ```
 
 - The number is the days until it expires, from 1 to 30; 7 when you leave it out.
-- One hub file connects one project. The staff lead's computer admits the hub to the project's member list from it and then enrols the project with it; a second project needs a new file. The editor command the staff lead uses for this arrives in a later release.
+- One hub file connects one project. The staff lead's computer admits the hub to the project's member list from it and then enrols the project with it; a second project needs a new file. The staff lead does this in SovAI with **Connect your organization's server**.
 - Treat it like a password until it is used: give it to the staff lead privately. Anyone holding it could put a project of their own on your hub. One that is lost or not needed can simply be left to expire.
 - The hub keeps only a hash of the enrolment secret. It does not store the secret: it derives it again from its own encryption key and the file's enrolment id when the project is enrolled. So a hub whose encryption key changed refuses every hub file it printed before; print new ones.
 - It prints nothing but the file. When it cannot (no public address set, days outside 1 to 30), it prints one `hub.start_refused` line instead and exits 1.
@@ -329,13 +329,13 @@ One limit needs care. To a member's computer, an honest restore and a hub that s
 4. Let every member's computer sync. Watch the logs: `checkpoint.waiting` names projects that still miss changes, and `checkpoint.signed` follows once a project is whole again. The hub leaves restore mode by itself once every member's computer has asked it for a checkpoint since the restart, removes the marker and logs `hub.restore-ended`. To end it early, remove the file `restore-mode` from the state folder; the hub notices within 30 seconds.
 5. When the staff lead has confirmed that every device has synced, and the logs show no `checkpoint.waiting` after the last of them reconnected, members may make changes again.
 
-If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead re-admits the hub; re-admitting a hub arrives with the editor's hub commands in a later release.
+If a member's computer still names the hub forked after an honest restore, it keeps refusing the hub, which is the safe choice. That member keeps working by file, or through another hub, until the staff lead or the deputy re-admits it (Re-admit your organization's server): in Share with people, SovAI shows them twelve words worked out from the certificate pin of the hub it now reaches, and after comparing them with you they choose **Trust your organization's server again**. That clears the finding on every member's computer once. The hub has no command that prints those twelve words for you yet; the pin itself is printed as shown under "Certificates and pins".
 
 Right after a restore, `checkpoint.conflict` with the reason `order-mismatch` can clear by itself: it means a member handed back a checkpoint that comes after one the hub does not hold yet, and signing resumes once another member hands that one back. A related gap remains: the hub may have signed a checkpoint that no member's computer ever received, with later checkpoints coming after it. If a restore loses it, no computer can hand it back, and the hub signs nothing more for that project until it is started again on a state whose checkpoints agree (for example a newer backup that still holds that checkpoint). Changes still sync in the meantime, but members' computers will in time report the hub as delayed. `checkpoint.conflict` with any other reason (`not-nested`, `equal-count-tip-mismatch`) means the hub's own record does not agree with itself and never clears: tell the staff lead, who re-admits the hub.
 
 ### The restore drill
 
-When members can connect projects from the editor, practise a restore before you need one, on a test project:
+Practise a restore before you need one, on a test project shared from SovAI:
 
 1. Take a backup.
 2. Make a change from two members' computers and let both sync.
@@ -344,7 +344,7 @@ When members can connect projects from the editor, practise a restore before you
 5. Check the logs: `hub.restore-ended` appears once both computers have synced, `checkpoint.waiting` lines stop and a `checkpoint.signed` line follows, with no `checkpoint.conflict`.
 6. Check that both computers show both changes.
 
-Until then, the hub's own test suite runs this drill on every change (`hub/test/restoreDrill.test.ts`), and you can practise the backup and restore commands on a hub with no projects: after the restore it must start and show `healthy`.
+The hub's own test suite runs this drill on every change (`hub/test/restoreDrill.test.ts`, `hub/test/restoreMode.test.ts`), and you can also practise the backup and restore commands on a hub with no projects: after the restore it must start and show `healthy`.
 
 ### Upgrades
 

@@ -192,7 +192,7 @@ test('SECURITY.md has the cell keys subsection once, inside the multi-user secti
   const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
   const heading = '### Cell keys, wraps and rekey';
   assert.equal(text.split('\n').filter((line) => line === heading).length, 1);
-  const start = text.indexOf('## Multi-user staff projects (preview)');
+  const start = text.indexOf('\n## Multi-user staff projects\n');
   const section = text.slice(start, text.indexOf('\n## ', start + 1));
   assert.ok(section.includes(heading));
   const subsection = section.slice(section.indexOf(heading));
@@ -206,7 +206,7 @@ test('SECURITY.md has "How cell keys are wrapped" once, inside the multi-user se
   const text = readFileSync(path.resolve(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
   const heading = '### How cell keys are wrapped';
   assert.equal(text.split('\n').filter((line) => line === heading).length, 1);
-  const start = text.indexOf('## Multi-user staff projects (preview)');
+  const start = text.indexOf('\n## Multi-user staff projects\n');
   const section = text.slice(start, text.indexOf('\n## ', start + 1));
   assert.ok(section.includes(heading));
   const after = section.slice(section.indexOf(heading) + heading.length);

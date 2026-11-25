@@ -1117,7 +1117,7 @@ test('MJ-03: a clearance change interrupted after member.update is finished: the
 
 test('SECURITY.md has the invitations subsection inside the multi-user section, with no em-dash', () => {
   const text = readFileSync(path.join(__dirname, '..', '..', 'SECURITY.md'), 'utf8');
-  const section = text.indexOf('## Multi-user staff projects (preview)');
+  const section = text.indexOf('\n## Multi-user staff projects\n');
   const heading = text.indexOf('### Invitations, join secrets and the safety code');
   assert.ok(section >= 0 && heading > section);
   const next = text.indexOf('\n## ', section + 5);
