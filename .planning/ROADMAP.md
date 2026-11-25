@@ -1235,11 +1235,11 @@ Plans:
   4. Your organization's guide and compilation rules, code words, fact types, model roles and enforcing levels live in the signed `classification@1` section, are evaluated by pure code over typed facts and a session's running fact set, and newer or lower layers can only tighten them. (CLSF-04)
   5. `label.auto-raised`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower` and `label.affirmed` are named and recorded, and anything above the system-high gives a possible spill: raised to the system-high with `local-only` and `no-agent-tools`, frozen and queued. (CLSF-05)
 **Undo cost**: High. The proposal record, the event ids, the basis kinds and the section keys are permanent once shipped; 70.1-01 ends with the owner's shapes checkpoint.
-**Plans:** 1/5 plans executed in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner-confirmed items in `70.1-CONTEXT.md`)
+**Plans:** 2/5 plans executed in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner-confirmed items in `70.1-CONTEXT.md`)
 
 Plans:
 - [x] 70.1-01-PLAN.md: Wave 1. Tracer: a marking raises a label through `classification@1`, the engine and the record; record v1, the five events, the owner's shapes checkpoint
-- [ ] 70.1-02-PLAN.md: Wave 2. The asymmetric rule: thresholds and bands, judgements, shadow, review, stale results, the possible spill, property tests
+- [x] 70.1-02-PLAN.md: Wave 2. The asymmetric rule: thresholds and bands, judgements, shadow, review, stale results, the possible spill, property tests
 - [ ] 70.1-03-PLAN.md: Wave 2. Guide and compilation rules, code words and fact types in the signed section; lower layers only tighten; Show Policy words
 - [ ] 70.1-04-PLAN.md: Wave 3. `assess()`, the hidden-instruction detector and the model-free red-team set
 - [ ] 70.1-05-PLAN.md: Wave 4. The full suite once, the verification record, the integration PR after the owner's gate approval
@@ -2194,7 +2194,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
-| 70.1. Classification engine | 1/5 | In Progress 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
+| 70.1. Classification engine | 2/5 | In Progress 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
 | 71. Identities and verified credentials (core), pulled forward | 8/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
