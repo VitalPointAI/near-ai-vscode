@@ -41,7 +41,12 @@
     {
       "number": "33.1",
       "name": "Assigned positions and handover",
-      "status": "pending"
+      "status": "in_progress"
+    },
+    {
+      "number": "33.2",
+      "name": "Post-quantum cell keys (cell-wrap/v2)",
+      "status": "in_progress"
     },
     {
       "number": "34",
@@ -114,9 +119,19 @@
       "status": "pending"
     },
     {
+      "number": "45.1",
+      "name": "NATO and Five Eyes exchange, part 1",
+      "status": "in_progress"
+    },
+    {
+      "number": "45.2",
+      "name": "NATO and Five Eyes exchange, part 2 (ZTDF)",
+      "status": "in_progress"
+    },
+    {
       "number": "46",
       "name": "Native Theia foundation",
-      "status": "in_progress"
+      "status": "pending"
     },
     {
       "number": "47",
@@ -126,6 +141,11 @@
     {
       "number": "48",
       "name": "Load and accreditation verification",
+      "status": "in_progress"
+    },
+    {
+      "number": "48.1",
+      "name": "Hosted SA&A completeness",
       "status": "in_progress"
     },
     {
@@ -144,8 +164,18 @@
       "status": "pending"
     },
     {
+      "number": "70.1",
+      "name": "Classification engine",
+      "status": "in_progress"
+    },
+    {
       "number": "71",
-      "name": "Identities, credentials and delegation that only narrows",
+      "name": "Identities and verified credentials (core), pulled forward",
+      "status": "in_progress"
+    },
+    {
+      "number": "71.1",
+      "name": "Agent delegation that only narrows",
       "status": "pending"
     },
     {
@@ -162,6 +192,11 @@
       "number": "74",
       "name": "Run contracts",
       "status": "pending"
+    },
+    {
+      "number": "74.3",
+      "name": "Classification assistant",
+      "status": "in_progress"
     },
     {
       "number": "85",
@@ -307,7 +342,7 @@
   "next": {
     "command": "/gsd-progress --next",
     "label": "Advance to the next step",
-    "reason": "Phase 3 of 9 · 11% · executing"
+    "reason": "Phase 3 of 12 · 8% · executing"
   },
-  "updated_at": "2026-11-24T17:19:35.195Z"
+  "updated_at": "2026-11-25T04:03:37.812Z"
 }
