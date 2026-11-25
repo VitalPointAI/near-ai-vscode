@@ -6386,15 +6386,28 @@
     {
       "appliesAt": "now",
       "blocksProduction": false,
-      "closesInPhase": "33",
       "controls": [
         "cp-10",
         "sa-11"
       ],
       "id": "G430",
       "ownerRole": "maintainers",
-      "remediation": "A person who joins a shared project late now starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server after the trade-off: the server checkpoints no other cell, so there the history is read in full (nothing is left out, and the person is told so). A summary of a product's text also counts only once the registrations of the editing sessions it holds have arrived, and those are written before the checkpoint, so the text is complete only when the earlier history has been served. Decide how a summary may name the sessions it holds without their registrations, then build serving the earlier history after the start. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
-      "title": "A late joiner starts from a checkpoint only in cells the server holds, and its text waits for the earlier history"
+      "poam": "g430",
+      "remediation": "A person who joins a shared project late starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server: the server checkpoints no other cell (the trade-off of Phase 33 D-63), so there the history is read in full. Nothing is left out, and the person is told so. Phase 35, together with the server items Phase 33 D-33 moved there, decides how a late joiner starts in a cell the server cannot open. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md and 33-CONTEXT.md D-70.",
+      "title": "A late joiner starts from a checkpoint only in cells the server holds"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "cp-10",
+        "sa-11"
+      ],
+      "id": "G431",
+      "ownerRole": "maintainers",
+      "remediation": "Changes made after the checkpoint in an editing session that was already open at it reach a person who joins late only once the earlier history has been served, because that session registered itself before the checkpoint and its changes wait for the registration. From plan 33-32 on, the joiner's status says the earlier history is still being checked, the history is fetched in the background, and the changes then appear; before 33-32, all text from before the checkpoint waits the same way. Plan 33-33 lets such a change count at once, marked not verified, when its client's slot belongs to the change's own writer and that writer's log starts at the checkpoint, after its own threat and version-safety analysis. Source: .planning/phases/33-live-multi-user-staff-projects/33-CONTEXT.md D-70 and D-71.",
+      "title": "A late joiner sees changes from an editing session open at the checkpoint only after the earlier history arrives"
     },
     {
       "appliesAt": "now",
