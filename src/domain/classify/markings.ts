@@ -26,11 +26,16 @@ function isWordChar(char: string | undefined): boolean {
   return char !== undefined && WORD_CHAR.test(char);
 }
 
-/** Whether the words occur in the (already normalised) text with no letter, digit or combining mark directly before or after them. */
-function occursAsWords(haystack: string, words: string): boolean {
+/** A code word is a whole token: `_` joins a token as letters and digits do. */
+function isTokenChar(char: string | undefined): boolean {
+  return char === '_' || isWordChar(char);
+}
+
+/** Whether the words occur in the (already normalised) text with no word character (by `wordChar`) directly before or after them. */
+function occursAsWords(haystack: string, words: string, wordChar: (char: string | undefined) => boolean = isWordChar): boolean {
   if (words === '') return false;
   for (let at = haystack.indexOf(words); at >= 0; at = haystack.indexOf(words, at + 1)) {
-    if (!isWordChar(codePointBefore(haystack, at)) && !isWordChar(codePointAt(haystack, at + words.length))) return true;
+    if (!wordChar(codePointBefore(haystack, at)) && !wordChar(codePointAt(haystack, at + words.length))) return true;
   }
   return false;
 }
@@ -47,12 +52,20 @@ function codePointBefore(text: string, at: number): string | undefined {
   return low >= 0xdc00 && low <= 0xdfff && at >= 2 ? text.slice(at - 2, at) : text.slice(at - 1, at);
 }
 
-/** One floor per marking of the section found in the text, in the section's order (sorted by id), each with a `marking` basis naming the pattern id. */
+/**
+ * One floor per marking of the section found in the text, in the section's order (sorted by id), each with a `marking` basis naming the pattern id; then
+ * one per code word of the section's list found as a whole token, with a `detector` basis naming the entry id, never the word (D-06, D-16). Code words
+ * match in any case, so `NorthernExample` is still found; a longer token (`NORTHERNEXAMPLES`) is a different word.
+ */
 export function markingFloors(text: string, section: ClassificationSection): readonly Floor[] {
   const haystack = markingText(text);
   const out: Floor[] = [];
   for (const marking of section.markings) {
     if (occursAsWords(haystack, markingText(marking.pattern))) out.push(Object.freeze({ label: marking.label, basis: Object.freeze({ kind: 'marking', ref: marking.id }) }));
+  }
+  const upper = haystack.toUpperCase();
+  for (const entry of section.codeWords?.entries ?? []) {
+    if (occursAsWords(upper, entry.token, isTokenChar)) out.push(Object.freeze({ label: entry.label, basis: Object.freeze({ kind: 'detector', ref: entry.id }) }));
   }
   return Object.freeze(out);
 }
