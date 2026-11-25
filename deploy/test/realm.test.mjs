@@ -208,3 +208,46 @@ test('no client or client scope puts a user attribute or a group into the access
   assert.match(broken((copy) => { copy.clientScopes = [{ name: 'guest-claims', protocol: 'openid-connect', protocolMappers: [groupMapper] }]; }).join('\n'), /client scope guest-claims puts a user attribute or a group/);
   assert.deepEqual(broken((copy) => { copy.clients[0].protocolMappers.push({ ...attributeMapper, config: { ...attributeMapper.config, 'access.token.claim': 'false' } }); }), []);
 });
+
+// The system use notice (D-76, AC-8): every sign-in page shows your organization's notice, set per language in the realm site file.
+const withNotice = (systemUseNotice) => prepare(SITE, KEYCLOAKX_SITE, { ...REALM_SITE, systemUseNotice });
+
+test('prepareRealm writes the notice per language, turns internationalization on, supports the notice\'s languages and defaults to English', () => {
+  const { realm, problems } = passkeys();
+  assert.deepEqual(problems, []);
+  assert.equal(realm.loginTheme, 'sterling');
+  assert.equal(realm.internationalizationEnabled, true);
+  assert.deepEqual(realm.supportedLocales, ['en', 'fr']);
+  assert.equal(realm.defaultLocale, 'en');
+  // Keycloak formats messages with MessageFormat, so the site's apostrophes are doubled to be shown as typed (47-23 tracer).
+  assert.equal(realm.localizationTexts.en.sterlingSystemUseNotice, REALM_SITE.systemUseNotice.en.replaceAll("'", "''"));
+  assert.equal(realm.localizationTexts.fr.sterlingSystemUseNotice, REALM_SITE.systemUseNotice.fr.replaceAll("'", "''"));
+  assert.match(RAW, /"loginTheme": "sterling"/);
+});
+
+test('the realm apply refuses a missing notice, a blank English or French text, a language code that is not one, and another login theme', () => {
+  const { systemUseNotice: _omitted, ...withoutNotice } = REALM_SITE;
+  assert.match(prepare(SITE, KEYCLOAKX_SITE, withoutNotice).problems.join('\n'), /the realm site file needs systemUseNotice/);
+  assert.match(withNotice({ en: '   ', fr: 'Texte.' }).problems.join('\n'), /systemUseNotice\.en, the English notice, is required and must not be blank/);
+  assert.match(withNotice({ fr: 'Texte.' }).problems.join('\n'), /systemUseNotice\.en, the English notice, is required/);
+  assert.match(withNotice({ en: 'Text.', fr: '' }).problems.join('\n'), /systemUseNotice\.fr is blank/);
+  assert.match(withNotice({ en: 'Text.', english: 'Text.' }).problems.join('\n'), /"english" is not a language code such as en, fr or fr-CA/);
+  assert.match(withNotice('Text.').problems.join('\n'), /the realm site file needs systemUseNotice/);
+  assert.deepEqual(withNotice({ en: 'Text.', 'fr-CA': 'Texte.' }).problems, []);
+  assert.match(broken((copy) => { copy.loginTheme = 'keycloak.v2'; }).join('\n'), /the login theme must be sterling/);
+  assert.match(broken((copy) => { delete copy.localizationTexts.fr; }).join('\n'), /must carry the notice of every language/);
+});
+
+test('a notice with only English gives supportedLocales [en]', () => {
+  const { realm, problems } = withNotice({ en: 'Authorized use only.' });
+  assert.deepEqual(problems, []);
+  assert.deepEqual(realm.supportedLocales, ['en']);
+  assert.deepEqual(Object.keys(realm.localizationTexts), ['en']);
+});
+
+test('quotes, an apostrophe, braces and accented letters reach the realm message so the page shows them as typed', () => {
+  const text = '« Accès réservé » "quoted" l\'usage {0} ç.';
+  const { realm, problems } = withNotice({ en: 'Text.', fr: text });
+  assert.deepEqual(problems, []);
+  assert.equal(realm.localizationTexts.fr.sterlingSystemUseNotice, '« Accès réservé » "quoted" l\'\'usage \'{\'0\'}\' ç.');
+});
