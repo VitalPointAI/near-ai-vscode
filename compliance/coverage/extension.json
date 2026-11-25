@@ -1,5 +1,5 @@
 {
   "component": "extension",
-  "applicableWithoutStatement": 245,
+  "applicableWithoutStatement": 241,
   "notApplicableAwaitingSignOff": 152
 }
