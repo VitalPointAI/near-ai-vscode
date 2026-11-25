@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-24-PLAN.md; 47-20 and 47-21 blocked on preconditions
-last_updated: "2026-11-25T04:25:30.179Z"
-state_head: 8da398afca986cfdcbc9abbf440ffdd4a1c68af8
+stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
+last_updated: "2026-11-25T12:34:16.032Z"
+state_head: 6c17e4d14812f20a4d762190d920924323e9158a
 progress:
   total_phases: 12
   completed_phases: 1
@@ -178,8 +178,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T04:25:21.812Z
-**Stopped at:** Completed 47-24-PLAN.md; 47-20 and 47-21 blocked on preconditions
+**Last session:** 2026-11-25T12:34:15.827Z
+**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
 **Resume file:** None
 
 ## Performance Metrics
@@ -231,6 +231,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P19 | 2h | 3 tasks | 15 files |
 | Phase 47 P23 | 45m | 3 tasks | 10 files |
 | Phase 47 P24 | 50m | 2 tasks | 10 files |
+| Phase 47 P34 | 1h30m | 3 tasks | 21 files |
 
 ## Decisions
 
@@ -338,3 +339,4 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-19: the guest approver's DID comes from the site's people directory; guests.mjs uses its own guest-operator policy; guest-removal has no KV path until the owner decides G447
 - [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
 - [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience
+- [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
