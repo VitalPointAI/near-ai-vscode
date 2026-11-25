@@ -29,6 +29,7 @@ import type { ReevaluationTrigger, UseTier } from '../domain/gate/models';
 import { passportTriggeredText } from '../domain/gate/passportStep';
 import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
+import { recordLaneOf } from '../domain/gate/researchLane';
 
 /**
  * Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (D-55). `closed` is set when
@@ -440,8 +441,19 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     ...(decision.passport === undefined ? {} : { passport: decision.passport }),
     ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap }),
     // The families of a check (74.1 D-23): the writers' and the checker's, so the record shows no work was checked by its own family.
-    ...(route.checkFamilies === undefined ? {} : { checkFamilies: route.checkFamilies })
+    ...(route.checkFamilies === undefined ? {} : { checkFamilies: route.checkFamilies }),
+    // The research workspace's requests say so in every record (74.1 D-17).
+    ...(laneOf(route) === undefined ? {} : { lane: 't0' as const })
   });
+}
+
+/** The record lane of a route: `t0` when its use facts say the research lane; none when they cannot be read. */
+function laneOf(route: SessionRoute): 't0' | undefined {
+  try {
+    return recordLaneOf(route.useOf?.());
+  } catch {
+    return undefined;
+  }
 }
 
 /** Why an answer sent at attested-cloud could not be checked at all (PR #89 review): recorded as unavailable, so no such answer goes unrecorded. */

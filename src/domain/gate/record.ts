@@ -132,6 +132,8 @@ export interface DecisionRecordInput {
   readonly passportGap?: PassportGapId;
   /** A checking route's families (74.1 D-19, D-23), written to `unmapped.nearAi.checkFamilies`. Optional: record version 1. */
   readonly checkFamilies?: CheckRecordFamilies;
+  /** `t0` for a request from the research workspace (74.1 D-17), written to `unmapped.nearAi.lane`; no other value exists. Optional: record version 1. */
+  readonly lane?: 't0';
 }
 
 /** The families of a check: the writers' (sorted) and the checker's, which is never one of them (74.1 D-19). */
@@ -220,6 +222,7 @@ export interface DecisionRecord {
       readonly passportHash?: string;
       readonly passportGap?: PassportGapId;
       readonly checkFamilies?: CheckRecordFamilies;
+      readonly lane?: 't0';
     };
   };
 }
@@ -352,7 +355,8 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.useTier === undefined ? {} : { useTier: input.useTier }),
         ...(input.passport === undefined ? {} : { passport: input.passport.id, passportHash: input.passport.hash }),
         ...(input.passportGap === undefined ? {} : { passportGap: input.passportGap }),
-        ...(input.checkFamilies === undefined ? {} : { checkFamilies: { author: [...input.checkFamilies.author].sort(), checker: input.checkFamilies.checker } })
+        ...(input.checkFamilies === undefined ? {} : { checkFamilies: { author: [...input.checkFamilies.author].sort(), checker: input.checkFamilies.checker } }),
+        ...(input.lane === undefined ? {} : { lane: input.lane })
       }
     }
   };
@@ -427,7 +431,9 @@ function passportFieldsKnown(value: Record<string, unknown>): Refusal | undefine
     ['useTier', (found) => typeof found === 'string' && USE_TIER_SET.has(found)],
     ['passport', (found) => typeof found === 'string' && PASSPORT_ID.test(found)],
     ['passportHash', (found) => typeof found === 'string' && HEX_64.test(found)],
-    ['passportGap', (found) => typeof found === 'string' && PASSPORT_GAP_SET.has(found)]
+    ['passportGap', (found) => typeof found === 'string' && PASSPORT_GAP_SET.has(found)],
+    // The research workspace's lane (74.1 D-17): t0 is the only lane; any other value is refused.
+    ['lane', (found) => found === 't0']
   ];
   for (const [key, ok] of checks) {
     const field = ['unmapped', 'nearAi', key].join('.');
