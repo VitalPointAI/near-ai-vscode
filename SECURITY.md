@@ -1887,9 +1887,11 @@ under that cell's key, so only the devices cleared for the cell can read it.
   unnamed cell exists, not what it is or what is in it.
 - **A completed rotation limits access to new work.** After a verified rotation, an affected
   cell has a new key wrapped to devices that still have access. A device that lost access keeps
-  what it received under the old key. Once this computer verifies a removal or revocation, it
-  pauses local writes under any key the removed device received. If a clearance reduction is
-  recorded and its key rotation is still pending, local writes may use the old key (G551).
+  what it received under the old key. This computer pauses ordinary writes when it verifies
+  that a revoked device received the current key. Roster recovery remains available. A
+  computer can still write under an old key while it is waiting for an earlier grant that
+  would show the revoked device held it (G552), or while rotation after a clearance reduction
+  is pending (G551).
 - **New devices can read the history of their cells.** A device admitted later receives wraps
   for the earlier epochs of the cells it is cleared for, so the history of those cells stays
   readable on it.

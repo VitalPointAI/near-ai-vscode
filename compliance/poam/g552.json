@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-03",
+    "sc-12"
+  ],
+  "gap": "G552",
+  "id": "g552",
+  "milestones": [
+    {
+      "phase": "33.2",
+      "title": "Prove that delayed key grants cannot allow writes under a key known to a revoked device and that unaffected cells still accept writes."
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Commit the current key recipients or pending rotations to authenticated history so a replica can verify whether the current key is safe for new work during partial synchronization. Keep affected writes paused until that proof or a verified rotation arrives.",
+  "title": "A computer can lack proof that a revoked device held the current cell key"
+}
