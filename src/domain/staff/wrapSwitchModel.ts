@@ -17,7 +17,7 @@ import { WRAP_FEATURE } from '../replica/wrapFormat';
 export const SWITCH_CARD_TEXT = 'Switch to post-quantum keys';
 export const SWITCH_CARD_EXPLAIN_TEXT = 'This protects shared work against future quantum computers.';
 export const SWITCH_NOT_READY_TEXT = 'These people have a computer that has not published its post-quantum keys yet. It gets its keys once it does:';
-export const MOVE_CARD_TEXT = 'Move every cell to the new keys';
+export const MOVE_CARD_TEXT = 'Move all shared work to the new keys';
 export const MOVE_CARD_EXPLAIN_TEXT = 'Some shared work still has older keys. Moving gives it new post-quantum keys.';
 export const MOVE_WAITING_TEXT = 'Part of it waits for a computer that has not published its post-quantum keys. It moves when that computer does, or now if you choose, and that computer gets its keys later.';
 /** The Move card's second way forward: the parts still waiting move at once, their late computers left to Give keys. */

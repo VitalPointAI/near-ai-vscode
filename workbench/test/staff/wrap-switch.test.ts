@@ -146,7 +146,7 @@ test('the room draws the three cards with its existing card renderer: a lifted c
     status: { state: 'live', findings: [] }, isLeadDevice: true, people: [], products: [], versions: [], contested: [], unconfirmed: [], joins: [], splits: [], agents: [],
     wrapCards: [
       { kind: 'switch', text: 'Switch to post-quantum keys', explain: 'This protects shared work against future quantum computers.', notReady: [] },
-      { kind: 'move', text: 'Move every cell to the new keys', ready: ['a'], waiting: ['b'] },
+      { kind: 'move', text: 'Move all shared work to the new keys', ready: ['a'], waiting: ['b'] },
       { kind: 'give-keys', text: 'Two computers are ready for keys. Give keys.', grants: [{ cell: 'a', epoch: 2, writers: ['w1', 'w2'] }] },
     ],
   } as never) as StaffRoomLiveView;
@@ -155,7 +155,7 @@ test('the room draws the three cards with its existing card renderer: a lifted c
   const markup = ReactDOMServer.renderToStaticMarkup(staffRoomView([room], handlers) as never);
   for (const kind of KEY_CARDS) assert.match(markup, new RegExp(`class="sterling-staff-room-card sterling-staff-room-card-${kind}"`), kind);
   assert.deepEqual([...markup.matchAll(/<button[^>]*aria-label="([^"]*)"/g)].map((match) => match[1]).slice(1),
-    ['Switch to post-quantum keys', 'Move every cell to the new keys', 'Move it now without waiting', 'Give keys'], 'after the sync bar\'s one action');
+    ['Switch to post-quantum keys', 'Move all shared work to the new keys', 'Move it now without waiting', 'Give keys'], 'after the sync bar\'s one action');
   const shown = markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
   for (const words of ['This protects shared work against future quantum computers.', 'Two computers are ready for keys. Give keys.']) assert.ok(shown.includes(words), words);
   assert.doesNotMatch(markup, /class="codicon undefined"/, 'every card kind has its codicon');
