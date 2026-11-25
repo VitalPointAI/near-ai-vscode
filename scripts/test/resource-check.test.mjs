@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { IMAGE_FILES, check, discover, knownIds, main } from '../resource-check.mjs';
+import { IMAGE_FILES, MODEL_FILES, check, discover, entryProblems, knownIds, main } from '../resource-check.mjs';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -162,6 +162,34 @@ test('workbench: no Dockerfile the fit check reads names its base image through 
   assert.deepEqual(argFromFiles(repo, IMAGE_FILES), []);
   const root = fixture({ 'workbench/Dockerfile': `ARG BASE\nFROM --platform=linux/amd64 \${BASE} AS build\n`, 'hub/Dockerfile': `FROM a/b:1@${DIGEST}\n` });
   assert.deepEqual(argFromFiles(root, IMAGE_FILES), ['workbench/Dockerfile']);
+});
+
+// Phase 74.1-01 (D-10): every shipped model passport is a `model` resource with a reviewed licence and fit entry.
+const PASSPORTS = 'src/domain/gate/shippedPassports.ts';
+const modelEntry = (id) => entry(id, 'model', [PASSPORTS], { component: 'model-endpoints', scope: 'runtime', fit: 'pass-with-conditions', conditions: ['Research only.'] });
+
+test('a shipped passport id line is discovered as a model resource', () => {
+  assert.deepEqual([...MODEL_FILES], [PASSPORTS]);
+  const text = "export const SHIPPED = [\n  row({\n    id: 'openai/gpt-oss',\n    match: ['openai/gpt-oss-120b'],\n    licence: { inherited: [], id: 'Apache-2.0', obligations: [] }\n  })\n];\n";
+  const { resources, problems } = discover(fixture({ [PASSPORTS]: text }));
+  assert.deepEqual(problems, []);
+  assert.deepEqual(resources.get('model:openai/gpt-oss'), { id: 'model:openai/gpt-oss', kind: 'model', where: [PASSPORTS] });
+  assert.equal([...resources.keys()].filter((id) => id.startsWith('model:')).length, 1, 'only row id lines are models');
+});
+
+test('a shipped passport with no register entry fails, and a model entry nothing discovers is stale', () => {
+  const files = { ...REPO, [PASSPORTS]: "  row({\n    id: 'openai/gpt-oss',\n  }),\n" };
+  const known = { controls: new Set(['sa-15']), components: new Set(['extension', 'relay', 'release-pipeline', 'model-endpoints']), areas: new Set(['build-and-test', 'workbench']) };
+  const missing = check({ resources: CLEAN }, discover(fixture(files)), known);
+  assert.deepEqual(missing, [`model:openai/gpt-oss (used in ${PASSPORTS}) has no entry in compliance/resources.json. Check its compliance fit and add an entry before using it.`]);
+  assert.deepEqual(check({ resources: [...CLEAN, modelEntry('model:openai/gpt-oss')] }, discover(fixture(files)), known), []);
+  const stale = check({ resources: [...CLEAN, modelEntry('model:openai/gpt-oss'), modelEntry('model:example/gone')] }, discover(fixture(files)), known);
+  assert.match(stale.join('\n'), /model:example\/gone: nothing in the repository uses it any more/);
+});
+
+test('a model entry needs the model: prefix', () => {
+  assert.deepEqual(entryProblems(modelEntry('model:openai/gpt-oss')), []);
+  assert.match(entryProblems(modelEntry('npm:openai/gpt-oss')).join('\n'), /the id of a model resource starts with "model:"/);
 });
 
 test('the repository itself passes the check, against the real catalogues and components', () => {

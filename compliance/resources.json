@@ -4269,6 +4269,570 @@
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "model:anthropic/claude",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Anthropic's Claude (closed weights): origin US, family claude, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:black-forest-labs/flux.2-klein-4b",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Black Forest Labs's FLUX.2 klein 4B: origin DE, family flux, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:cohere/command-a-plus",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Cohere's Command A+ 05-2026 (MoE, 218B total, 25B active; text and image input): origin CA, family command, licence Apache-2.0, approved at most for T2 on vendor-region, vendor-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on the Cohere Model Vault classes (vendor-region, vendor-tee) under Cohere's Usage Policy, or on your organization's own on-premise hosting through your organization's passport with the artifact hash; never on NEAR AI's private hardware (owner's decision of 2026-11-24, 74.1 D-05).",
+        "Apache-2.0: keep the attribution."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:deepseek-ai/deepseek",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for DeepSeek's DeepSeek: origin CN, family deepseek, licence MIT, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "MIT",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence MIT; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:google/gemini",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Google's Gemini (closed weights): origin US, family gemini, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:ibm-granite/granite",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for IBM's Granite 4.x (pretrained by IBM; synthetic data made by IBM, no teacher named): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:ibm-granite/granite-guardian",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for IBM's Granite Guardian 4.x (fine-tuned from Granite 4.1 by IBM Research): origin US, family granite, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: attribution.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:moonshotai/kimi",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Moonshot AI's Kimi: origin CN, family kimi, licence Kimi K3 License, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Kimi K3 License",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence Kimi K3 License; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/llama-nemotron",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Meta, post-trained by NVIDIA's Llama (Meta), post-trained by NVIDIA: origin US, family llama, licence NVIDIA Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Open Model License",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Open Model License: attribution; Llama Community License.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek-R1); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-nano",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Nano (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Nemotron Open Model License",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-super",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Super (pretrained from scratch by NVIDIA): origin US, family nemotron, licence NVIDIA Nemotron Open Model License, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "NVIDIA Nemotron Open Model License",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence NVIDIA Nemotron Open Model License: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/nemotron-3-ultra",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for NVIDIA's Nemotron 3 Ultra (pretrained from scratch by NVIDIA): origin US, family nemotron, licence OpenMDW-1.1, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "OpenMDW-1.1",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence OpenMDW-1.1: attribution; check NVIDIA dataset licences.",
+        "Post-trained with outputs of models from the People's Republic of China (DeepSeek V3.2, Kimi K2, Qwen3-Coder); your organization's evaluation includes trigger sweeps before operational work.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:nvidia/openreasoning-nemotron",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Alibaba (Qwen), post-trained by NVIDIA's Qwen2.5, post-trained by NVIDIA: origin CN, family qwen, licence CC-BY-4.0, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "CC-BY-4.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence CC-BY-4.0; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/gpt",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's GPT (closed weights): origin US, family gpt, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/gpt-oss",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's gpt-oss (open weights; training data not published): origin US, family gpt, licence Apache-2.0, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence Apache-2.0: OpenAI's gpt-oss usage policy.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:openai/whisper-large-v3",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for OpenAI's Whisper large-v3: origin US, family whisper, licence MIT, approved at most for T2 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "MIT",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs on NEAR AI's private hardware under this shipped passport; any other hosting needs your organization's own passport with the artifact hash.",
+        "Licence MIT: attribution; the Hugging Face card says apache-2.0.",
+        "Under enforce it takes a role only after your organization's evaluation of the exact model files."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:qwen/qwen",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Alibaba (Qwen)'s Qwen: origin CN, family qwen, licence Apache-2.0, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "Apache-2.0",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence Apache-2.0; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:x-ai/grok",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for xAI's Grok (closed weights): origin US, family grok, licence proprietary, approved at most for T2 on closed-api.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "proprietary",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "no",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Only where the label allows any cloud: the provider holds the weights and sees the request.",
+        "The provider's terms of service apply; record your organization's agreement with the provider."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
+      "id": "model:z-ai/glm",
+      "kind": "model",
+      "where": [
+        "src/domain/gate/shippedPassports.ts"
+      ],
+      "component": "model-endpoints",
+      "scope": "runtime",
+      "purpose": "The shipped model passport for Zhipu AI's GLM: origin CN, family glm, licence GLM-5.3 License, approved at most for T0 on nearai-tee.",
+      "role": "The gate's passport step reads it to decide which uses this model may serve and where it may run; without it the model counts as unknown and serves research only. Your organization's signed policy may replace it by id.",
+      "architectureArea": "workbench",
+      "licence": "GLM-5.3 License",
+      "controls": [
+        "sa-04",
+        "sr-03",
+        "sr-04"
+      ],
+      "evidence": "src/test/gatePassports.test.ts checks the row against the policy parser, its licence and its hosting; every route record names the passport and its hash.",
+      "crypto": "none",
+      "cveResponse": "A model has no package update: a security or licence change is a re-evaluation trigger, and your organization revokes or replaces the passport in its signed policy; the shipped row changes in a release.",
+      "airGap": "needs-mirror: weights by your organization's approved transfer",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Research only, in the research workspace; never project data. Its developer is in the People's Republic of China, so it is never approved for chat you review without your organization's signed risk acceptance, and never for agent or operational work.",
+        "Licence GLM-5.3 License; confirm the licence of each model before use."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
     }
   ]
 }
