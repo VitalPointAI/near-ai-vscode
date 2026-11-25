@@ -6184,6 +6184,33 @@
       "ownerRole": "owner",
       "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that use the old product name (the VS Code extension's former name); the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
       "title": "SA&A drafts made before the rename call the system by its old name"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ia-05",
+        "sc-12",
+        "sc-17"
+      ],
+      "id": "G465",
+      "ownerRole": "maintainers",
+      "remediation": "Issuing, revoking and suspending credentials from an officer's own session are built and tested against fakes (Phase 71, 71-12), but a hosted session cannot use them yet, for four reasons. First, the session has no copy of your organization's credential rules: the issuer service and the inbox pickup read them from the hosted trust source of 71-13, which is not on main, so issuing refuses with a plain sentence and inbox items wait. Second, status lists are read from and put on your organization's server only through the officer's hub session, which needs Phase 33's hosted session keys (33-21 to 33-23). Third, the site does not set STERLING_STATUS_LIST_KEY (status-list-<siteName>) or STERLING_OPENBAO_ISSUER_ROLE for the workbench yet, and no site file names its credentialIssuers; Phase 47's site values must render both and the key ceremony runbook must name the officers. Fourth, the person's backend moves checked credentials into their own wallet folder in OpenBao (kv/users/<entity>/credentials-wallet/), which the extension's Wallet does not read yet; 71-13 joins the two. Close each when its dependency lands, and test issuance end to end against a real OpenBao and hub then.",
+      "title": "Credential issuance is built but not yet reachable in a hosted session"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ia-03",
+        "ia-05"
+      ],
+      "id": "G466",
+      "ownerRole": "maintainers",
+      "remediation": "Binding a single computer (71-10) gives the computer a DeviceBindingCredential, which needs a revocation and a suspension place in your organization's status lists. 71-12 makes claiming a place and signing a list an officer's act only: the credential-issuers policy and the status-list key are held by the issuer step-up role alone (D-14). So a person still cannot bind their own computer, and bindComputer keeps refusing with a plain sentence. Decide whether a person may claim places for their own device bindings (a narrow create-only path for the person's own bindings), or whether an officer issues device bindings on the person's behalf, then provide the StatusAllocator that bindComputer takes.",
+      "title": "A person cannot yet get status list places to bind their own computer"
     }
   ]
 }
