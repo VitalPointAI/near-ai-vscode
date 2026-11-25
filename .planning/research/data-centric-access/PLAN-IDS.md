@@ -10,7 +10,7 @@ Written 2026-11-24 on `docs/phase-71-core-plan`, from `RESEARCH.md` in this fold
 | 71.1 | Agent delegation that only narrows | Stub, 0 plans. DLGT-02 to DLGT-08 move here. Stays in Stage 1, before Phase 72 |
 | 33.2 | Post-quantum cell keys (`cell-wrap/v2`) | 8 plans in 7 waves. Must merge before any site holds Protected B data |
 | 45.1 | NATO and Five Eyes exchange, part 1: labels, binding, adapter, base TDF | 5 plans in 5 waves |
-| 45.2 | NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts | 12 plans in 9 waves (planned 2026-11-24 on `docs/phase-45.2-plan` from AC322, ADatP-4774, 4778, 4778.2, 5636 and OpenTDF 4.3.0). 45.2-12 waits for a partner's KAS and samples. Hand-off ledger in `45.2-CONTEXT.md` |
+| 45.2 | NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts | 17 plans in 10 waves (planned 2026-11-24 on `docs/phase-45.2-plan` from AC322, ADatP-4774, 4778, 4778.2, 5636 and OpenTDF 4.3.0; amended 2026-11-25 on `docs/phase-45.2-inbound-adapters` with inbound format adapters, 45.2-13 to 45.2-17, after the owner's direction of that day and 45.1 D-11). 45.2-12 waits for a partner's KAS and samples. Hand-off ledger in `45.2-CONTEXT.md` |
 
 Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-13; the wrap (research plan 6) is Phase 33.2; I is 45.1; J is 45.2. The research's "plans 1 to 5" (verifier, `mayRelease`) are 71-03 to 71-07.
 
@@ -47,24 +47,29 @@ Research report rows map to these phases: B is 71-01 to 71-08; E is 71-09 to 71-
 | 45.1-05 | 5 | SECURITY.md, full suites once, verification record, integration PR | 45.2-08 (rewrites its SECURITY.md section) |
 | 45.2-01 | 1 | Tracer: our own narrow XML reader and writer; one label out as ADatP-4774 and back. After 45.1-01 | |
 | 45.2-11 | 1 | Label policy profiles with provenance (`label-profile/1`; NATO public-unverified, Canadian DND/CAF assumed), `provenanceCheck`, a gap row per unverified value | |
+| 45.2-13 | 1 | Inbound adapter interface (`InboundAdapter`, `recognizeArrival`), the record values checkpoint for exports and every arrival (replaces 45.2-07's), tracer: an unlabelled file held at the holding label and labelled by a person; never more trusted, never lower. After 45.1-03 | 45.2-07, 45.2-15, 45.2-16 |
+| 45.2-14 | 1 | One hardened archive reader moved to `src/domain/archive/zip.ts` (the Office tools keep theirs through it); the no-I/O and no-release-signer rule for inbound adapters | 45.2-15, 45.2-16 |
 | 45.2-02 | 2 | `labelXml` section (`label-xml@1`) adopting the profiles, every 4774 structure as our own vectors, labels coming in (`labelsIn`) | |
 | 45.2-03 | 2 | ADatP-4778 binding objects with the seven ADatP-5636 mandatory elements; sidecar files; every binding form read | |
 | 45.2-04 | 3 | Signed bindings to the ADatP-4778.2 cryptographic artefact profile; Transit key `release-p256-<site>` with a site PKI certificate | 48.1-08 (key inventory, hand-off H-7); Phase 47 site PKI (H-12) |
 | 45.2-05 | 3 | ZTDF-compatible profile on OpenTDF 4.3.0 (`ZtdfProfile`), extending 45.1-02's `tdf.ts`. After 45.1-02 | |
 | 45.2-06 | 4 | `exchangePartners` section (`exchange-partners@1`: purpose, KAS keys, trust anchors, profile overrides, classical cap), push and pull key access to partner KASs. After 45.1-03 | Phase 47 site runbook (egress and KAS client certificate, H-5) |
-| 45.2-07 | 5 | Record checkpoint (`ztdf-profile/1`, `bdo`, receipt fields), NATO-format export and import, screens. After 45.1-04 | |
-| 45.2-08 | 6 | AC322 conformance matrix, SECURITY.md, crypto inventory and data flow (45.1's algorithms too), control statements. After 45.1-05 | 48.1-09 (crypto inventory, H-4) |
-| 45.2-09 | 7 | Schema check against the texts' schemas, full suites once, integration PR | |
-| 45.2-10 | 8 | Conformance harness; development round trip against the OpenTDF quickstart's KAS, pinned, reviewed and registered first | |
-| 45.2-12 | 9 | Acceptance trial with an ally's or vendor's KAS and its own samples | |
+| 45.2-15 | 5 | Inbound TDF family: OpenTDF 4.3.0 and legacy TDF3 from stock tools (OAEP SHA-1 senders through rewrap only, per ITSP.40.111 v5), 45.1 objects, our ZTDF-compatible profile kept as received; the ZTDF-compatible stored form; G455 text | 45.2-07, 45.2-16 |
+| 45.2-07 | 6 | NATO-format export recorded (no checkpoint: values settled at 45.2-13), the export dialog, the import dialog and the Received objects card with exchange-officer decisions. After 45.1-04 and 45.2-15 | |
+| 45.2-16 | 6 | Inbound binding objects (standalone, sidecar, embedded, in Office and OPC packages) and marked files read through 70.1's `markingFloors` (no second marking reader); every adapter under fuzz. After 70.1-01 | |
+| 45.2-08 | 7 | AC322 conformance matrix, SECURITY.md, crypto inventory and data flow (45.1's algorithms too, the SHA-1 and RSA-2048 rules), control statements. After 45.1-05 | 48.1-09 (crypto inventory, H-4) |
+| 45.2-17 | 7 | PDF markings: the text-sample port in the workbench backend with the pdf.js copy the image already ships, run in a capped child process killed at its limit (its resource entry is 45.2-10 Task 2's) | 45.2-10 |
+| 45.2-09 | 8 | Schema check against the texts' schemas, full suites once, integration PR | |
+| 45.2-10 | 9 | Conformance harness (every arrival format too); development round trip against the OpenTDF quickstart's KAS (EC or SHA-256 key, never SHA-1), pinned, reviewed and registered first, in one gate pull request that also records the PDF reader's new use | |
+| 45.2-12 | 10 | Acceptance trial with an ally's or vendor's KAS and its own samples, and the partner's samples in other formats | |
 
 ## Requirement ids (added to REQUIREMENTS.md on this branch)
 
 - **Phase 71:** DLGT-01, VCRD-01 to VCRD-07, and new DCAC-01 to DCAC-06 (data-centric access control).
 - **Phase 71.1:** DLGT-02 to DLGT-08 (moved from Phase 71).
 - **Phase 33.2:** new WRAP-01 to WRAP-05.
-- **Phase 45.1:** new XCHG-01 to XCHG-04. **Phase 45.2:** XCHG-05 to XCHG-08 (reworded 2026-11-24 when 45.2 was planned).
-- **Phase 45.2 names (proposed; permanent once written):** policy features `label-xml@1` (section `labelXml`) and `exchange-partners@1` (section `exchangePartners`); label profile format `label-profile/1`; Transit key `release-p256-<site>` under the `exchange-release` policy; profile ids `ztdf-compatible/opentdf-4.3.0/1` and the NATO `urn:nato:stanag:4778:profile:cryptoartefact:1:2`; exchange format values `ztdf-profile/1` and `bdo` (settled at 45.2-07's checkpoint, possibly under `exchange@2`).
+- **Phase 45.1:** new XCHG-01 to XCHG-04. **Phase 45.2:** XCHG-05 to XCHG-08 (reworded 2026-11-24 when 45.2 was planned) and XCHG-09 (inbound format adapters, added 2026-11-25).
+- **Phase 45.2 names (proposed; permanent once written):** policy features `label-xml@1` (section `labelXml`) and `exchange-partners@1` (section `exchangePartners`); label profile format `label-profile/1`; Transit key `release-p256-<site>` under the `exchange-release` policy; profile ids `ztdf-compatible/opentdf-4.3.0/1` and the NATO `urn:nato:stanag:4778:profile:cryptoartefact:1:2`; exchange format values `ztdf-profile/1` and `bdo` (settled at 45.2-07's checkpoint, possibly under `exchange@2`). **Amended 2026-11-25** (45.1 D-11, 45.2 D-34): open id sets under `exchange@1`, no `exchange@2`; arrived ids `tdf`, `ztdf-profile/1`, `bdo-4778`, `marked-file`, `unlabelled` (reserved, not written: `smtp-4778`, `xmpp-4778`); `stored` a `readonly string[]` of `cell` and `ztdf-profile/1`, `conversion` optional, and the one id set `KNOWN_ARRIVAL_FORMATS` and `KNOWN_STORED_FORMS` in 45.1's `src/domain/exchange/adapter.ts` (a record is readable when its `arrived` id is known and `cell` is in `stored`; coordinator decisions B1 and B2); stored profile id `ztdf-compatible/opentdf-4.3.0/stored/1`; conversion and import receipt ids as 45.2-CONTEXT D-34 lists; all confirmed at 45.2-13 Task 1.
 
 ## Credential types (71-03; type names permanent)
 

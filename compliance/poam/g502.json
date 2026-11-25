@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "sc-12",
+    "sc-13"
+  ],
+  "gap": "G502",
+  "id": "g502",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Plan 45.2-06 refuses exports wrapped to a 2048-bit RSA partner key from 2031-01-01"
+    },
+    {
+      "targetDate": "2030-12-31",
+      "title": "Every partner key server listed in exchangePartners uses ec:secp256r1 or RSA of at least 3072 bits"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "ITSP.40.111 version 5 (section 5.1) asks for RSA keys of at least 3072 bits by the end of 2030. Partner key servers may use 2048-bit RSA keys today, because the public OpenTDF key access types name them, so from 2031-01-01 every export wrapped to a 2048-bit partner key is refused. Your organization's own receiving key is RSA-3072. Partners are asked for an EC key (ec:secp256r1) or a longer RSA key before then. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-32.",
+  "title": "Partner key servers with 2048-bit RSA keys can be used only until the end of 2030"
+}
