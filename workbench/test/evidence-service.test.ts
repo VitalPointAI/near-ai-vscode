@@ -13,6 +13,7 @@ import { createEvidenceService, readEvidenceSettings } from '../extension/src/no
 import net from 'node:net';
 import { attachLiveSignature, buildLiveFeed, liveSigningInput, makeTrustDocument } from '../../compliance/src/siteEvidence.ts';
 import type { EvidenceRow, EvidenceSnapshot } from '../extension/src/common/compliance-evidence.ts';
+import { fixtureBundle, fixtureKey } from './helpers/sigstore-fixture';
 
 // Bundled to workbench/dist/test/; scripts/build.mjs builds engine/compliance.cjs first.
 const workbenchRoot = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
@@ -124,20 +125,14 @@ test('plain data: getEvidence() survives JSON unchanged, as it crosses JSON-RPC'
 
 // ---- 48.2-04 (D-06, D-14, D-17, D-18, D-19): anchors from configuration only, the three outcomes, the clock case, re-verification ----
 
-const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-const otherSigner = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const signer = fixtureKey();
+const otherSigner = fixtureKey();
 const pem = (key: KeyObject) => key.export({ type: 'spki', format: 'pem' }).toString();
 const SITE_KEY = pem(signer.publicKey);
 const OTHER_KEY = pem(otherSigner.publicKey);
 
-/** A cosign key-mode Sigstore bundle over `content`, the shape cosign 3.1.4 sign-blob writes (deploy/test/sigstore-parity.test.mjs). */
-function sigstoreBundle(content: Buffer, key = signer) {
-  return {
-    mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
-    verificationMaterial: { publicKey: { hint: createHash('sha256').update(key.publicKey.export({ type: 'spki', format: 'der' })).digest('base64') } },
-    messageSignature: { messageDigest: { algorithm: 'SHA2_256', digest: createHash('sha256').update(content).digest('base64') }, signature: sign('sha256', content, key.privateKey).toString('base64') },
-  };
-}
+/** A cosign key-mode Sigstore bundle over `content` (test/helpers/sigstore-fixture.ts, held equal to the pinned cosign by deploy/test/sigstore-parity.test.mjs). */
+const sigstoreBundle = (content: Buffer, key = signer) => fixtureBundle(content, key);
 
 /** A trust folder as configuration mounts it: the anchors and, for release 0.5.0, the signature over `manifest`. */
 function trustFolder(files: { organization?: string; supplier?: string; signature?: unknown }): string {

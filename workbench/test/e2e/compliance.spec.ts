@@ -1,6 +1,6 @@
 // The Compliance view in a real browser against the built image (48.2-16; D-05, D-17, D-18, D-22, D-25, D-26): the one focused browser
 // check of its honesty rules. Each test is one case; test/container/compliance.test.ts starts a container with that case's mounts, makes
-// the signed fixture folders with the pinned cosign and throwaway keys, and runs the case by name. The words checked are the approved
+// the signed fixture folders (signed as cosign key mode signs, with throwaway keys), and runs the case by name. The words checked are the approved
 // UI-SPEC's (48.2-UI-SPEC.md, Copywriting Contract). Screenshots for the owner go to COMPLIANCE_SHOTS when it is set.
 import { renameSync, readdirSync } from 'node:fs';
 import path from 'node:path';

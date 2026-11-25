@@ -1,19 +1,18 @@
 // The Compliance view's one focused browser check (48.2-16): each case starts the image with its own evidence mounts and runs that case of
 // test/e2e/compliance.spec.ts in a real browser. The fixture folders are made here: a release evidence folder (sterling-evidence/1) whose
-// judgement comes from the one status engine, signed with the pinned cosign ($COSIGN, the S1 flags of deploy/bundle/lib/cosign.mjs) and
-// throwaway keys, the site trust document and a live feed (Ed25519, as the collector signs it), and the README's published projection.
+// judgement comes from the one status engine, signed as cosign key mode signs (test/helpers/sigstore-fixture.ts, held equal to the pinned cosign
+// by deploy/test/sigstore-parity.test.mjs) with throwaway keys, the site trust document and a live feed (Ed25519, as the collector signs it), and the README's published projection.
 // Run it with `npm run test:container`; it is not part of `npm test`. Hygiene: test/helpers/docker.ts. Screenshots: COMPLIANCE_SHOTS.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { cosignBinary, signBlob } from '../../../deploy/bundle/lib/cosign.mjs';
 import { attachLiveSignature, buildLiveFeed, liveSigningInput, makeTrustDocument } from '../../../compliance/src/siteEvidence.ts';
 import { freePort, removeOwn, repoRoot, runContainer, runPlaywright, testImage, waitHealthy, workbenchRoot } from '../helpers/docker';
+import { fixtureKey, signFixture, type FixtureKey } from '../helpers/sigstore-fixture';
 
 const engineFile = path.join(workbenchRoot, 'engine', 'compliance.cjs');
 const engine = createRequire(engineFile)(engineFile) as { JUDGEMENT_FORMAT: string; EVIDENCE_FORMAT: string; judgementRow(input: unknown, presentation: unknown): unknown };
@@ -25,9 +24,8 @@ const COMMIT = 'a'.repeat(40);
 const now = Date.now();
 const BUILT_AT = new Date(now - HOUR).toISOString();
 const ROOT = mkdtempSync(path.join(tmpdir(), 'sterling-compliance-browser-'));
-const KEYS = path.join(ROOT, 'keys');
 
-/** Makes a folder and everything in it readable by the container's user (10001): mkdtemp and cosign write private files. */
+/** Makes a folder and everything in it readable by the container's user (10001): mkdtemp writes private folders. */
 function readable(dir: string): string {
   chmodSync(dir, 0o755);
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -94,16 +92,17 @@ function releaseFolder(name: string): string {
   return dir;
 }
 
-// ---- Keys and signatures: cosign key pairs (ECDSA P-256) for the supplier, your site and a stranger; Ed25519 for the collector ----
+// ---- Keys and signatures: throwaway ECDSA P-256 key pairs (cosign's key type) for the supplier, your site and a stranger; Ed25519 for the collector ----
 
-function cosignKeyPair(prefix: string): void {
-  const run = spawnSync(cosignBinary(), ['generate-key-pair', '--output-key-prefix', prefix], { cwd: KEYS, encoding: 'utf8' });
-  assert.ok(!run.error, `cosign was not found (${cosignBinary()}); set COSIGN to the pinned cosign (sh compliance/ci/install-tool.sh cosign compliance/out/tools).`);
-  assert.equal(run.status, 0, run.stderr);
-}
-const publicKey = (prefix: string): string => readFileSync(path.join(KEYS, `${prefix}.pub`), 'utf8');
+const keys = new Map<string, FixtureKey>();
+const keyOf = (prefix: string): FixtureKey => {
+  const key = keys.get(prefix);
+  assert.ok(key, `no fixture key ${prefix}`);
+  return key;
+};
+const publicKey = (prefix: string): string => keyOf(prefix).publicKeyPem;
 /** Signs `file` with the prefix's key; the Sigstore bundle goes to `bundleFile`. */
-const signWith = (prefix: string, file: string, bundleFile: string): void => { signBlob(file, path.join(KEYS, `${prefix}.key`), { bundleFile }); };
+const signWith = (prefix: string, file: string, bundleFile: string): void => { signFixture(file, keyOf(prefix), bundleFile); };
 const collector = generateKeyPairSync('ed25519');
 const rawKey = (key: KeyObject): string => (key.export({ type: 'spki', format: 'der' }) as Buffer).subarray(12).toString('base64url');
 
@@ -127,9 +126,7 @@ const shots = process.env.COMPLIANCE_SHOTS?.trim();
 
 before(async () => {
   image = await testImage();
-  process.env.COSIGN_PASSWORD ??= 'compliance-browser-check';
-  mkdirSync(KEYS, { recursive: true });
-  for (const prefix of ['supplier', 'site', 'stranger']) cosignKeyPair(prefix);
+  for (const prefix of ['supplier', 'site', 'stranger']) keys.set(prefix, fixtureKey());
   if (shots) mkdirSync(shots, { recursive: true });
 });
 
