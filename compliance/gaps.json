@@ -6269,6 +6269,26 @@
       "poam": "g515",
       "remediation": "Owner decision d (D-81) requires a daily copy of the Longhorn backup target and the write-once audit archive to a write-once store at your organization's second site, and the backup runbook describes a sterling-offsite CronJob and offsite.mjs pack and verify for it. Neither exists yet; plan 47-33 builds them. Until then a site has no automated off-site copy: your organization makes the copy by its own means and records each one. This closes when 47-33 lands the CronJob, offsite.mjs pack and verify, and their tests, and a lab run copies and verifies one day's set.",
       "title": "The daily off-site copy has no tooling yet"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ca-03",
+        "sa-09",
+        "sc-07",
+        "sc-08"
+      ],
+      "id": "G516",
+      "ownerRole": "shared",
+      "poam": "g516",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Hosted workbench sessions send prompts and context up to Protected A or B to the model servers your organization's signed policy lists (the model-servers exchange), but compliance/levels.json does not list model-endpoints in the hosted levels, so the model servers have no rows there and no section in the hosted applicability map. Plan 48.1-06 (D-12) adds model-endpoints to hosted-protected-a, hosted-protected-b and hosted-itsp-10-171. When it lands, the applicability map gains a model-endpoints section at those levels that your organization must review before it takes effect, and the existing hosted sections, whose reasons name the components that carry each facet, must be re-checked and signed again. This closes when 48.1-06 has landed and the hosted stages are signed with the model-endpoints section.",
+      "title": "The hosted levels do not yet assess the model servers"
     }
   ]
 }
