@@ -21,6 +21,7 @@ import { StaffLiveEngine } from '../extension/src/node/staff/staff-live-engine.t
 import type * as StaffEntry from '../tools/staff-engine-entry.ts';
 import { buildHubFile } from '../../src/domain/replica/hubFile.ts';
 import { readGrant } from '../../src/domain/replica/cellKeys.ts';
+import { signKemBinding } from '../../src/domain/replica/deviceKem.ts';
 import { serverPinWords } from '../../src/domain/replica/serverWords.ts';
 import { ensureLabelCell } from '../../src/staff/replica/labelCells.ts';
 import { hubNodeOrSkip, startHubChild } from '../../src/test/helpers/hubChild.ts';
@@ -90,7 +91,9 @@ async function person(label: string, options: { hosted: boolean; staff: boolean 
     const { privateKey } = generateKeyPairSync('x25519');
     const publicKey = Buffer.from(privateKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64url');
     if (started.kind !== 'ok') throw new Error('the session keys were not made');
-    hosted = { keys: started.value, encryption: { publicKey, privateKey, kem: undefined, drop: () => undefined } };
+    const seeds = engine.newKemSeeds();
+    const kem = { publicKeys: engine.kemPublicFromSeeds(seeds), privateKeys: engine.kemPrivateFromSeeds(seeds) };
+    hosted = { keys: started.value, encryption: { publicKey, privateKey, kem, drop: () => undefined } };
   }
   const live = new StaffLiveEngine({ engine, roots: async () => [root], globalStorageDir: global, secrets, ...(hosted === undefined ? {} : { hosted }) });
   await live.start();
@@ -208,8 +211,9 @@ const CERT_PIN = 'b'.repeat(64);
 
 function localHubFile(): string {
   const device = rosterDevice('HUB-SOUTH', 'hub');
+  const kem = signKemBinding(engine.kemPublicFromSeeds(engine.newKemSeeds()), device.writer, (bytes) => device.signer.sign(bytes));
   return JSON.stringify(buildHubFile(device.signer, {
-    address: UNREACHABLE, certPin: CERT_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: 'enr-00112233aabbccdd',
+    address: UNREACHABLE, certPin: CERT_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, kem, enrolment: 'enr-00112233aabbccdd',
     enrolmentSecret: Buffer.alloc(32, 7).toString('base64url'), expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(), now: new Date(),
   }));
 }
