@@ -17,7 +17,7 @@ const now = new Date('2026-11-21T12:00:00.000Z');
 const stateFor = (id: string, rows: readonly { level: string; control: string; state: 'met' | 'not-met' | 'not-applicable' }[] = [], acceptances: readonly any[] = [], at = now) => gapStates({ gaps, poam, rows, acceptances, now: at }).find((gap) => gap.id === id)!;
 
 test('the real gap register and every POA&M item validate', () => {
-  assert.equal(gaps.length, 421);
+  assert.equal(gaps.length, 422);
   assert.equal(poam.length, 356);
   assert.ok(gaps.every((gap) => gap.controls.length > 0 && gap.remediation !== '' && gap.ownerRole !== '' && (gap.closesInPhase === undefined) !== (gap.poam === undefined)));
 });

@@ -6162,6 +6162,19 @@
       "title": "A guest's KV secrets cannot yet be removed after the retention period"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cp-09",
+        "cp-10"
+      ],
+      "id": "G448",
+      "ownerRole": "maintainers",
+      "remediation": "A site with more than one OpenSearch node puts its audit and log snapshots on one ReadWriteMany volume (PVC opensearch-snapshots, deploy/values/opensearch.yaml, 47-24), which Longhorn serves through its share manager. Whether a ReadWriteMany volume works on the encrypted storage class, and survives a node loss with its recurring backups, has not been checked: the 47-24 proof ran one OpenSearch node in a container. Check it on Phase 48's multi-node lab-full rig (three OpenSearch nodes writing one repository, a restore from it, and the Longhorn backup of the share), and record the result on the register entry.",
+      "title": "Multi-node audit snapshots need a shared volume on the encrypted class, not yet shown"
+    },
+    {
       "appliesAt": "now",
       "blocksProduction": false,
       "closesInPhase": "48",
