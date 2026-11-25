@@ -88,7 +88,7 @@ From the owner's data-centric access direction (`.planning/research/data-centric
 - [x] **DCAC-03**: One pure `mayRelease` decides every key wrap, release and serve from verified credential facts and the data's own label: level on the scale or an approved mapping, every compartment, releasability for every holder of a marked cell, export eligibility for CGP, ITAR and EAR, and the credentials required by sensitivity; a position's required clearance and ways of serving are checked the same way.
 - [ ] **DCAC-04**: The enforcement points check freshness at the moment of action: your organization's server refuses an append that cites a stale status list and stops serving a member whose credential is revoked, the wrap preparer and the session refuse stale evidence with a plain reason and Retry, an edge refuses past the level's maximum offline age, and a later revocation leads to a rekey.
 - [ ] **DCAC-05**: Credentials are issued, revoked and suspended only from an officer's own session, signed by their person key after a passkey step-up, under a role credential from your organization's root; status lists are signed by the HQ status-list key in OpenBao Transit, each signature authorized only by an officer's step-up (O4); no new runtime service.
-- [ ] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
+- [x] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
 
 ### AI classification (Phases 70.1 and 74.3, added 2026-11-24)
 
@@ -304,7 +304,7 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | DCAC-03 | Phase 71: Identities and verified credentials (core) | Complete |
 | DCAC-04 | Phase 71: Identities and verified credentials (core) | Pending |
 | DCAC-05 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-06 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-06 | Phase 71: Identities and verified credentials (core) | Complete |
 | CLSF-01 | Phase 70.1: Classification engine | Pending |
 | CLSF-02 | Phase 70.1: Classification engine | Pending |
 | CLSF-03 | Phase 70.1: Classification engine | Pending |

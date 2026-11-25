@@ -5,14 +5,14 @@ milestone_name: Governed agent platform
 current_plan: 21
 status: executing
 stopped_at: Phase 48.1 wave 1 executed (48.1-01 to 05 and 22); waiting on the wave 1 gate pull request (48.1-01 Task 3)
-last_updated: "2026-11-24T21:14:39.623Z"
-state_head: 7d9e2588787034faec8aeb95dd3c87d93ec9e26b
+last_updated: "2026-11-25T00:38:01.934Z"
+state_head: a89264e6fbf1f97ef0b113992a149ac8d482b883
 progress:
-  total_phases: 10
+  total_phases: 12
   completed_phases: 1
-  total_plans: 69
+  total_plans: 109
   completed_plans: 67
-  percent: 10
+  percent: 8
 last_activity: 2026-11-19
 current_phase: 70
 current_phase_name: Capability vocabulary, manifests and one gate with a floor
@@ -223,6 +223,9 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 71 P06 | ~60min | 3 tasks | 12 files |
 | Phase 71 P07 | ~60min | 3 tasks | 9 files |
 | Phase 71 P08 | ~75min | 3 tasks | 14 files |
+| Phase 71 P09 | ~3h (lock waits) | 2 of 3 tasks | 20 files |
+| Phase 71 P10 | ~40min | 1 of 3 tasks | 2 files |
+| Phase 71 P11 | ~1h | 3 tasks | 8 files |
 
 ## Decisions
 
