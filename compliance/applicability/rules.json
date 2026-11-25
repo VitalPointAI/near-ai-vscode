@@ -58,6 +58,9 @@
     "identity-proofing": {
       "words": "registers people after their identity is checked"
     },
+    "idle-lock": {
+      "words": "stops or locks a session left idle"
+    },
     "integrity-checks": {
       "words": "detects unauthorized software or changes automatically"
     },
@@ -156,9 +159,17 @@
           "class": "implements",
           "basis": "resources.json image:quay.io/jetstack/cert-manager-controller: generates and renews certificate keys."
         },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-pki (the site PKI issuers and trust bundles) is developed and reviewed in this repository."
+        },
         "network-traffic": {
           "class": "supports",
           "basis": "resources.json image:quay.io/jetstack/cert-manager-cainjector: writes CA bundles so services can trust each other on the network."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-pki (the site PKI issuers and trust bundles) is written in this repository."
         },
         "pki-trust": {
           "class": "implements",
@@ -217,6 +228,10 @@
           "class": "supports",
           "basis": "src/domain/gate/endpoints.ts: the extension reaches the model endpoints your organization configures (the model-endpoints component)."
         },
+        "integrity-checks": {
+          "class": "supports",
+          "basis": "src/domain/gate/bundle.ts: a policy file changed outside the product fails its signature check (bad-signature) and is refused."
+        },
         "labels": {
           "class": "implements",
           "basis": "src/domain/gate/labels.ts, labelAlgebra.ts and src/gate/chatLabel.ts: classification labels on content and chats, and routing by label (Phase 70, CLAS-01 to CLAS-08)."
@@ -268,11 +283,27 @@
       }
     },
     "hsm": {
-      "role": "The site HSM that holds the OpenBao seal key (SoftHSM2 in test only).",
+      "role": "The site HSM that holds the OpenBao seal key and your organization's site signing key; at HQ it may also hold the offline root CA key (SoftHSM2 in test only).",
       "facets": {
+        "accounts": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 3: the HSM token is initialised by the vendor's procedure, and OpenBao and the signing tool log in to it with its PIN."
+        },
+        "audit-records": {
+          "class": "supports",
+          "basis": "docs/security/hosted-incident-playbooks.md (HSM loss or tamper): the HSM's own logs are evidence of its use."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 4: your organization's site key is generated inside the HSM and signs bundles, re-signed images, user exports, CSRs and revocation lists."
+        },
         "backup-restore": {
           "class": "supports",
           "basis": "components/hsm.json: the seal key must be recoverable for OpenBao to be restored (47-25)."
+        },
+        "certificate-issuing": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md sections 1 and 4: HQ's offline root CA key may be held in HQ's HSM, and the site key in the HSM signs CSRs and revocation lists."
         },
         "crypto-module-login": {
           "class": "implements",
@@ -286,13 +317,25 @@
           "class": "implements",
           "basis": "components/hsm.json: the site HSM is hardware (SoftHSM2 in test only)."
         },
+        "monitoring": {
+          "class": "supports",
+          "basis": "docs/security/hosted-incident-playbooks.md (HSM loss or tamper): the HSM's tamper alarm or log is a detection source."
+        },
         "network-traffic": {
           "class": "supports",
           "basis": "resources.json tool:kms-pkcs11: OpenBao reaches the HSM through PKCS #11, over a network for network HSMs."
         },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md: at least two key custodians and the site administrator attend, and no one person holds a complete key or key backup (split knowledge)."
+        },
         "software": {
           "class": "supports",
           "basis": "resources.json tool:softhsm2: the HSM's firmware is the vendor's; SoftHSM2 in test only."
+        },
+        "two-person-control": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 5: the HSM is backed up to a second HSM with two custodians present."
         }
       }
     },
@@ -342,6 +385,10 @@
         "device-identity": {
           "class": "implements",
           "basis": "hub/src/join.ts and hub/src/enrol.ts: devices are admitted by their signed join requests."
+        },
+        "integrity-checks": {
+          "class": "supports",
+          "basis": "hub/src/http/routes.ts: equivocation in a stream is detected and pushed to that stream's devices and to the lead's and deputy's devices."
         },
         "labels": {
           "class": "implements",
@@ -444,6 +491,10 @@
           "class": "implements",
           "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: signature checks with your organization's key."
         },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-admission (the Kyverno signature policies) is developed and reviewed in this repository."
+        },
         "integrity-checks": {
           "class": "implements",
           "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: the admission controller refuses any image not signed with your organization's key."
@@ -460,6 +511,10 @@
           "class": "implements",
           "basis": "resources.json image:ghcr.io/project-zot/zot: the registry serves images over the network."
         },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-admission (the Kyverno signature policies) is written in this repository."
+        },
         "pki-trust": {
           "class": "supports",
           "basis": "resources.json image:ghcr.io/project-zot/zot: TLS from the site PKI."
@@ -472,6 +527,10 @@
           "class": "supports",
           "basis": "resources.json image:docker.io/goharbor/harbor-portal: administrators sign in to the registry."
         },
+        "sign-in-page": {
+          "class": "supports",
+          "basis": "deploy/values/zot.yaml: the import account signs in by htpasswd with a 5-second failDelay; deploy/values/harbor.yaml: Harbor administrators sign in to the registry."
+        },
         "software": {
           "class": "implements",
           "basis": "components/image-registry.json: Zot, Harbor and Kyverno are software every site runs."
@@ -479,6 +538,10 @@
         "software-installation": {
           "class": "implements",
           "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: only images signed with your organization's key may run."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/zot.yaml: nodes and Kyverno pull anonymously (anonymousPolicy read) on a node port, before the ingress exists."
         }
       }
     },
@@ -488,6 +551,10 @@
         "audit-records": {
           "class": "implements",
           "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the ingress writes access logs."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "deploy/values/kubernetes-ingress.yaml: with smart cards on, the HTTPS frontend asks for a client certificate that chains to the smart-card CA bundle."
         },
         "boundary-traffic": {
           "class": "implements",
@@ -518,7 +585,7 @@
           "basis": "components/ingress.json: the HAProxy Kubernetes Ingress controller is software every site runs."
         },
         "traffic-limits": {
-          "class": "implements",
+          "class": "supports",
           "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the one entry point every request passes, where request and connection limits belong; deploy/values/kubernetes-ingress.yaml sets none yet."
         },
         "unauthenticated-entry": {
@@ -544,7 +611,11 @@
         },
         "audit-records": {
           "class": "implements",
-          "basis": "resources.json image:docker.io/opensearchproject/opensearch: Keycloak events are sent to the site log store."
+          "basis": "deploy/keycloak/realm.json: eventsEnabled and adminEventsEnabled record sign-in and administration events."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "deploy/keycloak/realm.json: sign-in and administration events are kept in Keycloak for eventsExpiration before the log store takes them."
         },
         "authenticators": {
           "class": "implements",
@@ -812,11 +883,11 @@
         },
         "audit-records": {
           "class": "implements",
-          "basis": "resources.json image:docker.io/opensearchproject/opensearch: the OpenBao audit device writes to the site log store."
+          "basis": "deploy/values/openbao.yaml: the file audit device writes every request to standard output, which Fluent Bit ships to the site log store."
         },
         "audit-store": {
           "class": "supports",
-          "basis": "resources.json image:docker.io/opensearchproject/opensearch: the OpenBao audit device protects its own records with HMACs before they are shipped."
+          "basis": "deploy/values/openbao.yaml: the audit device hashes sensitive values with HMAC before they leave OpenBao; tamper evidence of the stored records is gap G2."
         },
         "authenticators": {
           "class": "implements",
@@ -838,6 +909,10 @@
           "class": "implements",
           "basis": "resources.json image:quay.io/openbao/openbao-ubi: holds the site secrets, the PKI intermediate and the per-person keys."
         },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/images/openbao/Containerfile and deploy/openbao/apply.mjs are developed and reviewed in this repository."
+        },
         "monitoring": {
           "class": "supports",
           "basis": "resources.json image:quay.io/prometheus/prometheus: OpenBao metrics for site monitoring."
@@ -849,6 +924,10 @@
         "organization-data": {
           "class": "implements",
           "basis": "resources.json image:quay.io/openbao/openbao-ubi: your organization's secrets at rest."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/images/openbao/Containerfile rebuilds the OpenBao image with the kms-pkcs11 plugin, and deploy/openbao/apply.mjs is its configuration as code."
         },
         "pki-trust": {
           "class": "implements",
@@ -885,6 +964,10 @@
         "two-person-control": {
           "class": "implements",
           "basis": "resources.json tool:kms-pkcs11: recovery with Shamir key shares needs more than one holder."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/openbao.yaml: the metrics-only listener on 9101 answers /v1/sys/metrics without a token (unauthenticated_metrics_access)."
         }
       }
     },
@@ -1049,6 +1132,10 @@
           "class": "implements",
           "basis": "resources.json tool:rke2: RKE2 is installed with an audit policy (the Kubernetes audit log)."
         },
+        "audit-store": {
+          "class": "supports",
+          "basis": "deploy/rke2/config.yaml: the API audit log is kept 30 days in at most 10 files of 100 MB on the node before Fluent Bit ships it."
+        },
         "authenticators": {
           "class": "supports",
           "basis": "resources.json tool:rke2: the API server checks client certificates and service account tokens."
@@ -1073,6 +1160,10 @@
           "class": "implements",
           "basis": "components/rke2.json: RKE2 in its FIPS build, with secrets encryption."
         },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/rke2 (install-node.sh, config.yaml, audit-policy.yaml) and deploy/charts/sterling-network is developed and reviewed in this repository."
+        },
         "device-identity": {
           "class": "supports",
           "basis": "resources.json tool:rke2: each node joins with its own node identity."
@@ -1096,6 +1187,10 @@
         "organization-data": {
           "class": "implements",
           "basis": "resources.json tool:rke2: etcd holds the site's Kubernetes objects and secrets at rest (secrets encryption)."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/rke2 (install-node.sh, config.yaml, audit-policy.yaml) and deploy/charts/sterling-network is written in this repository."
         },
         "pki-trust": {
           "class": "supports",
@@ -1209,6 +1304,10 @@
         "software": {
           "class": "implements",
           "basis": "components/site-logging.json: OpenSearch, Fluent Bit and Prometheus are software every site runs."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/fluent-bit.yaml: the HTTP server on port 2020 serves its metrics, health and uptime endpoints without a sign-in."
         }
       }
     },
@@ -1227,6 +1326,10 @@
           "class": "implements",
           "basis": "resources.json image:docker.io/longhornio/longhorn-manager: encrypted volumes."
         },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-storage (the encrypted class, snapshots and backups) is developed and reviewed in this repository."
+        },
         "network-traffic": {
           "class": "supports",
           "basis": "resources.json image:docker.io/longhornio/longhorn-engine: keeps volume copies on other nodes in step over the network."
@@ -1234,6 +1337,10 @@
         "organization-data": {
           "class": "implements",
           "basis": "components/site-storage.json: the encrypted storage class for workspaces and service data."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-storage (the encrypted class, snapshots and backups) is written in this repository."
         },
         "shared-resources": {
           "class": "supports",
@@ -1279,6 +1386,10 @@
         "development": {
           "class": "supports",
           "basis": "resources.json image:registry.access.redhat.com/ubi9/openjdk-21: we rebuild the operator, service and webhook from source."
+        },
+        "idle-lock": {
+          "class": "implements",
+          "basis": "deploy/values/theia-cloud.yaml: the operator's activity tracker stops idle sessions (the AppDefinition's notifyAfter and timeoutAfter)."
         },
         "network-traffic": {
           "class": "implements",
@@ -1349,6 +1460,10 @@
           "class": "implements",
           "basis": "workbench/extension/src/browser/session-activity-frontend-module.ts and the extension gate log inside the image record the session's own events."
         },
+        "audit-store": {
+          "class": "supports",
+          "basis": "workbench/Dockerfile: the release image bundles the extension, whose gate decision log rotates and keeps four files (src/gate/decisionLog.ts)."
+        },
         "authenticators": {
           "class": "supports",
           "basis": "workbench/extension/src/common/secret-store.ts and key-service.ts: the person's secrets and keys sit at their own OpenBao path, never in the image."
@@ -1376,6 +1491,10 @@
         "host-hardening": {
           "class": "supports",
           "basis": "workbench/Dockerfile: the image runs as a non-root user on UBI 9 minimal; the node kernel settings are RKE2's."
+        },
+        "idle-lock": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/session-activity.ts: the idle warning with Keep working; a stopped session needs a new sign-in."
         },
         "labels": {
           "class": "implements",
@@ -1513,7 +1632,8 @@
     },
     "ac-04": {
       "facets": [
-        "labels"
+        "labels",
+        "boundary-traffic"
       ]
     },
     "ac-05": {
@@ -1558,7 +1678,8 @@
     },
     "ac-07": {
       "facets": [
-        "sign-in-page"
+        "sign-in-page",
+        "crypto-module-login"
       ]
     },
     "ac-08": {
@@ -1572,7 +1693,9 @@
       ]
     },
     "ac-11": {
-      "facets": []
+      "facets": [
+        "idle-lock"
+      ]
     },
     "ac-11.01": {
       "facets": []
@@ -1651,10 +1774,14 @@
       "facets": []
     },
     "ac-20": {
-      "facets": []
+      "facets": [
+        "external-service"
+      ]
     },
     "ac-20.01": {
-      "facets": []
+      "facets": [
+        "external-service"
+      ]
     },
     "ac-20.02": {
       "facets": []
@@ -1971,13 +2098,19 @@
       "facets": []
     },
     "cp-06": {
-      "facets": []
+      "facets": [
+        "backup-restore"
+      ]
     },
     "cp-06.01": {
-      "facets": []
+      "facets": [
+        "backup-restore"
+      ]
     },
     "cp-06.03": {
-      "facets": []
+      "facets": [
+        "backup-restore"
+      ]
     },
     "cp-07": {
       "facets": []
@@ -2130,12 +2263,14 @@
     "ia-05.07": {
       "facets": [
         "our-code",
-        "change-path"
+        "change-path",
+        "authenticators"
       ]
     },
     "ia-05.08": {
       "facets": [
-        "sign-in-page"
+        "accounts",
+        "federation"
       ]
     },
     "ia-05.09": {
@@ -2550,10 +2685,14 @@
       ]
     },
     "sc-07.12": {
-      "facets": []
+      "facets": [
+        "host-hardening"
+      ]
     },
     "sc-07.13": {
-      "facets": []
+      "facets": [
+        "boundary-traffic"
+      ]
     },
     "sc-08": {
       "facets": [
