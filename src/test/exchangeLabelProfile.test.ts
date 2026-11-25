@@ -6,12 +6,17 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import {
+  ASSUMED_VALUES_TEXT,
   LABEL_PROFILE_FORMAT,
   NO_CONTEXT_VALUES_TEXT,
   PROVENANCE_LEVELS,
   parseLabelProfile,
+  placeholderText,
   profileLeaves,
+  provenanceCheck,
   valuesFor,
+  withTargetOverrides,
+  type AssumedException,
   type LabelProfile,
   type ProfileValue
 } from '../domain/exchange/labelProfile';
@@ -179,4 +184,106 @@ test('D-02: the public NATO identifier, its OID and the NATO top-level marking a
   walk(path.join(REPO_ROOT, 'src', 'domain', 'exchange'));
   assert.ok(files.some((file) => file.endsWith('labelProfile.ts')));
   for (const file of files) assert.doesNotMatch(readFileSync(file, 'utf8'), banned, path.relative(REPO_ROOT, file));
+});
+
+test('D-21: the Canadian DND/CAF draft parses as assumed, with its OID a placeholder set per target system', () => {
+  const profile = canadian();
+  assert.equal(valueOf(profile.policyIdentifier), 'CAN');
+  assert.deepEqual(profile.classifications.map((entry) => valueOf(entry.value)), ['PROTECTED A', 'PROTECTED B', 'PROTECTED C', 'CONFIDENTIAL', 'SECRET', 'TOP SECRET']);
+  assert.deepEqual(profile.categories, []);
+  const uri = profile.uri as { placeholder?: string; configurablePerTarget?: boolean };
+  assert.equal(uri.configurablePerTarget, true);
+  assert.equal(uri.placeholder, "The Canadian policy identifier's OID");
+  for (const { path: where, leaf } of profileLeaves(profile)) {
+    assert.equal(leaf.provenance, 'assumed', where);
+    assert.match(leaf.source, /assumed from DND security orders \(CAN SECRET, CAN PROTECTED B\); OID, caveats, releasability and SPIF unknown/i, where);
+  }
+  assert.doesNotMatch(readFileSync(path.join(PROFILES, 'can-dnd.label-profile.json'), 'utf8'), /urn:oid/, 'no Canadian OID is invented');
+});
+
+/** The values of a Canadian PROTECTED B label. */
+function canadianUsed(profile = canadian()): ReturnType<typeof valuesFor> {
+  return valuesFor(profile, { classification: 2 });
+}
+
+const TODAY = '2026-11-25';
+
+test('D-22: an operational export with assumed values and no exception is refused', () => {
+  const profile = canadian();
+  const values = canadianUsed(profile);
+  assert.ok(values.ok);
+  // Without the placeholder, only the assumed values decide.
+  const assumedOnly = values.value.used.filter((entry) => !('placeholder' in entry.leaf));
+  const verdict = provenanceCheck(assumedOnly, { purpose: 'operational', exceptions: [], today: TODAY });
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.ok ? '' : verdict.message, ASSUMED_VALUES_TEXT(profile.title));
+  assert.equal(ASSUMED_VALUES_TEXT('X'), 'This export would use assumed label values (X). Your security officer can record an exception, or the values must be verified first.');
+});
+
+test('D-22: an exception your security officer recorded lets assumed values through until it ends', () => {
+  const values = canadianUsed();
+  assert.ok(values.ok);
+  const assumedOnly = values.value.used.filter((entry) => !('placeholder' in entry.leaf));
+  const exception: AssumedException = { profile: 'can-dnd-draft', values: ['CAN', 'protected b'], reason: 'Trial with the target system owner', until: '2026-12-31' };
+  const verdict = provenanceCheck(assumedOnly, { purpose: 'operational', exceptions: [exception], today: TODAY });
+  assert.ok(verdict.ok, verdict.ok ? '' : verdict.message);
+  assert.deepEqual(verdict.exceptionsUsed, [exception]);
+  assert.equal(verdict.lowestProvenance, 'assumed');
+  const expired = provenanceCheck(assumedOnly, { purpose: 'operational', exceptions: [{ ...exception, until: '2026-11-24' }], today: TODAY });
+  assert.equal(expired.ok, false, 'an expired exception is refused');
+  const partial = provenanceCheck(assumedOnly, { purpose: 'operational', exceptions: [{ ...exception, values: ['CAN'] }], today: TODAY });
+  assert.equal(partial.ok, false, 'an exception that does not name every assumed value is refused');
+  const otherProfile = provenanceCheck(assumedOnly, { purpose: 'operational', exceptions: [{ ...exception, profile: 'example-org' }], today: TODAY });
+  assert.equal(otherProfile.ok, false, 'an exception for another profile is refused');
+});
+
+test('D-22: a placeholder is refused for every operational export, with or without an exception', () => {
+  const values = canadianUsed();
+  assert.ok(values.ok);
+  const exception: AssumedException = { profile: 'can-dnd-draft', values: ['CAN', 'PROTECTED B'], reason: 'Trial', until: '2026-12-31' };
+  for (const exceptions of [[], [exception]]) {
+    const verdict = provenanceCheck(values.value.used, { purpose: 'operational', exceptions, today: TODAY });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.ok ? '' : verdict.reason, 'placeholder');
+    assert.equal(verdict.ok ? '' : verdict.message, "The Canadian policy identifier's OID is not known for this target system.");
+  }
+  assert.equal(placeholderText("EXAMPLE-ORG's OID"), "EXAMPLE-ORG's OID is not known for this target system.");
+});
+
+test('D-22: a trial export may use assumed values and placeholders, and says so', () => {
+  const values = canadianUsed();
+  assert.ok(values.ok);
+  const verdict = provenanceCheck(values.value.used, { purpose: 'trial', exceptions: [], today: TODAY });
+  assert.ok(verdict.ok);
+  assert.equal(verdict.lowestProvenance, 'assumed');
+  assert.deepEqual(verdict.shown, [{ profile: 'can-dnd-draft', title: canadian().title, provenance: 'assumed' }]);
+});
+
+test('D-22: public, not yet verified values pass an operational export and are reported', () => {
+  const values = valuesFor(nato(), { classification: 4, releasableTo: ['CAN'] });
+  assert.ok(values.ok);
+  const verdict = provenanceCheck(values.value.used, { purpose: 'operational', exceptions: [], today: TODAY });
+  assert.ok(verdict.ok);
+  assert.equal(verdict.lowestProvenance, 'public-unverified');
+  assert.deepEqual(verdict.shown.map((entry) => [entry.profile, entry.provenance]), [['nato-draft', 'public-unverified']]);
+  assert.deepEqual(verdict.exceptionsUsed, []);
+  assert.equal(provenanceCheck([], { purpose: 'operational', exceptions: [], today: TODAY }).ok, true);
+});
+
+test('D-12, D-21: a per-target override with a verified URI replaces the placeholder for that target only', () => {
+  const profile = canadian();
+  const overridden = withTargetOverrides(profile, { uri: { value: 'urn:oid:1.3.6.1.4.1.32473.45', provenance: 'verified', source: 'EXAMPLE-ORG target system policy owner', date: '2026-11-25' } });
+  assert.ok(overridden.ok, overridden.ok ? '' : overridden.message);
+  assert.equal(valueOf(overridden.value.uri), 'urn:oid:1.3.6.1.4.1.32473.45');
+  assert.equal(overridden.value.uri?.provenance, 'verified');
+  assert.ok('placeholder' in (profile.uri ?? {}), 'the shipped profile keeps its placeholder');
+  const values = valuesFor(overridden.value, { classification: 2 });
+  assert.ok(values.ok);
+  const exception: AssumedException = { profile: 'can-dnd-draft', values: ['CAN', 'PROTECTED B'], reason: 'Trial', until: '2026-12-31' };
+  assert.equal(provenanceCheck(values.value.used, { purpose: 'operational', exceptions: [exception], today: TODAY }).ok, true, 'no placeholder is left');
+  // Only a placeholder can be overridden, and an override follows the same value rules.
+  const notPlaceholder = withTargetOverrides(profile, { policyIdentifier: { value: 'EXA', provenance: 'verified', source: 'EXAMPLE-ORG', date: '2026-11-25' } });
+  assert.equal(notPlaceholder.ok ? '' : `${notPlaceholder.reason} ${notPlaceholder.path}`, 'not-allowed-here policyIdentifier');
+  const badUri = withTargetOverrides(profile, { uri: { value: 'urn:x:1', provenance: 'verified', source: 'EXAMPLE-ORG', date: '2026-11-25' } });
+  assert.equal(badUri.ok ? '' : `${badUri.reason} ${badUri.path}`, 'wrong-type uri.value');
 });
