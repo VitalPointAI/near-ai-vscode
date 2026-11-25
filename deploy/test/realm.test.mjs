@@ -200,6 +200,34 @@ test('a security-contacts group is refused: who may approve guests is a Security
   assert.match(broken((copy) => { copy.groups[0].subGroups = [{ name: 'security-contacts', path: '/guests/security-contacts' }]; }).join('\n'), /security-contacts group/);
 });
 
+// The approvers' sign-in for your organization's software registry (48.3-05, D-18): a public client with the device grant and, as the decided
+// fallback, the code flow with PKCE to loopback addresses only. Keycloak 26.8.2's device endpoint ignores a request's acr_values and asks for
+// the client's default ACR values, so the step-up comes from the client itself.
+test('client sterling-supply-review is public, device grant and loopback PKCE only, asks for the step-up and carries what OpenBao binds', () => {
+  const { realm, problems } = passkeys();
+  assert.deepEqual(problems, []);
+  const review = realm.clients.find((client) => client.clientId === 'sterling-supply-review');
+  assert.ok(review, 'client sterling-supply-review');
+  assert.deepEqual([review.publicClient, review.standardFlowEnabled, review.implicitFlowEnabled, review.directAccessGrantsEnabled, review.serviceAccountsEnabled],
+    [true, true, false, false, false]);
+  assert.equal(review.secret, undefined, 'a public client has no secret');
+  assert.deepEqual(review.redirectUris, ['http://127.0.0.1/*', 'http://[::1]/*']);
+  assert.equal(review.attributes['oauth2.device.authorization.grant.enabled'], 'true');
+  assert.equal(review.attributes['pkce.code.challenge.method'], 'S256');
+  assert.equal(review.attributes['default.acr.values'], SITE.stepUpAcr, 'the device grant asks for the step-up level');
+  assert.equal(review.attributes['minimum.acr.value'], SITE.stepUpAcr);
+  const mapper = (type) => review.protocolMappers.find((entry) => entry.protocolMapper === type);
+  assert.equal(mapper('oidc-audience-mapper').config['included.client.audience'], 'sterling-supply-review');
+  assert.equal(mapper('oidc-acr-mapper').config['access.token.claim'], 'true');
+  assert.deepEqual(mapper('oidc-usersessionmodel-note-mapper').config, {
+    'user.session.note': 'AUTH_TIME', 'claim.name': 'sterling_auth_time', 'jsonType.label': 'String', 'access.token.claim': 'true', 'id.token.claim': 'false', 'introspection.token.claim': 'true',
+  });
+  const index = realm.clients.indexOf(review);
+  assert.match(broken((copy) => { copy.clients[index].redirectUris = ['https://evil.example/*']; }).join('\n'), /sterling-supply-review may redirect only to loopback addresses/);
+  assert.match(broken((copy) => { copy.clients[index].implicitFlowEnabled = true; }).join('\n'), /sterling-supply-review must be public with the device grant and PKCE only/);
+  assert.match(broken((copy) => { copy.clients[index].attributes['default.acr.values'] = 'webauthn'; }).join('\n'), /sterling-supply-review must ask for the step-up/);
+});
+
 test('no client or client scope puts a user attribute or a group into the access token', () => {
   const attributeMapper = { name: 'serves', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-attribute-mapper', config: { 'user.attribute': 'serves', 'claim.name': 'serves', 'access.token.claim': 'true' } };
   const groupMapper = { name: 'groups', protocol: 'openid-connect', protocolMapper: 'oidc-group-membership-mapper', config: { 'claim.name': 'groups' } };

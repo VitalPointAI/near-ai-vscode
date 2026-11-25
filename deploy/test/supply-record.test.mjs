@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { PREDICATE_TYPE, buildStatement, checkRecord, parseCosignAttestations } from '../supply/lib/record.mjs';
-import { approverFromLogin } from '../supply/lib/approvals.mjs';
+import { approverFromLogin, reconcile, sufficient } from '../supply/lib/approvals.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOW = new Date('2026-11-25T12:00:00.000Z');
@@ -115,4 +115,53 @@ test('not approved', () => {
   const result = checkRecord(record({ state: 'in-review' }), { digest: DIGEST, approvers: [ADA], approversNeeded: 1, now: NOW });
   assert.equal(result.ok, false);
   assert.ok(result.problems.includes('The record says in-review, not approved.'), result.problems.join(' | '));
+});
+
+// Task 3: the remaining approval rules (D-03, D-18, D-28) and the reconciliation (D-27).
+const CAL = '0a1b2c3d-0000-4000-8000-000000000003';
+const approval = (subject, at = '2026-11-25T11:00:00.000Z') => ({ subject, entity: `entity-${subject.slice(-1)}`, at });
+
+test('repeated subject', () => {
+  const result = sufficient([approval(ADA), approval(ADA, '2026-11-25T11:30:00.000Z')], { approversNeeded: 2, approvers: [ADA, BEN] });
+  assert.deepEqual([result.ok, result.missing], [false, 1]);
+  assert.match(result.problems.join(' '), /1 more approval from a different listed approver is needed/);
+  assert.equal(sufficient([approval(ADA), approval(BEN)], { approversNeeded: 2, approvers: [ADA, BEN] }).ok, true);
+  const checked = checkRecord(record({ approvals: [approval(ADA), approval(ADA)] }), { digest: DIGEST, approvers: [ADA, BEN], approversNeeded: 2, now: NOW });
+  assert.equal(checked.ok, false, 'checkRecord applies the same rule');
+});
+
+test('an approver your organization does not list does not count', () => {
+  const result = sufficient([approval(ADA), approval(CAL)], { approversNeeded: 2, approvers: [ADA, BEN] });
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.includes(`${CAL} is not one of your organization's listed approvers.`));
+});
+
+test('fast lane requester', () => {
+  const fastLane = { reason: 'GHSA-xxxx-yyyy-zzzz', requestedBy: ADA };
+  const own = sufficient([approval(ADA), approval(BEN)], { approversNeeded: 2, approvers: [ADA, BEN, CAL], fastLane });
+  assert.deepEqual([own.ok, own.missing], [false, 1]);
+  assert.ok(own.problems.includes(`${ADA} asked for the fast lane and cannot approve it.`));
+  assert.equal(sufficient([approval(BEN), approval(CAL)], { approversNeeded: 2, approvers: [ADA, BEN, CAL], fastLane }).ok, true);
+  // Outside the fast lane the requester is just another approver.
+  assert.equal(sufficient([approval(ADA)], { approversNeeded: 1, approvers: [ADA], requester: ADA }).ok, true);
+});
+
+test('a VEX not_affected needs two approvers for a KEV match or a critical with a fix, one otherwise', () => {
+  const vex = (finding, approvals) => sufficient(approvals, { kind: 'vex-not-affected', finding, approvers: [ADA, BEN] });
+  assert.equal(vex({ id: 'CVE-2026-1', kev: true }, [approval(ADA)]).ok, false);
+  assert.equal(vex({ id: 'CVE-2026-1', kev: true }, [approval(ADA), approval(BEN)]).ok, true);
+  assert.equal(vex({ id: 'CVE-2026-2', severity: 'critical', fixAvailable: true }, [approval(ADA)]).missing, 1);
+  assert.equal(vex({ id: 'CVE-2026-3', severity: 'critical', fixAvailable: false }, [approval(ADA)]).ok, true);
+  assert.equal(vex({ id: 'CVE-2026-4', severity: 'high' }, [approval(ADA)]).ok, true);
+  assert.equal(vex({ id: 'CVE-2026-4', severity: 'high' }, []).ok, false);
+});
+
+test('reconcile lists every site-key signature with no record of the same digest and key', () => {
+  const D1 = `sha256:${'1'.repeat(64)}`;
+  const D2 = `sha256:${'2'.repeat(64)}`;
+  const signatures = [{ digest: D1, keyId: 'site', at: '2026-11-25T10:00:00Z' }, { digest: D2, keyId: 'site', at: '2026-11-25T10:05:00Z' }];
+  assert.deepEqual(reconcile(signatures, [{ digest: D1, keyId: 'site' }, { digest: D2, keyId: 'site' }]), []);
+  assert.deepEqual(reconcile(signatures, [{ digest: D1, keyId: 'site' }]), [signatures[1]]);
+  assert.deepEqual(reconcile(signatures, [{ digest: D1, keyId: 'site' }, { digest: D2, keyId: 'other' }]), [signatures[1]], 'a record under another key does not match');
+  assert.deepEqual(reconcile([], []), []);
 });
