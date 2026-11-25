@@ -128,3 +128,11 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 - The component catalogue page `docs-site/content/architecture/components/workbench.md` is generated from `compliance/resources.json` (a gate file), whose workbench entry says "the NEAR AI chat"; the page keeps the register's words until that entry changes.
 - A comment in `scripts/verify-release-content.mjs` (a gate file) still says "NEAR AI: Load Staff Exercise Scenario"; left to avoid a second gate file for a comment.
 - A Playwright spec for Chat in the release image (streamed reply with a fake model server, history after reload, Stop), replacing the Puppeteer tool of `01a9f155` and `5a04d3d3`. It needs the release image with the bundled VSIX, like `get-started.spec.ts`'s create test.
+
+## Checks on the merged branch (main at `bcc85d44`)
+
+- Root: lint passes; the full suite runs 6,281 tests, 6,273 pass, 0 fail, 8 skipped (the existing skips). Copy lint (with rule 8), architecture (no frozen file grew; `chat.ts` stays at 1,517 lines) and the compliance fit check pass.
+- Workbench on Node 26.13.1: lint passes, 106 of 106 unit tests pass, the production build passes.
+- Tests added: copy lint rule 8 (two), the SA&A download offer, the last-conversation drawer close, the saved-credential welcome state (from `e7fc76c7`), the project switch during Project Setup (from `f73bc988`); extended: the onboarding provider button, the proxy advice words, the panel title prefix check.
+- Not run here: the browser and container suites (they need the built image), and the docs site build.
+- Gate file touched: `SECURITY.md` only.
