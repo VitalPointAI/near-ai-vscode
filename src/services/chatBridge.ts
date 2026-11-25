@@ -8,6 +8,10 @@ import { normalizePrompt, PromptResponse, StructuredPrompt, isPromptId, isSessio
 import { parseGsdPlanningState } from '../domain/gsdStatus';
 import type { OrganizationProfile } from '../domain/auth';
 import type { ActionPolicyMode } from '../domain/policy';
+import { AGENT_DEFAULTS } from '../domain/agentDefaults';
+import { checkerFor, preferredModels } from '../domain/gate/lineage';
+import type { CheckFamilies } from '../domain/gate/lineage';
+import type { ModelJob, ModelsSection } from '../domain/gate/models';
 import { isPolicyMode } from './approvalPolicy';
 import { isStaffTeamSection } from '../domain/staff/profiles';
 import type { StaffTeamSection } from '../domain/staff/profiles';
@@ -461,6 +465,32 @@ export function modelsAsPrivateAs(models: ModelInfo[], chosen: ModelInfo | undef
 export function privateSafetyModel(models: ModelInfo[], chosen: ModelInfo | undefined, wanted: string): string | undefined {
   const candidate = modelsAsPrivateAs(models, chosen).find((model) => model.id === wanted.trim());
   return candidate && (candidate.privacyBoundary === 'tee' || candidate.privacyBoundary === 'local') ? candidate.id : undefined;
+}
+
+/** The safety checkers of a run and, when there is none, why a person decides (74.1 D-19). */
+export interface SafetyCheckers {
+  readonly safetyModel?: string;
+  readonly safetyFallbackModel?: string;
+  /** With no checker of another family: the check.same-family sentence and the families, which the run's notice names. */
+  readonly person?: { readonly reason: string; readonly families: CheckFamilies };
+}
+
+/**
+ * The auto mode's safety checker and its second (74.1 D-19, owner's classifier order): checkerFor over the configured model, then the safety job's
+ * preference, never of the run model's family, each at least as private as the run's model (privateSafetyModel) and allowed by the gate for a checking
+ * job. The second is the next such model, so a busy first one never sends the check to the author's family either.
+ */
+export function safetyCheckersFor(input: {
+  readonly models: ModelInfo[]; readonly chosen: ModelInfo | undefined; readonly author: string; readonly configured: string;
+  readonly allows: (modelId: string, job: ModelJob) => boolean; readonly policyModels?: ModelsSection; readonly now: number;
+}): SafetyCheckers {
+  const preference = [input.configured.trim(), ...preferredModels(AGENT_DEFAULTS.models.safety, input.models, input.policyModels, input.now)];
+  const allowed = (id: string): boolean => privateSafetyModel(input.models, input.chosen, id) === id && input.allows(id, 'safety');
+  const context = { models: input.policyModels, now: input.now };
+  const first = checkerFor('safety', input.author, preference, allowed, context);
+  if (!('model' in first)) return { person: { reason: first.reason, families: first.families } };
+  const second = checkerFor('safety', input.author, preference.filter((id) => id !== first.model), allowed, context);
+  return { safetyModel: first.model, ...('model' in second ? { safetyFallbackModel: second.model } : {}) };
 }
 
 /** Embedding, reranking, and speech models cannot hold a conversation. */

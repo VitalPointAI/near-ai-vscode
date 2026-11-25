@@ -187,6 +187,19 @@ export function currentSessionRoute(): SessionRoute | undefined {
   return routes.getStore();
 }
 
+/**
+ * Runs `work` as a checking job (74.1 D-16, D-19): in a route that is the current one (or the default one outside every route) with `checkingJob: true`
+ * added to its use facts, starting at the use the current route is at. A checker's requests are then checked as agent work and, under enforce, need your
+ * organization's evaluation of the checking model.
+ */
+export function withCheckingJob<T>(work: () => T): T {
+  const parent = currentSessionRoute() ?? defaultSessionRoute();
+  const route: SessionRoute = { ...parent, useOf: () => ({ ...(parent.useOf?.() ?? {}), checkingJob: true }) };
+  const held = useHighWater.get(parent);
+  if (held !== undefined) raiseSessionUse(route, held);
+  return withSessionRoute(route, work);
+}
+
 // ---- The private floor (coherence review S4) ----
 
 const privateOnly = new AsyncLocalStorage<boolean>();
