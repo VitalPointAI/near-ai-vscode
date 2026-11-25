@@ -131,4 +131,16 @@ export const STAFF_SHARE_TEXT = {
   addressChanged: 'This computer now reaches your organization\'s server at the new address. Its certificate is checked at the next connection, as before.',
   showWorkOn: 'Others see what you are working on.',
   showWorkOff: 'Others see only that you are here.',
+  // The section's own sentences (33-27), kept here so the widgets hold none of their own (33-26 D-69).
+  noBackend: 'SovAI could not reach its backend. Try again.',
+  noJoinRequest: 'No join request is waiting at your organization\'s server.',
+  noAddress: 'This computer has no address for it yet.',
+  worksUntil: (day: string): string => `The invitation works until ${day}.`,
+  reachesAt: (address: string): string => `This computer reaches it at ${address}.`,
+} as const;
+
+/** What the invitation open handler says about a file it does not open (33-27). */
+export const INVITE_OPEN_TEXT = {
+  tooLarge: 'This file is larger than an invitation can be, so it was not opened. Ask the person who sent it for a new file.',
+  unreadable: 'This file could not be read as an invitation. Ask the person who sent it for a new file.',
 } as const;

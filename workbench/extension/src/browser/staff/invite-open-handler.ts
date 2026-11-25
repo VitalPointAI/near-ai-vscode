@@ -5,6 +5,7 @@
  */
 import type URI from '@theia/core/lib/common/uri.js';
 import type { OpenHandler } from '@theia/core/lib/browser/opener-service.js';
+import { INVITE_OPEN_TEXT } from '../../common/staff-share.js';
 
 export const INVITE_EXTENSION = '.near-staff-invite';
 /** An invitation file is a small signed payload; a larger file is not opened (the engine's MAX_PAYLOAD_BYTES). */
@@ -18,10 +19,7 @@ export interface InvitationOpened {
   readonly expiresAt?: string;
 }
 
-export const INVITE_OPEN_TEXT = {
-  tooLarge: 'This file is larger than an invitation can be, so it was not opened. Ask the person who sent it for a new file.',
-  unreadable: 'This file could not be read as an invitation. Ask the person who sent it for a new file.',
-} as const;
+export { INVITE_OPEN_TEXT };
 
 /** The fields shown before the person answers, read from the file's text; undefined fields when the text does not hold them. */
 export function invitationFields(text: string): InvitationOpened {

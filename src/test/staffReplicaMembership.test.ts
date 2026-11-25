@@ -20,13 +20,16 @@ import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
 import type { SecretStorageLike } from '../services/auth';
-import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX } from '../staff/replica/keyring';
+import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX, loadOrCreateKemKeys } from '../staff/replica/keyring';
+import { unwrapForDevice } from '../domain/replica/cellWrapV2';
+import { identityDir } from '../team/identity';
 import {
   MEMBERSHIP_REFUSALS, addMyOtherMachine, admitJoinRequest, cellOrderHook, chooseRosterBranch, describeRosterBranches, finishRekeys, handOverLead, inviteToProject, joinFromInvite, nameDeputy,
   openWelcome, pendingInvitationsDir, remakeWelcome, removeFromProject, reviewJoinRequest, unfinishedRekeys, updateMember, voidInvite
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
+import { newEpochPages } from '../staff/replica/wrapPlan';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -132,12 +135,18 @@ async function sync(from: { at: Install; p: ReplicaProject }, to: { p: ReplicaPr
 }
 
 /** The lead makes a labelled cell at the head, with its founding grant wrapped to the given devices (cell.create; no command makes one in Phase 31). */
+/** A new cell's founding grant as the product makes it (33.2-06): each wrap through the one entry point, in the format formatFor gives a new epoch. */
+function foundingFor(lead: { p: ReplicaProject }, roster: RosterState, input: { cell: string; key: Buffer; to: readonly string[]; labelSealed: string }): ReturnType<typeof buildGrant> {
+  const pages = newEpochPages(lead.p.signer, roster, { cell: input.cell, info: { base: false }, epoch: 1, key: input.key, recipients: input.to, labelSealed: input.labelSealed });
+  assert.ok(pages !== 'switch-first' && pages.length === 1, 'one founding page');
+  return pages[0];
+}
+
 async function createCell(lead: Lead, label: unknown, to: readonly string[]): Promise<string> {
   const at = await head(lead.p);
   const cell = randomBytes(16).toString('hex');
   const key = newEpochKey();
-  const wraps = to.map((writer) => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient: x25519At(at.roster.members, writer, at.position) as string, epochKey: key }) }));
-  const founding = buildGrant(lead.p.signer, { cell, epoch: 1, roster: at.hash, labelSealed: sealLabel(key, cell, 1, label), wraps });
+  const founding = foundingFor(lead, at.roster, { cell, key, to, labelSealed: sealLabel(key, cell, 1, label) });
   await lead.p.keys.addOwn(cell, 1, key, grantHash(founding));
   assert.ok(!isProjectRefused(await lead.p.putGrants([founding])));
   const written = await lead.p.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: at.hash });
@@ -628,8 +637,7 @@ async function unlabelledCell(lead: Lead, to: readonly string[]): Promise<string
   const at = await head(lead.p);
   const cell = randomBytes(16).toString('hex');
   const key = newEpochKey();
-  const wraps = to.map((writer) => ({ writer, wrap: wrapEpochKey({ cell, epoch: 1, writer, recipient: x25519At(at.roster.members, writer, at.position) as string, epochKey: key }) }));
-  const founding = buildGrant(lead.p.signer, { cell, epoch: 1, roster: at.hash, labelSealed: '', wraps });
+  const founding = foundingFor(lead, at.roster, { cell, key, to, labelSealed: '' });
   assert.ok(!isProjectRefused(await lead.p.putGrants([founding])));
   assert.ok('ok' in await lead.p.appendOwn('cell.create', { cell, epoch: 1, grant: grantHash(founding) }, { roster: at.hash }));
   return cell;
@@ -838,12 +846,14 @@ test('MJ-04: a rekey whose entry is not written leaves its key unused; the next 
   const { roster, position } = await head(lead.p);
   assert.equal(epochAt(roster.cells, base, position), 3);
   const cPrivate = createPrivateKey({ key: Buffer.from(c.at.secrets.values.get(ENCRYPTION_KEY_SECRET) as string, 'base64'), format: 'der', type: 'pkcs8' });
+  // C opens a wrap with its own keys: X25519 for an older wrap, its post-quantum keys for a cell-wrap/v2 one (33.2: the project started switched).
+  const cKem = (await loadOrCreateKemKeys(c.at.secrets, { identityDir: identityDir(c.at.global) })).privateKeys;
   const keyFor = (signed: unknown, epoch: number): Buffer | undefined => {
     const read = readGrant(signed);
     assert.ok(read.ok, 'the grant reads');
     const wrap = read.grant.wraps.find((item) => item.writer === c.writer);
     assert.ok(wrap !== undefined, `C is on epoch ${epoch}`);
-    return unwrapEpochKey({ cell: base, epoch, writer: c.writer, privateKey: cPrivate, wrap: wrap.wrap });
+    return unwrapForDevice({ cell: base, epoch, writer: c.writer, x25519: cPrivate, kem: cKem, wrap: wrap.wrap });
   };
   const committed2 = grantsOn(lead.at).find((signed) => grantHash(signed) === committedGrant(roster.cells, base, 2));
   assert.ok(committed2 !== undefined, 'the committed grant of epoch 2 is on disk');

@@ -31,8 +31,8 @@ export const JOIN_WAITING_TEXT = 'Someone wants to join. Admit shows their name 
 /** D-25: the owner's prompt after about 20 changes since a version. {version} and {title} are filled in; never a withdrawal. */
 export const OWNER_PROMPT_TEXT = '{version} of {title} has {count} changes since. Propose a new version when the text is ready.';
 
-/** D-48: a preview shared work whose products sit in its base key group. */
-export const PREVIEW_COPY_TEXT = 'This shared work was made shared by an earlier preview, so its products sit where your organization\'s server reads them. Make a single-machine copy and share that copy again.';
+/** D-48: shared work made shared by 0.4.35, whose products sit in its base key group. */
+export const EARLY_SHARE_COPY_TEXT = 'This shared work was made shared by an earlier version of SovAI, so its products sit where your organization\'s server reads them. Make a single-machine copy and share that copy again.';
 
 /** "Who can see this" (glossary): the people cleared for the product's label. */
 export const WHO_CAN_SEE_TEXT = 'Who can see this';
@@ -116,8 +116,8 @@ export interface StaffRoomLiveInput {
   /** Agent runs on this shared work; the trust line shows only where TrustFacts exist (D-44). */
   readonly agents: ReadonlyArray<{ readonly run: string; readonly name: string; readonly trust?: TrustFacts }>;
   readonly scales?: ScaleTable;
-  /** D-48: a preview shared work with products in its base key group. */
-  readonly previewCopyNeeded?: boolean;
+  /** D-48: shared work made shared by 0.4.35, with products in its base key group. */
+  readonly earlyShareCopyNeeded?: boolean;
   /** Owner prompts this person put away this session, as product and hash. */
   readonly dismissed?: readonly string[];
 }
@@ -145,7 +145,7 @@ export interface StaffRoomPerson {
 
 export type StaffRoomCard =
   | { readonly kind: 'update'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
-  | { readonly kind: 'preview-copy'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
+  | { readonly kind: 'early-share-copy'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
   | { readonly kind: 'contested'; readonly id: string; readonly text: string; readonly decisions: StaffRoomContestedInput['decisions']; readonly actions: readonly StaffRoomAction[] }
   | { readonly kind: 'join'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
   | { readonly kind: 'roster-split'; readonly id: string; readonly text: string; readonly branches: ReadonlyArray<{ readonly text: string; readonly action: StaffRoomAction }>; readonly actions: readonly StaffRoomAction[] }
@@ -224,8 +224,8 @@ export function staffRoomLive(input: StaffRoomLiveInput): StaffRoomLiveView {
 
   const cards: StaffRoomCard[] = [];
   if (status.state === 'needs-update') cards.push({ kind: 'update', id: 'update', text: sentence, actions: [] });
-  if (input.previewCopyNeeded === true) {
-    cards.push({ kind: 'preview-copy', id: 'preview-copy', text: PREVIEW_COPY_TEXT, actions: [action('make-copy', STAFF_ROOM_ACTION_TEXT['make-copy'], '')] });
+  if (input.earlyShareCopyNeeded === true) {
+    cards.push({ kind: 'early-share-copy', id: 'early-share-copy', text: EARLY_SHARE_COPY_TEXT, actions: [action('make-copy', STAFF_ROOM_ACTION_TEXT['make-copy'], '')] });
   }
   for (const card of input.contested) {
     const version = `v${card.number}`;

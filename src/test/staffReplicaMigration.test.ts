@@ -5,6 +5,7 @@
 // Since plan 32-10 (D-15 to D-21) each product goes into the cell for its label, the whole ledgers into the lead-only legacy cell, each label cell gets
 // a products import of its own lines, and the conversion refuses only the labels the lead's declared clearance does not cover.
 import assert from 'node:assert/strict';
+import { clientReplicaFeatures } from '../staff/replica/clientFeatures';
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -674,12 +675,18 @@ test('a folder with no staff project is refused no-staff-project and nothing is 
 
 // Fixed randomness for one conversion, so two installs that start from the same bytes write the same entries: every random draw is a hash of the place
 // in the code that asks and how many times that place has asked. A place that asks a different number of times on two runs (a lock token, a temporary
-// file name) cannot move another place's draws. X25519 key pairs are made from such a draw as a seed. The real functions are put back afterwards.
+// file name) cannot move another place's draws. X25519 and P-256 key pairs are made from such a draw as a seed, and so is the ML-KEM-768
+// encapsulation of a cell-wrap/v2 wrap (33.2: new shared work starts post-quantum), whose randomness OpenSSL does not take from outside: nothing in a
+// conversion opens its own wraps (it keeps the keys it made), so a drawn ciphertext and secret stand in for it here. The probe runs once before, on the
+// real functions. The real functions are put back afterwards.
 const nodeCrypto = require('node:crypto') as typeof import('node:crypto');
 const realRandomBytes = nodeCrypto.randomBytes;
 const realKeyPair = nodeCrypto.generateKeyPairSync;
+const realEncapsulate = (nodeCrypto as unknown as { encapsulate: unknown }).encapsulate;
+const P256_PKCS8_PREFIX = Buffer.from('3041020100301306072a8648ce3d020106082a8648ce3d030107042730250201010420', 'hex');
 
 async function withFixedRandomness<T>(work: () => Promise<T>): Promise<T> {
+  clientReplicaFeatures();
   const counters = new Map<string, number>();
   const draw = (site: string, size: number): Buffer => {
     const count = counters.get(site) ?? 0;
@@ -696,15 +703,21 @@ async function withFixedRandomness<T>(work: () => Promise<T>): Promise<T> {
     return undefined;
   };
   (nodeCrypto as { generateKeyPairSync: unknown }).generateKeyPairSync = (type: string, options?: unknown) => {
+    if (type === 'ec' && (options as { namedCurve?: string } | undefined)?.namedCurve === 'prime256v1') {
+      const privateKey = nodeCrypto.createPrivateKey({ key: Buffer.concat([P256_PKCS8_PREFIX, draw(caller(), 32)]), format: 'der', type: 'pkcs8' });
+      return { privateKey, publicKey: nodeCrypto.createPublicKey(privateKey) };
+    }
     if (type !== 'x25519') return (realKeyPair as (type: string, options?: unknown) => unknown)(type, options);
     const privateKey = x25519PrivateFromSeed(draw(caller(), 32));
     return { privateKey, publicKey: nodeCrypto.createPublicKey(privateKey) };
   };
+  (nodeCrypto as unknown as { encapsulate: unknown }).encapsulate = () => ({ sharedKey: draw(caller(), 32), ciphertext: draw(caller(), 1088) });
   try {
     return await work();
   } finally {
     nodeCrypto.randomBytes = realRandomBytes;
     nodeCrypto.generateKeyPairSync = realKeyPair;
+    (nodeCrypto as unknown as { encapsulate: unknown }).encapsulate = realEncapsulate;
   }
 }
 

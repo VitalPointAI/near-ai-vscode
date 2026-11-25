@@ -46,7 +46,7 @@ const icon = (name: string): unknown => h('span', { className: `codicon ${name}`
 
 const ICONS: Readonly<Record<StaffRoomCard['kind'], string>> = {
   update: 'codicon-cloud-download',
-  'preview-copy': 'codicon-copy',
+  'early-share-copy': 'codicon-copy',
   contested: 'codicon-git-compare',
   join: 'codicon-person-add',
   'roster-split': 'codicon-git-merge',

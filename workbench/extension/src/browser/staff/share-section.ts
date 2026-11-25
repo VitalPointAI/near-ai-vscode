@@ -156,7 +156,7 @@ export class ShareWithPeopleSection {
   /** Shows an action's answer: its sentence, notices and safety words, and saves the file it made. */
   private async shown(answer: Promise<ServiceResult<ShareOutcome>>, after?: () => void): Promise<void> {
     const result = await answer.catch(() => undefined);
-    if (result === undefined) { this.say('SovAI could not reach its backend. Try again.'); return; }
+    if (result === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
     if (result.kind === 'refused') { this.say(result.fix === undefined ? result.reason : `${result.reason} ${result.fix}.`); return; }
     const { message, notices, file, safetyWords, withheld } = result.value;
     this.say([message, ...(safetyWords === undefined ? [] : [`Six words: ${safetyWords.join(' ')}`]), ...(withheld ?? []), ...notices].join(' '));
@@ -190,7 +190,7 @@ export class ShareWithPeopleSection {
 
   private joinCard(opened: InvitationOpened): HTMLElement {
     const card = this.card(opened.name === undefined ? 'Join shared work' : `Join ${opened.name}`, 'mail-read');
-    if (opened.expiresAt !== undefined) card.append(el('p', `The invitation works until ${opened.expiresAt.slice(0, 10)}.`));
+    if (opened.expiresAt !== undefined) card.append(el('p', STAFF_SHARE_TEXT.worksUntil(opened.expiresAt.slice(0, 10))));
     const name = input('Your name');
     card.append(labelled('Your name, as the lead knows you', name),
       this.button('Send my join request', 'send', () => this.shown(this.server.openInvitation({ text: opened.text, name: name.value.trim() }), () => { this.invitation = undefined; }), true));
@@ -227,8 +227,8 @@ export class ShareWithPeopleSection {
 
   private async requests(card: HTMLElement, button: HTMLButtonElement): Promise<void> {
     const answer = await this.server.joinRequests().catch(() => undefined);
-    if (answer === undefined || answer.kind === 'refused') { this.say(answer?.kind === 'refused' ? answer.reason : 'SovAI could not reach its backend. Try again.'); return; }
-    if (answer.value.length === 0) this.say('No join request is waiting at your organization\'s server.');
+    if (answer === undefined || answer.kind === 'refused') { this.say(answer?.kind === 'refused' ? answer.reason : STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.value.length === 0) this.say(STAFF_SHARE_TEXT.noJoinRequest);
     for (const request of answer.value) this.admitRow(card, request);
     button.focus();
   }
@@ -257,7 +257,7 @@ export class ShareWithPeopleSection {
         }, true));
       return card;
     }
-    card.append(el('p', server.address === undefined ? 'This computer has no address for it yet.' : `This computer reaches it at ${server.address}.`));
+    card.append(el('p', server.address === undefined ? STAFF_SHARE_TEXT.noAddress : STAFF_SHARE_TEXT.reachesAt(server.address)));
     const address = input('server.example.org:8443');
     card.append(labelled(STAFF_SHARE_TEXT.changeAddress, address), this.button(STAFF_SHARE_TEXT.changeAddress, 'edit', () => this.shown(this.server.changeAddress({ address: address.value.trim() }))));
     card.append(el('p', STAFF_SHARE_TEXT.readmitHelp), el('p', server.words.join(' '), 'sterling-share-words'));

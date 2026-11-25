@@ -45,13 +45,14 @@ export const MAX_PAYLOAD_BYTES = 256 * 1024;
 // token pattern by chance (about 5 in 100,000 wraps), which would refuse an admission or a rekey at random. Only these exact paths skip the token
 // patterns, and only for pure base64url text; private key material is still refused everywhere. Phase 32 (D-60): the hub session answer's challenge
 // and TLS keying material, the hub file's X25519 key, its binding signature and the one-time enrolment secret, and the hub join envelope's MAC.
-// Phase 33 (D-62): the sealed body of the session.certify a session key's answer carries.
+// Phase 33 (D-62): the sealed body of the session.certify a session key's answer carries. Phase 33.2 (D-03): the post-quantum public keys and their
+// binding signature a join request and a hub file carry (kem).
 const GENERATED_PATHS: Partial<Record<PayloadPurpose, RegExp>> = {
   'staff-cell-grant': /^\$\.(?:labelSealed|wraps\[\d+\]\.wrap)$/,
   'staff-invite': /^\$\.(?:secret|lead\.x25519)$/,
-  'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac)$/,
+  'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac|kem\.(?:p256|mlkem768|sig))$/,
   'staff-hub-session': /^\$\.(?:challenge|keying|certificateEntry\.body)$/,
-  'staff-hub-file': /^\$\.(?:x25519|x25519Sig|enrolmentSecret)$/,
+  'staff-hub-file': /^\$\.(?:x25519|x25519Sig|enrolmentSecret|kem\.(?:p256|mlkem768|sig))$/,
   'staff-hub-join': /^\$\.hubMac$/
 };
 const PUBLIC_KEY_BYTES = 32;

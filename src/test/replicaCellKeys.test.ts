@@ -5,7 +5,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { GRANT_MAX_BYTES, MAX_GRANT_WRAPS, MAX_LABEL_BYTES, REKEY_KEEP_TEXT, WRAP_BYTES, buildGrant, earlierEpochGrants, grantHash, openLabel, planRekey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import { GRANT_MAX_BYTES, MAX_GRANT_WRAPS, MAX_LABEL_BYTES, REKEY_KEEP_TEXT, WRAP_BYTES, buildGrant, grantHash, openLabel, planRekey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
+import { earlierEpochGrants } from '../domain/replica/grantPages';
 import type { RekeyReason } from '../domain/replica/cellKeys';
 import type { CellGrant } from '../domain/replica/cellKeys';
 import { CELL_REFUSALS, epochsAt, granteesAt } from '../domain/replica/rosterCells';

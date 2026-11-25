@@ -25,14 +25,14 @@ import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { IDENTITY_CREATE_LOCK_FILE } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
-import { EPOCH_KEY_BYTES, readGrant, unwrapEpochKey, x25519BindingBytes, x25519PublicRaw } from '../../domain/replica/cellKeys';
+import { EPOCH_KEY_BYTES, readGrant, x25519BindingBytes, x25519PublicRaw } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
 import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from '../../domain/replica/entry';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import type { CellRecord, CellsState, EpochRecord } from '../../domain/replica/rosterCells';
 import type { KeyRing } from '../../domain/replica/rosterView';
 import { isRecord } from '../../domain/team/validate';
-import { MLKEM_SEED_BYTES, P256_SCALAR_BYTES, kemPrivateFromSeeds, kemPublicFromSeeds, newKemSeeds } from '../../domain/replica/cellWrapV2';
+import { MLKEM_SEED_BYTES, P256_SCALAR_BYTES, kemPrivateFromSeeds, kemPublicFromSeeds, newKemSeeds, unwrapForDevice } from '../../domain/replica/cellWrapV2';
 import type { KemPrivateKeys, KemPublicKeys, KemSeeds } from '../../domain/replica/cellWrapV2';
 
 /** The SecretStorage name of this install's X25519 private key, beside nearAi.identity.deviceKey (D-19). */
@@ -143,7 +143,8 @@ export async function loadOrCreateKemKeys(secrets: SecretStorageLike, options: {
 // ---- the key ring (D-24, D-44) -------------------------------------------------------------------------------------------------------------------
 
 /** The device a key ring opens grants for: its writer id and its X25519 private key. */
-export interface KeyRingDevice { writer: string; privateKey: KeyObject }
+/** The device a key ring opens grants for: its writer id, its X25519 private key and, where it has them, its post-quantum keys (33.2 D-03). */
+export interface KeyRingDevice { writer: string; privateKey: KeyObject; kem?: KemPrivateKeys }
 
 /** A key this device made for a new cell or a new epoch, with the hash of the founding grant that carries it (addOwn). */
 export interface OwnEpochKey { cell: string; epoch: number; grant: string; key: Buffer }
@@ -335,7 +336,7 @@ export class DeviceKeyRing {
     let key = this.unwrapped.get(hash);
     if (key === undefined) {
       const mine = grant.wraps.find((wrap) => wrap.writer === this.device.writer);
-      key = (mine === undefined ? undefined : unwrapEpochKey({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, privateKey: this.device.privateKey, wrap: mine.wrap })) ?? null;
+      key = (mine === undefined ? undefined : unwrapForDevice({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, x25519: this.device.privateKey, ...(this.device.kem === undefined ? {} : { kem: this.device.kem }), wrap: mine.wrap })) ?? null;
       this.unwrapped.set(hash, key);
     }
     return key === null ? undefined : Buffer.from(key);

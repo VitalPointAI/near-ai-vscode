@@ -43,7 +43,7 @@ import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
 import { HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
 import type { SealedEntry } from '../../domain/replica/entry';
@@ -58,6 +58,7 @@ import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
+import { SWITCH_FIRST_TEXT, formatFor, grantsTo, newEpochGrant, type PlannedEpoch } from './wrapPlan';
 import type { MemberRecord } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
@@ -145,6 +146,7 @@ export interface SharedProjectHost {
   deps: ReplicaProjectDeps;
   scales?: ScaleTable;
   mappings?: readonly ScaleMapping[];
+  routing?: import('../../domain/gate/routing').RoutingTable; // which labels are Protected B and above for the wrap rule (33.2 D-07); the defaults when absent
 }
 
 const done = (message: string, extra: Partial<MembershipResult> = {}): MembershipResult => ({ ok: true, message, notices: multiUserNoticeLines(), ...extra });
@@ -400,7 +402,7 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   const signed = await settled(buildInviteAsync(project.rosterSigner, {
     genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
     lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
-    inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt, now: at,
+    inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt, now: at, requires: roster.required,
     ...(input.forMember === undefined ? {} : { forMember: input.forMember })
   }));
   const when = expiresAt.slice(0, 10);
@@ -458,7 +460,7 @@ export function remakeInvite(shared: SharedProjectHost, invite: string): Promise
     const signed = await settled(buildInviteAsync(project.rosterSigner, {
       genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
       lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
-      inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt: record.expiresAt, now: at,
+      inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt: record.expiresAt, now: at, requires: roster.required,
       ...(record.forMember === undefined ? {} : { forMember: record.forMember })
     }));
     const who = record.forMember === undefined ? record.name : `${record.name}'s other computer`;
@@ -683,7 +685,7 @@ export async function joinFromInvite(root: string, deps: ReplicaProjectDeps, inv
   if (pin.kind === 'anchor' && !sameAnchor(pin.anchor, inviteAnchor(invite))) return hostRefusal('pin-mismatch');
   await keepPending(deps, invite);
   const device = await ReplicaProject.localDevice(deps);
-  const request = await settled(buildJoinRequestAsync(device.rosterSigner, invite, { name: input.name, x25519: device.x25519, now: now(deps) }));
+  const request = await settled(buildJoinRequestAsync(device.rosterSigner, invite, { name: input.name, x25519: device.x25519, now: now(deps), ...(device.kem === undefined ? {} : { kem: device.kem }) }));
   const safetyWords = inviteSafetyCode(invite, request.payload);
   const where = invite.forMember === undefined ? `to join ${invite.name}` : `to add this computer to ${invite.name}`;
   return done(`Your request ${where} is ready. Send the file back to the staff lead any way you like, then read these six words to them out loud or in person: ${safetyWords.join(' ')}. They admit you only if the words match.`, {
@@ -772,13 +774,14 @@ async function checkRequest(shared: SharedProjectHost, roster: RosterState, requ
   const secret = await joinSecret(deps.secrets, id);
   const usedBy = record.usedBy;
   const forMember = record.forMember === undefined ? {} : { forMember: record.forMember };
+  const requires = roster.required.length === 0 ? {} : { requires: [...roster.required] };
   // The device a used invitation admitted, with the keys of the request: anything else is refused invite-used.
   const admittedHere = (writer: string, request: JoinRequestPayload): boolean => {
     const device = deviceAt(roster.members, writer, head.position);
     return usedBy !== undefined && device?.member === usedBy && device.publicKey === request.publicKey && device.x25519 === request.x25519;
   };
   if (standing.state === 'used' && secret === undefined) {
-    const checked = checkAdmittedRequest(requestText, { invite: { genesisHash: project.anchor.genesisHash, invite: id, ...forMember } });
+    const checked = checkAdmittedRequest(requestText, { invite: { genesisHash: project.anchor.genesisHash, invite: id, ...forMember, ...requires } });
     if (!checked.ok) return fromInvite(checked.reason);
     if (!admittedHere(checked.writer, checked.request)) return refuse('invite-used');
     const invite: InvitePayload = { genesisHash: project.anchor.genesisHash, project: project.projectId, name: 'Staff project', lead: { ...project.anchor.lead }, inviter: { ...project.anchor.lead }, invite: id, secret: '', expiresAt: record.expiresAt, ...forMember };
@@ -790,7 +793,7 @@ async function checkRequest(shared: SharedProjectHost, roster: RosterState, requ
   const at = now(deps);
   const invite: InvitePayload = {
     genesisHash: project.anchor.genesisHash, project: project.projectId, name: 'Staff project', lead: { ...project.anchor.lead }, inviter, invite: id, secret,
-    expiresAt: record.expiresAt, ...forMember
+    expiresAt: record.expiresAt, ...forMember, ...requires
   };
   const checked = checkJoinRequest(requestText, { invite, secret, ...(standing.state === 'used' ? {} : { now: at, rosterInvite: { state: 'open' as const } }) });
   if (!checked.ok) return fromInvite(checked.reason);
@@ -831,7 +834,7 @@ function freeSlot(roster: RosterState): number | undefined {
   return undefined;
 }
 
-interface GrantPlan { cell: string; epochs: Array<{ epoch: number; key: Buffer }>; raw?: unknown }
+interface GrantPlan { cell: string; epochs: PlannedEpoch[]; raw?: unknown }
 
 /**
  * The grants a device needs for every cell its member is cleared for, with every epoch of each (D-45), and their keys from this device's ring. A
@@ -843,22 +846,21 @@ function grantPlans(shared: SharedProjectHost, roster: RosterState, member: { cl
   for (const info of cells) {
     const holds = member.holdsMember !== undefined && memberHolds(roster, member.holdsMember, info.cell, position);
     if (!clearedFor(member.clearance, info, holds, gate, member.leadOrDeputy === true) || skip(info.cell)) continue;
-    const epochs: Array<{ epoch: number; key: Buffer }> = [];
+    const epochs: GrantPlan['epochs'] = [];
     for (const item of epochsAt(roster.cells, info.cell, position)) {
       const key = shared.project.keys.epochKey(info.cell, item.epoch);
       if (key === undefined) return refuse('no-grant-key');
-      epochs.push({ epoch: item.epoch, key });
+      const choice = formatFor(roster, info, item.from, shared.routing); // a Protected B epoch is never given the older way (33.2 D-07)
+      if (choice !== 'switch-first') epochs.push({ epoch: item.epoch, key, choice });
     }
     if (epochs.length > 0) plans.push({ cell: info.cell, epochs, ...(info.base ? {} : { raw: info.raw }) });
   }
   return plans;
 }
 
-/** Signs and stores the per-epoch grants of the plans for one device at the roster given (a roster that admits the device). */
-async function writeGrants(shared: SharedProjectHost, plans: readonly GrantPlan[], device: { writer: string; x25519: string }, roster: string): Promise<MembershipResult | undefined> {
-  const grants = plans.flatMap((plan) => earlierEpochGrants(shared.project.signer, {
-    cell: plan.cell, epochs: plan.epochs, roster, writer: device.writer, recipient: device.x25519, ...(plan.raw === undefined ? {} : { label: plan.raw })
-  }));
+/** Signs and stores the per-epoch grants of the plans for one device at the roster given (a roster that admits the device), in each epoch's format. */
+async function writeGrants(shared: SharedProjectHost, state: RosterState, plans: readonly GrantPlan[], device: { writer: string }, roster: string): Promise<MembershipResult | undefined> {
+  const grants = grantsTo(shared.project.signer, state, roster, device.writer, plans);
   if (grants.length === 0) return undefined;
   const stored = await shared.project.putGrants(grants);
   return isProjectRefused(stored) ? fromProject(stored) : undefined;
@@ -901,7 +903,7 @@ export function admitJoinRequest(shared: SharedProjectHost, requestText: unknown
     const id = checked.invite.invite;
     const record = roster.members.invites.get(id);
     if (record === undefined) return refuse('unknown-invite');
-    const device = { writer: checked.writer, publicKey: checked.request.publicKey, x25519: checked.request.x25519, x25519Sig: checked.request.x25519Sig };
+    const { kem } = checked.request, device = { writer: checked.writer, publicKey: checked.request.publicKey, x25519: checked.request.x25519, x25519Sig: checked.request.x25519Sig, ...(kem === undefined ? {} : { kem: { ...kem } }) }; // kem: 33.2 D-03
     const forMember = record.forMember;
     let head = headOf(roster);
     let member: string;
@@ -945,7 +947,7 @@ export function admitJoinRequest(shared: SharedProjectHost, requestText: unknown
     const all = grantPlans(shared, roster, { clearance, ...holder }, cells, gate, position);
     if (isResult(all)) return all;
     const plans = checked.resume ? all.filter((plan) => !has(plan.cell)) : all;
-    const stored = await writeGrants(shared, plans, device, admitted);
+    const stored = await writeGrants(shared, roster, plans, device, admitted);
     if (stored !== undefined) return stored;
     // The roster has recorded the invitation's outcome: the join secret is no longer needed (P-31-28).
     await forgetJoinSecret(deps.secrets, id);
@@ -1015,14 +1017,14 @@ export function remakeWelcome(shared: SharedProjectHost, requestText: unknown): 
 
 // ---- remove, revoke and change: rekey (D-23) -----------------------------------------------------------------------------------------------------
 
-interface RekeyOutcome { rekeyed: string[]; skipped: string[] }
+export interface RekeyOutcome { rekeyed: string[]; skipped: string[] }
 
 /**
  * The rekey plans for a change, computed before the change is written: the grantees of each cell at the current head, and who is cleared once the
  * change applies. A labelled cell whose label this device cannot read cannot be rekeyed here (MN-05): a change touching a device on such a cell is
  * refused no-grant-key before anything is written, and a cell the change does not touch keeps its grantees and needs no new key.
  */
-function rekeyPlans(shared: SharedProjectHost, roster: RosterState, change: { kind: RekeyReason; writers: readonly string[] }, after: Change, gate: Gate): { plans: RekeyPlan[]; cells: Map<string, CellInfo> } | MembershipResult {
+export function rekeyPlans(shared: SharedProjectHost, roster: RosterState, change: { kind: RekeyReason; writers: readonly string[] }, after: Change, gate: Gate): { plans: RekeyPlan[]; cells: Map<string, CellInfo> } | MembershipResult {
   const head = headOf(roster);
   const infos = cellsAt(roster, shared.project.keys, head.position, gate.scales);
   const cells: Array<{ cell: string; grantees: readonly string[]; clearedNow: readonly string[] }> = [];
@@ -1046,7 +1048,7 @@ function rekeyPlans(shared: SharedProjectHost, roster: RosterState, change: { ki
 }
 
 /** Writes one cell.rekey per plan with recipients, each with its founding grant wrapped only to them (D-23, D-44). A plan with nobody left is not written. */
-async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[], cells: ReadonlyMap<string, CellInfo>): Promise<RekeyOutcome | MembershipResult> {
+export async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[], cells: ReadonlyMap<string, CellInfo>): Promise<RekeyOutcome | MembershipResult> {
   const { project } = shared;
   const rekeyed: string[] = [];
   const skipped: string[] = [];
@@ -1064,17 +1066,15 @@ async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[
     // Never a new epoch without its label (MN-05): a labelled cell whose label this computer cannot read is not rekeyed here.
     if (!info.base && info.raw === undefined) return refuse('no-grant-key');
     const key = newEpochKey();
-    const wraps = plan.recipients.map((writer) => {
-      const recipient = x25519At(roster.members, writer, head.position);
-      if (recipient === undefined) throw new Error('The cell key was not moved: a device to receive it has no encryption key in the roster.');
-      return { writer, wrap: wrapEpochKey({ cell: plan.cell, epoch, writer, recipient, epochKey: key }) };
-    });
-    const founding = await project.signGrant({ cell: plan.cell, epoch, roster: head.hash, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw), wraps });
+    const grant = newEpochGrant(roster, { cell: plan.cell, info, epoch, key, recipients: plan.recipients, routing: shared.routing, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw) });
+    if (grant === 'switch-first') return refused('switch-first', SWITCH_FIRST_TEXT);
+    if (grant === undefined) { skipped.push(plan.cell); continue; } // nobody has keys of the new epoch's format yet
+    const pages = await project.signGrantPages(grant), founding = pages[0]; // signed as the device the roster names (the person key when hosted)
     // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open. The key is
     // kept with its grant's hash: if the entry is not written, the next rekey of the cell makes another key for the same epoch, and the ring takes
     // the one whose grant the roster commits to (MJ-04).
     await project.keys.addOwn(plan.cell, epoch, key, grantHash(founding));
-    const stored = await project.putGrants([founding]);
+    const stored = await project.putGrants(pages);
     if (isProjectRefused(stored)) return fromProject(stored);
     const written = await append(shared, 'cell.rekey', { cell: plan.cell, epoch, reason: plan.reason, grant: grantHash(founding) }, head.hash);
     if (isResult(written)) return written;
@@ -1267,7 +1267,7 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
         const holding = (cell: string): boolean => (granteesAt(written.roster.cells, cell, updated.position, () => true) ?? []).includes(device.writer);
         const plans = grantPlans(shared, written.roster, { clearance: now2.clearance }, cells, gate, updated.position, holding);
         if (isResult(plans)) return plans;
-        const stored = await writeGrants(shared, plans, { writer: device.writer, x25519: device.x25519 }, written.hash);
+        const stored = await writeGrants(shared, written.roster, plans, { writer: device.writer }, written.hash);
         if (stored !== undefined) return stored;
         for (const plan of plans) granted.add(plan.cell);
       }
@@ -1486,7 +1486,7 @@ async function giveLegacy(shared: SharedProjectHost, written: { hash: string; ro
     const holding = (cell: string): boolean => (granteesAt(roster.cells, cell, position, () => true) ?? []).includes(device.writer);
     const plans = grantPlans(shared, roster, { clearance: record.clearance, holdsMember: member, leadOrDeputy }, legacy, gate, position, holding);
     if (isResult(plans)) continue;
-    const stored = await writeGrants(shared, plans, { writer: device.writer, x25519: device.x25519 }, at);
+    const stored = await writeGrants(shared, roster, plans, { writer: device.writer }, at);
     if (stored !== undefined) continue;
     for (const plan of plans) given.add(plan.cell);
   }

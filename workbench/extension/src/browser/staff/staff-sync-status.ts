@@ -12,7 +12,7 @@
  * liveSentences.ts SYNC_WORDS, which the browser cannot import (D-51); the workbench test checks this copy against it. Nothing here imports Theia
  * at run time, so the test drives it with a fake status bar.
  */
-import type { StaffStatusRow } from '../../common/staff-live.js';
+import { STAFF_STATUS_TEXT, type StaffStatusRow } from '../../common/staff-live.js';
 
 export const STAFF_SYNC_ENTRY = 'sterling.staffSync';
 export const STAFF_SYNC_COMMAND = 'sterling.staffSync.syncNow';
@@ -35,7 +35,7 @@ export const STAFF_SYNC_WARNING_STATES: ReadonlySet<string> = new Set(['refused'
 
 /** A state this build does not know (a newer engine) is shown as needing attention, never as calm. */
 const UNKNOWN_WORD = STAFF_SYNC_WORDS.attention;
-const UNKNOWN_SENTENCE = 'Sterling cannot show this sync state. Ask your administrator.';
+const UNKNOWN_SENTENCE = STAFF_STATUS_TEXT.unknownState;
 
 /** Which row the one entry shows when several shared projects are open: a state that needs a person first, then one still on its way. */
 const URGENCY: Readonly<Record<string, number>> = Object.freeze({

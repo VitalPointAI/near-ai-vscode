@@ -15,7 +15,7 @@
 //
 // The cell's label is sealed inside each grant under a key derived from the epoch key (sealLabel), so only a device that opens a wrap learns what the
 // cell is (DESIGN 4.1, 8.2). planRekey turns a removal, a revocation or a lowered clearance into one new epoch per affected cell (D-23), and
-// earlierEpochGrants gives a device admitted later the epochs before it, so history stays readable (D-45).
+// grantPages.ts earlierEpochGrants gives a device admitted later the epochs before it, so history stays readable (D-45).
 import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url } from '../team/canonical';
@@ -325,35 +325,4 @@ export function planRekey(input: RekeyInput): RekeyPlan[] {
     plans.push({ cell: item.cell, reason: kind, recipients: grantees.filter((writer) => !leaves(writer)), dropped, text: REKEY_KEEP_TEXT });
   }
   return plans.sort((a, b) => (a.cell < b.cell ? -1 : a.cell > b.cell ? 1 : 0));
-}
-
-// ---- earlier epochs for a device admitted later (D-45) ----
-
-export interface EarlierEpochInput {
-  cell: string;
-  // Every epoch of the cell the device is cleared for, with its key, oldest first (the host reads them from its own key ring and epochsAt).
-  epochs: ReadonlyArray<{ epoch: number; key: Buffer }>;
-  // The roster the grants are valid at: normally the one that admitted the device. It must not be the roster an epoch's founding entry cites
-  // (only the founding grant is valid there); when the current epoch was founded at the admission roster, put the device in the founding grant.
-  roster: string;
-  // The receiving device's writer id and X25519 public key.
-  writer: string;
-  recipient: Buffer | string;
-  // The cell's label, sealed into each grant under that epoch's key, when given.
-  label?: unknown;
-}
-
-// One signed grant per epoch, each wrapping that epoch's key to the one device, so a device admitted later can open the cell's history (D-45). The
-// roster fold accepts each grant when the signer is a roster writer at the named roster and the device is admitted there. Throws on a bad key, cell,
-// epoch, roster or recipient, and on an empty or repeated epoch list.
-export function earlierEpochGrants(signer: PayloadSigner, input: EarlierEpochInput): Array<SignedPayload<CellGrant>> {
-  if (input.epochs.length === 0) throw new Error('Name at least one epoch to grant.');
-  const seen = new Set<number>();
-  return input.epochs.map(({ epoch, key }) => {
-    if (seen.has(epoch)) throw new Error('Each epoch is granted once.');
-    seen.add(epoch);
-    const wrap = wrapEpochKey({ cell: input.cell, epoch, writer: input.writer, recipient: input.recipient, epochKey: key });
-    const labelSealed = input.label === undefined ? '' : sealLabel(key, input.cell, epoch, input.label);
-    return buildGrant(signer, { cell: input.cell, epoch, roster: input.roster, labelSealed, wraps: [{ writer: input.writer, wrap }] });
-  });
 }

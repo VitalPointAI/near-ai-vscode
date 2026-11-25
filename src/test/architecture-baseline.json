@@ -26,7 +26,6 @@
       "staff/replica/keyring.ts -> services/auth",
       "staff/replica/keyring.ts -> services/stateMirrorLock",
       "staff/replica/marks.ts -> services/auth",
-      "staff/replica/replicaProject.ts -> services/auth",
       "staff/replica/store.ts -> services/auth",
       "staff/replica/store.ts -> services/stateMirrorLock",
       "staff/sim/simSession.ts -> services/staffScenarioLoader",

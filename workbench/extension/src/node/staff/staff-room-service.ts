@@ -272,7 +272,7 @@ export class StaffRoomService implements StaffRoomServer {
       joins: [...(this.joins.get(row.project)?.values() ?? [])],
       splits,
       agents: [],
-      previewCopyNeeded: versions.some((item) => item.stream === project.projectId),
+      earlyShareCopyNeeded: versions.some((item) => item.stream === project.projectId),
       dismissed: [...(this.dismissed.get(row.project) ?? [])],
     } as never) as StaffRoomLiveView;
     const pending = [...this.tickets.values()].find((ticket) => ticket.project === row.project && ticket.expires > this.now());

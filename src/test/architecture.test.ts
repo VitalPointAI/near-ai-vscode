@@ -23,6 +23,7 @@ import {
   foldersInCycles,
   layerOf,
   scanArchitecture,
+  sourcesUnder,
   unplacedTopLevel,
   type ArchitectureBaseline,
   type BaselineComparison
@@ -276,4 +277,63 @@ test('D-45: the baseline file is sorted and has no duplicate line', () => {
   const files = Object.keys(baseline.fileSizes);
   assert.deepEqual(files, [...files].sort(), 'fileSizes is sorted');
   assert.ok(text.endsWith('}\n') && text.includes('\n  "rules": {'), 'two-space indent and a trailing newline');
+});
+
+// ---- 33.2 D-09: no new X25519 wrap after the switch, ever ----
+
+// The two files that may make a wrap themselves: the v1 wrap (cellKeys.ts) and the v2 wrap with the one entry point (cellWrapV2.ts).
+const WRAP_MAKERS: ReadonlySet<string> = new Set(['domain/replica/cellKeys.ts', 'domain/replica/cellWrapV2.ts']);
+// Files that call the entry point (wrapForDevice, or grantPages' wrapsFor and earlierEpochGrants over it) and must choose the format with
+// wrapPlan.formatFor, except these, each for its reason.
+const FORMAT_CHOSEN_ELSEWHERE: Readonly<Record<string, string>> = {
+  'domain/replica/cellWrapV2.ts': 'defines the entry point',
+  'domain/replica/grantPages.ts': 'takes the format its caller chose',
+  'staff/replica/replicaProject.ts': 'the genesis, before any roster: v2 exactly when the project starts switched (wrapV2AtCreation)'
+};
+
+const codeOf = (text: string): string => text.split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+
+/** Every way a source tree breaks the wrap rule (D-09). */
+function wrapPathProblems(sources: ReadonlyMap<string, string>): string[] {
+  const problems: string[] = [];
+  for (const [file, text] of sources) {
+    const code = codeOf(text);
+    if (!WRAP_MAKERS.has(file) && /\bwrapEpochKey\s*\(/.test(code)) problems.push(`${file}: calls wrapEpochKey outside the wrap modules`);
+    if (!WRAP_MAKERS.has(file) && /\bdiffieHellman\s*\(/.test(code)) problems.push(`${file}: does key agreement outside the wrap modules`);
+    const wraps = /\b(?:wrapForDevice|wrapsFor|earlierEpochGrants)\s*\(/.test(code);
+    if (wraps && !Object.hasOwn(FORMAT_CHOSEN_ELSEWHERE, file) && !/\bformatFor\s*\(/.test(code)) problems.push(`${file}: wraps without wrapPlan.formatFor`);
+  }
+  // The entry point writes v1 only on its format-1 branch, after the format-2 branch: the caller's formatFor is what keeps v1 out after the switch.
+  const entry = codeOf(sources.get('domain/replica/cellWrapV2.ts') ?? '');
+  const body = entry.slice(entry.indexOf('export function wrapForDevice'));
+  const guard = body.indexOf('input.format === 2');
+  const v1 = body.indexOf('wrapEpochKey(');
+  if (guard < 0 || v1 < 0 || v1 < guard) problems.push('domain/replica/cellWrapV2.ts: wrapForDevice writes v1 without the format-2 branch first');
+  return problems.sort();
+}
+
+test('33.2 D-09: no file outside the wrap modules makes an X25519 wrap or agreement, and every wrap path chooses its format with formatFor', () => {
+  const sources = sourcesUnder(SRC);
+  assert.ok(sources.has('domain/replica/cellWrapV2.ts'));
+  assert.deepEqual(wrapPathProblems(sources), []);
+});
+
+test('33.2 D-09 has teeth: a planted wrapEpochKey or diffieHellman call, a wrap path without formatFor, and a v1 branch without the guard are reported', () => {
+  const sources = sourcesUnder(SRC);
+  const entry = sources.get('domain/replica/cellWrapV2.ts') as string;
+  const seeded = new Map(sources);
+  seeded.set('staff/replica/planted.ts', "import { wrapEpochKey } from '../../domain/replica/cellKeys';\nexport const w = wrapEpochKey({} as never);\n");
+  seeded.set('agent/agreed.ts', "import { diffieHellman } from 'node:crypto';\nexport const s = diffieHellman({} as never);\n");
+  seeded.set('staff/replica/unchosen.ts', "import { wrapsFor } from '../../domain/replica/grantPages';\nexport const w = wrapsFor({ format: 1 } as never);\n");
+  seeded.set('domain/replica/cellWrapV2.ts', entry.replace('input.format === 2', 'false'));
+  assert.deepEqual(wrapPathProblems(seeded), [
+    'agent/agreed.ts: does key agreement outside the wrap modules',
+    'domain/replica/cellWrapV2.ts: wrapForDevice writes v1 without the format-2 branch first',
+    'staff/replica/planted.ts: calls wrapEpochKey outside the wrap modules',
+    'staff/replica/unchosen.ts: wraps without wrapPlan.formatFor'
+  ]);
+  // A comment that names the call is not a call.
+  const commented = new Map(sources);
+  commented.set('staff/replica/notes.ts', '// wrapEpochKey(...) is called only in cellKeys.ts\nexport const n = 1;\n');
+  assert.deepEqual(wrapPathProblems(commented), []);
 });

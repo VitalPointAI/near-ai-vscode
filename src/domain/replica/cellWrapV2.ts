@@ -24,7 +24,7 @@ import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createP
 import type { KeyObject } from 'node:crypto';
 import { isStrictBase64url } from '../team/canonical';
 import { isSafeIntegerInRange } from '../team/validate';
-import { EPOCH_KEY_BYTES, WRAP_BYTES, wrapEpochKey } from './cellKeys';
+import { EPOCH_KEY_BYTES, WRAP_BYTES, unwrapEpochKey, wrapEpochKey } from './cellKeys';
 import { HASH_PATTERN, STREAM_ID_PATTERN } from './entry';
 
 export const CELL_WRAP_V2_INFO = 'near-ai/cell-wrap/v2';
@@ -250,6 +250,18 @@ export function wrapForDevice(input: DeviceWrapInput): DeviceWrap {
   }
   if (input.recipient.x25519 === undefined) return { ok: false, reason: 'no-v1-key' };
   return { ok: true, format: 1, wrap: wrapEpochKey({ cell, epoch, writer, epochKey, recipient: input.recipient.x25519 }) };
+}
+
+export interface DeviceUnwrapInput { cell: string; epoch: number; writer: string; wrap: string; x25519?: KeyObject; kem?: KemPrivateKeys }
+
+// The one way a device opens a wrap addressed to it: v1 with its X25519 key, v2 with its post-quantum keys, chosen by the wrap's own format. A format
+// the device has no key for, a later version and any failure give undefined. Never throws.
+export function unwrapForDevice(input: DeviceUnwrapInput): Buffer | undefined {
+  const format = wrapFormatOf(input.wrap);
+  const where = { cell: input.cell, epoch: input.epoch, writer: input.writer, wrap: input.wrap };
+  if (format.ok && format.format === 1 && input.x25519 !== undefined) return unwrapEpochKey({ ...where, privateKey: input.x25519 });
+  if (format.ok && format.format === 2 && input.kem !== undefined) return unwrapEpochKeyV2({ ...where, privateKeys: input.kem });
+  return undefined;
 }
 
 // ---- the start-up probe (D-05; 33.2-RESEARCH 7) ----

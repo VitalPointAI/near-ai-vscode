@@ -20,7 +20,8 @@ import { randomBytes } from 'node:crypto';
 import { dominates } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleTable } from '../../domain/gate/labels';
-import { earlierEpochGrants, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { grantHash, newEpochKey, sealLabel } from '../../domain/replica/cellKeys';
+import { earlierEpochGrants, wrapsFor } from '../../domain/replica/grantPages';
 import { SEALED_OVERHEAD, sealBlob } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import { kindFamily } from '../../domain/replica/kinds';
@@ -31,7 +32,7 @@ import {
 import type { CellOrder, LegacyCellLabel, PinCandidate } from '../../domain/replica/productCells';
 import type { RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
-import { deviceAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
+import { deviceAt, memberAt } from '../../domain/replica/rosterMembers';
 import { replicaVersionHash } from '../../domain/replica/versions';
 import type { Pin, ProductVersions } from '../../domain/replica/versions';
 import type { ProductTextOutput } from '../../domain/replica/textFold';
@@ -40,6 +41,7 @@ import { MEMBERSHIP_REFUSALS, append, cellOrderHook, clearedDevices, clearedFor,
 import type { CellInfo, Gate, SharedProjectHost } from './membership';
 import { isProjectRefused } from './replicaProject';
 import type { ReplicaProject } from './replicaProject';
+import { SWITCH_FIRST_TEXT, formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 
 /** The D-19 sentence, word for word, for a label a person is not declared cleared for. */
 export function NOT_CLEARED_TEXT(label: string): string {
@@ -56,14 +58,20 @@ export const LABEL_CELL_REFUSALS = {
   'label-unknown': 'That label is not one of the labels this project knows, so nothing was written. Choose one of the labels shown.',
   'version-too-large': 'This version is larger than a version can be, so nothing was written. It stays a working text.',
   'not-a-roster-writer': MEMBERSHIP_REFUSALS['not-a-roster-writer'],
-  'roster-split': MEMBERSHIP_REFUSALS['roster-split']
+  'roster-split': MEMBERSHIP_REFUSALS['roster-split'],
+  // 33.2 D-07: a cell whose label routes local-only or nowhere is never wrapped the older way.
+  'switch-first': SWITCH_FIRST_TEXT,
+  'no-post-quantum-keys': 'This computer has not published its post-quantum keys in this shared work yet, so it cannot make a new part of it. Open the shared work again on this computer, then try again.'
 } as const;
 export type LabelCellRefusal = keyof typeof LABEL_CELL_REFUSALS;
 
 /** A refusal: reason names it; message is the plain sentence (a project or roster refusal keeps its own reason and sentence). */
 export interface LabelCellRefused { ok: false; reason: string; message: string }
-/** A cell for a label: created is false when an existing one was reused; granted lists the devices given the cell by this call. */
-export type EnsureCellResult = { ok: true; cell: string; created: boolean; granted: string[] } | LabelCellRefused;
+/**
+ * A cell for a label: created is false when an existing one was reused; granted lists the devices given the cell by this call, waiting the cleared
+ * devices that have no keys of the format the cell needs yet (33.2 D-05), given it once they publish them.
+ */
+export type EnsureCellResult = { ok: true; cell: string; created: boolean; granted: string[]; waiting?: string[] } | LabelCellRefused;
 /** An entry written into a product's cell. */
 export type ProductWriteResult = { ok: true; hash: string; stream: string } | LabelCellRefused;
 /** A version proposed: version is its replica hash (what a pin names), deps the entries it cites. */
@@ -128,36 +136,51 @@ async function legacyCellOf(shared: SharedProjectHost, labels: readonly Label[])
  * Gives the cleared person devices that hold nothing of the cell's current epoch every epoch of it, at the head (a run stopped after cell.create, or
  * a device admitted while it was being made). Only a roster writer with no split, holding every epoch key, does it; otherwise nothing is given.
  */
-async function fillGrants(shared: SharedProjectHost, cell: string, info: CellInfo, gate: Gate): Promise<string[]> {
+async function fillGrants(shared: SharedProjectHost, cell: string, info: CellInfo, gate: Gate): Promise<{ granted: string[]; waiting: string[] }> {
   const { project } = shared;
   const { roster } = await project.state();
-  if (writerProblem(shared, roster) !== undefined) return [];
+  if (writerProblem(shared, roster) !== undefined) return { granted: [], waiting: [] };
   const head = headOf(roster);
   const holders = granteesAt(roster.cells, cell, head.position, () => true);
-  if (holders === undefined) return [];
-  const epochs: Array<{ epoch: number; key: Buffer }> = [];
+  if (holders === undefined) return { granted: [], waiting: [] };
+  const epochs: GivenEpoch[] = [];
   for (const item of epochsAt(roster.cells, cell, head.position)) {
     const key = project.keys.epochKey(cell, item.epoch);
-    if (key === undefined) return [];
-    epochs.push({ epoch: item.epoch, key });
+    if (key === undefined) return { granted: [], waiting: [] };
+    epochs.push({ epoch: item.epoch, key, foundedAt: item.from });
   }
   return giveCell(shared, roster, cell, info, gate, head.position, head.hash, epochs, new Set(holders));
 }
 
-/** One grant per epoch for each cleared person device at the position that is not this device and not in `skip`, at the roster given. */
-async function giveCell(shared: SharedProjectHost, roster: RosterState, cell: string, info: CellInfo, gate: Gate, position: number, at: string, epochs: ReadonlyArray<{ epoch: number; key: Buffer }>, skip: ReadonlySet<string>): Promise<string[]> {
+interface GivenEpoch { epoch: number; key: Buffer; foundedAt: number }
+
+/**
+ * One grant per epoch for each cleared person device at the position that is not this device and not in `skip`, at the roster given, each wrap in
+ * the format formatFor gives that epoch (33.2 D-06, D-07). A device with no keys of that format is waiting; an epoch that may not be shared here yet
+ * (switch-first) is given to nobody.
+ */
+async function giveCell(shared: SharedProjectHost, roster: RosterState, cell: string, info: CellInfo, gate: Gate, position: number, at: string, epochs: readonly GivenEpoch[], skip: ReadonlySet<string>): Promise<{ granted: string[]; waiting: string[] }> {
   const { project } = shared;
   const writers = clearedDevices(roster, info, position, gate).filter((writer) => writer !== project.deviceWriter && !skip.has(writer)
     && deviceAt(roster.members, writer, position)?.kind === 'person');
+  const formats = epochs.map((item) => ({ ...item, format: formatFor(roster, info, item.foundedAt, shared.routing) }));
+  if (formats.some((item) => item.format === 'switch-first')) return { granted: [], waiting: writers };
+  const granted: string[] = [];
+  const waiting: string[] = [];
   const grants = writers.flatMap((writer) => {
-    const recipient = x25519At(roster.members, writer, position);
-    if (recipient === undefined) throw new Error('The part of the project was not shared: a device to receive it has no encryption key in the roster.');
-    return earlierEpochGrants(project.signer, { cell, epochs, roster: at, writer, recipient, label: info.raw });
+    const device = wrapDeviceAt(roster, writer, position);
+    const given = earlierEpochGrants(project.signer, {
+      cell, roster: at, writer, label: info.raw, ...(device.x25519 === undefined ? {} : { recipient: device.x25519 }), ...(device.kem === undefined ? {} : { kem: device.kem }),
+      epochs: formats.map((item) => ({ epoch: item.epoch, key: item.key, format: formatForDevice(item.format as 1 | 2 | 'best', device) }))
+    });
+    (given.length === formats.length ? granted : waiting).push(writer);
+    return given;
   });
-  if (grants.length === 0) return [];
-  const stored = await project.putGrants(grants);
-  if (isProjectRefused(stored)) throw new Error(stored.message);
-  return writers;
+  if (grants.length > 0) {
+    const stored = await project.putGrants(grants);
+    if (isProjectRefused(stored)) throw new Error(stored.message);
+  }
+  return { granted, waiting };
 }
 
 /**
@@ -167,27 +190,30 @@ async function giveCell(shared: SharedProjectHost, roster: RosterState, cell: st
 async function createCell(shared: SharedProjectHost, roster: RosterState, info: Omit<CellInfo, 'cell'>, gate: Gate, options: EnsureCellOptions): Promise<EnsureCellResult> {
   const { project } = shared;
   const head = headOf(roster);
-  const self = x25519At(roster.members, project.deviceWriter, head.position);
-  if (self === undefined) return refuse('not-a-roster-writer');
+  const self = wrapDeviceAt(roster, project.deviceWriter, head.position);
+  if (self.x25519 === undefined) return refuse('not-a-roster-writer');
+  const format = formatFor(roster, info, undefined, shared.routing);
+  if (format === 'switch-first') return refuse('switch-first');
   let cell = '';
   do cell = randomBytes(16).toString('hex'); while (roster.cells.cells.has(cell));
   const key = newEpochKey();
-  const founding = await project.signGrant({
-    cell, epoch: 1, roster: head.hash, labelSealed: sealLabel(key, cell, 1, info.raw),
-    wraps: [{ writer: project.deviceWriter, wrap: wrapEpochKey({ cell, epoch: 1, writer: project.deviceWriter, recipient: self, epochKey: key }) }]
-  });
+  const { wraps } = wrapsFor({ format: formatForDevice(format, self), cell, epoch: 1, epochKey: key, devices: [self] });
+  if (wraps.length === 0) return refuse('no-post-quantum-keys');
+  // Signed by the device the roster names: the person key in a hosted session (D-60), this device's key otherwise.
+  const pages = await project.signGrantPages({ cell, epoch: 1, roster: head.hash, labelSealed: sealLabel(key, cell, 1, info.raw), wraps });
+  const founding = pages[0];
   // The key and the founding grant are kept before the entry that commits to them (MJ-04): a crash before cell.create leaves them unused.
   await project.keys.addOwn(cell, 1, key, grantHash(founding));
   if (options.stopAfter === 'key') throw new Error('stopped after the key (test seam)');
-  const stored = await project.putGrants([founding]);
+  const stored = await project.putGrants(pages);
   if (isProjectRefused(stored)) return { ok: false, reason: stored.refused, message: stored.message };
   if (options.stopAfter === 'grant') throw new Error('stopped after the founding grant (test seam)');
   const written = await append(shared, 'cell.create', { cell, epoch: 1, grant: grantHash(founding) }, head.hash);
   if (!('hash' in written)) return fromResult(written);
   if (options.stopAfter === 'create') throw new Error('stopped after cell.create (test seam)');
   const position = written.roster.positionOf.get(written.hash) as number;
-  const granted = await giveCell(shared, written.roster, cell, { ...info, cell }, gate, position, written.hash, [{ epoch: 1, key }], new Set());
-  return { ok: true, cell, created: true, granted };
+  const given = await giveCell(shared, written.roster, cell, { ...info, cell }, gate, position, written.hash, [{ epoch: 1, key, foundedAt: position }], new Set());
+  return { ok: true, cell, created: true, ...given };
 }
 
 /**
@@ -205,8 +231,8 @@ export async function ensureLabelCell(shared: SharedProjectHost, label: unknown,
   const raw = plainLabel(wanted);
   const existing = await labelCellOf(shared, wanted);
   if (existing !== undefined) {
-    const granted = await fillGrants(shared, existing, { cell: existing, base: false, label: wanted, raw, known: true }, gate);
-    return { ok: true, cell: existing, created: false, granted };
+    const given = await fillGrants(shared, existing, { cell: existing, base: false, label: wanted, raw, known: true }, gate);
+    return { ok: true, cell: existing, created: false, ...given };
   }
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return fromResult(problem);
@@ -233,8 +259,8 @@ export async function ensureLegacyCell(shared: SharedProjectHost, labels: readon
   const raw: LegacyCellLabel = legacyCellLabel(read);
   const existing = await legacyCellOf(shared, raw.labels);
   if (existing !== undefined) {
-    const granted = await fillGrants(shared, existing, { cell: existing, base: false, legacy: raw.labels, raw, known: true }, gate);
-    return { ok: true, cell: existing, created: false, granted };
+    const given = await fillGrants(shared, existing, { cell: existing, base: false, legacy: raw.labels, raw, known: true }, gate);
+    return { ok: true, cell: existing, created: false, ...given };
   }
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return fromResult(problem);

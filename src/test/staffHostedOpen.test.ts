@@ -11,7 +11,7 @@ import { sessionCertifyData } from '../domain/replica/sessionKeys';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
 import type { AsyncPayloadSigner, PayloadSigner } from '../domain/team/signedPayload';
 import { appendProductEntry } from '../staff/replica/labelCells';
-import { loadOrCreateEncryptionKey } from '../staff/replica/keyring';
+import { loadOrCreateEncryptionKey, loadOrCreateKemKeys } from '../staff/replica/keyring';
 import { ReplicaProject, isProjectRefused } from '../staff/replica/replicaProject';
 import type { ReplicaProjectDeps } from '../staff/replica/replicaProject';
 import { identityDir } from '../team/identity';
@@ -47,11 +47,13 @@ async function hostedFor(lead: Seat, label: string): Promise<Hosted> {
   const certified = await lead.p.appendOwn('session.certify', data);
   assert.ok('ok' in certified, 'ok' in certified ? undefined : certified.message);
   const encryption = await loadOrCreateEncryptionKey(lead.at.secrets, { identityDir: identityDir(lead.at.global), identity: lead.p.signer });
+  // The person's post-quantum keys, as the session's envelope holds them (33.2-04): new shared work starts post-quantum (33.2-06).
+  const kem = await loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) });
   const secrets = new MemorySecrets();
   const person = asyncOf(lead.p.signer);
   const deps: ReplicaProjectDeps = {
     ...lead.at.deps, secrets, keyStatus: () => Promise.resolve(SESSION_KEYS), sessionSigner: session.signer, personSigner: person,
-    hosted: { personPublicKey: lead.p.signer.publicKey, encryption }
+    hosted: { personPublicKey: lead.p.signer.publicKey, encryption, kem: { publicKeys: kem.publicKeys, privateKeys: kem.privateKeys } }
   };
   return { deps, secrets, session: session.signer, person };
 }

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  JOIN_REQUEST_TEXT, JOIN_WAITING_TEXT, OFFLINE_BANNER_TEXT, ONLY_YOU_TEXT, PREVIEW_COPY_TEXT, staffRoomLive, UNCONFIRMED_TEXT,
+  JOIN_REQUEST_TEXT, JOIN_WAITING_TEXT, OFFLINE_BANNER_TEXT, ONLY_YOU_TEXT, EARLY_SHARE_COPY_TEXT, staffRoomLive, UNCONFIRMED_TEXT,
 } from '../domain/staff/staffRoomLive';
 import type { StaffRoomLiveInput, StaffRoomCard } from '../domain/staff/staffRoomLive';
 import { SCALE_PRESETS } from '../domain/gate/labels';
@@ -142,11 +142,11 @@ test('a roster split shows its sentence with one Choose per change, to a lead or
   assert.deepEqual(staffRoomLive(input({ splits })).cards, []);
 });
 
-test('a shared work that needs a newer Sterling shows the D-67 sentence; a preview shared work with base-cell products says to make a copy', () => {
+test('a shared work that needs a newer Sterling shows the D-67 sentence; shared work made shared by 0.4.35 with base-cell products says to make a copy', () => {
   const update = staffRoomLive(input({ status: { state: 'needs-update', reason: 'needs-update', findings: [] } }));
   assert.deepEqual(update.cards.map((card) => [card.kind, card.text]), [['update', 'This shared work needs a newer version of Sterling. Ask your administrator to update it.']]);
-  const preview = staffRoomLive(input({ previewCopyNeeded: true }));
-  assert.deepEqual(preview.cards.map((card) => [card.kind, card.text, card.actions[0]?.id]), [['preview-copy', PREVIEW_COPY_TEXT, 'make-copy']]);
+  const early = staffRoomLive(input({ earlyShareCopyNeeded: true }));
+  assert.deepEqual(early.cards.map((card) => [card.kind, card.text, card.actions[0]?.id]), [['early-share-copy', EARLY_SHARE_COPY_TEXT, 'make-copy']]);
 });
 
 test('agent cards carry the one trust line only where TrustFacts exist', () => {
@@ -169,7 +169,7 @@ test('a decision after the newest checkpoint says it is not yet confirmed by you
 });
 
 test('no sentence of the model says hub, entries or project', () => {
-  const view = staffRoomLive(input({ isLeadDevice: true, previewCopyNeeded: true, status: { state: 'offline', findings: [] }, joins: [{ invite: 'inv-drew' }] }));
+  const view = staffRoomLive(input({ isLeadDevice: true, earlyShareCopyNeeded: true, status: { state: 'offline', findings: [] }, joins: [{ invite: 'inv-drew' }] }));
   const text = JSON.stringify(view);
   for (const word of [/\bhub\b/i, /\bentries\b/i, /\bproject\b/i]) assert.doesNotMatch(text, word);
 });

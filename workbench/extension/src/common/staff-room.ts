@@ -33,7 +33,7 @@ export interface StaffRoomPerson {
 }
 
 export interface StaffRoomCard {
-  readonly kind: 'update' | 'preview-copy' | 'contested' | 'join' | 'roster-split' | 'owner-prompt' | 'agent';
+  readonly kind: 'update' | 'early-share-copy' | 'contested' | 'join' | 'roster-split' | 'owner-prompt' | 'agent';
   readonly id: string;
   readonly text: string;
   readonly actions: readonly StaffRoomAction[];

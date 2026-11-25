@@ -5,6 +5,15 @@
 import type { GrantWrap } from './cellKeys';
 import { wrapFormatOf } from './cellWrapV2';
 
+/** The sentences SECURITY.md "How cell keys are wrapped" carries word for word (33.2 D-11), checked by the docs test. */
+export const WRAP_SECURITY_SENTENCES: readonly string[] = Object.freeze([
+  'New shared work, and every project its lead switches to post-quantum keys, wraps each cell key with a hybrid of P-256 and ML-KEM-768, joined by HKDF-SHA256 and sealed with AES-256-GCM.',
+  'Keys given before the switch keep their older X25519 wraps and stay readable.',
+  'Protected B work is never wrapped the older way, so a project must switch before it shares Protected B work.',
+  'ML-KEM-1024 with P-384 is reserved for Protected C and classified work, pending the Cyber Centre\'s advice.',
+  'Signatures stay Ed25519.'
+]);
+
 /** The feature a project requires to be post-quantum (33.2 D-05, D-08). */
 export const WRAP_FEATURE = 'wrap@2';
 

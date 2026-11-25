@@ -853,7 +853,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [x] **WRAP-02**: Every device, hosted person and hub publishes a P-256 key and an ML-KEM-768 key bound to its Ed25519 key (`device.kem`, or `kem` in its descriptor); the safety words cover them; the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file.
 - [x] **WRAP-03**: An epoch grant may span several signed pages, each within the grant size limit, all committed by the founding roster entry.
 - [ ] **WRAP-04**: The `wrap@2` feature goes through `roster.require`: new shared projects require it at creation, a lead switches an existing project in one step, each cell moves at its next epoch, late devices get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap.
-- [ ] **WRAP-05**: A cell whose label routes local-only or nowhere (by default Protected B, Protected C and every classified level) is never wrapped with X25519; a required CI check fails if any wrap path bypasses the one entry point; ML-KEM-1024 with P-384 is reserved for Protected C and classified work.
+- [x] **WRAP-05**: A cell whose label routes local-only or nowhere (by default Protected B, Protected C and every classified level) is never wrapped with X25519; a required CI check fails if any wrap path bypasses the one entry point; ML-KEM-1024 with P-384 is reserved for Protected C and classified work.
 
 | Requirement | Phase |
 |-------------|-------|

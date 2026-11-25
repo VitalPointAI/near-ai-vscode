@@ -187,13 +187,19 @@ export class StaffLiveEngine {
     if (hosted === undefined) return { ...base, publishKem: true };
     const privateKey = hosted.encryption.privateKey;
     if (privateKey === undefined) throw new Error('The session\'s encryption key was dropped before the project opened.');
+    const kemPublic = hosted.encryption.kem?.publicKeys;
+    const kemPrivate = hosted.encryption.kem?.privateKeys;
     return {
       ...base,
       keyStatus: HOSTED_MARK_KEYS,
       sessionSigner: hosted.keys.sessionSigner,
       personSigner: hosted.keys.personSigner,
       // The binding (the person key's signature over the X25519 key) is made when the person joins a project (33-27); opening does not use it.
-      hosted: { personPublicKey: hosted.keys.personSigner.publicKey, encryption: { publicKey: hosted.encryption.publicKey, privateKey, binding: '' } },
+      hosted: {
+        personPublicKey: hosted.keys.personSigner.publicKey, encryption: { publicKey: hosted.encryption.publicKey, privateKey, binding: '' },
+        // The person's post-quantum keys, when the envelope holds them (33.2-04): a project that requires wrap@2 opens here too.
+        ...(kemPrivate === undefined || kemPublic === undefined ? {} : { kem: { publicKeys: kemPublic, privateKeys: kemPrivate } }),
+      },
     };
   }
 

@@ -169,6 +169,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - 47-20 blocked: its precondition needs 71-12 (the revocation card that reads the requests) on the base; 71-12 has no SUMMARY on main
 - 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
 - 33.1-15 waits for 32.1-24 (nearAi.setup.message) on the base (33.1-17 finished 2026-11-24 once 33-23 and #187 reached Phase 33's branch)
+- 33.2-07 Task 3 (cards in the native Staff Room) waits on 33-24 staff-live-engine.ts and 33-26 reaching main
 
 ### Quick Tasks Completed
 
@@ -358,3 +359,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
 - [Phase 33.1]: 33.1-01: owner answered the permanent-shapes checkpoint 'as listed' (D-43); positionWriteProblem is the one write rule for positions kinds, run by the fold and the hub
 - [Phase 33.1]: 33.1-17: a step-up binds one action only on its own nonce's return route; appendOwn refuses person-key-required and action-required before signing
+- [Phase 33.2]: 33.2-06: every wrap path through wrapForDevice with wrapPlan.formatFor; new projects start switched; Protected B never v1; architecture check enforces it
+- [Phase 33.2]: 33.2-07: switch, move and give-keys actions and the card model; the native Staff Room wiring waits on 33-24 and 33-26

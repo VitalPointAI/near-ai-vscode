@@ -21,16 +21,15 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import * as path from 'node:path';
-import type { SecretStorageLike } from '../../services/auth';
-import { identityDir as identityDirOf, loadOrCreateDeviceIdentity } from '../../team/identity';
+import { identityDir as identityDirOf } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
-import { localKeyStatus } from '../../team/keyHistory';
-import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../../domain/team/signedPayload';
 import { SESSION_REFUSALS, isPersonKeyKind, requiresActionId } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrantAsync, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { buildGrantAsync, newEpochKey, openLabel } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
+import { signKemBinding } from '../../domain/replica/deviceKem';
+import { buildGrantPagesAsync, wrapsFor } from '../../domain/replica/grantPages';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntryAsync, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
@@ -51,15 +50,15 @@ import type { HeadSet } from '../../domain/replica/transport';
 import { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, readAnchorFile, sameAnchor, writeAnchorFile } from './anchorFile';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
-import { DeviceKeyRing, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from './keyring';
+import { DeviceKeyRing, loadOrCreateKemKeys } from './keyring';
 import * as kemPublish from './kemPublish';
-import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
-import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import type { CheckVerdict, ForeignCheck, IngestResult, StartedAgain, StoreRefusal, StoreRefused } from './store';
 import { foldCheckpoints, trustedCheckpointsOf } from './foldCheckpoints';
 import type { SyncLocal } from './hubSync';
-import { UPDATE_SENTENCE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from './requireGate';
-import { WRAP_V2_FEATURE } from '../../domain/replica/features';
+import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGate';
+import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
+import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -123,79 +122,13 @@ export function isProjectRefused(value: unknown): value is ProjectRefused {
   return isRecord(value) && typeof value.refused === 'string' && Object.hasOwn(PROJECT_REFUSALS_HOST, value.refused) && typeof value.message === 'string';
 }
 
-/** What the host gives a project: secret storage, the extension's global storage folder, and optional seams for tests and later plans. */
-export interface ReplicaProjectDeps {
-  secrets: SecretStorageLike;
-  globalStorageDir: string;
-  /** The identity folder (identity-create.lock and the key history); identityDir(globalStorageDir) when absent. */
-  identityDir?: string;
-  now?: () => Date;
-  /** The key status that verifies this device's store marks; this device's key history when absent. */
-  keyStatus?: () => Promise<KeyStatusLookup>;
-  /** The cell order the fold checks writes against (D-25), built by the host from Phase 70 dominance; absent means every citation is allowed. */
-  cellOrder?: (roster: RosterState, keys: DeviceKeyRing) => ReplicaContext['cellOrder'];
-  /** The memory-capped decode worker entries from outside pass (D-05); the project makes its own on first need when absent, and close() ends it. */
-  decodeHost?: DecodeHost;
-  /** The features this build folds; clientReplicaFeatures() when absent. Tests set it to stand in for a newer version (POST-01) or a runtime
-   *  without wrap@2 (33.2 D-05). */
-  knownFeatures?: readonly string[];
-  /** A hosted session (Phase 33 D-60): the session key signs this device's ordinary writes, and the person key, through your organization's key store,
-   *  signs the person-key kinds. Absent on a single machine, where this device's key signs everything as before. */
-  sessionSigner?: PayloadSigner;
-  personSigner?: AsyncPayloadSigner;
-  /** Publish this computer's post-quantum keys at open (33.2 D-05). Off unless set: the host sets it where a project opens for live work, not for a
-   *  command's short open, whose flows promise to write nothing. A hosted session publishes through its own step-up instead. */
-  publishKem?: boolean;
-  /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). Off until every wrap path writes
-   *  cell-wrap/v2 (33.2-06): before that, a switched project would refuse the X25519 grants today's paths still write. */
-  wrapV2AtCreation?: boolean;
-  /** A hosted session (Phase 33 D-61): the person key is this device (its writer), the opened X25519 key decrypts grants, and the session key signs the
-   *  store's marks and owns its files. No device key is made or read; needs sessionSigner, personSigner and keyStatus. */
-  hosted?: { personPublicKey: string; encryption: DeviceEncryptionKey };
-}
-
-/** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
-export interface LocalDevice {
-  signer: DeviceIdentity;
-  /** What signs as the device the roster names (genesis, grants, invitations, join requests): the person key in a hosted session (33-27). */
-  rosterSigner: PayloadSigner | AsyncPayloadSigner;
-  writer: string;
-  publicKey: string;
-  /** The raw X25519 public key as base64url, and the device's signature binding it to the writer (D-19). */
-  x25519: string;
-  x25519Sig: string;
-}
-
-interface DeviceKeys { identity: DeviceIdentity; roster: PayloadSigner | AsyncPayloadSigner; writer: string; encryption: DeviceEncryptionKey }
-
-async function deviceKeys(deps: ReplicaProjectDeps): Promise<DeviceKeys> {
-  const person = deps.personSigner;
-  if (deps.hosted !== undefined && deps.sessionSigner !== undefined && person?.publicKey === deps.hosted.personPublicKey) return { identity: deps.sessionSigner, roster: person, writer: writerIdOf(deps.hosted.personPublicKey), encryption: deps.hosted.encryption };
-  if (deps.hosted !== undefined) throw new Error('A hosted session opens a shared project only with its session key and the person key it names.');
-  const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
-  const { identity } = await loadOrCreateDeviceIdentity(deps.secrets, { identityDir: dir, ...(deps.now === undefined ? {} : { now: deps.now }) });
-  const encryption = await loadOrCreateEncryptionKey(deps.secrets, { identityDir: dir, identity });
-  return { identity, roster: identity, writer: writerIdOf(identity.publicKey), encryption };
-}
+export type { LocalDevice, ReplicaProjectDeps } from './projectDevice';
 
 /** A signature of the device the roster names, or ReplicaProjectError signer-refused with the key store's own sentence (the flows return it). */
 export async function settled<T>(signed: Promise<T | SignRefused>): Promise<T> {
   const value = await signed;
   if (isRecord(value) && typeof value.refused === 'string' && !('payload' in value) && !('entry' in value)) throw new ReplicaProjectError(refuse('signer-refused', value.refused));
   return value as T;
-}
-
-/** Whether a project made shared now requires wrap@2 from the start: asked for, and known on this computer (its probe passed). */
-const wrapV2AtCreation = (deps: ReplicaProjectDeps): boolean => deps.wrapV2AtCreation === true && (deps.knownFeatures ?? clientReplicaFeatures()).includes(WRAP_V2_FEATURE);
-
-function storeDeps(deps: ReplicaProjectDeps, identity: DeviceIdentity): ReplicaStoreDeps {
-  const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
-  return {
-    secrets: deps.secrets,
-    signer: () => Promise.resolve(identity),
-    keyStatus: deps.keyStatus ?? (() => localKeyStatus(dir, deps.secrets)),
-    ...(deps.now === undefined ? {} : { now: deps.now })
-  };
 }
 
 // ---- reading entries this device can open ----------------------------------------------------------------------------------------------------------
@@ -278,7 +211,7 @@ export class ReplicaProject {
   /** This device's signing identity, X25519 public key and binding, made on first need (D-19). */
   public static async localDevice(deps: ReplicaProjectDeps): Promise<LocalDevice> {
     const keys = await deviceKeys(deps);
-    return { signer: keys.identity, rosterSigner: keys.roster, writer: keys.writer, publicKey: keys.roster.publicKey, x25519: keys.encryption.publicKey, x25519Sig: keys.encryption.binding };
+    return { signer: keys.identity, rosterSigner: keys.roster, writer: keys.writer, publicKey: keys.roster.publicKey, x25519: keys.encryption.publicKey, x25519Sig: keys.encryption.binding, ...(keys.kem === undefined ? {} : { kem: keys.kem }) };
   }
 
   /**
@@ -300,7 +233,7 @@ export class ReplicaProject {
     const device = await deviceKeys(deps);
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
-    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, ringDevice(device));
     const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
     // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
     if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
@@ -335,20 +268,29 @@ export class ReplicaProject {
       const pin = await readAnchorFile(genesisPinFile(deps.globalStorageDir, entry.header.stream));
       if (pin.kind !== 'anchor' || pin.anchor.genesisHash !== entryHash(entry.header) || pin.anchor.lead.writer !== device.writer) continue;
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
-      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, ringDevice(device));
       const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
-      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) });
+      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) && device.kem !== undefined });
       return isProjectRefused(rearmed) ? rearmed : reused;
     }
 
     const now = deps.now?.() ?? new Date();
     const project = randomBytes(16).toString('hex');
     const baseKey = newEpochKey();
-    const founding = await settled(buildGrantAsync(device.roster, {
+    // New shared work starts post-quantum (33.2 D-05): the lead's device names its post-quantum keys in the genesis, bound by its own key, and the
+    // base cell's first key is wrapped with cell-wrap/v2. Where this computer does not know wrap@2, the project starts as before. A hosted session
+    // binds its post-quantum keys with the person key after opening (publishPersonKem), not in a genesis the session key would sign, so it starts as
+    // before too.
+    const kem = wrapV2AtCreation(deps) && device.roster === device.identity ? device.kem : undefined;
+    const pages = await settled(buildGrantPagesAsync(device.roster, {
       cell: project, epoch: 1, roster: ORIGIN_ROSTER, labelSealed: '',
-      wraps: [{ writer: device.writer, wrap: wrapEpochKey({ cell: project, epoch: 1, writer: device.writer, recipient: device.encryption.publicKey, epochKey: baseKey }) }]
+      wraps: wrapsFor({ format: kem === undefined ? 1 : 2, cell: project, epoch: 1, epochKey: baseKey, devices: [{ writer: device.writer, x25519: device.encryption.publicKey, ...(kem === undefined ? {} : { kem }) }] }).wraps
     }));
-    const lead = { writer: device.writer, publicKey: device.roster.publicKey, x25519: device.encryption.publicKey, x25519Sig: device.encryption.binding, slot: 1 };
+    const founding = pages[0];
+    const lead = {
+      writer: device.writer, publicKey: device.roster.publicKey, x25519: device.encryption.publicKey, x25519Sig: device.encryption.binding, slot: 1,
+      ...(kem === undefined ? {} : { kem: signKemBinding(kem, device.writer, (bytes) => device.identity.sign(bytes)) })
+    };
     const data: Record<string, unknown> = {
       project, name: input.name, profile: input.profile, labelMapHash: input.labelMapHash,
       lead: { member: input.lead.member, writer: device.writer, device: lead },
@@ -363,18 +305,20 @@ export class ReplicaProject {
     }));
     const anchor: RosterAnchor = { genesisHash: genesis.hash, project, lead: { member: input.lead.member, writer: device.writer, publicKey: device.roster.publicKey, x25519: device.encryption.publicKey } };
 
-    const ring = await DeviceKeyRing.load(deps.secrets, project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, project, ringDevice(device));
     await ring.addOwn(project, 1, baseKey, grantHash(founding));
     if (!(await writeAnchorFile(genesisPinFile(deps.globalStorageDir, project), anchor))) return refuse('pin-damaged');
-    const grant = await store.putGrant(project, 1, founding);
-    if (!('ok' in grant)) return storeRefused(grant);
+    for (const page of pages) {
+      const grant = await store.putGrant(project, 1, page);
+      if (!('ok' in grant)) return storeRefused(grant);
+    }
     const created = new ReplicaProject(path.resolve(root), anchor, deps, store, ring, device);
     const appended = device.roster === device.identity ? await store.appendOwn([genesis]) : await store.ingestForeign([genesis.entry], [], async () => PASS);
     if (!('ok' in appended)) return storeRefused(appended);
     if (!(await writeAnchorFile(projectFile(root), anchor))) return refuse('pin-damaged');
     created.lamports.set(genesis.hash, 1);
     // New shared work requires wrap@2 from the start where this computer knows it (33.2 D-05).
-    const armed = await ensureRequireArmed(created, { withWrapV2: wrapV2AtCreation(deps) });
+    const armed = await ensureRequireArmed(created, { withWrapV2: kem !== undefined });
     if (isProjectRefused(armed)) return armed;
     // The genesis names only the lead's member id; the name the person gave is the lead's first member.update (33-14), as every other member's is.
     const named = input.lead.name === undefined ? undefined : await created.appendChecked(() => ({ kind: 'member.update', data: { member: input.lead.member, name: input.lead.name }, options: {}, check: () => undefined }));
@@ -436,7 +380,7 @@ export class ReplicaProject {
     if (local.kind === 'damaged') return refuse('pin-damaged');
     if (local.kind === 'anchor' && !sameAnchor(local.anchor, pinned)) return refuse('pin-mismatch');
     // Every check has passed; from here on the join writes.
-    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, ringDevice(device));
     if (pin.kind === 'missing' && !(await writeAnchorFile(pinFile, pinned))) return refuse('pin-mismatch');
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
@@ -473,6 +417,11 @@ export class ReplicaProject {
   /** A cell grant signed by the device the roster names; throws ReplicaProjectError signer-refused when the person key refuses. */
   public signGrant(grant: CellGrant): Promise<SignedPayload<CellGrant>> {
     return settled(buildGrantAsync(this.device.roster, grant));
+  }
+
+  /** The signed pages of one epoch grant (33.2 D-04), signed by the device the roster names; throws ReplicaProjectError signer-refused as signGrant. */
+  public signGrantPages(grant: CellGrant): Promise<Array<SignedPayload<CellGrant>>> {
+    return settled(buildGrantPagesAsync(this.device.roster, grant));
   }
 
   /** How many times the main fold had to start again (Pitfall 1: it does not rise when nothing changed). */
@@ -673,7 +622,8 @@ export class ReplicaProject {
       const blobs = new Map<string, SealedBlob>();
       for (const entry of own) {
         const opened = await this.openEntry(entry);
-        if (opened === undefined || ROSTER_KIND_OWNER[opened.kind] === undefined) continue;
+        // The roster line, and each device's post-quantum keys (33.2 D-03), which a device needs to wrap keys to the others.
+        if (opened === undefined || (ROSTER_KIND_OWNER[opened.kind] === undefined && opened.kind !== 'device.kem')) continue;
         roster.push(entry);
         if (opened.blob === undefined) continue;
         const blob = this.blobCache.get(opened.blob) ?? await this.store.blob(opened.blob);

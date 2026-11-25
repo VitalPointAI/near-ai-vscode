@@ -6,7 +6,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
 import test, { mock } from 'node:test';
-import { REKEY_KEEP_TEXT, openLabel, readGrant, unwrapEpochKey } from '../domain/replica/cellKeys';
+import { createHash } from 'node:crypto';
+import { REKEY_KEEP_TEXT, openLabel, readGrant } from '../domain/replica/cellKeys';
+import { kemPrivateFromSeeds, kemPublicFromSeeds, unwrapForDevice } from '../domain/replica/cellWrapV2';
+import type { KemSeeds } from '../domain/replica/cellWrapV2';
+import { signKemBinding } from '../domain/replica/deviceKem';
 import { signCheckpoint, verifyCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint } from '../domain/replica/checkpoint';
 import { HUB_FILE_REFUSALS, buildHubFile, certPinOf, enrolmentMac } from '../domain/replica/hubFile';
@@ -40,6 +44,10 @@ const PRODUCT_ROLES = { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuar
 
 interface TestHub { device: RosterDevice; text: string; enrolmentSecret: string; certPin: string }
 
+// The hub's post-quantum keys (33.2 D-03), fixed by its label like its other keys: a hub made with --generate-key kem carries them in its hub file.
+const hubKemSeeds = (device: RosterDevice): KemSeeds => ({ p256: createHash('sha256').update(`hub kem p256/${device.label}`).digest(), mlkem768: createHash('sha512').update(`hub kem mlkem/${device.label}`).digest() });
+const hubKem = (device: RosterDevice) => signKemBinding(kemPublicFromSeeds(hubKemSeeds(device)), device.writer, (bytes) => device.signer.sign(bytes));
+
 /** A hub file signed by the hub's own key (labels give fixed keys), as the operator prints it, valid for a week from WORLD_NOW unless told. */
 function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; expiresAt?: string } = {}): TestHub {
   const device = rosterDevice(label, 'hub');
@@ -48,7 +56,7 @@ function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; e
   const certPin = options.certPin ?? CERT_PIN;
   const signed = buildHubFile(device.signer, {
     address: HUB_ADDRESS, certPin, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: 'enr-00112233aabbccdd', enrolmentSecret,
-    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now
+    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now, kem: hubKem(device)
   });
   return { device, text: JSON.stringify(signed), enrolmentSecret, certPin };
 }
@@ -56,7 +64,7 @@ function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; e
 const hubIdOfDevice = (device: RosterDevice): string => `hub-${device.writer.slice(0, 16)}`;
 const head = (roster: RosterState): { hash: string; position: number } => ({ hash: roster.positions[roster.positions.length - 1], position: roster.positions.length - 1 });
 
-/** The epochs of each cell the hub's X25519 private key opens from the grants on the install's disk, each checked against the key the lead holds. */
+/** The epochs of each cell the hub's keys open from the grants on the install's disk (v1 or v2 wraps), each checked against the key the lead holds. */
 function hubOpens(seat: Seat, hub: RosterDevice): Map<string, number[]> {
   const opened = new Map<string, number[]>();
   for (const item of grantsOn(seat.at)) {
@@ -64,7 +72,7 @@ function hubOpens(seat: Seat, hub: RosterDevice): Map<string, number[]> {
     if (!read.ok) continue;
     for (const wrap of read.grant.wraps) {
       if (wrap.writer !== hub.writer) continue;
-      const key = unwrapEpochKey({ cell: read.grant.cell, epoch: read.grant.epoch, writer: hub.writer, privateKey: hub.x25519Private, wrap: wrap.wrap });
+      const key = unwrapForDevice({ cell: read.grant.cell, epoch: read.grant.epoch, writer: hub.writer, x25519: hub.x25519Private, kem: kemPrivateFromSeeds(hubKemSeeds(hub)), wrap: wrap.wrap });
       if (key === undefined) continue;
       const held = seat.p.keys.epochKey(read.grant.cell, read.grant.epoch);
       if (held !== undefined) assert.ok(key.equals(held), 'the hub opens the same key the lead holds');
@@ -584,7 +592,7 @@ function fakeHubFile(address: string, options: { expiresAt?: string; label?: str
   const enrolmentSecret = Buffer.alloc(32, 9).toString('base64url');
   const signed = buildHubFile(device.signer, {
     address, certPin: FAKE_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: ENROLMENT, enrolmentSecret,
-    expiresAt: options.expiresAt ?? new Date(WORLD_NOW.getTime() + 7 * DAY_MS).toISOString(), now: WORLD_NOW
+    expiresAt: options.expiresAt ?? new Date(WORLD_NOW.getTime() + 7 * DAY_MS).toISOString(), now: WORLD_NOW, kem: hubKem(device)
   });
   return { device, text: JSON.stringify(signed), enrolmentSecret, certPin: FAKE_PIN, address };
 }
