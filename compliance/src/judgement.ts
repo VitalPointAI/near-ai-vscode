@@ -5,7 +5,7 @@
 // The evidence folder's manifest (D-15, `sterling-evidence/1`) is defined here once, for the release evidence writer (48.2-05) and the
 // session (the workbench backend) alike. This file imports only status.ts and model.ts: the workbench bundles it (engine/compliance.cjs).
 import { aggregateControl, computeStatus, isFresh, summarizeLevel } from './status.ts';
-import { REASONS, type ComponentRow, type DashboardRow, type Responsibility, type RuleResult, type StatusInput } from './model.ts';
+import { AGEING, FRESHNESS, REASONS, type ComponentRow, type DashboardRow, type FreshnessWindows, type Responsibility, type RuleResult, type StatusInput, type WindowKind } from './model.ts';
 
 export const JUDGEMENT_FORMAT = 'sterling-judgement/1' as const;
 
@@ -61,8 +61,55 @@ export interface Judgement {
 }
 
 export type JudgedComponent = ComponentRow & Readonly<{ reasonText: string; statement?: string; limitation?: string; unsettled?: string; requiresOfficialSignature?: boolean; inheritedFrom?: string }>;
-export type JudgedRow = DashboardRow & JudgementRowPresentation & Readonly<{ reasonText: string; components: readonly JudgedComponent[] }>;
+export type JudgedRow = Omit<DashboardRow, 'components'> & JudgementRowPresentation & Readonly<{ reasonText: string; components: readonly JudgedComponent[] }>;
 export type JudgedLevel = JudgementLevel & Readonly<{ counts: ReturnType<typeof summarizeLevel> }>;
+
+/** A result's freshness (D-12): Current, Ageing, Out of date (exactly the engine's Stale), or Unknown when the clock cannot be trusted. */
+export type Freshness = 'current' | 'ageing' | 'out-of-date' | 'unknown';
+/** A row's freshness: the worst of its results, or `none` when it has no evidence. */
+export type RowFreshness = Freshness | 'none';
+export type AgeingThresholds = Readonly<Partial<Record<WindowKind, number>>>;
+/** A result as re-judged: with its freshness. */
+export type FreshResult = RuleResult & Readonly<{ freshness: Freshness }>;
+/** A row as re-judged: the dashboard's row, each result with its freshness, the row's worst freshness and its oldest result time. */
+export type FreshRow = Omit<JudgedRow, 'components'> & Readonly<{
+  components: readonly (Omit<JudgedComponent, 'evidence'> & Readonly<{ evidence: readonly FreshResult[] }>)[];
+  freshness: RowFreshness;
+  asOf?: string;
+}>;
+
+const FRESHNESS_RANK: Readonly<Record<RowFreshness, number>> = { none: -1, current: 0, ageing: 1, 'out-of-date': 2, unknown: 3 };
+
+/**
+ * One result's freshness: Out of date exactly when the status engine's isFresh says it is not fresh (so Out of date and Stale can never
+ * disagree); otherwise Ageing past its kind's ageing threshold and Current before it. `head` evidence has no ageing: it is current while it
+ * is about the commit being judged. `unknown` only when the caller says the clock cannot be trusted (the clock case, 48.2-03 Task 2).
+ */
+export function freshnessOf(result: RuleResult, options: { readonly head: string; readonly now: Date; readonly windows?: FreshnessWindows; readonly ageing?: AgeingThresholds; readonly clockUnknown?: boolean }): Freshness {
+  if (options.clockUnknown) return 'unknown';
+  const windows = options.windows ?? FRESHNESS;
+  if (!isFresh(result, options.head, options.now, windows)) return 'out-of-date';
+  const ageing: AgeingThresholds = options.ageing ?? AGEING;
+  const after = Object.hasOwn(ageing, result.window) ? ageing[result.window] : undefined;
+  if (after === undefined || windows[result.window] === 'head') return 'current';
+  return options.now.getTime() - Date.parse(result.collectedAt) > after ? 'ageing' : 'current';
+}
+
+/** A judged row with each result's freshness, the row's worst freshness and the oldest result time. */
+function withFreshness(row: JudgedRow, options: Parameters<typeof freshnessOf>[1]): FreshRow {
+  let worst: RowFreshness = 'none';
+  let asOf: string | undefined;
+  const components = row.components.map((component) => ({
+    ...component,
+    evidence: component.evidence.map((result) => {
+      const freshness = freshnessOf(result, options);
+      if (FRESHNESS_RANK[freshness] > FRESHNESS_RANK[worst]) worst = freshness;
+      if (asOf === undefined || result.collectedAt < asOf) asOf = result.collectedAt;
+      return { ...result, freshness };
+    }),
+  }));
+  return { ...row, components, freshness: worst, ...(asOf !== undefined ? { asOf } : {}) };
+}
 
 /** Fill the safe, local reason template; absent values become plain empty text rather than template braces. */
 export function fillReason(reason: keyof typeof REASONS, detail?: Readonly<Record<string, string>>): string {
@@ -166,23 +213,15 @@ export function judgeRow(row: JudgementRow, head: string, now: Date): JudgedRow 
   };
 }
 
-/** Re-judges a judgement at `now`: the rows and level counts in the dashboard's shape. */
-export function rejudge(judgement: Judgement, options: { readonly now: Date }): { readonly judgedAt: string; readonly levels: readonly JudgedLevel[]; readonly rows: readonly JudgedRow[] } {
+/**
+ * Re-judges a judgement at `now`: the rows and level counts in the dashboard's shape, each result with its freshness and each row with the
+ * worst freshness of its results and its oldest result time (D-12).
+ */
+export function rejudge(judgement: Judgement, options: { readonly now: Date }): { readonly judgedAt: string; readonly levels: readonly JudgedLevel[]; readonly rows: readonly FreshRow[] } {
   if (judgement?.format !== JUDGEMENT_FORMAT) throw new Error('unsupported judgement format');
-  const rows = judgement.rows.map((row) => judgeRow(row, judgement.head, options.now));
+  const rows = judgement.rows.map((row) => withFreshness(judgeRow(row, judgement.head, options.now), { head: judgement.head, now: options.now }));
   const levels = judgement.levels.map((level) => ({ ...level, counts: summarizeLevel(rows.filter((row) => row.level === level.id)) }));
   return { judgedAt: options.now.toISOString(), levels, rows };
-}
-
-/**
- * A judged row's evidence facts: its as-of time (the oldest result time) and its freshness (the worst of its results). `none` when the row
- * has no evidence. Until the freshness policy (48.2-03) adds ageing, a result is current inside its engine window and out of date past it.
- */
-export function rowFreshness(row: Pick<JudgedRow, 'components'>, head: string, now: Date): { readonly asOf?: string; readonly freshness: 'current' | 'out-of-date' | 'none' } {
-  const results = row.components.flatMap((component) => component.evidence);
-  if (results.length === 0) return { freshness: 'none' };
-  const asOf = results.map((result) => result.collectedAt).sort()[0];
-  return { ...(asOf ? { asOf } : {}), freshness: results.every((result) => isFresh(result, head, now)) ? 'current' : 'out-of-date' };
 }
 
 // ---- The release evidence folder's manifest (D-15) ----

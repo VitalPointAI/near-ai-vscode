@@ -3,7 +3,7 @@ import { lstat, readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import type {
-  EvidenceComponent, EvidenceFreshness, EvidenceLevel, EvidenceRow, EvidenceSnapshot, ReleaseDidNotVerifyReason, ReleaseEvidence, SterlingEvidenceService
+  EvidenceLevel, EvidenceRow, EvidenceSnapshot, ReleaseDidNotVerifyReason, ReleaseEvidence, SterlingEvidenceService
 } from '../common/sterling-evidence.js';
 import { defaultAppRoot } from './team-preview-reader.js';
 
@@ -13,7 +13,7 @@ export const DEFAULT_RELEASE_EVIDENCE_DIR = '/opt/sterling/evidence';
 type Measured = { readonly path: string; readonly size: number; readonly sha256: string } | { readonly path: string; readonly link: true };
 type ManifestCheck = { readonly ok: true; readonly manifest: { readonly release: string; readonly commit: string; readonly builtAt: string; readonly bundle: 'included' | 'none' } }
   | { readonly ok: false; readonly reason: ReleaseDidNotVerifyReason; readonly file: string };
-type JudgedRow = Omit<EvidenceRow, 'source' | 'asOf' | 'freshness' | 'components'> & { readonly components: readonly (EvidenceComponent & { readonly evidence: readonly { readonly collectedAt: string }[] })[] };
+type JudgedRow = Omit<EvidenceRow, 'source'>;
 type Judgement = { readonly format: string; readonly head: string; readonly levels: readonly EvidenceLevel[] };
 /** What engine/compliance.cjs (compliance/src/judgement.ts, bundled by tools/build-engine.mjs) exports and this service calls. */
 interface ComplianceEngine {
@@ -22,7 +22,6 @@ interface ComplianceEngine {
   readonly EVIDENCE_JUDGEMENT_FILE: string;
   checkEvidenceManifest(manifest: unknown, files: readonly Measured[]): ManifestCheck;
   rejudge(judgement: Judgement, options: { readonly now: Date }): { readonly rows: readonly JudgedRow[] };
-  rowFreshness(row: JudgedRow, head: string, now: Date): { readonly asOf?: string; readonly freshness: EvidenceFreshness };
 }
 
 export interface EvidenceServiceOptions {
@@ -103,7 +102,7 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Ste
       const judgement = JSON.parse(await readFile(join(evidenceDir, judgementFile), 'utf8')) as Judgement;
       if (judgement?.format !== compliance.JUDGEMENT_FORMAT) return { verification: 'did-not-verify', reason: 'format', file: judgementFile };
       const judged = compliance.rejudge(judgement, { now });
-      const rows: EvidenceRow[] = judged.rows.map((row) => ({ ...row, source: 'release' as const, ...compliance.rowFreshness(row, judgement.head, now) }));
+      const rows: EvidenceRow[] = judged.rows.map((row) => ({ ...row, source: 'release' as const }));
       const levels = judgement.levels.map(({ id, title, claim }) => ({ id, title, claim }));
       return { ...layer, levels, rows };
     } catch {

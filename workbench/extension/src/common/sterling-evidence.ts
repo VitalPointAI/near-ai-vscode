@@ -43,8 +43,8 @@ export const EVIDENCE_SERVICE_PATH = '/services/sterling-evidence';
 export const SterlingEvidenceService = Symbol('SterlingEvidenceService');
 
 export type EvidenceState = 'met' | 'partly-met' | 'not-met' | 'stale' | 'not-applicable' | 'your-organizations-responsibility';
-/** A row's freshness: the worst of its results; `none` when it has no evidence. 48.2-03 adds Ageing. */
-export type EvidenceFreshness = 'current' | 'out-of-date' | 'none';
+/** A row's freshness (D-12): the worst of its results; `none` when it has no evidence; `unknown` when the clock cannot be trusted. */
+export type EvidenceFreshness = 'current' | 'ageing' | 'out-of-date' | 'unknown' | 'none';
 
 export interface EvidenceResult {
   readonly rule: string;
@@ -53,6 +53,7 @@ export interface EvidenceResult {
   readonly commit?: string;
   readonly window: string;
   readonly runUrl?: string;
+  readonly freshness: EvidenceFreshness;
 }
 
 export interface EvidenceComponent {
@@ -126,7 +127,9 @@ export const RELEASE_EVIDENCE_TEXT = {
   verified: 'Verified',
   notVerified: 'Not verified',
   current: 'Current',
+  ageing: 'Ageing',
   outOfDate: 'Out of date',
+  unknown: 'Unknown',
   noEvidence: 'No evidence',
   noTrustKey: 'Not verified: no key from your organization’s configuration vouches for this release’s evidence, so nothing counts as Met.',
   wouldBe: 'Would be {state} if verified.',

@@ -37,6 +37,12 @@ function tracerInput(): DashboardInput {
   };
 }
 
+/** A re-judged row without the freshness annotations rejudge adds (48.2-03), so it can be compared with a dashboard row. */
+function dashboardShape(row: any): any {
+  const { freshness: _freshness, asOf: _asOf, ...rest } = row;
+  return { ...rest, components: row.components.map((component: any) => ({ ...component, evidence: component.evidence.map(({ freshness: _f, source: _s, ...result }: any) => result) })) };
+}
+
 /** Every key path in a value, for "no state anywhere" checks. */
 function keys(value: unknown, trail = ''): string[] {
   if (Array.isArray(value)) return value.flatMap((item, index) => keys(item, `${trail}[${index}]`));
@@ -61,7 +67,7 @@ test('judgement from the loop: one row per level, control and component, inputs 
   assert.equal(Object.hasOwn(judgement, 'now'), false);
   // The same judgement read back from JSON and judged at the dashboard's clock gives the dashboard's rows.
   const again = rejudge(JSON.parse(JSON.stringify(judgement)) as Judgement, { now: input.now });
-  assert.deepEqual(again.rows, JSON.parse(JSON.stringify(dashboard.rows)));
+  assert.deepEqual(again.rows.map(dashboardShape), JSON.parse(JSON.stringify(dashboard.rows)));
 });
 
 test('parity: a bundle from the real compliance sources carries its judgement, and rejudge at generatedAt reproduces every row and level count', async () => {
@@ -85,7 +91,7 @@ test('parity: a bundle from the real compliance sources carries its judgement, a
   assert.deepEqual(new Set(dashboard.rows.map(({ level }: { level: string }) => level)), new Set(levels.map(({ id }) => id)), 'every level has rows');
   const judged = rejudge(judgement, { now: new Date(judgement.generatedAt) });
   assert.equal(judged.rows.length, dashboard.rows.length);
-  for (const [index, row] of judged.rows.entries()) assert.deepStrictEqual(row, dashboard.rows[index], `${row.level}/${row.control}`);
+  for (const [index, row] of judged.rows.entries()) assert.deepStrictEqual(dashboardShape(row), dashboard.rows[index], `${row.level}/${row.control}`);
   assert.deepStrictEqual(judged.levels, dashboard.levels);
   // The parity covers each branch of the one row rule: a level with no claim, an aggregate of components, and single outcomes.
   const outcomes = new Set(judged.rows.map(({ state, reason }) => `${state}:${reason}`));

@@ -71,9 +71,29 @@ export const FRESHNESS = Object.freeze({
   settings: 7 * DAY_MS,
   harness: 30 * DAY_MS,
   document: 365 * DAY_MS,
-  attestation: 365 * DAY_MS
+  attestation: 365 * DAY_MS,
+  // 48.2-03 (D-13): a vulnerability scan ages from its database build date; live site facts from their collection time.
+  vulnerability: 30 * DAY_MS,
+  live: 2 * HOUR_MS
 } as const);
 export type WindowKind = keyof typeof FRESHNESS;
+
+/**
+ * When evidence starts Ageing (48.2-03, D-12, D-13): past this age a result is Ageing, and past its FRESHNESS window it is Out of date, which
+ * is exactly Stale. `head` evidence has no ageing: it is about the commit being judged.
+ */
+export const AGEING: Readonly<Record<Exclude<WindowKind, 'head'>, number>> = Object.freeze({
+  audit: 18 * HOUR_MS,
+  settings: 5 * DAY_MS,
+  harness: 23 * DAY_MS,
+  document: 335 * DAY_MS,
+  attestation: 335 * DAY_MS,
+  vulnerability: 7 * DAY_MS,
+  live: 30 * 60 * 1000
+});
+
+/** The out-of-date window of each kind in force: FRESHNESS, or a site policy's tighter values (judgement.ts effectivePolicy). */
+export type FreshnessWindows = Readonly<Partial<Record<WindowKind, number | 'head'>>>;
 
 /** The names of the props we add under NS. */
 export const PROP_NAMES = Object.freeze([
@@ -237,6 +257,8 @@ export interface StatusInput {
   /** The commit being judged: the current main head or the release tag. */
   readonly head: string;
   readonly now: Date;
+  /** The windows in force (48.2-03); FRESHNESS when absent, so nothing changes for an input without a policy. */
+  readonly windows?: FreshnessWindows;
 }
 
 /** What computeStatus returns. `detail` fills the placeholders of the reason's REASONS template. */

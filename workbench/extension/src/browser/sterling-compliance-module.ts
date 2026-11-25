@@ -272,7 +272,10 @@ class SterlingComplianceWidget extends BaseWidget {
     const version = RELEASE_EVIDENCE_TEXT.release.replace('{version}', release.version);
     const metadata = element('p', `${version} · ${RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', release.asOf)} · Commit ${release.commit.slice(0, 12)}`, 'sterling-evidence-meta');
     const verification = element('p', RELEASE_EVIDENCE_TEXT.noTrustKey, 'sterling-evidence-message');
-    const freshnessWords = { current: RELEASE_EVIDENCE_TEXT.current, 'out-of-date': RELEASE_EVIDENCE_TEXT.outOfDate, none: RELEASE_EVIDENCE_TEXT.noEvidence } as const;
+    const freshnessWords = {
+      current: RELEASE_EVIDENCE_TEXT.current, ageing: RELEASE_EVIDENCE_TEXT.ageing, 'out-of-date': RELEASE_EVIDENCE_TEXT.outOfDate,
+      unknown: RELEASE_EVIDENCE_TEXT.unknown, none: RELEASE_EVIDENCE_TEXT.noEvidence
+    } as const;
     const facts = (row: EvidenceRow): string => [version, row.asOf ? RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', row.asOf) : undefined,
       freshnessWords[row.freshness], RELEASE_EVIDENCE_TEXT.notVerified].filter(Boolean).join(' · ');
     const rows: Control[] = release.rows.map(row => ({

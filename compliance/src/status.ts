@@ -1,10 +1,10 @@
 // The status engine (D-17 to D-20). It derives every public state from evidence, tailoring and the clock.
-import { FRESHNESS, STATES, type ComponentRow, type ReasonCode, type RuleResult, type State, type Statement, type StatusInput, type StatusOutcome } from './model.ts';
+import { FRESHNESS, STATES, type ComponentRow, type FreshnessWindows, type ReasonCode, type RuleResult, type State, type Statement, type StatusInput, type StatusOutcome } from './model.ts';
 
 export const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
-export function isFresh(result: RuleResult, head: string, now: Date): boolean {
-  const window = FRESHNESS[result.window];
+export function isFresh(result: RuleResult, head: string, now: Date, windows: FreshnessWindows = FRESHNESS): boolean {
+  const window = Object.hasOwn(windows, result.window) ? windows[result.window] : undefined;
   if (window === undefined) return false;
   if (window === 'head') return typeof result.commit === 'string' && result.commit !== '' && result.commit === head;
   const at = Date.parse(result.collectedAt);
@@ -31,7 +31,7 @@ function statementStatus(input: StatusInput, statement: Statement): StatusOutcom
   }
   const failed = results.find((result) => !resultPassed(result));
   if (failed) return { state: 'not-met', reason: failureReason(failed) };
-  const stale = results.filter((result) => !isFresh(result, input.head, input.now));
+  const stale = results.filter((result) => !isFresh(result, input.head, input.now, input.windows));
   return stale.length === 0 ? { state: 'met', reason: 'met' } : { state: 'stale', reason: 'stale', detail: { date: stale.map((result) => result.collectedAt).sort()[0] } };
 }
 
