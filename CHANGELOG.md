@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Work on a staff project with other people
+
+- **Share with people.** On a staff project's work-area page, choose **Share this work**, then
+  **Connect your organization's server** with the hub file its operator gave you, then **Invite a
+  person**. They open the invitation file in SovAI, which opens the join flow already filled in;
+  you compare six words with them and choose **Admit**.
+- **Edit a product together.** A shared product open in the editor shows everyone's changes as
+  they type, and undo and redo take back only your own. If the file changes on disk outside the
+  editor, you choose **Take This Change as My Edit** or **Restore**.
+- **Your own key signs what matters.** Decisions and changes to who is in the shared work are
+  signed by your own key in your organization's key store, after you confirm with your passkey or
+  security key. What you type is signed by a short-lived key of your session.
+- **The Staff Room is live.** It shows the sync state with one action, such as **Sync Now**, each
+  product's version and the changes since, its label and Who can see this, join requests for the
+  lead or deputy, and contested decisions.
+- **Contested decisions are shown, not lost.** When two people decide the same version at the same
+  time, neither decision applies. The Staff Room shows both names and reasons, and a new decision
+  settles it.
+- **The sync word on the status bar.** While a shared project is open, the status bar says
+  "Synced", "Offline" or "Needs attention", with a sentence that says why. Select it to sync now.
+- **Working offline.** You keep working, and the Staff Room warns that decisions you make
+  offline may become contested.
+- **Re-admit your organization's server.** If the server goes back to an older copy, sessions stop
+  trusting it until the lead or deputy compares twelve words with its operator and chooses **Trust
+  your organization's server again**.
+- **A shared project can require a newer SovAI.** A session without a feature the project needs
+  stops that shared work and says "This shared work needs a newer version of Sterling. Ask your
+  administrator to update it." Nothing it already received is lost.
+- **Post-quantum keys.** New shared work starts with them. For older shared work the lead chooses
+  **Switch to post-quantum keys** and then **Move all shared work to the new keys**, and a
+  computer that holds a part's key can **Give keys** to one that published its keys later.
+- **The earlier preview is retired in SovAI.** Its multi-user setting and commands are not used in
+  SovAI. Shared work made with the 0.4.35 preview keeps working; where its products sit in the
+  part your organization's server reads, the Staff Room says to make a single-machine copy and
+  share that copy again.
+- **For your organization's operators.** The sync hub accepts a person's session key only until
+  its end time, refuses a session or change that does not cover a project's required features,
+  starts in restore mode when the restore procedure writes its marker, and refuses only the one
+  change whose attachment is missing. `relay/README.md` has the steps.
+- **Not in SovAI yet.** The Staff Room lists only you for now: who else is here, other people's
+  cursors and Show Who Wrote This are not shown yet. A person who joins late starts from a
+  checkpoint only in the parts your organization's server holds, and the text they see can be
+  incomplete until the earlier history arrives.
+
 ## 0.4.39
 
 Sterling Sovereign AI (SovAI) is now the product's name everywhere, and the Sterling workbench
