@@ -6184,6 +6184,19 @@
       "ownerRole": "owner",
       "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that use the old product name (the VS Code extension's former name); the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
       "title": "SA&A drafts made before the rename call the system by its old name"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G455",
+      "ownerRole": "shared",
+      "poam": "g455",
+      "remediation": "The OpenTDF reference tools wrap a payload key for an RSA key with RSA-OAEP and SHA-1, while OpenBao Transit opens RSA only with OAEP and SHA-256. So an object a partner's stock OpenTDF tool addresses to your organization's receiving key exchange-receive-<site> cannot be opened, and an export to a partner's RSA key uses the hash the partner names, which for the OpenTDF reference server is SHA-1. Partners are asked for an EC key (ec:secp256r1) or SHA-256, and to address objects to their own key access server, which Phase 45.2 reaches through rewrap. Whether SHA-1 in OAEP padding is acceptable under ITSP.40.111 is not verified; your organization's security officer decides before any export uses it. Source: .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-RESEARCH.md sections 1 and 5.",
+      "title": "RSA key access with partners' OpenTDF tools needs OAEP with SHA-1, which our receiving key cannot open"
     }
   ]
 }
