@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-03",
+    "cm-06"
+  ],
+  "gap": "G417",
+  "id": "g417",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "Your organization's runbook sets how often edges import rules and who carries the switch to them"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "A hosted session applies the security officer's switch within a minute; a desktop or edge install applies it at its next policy fetch or rules import. A disconnected edge keeps working under its last rules until then. Your organization's operating procedure says how often edges import rules and who carries the switch to them. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-28.",
+  "title": "An offline edge applies Stop agent work now only at its next rules import"
+}

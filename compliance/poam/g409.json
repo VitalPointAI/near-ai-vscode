@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cm-06",
+    "sr-03"
+  ],
+  "gap": "G409",
+  "id": "g409",
+  "milestones": [
+    {
+      "targetDate": "2027-06-30",
+      "title": "Your organization's policy switches models to enforce with an evaluated Western model for agent work"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Without your organization's policy, or with it set to report, model approvals are only reported: today's models, including PRC-origin ones, keep doing agent work, every use outside the rules is recorded as would-refuse, and a notice that cannot be dismissed says so. This closes when your organization's policy is in enforce mode with an evaluated Western model for agent work. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-18a and D-22.",
+  "title": "Report mode runs agent work outside your organization's model policy until enforce"
+}

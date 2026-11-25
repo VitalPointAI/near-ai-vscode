@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "au-10",
+    "ia-02"
+  ],
+  "gap": "G414",
+  "id": "g414",
+  "milestones": [
+    {
+      "targetDate": "2027-03-31",
+      "title": "A plan replaces the device-key signature on model exceptions with the person's credential"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "An exception that lets a named senior person allow a model for chat they review exists only under your organization's rules, which list the person's key; that key is the person's device key until a credential replaces it. The roadmap says Phase 71 replaces the signer, but no Phase 71 plan does it yet. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-20.",
+  "title": "Model exceptions are signed with a device key, not a person's credential"
+}
