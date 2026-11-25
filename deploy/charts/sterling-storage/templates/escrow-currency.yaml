@@ -1,0 +1,107 @@
+{{- /*
+Escrow currency of the cluster-held restore key (D-73, CP-9; 48.1 hand-off H-08). Every Longhorn backup of an encrypted volume needs the
+longhorn-crypto key once the cluster is gone, so the key custodians hold an escrow of it (deploy/bundle/escrow.mjs export), and export applies
+the escrow's digests as the ConfigMap sterling-escrow-record. This CronJob hashes each key of the live Secret daily and fails when one changed,
+is missing or was added since the escrow, or when no escrow was ever made: the failed Job is the signal 48.1-16's escrow-currency alert reads.
+It prints key names only. The RKE2 token and encryption configuration are node files no restricted pod may read; their currency is
+deploy/rke2/escrow-node.sh check, run after every rke2 secrets-encrypt rotate-keys and on the monthly checklist.
+The image is our sterling/openbao image by digest (a UBI image with sh and sha256sum), set by the release descriptor from the images lock.
+*/ -}}
+{{- $image := (.Values.escrowCurrency).image }}
+{{- if not $image }}{{ fail "escrowCurrency.image is not set (the release descriptor sets it from deploy/bundle/images.lock.json)" }}{{ end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sterling-escrow-currency
+spec:
+  schedule: "0 5 * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sterling-escrow-currency
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check
+              image: {{ $image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  key=/escrow/key
+                  record=/escrow/record
+                  status=0
+                  seen=0
+                  for want_file in "$record"/*.sha256; do
+                    [ -f "$want_file" ] || continue
+                    seen=$((seen + 1))
+                    name=$(basename "$want_file" .sha256)
+                    if [ ! -f "$key/$name" ]; then
+                      echo "escrow-currency: $name is in the escrow record but no longer in longhorn-crypto; make a new escrow"
+                      status=1
+                      continue
+                    fi
+                    if [ "$(sha256sum "$key/$name" | cut -d' ' -f1)" != "$(cat "$want_file")" ]; then
+                      echo "escrow-currency: $name changed since the escrow; make a new escrow (deploy/bundle/escrow.mjs export)"
+                      status=1
+                    fi
+                  done
+                  if [ "$seen" -eq 0 ]; then
+                    echo "escrow-currency: no escrow record (ConfigMap sterling-escrow-record); make the first escrow with deploy/bundle/escrow.mjs export"
+                    exit 1
+                  fi
+                  for have_file in "$key"/*; do
+                    [ -f "$have_file" ] || continue
+                    name=$(basename "$have_file")
+                    if [ ! -f "$record/$name.sha256" ]; then
+                      echo "escrow-currency: $name was added to longhorn-crypto after the escrow; make a new escrow"
+                      status=1
+                    fi
+                  done
+                  if [ "$status" -eq 0 ]; then echo "escrow-currency: escrow current ($seen keys)"; fi
+                  exit "$status"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi
+              volumeMounts:
+                - name: key
+                  mountPath: /escrow/key
+                  readOnly: true
+                - name: record
+                  mountPath: /escrow/record
+                  readOnly: true
+          volumes:
+            - name: key
+              secret:
+                secretName: longhorn-crypto
+                defaultMode: 0440
+                optional: true
+            # Optional, so that a site with no escrow yet gets a failed Job (the alert), not a pod that waits forever for its volume.
+            - name: record
+              configMap:
+                name: sterling-escrow-record
+                optional: true

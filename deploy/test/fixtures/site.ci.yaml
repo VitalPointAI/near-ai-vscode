@@ -24,5 +24,11 @@
   "stepUpMaxAgeSeconds": 300,
   "hubs": [
     { "name": "hub-a", "publicAddress": "hub-a.site.example:30843", "nodePort": 30843, "storage": "20Gi" }
-  ]
+  ],
+  "time": {
+    "servers": ["time1.site.example", "time2.site.example"],
+    "refclocks": [],
+    "nts": false,
+    "maxClockErrorMs": 1000
+  }
 }

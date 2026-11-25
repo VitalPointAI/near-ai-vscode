@@ -15,5 +15,31 @@
       }
     }
   ],
+  "secrets": [
+    {
+      "secret": "keycloak-db",
+      "kv": "postgres",
+      "keys": {
+        "password": {
+          "field": "keycloak-password",
+          "generate": "random-32",
+          "minLength": 43
+        }
+      }
+    },
+    {
+      "secret": "keycloak-admin-bootstrap",
+      "kv": "keycloak-bootstrap",
+      "keys": {
+        "username": {
+          "value": "temp-admin"
+        },
+        "password": {
+          "generate": "random-32",
+          "minLength": 43
+        }
+      }
+    }
+  ],
   "note": "The official Keycloak 26.8.2 image on chart keycloakx 7.4.0 (D-30, research Decision 10)."
 }
