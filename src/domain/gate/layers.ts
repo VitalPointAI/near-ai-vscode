@@ -197,7 +197,9 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
 /** Keys kept per layer and never compared: the envelope, and each section's own `v`. */
 export const LAYER_ENVELOPE_KEYS: readonly string[] = Object.freeze([
   'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'parent', 'requires', 'minClient',
-  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v'
+  'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v',
+  // Phase 70.1: until 70.1-03 adds the classification rows, every classification key has no rule, so your organization's value applies (compose's default).
+  'classification.v'
 ]);
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
