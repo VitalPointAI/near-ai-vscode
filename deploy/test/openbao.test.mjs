@@ -280,3 +280,59 @@ test('apply.mjs gives only the step-up role the signing policy, bound to the ste
 test('the install policy reaches only the static application secrets under kv/data/apps/', () => {
   assert.deepEqual(pathBlocks(policy('install')).map((block) => block.path), ['kv/data/apps/*']);
 });
+
+// Guest accounts (D-62, D-63, 47-19): the automatic end can only disable guest entities and file a create-only revocation request; every
+// removal of a guest's records needs two key custodians; the operator's guest token reaches only what guests.mjs uses.
+const shape = (name) => pathBlocks(policy(name)).map((block) => [block.path, capabilitiesOf(block), block.body.filter((line) => !line.startsWith('capabilities')).join(' ')]);
+
+test('guest-expiry reads and disables guest entities only, files create-only revocation requests, and holds nothing else', () => {
+  assert.deepEqual(shape('guest-expiry'), [
+    ['identity/entity/name/guest-*', ['read', 'update'], 'allowed_parameters = { "disabled" = [true] }'],
+    ['kv/data/site/revocation-requests/guest-*', ['create'], ''],
+    ['sys/capabilities-self', ['update'], ''],
+    ['auth/token/lookup-self', ['read'], ''],
+    ['auth/token/revoke-self', ['update'], '']
+  ]);
+  const expiry = ['guest-expiry'];
+  assert.equal(allows(expiry, ADA, 'update', 'identity/entity/name/guest-kc-1'), true);
+  assert.equal(allows(expiry, ADA, 'update', 'identity/entity/name/keycloak-kc-1'), false, 'never a staff entity');
+  for (const capability of ['read', 'update', 'delete', 'list']) assert.equal(allows(expiry, ADA, capability, 'kv/data/site/revocation-requests/guest-kc-1-guest-ended'), false, capability);
+  assert.equal(allows(expiry, ADA, 'create', 'kv/data/site/revocation-requests/keycloak-kc-1-disabled'), false, 'only guest requests');
+  assert.equal(allows(expiry, ADA, 'read', `kv/data/users/${ADA}/mail/work`), false);
+});
+
+test('guest-removal grants only delete, each behind two key-custodians approvals, and reaches no person\'s KV path', () => {
+  const blocks = pathBlocks(policy('guest-removal'));
+  assert.deepEqual(blocks.map((block) => [block.path, capabilitiesOf(block)]), [
+    ['identity/entity/name/guest-*', ['delete']], ['transit/keys/person-*', ['delete']], ['transit/keys/kek-*', ['delete']]]);
+  assert.ok(!blocks.some((block) => block.path.startsWith('kv/')), 'a person\'s KV data is reached only through the entity template');
+  for (const block of blocks) {
+    const body = block.body.join('\n');
+    assert.match(body, /^control_group = \{$/m, `${block.path}: control_group`);
+    assert.match(body, /^group_names = \["key-custodians"\]$/m, `${block.path}: approvers are key-custodians`);
+    assert.match(body, /^approvals = 2$/m, `${block.path}: two approvals`);
+  }
+});
+
+test('guest-operator reads approvers\' entities and the people directory, enables or disables guest entities, and files create-only requests', () => {
+  assert.deepEqual(shape('guest-operator'), [
+    ['identity/entity/name/keycloak-*', ['read'], ''],
+    ['kv/data/site/people/*', ['read'], ''],
+    ['identity/entity/name/guest-*', ['read', 'update'], 'allowed_parameters = { "disabled" = [] }'],
+    ['kv/data/site/revocation-requests/guest-*', ['create'], ''],
+    ['sys/capabilities-self', ['update'], '']
+  ]);
+  assert.equal(allows(['guest-operator'], ADA, 'update', 'identity/entity/name/keycloak-kc-1'), false, 'the operator never changes a staff entity');
+  assert.equal(allows(['guest-operator'], ADA, 'read', `kv/data/users/${ADA}/mail/work`), false, 'and never reads a person\'s secrets');
+});
+
+test('apply.mjs plans the guest policies and the jwt role guest-expiry: its own audience and azp, the expiry policy only, 300 s, no default policy', () => {
+  const run = spawnSync(process.execPath, [path.join(ROOT, 'deploy/openbao/apply.mjs'), '--site', SITE_FILE, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const operations = JSON.parse(run.stdout);
+  for (const what of ['policy guest-expiry', 'policy guest-removal', 'policy guest-operator', 'jwt role guest-expiry']) assert.ok(operations.some((operation) => operation.what === what), what);
+  assert.deepEqual(operations.find((operation) => operation.write === 'auth/jwt/role/guest-expiry').body, {
+    role_type: 'jwt', bound_audiences: ['sterling-guest-expiry'], bound_claims: { azp: 'sterling-guest-expiry' }, bound_claims_type: 'string', user_claim: 'sub',
+    token_no_default_policy: true, token_policies: ['guest-expiry'], token_ttl: 300, token_max_ttl: 300, token_explicit_max_ttl: 300, token_period: 0
+  });
+});

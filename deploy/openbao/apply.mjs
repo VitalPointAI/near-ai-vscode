@@ -19,12 +19,18 @@ import { loadSite } from '../bundle/lib/render.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
-export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator']);
+export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator', 'guest-expiry',
+  'guest-removal']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
 /** Base session token: 15 minutes, renewable to a working day. */
 export const BASE_TTL = Object.freeze({ token_ttl: 900, token_max_ttl: 28800 });
+/**
+ * The automatic end of guest accounts (D-62, D-63; 47-20's CronJob): a client-credentials token of the Keycloak client sterling-guest-expiry
+ * logs in to the jwt role guest-expiry, which admits only that client (audience and azp) and gives a 5-minute token that cannot outlive itself.
+ */
+export const GUEST_EXPIRY = Object.freeze({ role: 'guest-expiry', client: 'sterling-guest-expiry', ttl: 300 });
 
 /**
  * cert-manager's login (D-16, 47-13): the ClusterIssuers site-pki and site-pki-hub (deploy/charts/sterling-pki) ask Kubernetes for a short
@@ -84,6 +90,9 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     // outlive the step-up window.
     role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
       token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
+    // The automatic end of guest accounts: only the client sterling-guest-expiry, only the policy guest-expiry, 5 minutes and no renewal.
+    role(GUEST_EXPIRY.role, { bound_audiences: [GUEST_EXPIRY.client], bound_claims: { azp: GUEST_EXPIRY.client }, bound_claims_type: 'string', token_policies: ['guest-expiry'],
+      token_ttl: GUEST_EXPIRY.ttl, token_max_ttl: GUEST_EXPIRY.ttl, token_explicit_max_ttl: GUEST_EXPIRY.ttl, token_period: 0 }),
     // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
     // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10). key_type any: the
     // Certificates cert-manager makes from Ingress annotations (Theia Cloud, Harbor) and the Theia Cloud webhook's use RSA 2048 keys, which
