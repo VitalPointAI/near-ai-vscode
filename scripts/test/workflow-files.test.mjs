@@ -73,8 +73,11 @@ test('release jobs that hold a write token or deployment approval run no npm ins
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
-test('root lint, root tests and both VSIX build paths disable dependency lifecycle scripts', () => {
+test('root lint, root tests, the VS Code test and both VSIX build paths disable dependency lifecycle scripts', () => {
   const ci = jobs(read('ci.yml'));
+  // No CI job installs the root dependencies with their install scripts on (G10, 44.1-02): the VS Code test was the last exception.
+  for (const [id, job] of ci) assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m, `${id} installs with install scripts on`);
+  assert.match(ci.get('e2e'), /^\s*- run: npm ci --ignore-scripts$/m);
   const lint = ci.get('lint');
   assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
   assert.match(lint, /^\s*- run: npm run lint$/m);
@@ -535,7 +538,8 @@ printf 'partial or complete combined manifest\\n' > "$6/manifest.json"
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {
   const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
   for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/',
-    '/compliance/src/', '/compliance/components/', '/compliance/evidence-rules/', '/compliance/responsibility/', '/compliance/profiles/', '/compliance/levels.json', '/compliance/resources.json', '/scripts/resource-check.mjs']) {
+    '/compliance/src/', '/compliance/components/', '/compliance/evidence-rules/', '/compliance/responsibility/', '/compliance/profiles/', '/compliance/levels.json', '/compliance/resources.json', '/scripts/resource-check.mjs',
+    '/compliance/applicability/', '/compliance/coverage/']) {
     assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
   }
 });
@@ -700,4 +704,21 @@ test('every workflow image build retries only a Red Hat registry refusal, and a 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the required docs job blocks on the applicability drift check and the coverage ratchet; the compliance job reports coverage without failing (44.1-07, D-19)', () => {
+  const ci = jobs(read('ci.yml'));
+  const docs = steps(ci.get('docs'));
+  const step = (pattern) => docs.find((item) => pattern.test(item));
+  for (const pattern of [/npm --prefix compliance ci --ignore-scripts/, /node compliance\/src\/cli\.ts applicability --check/, /node compliance\/src\/cli\.ts coverage --check/]) {
+    const found = step(pattern);
+    assert.ok(found, `docs job step ${pattern}`);
+    assert.doesNotMatch(found, /continue-on-error/, `${pattern} must block`);
+  }
+  const install = docs.findIndex((item) => /npm --prefix compliance ci --ignore-scripts/.test(item));
+  assert.ok(install < docs.findIndex((item) => /coverage --check/.test(item)), 'the compliance package is installed before the checks');
+  const summary = steps(ci.get('compliance')).find((item) => /coverage --bundle compliance\/out\/bundle/.test(item));
+  assert.ok(summary, 'the compliance job prints the coverage summary');
+  assert.match(summary, /continue-on-error: true/);
+  assert.match(summary, /GITHUB_STEP_SUMMARY/);
 });

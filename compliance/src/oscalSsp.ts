@@ -5,7 +5,7 @@ import { NS, OSCAL_VERSION, STATE_WORDS, type ComponentInput, type Responsibilit
 export const TO_BE_COMPLETED = 'To be completed by your organization';
 
 type Level = Readonly<{ id: string; title: string; profile: string; components: readonly string[] }>;
-type DashboardComponent = Readonly<{ component: string; responsibility: Responsibility; state: string; statement?: string; inheritedFrom?: string }>;
+type DashboardComponent = Readonly<{ component: string; responsibility: Responsibility; state: string; statement?: string; inheritedFrom?: string; reason?: string; reasonText?: string }>;
 type DashboardRow = Readonly<{ level: string; control: string; state: string; reasonText: string; components: readonly DashboardComponent[] }>;
 export interface SspInput {
   readonly level: Level; readonly rows: readonly DashboardRow[]; readonly components: readonly ComponentInput[]; readonly generatedAt?: string;
@@ -61,6 +61,11 @@ export function buildSsp(input: SspInput): Record<string, unknown> {
   const requirements = rows.map((row) => {
     const byComponents = row.components.filter((component) => componentUuids.has(component.component)).map((component) => {
       const exported = uuid(`${input.level.id}:${row.control}:${component.component}:provided`);
+      // A component the signed applicability map gives no part says why, with nothing exported to your organization (44.1, D-20).
+      if (component.reason === 'component-not-applicable' && component.reasonText) return {
+        'component-uuid': componentUuids.get(component.component), uuid: uuid(`${input.level.id}:${row.control}:${component.component}`),
+        description: component.reasonText, 'implementation-status': implementation(component.state)
+      };
       return {
         'component-uuid': componentUuids.get(component.component), uuid: uuid(`${input.level.id}:${row.control}:${component.component}`),
         description: component.statement ?? 'No product statement is available yet.', 'implementation-status': implementation(component.state),

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkS
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { run as runBundleCommand } from '../src/commands/bundle.ts';
+import { loadDashboardSources, run as runBundleCommand } from '../src/commands/bundle.ts';
 import { loadComponents } from '../src/components.ts';
 import { validateOurs } from '../src/validate.ts';
 const levelsFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'levels.json');
@@ -54,8 +54,21 @@ async function realDashboard(levels?: readonly unknown[]): Promise<any> {
     repoRoot = path.join(dir, 'repo');
     const source = path.join(ROOT, 'compliance');
     mkdirSync(path.join(repoRoot, 'compliance'), { recursive: true });
-    for (const entry of readdirSync(source)) if (!['levels.json', 'node_modules', 'out'].includes(entry)) symlinkSync(path.join(source, entry), path.join(repoRoot, 'compliance', entry));
+    for (const entry of readdirSync(source)) if (!['levels.json', 'node_modules', 'out', 'applicability'].includes(entry)) symlinkSync(path.join(source, entry), path.join(repoRoot, 'compliance', entry));
     writeFileSync(path.join(repoRoot, 'compliance', 'levels.json'), JSON.stringify({ levels }));
+    // The committed review stages name levels this copy may leave out (stage 1 names hosted Protected A); the copy's stages keep only the levels
+    // it has, so the bundle loads. The committed reviews.json is never changed.
+    const applicability = path.join(source, 'applicability');
+    if (existsSync(applicability)) {
+      const kept = new Set(levels.map((item: any) => item.id));
+      mkdirSync(path.join(repoRoot, 'compliance', 'applicability'));
+      for (const entry of readdirSync(applicability)) {
+        if (entry !== 'reviews.json') { symlinkSync(path.join(applicability, entry), path.join(repoRoot, 'compliance', 'applicability', entry)); continue; }
+        const reviews = JSON.parse(readFileSync(path.join(applicability, entry), 'utf8'));
+        for (const stage of reviews.stages ?? []) stage.levels = stage.levels.filter((level: string) => kept.has(level));
+        writeFileSync(path.join(repoRoot, 'compliance', 'applicability', entry), JSON.stringify(reviews, null, 2) + '\n');
+      }
+    }
   }
   const inputs = path.join(dir, 'inputs.json');
   writeFileSync(inputs, JSON.stringify({ repository: 'owner/repo', commit: 'a'.repeat(40), kind: 'pr', repoRoot, collectors: {} }));
@@ -91,15 +104,33 @@ test('each hosted level and the hosted overlay list exactly the hosted component
   assert.deepEqual(overlay.attachedTo, ['hosted-protected-a', 'hosted-protected-b']);
 });
 
-test('every hosted platform row of hosted Protected B ac-02 reads No statement yet, unless it has a statement, which this bundle never makes Met', async () => {
+/**
+ * The reasons a silent component may read (44.1, D-11, D-13): No statement yet or your organization's, unless the committed applicability map says
+ * the component has no part, in which case it reads Not applicable to this component only while the map is signed for that level, and Not met with
+ * component-not-applicable-unreviewed otherwise. The map is loaded as the bundle loads it, so the expectation follows the committed rules and reviews.
+ */
+const MAP = loadDashboardSources(path.join(ROOT, 'compliance')).applicability;
+function silentReasons(levelId: string, control: string, component: string): string[] {
+  const record = MAP?.for(levelId, control, component);
+  if (record?.class !== 'not-applicable') return ['no-statement', 'your-organization'];
+  return ['your-organization', record.reviewed ? 'component-not-applicable' : 'component-not-applicable-unreviewed'];
+}
+
+test('every hosted platform row of hosted Protected B ac-02 reads No statement yet, or the applicability map\'s reason where it gives the component no part, unless it has a statement, which this bundle never makes Met', async () => {
   const row = (await dashboard()).rows.find((item: any) => item.level === 'hosted-protected-b' && item.control === 'ac-02');
+  // 48-08 gives some platform components an ac-02 statement; with no collected result it is never Met and never reads No statement yet.
   const stated = new Set(loadComponents(path.join(ROOT, 'compliance', 'components')).components
     .filter((component) => component.implemented.some((item) => item.control === 'ac-02' && item.statements.length > 0)).map((component) => component.id));
   assert.ok(PLATFORM.some((id) => !stated.has(id)), 'at least one platform component still has no ac-02 statement');
   for (const id of PLATFORM) {
     const component = row.components.find((item: any) => item.component === id);
-    if (stated.has(id)) assert.deepEqual([component?.state === 'met', component?.reason === 'no-statement'], [false, false], id);
-    else assert.equal(component?.reason, 'no-statement', id);
+    if (stated.has(id)) {
+      assert.deepEqual([component?.state === 'met', component?.reason === 'no-statement'], [false, false], id);
+      continue;
+    }
+    const record = MAP?.for('hosted-protected-b', 'ac-02', id);
+    const expected = record?.class === 'not-applicable' ? (record.reviewed ? 'component-not-applicable' : 'component-not-applicable-unreviewed') : 'no-statement';
+    assert.equal(component?.reason, expected, id);
   }
 });
 
@@ -112,7 +143,7 @@ test('no hosted component without statements reads Met on any hosted row', async
   for (const row of rows) for (const component of row.components) if ([...PLATFORM, 'workbench'].includes(component.component)) {
     assert.notEqual(component.state, 'met', `${row.level}/${row.control}/${component.component}`);
     if (stated.has(`${component.component}/${row.control}`)) continue;
-    assert.ok(['no-statement', 'your-organization'].includes(component.reason), `${row.level}/${row.control}/${component.component}: ${component.reason}`);
+    assert.ok(silentReasons(row.level, row.control, component.component).includes(component.reason), `${row.level}/${row.control}/${component.component}: ${component.reason}`);
   }
 });
 

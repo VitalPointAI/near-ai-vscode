@@ -36,3 +36,13 @@ test('every level page asks for a level that exists, so no page silently shows n
     for (const [, id] of readFileSync(join(pages, name), 'utf8').matchAll(/levelId="([^"]+)"/g)) assert.ok(levels.has(id), `${name} asks for level ${id}, which compliance/levels.json does not define`);
   }
 });
+test('the drawer names each component with its own state, applicability and reason, never the row\'s reason in its place (44.1-08, D-20)', () => {
+  const source = readFileSync(new URL('../src/components/accreditation/ControlDrawer.jsx', import.meta.url), 'utf8');
+  const section = /row\.components\?\.map\(\(component\) => <section[\s\S]*?<\/section>\)/.exec(source)?.[0];
+  assert.ok(section, 'the drawer has one section per component');
+  assert.match(section, /\{component\.component\}/, 'the component id');
+  assert.match(section, /<StateBadge state=\{component\.state\} \/>/, 'the component state word');
+  assert.match(section, /component\.applicability/, 'the applicability when present');
+  assert.match(section, /component\.statement \?\? component\.reasonText/, 'its own statement or reason');
+  assert.doesNotMatch(section, /row\.reasonText/, 'never the row reason in place of a component reason');
+});

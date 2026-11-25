@@ -1,0 +1,3013 @@
+{
+  "kind": "rules",
+  "facets": {
+    "access-decisions": {
+      "words": "decides who may read or do what"
+    },
+    "accounts": {
+      "words": "keeps accounts for people or services"
+    },
+    "admin-separation": {
+      "words": "separates administration from ordinary use"
+    },
+    "audit-records": {
+      "words": "writes audit records of its own events"
+    },
+    "audit-store": {
+      "words": "stores, protects or reviews audit records"
+    },
+    "authenticators": {
+      "words": "issues, holds or checks authenticators (keys, tokens, certificates, passkeys)"
+    },
+    "backup-restore": {
+      "words": "keeps state that must be backed up and restored"
+    },
+    "boundary-traffic": {
+      "words": "controls traffic that crosses a network or air-gap boundary"
+    },
+    "certificate-issuing": {
+      "words": "issues certificates"
+    },
+    "change-path": {
+      "words": "is the path by which changes reach the system"
+    },
+    "crypto-module-login": {
+      "words": "is a cryptographic module that needs an operator login"
+    },
+    "cryptography": {
+      "words": "uses or manages cryptographic keys"
+    },
+    "development": {
+      "words": "is developed or rebuilt here, so the development process covers it"
+    },
+    "device-identity": {
+      "words": "identifies devices or nodes"
+    },
+    "external-service": {
+      "words": "is, or reaches, a service outside your organization"
+    },
+    "federation": {
+      "words": "accepts sign-ins from another identity provider"
+    },
+    "hardware": {
+      "words": "is hardware, or carries hardware into a site"
+    },
+    "host-hardening": {
+      "words": "runs on hosts whose kernel settings it controls"
+    },
+    "identity-proofing": {
+      "words": "registers people after their identity is checked"
+    },
+    "idle-lock": {
+      "words": "stops or locks a session left idle"
+    },
+    "integrity-checks": {
+      "words": "detects unauthorized software or changes automatically"
+    },
+    "labels": {
+      "words": "reads or enforces security labels on information"
+    },
+    "malicious-code-checks": {
+      "words": "scans or refuses software for malicious content"
+    },
+    "monitoring": {
+      "words": "detects and reports security events"
+    },
+    "name-resolution": {
+      "words": "resolves names inside the site"
+    },
+    "network-traffic": {
+      "words": "sends or receives information over a network"
+    },
+    "organization-data": {
+      "words": "stores your organization's information at rest"
+    },
+    "our-code": {
+      "words": "is code this repository writes or rebuilds"
+    },
+    "outside-users": {
+      "words": "admits people from outside your organization"
+    },
+    "pki-trust": {
+      "words": "validates certificates or keys against a trust store"
+    },
+    "privileged-remote": {
+      "words": "takes privileged commands over a remote connection"
+    },
+    "process-isolation": {
+      "words": "runs work in isolated processes or containers"
+    },
+    "re-authentication": {
+      "words": "asks a signed-in person to sign in again before an action"
+    },
+    "remote-access": {
+      "words": "is the entry point for remote access"
+    },
+    "separation-of-duties": {
+      "words": "splits duties between roles"
+    },
+    "sessions": {
+      "words": "keeps sign-in or connection sessions"
+    },
+    "shared-resources": {
+      "words": "shares memory, storage or nodes between people"
+    },
+    "sign-in": {
+      "words": "signs people in or admits them only after a sign-in"
+    },
+    "sign-in-page": {
+      "words": "is the page where people sign in"
+    },
+    "software": {
+      "words": "is software or firmware we ship or deploy"
+    },
+    "software-installation": {
+      "words": "controls which software may be installed or run"
+    },
+    "supplier-process": {
+      "words": "carries the supplier's own policies, procedures, plans and records"
+    },
+    "time-source": {
+      "words": "sets the clocks of the nodes"
+    },
+    "traffic-limits": {
+      "words": "limits request rates or resource use against overload"
+    },
+    "two-person-control": {
+      "words": "needs two people for an action"
+    },
+    "unauthenticated-entry": {
+      "words": "is reachable before sign-in"
+    },
+    "user-interface": {
+      "words": "shows a user interface or runs code in a browser or editor"
+    }
+  },
+  "components": {
+    "cert-manager": {
+      "role": "cert-manager issuing site certificates from the site PKI.",
+      "facets": {
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/jetstack/cert-manager-controller: the certificates it issues are the services' TLS authenticators."
+        },
+        "certificate-issuing": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/jetstack/cert-manager-controller: issues and renews every TLS certificate at the site from the site's own CA."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/jetstack/cert-manager-controller: generates and renews certificate keys."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-pki (the site PKI issuers and trust bundles) is developed and reviewed in this repository."
+        },
+        "network-traffic": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/jetstack/cert-manager-cainjector: writes CA bundles so services can trust each other on the network."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-pki (the site PKI issuers and trust bundles) is written in this repository."
+        },
+        "pki-trust": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/jetstack/cert-manager-cainjector: writes the CA bundles the Kubernetes API trusts."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/cert-manager.json: cert-manager is software every site runs."
+        }
+      }
+    },
+    "extension": {
+      "role": "The locally installed VS Code extension.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "src/domain/gate/decide.ts and src/gate/host.ts: the gate decides every tool, route and model request against the signed organization policy before it runs."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "src/staff and src/domain/credentials: staff invitations, role changes and removals (G14) are recorded on the person's device; the accounts themselves are kept by your organization's identity provider and the hub."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "src/domain/gate/layers.ts and src/gate/organizationStore.ts: the organization layer of the policy is signed by your organization's administrators and cannot be changed from an ordinary session."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "src/gate/decisionLog.ts: every gate decision is written to the local decision log (44.1-01 maps AU-02 to its tests)."
+        },
+        "audit-store": {
+          "class": "implements",
+          "basis": "src/gate/decisionLog.ts: the local decision logs rotate at 5 MiB, keep four files and grant no group or other access (44.1-02-TRIAGE AU-04, AU-09)."
+        },
+        "authenticators": {
+          "class": "implements",
+          "basis": "src/domain/did and src/gate/wallet.ts: the person's per-install Ed25519 identity key and the credentials in the wallet are held and checked on the device."
+        },
+        "boundary-traffic": {
+          "class": "implements",
+          "basis": "src/domain/gate/routing.ts and src/domain/gate/endpoints.ts: requests leave the device only to endpoints the signed policy allows (the route check)."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "src/domain/credentials (ecdsaJcs2019.ts, dataIntegrity.ts) and src/domain/did/didKey.ts: signatures on policies, credentials and records; the crypto inventory lists its algorithms."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "components/extension.json: the extension is this repository's code, built by the release pipeline (resources.json npm:typescript, npm:esbuild)."
+        },
+        "device-identity": {
+          "class": "implements",
+          "basis": "src/gate/deviceIdentityCommand.ts and src/domain/did/deviceWords.ts: one Ed25519 identity per person per install, shown as six words."
+        },
+        "external-service": {
+          "class": "supports",
+          "basis": "src/domain/gate/endpoints.ts: the extension reaches the model endpoints your organization configures (the model-endpoints component)."
+        },
+        "integrity-checks": {
+          "class": "supports",
+          "basis": "src/domain/gate/bundle.ts: a policy file changed outside the product fails its signature check (bad-signature) and is refused."
+        },
+        "labels": {
+          "class": "implements",
+          "basis": "src/domain/gate/labels.ts, labelAlgebra.ts and src/gate/chatLabel.ts: classification labels on content and chats, and routing by label (Phase 70, CLAS-01 to CLAS-08)."
+        },
+        "malicious-code-checks": {
+          "class": "supports",
+          "basis": "src/security/scan.ts and src/security/osv.ts: the extension checks a project's lockfiles against known-vulnerable package versions; the release pipeline scans the VSIX's own code (resources.json action:github/codeql-action/analyze)."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "src/gate/decisionLog.ts: the gate records refused and allowed actions that your organization's monitoring can collect (G11 tracks forwarding)."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "components/extension.json and src/domain/gate/endpoints.ts: the extension sends prompts and context to model endpoints over TLS."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "src/gate/bundleStore.ts, src/gate/organizationStore.ts and the staff project store under src/staff: your organization's policy, projects and logs are kept on the device."
+        },
+        "our-code": {
+          "class": "implements",
+          "basis": "components/extension.json: the locally installed VS Code extension is written in this repository (src/)."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "src/domain/credentials/issuerAuthority.ts and src/domain/gate/trust.ts: issuer keys and trust anchors are checked before a credential or policy is accepted."
+        },
+        "process-isolation": {
+          "class": "supports",
+          "basis": "src/agent and src/mcp: agent tools and MCP servers run as separate processes that the gate starts and limits."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "src/domain/gate/enrolment.ts and src/domain/credentials/present.ts: enrolment and the person's credential presentation stand in for a sign-in to your organization's services."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/extension.json: the extension is software shipped as the VSIX (resources.json lists its 41 packages)."
+        },
+        "software-installation": {
+          "class": "supports",
+          "basis": "src/domain/gate/manifest.ts: tool and MCP server manifests decide which add-on software the agent may run."
+        },
+        "user-interface": {
+          "class": "implements",
+          "basis": "components/extension.json: the extension runs in VS Code and shows its chat and approval views there."
+        }
+      }
+    },
+    "hsm": {
+      "role": "The site HSM that holds the OpenBao seal key and your organization's site signing key; at HQ it may also hold the offline root CA key (SoftHSM2 in test only).",
+      "facets": {
+        "accounts": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 3: the HSM token is initialised by the vendor's procedure, and OpenBao and the signing tool log in to it with its PIN."
+        },
+        "audit-records": {
+          "class": "supports",
+          "basis": "docs/security/hosted-incident-playbooks.md (HSM loss or tamper): the HSM's own logs are evidence of its use."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 4: your organization's site key is generated inside the HSM and signs bundles, re-signed images, user exports, CSRs and revocation lists."
+        },
+        "backup-restore": {
+          "class": "supports",
+          "basis": "components/hsm.json: the seal key must be recoverable for OpenBao to be restored (47-25)."
+        },
+        "certificate-issuing": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md sections 1 and 4: HQ's offline root CA key may be held in HQ's HSM, and the site key in the HSM signs CSRs and revocation lists."
+        },
+        "crypto-module-login": {
+          "class": "implements",
+          "basis": "resources.json tool:kms-pkcs11: the HSM needs an operator login (PIN) before OpenBao can use the seal key."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "components/hsm.json: the HSM holds the OpenBao seal key."
+        },
+        "hardware": {
+          "class": "implements",
+          "basis": "components/hsm.json: the site HSM is hardware (SoftHSM2 in test only)."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "docs/security/hosted-incident-playbooks.md (HSM loss or tamper): the HSM's tamper alarm or log is a detection source."
+        },
+        "network-traffic": {
+          "class": "supports",
+          "basis": "resources.json tool:kms-pkcs11: OpenBao reaches the HSM through PKCS #11, over a network for network HSMs."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md: at least two key custodians and the site administrator attend, and no one person holds a complete key or key backup (split knowledge)."
+        },
+        "software": {
+          "class": "supports",
+          "basis": "resources.json tool:softhsm2: the HSM's firmware is the vendor's; SoftHSM2 in test only."
+        },
+        "two-person-control": {
+          "class": "supports",
+          "basis": "deploy/runbooks/key-ceremony.md section 5: the HSM is backed up to a second HSM with two custodians present."
+        }
+      }
+    },
+    "hub": {
+      "role": "Optional synchronization hub.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "hub/src/http/routes.ts and hub/src/append: the hub accepts an entry only from a member the project's roster allows."
+        },
+        "accounts": {
+          "class": "implements",
+          "basis": "hub/src/enrol.ts takes each project with its roster, hub/src/join.ts carries join requests for the lead's device to admit, and hub/src/store/schema.ts keeps each member's entries."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "hub/src/enrol.ts: the operator's enrolment file is separate from members' sessions."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "hub/src/log/logger.ts and hub/src/log/redact.ts: the hub writes its own redacted log."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "hub/src/store/schema.ts: the hub keeps the signed append log of every project."
+        },
+        "authenticators": {
+          "class": "implements",
+          "basis": "hub/src/http/session.ts and hub/src/keys.ts: the hub checks members' signed session requests and holds its own signing key."
+        },
+        "backup-restore": {
+          "class": "implements",
+          "basis": "hub/src/checkpoints.ts and hub/src/stateDir.ts: the hub's state and signed checkpoints are backed up and restored (the local hub drill)."
+        },
+        "boundary-traffic": {
+          "class": "supports",
+          "basis": "exchanges.json hub-sealed-bundles: sealed entries cross between hubs that are not connected."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "hub/src/keys.ts and hub/src/secrets.ts: the hub's signing key and the HMAC of enrolments."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "components/hub.json: the hub is built in this repository (hub/) by the release pipeline."
+        },
+        "device-identity": {
+          "class": "implements",
+          "basis": "hub/src/join.ts and hub/src/enrol.ts: devices are admitted by their signed join requests."
+        },
+        "integrity-checks": {
+          "class": "supports",
+          "basis": "hub/src/http/routes.ts: equivocation in a stream is detected and pushed to that stream's devices and to the lead's and deputy's devices."
+        },
+        "labels": {
+          "class": "implements",
+          "basis": "hub/src/store/schema.ts: each product stays in the cell for its label (Phase 32 Part B)."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "hub/src/health.ts and hub/src/live/events.ts: health and live events for your organization's monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "hub/src/http/server.ts: the hub is a network service over TLS."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "hub/src/store: shared staff projects of your organization are stored at rest."
+        },
+        "our-code": {
+          "class": "implements",
+          "basis": "components/hub.json: the hub is written in this repository (hub/src)."
+        },
+        "outside-users": {
+          "class": "supports",
+          "basis": "exchanges.json hub-sealed-bundles: another organization's hub may carry sealed entries."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "hub/src/http/server.ts: TLS-bound sessions are checked against the site certificates."
+        },
+        "process-isolation": {
+          "class": "supports",
+          "basis": "resources.json image:gcr.io/distroless/nodejs26-debian13: the hub runs alone in a minimal non-root container."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "components/hub.json: members reach the hub remotely to synchronize."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "hub/src/enrol.ts and hub/src/join.ts: the operator enrols, the lead admits; neither does both."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "hub/src/http/session.ts and hub/src/live/presence.ts: TLS-bound sessions and presence."
+        },
+        "shared-resources": {
+          "class": "supports",
+          "basis": "hub/src/store/schema.ts: one hub serves many projects in one store, separated by project and cell."
+        },
+        "sign-in": {
+          "class": "implements",
+          "basis": "hub/src/http/session.ts: members open a signed session before any request."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/hub.json: the hub image is software this repository ships."
+        },
+        "traffic-limits": {
+          "class": "supports",
+          "basis": "hub/src/limits.ts: request sizes and token buckets that run before any signature check."
+        },
+        "two-person-control": {
+          "class": "supports",
+          "basis": "hub/src/join.ts: joining needs the lead's device and the six words read aloud, not the hub alone."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "hub/src/health.ts and hub/src/join.ts: the health and join routes answer before a session exists."
+        }
+      }
+    },
+    "image-registry": {
+      "role": "The site registry (Zot, Harbor at HQ and large sites) and the Kyverno admission check of image signatures.",
+      "facets": {
+        "access-decisions": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-core: Harbor decides project access; Zot's access settings at small sites."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-core: Harbor keeps registry accounts for administrators and robots."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-portal: the registry administration screen is separate from image pulls."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/goharbor/harbor-core: the registry's audit log."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-core: registry credentials for pushes."
+        },
+        "change-path": {
+          "class": "supports",
+          "basis": "components/image-registry.json: every image reaches the cluster through the registry."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: signature checks with your organization's key."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-admission (the Kyverno signature policies) is developed and reviewed in this repository."
+        },
+        "integrity-checks": {
+          "class": "implements",
+          "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: the admission controller refuses any image not signed with your organization's key."
+        },
+        "malicious-code-checks": {
+          "class": "implements",
+          "basis": "components/image-registry.json: the registry and Kyverno refuse unsigned or unknown images."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-core: registry events for site monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:ghcr.io/project-zot/zot: the registry serves images over the network."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-admission (the Kyverno signature policies) is written in this repository."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "resources.json image:ghcr.io/project-zot/zot: TLS from the site PKI."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-portal: the administration screen keeps sign-in sessions."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/goharbor/harbor-portal: administrators sign in to the registry."
+        },
+        "sign-in-page": {
+          "class": "supports",
+          "basis": "deploy/values/zot.yaml: the import account signs in by htpasswd with a 5-second failDelay; deploy/values/harbor.yaml: Harbor administrators sign in to the registry."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/image-registry.json: Zot, Harbor and Kyverno are software every site runs."
+        },
+        "software-installation": {
+          "class": "implements",
+          "basis": "resources.json image:reg.kyverno.io/kyverno/kyverno: only images signed with your organization's key may run."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/zot.yaml: nodes and Kyverno pull anonymously (anonymousPolicy read) on a node port, before the ingress exists."
+        }
+      }
+    },
+    "ingress": {
+      "role": "The HAProxy Kubernetes Ingress controller in front of the site services.",
+      "facets": {
+        "audit-records": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the ingress writes access logs."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "deploy/values/kubernetes-ingress.yaml: with smart cards on, the HTTPS frontend asks for a client certificate that chains to the smart-card CA bundle."
+        },
+        "boundary-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the one entry point to the site services."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the ingress terminates TLS."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: access logs and metrics for site monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: routes people to sign-in, the landing page and their sessions."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: serves certificates from the site PKI."
+        },
+        "remote-access": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the entry point every remote session passes."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/ingress.json: the HAProxy Kubernetes Ingress controller is software every site runs."
+        },
+        "traffic-limits": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the one entry point every request passes, where request and connection limits belong; deploy/values/kubernetes-ingress.yaml sets none yet."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/haproxytech/kubernetes-ingress: the ingress answers before anyone signs in and hands them to oauth2-proxy."
+        }
+      }
+    },
+    "keycloak": {
+      "role": "Keycloak for passkey sign-in, with its realm applier and its Postgres database.",
+      "facets": {
+        "access-decisions": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: Keycloak issues the role claims that oauth2-proxy and the services act on."
+        },
+        "accounts": {
+          "class": "implements",
+          "basis": "resources.json tool:postgresql: Keycloak's database holds the user records and passkey public credentials of the site."
+        },
+        "admin-separation": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/adorsys/keycloak-config-cli: the realm is applied as code; the administration realm is separate from people's sign-in."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "deploy/keycloak/realm.json: eventsEnabled and adminEventsEnabled record sign-in and administration events."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "deploy/keycloak/realm.json: sign-in and administration events are kept in Keycloak for eventsExpiration before the log store takes them."
+        },
+        "authenticators": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: passkeys and hardware security keys only, no passwords."
+        },
+        "backup-restore": {
+          "class": "supports",
+          "basis": "resources.json tool:postgresql: Keycloak's database must be backed up and restored with the site."
+        },
+        "change-path": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/adorsys/keycloak-config-cli: sign-in settings change only through the reviewed realm applied at install and update."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: Keycloak signs tokens and checks passkey signatures."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/adorsys/keycloak-config-cli: the realm settings are developed and reviewed in this repository."
+        },
+        "federation": {
+          "class": "implements",
+          "basis": "exchanges.json hq-sign-in-broker: an edge site's Keycloak accepts sign-ins brokered from HQ's Keycloak."
+        },
+        "identity-proofing": {
+          "class": "supports",
+          "basis": "exchanges.json site-mail: an administrator registers a person by a passwordless link to their email; proofing the person is your organization's."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: Keycloak events reach the site log store for monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: the sign-in service answers over TLS."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "resources.json tool:postgresql: user records of your organization's people at rest."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/adorsys/keycloak-config-cli: the realm configuration is this repository's code."
+        },
+        "outside-users": {
+          "class": "implements",
+          "basis": "exchanges.json hq-sign-in-broker and user-export: people from another site are admitted."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "exchanges.json revocation-sources: smart card certificates are checked against an OCSP responder or CRL."
+        },
+        "privileged-remote": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: administrators change the realm remotely."
+        },
+        "re-authentication": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: step-up sign-in (acr and auth_time) before signing."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: every remote session signs in through Keycloak."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/adorsys/keycloak-config-cli: realm roles split administration duties."
+        },
+        "sessions": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: sign-in sessions and their lifetimes."
+        },
+        "sign-in": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: signs people in at the site with passkeys or hardware security keys only."
+        },
+        "sign-in-page": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: Keycloak serves the page where people sign in."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/keycloak.json: Keycloak is software every site runs."
+        },
+        "traffic-limits": {
+          "class": "supports",
+          "basis": "deploy/keycloak/realm.json: brute-force detection limits sign-in attempts."
+        },
+        "unauthenticated-entry": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: the sign-in page is reachable before sign-in."
+        },
+        "user-interface": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/keycloak/keycloak: the sign-in and account pages run in the browser."
+        }
+      }
+    },
+    "model-endpoints": {
+      "role": "Configured local and remote model providers.",
+      "facets": {
+        "boundary-traffic": {
+          "class": "supports",
+          "basis": "components/model-endpoints.json and exchanges.json model-servers: prompts cross to configured local and remote model providers."
+        },
+        "cryptography": {
+          "class": "supports",
+          "basis": "components/model-endpoints.json: the providers terminate the TLS the extension and workbench open; their keys are the provider's."
+        },
+        "external-service": {
+          "class": "implements",
+          "basis": "components/model-endpoints.json: configured local and remote model providers are services outside the product (48.1-18 states sa-09)."
+        },
+        "labels": {
+          "class": "supports",
+          "basis": "src/domain/gate/routing.ts: a request's label decides which endpoint may receive it; the endpoint itself holds no labels."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "exchanges.json model-servers: the prompts and context a person sends and the model's replies."
+        },
+        "organization-data": {
+          "class": "supports",
+          "basis": "exchanges.json model-servers: a provider receives project content up to the label it is allowed; storage there is the provider's."
+        },
+        "software": {
+          "class": "supports",
+          "basis": "components/model-endpoints.json: the model servers run the provider's software, not software this repository ships."
+        }
+      }
+    },
+    "oauth2-proxy": {
+      "role": "oauth2-proxy in front of each workspace session.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: oauth2-proxy in front of each workspace session admits only its owner."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: request and authentication logs."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/go-toolset: checks the Keycloak tokens it receives."
+        },
+        "boundary-traffic": {
+          "class": "supports",
+          "basis": "components/oauth2-proxy.json: sits on the boundary between the ingress and each session."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/go-toolset: built with the Go FIPS module; encrypts its session cookie."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/go-toolset: we compile oauth2-proxy from pinned source."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: proxies every request to a session."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/go-toolset: our build and settings of oauth2-proxy."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "components/oauth2-proxy.json: checks Keycloak's TLS against the site CA."
+        },
+        "re-authentication": {
+          "class": "supports",
+          "basis": "components/oauth2-proxy.json: sends an expired session back to Keycloak to sign in again."
+        },
+        "remote-access": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: the gate every remote session request passes."
+        },
+        "sessions": {
+          "class": "implements",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/go-toolset: the session cookie and its lifetime."
+        },
+        "sign-in": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: admits a request only after a Keycloak sign-in."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: oauth2-proxy is software every site runs."
+        },
+        "unauthenticated-entry": {
+          "class": "implements",
+          "basis": "components/oauth2-proxy.json: answers unauthenticated requests by sending them to sign in."
+        }
+      }
+    },
+    "offline-bundle": {
+      "role": "The signed offline bundle and the tools that build, carry and import it.",
+      "facets": {
+        "audit-records": {
+          "class": "supports",
+          "basis": "resources.json tool:hauler: the import records what it loaded."
+        },
+        "backup-restore": {
+          "class": "supports",
+          "basis": "resources.json tool:hauler: the bundle reinstalls every image and chart when a site is rebuilt."
+        },
+        "boundary-traffic": {
+          "class": "supports",
+          "basis": "exchanges.json offline-bundle: the bundle carries software across the air gap."
+        },
+        "change-path": {
+          "class": "implements",
+          "basis": "exchanges.json offline-bundle: every image, chart and tool reaches an air-gapped site in the bundle."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json tool:cosign: signs the bundle and verifies every signature at import."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "components/offline-bundle.json: the tools that build and import the bundle are in this repository (deploy/bundle)."
+        },
+        "hardware": {
+          "class": "supports",
+          "basis": "exchanges.json offline-bundle: the bundle is carried into a site on media."
+        },
+        "integrity-checks": {
+          "class": "implements",
+          "basis": "resources.json tool:cosign: the import refuses anything whose signature or digest does not match."
+        },
+        "malicious-code-checks": {
+          "class": "supports",
+          "basis": "resources.json tool:grype: the SBOMs in the bundle are scanned for known vulnerabilities."
+        },
+        "our-code": {
+          "class": "implements",
+          "basis": "components/offline-bundle.json: the build, carry and import tools are this repository's."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/offline-bundle.json: the bundle tools are software we ship."
+        },
+        "software-installation": {
+          "class": "supports",
+          "basis": "resources.json tool:hauler: loads only the bundle's listed images into the site registry."
+        }
+      }
+    },
+    "openbao": {
+      "role": "OpenBao holding the site secrets, the PKI intermediate and the per-person keys.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: templated ACL policies decide who may read each secret path."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: OpenBao entities for people and services, created from Keycloak sign-ins."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "resources.json chart:openbao: root and operator tokens are separate from people's per-entity access."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "deploy/values/openbao.yaml: the file audit device writes every request to standard output, which Fluent Bit ships to the site log store."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "deploy/values/openbao.yaml: the audit device hashes sensitive values with HMAC before they leave OpenBao; tamper evidence of the stored records is gap G2."
+        },
+        "authenticators": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: holds the per-person keys and the service tokens."
+        },
+        "backup-restore": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: OpenBao's storage must be backed up and restored (47-25 escrow of the restore keys)."
+        },
+        "certificate-issuing": {
+          "class": "implements",
+          "basis": "exchanges.json csr and intermediate: OpenBao holds the site's PKI intermediate and issues certificates."
+        },
+        "crypto-module-login": {
+          "class": "supports",
+          "basis": "resources.json tool:kms-pkcs11: OpenBao logs in to the HSM to unseal."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: holds the site secrets, the PKI intermediate and the per-person keys."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/images/openbao/Containerfile and deploy/openbao/apply.mjs are developed and reviewed in this repository."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/prometheus/prometheus: OpenBao metrics for site monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: answers over TLS."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: your organization's secrets at rest."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/images/openbao/Containerfile rebuilds the OpenBao image with the kms-pkcs11 plugin, and deploy/openbao/apply.mjs is its configuration as code."
+        },
+        "pki-trust": {
+          "class": "implements",
+          "basis": "exchanges.json crl: OpenBao publishes the revocation list of its intermediate."
+        },
+        "privileged-remote": {
+          "class": "supports",
+          "basis": "resources.json chart:openbao: operators run privileged commands against the OpenBao API remotely."
+        },
+        "re-authentication": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/key-service.ts: the step-up-only signing role checks a fresh sign-in."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: reached remotely by sessions and operators."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "resources.json tool:kms-pkcs11: Shamir key shares split recovery between people."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: tokens with a lifetime."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/openbao/openbao-ubi: people sign in to OpenBao through Keycloak (OIDC)."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/openbao.json: OpenBao is software every site runs."
+        },
+        "two-person-control": {
+          "class": "implements",
+          "basis": "resources.json tool:kms-pkcs11: recovery with Shamir key shares needs more than one holder."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/openbao.yaml: the metrics-only listener on 9101 answers /v1/sys/metrics without a token (unauthenticated_metrics_access)."
+        }
+      }
+    },
+    "relay": {
+      "role": "Optional relay service.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "levels.json (protected-b: relay inbound authentication) and resources.json npm:jose: the relay decides who may send through it; Phases 75 to 84 build its messaging (G3)."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "components/relay.json: the relay holds the sender registrations its messaging needs (Phases 75 to 84); people's accounts are your organization's."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "relay/src/config.ts and relay/src/secrets.ts: the operator's configuration and secrets are separate from what senders can reach."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "relay/src/log/logger.ts and relay/src/log/redact.ts: the relay writes its own redacted log."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json npm:jose: the relay checks the signed tokens senders present (planned, Phases 75 to 84)."
+        },
+        "boundary-traffic": {
+          "class": "implements",
+          "basis": "components/relay.json: the relay carries messages across the network boundary between your organization and outside parties."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "relay/src/log/pseudonymKey.ts and resources.json npm:jose: keyed pseudonyms in the log and token signatures."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "components/relay.json: the relay is built in this repository (relay/) by the release pipeline."
+        },
+        "device-identity": {
+          "class": "supports",
+          "basis": "components/relay.json: the relay identifies the devices that register with it (Phases 75 to 84)."
+        },
+        "external-service": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/bbernhard/signal-cli-rest-api: the relay reaches outside messaging services (planned, Phase 82)."
+        },
+        "labels": {
+          "class": "supports",
+          "basis": "components/relay.json: the relay carries labelled messages and must not lower their marking (Phases 75 to 84)."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "relay/src/health.ts: the relay reports its health for your organization's monitoring."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "relay/src/http/server.ts: the relay is a network service."
+        },
+        "organization-data": {
+          "class": "supports",
+          "basis": "relay/src/store: the relay keeps queued messages and registrations at rest."
+        },
+        "our-code": {
+          "class": "implements",
+          "basis": "components/relay.json: the relay is written in this repository (relay/src)."
+        },
+        "outside-users": {
+          "class": "implements",
+          "basis": "components/relay.json: the relay admits senders from outside your organization (Phases 75 to 84)."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "relay/src/http/server.ts: TLS to the relay is checked against your organization's certificates."
+        },
+        "process-isolation": {
+          "class": "supports",
+          "basis": "resources.json image:gcr.io/distroless/nodejs26-debian13: the relay runs alone in a minimal non-root container."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "components/relay.json: outside parties reach your organization through the relay."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "components/relay.json: the relay keeps sender connections (Phases 75 to 84)."
+        },
+        "sign-in": {
+          "class": "implements",
+          "basis": "levels.json protected-b note: relay inbound authentication admits only signed-in senders."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/relay.json: the relay image is software this repository ships."
+        },
+        "traffic-limits": {
+          "class": "implements",
+          "basis": "relay/src/http/server.ts: header count and slow-request time limits on every request."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "relay/src/health.ts: the health route answers before any sign-in."
+        }
+      }
+    },
+    "release-pipeline": {
+      "role": "Repository release automation.",
+      "facets": {
+        "change-path": {
+          "class": "implements",
+          "basis": "components/release-pipeline.json: repository release automation is the path by which every change reaches a release (scripts/merge-pr, .github/workflows)."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json tool:cosign and action:actions/attest: signatures and provenance on every release artifact."
+        },
+        "development": {
+          "class": "implements",
+          "basis": "components/release-pipeline.json and resources.json npm:typescript, action:actions/checkout: the development and build process of every component."
+        },
+        "external-service": {
+          "class": "supports",
+          "basis": "exchanges.json container-registry: the pipeline publishes to GitHub and the GitHub Container Registry."
+        },
+        "malicious-code-checks": {
+          "class": "supports",
+          "basis": "resources.json action:github/codeql-action/analyze and tool:grype: code scanning and SBOM vulnerability scans on every change and release."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "scripts/lib/workflow.mjs REVIEW_ACCOUNT and GATE_PATHS: the agent review identity is not the author's, and gate changes need the owner."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/release-pipeline.json: the workflows and tools that build and release are software (resources.json lists 29)."
+        },
+        "supplier-process": {
+          "class": "implements",
+          "basis": "components/release-pipeline.json, SECURITY.md and docs/security/incident-response.md: the supplier's own policies, procedures and records."
+        },
+        "two-person-control": {
+          "class": "supports",
+          "basis": "scripts/lib/workflow.mjs: a release needs the agent review and the owner's gate approval."
+        }
+      }
+    },
+    "rke2": {
+      "role": "The Kubernetes distribution of a site: RKE2 in its FIPS build, CIS profile, Canal networking.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "resources.json tool:rke2: Kubernetes RBAC decides what each workload and administrator may do."
+        },
+        "accounts": {
+          "class": "implements",
+          "basis": "resources.json tool:rke2: Kubernetes service accounts and role bindings for every site part."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: cluster administration runs through the Kubernetes API, separate from workloads."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "resources.json tool:rke2: RKE2 is installed with an audit policy (the Kubernetes audit log)."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "deploy/rke2/config.yaml: the API audit log is kept 30 days in at most 10 files of 100 MB on the node before Fluent Bit ships it."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: the API server checks client certificates and service account tokens."
+        },
+        "backup-restore": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: the cluster's etcd snapshots restore the site (47-27 recovery order)."
+        },
+        "boundary-traffic": {
+          "class": "implements",
+          "basis": "components/rke2.json: Canal networking and network policies decide traffic between pods and out of the cluster."
+        },
+        "certificate-issuing": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: RKE2 issues the cluster's internal component certificates; site certificates are cert-manager's."
+        },
+        "change-path": {
+          "class": "supports",
+          "basis": "resources.json tool:helm: every site part is installed and updated on the cluster through helm."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "components/rke2.json: RKE2 in its FIPS build, with secrets encryption."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/rke2 (install-node.sh, config.yaml, audit-policy.yaml) and deploy/charts/sterling-network is developed and reviewed in this repository."
+        },
+        "device-identity": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: each node joins with its own node identity."
+        },
+        "host-hardening": {
+          "class": "supports",
+          "basis": "components/rke2.json: the CIS profile sets the node kernel settings."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/prometheus/node-exporter: node and cluster metrics for site monitoring."
+        },
+        "name-resolution": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: CoreDNS resolves names inside the cluster."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "components/rke2.json: Canal networking carries every pod's traffic."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "resources.json tool:rke2: etcd holds the site's Kubernetes objects and secrets at rest (secrets encryption)."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/rke2 (install-node.sh, config.yaml, audit-policy.yaml) and deploy/charts/sterling-network is written in this repository."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: the API server trusts its own cluster CA."
+        },
+        "privileged-remote": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: administrators reach the Kubernetes API remotely for privileged commands."
+        },
+        "process-isolation": {
+          "class": "implements",
+          "basis": "components/rke2.json: Kubernetes runs each workload in its own container and namespace."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: the Kubernetes API is the remote entry point for administration."
+        },
+        "separation-of-duties": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: RBAC roles split cluster duties."
+        },
+        "shared-resources": {
+          "class": "implements",
+          "basis": "components/rke2.json: nodes are shared between many people's sessions."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "resources.json tool:rke2: administrators sign in to the API server."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/rke2.json: RKE2 is software every site runs."
+        },
+        "software-installation": {
+          "class": "supports",
+          "basis": "resources.json tool:helm and image-registry: only the signed images the registry admits are run."
+        },
+        "time-source": {
+          "class": "implements",
+          "basis": "exchanges.json time-source: the site time source sets the cluster nodes' clocks."
+        },
+        "traffic-limits": {
+          "class": "implements",
+          "basis": "resources.json tool:rke2: resource quotas and limits on every workload."
+        }
+      }
+    },
+    "site-logging": {
+      "role": "The site log store, log shipping and metrics (OpenSearch, Fluent Bit, Prometheus).",
+      "facets": {
+        "access-decisions": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: OpenSearch decides who may read the logs."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: log readers' accounts, from Keycloak."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: log administration is separate from reading."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "resources.json image:cr.fluentbit.io/fluent/fluent-bit: its own shipping events."
+        },
+        "audit-store": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: the site's log and audit store."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: checks readers' tokens."
+        },
+        "backup-restore": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: the log store must be backed up and restored."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:cr.fluentbit.io/fluent/fluent-bit: ships logs over TLS."
+        },
+        "integrity-checks": {
+          "class": "supports",
+          "basis": "resources.json image:quay.io/prometheus/alertmanager: alerts on the rules of deploy/values/prometheus-alerts.yaml."
+        },
+        "monitoring": {
+          "class": "implements",
+          "basis": "resources.json image:quay.io/prometheus/prometheus and image:quay.io/prometheus/alertmanager: metrics, alert rules and alert email."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json image:cr.fluentbit.io/fluent/fluent-bit: sends logs from every node."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: logs of your organization's activity at rest."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "resources.json image:cr.fluentbit.io/fluent/fluent-bit: checks the log store's TLS against the site CA."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: readers' sessions."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/opensearchproject/opensearch: readers sign in through Keycloak."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/site-logging.json: OpenSearch, Fluent Bit and Prometheus are software every site runs."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "deploy/values/fluent-bit.yaml: the HTTP server on port 2020 serves its metrics, health and uptime endpoints without a sign-in."
+        }
+      }
+    },
+    "site-storage": {
+      "role": "The encrypted storage class for workspaces and service data (Longhorn reference class).",
+      "facets": {
+        "audit-store": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/longhornio/longhorn-manager: the log store's volumes are Longhorn volumes."
+        },
+        "backup-restore": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/longhornio/csi-snapshotter: volume snapshots used for restores."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json image:docker.io/longhornio/longhorn-manager: encrypted volumes."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-storage (the encrypted class, snapshots and backups) is developed and reviewed in this repository."
+        },
+        "network-traffic": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/longhornio/longhorn-engine: keeps volume copies on other nodes in step over the network."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "components/site-storage.json: the encrypted storage class for workspaces and service data."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "deploy/charts/sterling-storage (the encrypted class, snapshots and backups) is written in this repository."
+        },
+        "shared-resources": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/longhornio/longhorn-share-manager: volumes several pods use at once."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/site-storage.json: Longhorn is software every site runs."
+        },
+        "two-person-control": {
+          "class": "supports",
+          "basis": "resources.json image:docker.io/longhornio/longhorn-ui: deleting volumes is an operator action your organization may require two people for."
+        }
+      }
+    },
+    "theia-cloud": {
+      "role": "The Theia Cloud operator, service, conversion webhook and landing page that start each person their workspace.",
+      "facets": {
+        "access-decisions": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud: the service starts a session only for the signed-in person who owns it."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud-crds: Theia Cloud keeps workspace records per person; the accounts are Keycloak's."
+        },
+        "admin-separation": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud-base: cluster-wide pieces are installed by the operator, separate from people's sessions."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/openjdk-21-runtime: the operator and service log session starts and stops."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud: the service checks the person's bearer token from Keycloak."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "resources.json chart:theia-cloud-crds: the conversion webhook and service answer over TLS."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/openjdk-21: we rebuild the operator, service and webhook from source."
+        },
+        "idle-lock": {
+          "class": "implements",
+          "basis": "deploy/values/theia-cloud.yaml: the operator's activity tracker stops idle sessions (the AppDefinition's notifyAfter and timeoutAfter)."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "resources.json chart:theia-cloud: the landing page and service answer over the network."
+        },
+        "our-code": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/nodejs-22: our rebuilt landing page and settings."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud-crds: the conversion webhook's CA bundle from cert-manager."
+        },
+        "process-isolation": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud: one workbench session per person in its own pod."
+        },
+        "remote-access": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/nginx-126: the landing page where a signed-in person opens their workbench."
+        },
+        "sessions": {
+          "class": "implements",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/openjdk-21-runtime: starts, tracks and stops each person's workbench session."
+        },
+        "shared-resources": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud: sessions share the site nodes with limits per session."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "resources.json chart:theia-cloud: the landing page needs a signed-in person."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/theia-cloud.json: the operator, service, webhook and landing page are software every site runs."
+        },
+        "traffic-limits": {
+          "class": "supports",
+          "basis": "deploy/values/theia-cloud.yaml: sessionsPerUser 1, one session per person."
+        },
+        "unauthenticated-entry": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/nginx-126: the landing page is reached first and sends people to sign in."
+        },
+        "user-interface": {
+          "class": "supports",
+          "basis": "resources.json image:registry.access.redhat.com/ubi9/nginx-126: the landing page runs in the browser."
+        }
+      }
+    },
+    "workbench": {
+      "role": "The Sterling workbench image that a hosted site runs for each person.",
+      "facets": {
+        "access-decisions": {
+          "class": "implements",
+          "basis": "components/workbench.json and workbench/extension/src/node/egress-contribution.ts: the workbench reuses the extension's gate and allows egress only to policy-listed servers."
+        },
+        "accounts": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/session-identity.ts: the session runs as the signed-in person; the account itself is Keycloak's."
+        },
+        "admin-separation": {
+          "class": "implements",
+          "basis": "workbench/extension/src/common/key-service.ts: signing needs the step-up role (sterling-workbench-stepup) that an ordinary session does not hold."
+        },
+        "audit-records": {
+          "class": "implements",
+          "basis": "workbench/extension/src/browser/session-activity-frontend-module.ts and the extension gate log inside the image record the session's own events."
+        },
+        "audit-store": {
+          "class": "supports",
+          "basis": "workbench/Dockerfile: the release image bundles the extension, whose gate decision log rotates and keeps four files (src/gate/decisionLog.ts)."
+        },
+        "authenticators": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/secret-store.ts and key-service.ts: the person's secrets and keys sit at their own OpenBao path, never in the image."
+        },
+        "boundary-traffic": {
+          "class": "implements",
+          "basis": "workbench/extension/src/node/egress-contribution.ts and exchanges.json model-servers and open-vsx: the session reaches only policy-listed model servers and the site extension mirror."
+        },
+        "cryptography": {
+          "class": "implements",
+          "basis": "workbench/extension/src/common/key-service.ts: signing through OpenBao's transit keys; TLS to OpenBao and the model servers."
+        },
+        "development": {
+          "class": "supports",
+          "basis": "components/workbench.json: the Sterling workbench image is built in this repository (workbench/Dockerfile) by the release pipeline."
+        },
+        "device-identity": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/identity.ts: the session is bound to the person's identity rather than a device; the node identity is RKE2's."
+        },
+        "external-service": {
+          "class": "supports",
+          "basis": "exchanges.json model-servers: workbench sessions send prompts to the model servers your organization's signed policy lists."
+        },
+        "host-hardening": {
+          "class": "supports",
+          "basis": "workbench/Dockerfile: the image runs as a non-root user on UBI 9 minimal; the node kernel settings are RKE2's."
+        },
+        "idle-lock": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/session-activity.ts: the idle warning with Keep working; a stopped session needs a new sign-in."
+        },
+        "labels": {
+          "class": "implements",
+          "basis": "workbench reuses the extension's label handling (src/domain/gate/labels.ts) inside the image; 48.1-19 states ac-16 on it."
+        },
+        "malicious-code-checks": {
+          "class": "supports",
+          "basis": "resources.json tool:grype: the Release workflow scans the workbench image SBOM for known vulnerabilities before publishing."
+        },
+        "monitoring": {
+          "class": "supports",
+          "basis": "workbench/extension/src/browser/session-activity-frontend-module.ts: the session reports activity that the site's monitoring and Theia Cloud read."
+        },
+        "network-traffic": {
+          "class": "implements",
+          "basis": "exchanges.json model-servers and open-vsx: the session sends and receives over the network, over TLS."
+        },
+        "organization-data": {
+          "class": "implements",
+          "basis": "workbench/extension/src/browser/sterling-work-areas-module.ts and site-storage volumes: each person's workspace holds your organization's files."
+        },
+        "our-code": {
+          "class": "implements",
+          "basis": "components/workbench.json: the workbench extension and image are written in this repository (workbench/)."
+        },
+        "pki-trust": {
+          "class": "supports",
+          "basis": "workbench/extension/src/node/backend-service.ts: TLS to OpenBao and the model servers is checked against the site CA."
+        },
+        "process-isolation": {
+          "class": "supports",
+          "basis": "components/theia-cloud.json: each person gets their own workbench container, which Theia Cloud starts and RKE2 isolates."
+        },
+        "re-authentication": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/key-service.ts: signing checks acr and auth_time and sends the person to step up first."
+        },
+        "sessions": {
+          "class": "supports",
+          "basis": "workbench/extension/src/common/session-identity.ts and session-activity.ts: the session view, its activity tracker and its retry."
+        },
+        "shared-resources": {
+          "class": "supports",
+          "basis": "components/workbench.json: many people's workbench containers share the site nodes and storage that RKE2 and site-storage separate."
+        },
+        "sign-in": {
+          "class": "supports",
+          "basis": "workbench/extension/src/browser/session-identity-frontend-module.ts: the session admits only the person oauth2-proxy signed in."
+        },
+        "software": {
+          "class": "implements",
+          "basis": "components/workbench.json: the Sterling workbench image is software a hosted site runs."
+        },
+        "software-installation": {
+          "class": "implements",
+          "basis": "exchanges.json open-vsx: the workbench installs extensions only from the site Open VSX mirror."
+        },
+        "user-interface": {
+          "class": "implements",
+          "basis": "components/workbench.json: the workbench is the browser editor each person uses."
+        }
+      }
+    }
+  },
+  "controls": {
+    "ac-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ac-02": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.01": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.02": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.03": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.04": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.05": {
+      "facets": [
+        "sessions"
+      ]
+    },
+    "ac-02.07": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.10": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-02.13": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-03": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-03.02": {
+      "facets": [
+        "two-person-control"
+      ]
+    },
+    "ac-03.04": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-03.09": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-04": {
+      "facets": [
+        "labels",
+        "boundary-traffic"
+      ]
+    },
+    "ac-05": {
+      "facets": [
+        "separation-of-duties"
+      ]
+    },
+    "ac-06": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-06.01": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-06.02": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-06.05": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-06.07": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ac-06.09": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-06.10": {
+      "facets": [
+        "access-decisions"
+      ]
+    },
+    "ac-07": {
+      "facets": [
+        "sign-in-page",
+        "crypto-module-login"
+      ]
+    },
+    "ac-08": {
+      "facets": [
+        "sign-in-page"
+      ]
+    },
+    "ac-09": {
+      "facets": [
+        "sign-in-page"
+      ]
+    },
+    "ac-11": {
+      "facets": [
+        "idle-lock"
+      ]
+    },
+    "ac-11.01": {
+      "facets": []
+    },
+    "ac-12": {
+      "facets": [
+        "sessions"
+      ]
+    },
+    "ac-14": {
+      "facets": [
+        "unauthenticated-entry"
+      ]
+    },
+    "ac-16": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-16.02": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-16.05": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "ac-17": {
+      "facets": [
+        "remote-access"
+      ]
+    },
+    "ac-17.01": {
+      "facets": [
+        "remote-access"
+      ]
+    },
+    "ac-17.02": {
+      "facets": [
+        "remote-access"
+      ]
+    },
+    "ac-17.03": {
+      "facets": [
+        "remote-access"
+      ]
+    },
+    "ac-17.04": {
+      "facets": [
+        "privileged-remote"
+      ]
+    },
+    "ac-17.400": {
+      "facets": [
+        "privileged-remote"
+      ]
+    },
+    "ac-18": {
+      "facets": []
+    },
+    "ac-18.01": {
+      "facets": []
+    },
+    "ac-18.03": {
+      "facets": []
+    },
+    "ac-18.04": {
+      "facets": []
+    },
+    "ac-19": {
+      "facets": []
+    },
+    "ac-19.05": {
+      "facets": []
+    },
+    "ac-20": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "ac-20.01": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "ac-20.02": {
+      "facets": []
+    },
+    "ac-20.04": {
+      "facets": []
+    },
+    "ac-21": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-21.400": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-21.401": {
+      "facets": [
+        "labels"
+      ]
+    },
+    "ac-22": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "au-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "au-02": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-03": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-03.01": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-04": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-04.01": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-05": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-05.01": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-06": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-06.01": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-06.03": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-06.04": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-07": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-07.01": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-08": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-09": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-09.02": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-09.04": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-09.06": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-11": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "au-12": {
+      "facets": [
+        "audit-records"
+      ]
+    },
+    "au-12.01": {
+      "facets": [
+        "audit-store"
+      ]
+    },
+    "cm-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "cm-02": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-02.02": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-02.03": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-02.06": {
+      "facets": [
+        "development"
+      ]
+    },
+    "cm-02.07": {
+      "facets": []
+    },
+    "cm-03": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-03.02": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-03.04": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-04": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-04.01": {
+      "facets": [
+        "development"
+      ]
+    },
+    "cm-04.02": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-05": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-06": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-07": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-07.01": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-07.02": {
+      "facets": [
+        "software-installation"
+      ]
+    },
+    "cm-07.05": {
+      "facets": [
+        "software-installation"
+      ]
+    },
+    "cm-08": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-08.01": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-08.03": {
+      "facets": [
+        "integrity-checks"
+      ]
+    },
+    "cm-08.04": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-08.06": {
+      "facets": [
+        "software"
+      ]
+    },
+    "cm-09": {
+      "facets": [
+        "change-path"
+      ]
+    },
+    "cm-10": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "cm-11": {
+      "facets": [
+        "software-installation"
+      ]
+    },
+    "cm-11.02": {
+      "facets": [
+        "software-installation"
+      ]
+    },
+    "cm-12": {
+      "facets": [
+        "organization-data"
+      ]
+    },
+    "cm-12.01": {
+      "facets": [
+        "organization-data"
+      ]
+    },
+    "cp-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "cp-02": {
+      "facets": [
+        "backup-restore",
+        "supplier-process"
+      ]
+    },
+    "cp-02.01": {
+      "facets": []
+    },
+    "cp-02.02": {
+      "facets": []
+    },
+    "cp-02.03": {
+      "facets": []
+    },
+    "cp-02.08": {
+      "facets": []
+    },
+    "cp-03": {
+      "facets": []
+    },
+    "cp-04": {
+      "facets": [
+        "backup-restore",
+        "supplier-process"
+      ]
+    },
+    "cp-04.01": {
+      "facets": []
+    },
+    "cp-06": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-06.01": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-06.03": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-07": {
+      "facets": []
+    },
+    "cp-07.01": {
+      "facets": []
+    },
+    "cp-07.02": {
+      "facets": []
+    },
+    "cp-07.03": {
+      "facets": []
+    },
+    "cp-07.04": {
+      "facets": []
+    },
+    "cp-07.06": {
+      "facets": []
+    },
+    "cp-08": {
+      "facets": []
+    },
+    "cp-08.01": {
+      "facets": []
+    },
+    "cp-08.02": {
+      "facets": []
+    },
+    "cp-08.03": {
+      "facets": []
+    },
+    "cp-08.05": {
+      "facets": []
+    },
+    "cp-09": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-09.01": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-09.03": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-09.05": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-09.07": {
+      "facets": [
+        "two-person-control"
+      ]
+    },
+    "cp-09.08": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-10": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-10.02": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-10.04": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "cp-10.06": {
+      "facets": [
+        "backup-restore"
+      ]
+    },
+    "ia-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ia-02": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-02.01": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-02.02": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-02.08": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-02.10": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-03": {
+      "facets": [
+        "device-identity"
+      ]
+    },
+    "ia-04": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ia-04.04": {
+      "facets": [
+        "accounts"
+      ]
+    },
+    "ia-05": {
+      "facets": [
+        "authenticators"
+      ]
+    },
+    "ia-05.01": {
+      "facets": [
+        "sign-in"
+      ]
+    },
+    "ia-05.02": {
+      "facets": [
+        "pki-trust"
+      ]
+    },
+    "ia-05.06": {
+      "facets": [
+        "authenticators"
+      ]
+    },
+    "ia-05.07": {
+      "facets": [
+        "our-code",
+        "change-path",
+        "authenticators"
+      ]
+    },
+    "ia-05.08": {
+      "facets": [
+        "accounts",
+        "federation"
+      ]
+    },
+    "ia-05.09": {
+      "facets": [
+        "federation"
+      ]
+    },
+    "ia-05.13": {
+      "facets": [
+        "authenticators"
+      ]
+    },
+    "ia-05.14": {
+      "facets": [
+        "pki-trust"
+      ]
+    },
+    "ia-06": {
+      "facets": [
+        "sign-in-page"
+      ]
+    },
+    "ia-07": {
+      "facets": [
+        "crypto-module-login"
+      ]
+    },
+    "ia-08": {
+      "facets": [
+        "outside-users"
+      ]
+    },
+    "ia-08.01": {
+      "facets": [
+        "outside-users"
+      ]
+    },
+    "ia-08.02": {
+      "facets": [
+        "outside-users"
+      ]
+    },
+    "ia-08.04": {
+      "facets": [
+        "outside-users"
+      ]
+    },
+    "ia-11": {
+      "facets": [
+        "re-authentication"
+      ]
+    },
+    "ia-12": {
+      "facets": [
+        "identity-proofing"
+      ]
+    },
+    "ia-12.02": {
+      "facets": [
+        "identity-proofing"
+      ]
+    },
+    "ia-12.03": {
+      "facets": [
+        "identity-proofing"
+      ]
+    },
+    "ia-12.04": {
+      "facets": [
+        "identity-proofing"
+      ]
+    },
+    "ia-12.05": {
+      "facets": [
+        "identity-proofing"
+      ]
+    },
+    "ir-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-02": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-03": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-03.02": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-04": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "ir-04.03": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-04.08": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-04.09": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-05": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "ir-06": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-06.01": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "ir-06.02": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-06.03": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-07": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-07.01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ir-08": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "pl-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "pl-02": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "pl-04": {
+      "facets": []
+    },
+    "pl-04.01": {
+      "facets": []
+    },
+    "pl-08": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "pl-10": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "pl-11": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ra-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ra-02": {
+      "facets": []
+    },
+    "ra-03": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ra-03.01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ra-05": {
+      "facets": [
+        "software"
+      ]
+    },
+    "ra-05.02": {
+      "facets": [
+        "software"
+      ]
+    },
+    "ra-05.05": {
+      "facets": []
+    },
+    "ra-05.11": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "ra-07": {
+      "facets": []
+    },
+    "ra-09": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-02": {
+      "facets": []
+    },
+    "sa-03": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-04": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-04.01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-04.09": {
+      "facets": [
+        "software"
+      ]
+    },
+    "sa-04.10": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-04.12": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sa-05": {
+      "facets": [
+        "software"
+      ]
+    },
+    "sa-08": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-09": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "sa-09.01": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "sa-09.02": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "sa-09.08": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "sa-10": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-10.01": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-10.07": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-11": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-15": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-15.03": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-16": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-17": {
+      "facets": [
+        "development"
+      ]
+    },
+    "sa-22": {
+      "facets": [
+        "software"
+      ]
+    },
+    "sa-400": {
+      "facets": [
+        "external-service"
+      ]
+    },
+    "sc-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sc-02": {
+      "facets": [
+        "admin-separation"
+      ]
+    },
+    "sc-04": {
+      "facets": [
+        "shared-resources"
+      ]
+    },
+    "sc-05": {
+      "facets": [
+        "traffic-limits"
+      ]
+    },
+    "sc-05.02": {
+      "facets": [
+        "traffic-limits"
+      ]
+    },
+    "sc-07": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.03": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.04": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.05": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.07": {
+      "facets": []
+    },
+    "sc-07.08": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.09": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.11": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-07.12": {
+      "facets": [
+        "host-hardening"
+      ]
+    },
+    "sc-07.13": {
+      "facets": [
+        "boundary-traffic"
+      ]
+    },
+    "sc-08": {
+      "facets": [
+        "network-traffic"
+      ]
+    },
+    "sc-08.01": {
+      "facets": [
+        "network-traffic"
+      ]
+    },
+    "sc-10": {
+      "facets": [
+        "sessions"
+      ]
+    },
+    "sc-12": {
+      "facets": [
+        "cryptography"
+      ]
+    },
+    "sc-12.01": {
+      "facets": [
+        "cryptography"
+      ]
+    },
+    "sc-13": {
+      "facets": [
+        "cryptography"
+      ]
+    },
+    "sc-15": {
+      "facets": []
+    },
+    "sc-15.03": {
+      "facets": []
+    },
+    "sc-17": {
+      "facets": [
+        "certificate-issuing"
+      ]
+    },
+    "sc-18": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-18.01": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-18.02": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-18.03": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-18.04": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-18.05": {
+      "facets": [
+        "user-interface"
+      ]
+    },
+    "sc-20": {
+      "facets": [
+        "name-resolution"
+      ]
+    },
+    "sc-21": {
+      "facets": [
+        "name-resolution"
+      ]
+    },
+    "sc-22": {
+      "facets": [
+        "name-resolution"
+      ]
+    },
+    "sc-23": {
+      "facets": [
+        "network-traffic"
+      ]
+    },
+    "sc-23.01": {
+      "facets": [
+        "sessions"
+      ]
+    },
+    "sc-23.03": {
+      "facets": [
+        "sessions"
+      ]
+    },
+    "sc-28": {
+      "facets": [
+        "organization-data"
+      ]
+    },
+    "sc-28.01": {
+      "facets": [
+        "organization-data"
+      ]
+    },
+    "sc-29": {
+      "facets": []
+    },
+    "sc-39": {
+      "facets": [
+        "process-isolation"
+      ]
+    },
+    "sc-45": {
+      "facets": [
+        "time-source"
+      ]
+    },
+    "si-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "si-02": {
+      "facets": [
+        "software"
+      ]
+    },
+    "si-02.02": {
+      "facets": [
+        "software"
+      ]
+    },
+    "si-03": {
+      "facets": [
+        "malicious-code-checks"
+      ]
+    },
+    "si-03.04": {
+      "facets": [
+        "malicious-code-checks"
+      ]
+    },
+    "si-04": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.02": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.04": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.05": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.10": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.11": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.12": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.13": {
+      "facets": [
+        "monitoring"
+      ]
+    },
+    "si-04.14": {
+      "facets": []
+    },
+    "si-04.15": {
+      "facets": []
+    },
+    "si-05": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "si-07": {
+      "facets": [
+        "software"
+      ]
+    },
+    "si-07.01": {
+      "facets": [
+        "software"
+      ]
+    },
+    "si-07.02": {
+      "facets": [
+        "integrity-checks"
+      ]
+    },
+    "si-07.03": {
+      "facets": [
+        "integrity-checks"
+      ]
+    },
+    "si-07.07": {
+      "facets": [
+        "integrity-checks"
+      ]
+    },
+    "si-08": {
+      "facets": []
+    },
+    "si-08.02": {
+      "facets": []
+    },
+    "si-10": {
+      "facets": [
+        "our-code"
+      ]
+    },
+    "si-11": {
+      "facets": [
+        "our-code"
+      ]
+    },
+    "si-12": {
+      "facets": [
+        "organization-data"
+      ]
+    },
+    "si-16": {
+      "facets": [
+        "host-hardening"
+      ]
+    },
+    "si-400": {
+      "facets": []
+    },
+    "sr-01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-02": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-02.01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-03": {
+      "facets": [
+        "software"
+      ]
+    },
+    "sr-05": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-06": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-08": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-10": {
+      "facets": [
+        "hardware"
+      ]
+    },
+    "sr-11": {
+      "facets": [
+        "software"
+      ]
+    },
+    "sr-11.01": {
+      "facets": [
+        "supplier-process"
+      ]
+    },
+    "sr-11.02": {
+      "facets": [
+        "hardware"
+      ]
+    },
+    "sr-12": {
+      "facets": [
+        "hardware"
+      ]
+    }
+  },
+  "overrides": []
+}

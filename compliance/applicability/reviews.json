@@ -1,0 +1,38 @@
+{
+  "kind": "reviews",
+  "stages": [
+    {
+      "id": "stage-1",
+      "levels": [
+        "unclassified",
+        "protected-a",
+        "hosted-protected-a"
+      ],
+      "reviewer": {
+        "role": "Field Architect, AI Solutions",
+        "name": "Aaron Luhning"
+      },
+      "reviewedAt": "2026-11-25",
+      "components": {
+        "cert-manager": "6a835dd920b8f2b1c9fb99c35ff2e4f32f6f2dc41768e9cd70493d17f0b76438",
+        "extension": "52c8e445664610f21e3a95e009b9278caf3d62dd10a45b58cfcfcee913b89020",
+        "hsm": "8f4306c3a32d3d3a538bf9d7927c578bb97385fad83bc758c0ccf666683d9ce2",
+        "hub": "b388fe54aac215cffab23d753677bea59dae4de13d94b5f9b7444ee578761371",
+        "image-registry": "258b2e1e94f757d0302009090fe25a8877bcd83aca0d014e4751052999a0c428",
+        "ingress": "ff8ed41103f6cfe07420099e0c58a24750671bfd46584375d5c311f1172b3a5b",
+        "keycloak": "54a5e845669d64378ad712913009d8373a91be7e28b162a72db0d42044a81231",
+        "model-endpoints": "a55d5dd60c0dc8835816a275eafc61dc7a05b1193393c9d077d2c5e0bb67733e",
+        "oauth2-proxy": "3cb12b6b2d6bc5d9255cc0ea540cc547e9f636b82492b6c44ae47ac843c72de6",
+        "offline-bundle": "0f6262d72c8ad5cc71ab9962a7d7856faee809de3287cfef31faa51a4cf12bd3",
+        "openbao": "c2f51d625a3b2761245cca80ce4eed67929e6f4e16b365010a255dfb03a013b1",
+        "relay": "5962dc32df0f973bdbb6b66dd7a1e694aeec51566cb4d33a6dfbe7cb44675356",
+        "release-pipeline": "a70fd136532ffd7d28d528d2156d9d4a335bd788c863836eac324a1e56aaf710",
+        "rke2": "1a14816a9681bab9abaf80c2885078d1384d614f27242c6f083bcda8dd251c47",
+        "site-logging": "710939c641991096696d1a22548a4ebaa8a9b317865c172d8bed8940c756da47",
+        "site-storage": "da2a40eacd6f9b18b435d0c8f918286c89a47069cb21ef497748f7573a500b4e",
+        "theia-cloud": "e14eaffb7cfd0a17df166a02828d1cdf5a39ef0b1c68e74746dda8672cb6bfee",
+        "workbench": "56d512d4af898906171b2bcc8c6e924ae375d5c4b0fe682871ab0dc3e70752f3"
+      }
+    }
+  ]
+}

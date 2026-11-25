@@ -105,7 +105,7 @@ jobs:
           restore-keys: vscode-test-${{ runner.os }}-
       - name: Install xvfb if the runner lacks it
         run: command -v xvfb-run >/dev/null || (sudo apt-get update && sudo apt-get install -y xvfb)
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run compile
       - name: Run the extension in a real VS Code
         run: env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s "-screen 0 1920x1080x24" node dist/test/e2e/run.js
@@ -199,6 +199,18 @@ jobs:
       - name: Check the generated blocks of the hosted SA&A documents
         working-directory: .
         run: node compliance/src/cli.ts hosted-docs --check
+      # 44.1-07 (D-10, D-19): the component applicability map matches its rules, and the count of applicable cells without a statement (and of
+      # Not applicable cells awaiting sign-off) only goes down. The loaders validate with ajv, so the compliance package is installed first,
+      # from its lockfile with no install scripts.
+      - name: Install the compliance package
+        working-directory: .
+        run: npm --prefix compliance ci --ignore-scripts
+      - name: Check the component applicability map against its rules
+        working-directory: .
+        run: node compliance/src/cli.ts applicability --check
+      - name: Check the compliance coverage ratchet
+        working-directory: .
+        run: node compliance/src/cli.ts coverage --check
       - run: npm ci --ignore-scripts
       - run: npm audit --audit-level=high
       - name: Test the documentation site
@@ -827,6 +839,15 @@ jobs:
           else
             echo 'No earlier main evidence bundle was available for comparison.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      # 44.1-07 (D-19): cell counts per state and component, with the change since the previous main bundle. Report-only (Phase 44 D-07,
+      # D-41); the ratchet that blocks is coverage --check in the required docs job.
+      - name: Write compliance coverage per component to the job summary
+        if: steps.has_compliance.outputs.present == 'true'
+        continue-on-error: true
+        run: |
+          previous=""
+          if [ -f compliance/out/previous/dashboard/dashboard.json ]; then previous="--previous compliance/out/previous"; fi
+          node compliance/src/cli.ts coverage --bundle compliance/out/bundle $previous >> "$GITHUB_STEP_SUMMARY"
       - name: Secret-scan the completed evidence bundle
         id: bundle_scan
         if: steps.has_compliance.outputs.publish_as != ''

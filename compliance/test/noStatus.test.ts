@@ -104,7 +104,7 @@ test('missing source folders and files are skipped by name, and files outside th
     'other.json': { state: 'x' }
   });
   assert.deepEqual(findStatusFields(root), []);
-  assert.ok(SOURCE_DIRS.length === 10 && SOURCE_FILES.length === 4);
+  assert.ok(SOURCE_DIRS.length === 11 && SOURCE_FILES.length === 4);
 });
 
 test('the JSON licence-check audit report passes source validation', () => {
