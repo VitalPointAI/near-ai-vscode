@@ -228,7 +228,16 @@ test('buildTdf refuses a binding over other content, an RSA key with no OAEP has
   assert.throws(() => buildTdf({ content: CONTENT, ...parts, recipient: noHash }), (error: unknown) => error instanceof TdfError && error.reason === 'unsupported');
   const p384 = generateKeyPairSync('ec', { namedCurve: 'secp384r1' }).publicKey.export({ type: 'spki', format: 'pem' }).toString();
   assert.throws(() => buildTdf({ content: CONTENT, ...parts, recipient: { ...EC.recipient, publicKey: p384 } }), (error: unknown) => error instanceof TdfError && error.reason === 'unsupported');
-  const small = generateKeyPairSync('rsa', { modulusLength: 1024 }).publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  // Public fixture with a 1024-bit modulus, used only to verify that export refuses it.
+  const small = [
+    '-----BEGIN PUBLIC KEY-----',
+    'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQChnC9OtaK6MCOawfjlnP0XsjcF',
+    'ixKx1cxVSD47EAhM+Fb5efSlXjyMocwJiPlOlrHy5jsQs/dCcscSKz5Nokwl9mSK',
+    'fMapDiDk6+yQermvHZ1bqI2ouww5xR5/hF2ZOl1wK5b2iHajZADn1IqObrpFztdZ',
+    'vXSC0rjtlq+WusrCswIDAQAB',
+    '-----END PUBLIC KEY-----',
+    ''
+  ].join('\n');
   assert.throws(() => buildTdf({ content: CONTENT, ...parts, recipient: { ...RSA_SHA1.recipient, publicKey: small } }), (error: unknown) => error instanceof TdfError && error.reason === 'unsupported');
 });
 
