@@ -194,6 +194,48 @@ test('agreements: tokens are label tokens, the ceiling is a known level, until i
   assert.equal(parsePolicyDocument(documentWith((doc) => { doc.agreements.items = [second, doc.agreements.items[0]]; })).ok, true);
 });
 
+// ---- 45.1-03 Task 3 (D-12): your organization's record that it vetted a partner's clearance process ----
+
+const VETTING = { by: 'Example Security Officer', on: '2026-10-01T00:00:00.000Z', basis: 'Example review of the partner\'s clearance process.' };
+
+test('agreements: clearanceProcessVetted { by, on, basis } parses frozen; absent means no vetting; a missing or extra key, empty text or a bad time is refused', () => {
+  const vetted = parsed(documentWith((doc) => { doc.agreements.items[0].clearanceProcessVetted = { ...VETTING }; })).agreements?.items[0];
+  assert.deepEqual(plain(vetted?.clearanceProcessVetted), VETTING);
+  assert.ok(Object.isFrozen(vetted?.clearanceProcessVetted));
+  assert.equal(Object.prototype.hasOwnProperty.call(parsed(documentWith()).agreements?.items[0], 'clearanceProcessVetted'), false, 'absent: not vetted');
+  const vet = (edit: (vetting: Loose) => void) => (doc: Loose): void => { const vetting: Loose = { ...VETTING }; edit(vetting); doc.agreements.items[0].clearanceProcessVetted = vetting; };
+  const cases: Array<[string, (doc: Loose) => void, string]> = [
+    ['not an object', (doc) => { doc.agreements.items[0].clearanceProcessVetted = 'yes'; }, 'wrong-type'],
+    ['no by', vet((v) => { delete v.by; }), 'missing-field'],
+    ['no on', vet((v) => { delete v.on; }), 'missing-field'],
+    ['no basis', vet((v) => { delete v.basis; }), 'missing-field'],
+    ['an extra key', vet((v) => { v.level = 'Secret'; }), 'unknown-field'],
+    ['empty by', vet((v) => { v.by = ''; }), 'wrong-type'],
+    ['empty basis', vet((v) => { v.basis = ''; }), 'wrong-type'],
+    ['by too long', vet((v) => { v.by = 'x'.repeat(201); }), 'wrong-type'],
+    ['basis too long', vet((v) => { v.basis = 'x'.repeat(501); }), 'wrong-type'],
+    ['on not a timestamp', vet((v) => { v.on = '2026-10-01'; }), 'wrong-type'],
+    ['on a number', vet((v) => { v.on = Date.UTC(2026, 9, 1); }), 'wrong-type']
+  ];
+  for (const [name, edit, reason] of cases) assert.equal(refusal(documentWith(edit)).reason, reason, name);
+  assert.equal(parsePolicyDocument(documentWith(vet((v) => { v.by = 'x'.repeat(200); v.basis = 'x'.repeat(500); }))).ok, true, 'at the limits');
+});
+
+test('layers: only your organization\'s signed layer can mark a partner vetted; a personal layer\'s vetting is ignored', () => {
+  for (const key of ['agreements.items[].clearanceProcessVetted', 'agreements.items[].clearanceProcessVetted.on', 'agreements.items[].clearanceProcessVetted.by',
+    'agreements.items[].clearanceProcessVetted.basis']) {
+    assert.equal(directionOf(key)?.direction, 'organization-only', key);
+  }
+  const organization = parsed(documentWith((doc) => { doc.layer = 'organization'; doc.issuer = { fingerprint: issuerKey().fingerprint, publicKey: issuerKey().publicKey }; }));
+  const personal = parsed(documentWith((doc) => {
+    doc.parent = { hash: 'c'.repeat(64), issuer: issuerKey().fingerprint };
+    doc.agreements.items[0].clearanceProcessVetted = { ...VETTING };
+  }));
+  const composed = composeLayers({ organization, personal });
+  assert.equal(composed.effective.agreements?.items[0]?.clearanceProcessVetted, undefined, 'your organization never vetted this partner');
+  assert.ok(composed.ignored.some((setting) => setting.key.startsWith('agreements.items')), 'the personal vetting is named as ignored');
+});
+
 test('your organization\'s signed layer carries both sections: built, signed by its key and verified, with the features named for it', () => {
   const key = issuerKey();
   const sections = { labels: plain(policyDocumentFor({ key })).labels, agents: plain(policyDocumentFor({ key })).agents, credentials: credentials(), agreements: agreements() };
