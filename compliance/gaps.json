@@ -6481,6 +6481,25 @@
       ],
       "remediation": "The intake verifies and records npm provenance where it exists and treats provenance present on the previous approved version and absent now as a review flag. Maven artefacts are checked only by the SHA-256 recorded at intake, because Maven Central's checksum files come from the same server. Add PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-16, D-21. Sovereignty: software.",
       "title": "Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "si-02",
+        "cm-03",
+        "sr-11"
+      ],
+      "id": "G521",
+      "ownerRole": "owner",
+      "poam": "g521",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "A withdrawal reaches a site with the next signed refresh, raises `SupplyWithdrawnRunning` and is listed in the change and impact record. No admission rule blocks it, so a disconnected site never stops a running service on its own. Your organization's authorizing official accepts this or asks for an admission deny list. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-08, D-29. Sovereignty: software.",
+      "title": "A withdrawn artefact keeps running at a site until its change board acts (owner decision Q8)"
     }
   ]
 }
