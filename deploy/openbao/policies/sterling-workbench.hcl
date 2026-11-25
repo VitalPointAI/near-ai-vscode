@@ -12,6 +12,13 @@ path "kv/metadata/users/{{identity.entity.id}}/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 
+# The site's people directory (Phase 71, 71-10; D-15): the person's own entry, kv/site/people/<own entity> = { did }, created once by their own
+# backend at first sign-in and read back. Exactly this path: no other person's entry, no list, no update and no delete, so nobody can claim
+# another person's DID or move their own to someone else's. Officers read the directory through credential-issuers (71-12).
+path "kv/data/site/people/{{identity.entity.id}}" {
+  capabilities = ["create", "read"]
+}
+
 # The person's key-encryption key: wrap a new data key, and unwrap one.
 path "transit/datakey/wrapped/kek-{{identity.entity.id}}" {
   capabilities = ["update"]
