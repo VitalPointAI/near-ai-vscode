@@ -49,18 +49,41 @@ export interface TrustSource {
 
 export interface WalletEntry { readonly hash: string; readonly verified: VerifiedCredential }
 
+/** A status list the view relied on: its id, its validFrom and when the copy used was fetched (epoch milliseconds), for the enforcement points' freshness. */
+export interface WalletListUsed { readonly list: string; readonly validFrom: string; readonly fetchedAt: number }
+
+/** A trust source that can fetch newer copies (hubTrustSource.ts): the logs of `dids` and every list of your organization's rules. */
+export interface RefreshingTrustSource extends TrustSource {
+  refresh(dids: readonly string[]): Promise<unknown>;
+}
+
+/** The timers keepFresh uses; tests pass their own. */
+export interface RefreshTimers {
+  setTimeout(run: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const REAL_TIMERS: RefreshTimers = {
+  setTimeout: (run, ms) => { const timer = setTimeout(run, ms); timer.unref?.(); return timer; },
+  clearTimeout: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>); }
+};
+/** A refresh is due a tenth of the time to live early, so a connected view does not turn stale between refreshes; never sooner than this. */
+const MIN_REFRESH_MS = 15_000;
+
 export interface WalletView {
   readonly cache: CredentialCache;
   /** The credentials that checked, now. */
   readonly entries: readonly WalletEntry[];
   readonly facts: CredentialFacts;
   readonly clearances: readonly Clearance[];
+  /** The status lists the entries were checked against (absent in a view built by hand: none). */
+  readonly lists?: readonly WalletListUsed[];
 }
 
 export type ImportResult = { readonly ok: true; readonly hash: string } | { readonly ok: false; readonly sentence: string };
 
 type CheckOutcome =
-  | { readonly kind: 'ok'; readonly entry: WalletEntry; readonly fetchedAt: number }
+  | { readonly kind: 'ok'; readonly entry: WalletEntry; readonly fetchedAt: number; readonly lists: readonly WalletListUsed[] }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'refused'; readonly sentence: string };
 
@@ -104,12 +127,14 @@ export class Wallet {
     const policy = this.trust.policy();
     if (policy === undefined) return this.publish(this.emptyView(cacheStateAt(initialCache(this.ttlMs()), { kind: 'missing' })));
     const entries: WalletEntry[] = [];
+    const lists = new Map<string, WalletListUsed>();
     let oldest = Number.POSITIVE_INFINITY;
     let missing = false;
     for (const blob of stored) {
       const outcome = this.check(blob, policy);
       if (outcome.kind === 'ok') {
         entries.push(outcome.entry);
+        for (const used of outcome.lists) lists.set(used.list, used);
         oldest = Math.min(oldest, outcome.fetchedAt);
       } else if (outcome.kind === 'unavailable') {
         missing = true;
@@ -118,7 +143,9 @@ export class Wallet {
     const base = initialCache(policy.section.statusTtl * 1000);
     const cache = missing ? cacheStateAt(base, { kind: 'missing' }) : cacheStateAt(base, { kind: 'refreshed', at: Number.isFinite(oldest) ? oldest : this.now() });
     const facts = factsFrom(entries.map((entry) => ({ credential: entry.verified, status: 'clear' as const })));
-    return this.publish(Object.freeze({ cache, entries: Object.freeze(entries), facts, clearances: clearanceFromCredentials(facts, policy.scales) }));
+    return this.publish(Object.freeze({
+      cache, entries: Object.freeze(entries), facts, clearances: clearanceFromCredentials(facts, policy.scales), lists: Object.freeze([...lists.values()])
+    }));
   }
 
   /** Adds a .near-vc file's credential after it checks now; on any refusal nothing is stored and one sentence says why. */
@@ -149,13 +176,77 @@ export class Wallet {
     return { ok: true, hash: outcome.entry.hash };
   }
 
+  /**
+   * Keeps the view fresh in the background (D-11, OFFL-01): fetches through `source` at once, then again a tenth of the time to live before the view
+   * would turn stale, rescheduled on every change of the view. One refresh at a time; a decision reads verifiedView() meanwhile and never waits.
+   */
+  public keepFresh(source: RefreshingTrustSource, timers: RefreshTimers = REAL_TIMERS): { dispose(): void; settled(): Promise<void> } {
+    let handle: unknown;
+    let disposed = false;
+    let cycle: Promise<void> | undefined;
+    const run = (): void => {
+      if (disposed || cycle !== undefined) return;
+      cycle = (async () => {
+        try {
+          await source.refresh(await this.wantedDids());
+        } catch {
+          // A refresh that fails keeps the last verified copies; the view turns stale or unavailable on its own.
+        }
+        await this.load();
+      })().finally(() => { cycle = undefined; });
+    };
+    const schedule = (view: WalletView): void => {
+      if (disposed) return;
+      if (handle !== undefined) timers.clearTimeout(handle);
+      const ttl = view.cache.ttlMs;
+      // Never checked: try again within a minute while your organization's rules are in force, else at the time to live.
+      const due = view.cache.refreshedAt === undefined
+        ? (this.trust.policy() === undefined ? ttl : 4 * MIN_REFRESH_MS)
+        : view.cache.refreshedAt + ttl - Math.floor(ttl / 10) - this.now();
+      handle = timers.setTimeout(run, Math.min(ttl, Math.max(MIN_REFRESH_MS, due)));
+    };
+    const subscription = this.onDidChange(schedule);
+    run();
+    return {
+      dispose: () => {
+        disposed = true;
+        subscription.dispose();
+        if (handle !== undefined) timers.clearTimeout(handle);
+      },
+      settled: () => cycle ?? Promise.resolve()
+    };
+  }
+
+  /** The DIDs a check of the stored credentials needs logs for: the holder, each issuer, and each issuer of the roles they rely on. */
+  public async wantedDids(): Promise<string[]> {
+    const wanted = new Set<string>([this.holder]);
+    const policy = this.trust.policy();
+    if (policy === undefined) return [...wanted];
+    let stored: unknown[];
+    try {
+      stored = await this.readStored();
+    } catch {
+      return [...wanted];
+    }
+    for (const blob of stored) {
+      const read = readCredential(blob, policy.scales, { signed: true });
+      if (!read.ok) continue;
+      wanted.add(read.value.issuer);
+      for (const role of this.trust.roles(read.value.issuer)) {
+        const roleRead = readCredential(role, policy.scales, { signed: true });
+        if (roleRead.ok) wanted.add(roleRead.value.issuer);
+      }
+    }
+    return [...wanted];
+  }
+
   private ttlMs(): number {
     return (this.trust.policy()?.section.statusTtl ?? 900) * 1000;
   }
 
   private emptyView(cache: CredentialCache): WalletView {
     const facts = factsFrom([]);
-    return Object.freeze({ cache, entries: Object.freeze([]), facts, clearances: Object.freeze([]) });
+    return Object.freeze({ cache, entries: Object.freeze([]), facts, clearances: Object.freeze([]), lists: Object.freeze([]) });
   }
 
   private publish(view: WalletView): WalletView {
@@ -204,6 +295,7 @@ export class Wallet {
       dids.add(roleRead.value.issuer);
     }
     const lists: Record<string, unknown> = {};
+    const used: WalletListUsed[] = [];
     const status: Array<EvidenceCitation['status'][number]> = [];
     let oldest = Number.POSITIVE_INFINITY;
     for (const id of listIds) {
@@ -214,6 +306,7 @@ export class Wallet {
       const heldHash = listHash(held.credential);
       lists[heldHash] = held.credential;
       status.push({ list: id, hash: heldHash, validFrom: listRead.value.validFrom });
+      used.push(Object.freeze({ list: id, validFrom: listRead.value.validFrom, fetchedAt: held.fetchedAt }));
       oldest = Math.min(oldest, held.fetchedAt);
     }
     const states: Record<string, WebvhState> = {};
@@ -227,7 +320,7 @@ export class Wallet {
     if (result.ok) {
       const verified = result.credentials.find((credential) => credentialHash(credential.credential) === hash);
       if (verified === undefined) return { kind: 'refused', sentence: WALLET_DOES_NOT_VERIFY_TEXT };
-      return { kind: 'ok', entry: Object.freeze({ hash, verified }), fetchedAt: oldest };
+      return { kind: 'ok', entry: Object.freeze({ hash, verified }), fetchedAt: oldest, lists: used };
     }
     switch (result.reason) {
       case 'list-missing': case 'list-out-of-date': case 'issuer-key': return { kind: 'unavailable' };

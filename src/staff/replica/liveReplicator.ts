@@ -36,7 +36,7 @@ import { HubTransport, HubTransportError } from './hubTransport';
 import type { EventReader, HubTransportOptions } from './hubTransport';
 
 /** What the replicator needs of HubTransport: what syncOnce calls, the event stream and close. */
-export type LiveTransport = SyncTransport & Pick<HubTransport, 'events' | 'close' | 'postPresence' | 'leavePresence'>;
+export type LiveTransport = SyncTransport & Pick<HubTransport, 'events' | 'close' | 'postPresence' | 'leavePresence'> & Partial<Pick<HubTransport, 'trustSession'>>;
 
 /** The timers the replicator uses; tests give a manual clock (liveWorld FakeTimers). */
 export interface LiveTimers {
@@ -193,6 +193,12 @@ export class LiveReplicator {
   /** The network changed (a new address, back from sleep): an offline project tries again at once. */
   public networkChanged(): void {
     this.fire({ kind: 'network-change' });
+  }
+
+  /** Your organization's trust routes through this project's one transport while live (Phase 71, 71-13): logs and lists; undefined otherwise. */
+  public trust(): ReturnType<HubTransport['trustSession']> | undefined {
+    if (this.machine.state !== 'live' || this.transport?.trustSession === undefined) return undefined;
+    return this.transport.trustSession();
   }
 
   /** Posts this device's sealed presence in one cell through the one transport while live; does nothing otherwise (33-12, D-21). */
