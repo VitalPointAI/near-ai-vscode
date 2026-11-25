@@ -18,7 +18,10 @@ import { initProfileIndex, listSavedProfiles, runUseSavedProfile } from './servi
 import { GsdRuntime, startRuntimeUpdates } from './gsd/runtime';
 import { readAgentLimits, readHistoryLimits, readModelTiers, readSettings, shouldAutoInstallGsd } from './services/settings';
 import { activeProvider } from './services/providerCache';
-import { modelOptions } from './services/chatBridge';
+import { isChatModel, modelOptions } from './services/chatBridge';
+import { RESEARCH_WORKSPACE_COMMAND, openResearchWorkspace } from './services/researchWorkspace';
+import { RESEARCH_TEXT } from './domain/gate/researchLane';
+import { catalogRows } from './domain/gate/modelRow';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
@@ -60,7 +63,7 @@ import { registerChatParticipant } from './services/chatParticipant';
 import { openThreadInPanel } from './services/participantRecorder';
 import { registerWorkspaceCommands } from './services/workspaceCommands';
 import { initEmergencyStop, isEmergencyStopped, setEmergencyStop } from './services/emergencyStop';
-import { clearProviderCache } from './services/providerCache';
+import { clearProviderCache, clientFor } from './services/providerCache';
 import { setNearAiDiagnostics } from './services/nearAiClient';
 import { closeInterruptedRuns } from './services/activityStore';
 import { offerProxyAdvice } from './domain/proxyAdvice';
@@ -153,6 +156,24 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   registerSpendingLimits(context, auth);
   registerMcpConnections(context);
   registerModelComparison(context, auth, gate);
+  // The research workspace (74.1 D-17): its folder in global storage; the open folders are passed only so their files are refused (Q2).
+  context.subscriptions.push(vscode.commands.registerCommand(RESEARCH_WORKSPACE_COMMAND, panelCommand(() => openResearchWorkspace({
+    context,
+    folder: path.join(context.globalStorageUri.fsPath, 'research-workspace'),
+    models: async () => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const active = root ? await activeProvider(root, auth) : undefined;
+      const layers = gate.policyLayers();
+      return active === undefined ? [] : catalogRows(active.models.filter(isChatModel), layers.effective?.models, Date.now(), { organization: layers.organization.state === 'valid' });
+    },
+    endpointFor: async (model) => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const active = root ? await activeProvider(root, auth).catch(() => undefined) : undefined;
+      return active === undefined ? undefined : clientFor(active, model).client;
+    },
+    runtime: () => gate.runtimeFor({ actor: { kind: 'person', sessionId: 'research-workspace' }, presence: 'person', context: 'interactive' }),
+    projectFolders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
+  }), RESEARCH_TEXT.command)));
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', panelCommand(() => openOnboarding(context, {

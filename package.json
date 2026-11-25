@@ -313,6 +313,12 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "nearAi.models.openResearchWorkspace",
+        "title": "Open Research Workspace",
+        "category": "SovAI",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "nearAi.clearProjectModelChoices",
         "title": "Clear This Project's Model Choices",
         "category": "SovAI"
