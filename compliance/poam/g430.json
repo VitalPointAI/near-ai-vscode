@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "cp-10",
+    "sa-11"
+  ],
+  "gap": "G430",
+  "id": "g430",
+  "milestones": [
+    {
+      "phase": "35",
+      "title": "Decide and build how a late joiner starts in a cell your organization's server cannot open, with the server items Phase 33 D-33 moved to Phase 35"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "A person who joins a shared project late starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server: the server checkpoints no other cell (the trade-off of Phase 33 D-63), so there the history is read in full. Nothing is left out, and the person is told so. Phase 35, together with the server items Phase 33 D-33 moved there, decides how a late joiner starts in a cell the server cannot open. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md and 33-CONTEXT.md D-70.",
+  "title": "A late joiner starts from a checkpoint only in cells the server holds"
+}
