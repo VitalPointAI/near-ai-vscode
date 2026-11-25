@@ -15,8 +15,8 @@ import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints'
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
 import type { ModelsSection, UseTier } from './models';
-import { PASSPORT_GAP_TEXT, SHIPPED_REPORT_MODELS, authorizationRecord, passportStep, whoToAsk } from './passportStep';
-import type { PassportGapId, PassportStepResult } from './passportStep';
+import { PASSPORT_GAP_TEXT, SHIPPED_REPORT_MODELS, alternativesFor, authorizationRecord, passportStep, whoToAsk } from './passportStep';
+import type { CandidateModel, PassportGapId, PassportStepResult } from './passportStep';
 import { residencyAllows } from './residency';
 import type { ResidencySection } from './sections';
 import { checkKeys, childPath, isRecord, ownValue, refused } from './shape';
@@ -412,6 +412,8 @@ export interface RouteFacts {
   readonly useInput?: UseInput;
   /** The SHA-256 of the weights the place reports for this model, when it reports one (an attested or measured hash; 74.1 D-11 `artifact-mismatch`). */
   readonly observedArtifact?: string;
+  /** The client's catalogue (74.1 D-14): a passport refusal names the ones decideRoute would allow instead. Absent: nothing is said about other models. */
+  readonly candidates?: readonly CandidateModel[];
   /** Team Mode's `allowedModels` (D-37): when given, a request for a model whose id is not listed is refused, with or without a policy. */
   readonly allowedModels?: readonly string[];
 }
@@ -683,7 +685,7 @@ export function decideRoute(mark: Mark, routing: RoutingTable, facts: RouteFacts
   if (!decision.allowed) return decision;
   // Step 0 (D-37): Team Mode's allowed models, with or without a policy. An unknown model is on no list.
   if (facts.allowedModels !== undefined && (facts.model === undefined || !facts.allowedModels.includes(facts.model.id))) return refuse(decision.tier, 'route.model-not-allowed');
-  return policy === undefined ? decision : decidePolicySteps(decision, mark, routing, facts, defaultLabel, policy);
+  return policy === undefined ? decision : decidePolicySteps(decision, mark, routing, facts, defaultLabel, policy, floor);
 }
 
 /** The safety patch's decision: the tier from the table and the floor, the local and attested checks, and the this-computer and floor sentences. */
@@ -758,7 +760,7 @@ export function endpointOf(facts: Pick<RouteFacts, 'host' | 'nearEndpoint' | 'mo
  * under `models.mode: enforce` and reported otherwise, 74.1 D-11, D-12) and clearance (route.clearance). The first refusing step decides; a step that only
  * reports never hides a later refusal, and never refuses even when its check throws (WR-05); under enforce a passport check that throws refuses. The private floor (S4) is part of the safety patch's checks, so its refusal comes first and keeps its words.
  */
-function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy): RouteDecision {
+function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: RoutingTable, facts: RouteFacts, defaultLabel: Label | undefined, policy: RoutePolicy, floor: RoutingTier | undefined): RouteDecision {
   const labels: readonly Label[] = mark.length === 0 ? (defaultLabel === undefined ? [] : [defaultLabel]) : mark;
   const strictest = strictestLabelOf(mark, routing) ?? defaultLabel;
   const allowedBy: AllowingRecord[] = strictest === undefined ? [] : [Object.freeze({ kind: 'routing' as const, label: labelKey(strictest) })];
@@ -842,7 +844,11 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   const passportFacts = passportFactsOf(passport, checked);
   if (!passport.covers) {
     if (enforce) {
-      const reason = passport.gap === undefined || passport.details === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap](passport.details);
+      // D-14: the models that would go instead, each decided the same way; they decide nothing and are never sent to.
+      const candidates = facts.candidates;
+      const alternatives = candidates === undefined ? undefined : alternativesFor(candidates, facts.model?.id ?? '', (model) => decideRoute(mark, routing, { ...facts, model, candidates: undefined }, defaultLabel, floor, policy), models.order);
+      const details = passport.details === undefined ? undefined : { ...passport.details, ...(alternatives === undefined ? {} : { alternatives }) };
+      const reason = passport.gap === undefined || details === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap](details);
       return { allowed: false, tier: decision.tier, rule: 'route.passport', reason, ...(endpoint === undefined ? {} : { endpoint }), ...passportFacts };
     }
     wouldRefuse.add('route.passport');

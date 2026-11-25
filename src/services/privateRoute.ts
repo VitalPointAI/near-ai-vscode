@@ -27,6 +27,8 @@ export interface RouteFactsInput {
   readonly sessionless: boolean;
   /** Team Mode's allowed models, from the floor (D-37); absent is no filter. */
   readonly allowedModels?: readonly string[];
+  /** The client's cached catalogue, so a passport refusal can name the models that would go instead (74.1 D-14). */
+  readonly catalog?: { values(): Iterable<Pick<ModelInfo, 'id' | 'privacyBoundary'>> };
 }
 
 /**
@@ -63,7 +65,8 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     now,
     localModelAvailable: input.localModelAvailable,
     sessionless: input.sessionless,
-    ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels })
+    ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels }),
+    ...(input.catalog === undefined ? {} : { candidates: Object.freeze([...input.catalog.values()].map((entry) => Object.freeze({ id: entry.id, ...(entry.privacyBoundary === undefined ? {} : { privacyBoundary: entry.privacyBoundary }) }))) })
   };
   return facts;
 }

@@ -1175,7 +1175,7 @@ export class NearAiClient implements ModelEndpoint {
     this.refreshBinding(host, now);
     // D-37: privacyMode tee-only and a private member or agent team give one floor; decideRoute reads its tier and its allowed models.
     const floor = floorFor({ privateOnly: privateOnlyNow() });
-    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels });
+    const facts = routeFactsFor({ clientRoute: this.options.route, host, info: model === undefined ? undefined : this.models.get(model), attestation: attestationStateOf(route), fact, now, localModelAvailable: this.options.localModelAvailable === true, sessionless: inSession === undefined, allowedModels: floor.allowedModels, catalog: this.models });
     let decision: RouteDecision;
     let mark: Mark = [];
     let checkFailed = false;

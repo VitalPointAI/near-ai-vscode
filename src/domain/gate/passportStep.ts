@@ -128,6 +128,35 @@ export function authorizationRecord(found: VerifiedAuthorization, label?: string
   return Object.freeze(label === undefined ? base : { ...base, label });
 }
 
+/** The most models a refusal names as ways forward (74.1 D-14). */
+export const MAX_ALTERNATIVES = 5;
+
+/** A catalogue model the decision may try instead. */
+export interface CandidateModel {
+  readonly id: string;
+  readonly privacyBoundary?: string;
+}
+
+/**
+ * The models that would go instead of a refused one (74.1 D-14): each catalogue model but the refused one, decided by `decide` (decideRoute itself, with
+ * the same mark, use, floor and policy), kept only when allowed; your organization's `models.order` first (by the passport that decided each), then by id;
+ * at most MAX_ALTERNATIVES. No second matcher: the passport of each comes from its own decision.
+ */
+export function alternativesFor(
+  candidates: readonly CandidateModel[], refused: string, decide: (model: CandidateModel) => { readonly allowed: boolean; readonly passport?: { readonly id: string } }, order?: readonly string[]
+): readonly string[] {
+  const found: Array<{ readonly id: string; readonly rank: number }> = [];
+  for (const candidate of candidates) {
+    if (candidate.id === refused) continue;
+    const decision = decide(candidate);
+    if (!decision.allowed) continue;
+    const at = decision.passport === undefined ? -1 : (order ?? []).indexOf(decision.passport.id);
+    found.push({ id: candidate.id, rank: at < 0 ? Number.MAX_SAFE_INTEGER : at });
+  }
+  found.sort((a, b) => a.rank - b.rank || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return Object.freeze(found.slice(0, MAX_ALTERNATIVES).map((entry) => entry.id));
+}
+
 /** The passport check of step 7. It decides nothing itself: decideRoute refuses on a gap under enforce and reports it under report. */
 export function passportStep(models: ModelsSection, input: PassportStepInput): PassportStepResult {
   const resolved = resolvePassport(models, input.modelId, input.now);
