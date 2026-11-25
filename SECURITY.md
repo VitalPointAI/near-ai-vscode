@@ -812,7 +812,9 @@ Under your organization's rules only authorizations signed by a key your
 organization lists count. Without your organization's rules, one signed on
 this computer counts for your own rules, and the trust line says
 "(self-signed on this computer)" until your organization's issuer can sign
-them.
+them. A model exception (`t1-risk`) is the one kind that never counts this
+way: it counts only under your organization's rules (see "Which models may do
+what").
 
 #### Export-controlled content
 
@@ -839,6 +841,127 @@ that are read and recorded only, and never decide a request. Meeting the
 Controlled Goods Program or the ITAR is your organization's obligation, and
 your officials decide. SovAI does not make your organization compliant
 with either.
+
+### Which models may do what
+
+Every model request is checked against an approval for its use before
+anything is sent. An approval names the model, the uses it is approved for,
+the places it may run and the date it ends. Your organization's signed rules
+hold its approvals (its model policy); without them, the approvals SovAI ships
+are used. Your organization's approval of a model replaces the shipped one.
+
+**Approvals by use.** Each request has one of four uses, worked out on this
+computer from what the request does: research only (in the research
+workspace), chat you review (plain chat whose answer a person reads), agent
+work (tools, file changes, sub-agents, checks, unattended runs) and
+operational work (a staff project). A use only rises during a chat, and a
+sub-agent starts at its parent's use. A model may do the work only when its
+approval covers the use at the place it runs; the model picker shows each
+model's origin, family and "Approved for {use} until {date}" or "Research
+only". Under enforce, every use above research also needs your organization's
+evaluation of that model's files, cited in its approval, and this includes
+every checking role. The approvals SovAI ships carry no evaluation, so under
+enforce nothing goes above research until your organization evaluates its
+models.
+
+A model from a developer in the People's Republic of China is approved for
+research only, and so is a model with no approval. A model under a
+non-commercial licence is approved for research only, except through the
+vendor's own service. Command A+ is approved on the Cohere Model Vault; your
+organization may approve its own on-premise copy with the files' hash; it is
+never approved on NEAR AI's private hardware.
+
+**The refusal.** Under enforce a refused request sends nothing. The chat says
+why in one form, which starts with "Nothing was sent." and ends with "Who to
+ask:", for example: "Nothing was sent. Your organization has not evaluated gpt-oss-120b for agent work, and under its rules a model takes any role above research only after that evaluation. Choose an evaluated model, or ask for this one to be evaluated. Who to ask: your organization's security contact."
+When other models would pass, it names up to five of them. Nothing moves your
+work to another model by itself. When no approved model can do the work, the
+chat shows the ways forward that apply here, and who to ask.
+
+**Report only.** Until your organization's model policy says
+`mode: enforce`, and on every computer without your organization's rules,
+approvals are only reported: the request is sent and recorded as one the rules
+would refuse (`route.passport`). From the first such request in a session, a
+notice stays at the top of the chat and in the status bar, with no way to
+close it: "Agent work is running outside your organization's model policy (report only)."
+Without your organization's rules it says "Agent work is running outside your rules for models (report only)."
+and offers **Adopt the Western defaults**, which opens a proposal on the policy
+page; nothing changes until you apply it. In report mode today's models,
+including those from developers in the People's Republic of China, keep doing
+agent work, and each use outside the rules is recorded (G409).
+
+**The Western defaults.** The models for each job come from one list, by
+approval: standard Nemotron 3 Super, then Command A+, then gpt-oss; deep
+Nemotron 3 Ultra, Command A+, gpt-oss; fast Nemotron 3 Nano, gpt-oss, IBM
+Granite; safety checks gpt-oss, Nemotron 3 Nano, Granite Guardian; vision
+Command A+; transcription Whisper large-v3; images FLUX.2 klein 4B. For each
+job, a model you set yourself is kept; otherwise your organization's default
+is used, then the first model in that list that the AI service offers and the
+rules allow. In report mode, while none of these models is offered, each job
+falls back to the model it used before; under enforce it never does.
+
+**The research workspace.** **SovAI: Open Research Workspace** opens the one
+place where a model approved for research only, including an adversary model,
+is used on purpose. Its banner says "Research workspace. Adversary models allowed. No project data."
+It reads no project file, searches no project, keeps no project memory and
+has no tools; anything else is refused with "This is the research workspace. It cannot open project files, run commands or use tools."
+A file you add is copied into the workspace's own folder first, and a file in
+an open project is refused. Text copied out starts with the line
+"From the research workspace, model {model}, untrusted". Records of its
+requests say `lane: t0`. The cybersecurity panel and Compare Models'
+evaluations run in the same research lane. The workspace is kept apart by
+SovAI's own checks, not by the operating system, and the cybersecurity scan
+tools still run on this computer with your approvals and the engagement's
+scope check (G413).
+
+**Exceptions.** Under your organization's rules, a named person can allow one
+model approved for research only to serve chat you review, for named projects
+and labels, for at most 90 days. On the policy page, **Ask to allow for chat you review**
+drafts the exception with the model's legal flags first, the named person
+signs it, and it is saved as a request file for your organization; nothing
+changes on this computer. It counts only once your organization's rules carry
+it and list that person's key, and the trust line then reads
+"Allowed for chat you review by {name} until {date}". An exception never
+allows agent work. With no organization rules there are no exceptions: one
+signed only on this computer covers nothing.
+
+**Checks by another family.** Every role that checks another model's work
+(the safety check of agent commands, reviewers, plan checkers, verifiers,
+editors, red team, the staff release guard and the J2 tradecraft reviewer)
+runs on a model of another family than the model it checks. The family comes
+from the approval's lineage, not from the model's name. When no approved
+model of another family is available, a person decides, and the chat says:
+"This check was not given to {model}, because it comes from the same family ({family}) as the model it checks, and no approved model of another family is available. A person decides instead."
+The record of each check names both families.
+
+**What the records say.** Each model request's record names its use, the
+approval by id and hash, and, when the request was refused or reported, the
+reason. **SovAI: Export AI Bill of Materials** writes
+`.near-ai/state/ai-bom.cdx.json` in an open project: a CycloneDX 1.6 list of
+every model the project used, from the model requests this computer still
+keeps, with supplier, licence, the files' hash when known, the base model and
+teachers with their origin, the approval's hash, where it ran and the uses it
+served. It holds no prompt or answer text.
+
+**Known limits.** Each one is in the
+[road to production](https://github.com/VitalPointAI/near-ai-vscode/blob/main/docs-site/content/security/road-to-production.md)
+with its gap id.
+
+- No Western model runs in NEAR AI's private hardware yet, so under enforce
+  agent work on NEAR AI has no approved model (G408).
+- Under enforce nothing goes above research until your organization evaluates
+  its models (G410).
+- On NEAR AI's private hardware an approval binds to the model's name, not to
+  the exact files, because the proof of the hardware does not report the
+  files' hash (G411).
+- How NEAR AI passes the publishers' licence terms on to your organization is
+  not answered yet (G412).
+- The research workspace is kept apart by SovAI's own checks, not by the
+  operating system (G413).
+- An exception is signed with this computer's device key until a person's
+  credential replaces it (G414), and it records the mission benefit but no
+  reference to your organization's assessment of the model (G537).
+- Stop agent work now, a security officer's signed switch to enforce, is not yet available, so enforce comes only from a new signed policy from your organization (G418).
 
 ### Sub-agents nobody is watching
 
@@ -2492,8 +2615,8 @@ health check connects only to itself; and no hub source file names a client netw
 | The twelve words protect your organization's key only when its security contact reads them to you over a channel you trust | Compare them in person or on a call you placed to a number you already know; never over the channel the file came through |
 | Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and SovAI does not make your organization compliant with the Controlled Goods Program or the ITAR | Your organization's officials decide; a later release uses these decisions to allow access |
 | Your organization's server does not load your organization's rules yet | Its rules reach this computer as a signed file you add with **SovAI: Add Your Organization's Rules** |
-| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second; model approvals refuse in a later release |
-| Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count |
+| Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second, and set the model policy to `mode: enforce` to refuse the first (see the section on models above) |
+| Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count; a model exception counts only under your organization's rules |
 | There is no command to leave your organization | Ask your organization's security contact |
 
 ## How changes reach a release

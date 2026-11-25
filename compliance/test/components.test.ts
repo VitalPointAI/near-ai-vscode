@@ -73,6 +73,24 @@ test('provider responsibilities identify a provider class, not a company', () =>
   assert.equal(endpoint.implemented.find((requirement) => requirement.control === 'sc-08')?.inheritedFrom, 'configured-model-provider');
 });
 
+// 74.1 D-25 and D-02 (T-74.1-52): the model controls are stated, each statement is proven by a named test, and nothing claims the security officer's
+// switch (cm-06) before it ships. When the switch lands, its plan adds cm-06 here with its evidence rule.
+test('74.1: model-endpoints states the model controls, each statement cites a test, and claims no model switch yet', () => {
+  const endpoint = loadComponents(COMPONENTS).components.find((component) => component.id === 'model-endpoints')!;
+  const modelControls = ['sa-04', 'sa-09', 'sa-11', 'cm-08', 'cm-10', 'sr-03', 'sr-04'];
+  const controls = endpoint.implemented.map((requirement) => requirement.control);
+  for (const control of modelControls) assert.ok(controls.includes(control), control);
+  assert.ok(!controls.includes('cm-06'), 'no statement for Stop agent work now until it ships (G418)');
+  const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules')).filter((rule) => rule.component === 'model-endpoints');
+  for (const requirement of endpoint.implemented.filter((item) => modelControls.includes(item.control))) {
+    assert.equal(requirement.responsibility, 'shared', `${requirement.control}: your organization approves and evaluates its own models`);
+    for (const statement of requirement.statements) {
+      const cited = rules.filter((rule) => rule.statement === statement.id && rule.control === requirement.control && rule.kind === 'test');
+      assert.ok(cited.length > 0, `${statement.id} names a test`);
+    }
+  }
+});
+
 test('the release rule keeps docs-required visible as a settings observation', () => {
   const rules = loadEvidenceRules(path.join(ROOT, 'compliance', 'evidence-rules'));
   assert.ok(rules.some((rule) => rule.id === 'release.cm-03.docs-required' && rule.kind === 'observation' && rule.observation?.subject === 'docs-required'));

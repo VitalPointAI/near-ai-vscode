@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ra-03",
+    "sa-11"
+  ],
+  "gap": "G537",
+  "id": "g537",
+  "milestones": [
+    {
+      "targetDate": "2027-06-30",
+      "title": "A model exception records your organization's assessment reference beside the mission benefit"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "An exception for chat you review has one evidence text, and the request form puts the mission benefit there. The design expects the evidence to hold the benefit and a reference to your organization's assessment of the model, and under enforce the exception stands in for that evaluation, but no assessment reference is recorded. Until the record gains a second field (a new signed shape, so a later phase), your organization records its assessment reference in the change note of the rules update that carries the exception, and whoever reviews the request checks it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16 and D-20; 74.1-11-SUMMARY.md.",
+  "title": "A model exception records its mission benefit, not a reference to your organization's assessment"
+}

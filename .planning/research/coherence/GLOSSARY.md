@@ -22,12 +22,17 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | A dimension of the sovereignty card | The fourteen plain names, in order: "Where your data is stored", "Where data travels", "Where AI runs", "Who holds the keys", "Canada-only handling rule", "Where models come from", "Where the software comes from", "Where the hardware comes from", "Who runs it", "Who issues identities", "What can leave the site", "Who can switch it off", "Which laws apply to outside services", "Assessments" | dimension ids D1 to D14, SA-400 (detail pane only) | no |
 | A signed fact your organization states | "Declared by {name} on {date}" (a fact the site checked itself reads "Verified") | attestation (unless a hardware attestation verified it) | no |
 | The organization approved a model for a use | "Approved for {use words} until {date}" | model passport, `models.passports` (admins: "model approval") | no |
-| A named person allowed an exception | "Allowed by {name} until {date}", plus "(self-signed on this computer)" until the organization layer exists | risk acceptance, authorization record, exception (admin pages say "authorization") | no |
+| A named person allowed an exception | **Exception** (owner, 2026-11-25): "Allowed by {name} until {date}". A model exception covers exactly one use, so the use is named: "Allowed for chat you review by {name} until {date}". An exception exists only under your organization's rules, so it has no self-signed form (74.1 D-20) | risk acceptance, authorization record, `t1-risk` (admin pages say "authorization") | no |
+| The organization's rules for which models may do what | **Model policy** ("your organization's model policy"; "your rules for models" without an organization) | `models` section, passport set | no |
+| Model rules that only record what they would refuse | "report only" ("Agent work is running outside your organization's model policy (report only).") | report mode, would-refuse, `mode: report` | no |
+| The list of models that worked on a project | **AI bill of materials** (command "Export AI Bill of Materials") | AI-BOM, CycloneDX, ML-BOM | no |
 | Protected B allowed in a hosted service | "Allowed for Protected B by {name}'s authorization {ref} until {date}" | `authorizations[kind=protected-b]` | no |
 | The organization's signed rules | **Your organization's rules**; without an organization, **Your rules** | policy bundle, bundle keys, layer, issuer | no |
 | The rules a fresh install starts with | **Starting rules** | default bundle, self-signed default | no |
 | Model for a job (fast, standard, deep) | **Models by job**: "Fast model", "Standard model", "Deep model" | tier (for models), model role, model slot | no |
 | Verified private models only (today's `nearAi.privacyMode: tee-only`) | "Only verified private hardware or this computer" | TEE-only, sovereignty mode | no |
+
+Updated 2026-11-25 by 74.1-16 (UI-SPEC P13): "exception" is the user word, "(self-signed on this computer)" no longer applies to exceptions, and the model policy, report only and AI bill of materials words are added. The words of the security officer's switch ("Stop agent work now", "Return to report only", "stopped entirely") are added when the switch ships; it is not yet available (G418).
 
 ## 2. Agents and people
 
@@ -64,7 +69,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | Same person, other computer | **My computers** (recovery code; also covers Add My Other Machine) | Project Sync, online home (say "GitHub repository" once), key file | no |
 | Working with other people | **Share with people** (invitation file and safety code) | Team Mode, multi-user, genesis, join secret, replica | joining words follow the mode |
 | Workflows (Open-GSD) | **Workflows** | GSD, Open-GSD (Tools page detail only) | no |
-| Research-only space | **Research workspace** | T0 lane | no |
+| Research-only space | **Research workspace**; its one use is "research only" ("Research workspace. Adversary models allowed. No project data.") | T0 lane, `lane: t0` | no |
 | Data platform personal opt-out | "Personal: keep out of the catalogue" | personal mark, mark | no |
 
 ## 4. Collisions the reviews found, and how they are resolved
