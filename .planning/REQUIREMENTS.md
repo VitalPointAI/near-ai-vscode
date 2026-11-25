@@ -1012,7 +1012,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-25 from the owner's direction ("yes, plan that as long as the compliance evidence is always a real-time understanding of the product's compliance status"). Decisions and the real-time meaning per source: `.planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md`.
 **Core value:** The Compliance view always shows a real-time, verified understanding of the product's compliance status: the release's own evidence from the image, your site's evidence live on top, and nothing unverified shown as passing.
-**Status:** planned, 15 plans in 10 waves.
+**Status:** planned, 17 plans in 10 waves (revised 2026-11-25 after the plan check).
 
 - [ ] **LCE-01**: Every release image carries its own product evidence read-only at `/opt/sterling/evidence` (SBOM, vulnerability scan with its database build date, the evidence bundle with the engine inputs, the OSCAL package, the gap register and road-to-production) under a manifest the release key signs; its as-of time is the release build. [CM-8, SA-11, SR-4]
 - [ ] **LCE-02**: States and freshness are re-judged by the one status engine against the current time at start, every 60 seconds and on every change; each cell shows source, as-of time, freshness (Current, Ageing, Out of date) and verification. [CA-7]
@@ -1030,10 +1030,10 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | LCE-01 | 48.2-01, 48.2-05, 48.2-07 |
 | LCE-02 | 48.2-01, 48.2-03, 48.2-08, 48.2-10 |
 | LCE-03 | 48.2-03, 48.2-05, 48.2-14 |
-| LCE-04 | 48.2-01, 48.2-04, 48.2-06, 48.2-07, 48.2-12, 48.2-13 |
-| LCE-05 | 48.2-06, 48.2-08, 48.2-09, 48.2-11, 48.2-12 |
+| LCE-04 | 48.2-01, 48.2-04, 48.2-06, 48.2-07, 48.2-12, 48.2-13, 48.2-16, 48.2-17 |
+| LCE-05 | 48.2-06, 48.2-08, 48.2-09, 48.2-11, 48.2-12, 48.2-17 |
 | LCE-06 | 48.2-06, 48.2-13, 48.2-14 |
-| LCE-07 | 48.2-10, 48.2-15 |
+| LCE-07 | 48.2-10, 48.2-15, 48.2-16 |
 | LCE-08 | 48.2-02 |
 | LCE-09 | 48.2-04, 48.2-08, 48.2-09, 48.2-11 |
 | LCE-10 | 48.2-02, 48.2-15 |
