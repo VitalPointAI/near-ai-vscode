@@ -6182,7 +6182,7 @@
       ],
       "id": "G421",
       "ownerRole": "maintainers",
-      "remediation": "The site install writes the static application secrets its release descriptors declare (install.mjs secrets): today longhorn-crypto, postgres-superuser, keycloak-db and keycloak-admin-bootstrap, and the registry account through install.mjs registry. The others the charts expect are not declared yet: opensearch-internal-users with opensearch-admin and opensearch-writer (bcrypt hashes), oauth2-proxy-secrets, keycloak-realm-applier, the Harbor Secrets on Harbor sites, and each hub-<name>-keys (the hub-key generator exists). Without them a full apply stops at the first release that needs one. Declare them, with their hashing, before 47-18's lab run. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-16-SUMMARY.md.",
+      "remediation": "The site install writes the static application secrets its release descriptors declare (install.mjs secrets): today longhorn-crypto, postgres-superuser, keycloak-db and keycloak-admin-bootstrap, and the registry account through install.mjs registry. The others the charts expect are not declared yet: opensearch-internal-users with opensearch-admin and opensearch-writer (bcrypt hashes), oauth2-proxy-secrets, keycloak-realm-applier, the Harbor Secrets on Harbor sites, and each hub-<name>-keys (the hub-key generator exists). Without them a full apply stops at the first release that needs one. Declare them, with their hashing, before 47-18's lab run. The master-realm client behind keycloak-realm-applier must also carry the client scope kc-admin-api: on Keycloak 26.8 an admin API token without that audience answers 401, so neither keycloak-config-cli's client-credentials login nor the guest expiry permission step (deploy/keycloak/admin-permissions.mjs) can reach realm sterling without it (shown in 47-20's tracer). Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-16-SUMMARY.md and 47-20-SUMMARY.md.",
       "title": "The site install does not yet write every application secret the charts expect"
     },
     {
@@ -6249,8 +6249,21 @@
       ],
       "id": "G449",
       "ownerRole": "maintainers",
-      "remediation": "Guest accounts (deploy/keycloak/guests.mjs, 47-19) hold lifecycle attributes only: how a guest serves, their organization, access agreement and visit clearance are credentials the security contact issues to the guest in their own session, and an early end files a revocation request that only 71-12's revocation card shows to the issuing officers. 71-12 is now in the release, but its card is not reachable in a hosted session until G465 closes, so guests.mjs keeps CREDENTIAL_CARD_REACHABLE false and a site must keep guests off (guests.maxDays 0 or absent in the realm site file) until it runs a release that includes 71-12: the example ships maxDays 0, and guests.mjs create and extend refuse a nonzero maxDays while the release has no credential-issuers policy (71-12's); 47-20, the automatic end, waits on it too. Close this when G465 is closed, CREDENTIAL_CARD_REACHABLE is set, and the lab run shows a guest's credentials issued and an early end's request revoked.",
+      "remediation": "Guest accounts (deploy/keycloak/guests.mjs, 47-19) hold lifecycle attributes only: how a guest serves, their organization, access agreement and visit clearance are credentials the security contact issues to the guest in their own session, and an early end files a revocation request that only 71-12's revocation card shows to the issuing officers. 71-12 is now in the release, but its card is not reachable in a hosted session until G465 closes, so guests.mjs keeps CREDENTIAL_CARD_REACHABLE false and a site must keep guests off (guests.maxDays 0 or absent in the realm site file) until it runs a release that includes 71-12: the example ships maxDays 0, and guests.mjs create and extend refuse a nonzero maxDays while the release has no credential-issuers policy (71-12's); the automatic end (47-20: the CronJob sterling-guest-expiry and the realm applier's permission step) renders only while guests are on, so it stays off with them. Close this when G465 is closed, CREDENTIAL_CARD_REACHABLE is set, and the lab run shows a guest's credentials issued and an early end's request revoked.",
       "title": "Guest accounts stay off until a release includes the credential issuing and revocation card (71-12)"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "48",
+      "controls": [
+        "ac-02",
+        "ia-08"
+      ],
+      "id": "G446",
+      "ownerRole": "maintainers",
+      "remediation": "A guest is carried to another site only when the target site's newest signed site evidence export shows that its user import reads guest records (guests@1 in facts.sterling.reads.users; users.mjs export --include-guests, 47-21). No site export carries that yet: 48-11 adds the site's release and what it reads to the export (schema 2) and 47-32 records reads.users at install, and neither is on main, so every guest export refuses its target, which is the safe side (a guest never arrives somewhere as an ordinary member). The check in deploy/keycloak/site-evidence.mjs is written against 48-11's planned shape. Close this when 48-11 and 47-32 are merged, the shape is checked against theirs, and the lab run carries a guest between two sites.",
+      "title": "Guests cannot be carried between sites until site evidence exports say what each site's user import reads (48-11, 47-32)"
     },
     {
       "appliesAt": "now",
