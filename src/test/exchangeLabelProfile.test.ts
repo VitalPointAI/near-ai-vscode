@@ -117,7 +117,7 @@ test('D-21: the profile carries no context values, and asking for one says where
   const result = valuesFor(profile, { classification: 2, context: ['EXAMPLE-ALLIANCE'] });
   assert.equal(result.ok, false);
   assert.equal(result.ok ? '' : result.message, NO_CONTEXT_VALUES_TEXT);
-  assert.equal(NO_CONTEXT_VALUES_TEXT, "This profile has no context values; they come with the mission's policy file.");
+  assert.equal(NO_CONTEXT_VALUES_TEXT, "This label policy has no context values; they come with the mission's policy file.");
 });
 
 test('D-21: a value with no provenance, or a provenance outside the three levels, is refused', () => {

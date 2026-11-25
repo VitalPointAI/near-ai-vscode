@@ -249,10 +249,10 @@ export function lowestProvenance(leaves: Iterable<ProfileLeaf>): Provenance {
 }
 
 // Sentences shown to people (D-19: plain short sentences).
-export const NO_CONTEXT_VALUES_TEXT = "This profile has no context values; they come with the mission's policy file.";
-export const UNKNOWN_CLASSIFICATION_TEXT = 'This profile has no classification at that level.';
-export const UNKNOWN_VALUE_TEXT = 'This profile has no such value for that category.';
-export const NO_CATEGORY_TEXT = 'This profile has no such category.';
+export const NO_CONTEXT_VALUES_TEXT = "This label policy has no context values; they come with the mission's policy file.";
+export const UNKNOWN_CLASSIFICATION_TEXT = 'This label policy has no classification at that level.';
+export const UNKNOWN_VALUE_TEXT = 'This label policy has no such value for that category.';
+export const NO_CATEGORY_TEXT = 'This label policy has no such category.';
 
 export const LABEL_VALUE_REFUSALS = Object.freeze({
   'unknown-classification': UNKNOWN_CLASSIFICATION_TEXT,
