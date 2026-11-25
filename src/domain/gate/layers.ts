@@ -20,7 +20,9 @@ import type { Fields, Parsed } from './shape';
 
 /** The ways a key can be narrower. `superset` is a list a layer may only add to (D-60's export regimes). */
 export const NARROWING_DIRECTIONS = Object.freeze([
-  'tier-stricter', 'subset', 'number-lower', 'ceiling-dominated', 'boolean-safe', 'organization-only', 'superset'
+  'tier-stricter', 'subset', 'number-lower', 'ceiling-dominated', 'boolean-safe', 'organization-only', 'superset',
+  // Phase 70.1 (D-17): a classification cost ratio or recall target is narrower when higher (more raises).
+  'number-higher'
 ] as const);
 export type NarrowingDirection = (typeof NARROWING_DIRECTIONS)[number];
 
@@ -191,14 +193,34 @@ export const NARROWING: Readonly<Record<string, NarrowingRule>> = Object.freeze(
   'credentials.maxOfflineAge': ONLY_TREE,
   'credentials.requiredBySensitivity.*': rule('superset', { absent: 'weakest' }),
   'credentials.fallbackPersonKeys': ONLY,
-  'agreements.items': ONLY_TREE
+  'agreements.items': ONLY_TREE,
+  // Phase 70.1 (D-17): a personal or project layer may only make classification stricter. The system-high, the shadow settings and the classifier roles
+  // are your organization's alone; a threshold may only fall (a higher cost ratio or recall target, more raises); markings, code words, fact types and
+  // rules may only be added; review may only look sooner. thresholds, markings, codeWords and the rules compose by their own functions (SPECIAL).
+  'classification.systemHigh': ONLY_TREE,
+  // The three fields come before the entry row: a pattern that ends in `*` also matches every key below it, and the first match wins.
+  'classification.thresholds.*.costRatio': rule('number-higher'),
+  'classification.thresholds.*.recallTarget': rule('number-higher'),
+  'classification.thresholds.*.secondFamily': rule('boolean-safe', { safe: true }),
+  'classification.thresholds.*': rule('superset'),
+  'classification.shadow.defaultMode': ONLY,
+  'classification.shadow.levels': ONLY,
+  'classification.roles': ONLY_TREE,
+  'classification.review.jumpLevels': LOWER,
+  'classification.review.topLevel': rule('boolean-safe', { safe: true }),
+  'classification.review.lowerRequestAgeDays': LOWER,
+  'classification.markings[]': rule('superset'),
+  'classification.codeWords.listLabel': ONLY_TREE,
+  'classification.codeWords.entries[]': rule('superset'),
+  'classification.factTypes': rule('superset'),
+  'classification.guideRules[]': rule('superset'),
+  'classification.compilationRules[]': rule('superset')
 });
 
 /** Keys kept per layer and never compared: the envelope, and each section's own `v`. */
 export const LAYER_ENVELOPE_KEYS: readonly string[] = Object.freeze([
   'bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'parent', 'requires', 'minClient',
   'labels.v', 'agents.v', 'models.v', 'residency.v', 'people.v', 'onboarding.v', 'limits.v', 'reserved.v', 'exportControl.v', 'credentials.v', 'agreements.v',
-  // Phase 70.1: until 70.1-03 adds the classification rows, every classification key has no rule, so your organization's value applies (compose's default).
   'classification.v'
 ]);
 
@@ -427,8 +449,12 @@ function within(found: NarrowingRule, after: unknown, before: unknown, scales: S
       if (!Array.isArray(after) || !Array.isArray(before)) return sameValue(after, before);
       return isSubset(after, before);
     case 'superset':
+      // One item of a list that may only grow (70.1's rules and markings): adding it narrows, removing or changing it does not.
+      if (before === undefined && after !== undefined && !Array.isArray(after)) return true;
       if (!Array.isArray(after) || !Array.isArray(before)) return sameValue(after, before);
       return isSubset(before, after);
+    case 'number-higher':
+      return typeof after === 'number' && typeof before === 'number' && after >= before;
     case 'number-lower': {
       const weakest = found.absent === 'weakest' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
       const a = after === undefined ? weakest : after;
@@ -598,8 +624,57 @@ const SPECIAL: Readonly<Record<string, (org: unknown, mine: unknown, context: Co
   'people.organization': composeOrganizationBlock,
   'people.organization.mode': composeOrganizationMode,
   'exportControl.officials': composeOfficials,
-  'models.passports': composePassports
+  'models.passports': composePassports,
+  'classification.thresholds': composeThresholds,
+  'classification.markings': (org: unknown, mine: unknown, context: Context) => composeById('classification.markings', org, mine, context),
+  'classification.codeWords': composeCodeWords,
+  'classification.guideRules': (org: unknown, mine: unknown, context: Context) => composeById('classification.guideRules', org, mine, context),
+  'classification.compilationRules': (org: unknown, mine: unknown, context: Context) => composeById('classification.compilationRules', org, mine, context)
 });
+
+/**
+ * classification.thresholds (70.1 D-17): per level, the higher cost ratio and recall target and the safe second-family flag win, so a threshold only ever
+ * falls; a level your organization has no entry for may be added (it adds raises). A looser personal value is replaced and listed.
+ */
+function composeThresholds(org: unknown, mine: unknown, context: Context): unknown {
+  if (!isRecord(mine)) return org;
+  const organization = isRecord(org) ? org : {};
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(organization)) out[key] = ownValue(organization, key);
+  for (const key of Object.keys(mine)) {
+    const yours = ownValue(mine, key);
+    const theirs = ownValue(organization, key);
+    if (theirs === undefined) { out[key] = yours; continue; }
+    const costRatio = Math.max(Number(field(theirs, 'costRatio')), Number(field(yours, 'costRatio')));
+    const recallTarget = Math.max(Number(field(theirs, 'recallTarget')), Number(field(yours, 'recallTarget')));
+    const secondFamily = field(theirs, 'secondFamily') === true || field(yours, 'secondFamily') === true;
+    const joined = { costRatio, recallTarget, secondFamily };
+    if (!sameValue(joined, yours)) widen(context, 'classification.thresholds.*', `classification.thresholds.${key}`, yours, theirs);
+    out[key] = joined;
+  }
+  return out;
+}
+
+/** A list keyed by `id` that may only grow (70.1 D-17): every entry of your organization's stays; a personal entry with a new id is added; sorted by id. */
+function composeById(pattern: string, org: unknown, mine: unknown, context: Context): unknown {
+  if (!Array.isArray(mine)) return org;
+  const out = new Map<string, unknown>();
+  for (const item of listOf(org)) out.set(String(field(item, 'id')), item);
+  for (const item of mine) {
+    const id = String(field(item, 'id'));
+    const theirs = out.get(id);
+    if (theirs === undefined) out.set(id, item);
+    else if (!sameValue(theirs, item)) widen(context, `${pattern}[]`, `${pattern}[${id}]`, item, theirs);
+  }
+  return [...out.keys()].sort().map((id) => out.get(id));
+}
+
+/** classification.codeWords: your organization's list label stands (its own when it has a list); the entries only grow. */
+function composeCodeWords(org: unknown, mine: unknown, context: Context): unknown {
+  if (!isRecord(mine)) return org;
+  if (!isRecord(org)) return mine;
+  return { listLabel: ownValue(org, 'listLabel'), entries: composeById('classification.codeWords.entries', ownValue(org, 'entries'), ownValue(mine, 'entries'), context) };
+}
 
 function compose(pattern: string, segments: readonly string[], org: unknown, mine: unknown, context: Context): unknown {
   const special = own(SPECIAL, pattern);

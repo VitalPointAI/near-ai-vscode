@@ -387,7 +387,37 @@ function labelRows(doc: PolicyDocument, scales: ScaleTable): PolicySectionRow[] 
   if (doc.exportControl !== undefined) {
     rows.push(row('Export-controlled work', `Rules set for ${doc.exportControl.regimes.map((regime) => COMPARTMENT_WORDS[regime] ?? regime).join(', ')}`));
   }
+  if (doc.classification !== undefined) rows.push(...classificationRows(doc.classification, scales));
   return rows;
+}
+
+/** Show Policy's words for the classification section (70.1 D-16): counts and levels only, never a rule's description or a code word. */
+export const CLASSIFICATION_ROWS_TEXT = Object.freeze({
+  rules: 'How labels are proposed',
+  systemHigh: 'Highest label this system may hold',
+  systemHighNone: 'Not set',
+  assistant: "The assistant's proposals",
+  trial: 'Trial: it only suggests',
+  trialExcept: 'Trial: it only suggests, except at {levels}',
+  applied: 'Applied where your organization has set a threshold'
+});
+
+function counted(count: number, one: string, many: string): string {
+  return `${String(count)} ${count === 1 ? one : many}`;
+}
+
+function classificationRows(section: NonNullable<PolicyDocument['classification']>, scales: ScaleTable): PolicySectionRow[] {
+  const words = CLASSIFICATION_ROWS_TEXT;
+  const parts = [
+    counted(section.guideRules.length, "rule from your organization's guide", "rules from your organization's guide"),
+    counted(section.compilationRules.length, 'combination rule', 'combination rules'),
+    counted(section.markings.length, 'marking', 'markings'),
+    counted(section.codeWords?.entries.length ?? 0, 'code word', 'code words')
+  ];
+  const high = section.systemHigh === undefined ? words.systemHighNone : section.systemHigh.map((label) => labelKeyShown(label, scales)).join(', ');
+  const mode = section.shadow.defaultMode === 'enforce' ? words.applied
+    : section.shadow.levels.length === 0 ? words.trial : words.trialExcept.replace('{levels}', section.shadow.levels.map((key) => labelKeyShown(key, scales)).join(', '));
+  return [row(words.rules, parts.join(', ')), row(words.systemHigh, high), row(words.assistant, mode)];
 }
 
 function whereRows(doc: PolicyDocument, scales: ScaleTable): PolicySectionRow[] {
