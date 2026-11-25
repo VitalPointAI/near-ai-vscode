@@ -89,7 +89,7 @@ async function openSide(browser: Browser, who: 'a' | 'b', url: string): Promise<
 async function sharePage(side: Side): Promise<Locator> {
   const { page } = side;
   const section = page.locator('section.sterling-share');
-  if (await section.count() === 0) {
+  if (!(await section.isVisible())) {
     await page.locator('.lm-TabBar-tab', { hasText: 'Get Started' }).first().click();
     await page.locator('button.sterling-destination[data-work-area="operations"]').first().click();
   }
