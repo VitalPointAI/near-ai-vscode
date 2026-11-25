@@ -4,6 +4,8 @@
 !compliance/
 !compliance/src/
 !compliance/src/**
+!compliance/hosted/
+!compliance/hosted/exchanges.json
 !workbench/
 !workbench/package.json
 !workbench/package-lock.json

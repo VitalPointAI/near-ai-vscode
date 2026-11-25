@@ -38,10 +38,11 @@ RUN JOBS=2 npm_config_build_from_source=true npm_config_nodedir=/usr/local npm r
     && mkdir -p "node_modules/node-pty/prebuilds/$dist" \
     && cp node_modules/node-pty/build/Release/pty.node "node_modules/node-pty/prebuilds/$dist/pty.node"
 
-# The engine bundle reads the repository's src/ and the compliance status engine's compliance/src/ (48.2-01: only engine/compliance.cjs
-# reaches the runtime stage); the documentation tool reads the published guides.
+# The engine bundle reads the repository's src/ and the compliance status engine's compliance/src/ with the exchange register (48.2-01,
+# 48.2-08: only engine/compliance.cjs reaches the runtime stage); the documentation tool reads the published guides.
 COPY src /repo/src
 COPY compliance/src /repo/compliance/src
+COPY compliance/hosted/exchanges.json /repo/compliance/hosted/exchanges.json
 COPY README.md SECURITY.md CHANGELOG.md CONTRIBUTING.md /repo/
 COPY docs/development-workflow.md docs/testing.md docs/staff-env-packs.md /repo/docs/
 # The screenshots README.md shows: bundled as same-origin images by the documentation tool, never loaded from GitHub.

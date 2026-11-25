@@ -80,5 +80,10 @@ export default new ContainerModule(bind => {
   bind(EvidenceSettingsContribution).toSelf().inSingletonScope();
   bind(BackendApplicationContribution).toService(EvidenceSettingsContribution);
   bindBackendService<SterlingEvidenceService>(bind, SterlingEvidenceService, EVIDENCE_SERVICE_PATH,
-    context => createEvidenceService({ settings: context.container.get<EvidenceSettings>(EvidenceSettingsId) }));
+    context => {
+      // The 30-second source check and the 60-second re-judge run for as long as the backend does (48.2-08, D-25).
+      const service = createEvidenceService({ settings: context.container.get<EvidenceSettings>(EvidenceSettingsId) });
+      service.start();
+      return service;
+    });
 });
