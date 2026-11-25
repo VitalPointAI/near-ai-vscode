@@ -15,7 +15,7 @@ import { enrolPerson } from '../openbao/enrol.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOW = Date.parse('2026-11-24T12:00:00Z');
 const UNTIL = '2026-12-20T17:00:00Z';
-const SETTINGS = { maxDays: 90, checkMinutes: 15, sessionsNamespace: 'theia-cloud' };
+const SETTINGS = { maxDays: 90, checkMinutes: 15, sessionsNamespace: 'theia-cloud', retentionDays: 365 };
 const LEAD = 'kc-lead-1';
 const SEC = 'kc-sec-1';
 
@@ -102,7 +102,7 @@ function fakeBao({ createOnly = true } = {}) {
     if (apiPath === 'identity/entity') { const entity = addEntity(body.name, { metadata: body.metadata }); return reply(200, { id: entity.id, name: entity.name }); }
     if (apiPath === 'identity/entity-alias') return reply(200, { id: 'alias-1' });
     if (apiPath.startsWith('transit/keys/')) return method === 'GET' ? { status: 404, data: { errors: [] } } : { status: 204, data: null };
-    if (apiPath === 'sys/capabilities-self') return reply(200, Object.fromEntries(body.paths.map((where) => [where, where.startsWith('kv/data/site/revocation-requests/guest-') ? ['create'] : ['deny']])));
+    if (apiPath === 'sys/capabilities-self') return reply(200, Object.fromEntries(body.paths.map((where) => [where, /^kv\/data\/site\/(revocation-requests|guest-ended)\/guest-/.test(where) ? ['create'] : ['deny']])));
     if (apiPath.startsWith('kv/data/')) {
       if (method === 'GET') return kv.has(apiPath) ? reply(200, { data: kv.get(apiPath) }) : { status: 404, data: { errors: [] } };
       if (kv.has(apiPath)) return createOnly ? { status: 403, data: { errors: ['permission denied'] } } : { status: 400, data: { errors: ['check-and-set parameter did not match the current version'] } };
@@ -174,6 +174,8 @@ test('link refuses an ended guest', async () => {
   assert.equal(kc.writes().length, 0);
 });
 
+/** The end record of D-84 for kc-ada ended at NOW with a 365-day retention. */
+const END_RECORD = { format: 'sterling-guest-ended/1', entity: 'guest-kc-ada', keycloakId: 'kc-ada', endedAt: '2026-11-24T12:00:00Z', removeAfter: '2027-11-24T12:00:00Z' };
 const GUEST_ATTRS = { guestUntil: [UNTIL], guestRequestedBy: ['lead.one'], guestApprovedBy: ['sec.one'], guestApprovalRef: ['VR-001'] };
 const enrolledGuest = (kc, bao, id = 'kc-ada') => {
   kc.add({ id, username: 'ada.observer', email: 'guest-07@site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'], keys: ['k1', 'k2'] });
@@ -185,14 +187,15 @@ test('endGuest disables, logs out, records the end, disables the entity and stop
   const bao = fakeBao();
   const sessions = fakeSessions();
   enrolledGuest(kc, bao);
-  const result = await endGuest({ userId: 'kc-ada', reason: 'visit over', early: false, keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW });
+  const result = await endGuest({ userId: 'kc-ada', reason: 'visit over', early: false, keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW, retentionDays: 365 });
   assert.deepEqual(result.failures, []);
   assert.deepEqual(kc.writes().map((call) => `${call.method} ${call.path}`), ['PUT users/kc-ada', 'POST users/kc-ada/logout', 'PUT users/kc-ada']);
   assert.equal(kc.writes()[0].body.enabled, false);
   const recorded = kc.users.get('kc-ada');
   assert.equal(recorded.enabled, false);
   assert.deepEqual(recorded.attributes, { ...GUEST_ATTRS, guestEndedAt: ['2026-11-24T12:00:00Z'], guestEndedReason: ['visit over'] }, 'the other guest attributes survive the end');
-  assert.deepEqual(bao.writes().map((call) => [call.method, call.path, call.body]), [['POST', 'identity/entity/name/guest-kc-ada', { disabled: true }]]);
+  assert.deepEqual(bao.writes().map((call) => [call.method, call.path, call.body]), [['POST', 'identity/entity/name/guest-kc-ada', { disabled: true }],
+    ['POST', 'kv/data/site/guest-ended/guest-kc-ada-20261124T120000Z', { options: { cas: 0 }, data: END_RECORD }]]);
   assert.equal(bao.entities.get('guest-kc-ada').disabled, true);
   assert.deepEqual(sessions.stopped, ['guest-07@site.example']);
   for (const call of [...kc.calls, ...bao.calls]) assert.notEqual(call.method, 'DELETE', `${call.path} is a delete`);
@@ -204,14 +207,14 @@ test('an early end files one create-only revocation request with exactly the D-2
   const kc = fakeKeycloak();
   const bao = fakeBao();
   enrolledGuest(kc, bao);
-  const first = await endGuest({ userId: 'kc-ada', reason: 'left early', early: true, job: 'guests.mjs end', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW });
+  const first = await endGuest({ userId: 'kc-ada', reason: 'left early', early: true, job: 'guests.mjs end', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW, retentionDays: 365 });
   assert.deepEqual(first.failures, []);
   assert.equal(first.request, 'filed');
   const where = 'kv/data/site/revocation-requests/guest-kc-ada-guest-ended';
   const write = bao.calls.find((call) => call.path === where);
   assert.deepEqual(write.body.options, { cas: 0 });
   assert.deepEqual(write.body.data, { format: REVOCATION_FORMAT, entity: 'guest-kc-ada', keycloakId: 'kc-ada', reason: 'guest-ended', seenAt: '2026-11-24T12:00:00Z', job: 'guests.mjs end' });
-  const second = await endGuest({ userId: 'kc-ada', reason: 'again', early: true, job: 'sterling-guest-expiry', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW + 60_000 });
+  const second = await endGuest({ userId: 'kc-ada', reason: 'again', early: true, job: 'sterling-guest-expiry', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW + 60_000, retentionDays: 365 });
   assert.deepEqual(second.failures, []);
   assert.equal(second.request, 'already filed');
   assert.equal(bao.kv.get(where).job, 'guests.mjs end', 'the first request is unchanged');
@@ -223,7 +226,7 @@ test('a guest who never enrolled has no entity: endGuest skips the OpenBao disab
   const kc = fakeKeycloak();
   const bao = fakeBao();
   kc.add({ id: 'kc-new', username: 'new.guest', email: 'guest-09@site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'] });
-  const result = await endGuest({ userId: 'kc-new', reason: 'cancelled', early: true, keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW });
+  const result = await endGuest({ userId: 'kc-new', reason: 'cancelled', early: true, keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW, retentionDays: 365 });
   assert.deepEqual(result.failures, []);
   assert.equal(bao.writes().length, 0);
   assert.ok(!bao.entities.has('guest-kc-new'));
@@ -368,7 +371,7 @@ test('extend follows the create rules, moves the end, and brings an ended guest 
   const kc = fakeKeycloak();
   const bao = fakeBao();
   enrolledGuest(kc, bao);
-  await endGuest({ userId: 'kc-ada', reason: 'paused', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW });
+  await endGuest({ userId: 'kc-ada', reason: 'paused', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW, retentionDays: 365 });
   await assert.rejects(extendGuest({ request: { ...extendRequest, until: '2027-06-01T00:00:00Z' }, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /more than 90 days/);
   await assert.rejects(extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: async () => ({ ok: false, message: 'A cited credential is revoked.' }), now: NOW }), /revoked/);
   assert.equal(kc.users.get('kc-ada').enabled, false, 'refusals change nothing');
@@ -438,7 +441,7 @@ test('expireGuests ends the overdue, fails closed on a role, a group or an OpenB
   guest('kc-policy', {}).policies = ['sterling-admin'];
   guest('kc-moved', { guestUntil: ['2026-11-24T11:00:00Z'] });
   kc.beforeRead = { 'kc-moved': (user) => { user.attributes.guestUntil = ['2026-12-31T00:00:00Z']; } };
-  const result = await expireGuests({ keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW, job: 'sterling-guest-expiry' });
+  const result = await expireGuests({ keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW, job: 'sterling-guest-expiry', retentionDays: 365 });
   assert.deepEqual(result.failures, []);
   assert.deepEqual(result.ended.map((entry) => [entry.username, entry.reason]).sort(), [
     ['admin', 'holds the realm-management role view-users'], ['grouped', 'member of /staff'], ['late', 'end date 2026-11-24T11:00:00Z passed'], ['policy', 'OpenBao entity holds the policy sterling-admin']].sort());
@@ -457,9 +460,36 @@ test('expireGuests still ends on the Keycloak side when OpenBao fails, reports t
   const bao = fakeBao();
   for (const id of ['kc-one', 'kc-two']) kc.add({ id, username: id.slice(3), email: `${id}@guests.site.example`, attributes: { ...structuredClone(GUEST_ATTRS), guestUntil: ['2026-11-01T00:00:00Z'] } }, { groupPaths: ['/guests'] });
   const sealed = async (method, apiPath, body) => (apiPath.startsWith('identity/') ? { status: 503, data: { errors: ['sealed'] } } : bao.request(method, apiPath, body));
-  const result = await expireGuests({ keycloak: kc.keycloak, bao: sealed, sessions: null, now: NOW });
+  const result = await expireGuests({ keycloak: kc.keycloak, bao: sealed, sessions: null, now: NOW, retentionDays: 365 });
   assert.deepEqual(result.ended.map((entry) => entry.username).sort(), ['one', 'two']);
   assert.equal(kc.users.get('kc-one').enabled, false);
   assert.equal(kc.users.get('kc-two').enabled, false);
   assert.ok(result.failures.length >= 2 && result.failures.every((failure) => /OpenBao/.test(failure)), JSON.stringify(result.failures));
+});
+
+// ---- 47-34 (D-84): the end record that starts the retention period ----
+
+test('every end of an enrolled guest files one create-only end record; a second end files nothing new; a never-enrolled guest gets none', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  enrolledGuest(kc, bao);
+  const first = await endGuest({ userId: 'kc-ada', reason: 'visit over', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW, retentionDays: 365 });
+  assert.deepEqual(first.failures, []);
+  assert.ok(first.steps.includes('end record filed'));
+  assert.deepEqual(bao.kv.get('kv/data/site/guest-ended/guest-kc-ada-20261124T120000Z'), END_RECORD);
+  const second = await endGuest({ userId: 'kc-ada', reason: 'again', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW + 3_600_000, retentionDays: 365 });
+  assert.deepEqual(second.failures, []);
+  assert.ok(second.steps.includes('end record already filed'), 'the recorded end time names the same record');
+  assert.equal([...bao.kv.keys()].filter((key) => key.includes('guest-ended')).length, 1);
+});
+
+test('without guests.retentionDays no end record is filed, the end says so, and no guest can be created', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  enrolledGuest(kc, bao);
+  const result = await endGuest({ userId: 'kc-ada', reason: 'visit over', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW });
+  assert.match(result.failures.join('\n'), /guests\.retentionDays is not set/);
+  assert.equal(kc.users.get('kc-ada').enabled, false, 'the end itself still happens');
+  assert.equal([...bao.kv.keys()].filter((key) => key.includes('guest-ended')).length, 0);
+  assert.match(checkGuestRequest(REQUEST, { ...SETTINGS, retentionDays: 0 }, NOW).problems.join('\n'), /Set guests\.retentionDays/);
 });

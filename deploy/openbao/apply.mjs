@@ -21,7 +21,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
 export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator', 'guest-expiry',
-  'guest-removal', 'raft-snapshot']);
+  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
@@ -43,6 +43,19 @@ export const CERT_MANAGER = Object.freeze({ role: 'cert-manager', serviceAccount
  * The scheduled Raft snapshot (D-73, 47-24): CronJob openbao-raft-snapshot logs in with a projected token of its own ServiceAccount for this
  * audience (so the token is no use to the Kubernetes API) and gets a 5-minute token holding only policy raft-snapshot.
  */
+/** The hourly check for guests past retention (D-84, 47-34): CronJob guest-retention-check, read-only but for the officers' notice. */
+export const GUEST_RETENTION_CHECK = Object.freeze({ role: 'guest-retention-check', serviceAccount: 'guest-retention-check', namespace: 'sterling-openbao', audience: 'sterling-openbao-guest-retention' });
+/** A subject no sign-in token carries: the officer roles bind it when the site names no security officer, so a stale list never stays admitted. */
+export const NO_SUBJECT = 'not-set';
+const SUBJECT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The site's security officers (D-84): Keycloak user ids named at the key ceremony; refused unless each is one. */
+export function securityOfficers(site) {
+  const officers = site.securityOfficers ?? [];
+  if (!Array.isArray(officers) || !officers.every((sub) => typeof sub === 'string' && SUBJECT.test(sub))) {
+    throw new Error('the site setting securityOfficers must list the Keycloak user ids (lowercase UUIDs) of your organization\'s security officers, named at the key ceremony.');
+  }
+  return officers.length ? [...officers] : [NO_SUBJECT];
+}
 export const RAFT_SNAPSHOT = Object.freeze({ role: 'raft-snapshot', serviceAccount: 'openbao-snapshot', namespace: 'sterling-openbao', audience: 'sterling-openbao-snapshot' });
 /**
  * The cluster service domains the ingress role may sign besides the site domain: the in-cluster names of the services that serve TLS from the
@@ -78,6 +91,7 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
   const stepUpAcr = site.stepUpAcr;
   const window = Number(site.stepUpMaxAgeSeconds);
   if (!stepUpAcr || !Number.isInteger(window) || window <= 0) throw new Error('the site file needs stepUpAcr and a positive whole stepUpMaxAgeSeconds.');
+  const officers = securityOfficers(site);
   const mount = (where, type, options) => ({ what: `mount ${where}/ (${type})`, read: 'sys/mounts', write: `sys/mounts/${where}`, body: { type, ...(options ? { options } : {}) },
     compare: (mounts) => mounts?.[`${where}/`]?.type === type });
   const role = (name, extra) => ({ what: `jwt role ${name}`, read: `auth/jwt/role/${name}`, write: `auth/jwt/role/${name}`, body: {
@@ -96,6 +110,12 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     // outlive the step-up window.
     role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
       token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
+    // Removing ended guests' secrets (D-84): only the named security officers, only after a passkey step-up, only for the step-up window, and
+    // only that policy; the officers' notice: the same officers, read-only, one minute.
+    role('guest-secrets-removal', { bound_claims: { acr: stepUpAcr, sub: officers }, bound_claims_type: 'string', token_policies: ['guest-secrets-removal'],
+      token_ttl: window, token_max_ttl: window, token_explicit_max_ttl: window, token_period: 0 }),
+    role('security-officer-notices', { bound_claims: { sub: officers }, bound_claims_type: 'string', token_policies: ['security-officer-notices'],
+      token_ttl: 60, token_max_ttl: 60, token_explicit_max_ttl: 60, token_period: 0 }),
     // The automatic end of guest accounts: only the client sterling-guest-expiry, only the policy guest-expiry, 5 minutes and no renewal.
     role(GUEST_EXPIRY.role, { bound_audiences: [GUEST_EXPIRY.client], bound_claims: { azp: GUEST_EXPIRY.client }, bound_claims_type: 'string', token_policies: ['guest-expiry'],
       token_ttl: GUEST_EXPIRY.ttl, token_max_ttl: GUEST_EXPIRY.ttl, token_explicit_max_ttl: GUEST_EXPIRY.ttl, token_period: 0 }),
@@ -122,6 +142,9 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     { what: `kubernetes role ${RAFT_SNAPSHOT.role}`, read: `auth/kubernetes/role/${RAFT_SNAPSHOT.role}`, write: `auth/kubernetes/role/${RAFT_SNAPSHOT.role}`, body: {
       bound_service_account_names: [RAFT_SNAPSHOT.serviceAccount], bound_service_account_namespaces: [RAFT_SNAPSHOT.namespace], audience: RAFT_SNAPSHOT.audience,
       token_policies: ['raft-snapshot'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 600 } },
+    { what: `kubernetes role ${GUEST_RETENTION_CHECK.role}`, read: `auth/kubernetes/role/${GUEST_RETENTION_CHECK.role}`, write: `auth/kubernetes/role/${GUEST_RETENTION_CHECK.role}`, body: {
+      bound_service_account_names: [GUEST_RETENTION_CHECK.serviceAccount], bound_service_account_namespaces: [GUEST_RETENTION_CHECK.namespace], audience: GUEST_RETENTION_CHECK.audience,
+      token_policies: ['guest-retention-check'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 300 } },
     // The approvers of key moves between sites (key-move.hcl); members are added at the key ceremony and never by this script.
     { what: 'identity group key-custodians', read: 'identity/group/name/key-custodians', write: 'identity/group/name/key-custodians', body: { type: 'internal', policies: [] },
       compare: (group) => group?.type === 'internal' }

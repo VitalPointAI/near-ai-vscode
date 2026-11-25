@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
+import { POLICIES, planApply } from '../openbao/apply.mjs';
 import { countPasswordlessKeys, enrolPerson, rebindPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -206,7 +207,11 @@ test('every key-move path needs two approvals from key-custodians', () => {
   }
 });
 
+/** The one policy block allowed to reach any person's KV path (D-84): list and delete, in the officer's step-up role only. */
+const PER_PERSON_EXCEPTION = Object.freeze({ file: 'guest-secrets-removal.hcl', path: 'kv/metadata/users/*' });
+
 test('every per-person path is templated on the entity and no policy names a literal entity id', () => {
+  const exceptions = [];
   const files = readdirSync(POLICY_DIR).filter((name) => name.endsWith('.hcl'));
   assert.ok(files.length >= 4);
   for (const file of files) {
@@ -214,10 +219,13 @@ test('every per-person path is templated on the entity and no policy names a lit
     assert.doesNotMatch(text, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, `${file} names a literal id`);
     for (const block of pathBlocks(text)) {
       if (/^(kv\/(data|metadata)\/users\/|transit\/(sign|datakey|decrypt)\/)/.test(block.path)) {
+        // The one exception (D-84, owner 2026-11-25): the security officer's step-up role removes ended guests' secrets.
+        if (file === PER_PERSON_EXCEPTION.file && block.path === PER_PERSON_EXCEPTION.path) { exceptions.push(file); continue; }
         assert.match(block.path, /\{\{identity\.entity\.id\}\}/, `${file}: ${block.path} is a per-person path without the entity template`);
       }
     }
   }
+  assert.deepEqual(exceptions, [PER_PERSON_EXCEPTION.file], 'exactly one exception, and it is there');
   assert.ok(pathBlocks(policy('enrolment')).every((block) => !block.path.startsWith('kv/')), 'the enrolment operator cannot read secrets');
 });
 
@@ -289,6 +297,7 @@ test('guest-expiry reads and disables guest entities only, files create-only rev
   assert.deepEqual(shape('guest-expiry'), [
     ['identity/entity/name/guest-*', ['read', 'update'], 'allowed_parameters = { "disabled" = [true] }'],
     ['kv/data/site/revocation-requests/guest-*', ['create'], ''],
+    ['kv/data/site/guest-ended/guest-*', ['create'], ''],
     ['sys/capabilities-self', ['update'], ''],
     ['auth/token/lookup-self', ['read'], ''],
     ['auth/token/revoke-self', ['update'], '']
@@ -320,6 +329,7 @@ test('guest-operator reads approvers\' entities and the people directory, enable
     ['kv/data/site/people/*', ['read'], ''],
     ['identity/entity/name/guest-*', ['read', 'update'], 'allowed_parameters = { "disabled" = [] }'],
     ['kv/data/site/revocation-requests/guest-*', ['create'], ''],
+    ['kv/data/site/guest-ended/guest-*', ['create'], ''],
     ['sys/capabilities-self', ['update'], '']
   ]);
   assert.equal(allows(['guest-operator'], ADA, 'update', 'identity/entity/name/keycloak-kc-1'), false, 'the operator never changes a staff entity');
@@ -396,4 +406,84 @@ test('the snapshot script logs in with the ServiceAccount token, saves a UTC-tim
   assert.match(job, /KEEP/);
   assert.match(job, /value: "28"/, 'keep from the site file');
   assert.doesNotMatch(job, /set -x|echo[^\n]*BAO_TOKEN|printenv|env\b[^:]/, 'the token is never printed');
+});
+
+// Removing ended guests' secrets (D-84, 47-34): the officer's step-up role is the only holder of the delete; the check job and the notice read.
+test('guest-secrets-removal lists and reads the end and removal records, reads guest entities, and lists and deletes KV secrets', () => {
+  assert.deepEqual(shape('guest-secrets-removal'), [
+    ['kv/metadata/site/guest-ended/', ['list'], ''],
+    ['kv/data/site/guest-ended/*', ['read'], ''],
+    ['kv/metadata/site/guest-secrets-removed/', ['list'], ''],
+    ['kv/data/site/guest-secrets-removed/guest-*', ['create', 'read'], ''],
+    ['identity/entity/name/guest-*', ['read'], ''],
+    ['kv/metadata/users/*', ['list', 'delete'], ''],
+    ['auth/token/lookup-self', ['read'], ''],
+    ['auth/token/revoke-self', ['update'], '']
+  ]);
+  const officer = ['guest-secrets-removal'];
+  for (const capability of ['read', 'create', 'update']) assert.equal(allows(officer, ADA, capability, `kv/data/users/${BEN}/mail/work`), false, `no ${capability} of anyone's secret values`);
+  assert.equal(allows(officer, ADA, 'update', 'kv/data/site/guest-secrets-removed/guest-kc-1-20261124T120000Z'), false, 'a removal record is never changed');
+  assert.equal(allows(officer, ADA, 'update', 'identity/entity/name/guest-kc-1'), false);
+  for (const name of POLICIES.filter((item) => item !== 'guest-secrets-removal')) {
+    assert.equal(allows([name], ADA, 'delete', `kv/metadata/users/${BEN}/mail/work`), false, `${name} cannot delete another person's secrets`);
+  }
+});
+
+test('the retention check reads the records and writes only the notice; officers read only the notice', () => {
+  assert.deepEqual(shape('guest-retention-check'), [
+    ['kv/metadata/site/guest-ended/', ['list'], ''],
+    ['kv/data/site/guest-ended/*', ['read'], ''],
+    ['kv/metadata/site/guest-secrets-removed/', ['list'], ''],
+    ['identity/entity/name/guest-*', ['read'], ''],
+    ['kv/data/site/notices/guest-secrets-removal', ['create', 'update'], '']
+  ]);
+  assert.deepEqual(shape('security-officer-notices'), [['kv/data/site/notices/guest-secrets-removal', ['read'], '']]);
+});
+
+const OFFICERS = ['5f7c2a1e-0b3d-4c6e-8a9f-1b2c3d4e5f60', '6a8d3b2f-1c4e-4d7f-9b0a-2c3d4e5f6a71'];
+const roleBody = (operations, where) => operations.find((operation) => operation.write === where)?.body;
+
+test('apply.mjs binds the removal role to the step-up acr and the named officers for the step-up window, and the notice role to the officers', () => {
+  const site = { ...loadSite(SITE_FILE), securityOfficers: OFFICERS };
+  const operations = planApply(site);
+  for (const what of ['policy guest-secrets-removal', 'policy guest-retention-check', 'policy security-officer-notices']) assert.ok(operations.some((operation) => operation.what === what), what);
+  assert.deepEqual(roleBody(operations, 'auth/jwt/role/guest-secrets-removal'), {
+    role_type: 'jwt', bound_audiences: ['sterling-sessions'], user_claim: 'sub', token_no_default_policy: true,
+    bound_claims: { acr: site.stepUpAcr, sub: OFFICERS }, bound_claims_type: 'string', token_policies: ['guest-secrets-removal'],
+    token_ttl: site.stepUpMaxAgeSeconds, token_max_ttl: site.stepUpMaxAgeSeconds, token_explicit_max_ttl: site.stepUpMaxAgeSeconds, token_period: 0
+  });
+  assert.deepEqual(roleBody(operations, 'auth/jwt/role/security-officer-notices'), {
+    role_type: 'jwt', bound_audiences: ['sterling-sessions'], user_claim: 'sub', token_no_default_policy: true,
+    bound_claims: { sub: OFFICERS }, bound_claims_type: 'string', token_policies: ['security-officer-notices'],
+    token_ttl: 60, token_max_ttl: 60, token_explicit_max_ttl: 60, token_period: 0
+  });
+  const check = roleBody(operations, 'auth/kubernetes/role/guest-retention-check');
+  assert.deepEqual([check.bound_service_account_names, check.bound_service_account_namespaces, check.audience, check.token_policies, check.token_no_default_policy, check.token_ttl],
+    [['guest-retention-check'], ['sterling-openbao'], 'sterling-openbao-guest-retention', ['guest-retention-check'], true, 300]);
+  // No officer named: both jwt roles bind a subject no sign-in token has, so a stale list never stays admitted.
+  const none = planApply({ ...loadSite(SITE_FILE), securityOfficers: [] });
+  assert.deepEqual(roleBody(none, 'auth/jwt/role/guest-secrets-removal').bound_claims.sub, ['not-set']);
+  assert.deepEqual(roleBody(none, 'auth/jwt/role/security-officer-notices').bound_claims.sub, ['not-set']);
+  assert.throws(() => planApply({ ...loadSite(SITE_FILE), securityOfficers: ['ops-team'] }), /securityOfficers/);
+  // The staff roles are unchanged.
+  assert.deepEqual(roleBody(operations, 'auth/jwt/role/sterling-workbench-stepup').token_policies, ['sterling-workbench', 'sterling-workbench-sign']);
+});
+
+test('CronJob guest-retention-check reads, writes only the notice, alerts through Alertmanager and deletes nothing (D-84)', () => {
+  const yaml = renderRelease(ROOT, openbao(), { site: loadSite(SITE_FILE), helm: HELM });
+  const docs = yaml.split(/^---[ \t]*$/m);
+  const job = docs.find((doc) => /^kind: CronJob$/m.test(doc) && /name: guest-retention-check/.test(doc));
+  assert.ok(job, 'CronJob guest-retention-check');
+  const server = /image: "([^"]+)"/.exec(docs.find((doc) => /^kind: StatefulSet$/m.test(doc)))[1];
+  assert.ok(job.includes(`image: "${server}"`), 'the server image by digest');
+  for (const setting of [/concurrencyPolicy: Forbid/, /serviceAccountName: guest-retention-check/, /automountServiceAccountToken: false/, /audience: sterling-openbao-guest-retention/,
+    /readOnlyRootFilesystem: true/, /runAsNonRoot: true/, /drop: \[ALL\]/, /seccompProfile:\n\s+type: RuntimeDefault/]) assert.match(job, setting);
+  assert.match(job, /auth\/kubernetes\/login role=guest-retention-check/);
+  assert.match(job, /bao write kv\/data\/site\/notices\/guest-secrets-removal -/);
+  assert.equal((job.match(/bao write /g) ?? []).length, 2, 'the login and the notice are its only writes');
+  assert.doesNotMatch(job, /bao delete|-X DELETE|kv\/metadata\/users|kv\/data\/users/, 'it deletes nothing and reads no person\'s secrets');
+  assert.match(job, /value: http:\/\/prometheus-alertmanager\.sterling-monitoring\.svc:9093/);
+  assert.match(job, /"alertname":"GuestSecretsAwaitRemoval"/);
+  assert.doesNotMatch(job, /echo[^\n]*(\$key|\$entity|BAO_TOKEN)/, 'it prints the count only');
+  assert.ok(docs.some((doc) => /^kind: ServiceAccount$/m.test(doc) && /name: guest-retention-check$/m.test(doc)));
 });

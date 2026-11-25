@@ -29,6 +29,11 @@ path "kv/data/site/revocation-requests/guest-*" {
   capabilities = ["create"]
 }
 
+# The end record that starts the retention period after which a security officer removes the guest's secrets (D-84), create only.
+path "kv/data/site/guest-ended/guest-*" {
+  capabilities = ["create"]
+}
+
 path "sys/capabilities-self" {
   capabilities = ["update"]
 }

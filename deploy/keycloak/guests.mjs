@@ -17,7 +17,9 @@
 //   end     --user <name> --reason <text> [--no-sessions]
 //           Ends the guest now: Keycloak account disabled and its sessions ended, the end recorded, the OpenBao entity guest-<id> disabled
 //           (every token it holds stops at once) and the guest's Theia sessions stopped. An early end also files one revocation request in
-//           the site's revocation inbox, so the officers who issued the guest credentials revoke them in their own session. Nothing is deleted.
+//           the site's revocation inbox, so the officers who issued the guest credentials revoke them in their own session. Every end of an
+//           enrolled guest also files an end record whose removeAfter (the end plus guests.retentionDays) is when a security officer may
+//           remove the guest's secrets in the workbench (D-84). Nothing is deleted here.
 //   list    one line per guest: username, end, status (pending-keys, active, overdue, ended), lead and approver
 //   expire  [--no-sessions] ends every guest past their end date, and fails closed on any guest holding a realm-management role, another
 //           group or an OpenBao policy or group (the automatic end runs the same function in the cluster, 47-20)
@@ -48,6 +50,9 @@ export const CREDENTIAL_CHECK = path.join(HERE, '../tools/credential-check.mjs')
 export const REVOCATION_FORMAT = 'sterling-revocation-request/1';
 export const REVOCATION_INBOX = 'kv/data/site/revocation-requests';
 export const EARLY_END_REASON = 'guest-ended';
+/** The end record that starts a guest's retention period (D-84): kv/data/site/guest-ended/guest-<id>-<end time>, written once with cas 0. */
+export const END_FORMAT = 'sterling-guest-ended/1';
+export const END_RECORDS = 'kv/data/site/guest-ended';
 /** A UTC instant as Keycloak stores guestUntil. */
 export const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -67,7 +72,8 @@ export const attribute = (user, name) => user?.attributes?.[name]?.[0];
 /** The guests settings of the realm site file: { maxDays, checkMinutes, sessionsNamespace }. Guests are off when maxDays is 0 or absent. */
 export function guestSettings(realmSite) {
   const guests = realmSite?.guests ?? {};
-  return { maxDays: Number(guests.maxDays ?? 0) || 0, checkMinutes: Number(guests.checkMinutes ?? 15), sessionsNamespace: guests.sessionsNamespace || 'theia-cloud' };
+  return { maxDays: Number(guests.maxDays ?? 0) || 0, checkMinutes: Number(guests.checkMinutes ?? 15), sessionsNamespace: guests.sessionsNamespace || 'theia-cloud',
+    retentionDays: Number(guests.retentionDays ?? 0) || 0 };
 }
 
 /**
@@ -79,6 +85,7 @@ export function checkGuestRequest(request, settings, now = Date.now()) {
   const problems = [];
   const maxDays = Number(settings?.maxDays ?? 0);
   if (!(maxDays > 0)) problems.push('Guests are off at this site. Set guests.maxDays in the realm site file.');
+  if (!(Number(settings?.retentionDays ?? 0) > 0)) problems.push('Set guests.retentionDays in the realm site file: how long an ended guest\'s records are kept before a security officer removes their secrets (D-84).');
   for (const field of CREDENTIAL_FIELDS) {
     if (request[field] !== undefined) problems.push(`--${field} is not kept in Keycloak any more: how a guest serves, their nationality and organization are credentials the security contact issues to the guest in their own session (Phase 71). Leave it out.`);
   }
@@ -209,8 +216,22 @@ export async function linkGuest({ username, keycloak, now = Date.now() }) {
  * (OpenBao counts the second write as an update); that is told apart from a token that may not file at all by the token's own capabilities.
  */
 export async function fileRevocationRequest({ bao, entity, keycloakId, reason, seenAt, job }) {
-  const where = `${REVOCATION_INBOX}/${entity}-${reason}`;
-  const result = await bao('POST', where, { options: { cas: 0 }, data: { format: REVOCATION_FORMAT, entity, keycloakId, reason, seenAt, job } });
+  return fileOnce(bao, `${REVOCATION_INBOX}/${entity}-${reason}`, { format: REVOCATION_FORMAT, entity, keycloakId, reason, seenAt, job });
+}
+
+/**
+ * Files one sterling-guest-ended/1 (D-84): { format, entity, keycloakId, endedAt, removeAfter }, removeAfter being the end plus the site's
+ * guests.retentionDays. Keyed by the end time, so ending the same end again files nothing new, and a guest extended and ended later gets a new
+ * record (the newest counts). Returns 'filed' or 'already filed'.
+ */
+export async function fileEndRecord({ bao, entity, keycloakId, endedAt, retentionDays }) {
+  const removeAfter = iso(Date.parse(endedAt) + Number(retentionDays) * DAY_MS);
+  return fileOnce(bao, `${END_RECORDS}/${entity}-${endedAt.replace(/[-:]/g, '')}`, { format: END_FORMAT, entity, keycloakId, endedAt, removeAfter });
+}
+
+/** Writes a KV v2 record once (cas 0) and tells a record that exists from a token that may not write (see fileRevocationRequest). */
+async function fileOnce(bao, where, data) {
+  const result = await bao('POST', where, { options: { cas: 0 }, data });
   if (result.status < 300) return 'filed';
   const errors = JSON.stringify(result.data?.errors ?? '');
   if (result.status === 400 && /check-and-set/.test(errors)) return 'already filed';
@@ -219,7 +240,7 @@ export async function fileRevocationRequest({ bao, entity, keycloakId, reason, s
     const held = capabilities.status < 300 ? (capabilities.data?.data?.[where] ?? capabilities.data?.[where] ?? []) : [];
     if (held.includes('create')) return 'already filed';
   }
-  throw new Error(`filing the revocation request ${where}: OpenBao answered ${result.status} ${errors}`);
+  throw new Error(`filing ${where}: OpenBao answered ${result.status} ${errors}`);
 }
 
 /**
@@ -228,7 +249,7 @@ export async function fileRevocationRequest({ bao, entity, keycloakId, reason, s
  * first: a write to a missing name would create one), files a revocation request for an early end, and stops the guest's Theia sessions.
  * Deletes nothing. Every side is tried even when another fails. Returns { steps, failures, request }.
  */
-export async function endGuest({ userId, reason, early = false, job = 'guests.mjs end', keycloak, bao, sessions, now = Date.now() }) {
+export async function endGuest({ userId, reason, early = false, job = 'guests.mjs end', keycloak, bao, sessions, now = Date.now(), retentionDays }) {
   const steps = [];
   const failures = [];
   const at = iso(now);
@@ -257,6 +278,13 @@ export async function endGuest({ userId, reason, early = false, job = 'guests.mj
       ok(found, `read ${entity}`);
       ok(await bao('POST', `identity/entity/name/${entity}`, { disabled: true }), `disable ${entity}`);
       steps.push(`OpenBao entity ${entity} disabled`);
+      // The end record starts the retention period after which a security officer removes the guest's secrets (D-84).
+      if (Number(retentionDays) > 0) {
+        const recorded = await fileEndRecord({ bao, entity, keycloakId: userId, endedAt: attribute(user, 'guestEndedAt') ?? at, retentionDays });
+        steps.push(recorded === 'filed' ? 'end record filed' : 'end record already filed');
+      } else {
+        failures.push('OpenBao: guests.retentionDays is not set in the realm site file, so no end record was filed and the guest\'s secrets are never offered for removal; set it and end the guest again');
+      }
       if (early) {
         request = await fileRevocationRequest({ bao, entity, keycloakId: userId, reason: EARLY_END_REASON, seenAt: at, job });
         steps.push(`revocation request ${request}`);
@@ -354,7 +382,7 @@ export async function listGuests({ keycloak, now = Date.now() }) {
  * just before acting, and one whose end moved into the future (with nothing forbidden) is skipped. A fail-closed end before the end date is
  * early, so it files a revocation request. Every guest is tried; failures are returned, not thrown. Returns { ended, skipped, failures }.
  */
-export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), job = 'guests.mjs expire' }) {
+export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), job = 'guests.mjs expire', retentionDays }) {
   const ended = [];
   const skipped = [];
   const failures = [];
@@ -376,7 +404,7 @@ export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), 
         continue;
       }
       const reason = due ? (until ? `end date ${until} passed` : 'no end date') : reasons.join('; ');
-      const result = await endGuest({ userId: member.id, reason: due && reasons.length ? `${reason}; ${reasons.join('; ')}` : reason, early: !due, job, keycloak, bao, sessions, now });
+      const result = await endGuest({ userId: member.id, reason: due && reasons.length ? `${reason}; ${reasons.join('; ')}` : reason, early: !due, job, keycloak, bao, sessions, now, retentionDays });
       ended.push({ username: member.username, reason: due && reasons.length ? `${reason}; ${reasons.join('; ')}` : reason, steps: result.steps });
       failures.push(...result.failures.map((failure) => `${member.username}: ${failure}`));
     } catch (error) {
@@ -410,9 +438,9 @@ const USAGE = `usage: guests.mjs <command> [flags] <connection flags>
   link   --user <name>
   extend --user <name> --until <UTC time> --requested-by <lead> --approved-by <security contact> --approver-credential <file>
          --trust <folder> --approval-ref <reference>
-  end    --user <name> --reason <text> [--no-sessions]
+  end    --user <name> --reason <text> [--no-sessions]      (needs --realm-site for guests.retentionDays)
   list
-  expire [--no-sessions]
+  expire [--no-sessions]                                     (needs --realm-site)
   connection flags: --keycloak <url> --keycloak-token-file <file> [--realm sterling] --bao <url> --ca-file <pem> --bao-token-file <file>
                     --realm-site <realm site file>`;
 
@@ -423,7 +451,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     if (!SUBCOMMANDS.includes(command)) throw new Error(USAGE);
     const needed = ['--keycloak', '--keycloak-token-file', '--bao', '--ca-file', '--bao-token-file', ...(['list', 'expire'].includes(command) ? [] : ['--user']),
-      ...(command === 'end' ? ['--reason'] : []), ...(['create', 'extend'].includes(command) ? ['--realm-site'] : [])];
+      ...(command === 'end' ? ['--reason'] : []), ...(['create', 'extend', 'end', 'expire'].includes(command) ? ['--realm-site'] : [])];
     const missing = needed.filter((flag) => !option(flag));
     if (missing.length) throw new Error(`${USAGE}\nmissing: ${missing.join(' ')}`);
     const caPem = readFileSync(option('--ca-file'), 'utf8');
@@ -453,7 +481,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (!rows.length) console.log('No guests at this site.');
       for (const row of rows) console.log(`${row.username}\t${row.until || 'no end date'}\t${row.status}\trequested by ${row.requestedBy || '?'}\tapproved by ${row.approvedBy || '?'}`);
     } else if (command === 'expire') {
-      const result = await expireGuests({ keycloak, bao, sessions: sessionsClient() });
+      const result = await expireGuests({ keycloak, bao, sessions: sessionsClient(), retentionDays: settings.retentionDays });
       for (const entry of result.ended) console.log(`ended ${entry.username}: ${entry.reason}`);
       for (const entry of result.skipped) console.log(`skipped ${entry.username}: the end moved to ${entry.until}`);
       for (const failure of result.failures) console.error(`failed: ${failure}`);
@@ -469,7 +497,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const sessions = sessionsClient();
       // Before the end date this is an early end; after it, the guest's credentials have ended on their own (validUntil is guestUntil).
       const early = Date.parse(attribute(user, 'guestUntil') ?? '') > Date.now();
-      const result = await endGuest({ userId: user.id, reason: option('--reason'), early, job: 'guests.mjs end', keycloak, bao, sessions });
+      const result = await endGuest({ userId: user.id, reason: option('--reason'), early, job: 'guests.mjs end', keycloak, bao, sessions, retentionDays: settings.retentionDays });
       for (const step of result.steps) console.log(`  ${step}`);
       for (const failure of result.failures) console.error(`  failed: ${failure}`);
       console.log(`Ended ${username}.${result.request === 'none' ? '' : ` The officers who issued ${username} credentials see a revocation request on their revocation card and revoke them in their own session.`}`);
