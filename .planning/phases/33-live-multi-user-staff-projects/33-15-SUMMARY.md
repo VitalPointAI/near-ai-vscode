@@ -84,7 +84,7 @@ README, SECURITY.md, the operator guide, the workbench README and the CHANGELOG 
 1. **[Re-aim] Features not built are stated as not built.** The plan's README must-have lists presence, cursors and Show Who Wrote This. The native engine runs no presence (G435), and 33-29 (native cursors and Who Wrote This) has not run, so the documents say these are not in SovAI yet.
 2. **[Rule 1] Four existing SECURITY tests read the old heading** `## Multi-user staff projects (preview)`: replicaCellLeak (2 places), staffReplicaLabelLeak, staffReplicaStore (2) and staffReplicaMembership. They now read `\n## Multi-user staff projects\n`. Every assertion is unchanged.
 3. **Restore mode is already in relay/README.md** (33-07 wrote the marker step), so Task 2 only changed the sentences that said the editor could not connect, and the drill's opening line.
-4. **The operator cannot show the twelve words.** Re-admitting compares twelve words derived from the hub's certificate pin (`serverPinWords`). The hub has no command that prints them, so the operator guide says so. Filed as G541 with the coordinator's reserved id, with POA&M g541 (a hub command that prints the words).
+4. **The operator cannot show the twelve words.** Re-admitting compares twelve words derived from the hub's certificate pin (`serverPinWords`). The hub has no command that prints them, so the operator guide says so. Filed as G541 with the coordinator's reserved id, with POA&M g541 (a hub command that prints the words). **Closed later on this branch** (fix/g541-hub-pin-words): the hub's `--pin-words` prints the twelve words with `serverPinWords` itself, now on the hub side of the replica boundary, and `hub/test/api.test.ts` shows its line equals SovAI's words for the pin worked out with openssl and passes `readmitWordsMatch`. relay/README.md's re-admit steps use the command. The G541 row and POA&M g541 are removed.
 5. **Tests first.** `staffLiveDocs.test.ts` was written before any document changed. RED: 15 of 15 failed on the unchanged documents. GREEN: 15 of 15.
 
 ## Verification
@@ -133,4 +133,3 @@ None.
 - G435 (closes in Phase 33): SovAI runs no presence yet, so the Staff Room lists only the person. The documents say so.
 - G440 (closes in Phase 33, blocks production): person-key signatures are not yet bound to one confirmed action. SECURITY.md states it as a limit.
 - G441 (closes in Phase 33, blocks production): a conversion trusts any key that signed the legacy ledgers. SECURITY.md states it as a limit.
-- G541 (blocks production, applies now; POA&M g541): the hub has no command that prints the twelve words of its certificate pin, so the operator has nothing to compare against when the lead re-admits it. relay/README.md cites it; the follow-up is a small hub command.
