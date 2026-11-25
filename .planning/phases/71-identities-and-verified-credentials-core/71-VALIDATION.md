@@ -48,17 +48,17 @@ Never bare `node --test` and never an uncapped `npm test`.
 | VCRD-02 | Narrow profile: fixed contexts, two suites, integers only, required dates and status | 01, 03 | unit | `dist/test/credentialsProfile.test.js` | W0 |
 | VCRD-01 | Every credential type with exact claims, ClassificationAuthorityCredential included | 03 | unit | `dist/test/credentialsTypes.test.js` | W0 |
 | VCRD-05 | Thresholds; present only what is asked | 03, 08 | unit | `dist/test/credentialsTypes.test.js`, `dist/test/gateWallet.test.js` | W0 |
-| DLGT-01 | `did:key` from Phase 69 keys; `did:webvh` from a cached copy; minimal DID documents; people's DIDs at first sign-in; root DID offline | 04, 10 | unit, DIF vectors, workbench | `dist/test/didKey.test.js`, `dist/test/didWebvh.test.js`, `workbench/test/credentials/identity-service.test.ts`, `scripts/test/orgIssuer.test.mjs` | W0 |
-| VCRD-04 | Status lists: build, sign, read, never un-revoke, newer lists, fail closed; exported to edges | 05, 11, 12 | unit, cross-check, hub | `dist/test/credentialsStatusList.test.js`, `dist/test/credentialsTrustExport.test.js`, `workbench/test/credentials/issuer-service.test.ts` | W0 |
+| DLGT-01 | `did:key` from Phase 69 keys; `did:webvh` from a cached copy; minimal DID documents; people's DIDs at first sign-in; root DID offline | 04, 10 | unit, DIF vectors, workbench | `dist/test/didKey.test.js`, `dist/test/didWebvh.test.js`, `workbench/test/credentials-identity-service.test.ts`, `scripts/test/orgIssuer.test.mjs` | W0 |
+| VCRD-04 | Status lists: build, sign, read, never un-revoke, newer lists, fail closed; exported to edges | 05, 11, 12 | unit, cross-check, hub | `dist/test/credentialsStatusList.test.js`, `dist/test/credentialsTrustExport.test.js`, `workbench/test/credentials-issuer-service.test.ts` | W0 |
 | VCRD-06 | Device binding; a lost computer cut off by one revocation | 10 | unit | `dist/test/gateDeviceIdentity.test.js` | W0 |
 | DCAC-01 | `credentials@1` and `agreements@1`; issuer authority; agents and devices never issue (property test); requirements only tighten | 06 | unit, property | `dist/test/policyCredentialsSection.test.js`, `dist/test/credentialsIssuerAuthority.test.js`, `dist/test/gateOrganizationStore.test.js` | W0 |
 | DCAC-02 | Evidence cited by hash; same answer on every replica | 07 | unit, property | `dist/test/credentialsEvidence.test.js` | W0 |
 | DCAC-03 | `mayRelease` for every holder; `eligibleForPosition` | 07 | unit, property | `dist/test/credentialsMayRelease.test.js` | W0 |
-| DCAC-04 | Freshness at the hub, the preparer and the session; offline age; rekey card; session state; key release | 07, 09, 13 | unit, hub, workbench | `dist/test/credentialsFreshness.test.js`, `hub: dist/test/evidencePep.test.js`, `dist/test/staffRevocationWatch.test.js`, `workbench/test/credentials/credential-cache.test.ts`, `dist/test/staffKeyRelease.test.js` | W0 |
+| DCAC-04 | Freshness at the hub, the preparer and the session; offline age; rekey card; session state; key release | 07, 09, 13 | unit, hub, workbench | `dist/test/credentialsFreshness.test.js`, `hub: dist/test/evidencePep.test.js`, `dist/test/staffRevocationWatch.test.js`, `workbench/test/credentials-credential-cache.test.ts`, `dist/test/staffKeyRelease.test.js`, `dist/test/gateHubTrustSource.test.js` | W0 |
 | VCRD-07 | Gate clearance only from verified credentials in your organization; solo declared clearances unchanged | 07, 08 | unit | `dist/test/gateCredentialClearance.test.js`, `dist/test/gateLabelReads.test.js` | W0 |
-| DCAC-05 | Issuance from the officer's session with step-up; status-list key and issuer role in OpenBao; revoke and suspend | 10, 12 | workbench, deploy | `workbench/test/credentials/issuer-service.test.ts`, `deploy/test/openbao.test.mjs` | W0 |
+| DCAC-05 | Issuance from the officer's session with step-up; status-list key and issuer role in OpenBao; revoke and suspend | 10, 12 | workbench, deploy | `workbench/test/credentials-issuer-service.test.ts`, `deploy/test/openbao.test.mjs` | W0 |
 | DCAC-06 | Hub serves logs and lists; trust export and import | 09, 11 | hub | `hub: dist/test/trustRoutes.test.js`, `hub: dist/test/trustTransfer.test.js` | W0 |
-| (D-18) | Tokens only authenticate | 13 | workbench, static | `workbench/test/credentials/token-claims.test.ts` | W0 |
+| (D-18) | Tokens only authenticate | 13 | workbench, static | `workbench/test/credentials-token-claims.test.ts` | W0 |
 | (D-21) | Docs say what the code does | 14 | word for word | `dist/test/gateDocs.test.js` | yes |
 
 ---
@@ -66,6 +66,8 @@ Never bare `node --test` and never an uncapped `npm test`.
 ## Wave 0 Requirements
 
 Each test file is created by the task that needs it, tests first, and run on the unchanged base where it fails. No separate scaffolding wave.
+
+Workbench test files are flat (`workbench/test/credentials-*.test.ts`), because the workbench runner runs only `dist/test/*.test.js` and `dist/test/staff/*.test.js` (H-71-01).
 
 ---
 

@@ -438,10 +438,10 @@ class HubConnection {
   }
 }
 
-// The trust routes a client reads (hub/src/http/trustRoutes.ts): a log or witness file by DID path (well-known or up to 16 segments), or a list by name.
+// The trust routes a client calls (hub/src/http/trustRoutes.ts): a log or witness file by DID path (well-known or up to 16 segments), or a list by
+// name; a log is at most 1 MiB and a list a few hundred KiB, so the answer cap leaves room for both.
 const TRUST_LIST_NAME = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const TRUST_TARGET = /^\/v1\/trust\/(?:did\/(?:\.well-known|[A-Za-z0-9][A-Za-z0-9._~-]{0,99}(?:\/[A-Za-z0-9][A-Za-z0-9._~-]{0,99}){0,15})\/(?:did\.jsonl|did-witness\.json)|status\/[A-Za-z0-9][A-Za-z0-9._~-]{0,127})$/;
-/** A did:webvh log is at most 1 MiB, a list at most a few hundred KiB; the cap leaves room for both. */
 const TRUST_RESPONSE_MAX_BYTES = 2 * MIB;
 
 /** Token refusals a new session on the same connection can mend. */
@@ -721,11 +721,9 @@ export class HubTransport implements ReplicaTransport {
     await this.presence({ cell, leave: true });
   }
 
-  // ---- your organization's trust routes (Phase 71, 71-09, 71-13) -------------------------------------------------------------------------------------
-
   /**
-   * GET a trust route over this transport's one pinned connection and session: a did:webvh log, its witness file or a status list, as text; undefined
-   * when the hub holds none (404). Any other answer throws the failure it means. Never a connection of its own (71-13: no second HTTP client).
+   * Your organization's trust routes (Phase 71, 71-09, 71-13), over this transport's one pinned connection and session, never a connection of its
+   * own. GET answers a did:webvh log, its witness file or a status list as text, undefined for 404, and throws the failure any other answer means.
    */
   public async trustText(target: string): Promise<string | undefined> {
     if (!TRUST_TARGET.test(target)) throw new Error('That is not one of the hub\'s trust routes.');
@@ -742,13 +740,22 @@ export class HubTransport implements ReplicaTransport {
     return { status: answer.status };
   }
 
-  /** The trust routes as the wallet's trust source and the issuer service read them: logs by DID path, witness files and lists by name. */
-  public trustSession(): { getLog(path: string): Promise<string | undefined>; getWitness(path: string): Promise<string | undefined>; getList(name: string): Promise<string | undefined>; putList(name: string, text: string): Promise<{ readonly status: number }> } {
+  /** POST a person's whole did:webvh log (D-24: their own backend, through their own hub session); 201 stored, 200 already held. */
+  public async postTrustLog(path: string, log: string): Promise<{ readonly status: number }> {
+    const target = `/v1/trust/did/${path}/did.jsonl`;
+    if (!TRUST_TARGET.test(target)) throw new Error('That is not one of the hub\'s trust routes.');
+    const answer = await this.call('POST', target, { bytes: Buffer.from(log, 'utf8') });
+    return { status: answer.status };
+  }
+
+  /** The trust routes as the wallet's trust source, the issuer service and the identity service use them: logs by DID path, witness files and lists by name. */
+  public trustSession() {
     return {
-      getLog: (path) => this.trustText(`/v1/trust/did/${path}/did.jsonl`),
-      getWitness: (path) => this.trustText(`/v1/trust/did/${path}/did-witness.json`),
-      getList: (name) => this.trustText(`/v1/trust/status/${name}`),
-      putList: (name, text) => this.putTrustList(name, text),
+      getLog: (path: string) => this.trustText(`/v1/trust/did/${path}/did.jsonl`),
+      getWitness: (path: string) => this.trustText(`/v1/trust/did/${path}/did-witness.json`),
+      getList: (name: string) => this.trustText(`/v1/trust/status/${name}`),
+      putList: (name: string, text: string) => this.putTrustList(name, text),
+      postLog: (path: string, log: string) => this.postTrustLog(path, log),
     };
   }
 

@@ -27,3 +27,10 @@ export { syncSentence } from '../../src/domain/staff/liveSentences';
 export { UPDATE_SENTENCE } from '../../src/domain/replica/features';
 export { isRosterWriterAt } from '../../src/domain/replica/roster';
 export { cellOrderHook } from '../../src/staff/replica/membership';
+// 71-13: the person's verified credentials in a hosted session (extension/src/node/credentials/credential-cache.ts). The wallet, its hub-backed trust
+// source and the key ring's release check are bundled here, beside the key ring, so the facts the wallet makes are the ones mayRelease accepts.
+export { Wallet, WALLET_SECRET_KEY, walletStateAt, walletStateText } from '../../src/gate/wallet';
+export { HubTrustSource } from '../../src/gate/hubTrustSource';
+export { keyReleaseFor } from '../../src/staff/replica/keyRelease';
+export { verifyOrganizationLayer } from '../../src/domain/gate/enrolment';
+export { readCredential } from '../../src/domain/credentials/profile';

@@ -13,6 +13,7 @@ import { BackendApplicationContribution } from '@theia/core/lib/node/backend-app
 import { KeyStoreService } from '@theia/core/lib/common/key-store.js';
 import { WorkspaceServer } from '@theia/workspace/lib/common/workspace-protocol.js';
 import { SecretStoreService } from '../common/secret-store.js';
+import { CredentialCacheId, type CredentialCache } from './credentials/credential-cache.js';
 import { StaffStatusServer } from '../common/staff-live.js';
 import { KeyService } from './key-service.js';
 import type { KeyStore } from './key-stores.js';
@@ -77,7 +78,9 @@ async function createEngine(context: interfaces.Context, log: (line: string) => 
     log('staff: the encryption key was not opened, so shared projects do not open');
     return undefined;
   }
-  return new StaffLiveEngine({ ...common, hosted: { keys: keys.value, encryption: encryption.value } });
+  // Phase 71 (D-18): in a hosted session each epoch key reaches the engine only after the key release check on the person's fresh credentials.
+  const credentials = context.container.isBound(CredentialCacheId) ? context.container.get<CredentialCache>(CredentialCacheId) : undefined;
+  return new StaffLiveEngine({ ...common, hosted: { keys: keys.value, encryption: encryption.value }, ...(credentials === undefined ? {} : { keyRelease: credentials.keyRelease() }) });
 }
 
 @injectable()

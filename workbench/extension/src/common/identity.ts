@@ -15,10 +15,24 @@ export type DeviceClass = 'personal' | 'managed';
  * - ready: the person's DID exists. `published` says whether your organization's server has it yet; it is posted at the person's first
  *   session with that server (owner decision A, 2026-11-24).
  */
-export type IdentityStatus =
+export type IdentityStatus = (
   | { readonly state: 'not-configured' }
   | { readonly state: 'pending'; readonly message: string; readonly action: string }
-  | { readonly state: 'ready'; readonly did: string; readonly published: boolean };
+  | { readonly state: 'ready'; readonly did: string; readonly published: boolean }
+) & {
+  /** The session's credential check (71-13, D-18), present while your organization's rules carry credentials@1. */
+  readonly credentials?: CredentialCheckStatus;
+};
+
+/**
+ * The session's credential check (Phase 71, D-18): fresh; stale (past the time to live: protected actions are refused until Retry); unavailable (a
+ * needed log or list cannot be read: connect to your organization's server, then Retry). `action` is the button word when there is one.
+ */
+export interface CredentialCheckStatus {
+  readonly state: 'fresh' | 'stale' | 'unavailable';
+  readonly message: string;
+  readonly action?: string;
+}
 
 export interface BoundComputerFile {
   /** A file name ending in .near-vc, never confused with ~/.near-credentials (NEAR account keys). */
@@ -58,4 +72,7 @@ export const IDENTITY_TEXT = {
   lostFiled: 'Reported. Your organization\'s security officer revokes that computer\'s binding; until then it can still open what it holds offline.',
   lostAlready: 'That computer is already reported as lost.',
   notPublished: 'Your organization\'s server did not take your identity. It is sent again at your next session.',
+  checkStale: 'Your access needs a fresh check',
+  checkUnavailable: 'Your access cannot be checked',
+  checkAgain: 'Check My Access Again',
 } as const;

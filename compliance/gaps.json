@@ -6128,7 +6128,7 @@
       ],
       "id": "G426",
       "ownerRole": "maintainers",
-      "remediation": "Three limits of the sync hub as your organization's trust host (Phase 71, 71-09). First, an address for an identity log is first come, first served: a member could post a log for someone else's address before that person does, which blocks that person there until an administrator clears it; people's addresses end in a random id, so the address must be known in advance. Second, a hub that holds no copy of a status list takes the first copy at any version, so a hub started empty (not restored from its backup) could be given an old list by a member before an officer publishes the current one. Third, the hub checks cited evidence only on entries it can open (the project's base part); entries in other cells are checked by the people who read them. Close the first two by having the officer's backend publish each person's log and the current lists when the hub is set up (71-10, 71-12), and record the third in SECURITY.md (71-14).",
+      "remediation": "Three limits of the sync hub as your organization's trust host (Phase 71, 71-09). First, an address for an identity log is first come, first served: a member could post a log for someone else's address before that person does, which blocks that person there until an administrator clears it; people's addresses end in a random id, so the address must be known in advance. Second, a hub that holds no copy of a status list takes the first copy at any version, so a hub started empty (not restored from its backup) could be given an old list by a member before an officer publishes the current one. Third, the hub checks cited evidence only on entries it can open (the project's base part); entries in other cells are checked by the people who read them. Close the first two by having the officer's backend publish each person's log and the current lists when the hub is set up (71-10, 71-12). The third is a limit of the design, stated in SECURITY.md under \"Verified credentials and access decided by the data\" (71-14).",
       "title": "The sync hub's trust routes take first copies on trust and check evidence only where they can read"
     },
     {
@@ -6142,8 +6142,8 @@
       ],
       "id": "G427",
       "ownerRole": "maintainers",
-      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer takes its status list places from the person's own computer slots (D-25, at most 5), which needs your organization's status lists in the session (G465); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
-      "title": "People's identities are made but not yet published, and computers cannot be bound yet"
+      "remediation": "People's identities are made by their own backend at first sign-in (Phase 71, 71-10). Two of the three parts are now in service (71-13): each person's identity log is posted through that person's own hub session once a shared project is live (D-24, HubTransport.trustSession postLog), and binding a computer takes its status list places from the person's own computer slots once your organization's rules reach the session. What is left is the site: it does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; Phase 47's site values must render it. Then test the post, binding and the hub's copy of the log against the real server, and close this gap.",
+      "title": "People's identities are not made in a hosted session until the site sets their domain"
     },
     {
       "appliesAt": "now",
@@ -6386,7 +6386,7 @@
       ],
       "id": "G465",
       "ownerRole": "maintainers",
-      "remediation": "Issuing, revoking and suspending credentials from an officer's own session are built and tested against fakes (Phase 71, 71-12), but a hosted session cannot use them yet, for four reasons. First, the session has no copy of your organization's credential rules: the issuer service and the inbox pickup read them from the hosted trust source of 71-13, which is not on main, so issuing refuses with a plain sentence and inbox items wait. Second, status lists are read from and put on your organization's server only through the officer's hub session, which needs Phase 33's hosted session keys (33-21 to 33-23). Third, the site does not set STERLING_STATUS_LIST_KEY (status-list-<siteName>) or STERLING_OPENBAO_ISSUER_ROLE for the workbench yet, and no site file names its credentialIssuers; Phase 47's site values must render both and the key ceremony runbook must name the officers. Fourth, the person's backend moves checked credentials into their own wallet folder in OpenBao (kv/users/<entity>/credentials-wallet/), which the extension's Wallet does not read yet; 71-13 joins the two. Close each when its dependency lands, and test issuance end to end against a real OpenBao and hub then.",
+      "remediation": "Issuing, revoking and suspending credentials from an officer's own session are built and tested against fakes (Phase 71, 71-12), and the session now has what they read (71-13): your organization's rules, verified from the file STERLING_ORGANIZATION_POLICY names against STERLING_ORGANIZATION_POLICY_KEY; the officer's hub session through a live shared project; and the person's wallet folder in OpenBao joined to the extension's own Wallet, with the officer's role credentials travelling beside each credential. What is left is the site. Phase 47's site values must render STERLING_ORGANIZATION_POLICY (the signed rules file, mounted read-only) and STERLING_ORGANIZATION_POLICY_KEY, STERLING_STATUS_LIST_KEY (status-list-<siteName>) and STERLING_OPENBAO_ISSUER_ROLE for the workbench, and the key ceremony runbook must name the officers in the site file's credentialIssuers. Then test issuing, the inbox pickup and the session's credential check end to end against a real OpenBao and hub, and close this gap.",
       "title": "Credential issuance is built but not yet reachable in a hosted session"
     },
     {
@@ -6401,6 +6401,32 @@
       "ownerRole": "maintainers",
       "remediation": "Computer bindings are now checked by every verifier (D-26): a binding counts only when its status places are in the computer part of the lists and the person's own DID document lists it in one of at most five slots, and the HQ hub refuses a DID log whose computer uses another person's place. What is left is the limit on claiming computer places in OpenBao (kv/data/site/status-index/device-), which only keeps one person from using up the places others need: deploy/openbao/apply.mjs sets the rate limit quota computer-places (12 claims an hour per client address, then blocked for an hour, violations audited), and the alert ComputerPlaceClaimsLimited reads vault_quota_rate_limit_violation. That the quota matches the path prefix and counts each session pod's address separately comes from OpenBao's documentation and is not yet checked against a running OpenBao 2.7. Check it in the lab install (Phase 47): claim 13 places from one session, see the 13th refused, the counter rise and the alert fire; then close this gap.",
       "title": "The limit on computer place claims is not yet checked against a running OpenBao"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "71.1",
+      "controls": [
+        "ac-03",
+        "ia-05"
+      ],
+      "id": "G468",
+      "ownerRole": "maintainers",
+      "remediation": "In the hosted workbench the session checks the person's credentials and keeps them fresh from your organization's hub (Phase 71, 71-13). The VS Code extension has the same Wallet and the hub-backed trust source (src/gate/wallet.ts, src/gate/hubTrustSource.ts), but no production code builds them yet: the extension's gate host is never given a wallet, so under your organization's credential rules it gives no clearance at all (it fails closed, so nothing is released that should not be). Build the extension's wallet from SecretStorage near-ai.credentials with HubTrustSource over a live shared project's hub connection (LiveReplicator.trust), and the trust files imported where there is no hub; pass it to GateHost; run Wallet.keepFresh; and show the wallet's state where the gate's clearances are shown.",
+      "title": "The VS Code extension does not build its credential wallet yet"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "ac-03",
+        "ac-16"
+      ],
+      "id": "G469",
+      "ownerRole": "maintainers",
+      "remediation": "When your organization's credential rules hold back a part of a shared project in a hosted session (the key release check, Phase 71, 71-13), the backend adds the reason and its action to the project's status row (StaffStatusRow.access) and the status bar says when the session's credential check is stale or cannot be made, with Retry. The browser's sync status part, which would show the row's sentence beside the project, is still an empty slot (workbench/extension/src/browser/staff/status-part.ts, filled by plan 33-28). Show StaffStatusRow.access there with its Retry or connect action, and test it in the browser.",
+      "title": "A part of a shared project held back by credential rules is not yet named in the browser's sync status"
     },
     {
       "appliesAt": "protected-a",

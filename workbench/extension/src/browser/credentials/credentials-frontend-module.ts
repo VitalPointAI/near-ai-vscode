@@ -1,13 +1,14 @@
 import { ContainerModule, inject, injectable } from '@theia/core/shared/inversify';
-import { Command, CommandRegistry } from '@theia/core/lib/common/command.js';
+import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command.js';
 import { MessageService } from '@theia/core/lib/common/message-service.js';
 import { QuickInputService, type QuickPickItem } from '@theia/core/lib/common/quick-pick-service.js';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution.js';
+import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { bindFrontendService } from '../frontend-service.js';
 import { CARD_TEXT } from '../../common/issue-credential-card.js';
-import { IDENTITY_SERVICE_PATH, IDENTITY_TEXT, IdentityServiceRpc } from '../../common/identity.js';
+import { IDENTITY_SERVICE_PATH, IDENTITY_TEXT, IdentityServiceRpc, type CredentialCheckStatus } from '../../common/identity.js';
 import { ISSUER_SERVICE_PATH, IssuerServiceRpc } from '../../common/issuer-service.js';
 import { ISSUE_CREDENTIAL_WIDGET_ID, IssueCredentialWidget } from './issue-credential-widget.js';
 
@@ -18,6 +19,9 @@ import { ISSUE_CREDENTIAL_WIDGET_ID, IssueCredentialWidget } from './issue-crede
 const issueCredential: Command = { id: 'sterling.credentials.issue', label: CARD_TEXT.command, category: 'SovAI' };
 const reportLost: Command = { id: 'sterling.credentials.reportLostComputer', label: 'Report a Lost Computer', category: 'SovAI' };
 const INBOX_WAIT_MS = 15_000;
+const checkAgain: Command = { id: 'sterling.credentials.checkAgain', label: IDENTITY_TEXT.checkAgain, category: 'SovAI' };
+const CHECK_ENTRY = 'sterling-credential-check';
+const CHECK_POLL_MS = 60_000;
 
 @injectable()
 class IssueCredentialContribution extends AbstractViewContribution<IssueCredentialWidget> {
@@ -70,6 +74,53 @@ class InboxNews implements FrontendApplicationContribution {
   }
 }
 
+/**
+ * The session's credential check (71-13, D-18): nothing shows while it is fresh or while your organization has no credential rules; when it is stale
+ * or unavailable a status bar entry says so, its tooltip gives the backend's sentence, and choosing it checks again (Retry).
+ */
+@injectable()
+class CredentialCheckView implements FrontendApplicationContribution, CommandContribution {
+  @inject(IdentityServiceRpc) private readonly identity!: IdentityServiceRpc;
+  @inject(StatusBar) private readonly statusBar!: StatusBar;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  onStart(): void {
+    void this.refresh(() => this.identity.status());
+  }
+
+  onStop(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+  }
+
+  registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand(checkAgain, { execute: () => this.refresh(() => this.identity.retry()) });
+  }
+
+  private async refresh(read: () => Promise<{ readonly credentials?: CredentialCheckStatus }>): Promise<void> {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    try {
+      await this.show((await read()).credentials);
+    } catch {
+      // The backend did not answer; the next poll asks again.
+    }
+    this.timer = setTimeout(() => void this.refresh(() => this.identity.status()), CHECK_POLL_MS);
+  }
+
+  private async show(check: CredentialCheckStatus | undefined): Promise<void> {
+    if (check === undefined || check.state === 'fresh') {
+      await this.statusBar.removeElement(CHECK_ENTRY);
+      return;
+    }
+    await this.statusBar.setElement(CHECK_ENTRY, {
+      text: `$(warning) ${check.state === 'stale' ? IDENTITY_TEXT.checkStale : IDENTITY_TEXT.checkUnavailable}`,
+      tooltip: check.message,
+      alignment: StatusBarAlignment.LEFT,
+      priority: 99,
+      command: checkAgain.id,
+    });
+  }
+}
+
 export default new ContainerModule(bind => {
   bindFrontendService<IssuerServiceRpc>(bind, IssuerServiceRpc, ISSUER_SERVICE_PATH);
   bindFrontendService<IdentityServiceRpc>(bind, IdentityServiceRpc, IDENTITY_SERVICE_PATH);
@@ -78,4 +129,7 @@ export default new ContainerModule(bind => {
   bindViewContribution(bind, IssueCredentialContribution);
   bind(InboxNews).toSelf().inSingletonScope();
   bind(FrontendApplicationContribution).toService(InboxNews);
+  bind(CredentialCheckView).toSelf().inSingletonScope();
+  bind(FrontendApplicationContribution).toService(CredentialCheckView);
+  bind(CommandContribution).toService(CredentialCheckView);
 });

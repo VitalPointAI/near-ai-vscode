@@ -358,7 +358,9 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
           else refusedCount += 1;
           continue;
         }
-        await deps.kv.create(`users/${entity}/credentials-wallet/${checked.hash}`, { format: 'sterling-wallet-item/1', credential: item?.credential });
+        // The officer's role credentials came beside it; the session's wallet cites them when it checks the credential (71-13).
+        const roles = Array.isArray(item?.roles) ? item.roles.slice(0, 8) : [];
+        await deps.kv.create(`users/${entity}/credentials-wallet/${checked.hash}`, { format: 'sterling-wallet-item/1', credential: item?.credential, ...(roles.length === 0 ? {} : { roles }) });
         await deps.kv.remove(`${inboxFolder(entity)}/${name}`);
         labels.push(checked.label);
       }

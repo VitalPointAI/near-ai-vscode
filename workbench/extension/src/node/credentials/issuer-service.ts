@@ -436,7 +436,8 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
         const credential = await context.engine.issueCredential(signer, unsignedFor(context, request, revocation, suspension), 'eddsa-jcs-2022', { scales: context.policy.scales });
         const hash = context.engine.credentialHash(credential);
         const text = `${JSON.stringify(credential, null, 2)}\n`;
-        if (request.delivery === 'inbox' && subjectEntity !== undefined) await vault.create(inboxPath(subjectEntity, hash), { format: INBOX_FORMAT, credential });
+        // The role credentials the officer relies on travel beside it (71-13): every verifier of the credential needs them as cited evidence.
+        if (request.delivery === 'inbox' && subjectEntity !== undefined) await vault.create(inboxPath(subjectEntity, hash), { format: INBOX_FORMAT, credential, roles: typeRoles(context, request.type) });
         // The register: what was issued, to whom, by whom and where its status is; a person with no directory entry is registered under their DID's path.
         const registerKey = subjectEntity ?? `did-${didHostPath(request.subject).replaceAll('/', '-')}`;
         await vault.create(issuedPath(registerKey, hash), {
@@ -536,14 +537,19 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
     });
   }
 
+  /** The officer's current, clear role credentials your organization's rules name for issuing `type` (signed, as held). */
+  function typeRoles(context: Context, type: string): unknown[] {
+    const rule = Object.prototype.hasOwnProperty.call(context.policy.section.issuance, type) ? context.policy.section.issuance[type] : undefined;
+    if (rule === undefined) return [];
+    const at = now();
+    return context.roles.filter((role) => role.statusClear && role.read.type === rule.role
+      && (rule.role !== 'IssuerRoleCredential' || role.read.claims.credentialType === type)
+      && Date.parse(role.read.validFrom) <= at && at < Date.parse(role.read.validUntil)).map((role) => role.credential);
+  }
+
   /** Whether the officer holds a current, clear role credential your organization's rules name for issuing `type`. */
   function hasTypeRole(context: Context, type: string): boolean {
-    const rule = Object.prototype.hasOwnProperty.call(context.policy.section.issuance, type) ? context.policy.section.issuance[type] : undefined;
-    if (rule === undefined) return false;
-    const at = now();
-    return context.roles.some((role) => role.statusClear && role.read.type === rule.role
-      && (rule.role !== 'IssuerRoleCredential' || role.read.claims.credentialType === type)
-      && Date.parse(role.read.validFrom) <= at && at < Date.parse(role.read.validUntil));
+    return typeRoles(context, type).length > 0;
   }
 
   interface OpenRequest { readonly id: string; readonly entityName: string; readonly reason: string; readonly seenAt: string; readonly slot?: number }

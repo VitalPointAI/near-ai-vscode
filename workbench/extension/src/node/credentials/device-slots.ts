@@ -19,6 +19,7 @@ import { randomInt } from 'node:crypto';
 import { IDENTITY_TEXT, type BoundComputer } from '../../common/identity.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { IdentityKv, StatusAllocator, StatusSlot } from './identity-service.js';
+import { tokenClaimsOf } from './token-facts.js';
 
 /** The most computers a person has bound at once (owner, 2026-11-25). */
 export const MAX_COMPUTERS = 5;
@@ -118,14 +119,7 @@ export async function listComputers(deps: Pick<DeviceSlotDeps, 'kv' | 'entityId'
 
 /** The sub of a forwarded sign-in token (read only to name the person's own entity; OpenBao checks the name against the token). */
 export function subjectOf(jwt: string | undefined): string | undefined {
-  const payload = jwt?.split('.')[1];
-  if (payload === undefined || !/^[A-Za-z0-9_-]+$/.test(payload)) return undefined;
-  try {
-    const sub = (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub?: unknown }).sub;
-    return typeof sub === 'string' ? sub : undefined;
-  } catch {
-    return undefined;
-  }
+  return tokenClaimsOf(jwt)?.sub;
 }
 
 export interface LostComputerDeps extends Pick<DeviceSlotDeps, 'kv' | 'entityId' | 'now'> {

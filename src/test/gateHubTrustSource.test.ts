@@ -12,6 +12,11 @@ import { didHostPath } from '../domain/credentials/trustExport';
 import { REVOCATIONS, SUSPENSIONS, issue, list, makeWorld } from './helpers/credentialWorld';
 import type { Issued, SignedList, World } from './helpers/credentialWorld';
 import { MemorySecrets } from './helpers/teamHarness';
+import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'node:crypto';
+import { certPinOf } from '../domain/replica/hubFile';
+import { fingerprintOf } from '../domain/team/canonical';
+import { HubTransport } from '../staff/replica/hubTransport';
+import { FIXTURE_CERT, FakeHubServer } from './helpers/fakeHubServer';
 
 const NOW = Date.UTC(2026, 10, 21);
 const TTL_MS = 900 * 1000;
@@ -191,4 +196,50 @@ test('refresh is one at a time: calls while a fetch is in flight share it', asyn
   const two = s.source.refresh(dids(s));
   assert.equal(one, two, 'the same refresh is answered');
   assert.equal(s.hub.calls, 1, 'one fetch is in flight, not two');
+});
+
+// The fetch HubTrustSource uses in production: HubTransport's trust routes, over the one pinned connection and its session (no second HTTP client).
+test('HubTransport.trustSession reads logs and lists as text over the pinned connection and its session, 404 is nothing, and only trust routes are asked', async () => {
+  const sha = (text: string): Buffer => createHash('sha256').update(text, 'utf8').digest();
+  const privateKey = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), sha('trust-source/device')]), format: 'der', type: 'pkcs8' });
+  const raw = Buffer.from(createPublicKey(privateKey).export({ format: 'jwk' }).x as string, 'base64url');
+  const signer = { fingerprint: fingerprintOf(raw), publicKey: raw.toString('base64url'), sign: (bytes: Buffer): string => edSign(null, bytes, privateKey).toString('base64url') };
+  const project = sha('trust-source/project').toString('hex').slice(0, 32);
+  const hub = createHash('sha256').update(sha('trust-source/hub')).digest('hex');
+  const s = await setup();
+  const listText = s.hub.lists.get('revocation-1') as string;
+  const logText = s.w.officer.log;
+  const officerPath = didHostPath(s.w.officer.did) as string;
+  const posted: string[] = [];
+  const fake = await FakeHubServer.start({
+    project, hub,
+    handle: (req) => {
+      if (req.method === 'GET' && req.path === '/v1/trust/status/revocation-1') return { bytes: Buffer.from(listText), headers: { 'content-type': 'application/json' } };
+      if (req.method === 'GET' && req.path === `/v1/trust/did/${officerPath}/did.jsonl`) return { bytes: Buffer.from(logText), headers: { 'content-type': 'text/jsonl' } };
+      if (req.method === 'POST' && req.path === `/v1/trust/did/${officerPath}/did.jsonl`) { posted.push(req.body.toString('utf8')); return { status: 201, json: { stored: true } }; }
+      return { status: 404, json: { error: 'not-found' } };
+    }
+  });
+  const transport = new HubTransport({ address: fake.address, project, hub, trust: { pin: certPinOf(FIXTURE_CERT) }, signer, servername: 'localhost', now: () => new Date(NOW) });
+  try {
+    const session = transport.trustSession();
+    assert.equal(await session.getList('revocation-1'), listText);
+    assert.equal(await session.getLog(officerPath), logText);
+    assert.equal(await session.getList('suspension-1'), undefined, 'a 404 is nothing held');
+    assert.deepEqual(await session.postLog(officerPath, logText), { status: 201 });
+    assert.deepEqual(posted, [logText]);
+    await assert.rejects(() => transport.trustText('/v1/projects/x/heads'), /trust routes/);
+    await assert.rejects(() => session.getLog('../escape'), /trust routes/);
+    assert.equal(fake.connections, 1, 'every call went over the one pinned connection');
+    assert.ok(fake.calls().every((call) => call.tokenOf === call.connection), 'every call carried the session token of its own connection');
+
+    // The trust source on top of it verifies what the transport fetched.
+    const source = new HubTrustSource({ policy: () => s.w.policy, hub: () => session, now: () => NOW });
+    assert.equal(await source.refresh([s.w.officer.did]), 'unavailable', 'the suspension list is not on this hub, so no copy covers the need');
+    assert.ok(source.list(REVOCATIONS) !== undefined);
+    assert.ok(source.didState(s.w.officer.did) !== undefined);
+  } finally {
+    transport.close();
+    await fake.close();
+  }
 });
