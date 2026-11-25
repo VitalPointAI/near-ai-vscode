@@ -1008,6 +1008,36 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [x] **FND-T-09**: CI builds the workbench image on a digest-pinned UBI 9 base, writes a CycloneDX SBOM, scans it, and signs it with your organization's key on `main` (no keyless signing). (P10, image build)
 - [x] **FND-T-10**: Every resource the phase adds has a passing entry in `compliance/resources.json` and the fit check covers the workbench manifests; the copy lint accepts the Sterling edition names and scans the workbench's user strings. (D9; DESIGN section 15)
 
+## Phase 48.2 requirements: Live compliance evidence in the workbench
+
+**Defined:** 2026-11-25 from the owner's direction ("yes, plan that as long as the compliance evidence is always a real-time understanding of the product's compliance status"). Decisions and the real-time meaning per source: `.planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md`.
+**Core value:** The Compliance view always shows a real-time, verified understanding of the product's compliance status: the release's own evidence from the image, your site's evidence live on top, and nothing unverified shown as passing.
+**Status:** planned, 17 plans in 10 waves (revised 2026-11-25 after the plan check).
+
+- [ ] **LCE-01**: Every release image carries its own product evidence read-only at `/opt/sterling/evidence` (SBOM, vulnerability scan with its database build date, the evidence bundle with the engine inputs, the OSCAL package, the gap register and road-to-production) under a manifest the release key signs; its as-of time is the release build. [CM-8, SA-11, SR-4]
+- [ ] **LCE-02**: States and freshness are re-judged by the one status engine against the current time at start, every 60 seconds and on every change; each cell shows source, as-of time, freshness (Current, Ageing, Out of date) and verification. [CA-7]
+- [ ] **LCE-03**: A freshness policy gives each evidence kind an ageing and an out-of-date threshold; your organization can only tighten the release defaults; vulnerability evidence ages from its database build date; a clock earlier than the release build or future-dated evidence never reads current. [RA-5, RA-5(2), CA-7, AU-8]
+- [ ] **LCE-04**: Release and site evidence are verified (manifest hashes, signatures, purposes, times) against trust anchors from your organization's configuration before display; what does not verify is not shown; what cannot be verified is Not verified and never passing; no evidence is trusted for where it is found. [SI-7, SI-7(1), SR-4]
+- [ ] **LCE-05**: A scheduled site collector gathers in-cluster facts with their own collection times, signs them with a key your site key vouches for, and every session sees them within the interval plus about two minutes through a read-only mount, re-judged in place and never cached as if current. [CA-7, SI-4, AU-5, AU-6, CM-2]
+- [ ] **LCE-06**: The operator publishes the signed site evidence export, the offline rescan summary and the exchange agreements as signed site files; each shows with its own time; a site rescan with a newer signed database replaces the release scan. [CA-7, CA-3, RA-5, RA-5(2)]
+- [ ] **LCE-07**: The Compliance view layers release evidence then site evidence; "Authorization is your organization's decision" stays; in Restricted Mode and with no site evidence it shows the release evidence clearly labelled; original theme with lifted cards, codicons and Theia variables only. [CA-7]
+- [ ] **LCE-08**: `compliance:refresh` writes the public projection readable by the workbench user (files 0644, folders 0755) under any umask, with a test; the README's read-only mount works.
+- [ ] **LCE-09**: Air-gapped and disconnected edges work with local sources only (the image, the site collector, operator files, the signed database media); nothing fetches outside. [CA-7, SC-7]
+- [ ] **LCE-10**: Statements, evidence rules and documents for the controls this phase implements, gap rows G475 to G479, and the real-time definitions in the continuous monitoring strategy. [CA-7, CM-8, RA-5, SI-4, SA-11]
+
+| Requirement | Plans |
+|-------------|-------|
+| LCE-01 | 48.2-01, 48.2-05, 48.2-07 |
+| LCE-02 | 48.2-01, 48.2-03, 48.2-08, 48.2-10 |
+| LCE-03 | 48.2-03, 48.2-05, 48.2-14 |
+| LCE-04 | 48.2-01, 48.2-04, 48.2-06, 48.2-07, 48.2-12, 48.2-13, 48.2-16, 48.2-17 |
+| LCE-05 | 48.2-06, 48.2-08, 48.2-09, 48.2-11, 48.2-12, 48.2-17 |
+| LCE-06 | 48.2-06, 48.2-13, 48.2-14 |
+| LCE-07 | 48.2-10, 48.2-15, 48.2-16 |
+| LCE-08 | 48.2-02 |
+| LCE-09 | 48.2-04, 48.2-08, 48.2-09, 48.2-11 |
+| LCE-10 | 48.2-02, 48.2-15 |
+
 ## Phase 74.1 requirements: Model passports, use tiers and Western defaults (0.4.x)
 
 **Defined:** 2026-11-24 from `.planning/research/model-provenance/DESIGN.md` (sections 5 to 10 and 14; owner decisions 1 to 5 and O1 to O5) and the ROADMAP's success criteria, added when Phase 74.1 was planned. Phase 41 delivered the schema half (FND-08); these requirements are the enforcement, the research workspace, the defaults and the surfaces.
