@@ -29,8 +29,7 @@ import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { AsyncPayloadSigner, PayloadSigner } from '../../domain/team/signedPayload';
 import { isPersonKeyKind } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrant, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
-import { grantHash, readGrant } from '../../domain/replica/cellKeys';
+import { buildGrant, grantHash, newEpochKey, openLabel, readGrant, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, buildEntryAsync, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
@@ -59,7 +58,6 @@ import { foldCheckpoints, trustedCheckpointsOf } from './foldCheckpoints';
 import type { SyncLocal } from './hubSync';
 import { UPDATE_SENTENCE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from './requireGate';
 import { WRAP_V2_FEATURE } from '../../domain/replica/features';
-
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
 export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
@@ -149,6 +147,8 @@ export interface ReplicaProjectDeps {
   /** A hosted session (Phase 33 D-61): the person key is this device (its writer), the opened X25519 key decrypts grants, and the session key signs the
    *  store's marks and owns its files. No device key is made or read; needs sessionSigner, personSigner and keyStatus. */
   hosted?: { personPublicKey: string; encryption: DeviceEncryptionKey };
+  /** Phase 71 (D-18, D-19): the key release check the key ring asks before it hands out an epoch key; absent, every settled key is released. */
+  keyRelease?: import('./keyRelease').KeyReleaseCheck;
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -285,7 +285,7 @@ export class ReplicaProject {
     const device = await deviceKeys(deps);
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
-    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey }, deps.keyRelease);
     const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
     // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
     if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
@@ -320,7 +320,7 @@ export class ReplicaProject {
       const pin = await readAnchorFile(genesisPinFile(deps.globalStorageDir, entry.header.stream));
       if (pin.kind !== 'anchor' || pin.anchor.genesisHash !== entryHash(entry.header) || pin.anchor.lead.writer !== device.writer) continue;
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
-      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+      const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey }, deps.keyRelease);
       const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
       const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) });
       return isProjectRefused(rearmed) ? rearmed : reused;
@@ -348,7 +348,7 @@ export class ReplicaProject {
     });
     const anchor: RosterAnchor = { genesisHash: genesis.hash, project, lead: { member: input.lead.member, writer: device.writer, publicKey: device.identity.publicKey, x25519: device.encryption.publicKey } };
 
-    const ring = await DeviceKeyRing.load(deps.secrets, project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, project, { writer: device.writer, privateKey: device.encryption.privateKey }, deps.keyRelease);
     await ring.addOwn(project, 1, baseKey, grantHash(founding));
     if (!(await writeAnchorFile(genesisPinFile(deps.globalStorageDir, project), anchor))) return refuse('pin-damaged');
     const grant = await store.putGrant(project, 1, founding);
@@ -421,7 +421,7 @@ export class ReplicaProject {
     if (local.kind === 'damaged') return refuse('pin-damaged');
     if (local.kind === 'anchor' && !sameAnchor(local.anchor, pinned)) return refuse('pin-mismatch');
     // Every check has passed; from here on the join writes.
-    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey });
+    const ring = await DeviceKeyRing.load(deps.secrets, pinned.project, { writer: device.writer, privateKey: device.encryption.privateKey }, deps.keyRelease);
     if (pin.kind === 'missing' && !(await writeAnchorFile(pinFile, pinned))) return refuse('pin-mismatch');
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);

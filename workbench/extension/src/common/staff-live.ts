@@ -17,6 +17,11 @@ export interface StaffStatusRow {
   readonly state: string;
   readonly sentence: string;
   readonly lastSyncedAt?: number;
+  /**
+   * Present when your organization's credential rules hold back a part of this project (Phase 71, D-18): the sentence a person reads and, where
+   * they can act, the action (retry: Retry; connect: connect to your organization's server, then Retry).
+   */
+  readonly access?: { readonly sentence: string; readonly action?: 'retry' | 'connect' };
 }
 
 /** A join request reaching a lead or deputy: the invitation's name and the code to compare with the person, as the hub carried it. */

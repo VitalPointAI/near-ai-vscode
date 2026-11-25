@@ -73,6 +73,20 @@ export interface EngineProject {
   state(): Promise<{ readonly roster: EngineRoster; readonly fold: unknown }>;
   appendOwn(kind: string, data: unknown, options?: object): Promise<{ readonly ok: true; readonly hash: string; readonly built: { readonly entry: unknown } } | EngineRefused>;
   close(): Promise<void>;
+  /** The project's key ring (src/staff/replica/keyring.ts), as far as the key release check of 71-13 uses it. */
+  readonly keys?: {
+    recheck(): Promise<number>;
+    withheldCells(): ReadonlyMap<string, { readonly ok: false; readonly sentence: string; readonly action?: 'retry' | 'connect' } | { readonly ok: true }>;
+  };
+}
+
+/** Your organization's trust routes through a live project's one hub connection (HubTransport.trustSession, 71-13). */
+export interface EngineTrustSession {
+  getLog(path: string): Promise<string | undefined>;
+  getWitness(path: string): Promise<string | undefined>;
+  getList(name: string): Promise<string | undefined>;
+  putList(name: string, text: string): Promise<{ readonly status: number }>;
+  postLog(path: string, log: string): Promise<{ readonly status: number }>;
 }
 
 /** The replicator's status (src/staff/replica/liveReplicator.ts LiveStatus). */
@@ -95,6 +109,8 @@ export interface EngineReplicator {
   stop(): Promise<void>;
   syncNow(): void;
   localAppended(): void;
+  /** The trust routes through this replicator's transport while live (71-13); undefined otherwise. */
+  trust?(): EngineTrustSession | undefined;
 }
 
 /** One hub as the roster has it (src/staff/replica/hubMembership.ts HubStanding). */

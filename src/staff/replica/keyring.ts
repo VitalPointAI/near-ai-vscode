@@ -25,7 +25,7 @@ import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { IDENTITY_CREATE_LOCK_FILE } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
-import { EPOCH_KEY_BYTES, readGrant, unwrapEpochKey, x25519BindingBytes, x25519PublicRaw } from '../../domain/replica/cellKeys';
+import { EPOCH_KEY_BYTES, openLabel, readGrant, unwrapEpochKey, x25519BindingBytes, x25519PublicRaw } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
 import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from '../../domain/replica/entry';
 import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
@@ -34,6 +34,8 @@ import type { KeyRing } from '../../domain/replica/rosterView';
 import { isRecord } from '../../domain/team/validate';
 import { MLKEM_SEED_BYTES, P256_SCALAR_BYTES, kemPrivateFromSeeds, kemPublicFromSeeds, newKemSeeds } from '../../domain/replica/cellWrapV2';
 import type { KemPrivateKeys, KemPublicKeys, KemSeeds } from '../../domain/replica/cellWrapV2';
+import { ReleaseMemory, UNREADABLE_LABEL, forgetInMemory } from './keyRelease';
+import type { KeyReleaseCheck, ReleaseDecision } from './keyRelease';
 
 /** The SecretStorage name of this install's X25519 private key, beside nearAi.identity.deviceKey (D-19). */
 export const ENCRYPTION_KEY_SECRET = 'nearAi.identity.encryptionKey';
@@ -191,6 +193,20 @@ function cachedRing(text: string | undefined): CachedRing {
   return ring;
 }
 
+/**
+ * The label sealed for a cell's epoch, opened with that epoch's key (Phase 71, D-18): undefined when none of its grants carries a label (an unmarked
+ * cell, such as the base cell), UNREADABLE_LABEL when one does and none opens under this key. A label opens only under the key it was sealed with.
+ */
+function labelOfEpoch(cell: string, epoch: number, key: Buffer, grants: readonly CellGrant[]): unknown {
+  const sealed = grants.filter((grant) => grant.cell === cell && grant.epoch === epoch && grant.labelSealed !== '');
+  if (sealed.length === 0) return undefined;
+  for (const grant of sealed) {
+    const opened = openLabel(key, cell, epoch, grant.labelSealed);
+    if (opened !== undefined) return opened;
+  }
+  return UNREADABLE_LABEL;
+}
+
 /** The cell id a signed grant names, read without checking anything else, so a grant for another cell is skipped before its signature is checked. */
 function grantCell(signed: unknown): string | undefined {
   if (!isRecord(signed) || !isRecord(signed.payload)) return undefined;
@@ -206,23 +222,37 @@ function grantCell(signed: unknown): string | undefined {
  * the roster fold placed (its signer could change the roster at the roster it names and every device it wraps to was admitted there, or it is the
  * founding grant the roster committed to by hash), or from a key this device made for the founding grant the roster committed to. A grant from
  * anyone else, or for an epoch the roster has not founded, never decides which key this device writes with.
+ *
+ * With a KeyReleaseCheck (Phase 71, D-18, D-19: your organization's credentials@1 in force), a key is also handed out only while the cell's own label
+ * allows it for the person's fresh credentials: settle, every read (epochKey) and the reading path open the label in memory and ask the check, and on
+ * refusal the key is dropped from memory and the cell keeps the refusal (withheldCells). A cached key is handed out only once settle has opened its
+ * label. Without a check nothing here changes.
  */
 export class DeviceKeyRing {
   private readonly keys: Map<string, Buffer>;
   private readonly own: Map<string, OwnEpochKey>;
   // What this device's wrap in a grant opens to, by grant hash, so each grant is unwrapped once. Memory only; null when nothing opens.
   private readonly unwrapped = new Map<string, Buffer | null>();
+  // The ring id each opened grant is for, so a dropped key leaves no opened copy behind.
+  private readonly unwrappedFor = new Map<string, string>();
+  // With a release check: the label opened for each released epoch, why a cell's key is withheld, and the epochs dropped. Memory only.
+  private readonly release = new ReleaseMemory();
+  private lastCells: CellsState | undefined;
   private changes = 0;
 
-  private constructor(private readonly secrets: SecretStorageLike, public readonly project: string, private readonly device: KeyRingDevice, cached: CachedRing) {
+  private constructor(private readonly secrets: SecretStorageLike, public readonly project: string, private readonly device: KeyRingDevice, cached: CachedRing,
+    private readonly check?: KeyReleaseCheck) {
     this.keys = cached.keys;
     this.own = cached.own;
   }
 
-  /** The ring of a project for a device, starting from the SecretStorage cache (or empty when there is none or it does not read). */
-  public static async load(secrets: SecretStorageLike, project: string, device: KeyRingDevice): Promise<DeviceKeyRing> {
+  /**
+   * The ring of a project for a device, starting from the SecretStorage cache (or empty when there is none or it does not read). `check` is the key
+   * release check (keyRelease.ts); without one every settled key is released, as before.
+   */
+  public static async load(secrets: SecretStorageLike, project: string, device: KeyRingDevice, check?: KeyReleaseCheck): Promise<DeviceKeyRing> {
     if (!STREAM_ID_PATTERN.test(project)) throw new Error('A project id is 32 lowercase hex characters.');
-    return new DeviceKeyRing(secrets, project, device, cachedRing(await secrets.get(EPOCH_KEY_SECRET_PREFIX + project)));
+    return new DeviceKeyRing(secrets, project, device, cachedRing(await secrets.get(EPOCH_KEY_SECRET_PREFIX + project)), check);
   }
 
   /** Counts every time the ring changed, so a host can tell that the ring answers differently than it did (and replace its fold context). */
@@ -242,12 +272,27 @@ export class DeviceKeyRing {
    * its committed grant carries. Returns how many keys were added or replaced; a change is written through to SecretStorage.
    */
   public async settle(cells: CellsState): Promise<number> {
+    this.lastCells = cells;
     let changed = 0;
     for (const record of cells.cells.values()) {
       for (const founded of record.epochs) {
         const key = this.settledKey(record, founded);
         if (key === undefined) continue;
         const id = ringId(record.cell, founded.epoch);
+        if (this.check !== undefined) {
+          const label = labelOfEpoch(record.cell, founded.epoch, key, record.grants.map((grant) => grant.grant));
+          const decision = this.check(record.cell, label);
+          if (!decision.ok) {
+            if (this.drop(id, record.cell, decision)) changed += 1;
+            continue;
+          }
+          const first = this.release.released(id, record.cell, label);
+          // A cached key that now has its label is released: count it, so the host folds again with it.
+          if (first && this.keys.get(id)?.equals(key) === true) {
+            changed += 1;
+            continue;
+          }
+        }
         const held = this.keys.get(id);
         if (held !== undefined && held.equals(key)) continue;
         this.keys.set(id, key);
@@ -289,27 +334,64 @@ export class DeviceKeyRing {
    */
   public readingCandidates(cell: string, grants: readonly unknown[]): ReadingCandidate[] {
     const out: ReadingCandidate[] = [];
-    const own = [...this.own.values()].filter((item) => item.cell === cell && !this.keys.has(ringId(cell, item.epoch))).sort((a, b) => byText(a.grant, b.grant));
-    for (const item of own) out.push({ epoch: item.epoch, key: Buffer.from(item.key), own: true, grant: item.grant });
+    const read: Array<{ grant: CellGrant; hash: string }> = [];
     for (const signed of grants) {
       if (grantCell(signed) !== cell) continue;
-      const read = readGrant(signed);
-      if (!read.ok || this.keys.has(ringId(cell, read.grant.epoch))) continue;
-      const key = this.open(read.grant, read.hash);
-      if (key !== undefined) out.push({ epoch: read.grant.epoch, key, own: false, grant: read.hash });
+      const item = readGrant(signed);
+      if (item.ok) read.push({ grant: item.grant, hash: item.hash });
+    }
+    // With a release check, a reading key too is offered only when the cell's label, opened with it, allows it now (D-18).
+    const released = (epoch: number, key: Buffer): boolean => this.check === undefined || this.check(cell, labelOfEpoch(cell, epoch, key, read.map((item) => item.grant))).ok;
+    const own = [...this.own.values()].filter((item) => item.cell === cell && !this.isReleased(ringId(cell, item.epoch))).sort((a, b) => byText(a.grant, b.grant));
+    for (const item of own) if (released(item.epoch, item.key)) out.push({ epoch: item.epoch, key: Buffer.from(item.key), own: true, grant: item.grant });
+    for (const item of read) {
+      if (this.isReleased(ringId(cell, item.grant.epoch))) continue;
+      const key = this.open(item.grant, item.hash);
+      if (key !== undefined && released(item.grant.epoch, key)) out.push({ epoch: item.grant.epoch, key, own: false, grant: item.hash });
     }
     return out;
   }
 
-  /** The epoch key of a cell, as a copy, or undefined when the roster has not settled one for this device. */
+  /**
+   * The epoch key of a cell, as a copy, or undefined when the roster has not settled one for this device. With a release check, the check is asked at
+   * every read: a key whose cell the person's credentials no longer allow (or whose session ended) is dropped here and not handed out.
+   */
   public epochKey(cell: string, epoch: number): Buffer | undefined {
-    const key = this.keys.get(ringId(cell, epoch));
-    return key === undefined ? undefined : Buffer.from(key);
+    const id = ringId(cell, epoch);
+    const key = this.keys.get(id);
+    if (key === undefined) return undefined;
+    if (this.check !== undefined) {
+      if (!this.release.hasLabel(id)) return undefined;
+      const decision = this.check(cell, this.release.label(id));
+      if (!decision.ok) {
+        if (this.drop(id, cell, decision)) this.changes += 1;
+        return undefined;
+      }
+    }
+    return Buffer.from(key);
+  }
+
+  /** Asks the release check again for every epoch of the last roster settled (after the person's credentials were refreshed); how many keys changed. */
+  public recheck(): Promise<number> {
+    return this.lastCells === undefined ? Promise.resolve(0) : this.settle(this.lastCells);
+  }
+
+  /** The cells whose key is withheld now, each with the refusal to show on it (always empty without a release check). */
+  public withheldCells(): ReadonlyMap<string, ReleaseDecision> {
+    return this.release.withheldCells();
   }
 
   /** Whether the roster has settled a key of the cell's epoch for this device. */
   public holds(cell: string, epoch: number): boolean {
-    return this.keys.has(ringId(cell, epoch));
+    return this.isReleased(ringId(cell, epoch));
+  }
+
+  /**
+   * Whether the ring answers for this epoch. With a release check, a key loaded from the cache counts only once settle has opened its label, so the
+   * host reads the roster with reading keys (themselves checked) until then, exactly as a device that holds no cache does.
+   */
+  private isReleased(id: string): boolean {
+    return this.keys.has(id) && (this.check === undefined || this.release.hasLabel(id));
   }
 
   /** The KeyRing the fold reads. It answers from the live ring, so a key settled later is answered by the same function. */
@@ -330,6 +412,17 @@ export class DeviceKeyRing {
     return undefined;
   }
 
+  /** Drops a withheld epoch's key from memory, with every opened copy of it, and keeps the refusal for the cell. True when a held key was dropped. */
+  private drop(id: string, cell: string, decision: ReleaseDecision): boolean {
+    this.release.refused(id, cell, decision);
+    for (const [hash, opened] of [...this.unwrappedFor]) {
+      if (opened !== id) continue;
+      forgetInMemory(this.unwrapped, hash);
+      forgetInMemory(this.unwrappedFor, hash);
+    }
+    return forgetInMemory(this.keys, id) !== undefined;
+  }
+
   /** What this device's wrap in a grant opens to, or undefined. */
   private open(grant: CellGrant, hash: string): Buffer | undefined {
     let key = this.unwrapped.get(hash);
@@ -337,6 +430,7 @@ export class DeviceKeyRing {
       const mine = grant.wraps.find((wrap) => wrap.writer === this.device.writer);
       key = (mine === undefined ? undefined : unwrapEpochKey({ cell: grant.cell, epoch: grant.epoch, writer: this.device.writer, privateKey: this.device.privateKey, wrap: mine.wrap })) ?? null;
       this.unwrapped.set(hash, key);
+      this.unwrappedFor.set(hash, ringId(grant.cell, grant.epoch));
     }
     return key === null ? undefined : Buffer.from(key);
   }
@@ -345,7 +439,8 @@ export class DeviceKeyRing {
   private async persist(): Promise<void> {
     const name = EPOCH_KEY_SECRET_PREFIX + this.project;
     const stored = cachedRing(await this.secrets.get(name));
-    for (const [id, key] of stored.keys) if (!this.keys.has(id)) this.keys.set(id, key);
+    // A key the release check dropped is not merged back from another window's copy; it comes back from the grants once it is released again.
+    for (const [id, key] of stored.keys) if (!this.keys.has(id) && !this.release.wasDropped(id)) this.keys.set(id, key);
     for (const [grant, item] of stored.own) if (!this.own.has(grant)) this.own.set(grant, item);
     const keys = [...this.keys].sort(([a], [b]) => byText(a, b)).map(([id, key]) => {
       const [cell, epoch] = id.split('/');

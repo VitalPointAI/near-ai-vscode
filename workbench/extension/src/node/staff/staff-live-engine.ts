@@ -21,7 +21,7 @@
 import type { SessionKeys } from './session-keys.js';
 import type { OpenedEncryptionKey } from './encryption-key.js';
 import type { SecretStorageLike } from './keystore-secrets.js';
-import type { EngineHubStanding, EngineLiveStatus, EngineProject, EngineReplicator, StaffEngine } from './staff-engine.js';
+import type { EngineHubStanding, EngineLiveStatus, EngineProject, EngineReplicator, EngineTrustSession, StaffEngine } from './staff-engine.js';
 import type { StaffJoinRequest, StaffStatusRow } from '../../common/staff-live.js';
 import { publishPersonKem } from './person-kem.js';
 
@@ -41,6 +41,11 @@ export interface StaffLiveEngineOptions {
   readonly secrets: SecretStorageLike;
   /** Present in a hosted session; absent on a single machine, where the device key path runs unchanged. */
   readonly hosted?: HostedSessionKeys;
+  /**
+   * Phase 71 (D-18, D-19): the key release check from the person's verified credentials, while your organization's credentials@1 is in force. Each
+   * project's key ring asks it before it hands out an epoch key; when the credentials change, every ring asks again and the projects sync.
+   */
+  readonly keyRelease?: { readonly check: (cell: string, label: unknown) => unknown; onDidChange(listener: () => void): { dispose(): void } };
   /** Replicator options the tests set: the transport, the timers and the clock. */
   readonly replicator?: Readonly<Record<string, unknown>>;
   readonly now?: () => Date;
@@ -71,8 +76,11 @@ export class StaffLiveEngine {
   private readonly joinListeners = new Set<JoinListener>();
   private started = false;
   private stopped = false;
+  private readonly releaseSubscription: { dispose(): void } | undefined;
 
-  constructor(private readonly options: StaffLiveEngineOptions) {}
+  constructor(private readonly options: StaffLiveEngineOptions) {
+    this.releaseSubscription = options.keyRelease?.onDidChange(() => { void this.recheckKeys(); });
+  }
 
   /** Opens every shared project in the workspace roots and starts its replicator. Once. */
   public async start(): Promise<void> {
@@ -88,6 +96,7 @@ export class StaffLiveEngine {
   public async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    this.releaseSubscription?.dispose();
     for (const live of this.open.values()) {
       for (const subscription of live.subscriptions) subscription.dispose();
       await live.replicator?.stop();
@@ -121,6 +130,25 @@ export class StaffLiveEngine {
     return live?.row;
   }
 
+  /** Your organization's trust routes through the first live project's hub connection (71-13): logs and lists; undefined while none is live. */
+  public trustSession(): EngineTrustSession | undefined {
+    for (const live of this.open.values()) {
+      const session = live.replicator?.trust?.();
+      if (session !== undefined) return session;
+    }
+    return undefined;
+  }
+
+  /** After the person's credentials changed: every key ring asks the release check again, and a project whose keys changed syncs now. */
+  public async recheckKeys(): Promise<void> {
+    for (const live of [...this.open.values()]) {
+      if (this.stopped) return;
+      const changed = await live.project.keys?.recheck().catch(() => 0) ?? 0;
+      if (changed > 0) live.replicator?.syncNow();
+      this.publishRow(live, live.row);
+    }
+  }
+
   public onStatus(listener: RowListener): { dispose(): void } {
     this.rowListeners.add(listener);
     return { dispose: () => { this.rowListeners.delete(listener); } };
@@ -141,7 +169,8 @@ export class StaffLiveEngine {
 
   private depsFor(): object {
     const { hosted, secrets, globalStorageDir, now, engine } = this.options;
-    const base = { secrets, globalStorageDir, cellOrder: engine.cellOrderHook(now === undefined ? {} : { now }), ...(now === undefined ? {} : { now }) };
+    const keyRelease = this.options.keyRelease === undefined ? {} : { keyRelease: this.options.keyRelease.check };
+    const base = { secrets, globalStorageDir, cellOrder: engine.cellOrderHook(now === undefined ? {} : { now }), ...(now === undefined ? {} : { now }), ...keyRelease };
     if (hosted === undefined) return { ...base, publishKem: true };
     const privateKey = hosted.encryption.privateKey;
     if (privateKey === undefined) throw new Error('The session\'s encryption key was dropped before the project opened.');
@@ -272,11 +301,10 @@ export class StaffLiveEngine {
     if (this.stopped) return;
     const { engine } = this.options;
     engine.syncStatusFor(live.root).setStatus(status as never);
-    live.row = {
+    this.publishRow(live, {
       project: live.project.projectId, root: live.root, state: status.state, sentence: engine.syncSentence(status as never),
       ...(status.lastSyncedAt === undefined ? {} : { lastSyncedAt: status.lastSyncedAt }),
-    };
-    for (const listener of [...this.rowListeners]) listener(live.row);
+    });
     if (status.state === 'needs-update') {
       // The shared work needs a newer version of Sterling (D-06, D-67): this project stops here, and its store keeps every entry.
       await live.replicator?.stop();
@@ -286,6 +314,19 @@ export class StaffLiveEngine {
       live.pulled = status.pulled;
       await this.projectFiles(live);
     }
+  }
+
+  /** Sends a project's row, with the first part your organization's credential rules hold back, if any (D-18). */
+  private publishRow(live: LiveProject, row: StaffStatusRow): void {
+    const { access: _previous, ...rest } = row;
+    let access: StaffStatusRow['access'];
+    for (const decision of live.project.keys?.withheldCells().values() ?? []) {
+      if (decision.ok) continue;
+      access = { sentence: decision.sentence, ...(decision.action === undefined ? {} : { action: decision.action }) };
+      break;
+    }
+    live.row = access === undefined ? rest : { ...rest, access };
+    for (const listener of [...this.rowListeners]) listener(live.row);
   }
 
   /** The projector after an exchange that brought something: files not open in a bound editor are written from the fold (33-06). */

@@ -283,6 +283,44 @@ test('Sync Now runs one exchange for an open project; a project not open here gi
   }
 });
 
+// Phase 71, plan 13 (D-18): the key release check from the person's credentials reaches each project's key ring; a part it holds back is named on the
+// project's row, and when the credentials change every ring asks again and the project syncs.
+test('the key release check reaches the key ring: a held-back part is named on the row, and a change of credentials releases it and syncs', async () => {
+  const world = await worldOfTwo();
+  try {
+    const [avery] = world.devices;
+    const created = await appendProductEntry(avery.host, 'product.create', { product: PRODUCT, section: 'j4', roles: ROLES, title: 'Logistics estimate' }, { label: LABEL });
+    assert.ok(created.ok, created.ok ? '' : created.message);
+    const WITHHELD = { ok: false as const, reason: 'stale', sentence: 'Your credentials have not been checked recently.', action: 'retry' as const };
+    let allowed = false;
+    const listeners: Array<() => void> = [];
+    const asked: unknown[] = [];
+    const keyRelease = {
+      check: (_cell: string, label: unknown) => { asked.push(label); return label === undefined || allowed ? { ok: true as const } : WITHHELD; },
+      onDidChange: (listener: () => void) => { listeners.push(listener); return { dispose: () => undefined }; },
+    };
+    FakeReplicator.made = [];
+    const live = engineFor(avery, { engine: spiedEngine({ projected: [], compacted: 0, armed: 0 }), keyRelease });
+    await live.start();
+    // The replicator is faked, so fold once as an exchange would, then report a status, as the replicator does after each exchange.
+    await live.project(avery.project.projectId)?.state();
+    FakeReplicator.made[0].emit({ state: 'live' });
+    await settle();
+    const opened = live.project(avery.project.projectId) as unknown as { keys?: { size: number } } | undefined;
+    assert.ok(asked.some((label) => label !== undefined),
+      `the ring opened the labelled part's label and asked (asked ${JSON.stringify(asked)}; ring holds ${String(opened?.keys?.size)}; created in ${created.ok ? created.stream : '-'})`);
+    assert.deepEqual(live.projects()[0]?.access, { sentence: WITHHELD.sentence, action: 'retry' });
+    allowed = true;
+    for (const listener of listeners) listener();
+    await settle();
+    assert.equal(live.projects()[0]?.access, undefined, 'released after the credentials changed');
+    assert.ok(FakeReplicator.made[0].synced >= 1, 'the project syncs with the key it now holds');
+    await live.stop();
+  } finally {
+    await world.close();
+  }
+});
+
 test('a project that needs a newer Sterling stops with the D-67 sentence and keeps every entry', async () => {
   const world = await worldOfTwo();
   try {
