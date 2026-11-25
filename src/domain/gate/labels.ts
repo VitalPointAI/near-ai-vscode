@@ -284,9 +284,9 @@ export function parseMapping(value: unknown, scales: ScaleTable, path = ''): Par
   return { ok: true, value: Object.freeze({ from: from.value, covers: covers.value }) };
 }
 
-/** Until verified credentials arrive (Phase 71), a clearance is the person's own word, so every place that shows one says so in these words (D-27). */
+/** Without your organization's credential rules (Phase 71, D-08), a clearance is the person's own word, so every place that shows one says so in these words (D-27). */
 export const CLEARANCE_SELF_ASSERTED_TEXT =
-  'Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.';
+  'Without your organization\'s credential rules, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.';
 
 /**
  * What labels and routing do and do not promise (D-32, amended by D-40). SECURITY.md and the label settings repeat this string exactly. It still names
@@ -294,7 +294,7 @@ export const CLEARANCE_SELF_ASSERTED_TEXT =
  * (the SovAI rename of 2026-11-24 left it; .planning/CODEX-PORT-AUDIT.md, Left over).
  */
 export const LABELS_NOT_ACCREDITATION_TEXT =
-  'Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.';
+  'Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Without your organization\'s credential rules, your clearance is the one you declared yourself, so it is not an enforced boundary.';
 
 /** Where the preset lists come from and who confirms them (D-23). */
 export const SCALE_PRESETS_CAVEAT_TEXT =

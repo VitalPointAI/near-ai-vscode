@@ -516,8 +516,8 @@ each MCP server may receive. A call to that server from a chat whose label is
 above it is refused before anything is sent, at every tier, with
 `label.mcp-ceiling`; see "MCP connections" below.
 
-Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
-- **Your clearance is your own word.** Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Without your organization's credential rules, your clearance is the one you declared yourself, so it is not an enforced boundary.
+- **Your clearance is your own word.** Without your organization's credential rules, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 #### Your organization's rules on this computer
 
@@ -631,7 +631,7 @@ Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, 
 
 **Clearances.** An agent reads a labelled file only when a clearance in your
 policy covers its label; add one in **SovAI: Policy** with **Edit my rules**,
-then **Apply my draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+then **Apply my draft**. Without your organization's credential rules, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 **The chat's label.** Each chat has a label that rises with what its agents,
 helpers included, read: reading a Confidential file makes the chat
@@ -727,7 +727,7 @@ each MCP server may receive. A call to that server from a chat whose label is
 above it is refused before anything is sent, at every tier, with
 `label.mcp-ceiling`; see "MCP connections" below.
 
-Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Until verified credentials arrive, your clearance is the one you declared yourself, so it is not an enforced boundary.
+Labels and routing are an organizational control that helps prevent mistakes. They check what NEAR AI itself sends to a model and what its own file tools read, and they cannot see everything a shell command or an add-on server does. They do not make this device accredited for classified information. Without your organization's credential rules, your clearance is the one you declared yourself, so it is not an enforced boundary.
 
 #### Where AI may run
 
@@ -2422,6 +2422,49 @@ health check connects only to itself; and no hub source file names a client netw
   the owner adds it to main's required checks after this phase merges. `verify:release` refuses a
   VSIX that contains anything from `hub/` (`src/test/hubIsolation.test.ts`).
 
+## Verified credentials and access decided by the data
+
+Your organization can add credential rules to its signed rules. Then a person's access comes from
+credentials your organization's officers issued, and each part of a shared project decides from
+its own label who may open it. This section says what that does and what it does not. Each point
+names the tests that show it.
+
+- **The only source.** When your organization's rules include credential rules, verified
+  credentials are the only source of access attributes: clearance, compartments, nationality,
+  export eligibility and how a person serves. Shown by `src/test/gateCredentialClearance.test.ts`
+  and `src/test/credentialsMayRelease.test.ts`.
+- **Signing in is not access.** Keycloak only signs people in. The session reads who signed in and
+  how recently they confirmed it, and nothing else in a sign-in token grants access. Shown by
+  `workbench/test/credentials-token-claims.test.ts`.
+- **Who issues.** Only people issue credentials: your organization's root, in an offline
+  ceremony, and the officers it names, who sign with their own key after confirming with a passkey
+  or security key. Agents and devices never issue. Shown by
+  `src/test/credentialsIssuerAuthority.test.ts` and `workbench/test/credentials-issuer-service.test.ts`.
+- **Evidence by hash.** A shared entry that relies on a credential cites it and the status lists
+  it was checked against by hash, so every copy of the project reaches the same answer. Shown by
+  `src/test/credentialsEvidence.test.ts`.
+- **Freshness at the moment of action.** Freshness is checked at the moment of action: by your
+  organization's server when it stores an entry it can read, and by the session before it opens a
+  part of a shared project. Your organization's server can read only the base part of a shared
+  project, so it checks cited evidence there. Entries in other parts are checked on the computers
+  of the people who read them. The session shows whether its check is fresh. When it is stale or cannot be
+  made, the parts above the lowest level stay closed, with a sentence and **Retry**. Shown by
+  `hub/test/evidencePep.test.ts`, `src/test/staffKeyRelease.test.ts` and
+  `workbench/test/credentials-credential-cache.test.ts`.
+- **Offline age.** Your organization's rules set a maximum offline age for each level. Past it, a
+  check at that level refuses until newer status lists arrive. Shown by
+  `src/test/credentialsFreshness.test.ts` and `src/test/credentialsTrustExport.test.ts`.
+- **Offline trust.** A computer that holds keys offline is trusted until its next contact with
+  your organization's server. This is not a key access server: a key already on a computer cannot
+  be taken back.
+- **Declared clearances.** With no organization, nothing changes. Your clearances here are
+  declared, not verified: they come from your own policy on this computer and count nowhere else.
+  Under your organization's credential rules, a declared clearance counts at most for unmarked
+  work and the lowest level of a scale. Anything above needs a verified credential. Shown by
+  `src/test/gateCredentialClearance.test.ts` and `src/test/staffKeyRelease.test.ts`.
+- **Not accreditation.** These checks help prevent mistakes. They do not accredit a computer, a
+  person or a deployment.
+
 ## Known limitations
 
 | Limitation | Plan |
@@ -2464,6 +2507,7 @@ health check connects only to itself; and no hub source file names a client netw
 | Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second; model approvals refuse in a later release |
 | Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count |
 | There is no command to leave your organization | Ask your organization's security contact |
+| A computer that holds keys offline is trusted until its next contact with your organization's server | Your organization's rules set a maximum offline age for each level. A key already on a computer stays there, so a revoked person keeps what that computer already opened |
 
 ## How changes reach a release
 

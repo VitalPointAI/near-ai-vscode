@@ -1634,6 +1634,12 @@ Read the full [security and trust report](SECURITY.md).
   [what it does and doesn't check](SECURITY.md#the-trust-badge-on-each-answer)).
 - **No wallet, staking, or NEAR account sign-in yet.** They wait for a
   documented NEAR AI contract; sign-in uses API keys.
+- **Clearances.** With no organization, nothing changes. Your clearances here
+  are declared, not verified: they come from your own policy on this computer
+  and count nowhere else. Under your organization's credential rules, a declared
+  clearance counts at most for unmarked work and the lowest level of a scale.
+  Anything above needs a verified credential. See
+  [verified credentials](SECURITY.md#verified-credentials-and-access-decided-by-the-data).
 
 ## Troubleshooting
 

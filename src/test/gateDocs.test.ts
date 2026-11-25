@@ -18,6 +18,12 @@ import { MAX_DECISION_LOG_BYTES, MAX_ROTATED_FILES, MODEL_REQUESTS_DIR } from '.
 import { redactCredentialArguments } from '../domain/redaction';
 import { OUTBOUND_EARLIER_TEXT, OUTBOUND_LIMITS_TEXT, OUTBOUND_REOPENED_DOCS_TEXT, OUTBOUND_UNCHECKED_TEXT } from '../agent/outboundCheck';
 import { createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
+import {
+  CREDENTIALS_ONLY_SOURCE_TEXT, EVIDENCE_BY_HASH_TEXT, FRESHNESS_AT_ACTION_TEXT, HUB_CHECKS_WHAT_IT_READS_TEXT, MAX_OFFLINE_AGE_TEXT, NEVER_ISSUE_TEXT, NOT_ACCREDITATION_TEXT,
+  OFFLINE_TRUST_TEXT, SIGN_IN_ONLY_TEXT
+} from '../domain/credentials/statements';
+import { DECLARED_COUNTS_ONLY_LOWEST_TEXT } from '../domain/credentials/clearance';
+import { DECLARED_NOT_VERIFIED_TEXT } from '../gate/clearances';
 import { ENROLMENT_FILE_EXTENSION, ISSUER_WORDS_DOMAIN, ISSUER_WORDS_MATCH, MAX_ENROLMENT_FILE_BYTES, issuerWordsPrompt, issuerWordsQuestion, organizationEndedText } from '../domain/gate/enrolment';
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -58,8 +64,8 @@ test('SECURITY.md has the policy section once, after "What the agent can do with
   assert.ok(here < SECURITY.indexOf('### Sub-agents nobody is watching'));
 });
 
-test('the policy section carries the code\'s clearance text word for word, and that text still begins "Until verified credentials arrive"', () => {
-  assert.ok(CLEARANCE_SELF_ASSERTED_TEXT.startsWith('Until verified credentials arrive'));
+test('the policy section carries the code\'s clearance text word for word, and that text still begins "Without your organization\'s credential rules"', () => {
+  assert.ok(CLEARANCE_SELF_ASSERTED_TEXT.startsWith('Without your organization\'s credential rules'));
   assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT));
 });
 
@@ -1066,4 +1072,43 @@ test('Phase 41 review: SECURITY.md says what the review fixes do (CR-01, WR-01, 
   assert.match(DAMAGED_PIN_TEXT, /enrolment file again/);
   assert.match(ENDPOINT_SCHEME_TEXT, /^Nothing was sent\. .*https connections only/);
   assert.equal(isNearCloudEndpoint('https://example.org'), false);
+});
+
+// ---- Phase 71 (71-14; D-08, D-21, O11): verified credentials and access decided by the data ----
+
+const CREDENTIALS_HEADING = '## Verified credentials and access decided by the data';
+
+test('71-14: SECURITY.md has the credentials section once, after "Your organization\'s sync hub" and before Known limitations', () => {
+  assert.equal(SECURITY.split(`\n${CREDENTIALS_HEADING}\n`).length - 1, 1);
+  const here = SECURITY.indexOf(`\n${CREDENTIALS_HEADING}\n`);
+  assert.ok(SECURITY.indexOf('\n## Your organization\'s sync hub\n') < here);
+  assert.ok(here < SECURITY.indexOf('\n## Known limitations\n'));
+});
+
+test('71-14: the credentials section says, word for word from the code, what credentials do and do not guarantee, with no claim of compliance', async () => {
+  const section = sectionOf(SECURITY, CREDENTIALS_HEADING);
+  const sentences = {
+    CREDENTIALS_ONLY_SOURCE_TEXT, SIGN_IN_ONLY_TEXT, NEVER_ISSUE_TEXT, EVIDENCE_BY_HASH_TEXT, FRESHNESS_AT_ACTION_TEXT, HUB_CHECKS_WHAT_IT_READS_TEXT, MAX_OFFLINE_AGE_TEXT,
+    OFFLINE_TRUST_TEXT, NOT_ACCREDITATION_TEXT, DECLARED_NOT_VERIFIED_TEXT, DECLARED_COUNTS_ONLY_LOWEST_TEXT
+  };
+  for (const [name, text] of Object.entries(sentences)) assert.ok(flat(section).includes(flat(text)), name);
+  assert.ok(DECLARED_NOT_VERIFIED_TEXT.includes('declared, not verified'));
+  assert.ok(OFFLINE_TRUST_TEXT.includes('This is not a key access server'));
+  assert.equal(section.includes(EM_DASH), false);
+  assert.doesNotMatch(section, /NEAR organization/);
+  const { countHits } = await import('./helpers/copyLintScan');
+  assert.equal(countHits([{ text: prose(section) }], 'SECURITY.md')['SECURITY.md']?.['compliance-claim'] ?? 0, 0);
+});
+
+test('71-14: README keeps "declared, not verified" for a computer with no organization and gives the O11 sentence for your organization', () => {
+  const readme = flat(README);
+  assert.ok(readme.includes(flat(DECLARED_NOT_VERIFIED_TEXT)));
+  assert.ok(readme.includes(flat(DECLARED_COUNTS_ONLY_LOWEST_TEXT)));
+  assert.ok(README.includes('(SECURITY.md#verified-credentials-and-access-decided-by-the-data)'));
+});
+
+test('71-14: Known limitations has the row that a computer holding keys offline is trusted until its next contact', () => {
+  const first = OFFLINE_TRUST_TEXT.slice(0, OFFLINE_TRUST_TEXT.indexOf('.'));
+  const rows = sectionOf(SECURITY, '## Known limitations').split('\n').filter((row) => row.startsWith(`| ${first} |`));
+  assert.equal(rows.length, 1);
 });
