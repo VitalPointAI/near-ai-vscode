@@ -14,3 +14,11 @@ persistence:
 sterling:
   # How long audit-* and logs-* indices are kept before they are deleted (D-35); your organization's records policy decides.
   retentionDays: 365
+  # Snapshots of audit-* and logs-* (D-73) to the repository sterling-snapshots, in UTC. Audit records are kept 5 years (owner decision b,
+  # D-82): 730 days online, to 1,825 days in the write-once archive (48.1), and these snapshots for 1,825 days; maxAgeDays may be longer,
+  # never shorter (the render stops). The size is provisional until Phase 48. The recovery point setting (47-27) is checked against cron.
+  snapshots:
+    cron: "30 1 * * *"
+    maxAgeDays: 1825
+    minCount: 7
+    size: 200Gi

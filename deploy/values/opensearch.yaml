@@ -1,6 +1,10 @@
 # OpenSearch 3.10.0 (chart deploy/charts/vendored/opensearch-3.10.0.tgz), the settings that decide which images render. The descriptor sets
 # image.repository and image.tag (<tag>@<digest>) from deploy/bundle/images.lock.json (D-19, D-20). Later plans add the rest of the log store
 # settings here and must keep these.
+# Snapshots (D-73, CP-9, CP-10; 47-24): the filesystem repository sterling-snapshots on PVC opensearch-snapshots (the site's encrypted class,
+# so the Longhorn recurring backups carry it off the node, encrypted) and the snapshot-management policy sterling-audit. Repositories and
+# snapshot-management policies are API objects, not files: 47-16's apply step puts the two bodies from ConfigMaps
+# opensearch-snapshot-repository and opensearch-snapshot-policy (PUT _snapshot/sterling-snapshots and _plugins/_sm/policies/sterling-audit).
 
 # One node by default (small sites); large sites raise it to three data nodes.
 singleNode: true
@@ -72,6 +76,16 @@ config:
     plugins.security.nodes_dn: ["CN=opensearch-cluster-master.sterling-logging.svc"]
     plugins.security.audit.type: internal_opensearch
     plugins.security.restapi.roles_enabled: ["all_access"]
+    path.repo: ["/usr/share/opensearch/snapshots"]
+
+# The snapshot repository's volume, on every node at path.repo.
+extraVolumes:
+  - name: snapshots
+    persistentVolumeClaim:
+      claimName: opensearch-snapshots
+extraVolumeMounts:
+  - name: snapshots
+    mountPath: /usr/share/opensearch/snapshots
 
 # Data on the site's encrypted class (D-17); size, heap and node count per site (deploy/values/site.example/opensearch.yaml).
 persistence:
@@ -98,5 +112,141 @@ extraObjects:
             "ism_template": [{ "index_patterns": ["audit-*", "logs-*"], "priority": 100 }]
           }
         }
+  # The snapshot volume: ReadWriteOnce for one node, ReadWriteMany (Longhorn's share manager) when there are several, because every node
+  # writes its own shards to the shared repository. Kept when the release is removed: the snapshots outlive it.
+  - |
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: opensearch-snapshots
+      annotations:
+        helm.sh/resource-policy: keep
+    spec:
+      accessModes: [{{ if .Values.singleNode }}ReadWriteOnce{{ else }}ReadWriteMany{{ end }}]
+      storageClassName: "${site.storageClass}"
+      resources:
+        requests:
+          storage: {{ .Values.sterling.snapshots.size }}
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: opensearch-snapshot-repository
+    data:
+      repository.json: |
+        { "type": "fs", "settings": { "location": "/usr/share/opensearch/snapshots", "compress": true } }
+  # Audit records are kept 5 years (owner decision b, D-82): the policy deletes only snapshots older than maxAgeDays, which may be longer than
+  # 1,825 days but never shorter, and always keeps minCount. include_global_state false keeps the security index out of every snapshot;
+  # ignore_unavailable keeps the policy working after the write-once archive (48.1-14) deletes an index it has archived.
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: opensearch-snapshot-policy
+    data:
+      policy.json: |
+        {{- if lt (int .Values.sterling.snapshots.maxAgeDays) 1825 }}
+        {{- fail "sterling.snapshots.maxAgeDays must be at least 1825: audit snapshots are kept 5 years (owner decision b, D-82)" }}
+        {{- end }}
+        {
+          "description": "Snapshots of the site audit and log indices, kept 5 years (D-73, D-82)",
+          "creation": { "schedule": { "cron": { "expression": "{{ .Values.sterling.snapshots.cron }}", "timezone": "UTC" } } },
+          "deletion": {
+            "schedule": { "cron": { "expression": "{{ .Values.sterling.snapshots.cron }}", "timezone": "UTC" } },
+            "condition": { "max_age": "{{ int .Values.sterling.snapshots.maxAgeDays }}d", "min_count": {{ int .Values.sterling.snapshots.minCount }} }
+          },
+          "snapshot_config": {
+            "repository": "sterling-snapshots",
+            "indices": "audit-*,logs-*",
+            "include_global_state": false,
+            "ignore_unavailable": true,
+            "partial": false,
+            "timezone": "UTC"
+          }
+        }
+  # The signal 48.1-16's alert reads (H-08): a failed Job when no snapshot is newer than checkMaxGapMinutes. A failed snapshot writes no
+  # snap-*.dat file. It reads the volume only, holds no credentials and prints only the newest snapshot's age; with a ReadWriteOnce volume it
+  # runs on the OpenSearch pod's node. Shell built-ins, stat and date only: the OpenSearch image has no find.
+  - |
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: opensearch-snapshot-check
+    spec:
+      schedule: "15 * * * *"
+      timeZone: Etc/UTC
+      concurrencyPolicy: Forbid
+      successfulJobsHistoryLimit: 1
+      failedJobsHistoryLimit: 3
+      jobTemplate:
+        spec:
+          backoffLimit: 0
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: opensearch-snapshot-check
+            spec:
+              restartPolicy: Never
+              automountServiceAccountToken: false
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                seccompProfile:
+                  type: RuntimeDefault
+              {{- if .Values.singleNode }}
+              affinity:
+                podAffinity:
+                  requiredDuringSchedulingIgnoredDuringExecution:
+                    - topologyKey: kubernetes.io/hostname
+                      labelSelector:
+                        matchLabels:
+                          app.kubernetes.io/name: {{ include "opensearch.name" . }}
+                          app.kubernetes.io/instance: {{ .Release.Name }}
+              {{- end }}
+              containers:
+                - name: check
+                  image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      newest=0
+                      for file in /snapshots/snap-*.dat; do
+                        if [ -f "$file" ]; then when=$(stat -c %Y "$file"); if [ "$when" -gt "$newest" ]; then newest=$when; fi; fi
+                      done
+                      if [ "$newest" -eq 0 ]; then echo "no snapshot in the repository"; exit 1; fi
+                      age=$(( ($(date +%s) - newest) / 60 ))
+                      echo "the newest snapshot is $age minutes old (allowed: $MAX_GAP_MINUTES)"
+                      [ "$age" -le "$MAX_GAP_MINUTES" ]
+                  env:
+                    - name: MAX_GAP_MINUTES
+                      value: "{{ int .Values.sterling.snapshots.checkMaxGapMinutes }}"
+                  resources:
+                    requests:
+                      cpu: 10m
+                      memory: 32Mi
+                    limits:
+                      memory: 64Mi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities:
+                      drop: [ALL]
+                  volumeMounts:
+                    - name: snapshots
+                      mountPath: /snapshots
+                      readOnly: true
+              volumes:
+                - name: snapshots
+                  persistentVolumeClaim:
+                    claimName: opensearch-snapshots
+                    readOnly: true
 sterling:
   retentionDays: 365
+  # Snapshot defaults; a site sets its own in its site file (deploy/values/site.example/opensearch.yaml).
+  snapshots:
+    cron: "30 1 * * *"
+    maxAgeDays: 1825
+    minCount: 7
+    size: 200Gi
+    checkMaxGapMinutes: 2160
