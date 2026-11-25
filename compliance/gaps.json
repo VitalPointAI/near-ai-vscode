@@ -6223,6 +6223,76 @@
       ],
       "remediation": "The sessions certificate (theia-cloud ws-cert-secret, issued by site-pki) now names the wildcard *.webview.<instance>.<domain> beside <instance>.<domain>, so the workbench's webviews keep one origin each. Wildcard certificates are discouraged when their scope is wide (a stolen key covers every name under it); this one covers only the webview names, which HAProxy routes to the same session backends as the session host, behind the same sign-in. Describe the scope in the hosted system description (SC-17) and get your organization's PKI authority and the assessor to accept it. If policy refuses wildcard names, the alternatives are a single fixed webview host through THEIA_WEBVIEW_EXTERNAL_ENDPOINT (one name, no wildcard, but the webviews then share one origin and Theia warns about the changed pattern at every start) or per-session certificates, which Theia Cloud 1.2.0's shared instances Ingress does not support.",
       "title": "The sessions certificate carries a wildcard name for the webview hosts, which needs accepting"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "pl-02",
+        "cm-08"
+      ],
+      "id": "G490",
+      "ownerRole": "maintainers",
+      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. The draft rules move about 8,016 cells, two thirds, to Not applicable; 44.1-07 replaces this estimate here with the count it measures on the signed map. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
+      "title": "The dashboard assesses every component against every control"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "44.1",
+      "controls": [
+        "pl-10",
+        "pl-11"
+      ],
+      "id": "G491",
+      "ownerRole": "owner",
+      "remediation": "Which controls each component has a part in is a scope decision your organization reviews before an assessment relies on it. Plan 44.1-06 takes your organization's sign-off of the generated map for stage 1 (Unclassified, Protected A, hosted Protected A), 44.1-23 for stage 2 (Protected B) and 44.1-24 for stage 3 (the appliance and the overlays, after 44.1-03's scope decision). Until a stage is signed, its cells keep reading Not met, and a changed map section reads Not met until it is signed again. Each deploying organization re-reviews the map in its own assessment (44.1-04).",
+      "title": "Your organization has not yet reviewed which controls each component carries"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ac-02",
+        "ac-03",
+        "au-02",
+        "sa-09",
+        "sc-07",
+        "si-03",
+        "si-04"
+      ],
+      "id": "G492",
+      "ownerRole": "maintainers",
+      "remediation": "At Unclassified, component and control pairs that the draft map makes applicable have no statement: extension (ac-02, si-03, si-04, sa-09), hub (ac-02, au-02, sc-07, si-04), model-endpoints (sc-07), relay (ac-02, ac-03, au-02, sa-09, sc-07, si-04) and release-pipeline (si-03); cm-02 and si-02 for each come from 44.1-09's inventory statements and G10. Plans 44.1-10 to 44.1-13 write each statement with evidence a CI job reports, or link the pair to the phase that builds it (the relay's messaging: G3 and Phases 75 to 84). Pairs reserved by other plans stay theirs (44.1-HANDOFFS.md). The Protected A pairs follow in 44.1-10 to 44.1-21.",
+      "title": "Unclassified pairs where a component has a part have no statement yet"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ca-07",
+        "cm-04"
+      ],
+      "id": "G493",
+      "ownerRole": "maintainers",
+      "remediation": "The pull request summary shows state changes, but nothing stops a change that removes a statement or widens a profile from adding cells that read No statement yet. Plan 44.1-07 adds a coverage measure (counts per state and component) and a ratchet in the required docs job: the count of applicable cells without a statement per component may only fall, and a rise needs a change to the gated baseline that the owner approves.",
+      "title": "The count of cells without a statement can rise without anyone noticing"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ca-02",
+        "sa-11"
+      ],
+      "id": "G494",
+      "ownerRole": "maintainers",
+      "remediation": "Only the test, relay, hub, workbench and deploy jobs write the per-test reports the evidence bundle reads. A rule on a compliance or docs-site test never gets a result, and a statement with no rule at all is allowed in the sources; both read Not met on the dashboard, but nothing refuses them when they are written. Plan 44.1-08 refuses both at source time, through 44.1-07's required check; the appliance's reference statement stays exempt while its level makes no claim. How fresh each kind of evidence must be stays with Phase 48.2 (Live compliance evidence).",
+      "title": "A statement can cite a test that no CI job reports"
     }
   ]
 }

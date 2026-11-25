@@ -973,6 +973,24 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | ACCR-13 | Phase 44 | 44-06, 44-13, 44-15, 44-16, 44-18 |
 | ACCR-14 | Phase 44 | 44-03, 44-04, 44-05, 44-13, 44-18 |
 
+## Phase 44.1 amendment requirements: compliance coverage
+
+**Defined:** 2026-11-25 from the owner's brief, when the coverage amendment to Phase 44.1 was planned (`.planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-CONTEXT.md`). They extend ACCR-03, ACCR-04, ACCR-06, ACCR-07 and ACCR-10.
+
+- [ ] **COVR-01**: A generated, reviewable per-component applicability map, derived by rules from the component catalogue and the control families, says which controls each component implements, supports or has no part in; a component with no part shows "Not applicable to this component" with its reason, never Not met; your organization signs each stage in the repository, and a change takes effect only after a new sign-off, so no cell changes class unseen.
+- [ ] **COVR-02**: Every applicable (component, control) pair has a statement of what the built code does, or a named gap and phase where it is not built; the plans that already write statements keep their pairs.
+- [ ] **COVR-03**: Every statement has an evidence rule backed by a test in a CI job that writes a per-test report, a CI artefact collector or the site collector; a statement without such a rule is refused at source time and is never Met; freshness follows Phase 48.2 (Live compliance evidence).
+- [ ] **COVR-04**: Unclassified and Protected A first, then Protected B, then the Classified appliance and the overlays, each with its own sign-off.
+- [ ] **COVR-05**: A generated coverage measure gives counts per state and component; a required check fails when the number of applicable cells without a statement rises without a gated baseline change, or falls without the baseline being lowered.
+
+| Requirement | Phase | Plans |
+|-------------|-------|-------|
+| COVR-01 | Phase 44.1 | 44.1-05, 44.1-06, 44.1-07, 44.1-08, 44.1-23, 44.1-24 |
+| COVR-02 | Phase 44.1 | 44.1-09 to 44.1-22 |
+| COVR-03 | Phase 44.1 | 44.1-07, 44.1-08, 44.1-09 to 44.1-22 |
+| COVR-04 | Phase 44.1 | 44.1-06, 44.1-07, 44.1-10 to 44.1-21, 44.1-22, 44.1-23, 44.1-24 |
+| COVR-05 | Phase 44.1 | 44.1-07, 44.1-22 |
+
 ## Phases 45.1 and 45.2 requirements: NATO and Five Eyes exchange
 
 **Defined:** 2026-11-24 from the owner's decision O1 and NATO direction (`.planning/research/data-centric-access/RESEARCH.md` sections 2.2 and 11), when Phase 45.1 was planned. XCHG-05 … XCHG-08 were reworded 2026-11-24 when Phase 45.2 was planned from AC322 (DCRA v2), ADatP-4774, 4778, 4778.2, 5636 and the public OpenTDF specification 4.3.0 (`45.2-RESEARCH.md`), with unverified label values drafted as tracked assumptions; ACP-240(A) is not held, so ZTDF conformance stays unverified until it or a partner's KAS with its own samples arrives.
