@@ -213,6 +213,8 @@ ul.controls strong { overflow-wrap: anywhere; }
 .empty-msg { padding: 8px 16px; border-inline-start: 3px solid var(--theia-editorWarning-foreground); }
 
 .theia-status { display: flex; gap: 16px; padding: 0 8px; min-height: 24px; align-items: center; background: var(--theia-statusBar-background); color: var(--theia-statusBar-foreground); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.helper { color: var(--theia-descriptionForeground); font-weight: 400; }
 .sr-note { color: var(--theia-descriptionForeground); border-inline-start: 3px solid var(--theia-panel-border); padding-inline-start: 8px; }
 </style>
 </head>
@@ -237,6 +239,8 @@ ul.controls strong { overflow-wrap: anywhere; }
   <symbol id="i-warning" viewBox="0 0 16 16"><path d="M8 2 14.5 13.5h-13z M8 6.5v3M8 11.5v.01"/></symbol>
   <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1"/><path d="M11 5V2.5H2.5V11H5"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5H11"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9M10.5 3.5v9"/></symbol>
+  <symbol id="i-continue" viewBox="0 0 16 16"><path d="M3.5 3.5v9M6.5 3.5l7 4.5-7 4.5z"/></symbol>
   <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.5 13.5 3.5v4c0 3.2-2.4 5.8-5.5 7-3.1-1.2-5.5-3.8-5.5-7v-4z"/></symbol>
 </svg>
 
@@ -253,7 +257,7 @@ ul.controls strong { overflow-wrap: anywhere; }
 <div class="sk-frame"><div class="view" id="s1"></div></div>
 
 <p class="sk-cap">Partial and empty states</p>
-<p>Each frame shows the header, the notices and the source cards, then the first rows. Everything below the rows (Needs attention, filters, charts) follows the same rules as S1 and is left out.</p>
+<p>Each frame shows the header, the notices (at most one per kind, and one Did not verify notice per failed source) and the source cards, then the first rows. Everything below the rows (Needs attention, filters, charts) follows the same rules as S1 and is left out.</p>
 <div class="sk-grid" id="states"></div>
 
 <script>
@@ -264,18 +268,20 @@ const vb = v => ({
   'not-verified': `<span class="vbadge" data-v="not-verified">${I('unverified')}<span>Not verified</span></span>`,
   'did-not-verify': `<span class="vbadge" data-v="did-not-verify">${I('error')}<span>Did not verify</span></span>`
 })[v] || '';
-const header = (live = 'Live · Updated just now', paused = false) => `
+// mode: 'live' | 'lost' | 'held'
+const header = (live = 'Live · Updated just now', mode = 'live') => `
   <header class="heading">
     <div><h1>Compliance</h1><p>${LEAD}</p></div>
     <div class="heading-side">
-      <p class="live">${I(paused ? 'disconnect' : 'broadcast')}<span>${live}</span></p>
-      <button class="btn" type="button">${I('refresh')}Check evidence now</button>
+      <p class="live">${I({ live: 'broadcast', lost: 'disconnect', held: 'pause' }[mode])}<span>${live}</span></p>
+      ${mode === 'live' ? `<button class="btn" type="button">${I('pause')}Pause live updates</button>` : ''}
+      ${mode === 'held' ? `<button class="btn" type="button">${I('continue')}Resume live updates</button>` : `<button class="btn" type="button">${I('refresh')}Check evidence now</button>`}
     </div>
   </header>`;
 const notice = (tone, icon, text) => `<div class="notice" data-tone="${tone}">${I(icon)}<p>${text}</p></div>`;
 const facts = rows => `<dl class="facts">${rows.map(([t, d]) => `<div><dt>${t}</dt><dd>${d}</dd></div>`).join('')}</dl>`;
 const scanFresh = (when, age, f) => `database built ${when} (${age}) · ${f === 'ageing' ? I('clock', 'w') + ' Ageing' : I('pulse') + ' Current'}`;
-const releaseCard = ({ v = 'verified', anchor = 'your organization’s site key', extra = '' } = {}) => `
+const releaseCard = ({ v = 'verified', anchor = 'your organization’s site key', extra = '', scanUnknown = '' } = {}) => `
   <section class="card source">
     <div class="source-title"><h3>${I('package')}Release evidence</h3>${vb(v)}</div>
     ${v === 'did-not-verify' ? '' : facts([
@@ -283,7 +289,7 @@ const releaseCard = ({ v = 'verified', anchor = 'your organization’s site key'
       ['Built', '24 Nov 2026 18:40 UTC'],
       ...(v === 'verified' ? [['Verified with', anchor]] : []),
       ['Checked', '25 Nov 2026 08:00 UTC'],
-      ['Vulnerability scan', scanFresh('24 Nov 2026 06:00 UTC', '1 day ago', 'current')]
+      ['Vulnerability scan', scanUnknown ? `database built 24 Nov 2026 06:00 UTC (1 day ago) · ${I('question')} ${scanUnknown}` : scanFresh('24 Nov 2026 06:00 UTC', '1 day ago', 'current')]
     ])}
     ${extra}
     ${v === 'did-not-verify' ? '' : '<details><summary>Show how this release was checked</summary><p class="muted">Release evidence and its signature: checked in this session at 25 Nov 2026 08:00 UTC with ' + anchor + '.</p></details>'}
@@ -309,6 +315,7 @@ const fresh = {
   ageing: () => `<span>${I('clock', 'w')}Ageing</span>`,
   ood: () => `<span>${I('history', 's')}Out of date</span>`,
   unknownPaused: () => `<span>${I('question')}Unknown (live updates paused)</span>`,
+  unknownHeld: () => `<span>${I('question')}Unknown (live updates paused by you)</span>`,
   unknownClock: () => `<span>${I('question')}Unknown (this computer’s clock is earlier than the release build)</span>`,
   none: () => `<span>${I('slash')}No evidence</span>`
 };
@@ -425,6 +432,22 @@ document.getElementById('s1').innerHTML = `<main class="page">
   <div><button class="btn more" type="button">Show more controls</button></div>
 </main>`;
 
+/* while paused: state columns stay, Ageing and Out of date read Unknown */
+const pausedSummary = words => {
+  const u = `<span aria-hidden="true">–</span><span class="sr-only">${words}</span>`;
+  return `<section class="card">
+    <div class="table-region" role="region" tabindex="0" aria-label="Summary across levels">
+    <table>
+      <caption><h3>Summary across levels</h3><p>Select a level to filter. Ageing and Out of date count controls by evidence age, so they overlap the other columns.</p></caption>
+      <thead><tr><th scope="col">Level</th><th scope="col">Controls</th><th scope="col">Met</th><th scope="col">Needs attention</th><th scope="col">Not verified</th><th scope="col">Ageing</th><th scope="col">Out of date</th></tr></thead>
+      <tbody>${levels.slice(0, 2).map(l => `<tr><th scope="row"><button class="lvl" type="button" aria-pressed="false">${l[0]}${bar(l[7])}</button></th><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td><td>${l[4]}</td><td>${u}</td><td>${u}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th scope="row">All levels</th><td>974</td><td>704</td><td>101</td><td>0</td><td>${u}</td><td>${u}</td></tr></tfoot>
+    </table></div></section>`;
+};
+const pausedFilter = `<div class="filters">
+  <label>Freshness<select disabled aria-describedby="fp"><option>Out of date</option></select><span class="helper" id="fp">Freshness filter is off while live updates are paused.</span></label>
+  <label>Source<select><option>Release and your site</option></select></label></div>`;
+
 /* states */
 const cmd = `mkdir -p sterling-evidence
 cp sterling-release-cosign.pub sterling-evidence/supplier.pub
@@ -480,18 +503,30 @@ const states = [
     <h2>Evidence sources</h2>
     <div class="sources">${releaseCard({ v: 'did-not-verify', extra: `<p class="line">${I('error', 'e')}<span><span class="mono">bundle/dashboard/judgement.json</span> has changed since the evidence was signed. Nothing from this source is shown.</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
     ${controls([], '', { msg: 'No controls to show: no evidence source verified.' })}`),
-  frame('S7 Live updates paused', `${header('Live updates paused · Last updated 25 Nov 2026 13:58 UTC', true)}
+  frame('S7 Live updates paused: connection lost', `${header('Live updates paused · Last updated 25 Nov 2026 13:58 UTC', 'lost')}
     ${notice('warning', 'disconnect', 'Live updates paused: the view lost its connection to the workbench. Freshness shows as Unknown until it is back. Trying again on its own.')}
     <h2>Evidence sources</h2>
-    <div class="sources">${releaseCard()}${siteCard({ itemsHtml: `${I('question')} Unknown (live updates paused)` })}</div>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (live updates paused)' })}${siteCard({ itemsHtml: `${I('question')} Unknown (live updates paused)` })}</div>
+    ${pausedFilter}
+    ${pausedSummary('Unknown (live updates paused)')}
     ${controls([
       row('SI-4', 'System monitoring', 'not-met', 'Your site', '25 Nov 2026 13:45 UTC', 'unknownPaused', 'Verified', 3),
       row('AC-2', 'Account management', 'met', 'Release and your site', '24 Nov 2026 18:40 UTC', 'unknownPaused', 'Verified', 4)
-    ], '24 of 974 control entries')}`),
+    ], '24 of 974 control entries')}
+    <p class="sr-note">States and state counts stay as last judged. Every freshness word and count reads Unknown, never the last value. The Out of date button in Needs attention is hidden.</p>`),
+  frame('S7b Live updates paused by you (WCAG 2.2.2): Resume live updates restores them', `${header('Live updates paused by you · Last updated 25 Nov 2026 14:02 UTC', 'held')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (live updates paused by you)' })}${siteCard({ itemsHtml: `${I('question')} Unknown (live updates paused by you)` })}</div>
+    ${pausedSummary('Unknown (live updates paused by you)')}
+    ${controls([
+      row('SI-4', 'System monitoring', 'not-met', 'Your site', '25 Nov 2026 14:00 UTC', 'unknownHeld', 'Verified', 3),
+      row('AC-2', 'Account management', 'met', 'Release and your site', '24 Nov 2026 18:40 UTC', 'unknownHeld', 'Verified', 4)
+    ], '24 of 974 control entries')}
+    <p class="sr-note">No notice: the person chose this. "Check evidence now" is not offered while held. Screen readers hear "Live updates paused by you." once.</p>`),
   frame('S8 This computer’s clock is earlier than the release build', `${header()}
     ${notice('warning', 'watch', 'This computer’s clock is earlier than the release build, so no evidence reads current. Check this computer’s clock.')}
     <h2>Evidence sources</h2>
-    <div class="sources">${releaseCard({ extra: `<p class="line">${I('watch', 'w')}<span>Freshness is Unknown: this computer’s clock is earlier than the release build (24 Nov 2026 18:40 UTC).</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (this computer’s clock is earlier than the release build)', extra: `<p class="line">${I('watch', 'w')}<span>Freshness is Unknown: this computer’s clock is earlier than the release build (24 Nov 2026 18:40 UTC).</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
     ${controls([
       row('AC-2', 'Account management', 'stale', 'Release', '24 Nov 2026 18:40 UTC', 'unknownClock', 'Verified', 4)
     ], '24 of 974 control entries')}`),
