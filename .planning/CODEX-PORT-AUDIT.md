@@ -128,10 +128,11 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 - A comment in `scripts/verify-release-content.mjs` (a gate file) still says "NEAR AI: Load Staff Exercise Scenario"; left to avoid a second gate file for a comment.
 - Gap G450: a Playwright spec for Chat in the release image (streamed reply with a fake model server, history after reload, Stop), replacing the Puppeteer tool of `01a9f155` and `5a04d3d3`. It needs the release image with the bundled VSIX, like `get-started.spec.ts`'s create test.
 
-## Checks on the merged branch (main at `bcc85d44`)
+## Checks on the merged branch (main at `0cafa60a`, after the owner's answers)
 
-- Root: lint passes; the full suite runs 6,281 tests, 6,273 pass, 0 fail, 8 skipped (the existing skips). Copy lint (with rule 8), architecture (no frozen file grew; `chat.ts` stays at 1,517 lines) and the compliance fit check pass.
+- Root: lint passes; the full suite runs 6,282 tests, 6,274 pass, 0 fail, 8 skipped (the existing skips). Copy lint (rules 1 and 8), architecture (no frozen file grew; `chat.ts` stays at 1,517 lines), the component catalogue and the road to production checks pass, and so does the compliance fit check.
+- Compliance: lint passes; the suite runs 550 tests, all pass (the register count test reads 417 with G450 to G452); `validate` passes, `oscalValid` passes, and the hosted documents' generated blocks are current.
 - Workbench on Node 26.13.1: lint passes, 106 of 106 unit tests pass, the production build passes.
-- Tests added: copy lint rule 8 (two), the SA&A download offer, the last-conversation drawer close, the saved-credential welcome state (from `e7fc76c7`), the project switch during Project Setup (from `f73bc988`); extended: the onboarding provider button, the proxy advice words, the panel title prefix check.
+- Tests added: copy lint rule 8 (two), the Staff Room name, the SA&A download offer, the last-conversation drawer close, the saved-credential welcome state (from `e7fc76c7`), the project switch during Project Setup (from `f73bc988`); extended: the onboarding provider button, the proxy advice words, the panel title prefix check.
 - Not run here: the browser and container suites (they need the built image), and the docs site build.
-- Gate file touched: `SECURITY.md` only.
+- Gate files touched: `SECURITY.md`, `compliance/resources.json`, `compliance/src/oscalAssessment.ts`, `compliance/src/oscalPoam.ts`, `compliance/src/oscalSsp.ts`, `compliance/src/readable.ts`.
