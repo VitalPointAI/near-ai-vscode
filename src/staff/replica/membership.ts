@@ -53,7 +53,7 @@ import {
 } from '../../domain/replica/invite';
 import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
 import type { ProjectOutput } from '../../domain/replica/projectFold';
-import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
+import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, inviteClosedByModeAt, isRosterWriterAt, leadAt, projectModeAt } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
@@ -64,7 +64,7 @@ import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
-import { MULTI_USER_DECLARED_TEXT, REPLICA_DIR, multiUserNoticeLines } from '../../domain/staff/multiUser';
+import { MULTI_USER_DECLARED_TEXT, REPLICA_DIR, inviteNotInModeText, multiUserNoticeLines } from '../../domain/staff/multiUser';
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { forgetJoinSecret, joinSecret, storeJoinSecret } from './keyring';
 import type { DeviceKeyRing } from './keyring';
@@ -379,10 +379,10 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   const { roster, fold } = await project.state();
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return problem;
-  // Any device of the lead or the deputy invites (MJ-05): the invitation names the project's anchor for the joining device to pin, and this device as
-  // the inviter, which the joining device checks against the roster folded from that anchor.
+  // A lead or deputy device invites (MJ-05) and names the anchor to pin and itself as inviter; in an assignment mode people are posted (33.1-03).
   const inviter = selfAt(shared, roster, headOf(roster).position);
   if (inviter === undefined) return refuse('not-a-roster-writer');
+  if (input.forMember === undefined && inviteClosedByModeAt(roster, {}, headOf(roster).position)) return refused('invite-not-in-mode', inviteNotInModeText(projectModeAt(roster, headOf(roster).position)));
   const at = now(deps);
   const days = input.days ?? INVITE_DEFAULT_DAYS;
   if (!Number.isFinite(days) || days <= 0 || days > 366) throw new Error('An invitation stays open for 1 to 366 days.');

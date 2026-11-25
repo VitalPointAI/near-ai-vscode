@@ -10,7 +10,7 @@
 import { UPDATE_SENTENCE, WRAP_V2_FEATURE, missingFeatures } from '../../domain/replica/features';
 import { isRosterWriterAt } from '../../domain/replica/roster';
 import type { RosterState } from '../../domain/replica/roster';
-import type { AppendOwnResult, ReplicaProject } from './replicaProject';
+import type { AppendOwnOptions, AppendOwnResult, ReplicaProject } from './replicaProject';
 import { clientReplicaFeatures } from './clientFeatures';
 
 export { UPDATE_SENTENCE, clientReplicaFeatures };
@@ -36,9 +36,21 @@ export type RequireArmSkip = { ok: false; skipped: 'already-armed' | 'not-a-lead
  */
 export function ensureRequireArmed(project: Pick<ReplicaProject, 'appendChecked' | 'deviceWriter'>, options: { withWrapV2?: boolean } = {}): Promise<AppendOwnResult | RequireArmSkip> {
   const features = options.withWrapV2 === true ? [REQUIRE_ARMED_FEATURE, WRAP_V2_FEATURE].sort() : [REQUIRE_ARMED_FEATURE];
-  return project.appendChecked<RequireArmSkip>(({ roster }) => {
+  return appendRequire(project, (roster) => {
     if (roster.required.includes(REQUIRE_ARMED_FEATURE)) return { ok: false, skipped: 'already-armed' };
     if (!isRosterWriterAt(roster, project.deviceWriter, roster.positions.length - 1)) return { ok: false, skipped: 'not-a-lead-device' };
-    return { kind: 'roster.require', data: { features }, options: {}, check: () => undefined };
+    return features;
+  });
+}
+
+/**
+ * The one writer of roster.require (33-03; 33.1-03 reuses it for positions@1 and verified-clearance@1): `pick` reads the fold at the moment of the
+ * write and gives the features to require, or a skip. The check and the write are one checked append, so nothing is written twice.
+ */
+export function appendRequire(project: Pick<ReplicaProject, 'appendChecked'>, pick: (roster: RosterState) => readonly string[] | RequireArmSkip, options: AppendOwnOptions = {}): Promise<AppendOwnResult | RequireArmSkip> {
+  return project.appendChecked<RequireArmSkip>(({ roster }) => {
+    const picked = pick(roster);
+    if (!Array.isArray(picked)) return picked as RequireArmSkip;
+    return { kind: 'roster.require', data: { features: [...new Set(picked)].sort() }, options, check: () => undefined };
   });
 }

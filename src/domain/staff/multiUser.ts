@@ -10,6 +10,8 @@
 // It also holds the texts every multi-user result shows (D-13), so a command can show them without loading anything under src/staff/replica/. The
 // setting that switches the multi-user commands on lives with those commands in src/services/staffMultiUserCommands.ts (D-36).
 import { CLEARANCE_SELF_ASSERTED_TEXT, LABELS_NOT_ACCREDITATION_TEXT } from '../gate/labels';
+import type { ModeId } from '../org/modes';
+import { term } from '../org/terms';
 
 /** The replica store folder of a multi-user staff project. */
 export const REPLICA_DIR = '.planning/staff/replica';
@@ -38,4 +40,12 @@ export const SHARED_PROJECT_REFUSAL = 'This project is shared, so its history li
 export function sharedCheckFailedText(code: unknown): string {
   const name = typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(code) ? code : 'an unknown error';
   return `SovAI could not check whether this project is shared: reading ${REPLICA_PROJECT_FILE} failed with ${name}. This step was not done and nothing was written. Check that the folder can be read, then try again.`;
+}
+
+/** Why a plain invitation is refused in an assignment or appointment mode (Phase 33.1 D-11, D-34); filled by inviteNotInModeText. */
+export const INVITE_NOT_IN_MODE_TEXT = 'People join this shared work by {join}. Ask the {tasker} to post them.';
+
+/** INVITE_NOT_IN_MODE_TEXT in the mode's own words (term(), D-22). */
+export function inviteNotInModeText(mode: ModeId): string {
+  return INVITE_NOT_IN_MODE_TEXT.replace('{join}', term('join', mode).toLowerCase()).replace('{tasker}', term('tasker', mode).toLowerCase());
 }

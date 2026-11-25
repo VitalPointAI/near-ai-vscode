@@ -13,8 +13,8 @@ import { carryThroughFake, createLiveWorld, liveInstall } from './helpers/liveWo
 import type { LiveDevice, LiveWorld } from './helpers/liveWorld';
 
 const PRODUCT = 'intel-estimate';
-// A newer version folds everything this one does (wrap@2 too where the probe passes, 33.2 D-05) and positions@1.
-const NEWER = [...clientReplicaFeatures(), 'positions@1'].sort();
+// A newer version folds everything this one does (wrap@2 too where the probe passes, 33.2 D-05) and later@1, a feature this build does not know.
+const NEWER = [...clientReplicaFeatures(), 'later@1'].sort();
 // What a project made shared here requires from creation (D-08), with wrap@2 beside require@1 where this computer knows it (33.2 D-05).
 const ARMED = clientReplicaFeatures().includes(WRAP_V2_FEATURE) ? [REQUIRE_ARMED_FEATURE, WRAP_V2_FEATURE].sort() : [REQUIRE_ARMED_FEATURE];
 
@@ -45,11 +45,11 @@ function textOf(fold: { families: Record<string, unknown> }, stream: string): st
   return ((fold.families.doc as ProductTextOutput[] | undefined) ?? []).find((item) => item.stream === stream && item.product === PRODUCT)?.text;
 }
 
-/** The lead's computer runs a newer version that folds positions@1: it requires it, then writes a product after the requirement. */
+/** The lead's computer runs a newer version that folds later@1: it requires it, then writes a product after the requirement. */
 async function newerLeadRequires(world: LiveWorld): Promise<{ newer: LiveDevice; text: string; required: string }> {
   const lead = world.lead;
   const newerProject = opened(await ReplicaProject.open(lead.at.root, { ...lead.at.deps, knownFeatures: NEWER }), 'the newer lead opens the project');
-  const required = await newerProject.appendOwn('roster.require', { features: ['positions@1'] });
+  const required = await newerProject.appendOwn('roster.require', { features: ['later@1'] });
   assert.ok('ok' in required, 'the lead device writes the requirement');
   const editor = await ProductEditor.open(newerProject, { stream: newerProject.projectId, product: PRODUCT, actor: { kind: 'person' } });
   editor.insert(0, 'Enemy forces hold the bridge.');
@@ -60,7 +60,7 @@ async function newerLeadRequires(world: LiveWorld): Promise<{ newer: LiveDevice;
   return { newer: { ...lead, project: newerProject }, text, required: required.hash };
 }
 
-test('tracer: a newer lead requires positions@1, this computer stops with the update sentence before folding anything else, and keeps every entry', async () => {
+test('tracer: a newer lead requires later@1, this computer stops with the update sentence before folding anything else, and keeps every entry', async () => {
   await withWorld(async (world) => {
     const [, ben] = world.devices;
     const stream = ben.project.projectId;
@@ -82,7 +82,7 @@ test('tracer: a newer lead requires positions@1, this computer stops with the up
   });
 });
 
-test('no loss after the update: the same store opened by a version that folds positions@1 folds every entry, and the text equals the lead\'s', async () => {
+test('no loss after the update: the same store opened by a version that folds later@1 folds every entry, and the text equals the lead\'s', async () => {
   await withWorld(async (world) => {
     const [, ben] = world.devices;
     const stream = ben.project.projectId;
@@ -93,7 +93,7 @@ test('no loss after the update: the same store opened by a version that folds po
       const updated = opened(await ReplicaProject.open(ben.at.root, { ...ben.at.deps, knownFeatures: NEWER }), 'the updated version opens the same store');
       try {
         const { roster, fold } = await updated.state();
-        assert.deepEqual(roster.required, ['positions@1', ...ARMED].sort());
+        assert.deepEqual(roster.required, ['later@1', ...ARMED].sort());
         assert.equal(textOf(fold, stream), text);
         assert.deepEqual(fold.refused, [], 'nothing was refused');
       } finally {
@@ -136,7 +136,7 @@ test('ensureRequireArmed writes once on a lead device and never on a member devi
 test('requireProblem lists the missing features sorted and without repeats, and nothing when this build folds every one', () => {
   assert.equal(requireProblem({ required: [] }), undefined);
   assert.equal(requireProblem({ required: ['require@1', 'replica@2'] }), undefined);
-  assert.deepEqual(requireProblem({ required: ['zeta@1', 'positions@1', 'require@1'] }), { missing: ['positions@1', 'zeta@1'] });
-  assert.equal(requireProblem({ required: ['positions@1'] }, NEWER), undefined, 'a newer build folds it');
+  assert.deepEqual(requireProblem({ required: ['zeta@1', 'later@1', 'require@1'] }), { missing: ['later@1', 'zeta@1'] });
+  assert.equal(requireProblem({ required: ['later@1'] }, NEWER), undefined, 'a newer build folds it');
   assert.equal(UPDATE_SENTENCE, 'This shared work needs a newer version of Sterling. Ask your administrator to update it.');
 });
