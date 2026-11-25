@@ -1,0 +1,20 @@
+{
+  "controls": [
+    "sa-09",
+    "sa-09.08",
+    "sa-10",
+    "sr-05",
+    "sc-07"
+  ],
+  "gap": "G525",
+  "id": "g525",
+  "milestones": [
+    {
+      "title": "Owner decision on a source host in Canada",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "The repository, pull requests, workflow definitions and job dispatch stay on github.com; npm ci reaches HQ's npm registry and runners reach GitHub's published ranges. Decide on a source host and CI control plane at HQ, after its own research and fit check.",
+  "title": "Source code and the CI control plane stay on GitHub (US) after the runner move, and two network paths remain"
+}

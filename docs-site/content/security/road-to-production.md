@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 442 items, 404 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 443 items, 404 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -25,7 +25,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 | --- | --- | --- |
 | [Now, at every level](#now) | 82 | 17 |
 | [From Protected A](#protected-a) | 306 | 4 |
-| [From Protected B](#protected-b) | 12 | 6 |
+| [From Protected B](#protected-b) | 12 | 7 |
 | [From Protected C](#protected-c) | 0 | 1 |
 | [From Confidential](#confidential) | 0 | 1 |
 | [From Secret](#secret) | 0 | 0 |
@@ -488,6 +488,7 @@ These matter from Protected B, where validated cryptography and hardened base im
 - **G519. The vulnerability database is built by Anchore in the US; your organization checks and signs it but does not build it.** The daily Grype database is downloaded only by the gather host, checked against Anchore's listing checksum and signed with your organization's site key before any scanner uses it. Building it with grype-db and vunnel at HQ is the option for independence, after its own fit check (vunnel had a SUS legitimacy verdict on 2026-11-25). Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-07, D-26. Sovereignty: software. Controls: RA-5(2), SR-3, SR-5. Owner role: owner. Tracked as POA&M item g519; first milestone: Owner decision on building the database at HQ (by 2027-05-31).
 - **G520. Most dependencies carry no build provenance and Maven publishers' signatures are not checked, so provenance is recorded where present but cannot be required.** The intake verifies and records npm provenance where it exists and treats provenance present on the previous approved version and absent now as a review flag. Maven artefacts are checked only by the SHA-256 recorded at intake, because Maven Central's checksum files come from the same server. Add PGP signature checks for Maven with a reviewed publisher keyring, and a provenance minimum when coverage allows. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-16, D-21. Sovereignty: software. Controls: SR-4, SR-11, SI-7. Owner role: maintainers. Tracked as POA&M item g520; first milestone: Maven publisher signature check designed (by 2027-05-31).
 - **G524. Facts only the connected gather host can see (publish time, provenance, publisher) reach the signing host as unsigned claims.** The signing host holds the site key and has no internet. It re-derives integrity, registry signatures, install scripts, licences, SBOMs, scans and malware matches from the bytes themselves, so a compromised gather host can misstate only publish time, provenance and publisher. Your organization's authorizing official accepts this, or a second independent source for those facts is added. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-14. Sovereignty: software. Controls: SR-4, SR-11, SI-7. Owner role: owner. Tracked as POA&M item g524; first milestone: Authorizing official's decision on gather-host claims recorded (by 2027-05-31).
+- **G525. Source code and the CI control plane stay on GitHub (US) after the runner move, and two network paths remain.** After 48.3-23 to 48.3-25, builds run and publish in Canada, but the repository, pull requests, workflow definitions and job dispatch stay on github.com, and two network paths stay open by design: \`npm ci\` in image builds reaches your organization's npm registry at HQ over the network (inside HQ), and runner machines reach GitHub's published address ranges to take jobs. A source host and CI control plane at HQ is the remaining step, after its own research and fit check. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-30, D-33. Sovereignty: software, switch-off. Controls: SA-9, SA-9(8), SA-10, SR-5, SC-7. Owner role: owner. Tracked as POA&M item g525; first milestone: Owner decision on a source host in Canada (by 2027-05-31).
 
 ## From Protected C {#protected-c}
 
