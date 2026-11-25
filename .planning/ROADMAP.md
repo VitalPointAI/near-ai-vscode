@@ -717,12 +717,36 @@ Plans:
 4. Assess Unclassified and Protected A first. Review Protected B, the Classified appliance, and each applicable overlay when scope is established. Authorization remains with the responsible organization.
 5. The submission review confirms that the report's applicable sponsor and deployment fields contain verified entries, with a rationale and authority for each exclusion. Its diagrams reflect the assessed deployment's components, trust boundaries, data flows, and operating dependencies. The submission includes the linked evidence, completed applicable forms, sponsor concurrence, independent assessor findings, and the authorized decision or the sponsor's confirmed submission route and outstanding decision step. Generated draft text and unfilled fields remain tracked until the sponsor or assessor supplies the required information.
 
-**Plans:** 4 planned waves, starting with the evidence pipeline and the existing supplier control mappings.
+**Requirements**: COVR-01 to COVR-05 (coverage amendment, 2026-11-25); extends ACCR-03, ACCR-04, ACCR-06, ACCR-07 and ACCR-10.
+
+**Coverage amendment (2026-11-25, owner brief):** the dashboard at 32007751 has 12,242 component cells reading "No statement yet", because every component is assessed against every control. The amendment adds a reviewed per-component applicability map (a component with no part shows "Not applicable to this component" with its reason; estimated about 8,016 cells, two thirds), statements and evidence for every applicable pair (about 1,787 pairs, of which about 275 are generated from the inventory), a rule that a statement needs evidence a CI job reports, and a coverage ratchet in the required `docs` job. Order: Unclassified and Protected A, then Protected B, then the appliance and the overlays. Decisions in `44.1-CONTEXT.md`, measurement and estimate in `44.1-RESEARCH.md`, cross-phase pairs in `44.1-HANDOFFS.md`.
+
+**Plans:** 24 plans: the first 4 as planned, then the coverage amendment's 20 plans in 8 waves (05, then 06 and 08, then 07, then 09, then 10 to 21 in parallel, then 22, 23 and 24).
 
 - [x] 44.1-01-PLAN.md: Verify evidence reaches the local assessor package and map existing audit and incident practices with their documented limits. Check the published bundle after the reviewed release.
-- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner.
-- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions.
+- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner (amended: triage over applicable cells once 44.1-07 lands).
+- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions (amended: product steps in 44.1-23 and 44.1-24).
 - [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
+- [ ] 44.1-05-PLAN.md: Tracer: one component's "Not applicable to this component" with its reason, from a signed rule to the real hosted level.
+- [ ] 44.1-06-PLAN.md: The full applicability rules from the catalogue, the generated map and its drift check, and your organization's stage 1 review.
+- [ ] 44.1-07-PLAN.md: The coverage measure and ratchet in the required docs job, the stage 1 sign-off, and the machinery gate.
+- [ ] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
+- [ ] 44.1-09-PLAN.md: Supply-chain and inventory statements for every component, generated from the inventory with each component's evidence.
+- [ ] 44.1-10-PLAN.md: Extension statements and evidence.
+- [ ] 44.1-11-PLAN.md: Hub statements and evidence.
+- [ ] 44.1-12-PLAN.md: Release pipeline (the supplier's process) statements and evidence.
+- [ ] 44.1-13-PLAN.md: Model endpoints and relay statements and evidence, with links for the relay's unbuilt messaging.
+- [ ] 44.1-14-PLAN.md: Workbench statements and evidence.
+- [ ] 44.1-15-PLAN.md: Keycloak statements and evidence.
+- [ ] 44.1-16-PLAN.md: oauth2-proxy and Theia Cloud statements and evidence.
+- [ ] 44.1-17-PLAN.md: OpenBao and HSM statements and evidence.
+- [ ] 44.1-18-PLAN.md: RKE2 and cert-manager statements and evidence.
+- [ ] 44.1-19-PLAN.md: Ingress and image registry statements and evidence.
+- [ ] 44.1-20-PLAN.md: Offline bundle statements and evidence.
+- [ ] 44.1-21-PLAN.md: Site logging and site storage statements and evidence.
+- [ ] 44.1-22-PLAN.md: Integration: held rows, new gaps, the full suite once, the measured coverage and both statement gates.
+- [ ] 44.1-23-PLAN.md: Protected B: statements checked against its expectations and the stage 2 sign-off.
+- [ ] 44.1-24-PLAN.md: The appliance and the overlays in the map, after 44.1-03's scope decision, and the stage 3 sign-off.
 
 ### Export-controlled technical data: Controlled Goods Program and ITAR (Phase 45, added 2026-11-20)
 
@@ -768,33 +792,39 @@ Plans:
 - [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
 
 ### Phase 45.2: NATO and Five Eyes exchange, part 2: ZTDF and the NATO texts (INSERTED)
-**Goal**: Your organization's exports to allies carry labels, a binding and core metadata exactly as ADatP-4774, 4778, 4778.2 and 5636 define them, in the label policy of the information's owner with the provenance of every value shown, conformant to the principles of the AC322 Data Centric Reference Architecture, inside a ZTDF-compatible object built on the public OpenTDF specification whose key access reaches a partner's key access server; partners' objects in those forms are read, checked and held until a person accepts them. ZTDF conformance stays unverified until ACP-240(A) or a partner's KAS with its own samples is available.
+**Goal**: Your organization's exports to allies carry labels, a binding and core metadata exactly as ADatP-4774, 4778, 4778.2 and 5636 define them, in the label policy of the information's owner with the provenance of every value shown, conformant to the principles of the AC322 Data Centric Reference Architecture, inside a ZTDF-compatible object built on the public OpenTDF specification whose key access reaches a partner's key access server; partners' objects in those forms are read, checked and held until a person accepts them, and partners' files in formats that are not ZTDF are accepted into quarantine, kept as our protected cell plus a ZTDF-compatible form where conversion is possible, and never trusted beyond what their source proves. ZTDF conformance stays unverified until ACP-240(A) or a partner's KAS with its own samples is available.
 **Inserted**: 2026-11-24 as a stub (research row J); planned 2026-11-24 on `docs/phase-45.2-plan` from the texts the owner provided: AC/322-D(2025)0056 (DCRA v2, used for its principles and not in place of ACP-240(A), which defines ZTDF and is not held), ADatP-4774, ADatP-4778, ADatP-4778.2, ADatP-5636 and 5636.1 (local, gitignored, cited by section only), and the public OpenTDF specification 4.3.0 as the base for a ZTDF-compatible profile; label values not yet verified are drafted as tracked assumptions with provenance (owner, 2026-11-24). Owner defaults confirmed 2026-11-24.
-**Depends on**: Phase 45.1 (45.1-01 for 45.2-01, 45.1-02 for 45.2-05, 45.1-03 for 45.2-06, 45.1-04 for 45.2-07, 45.1-05 for 45.2-08) and, through it, Phase 71 (core); 46-07 for the workbench tasks; PR #191 (gap register fields) for 45.2-08 and 45.2-11. ACP-240(A), verified label policies and partner samples are not prerequisites: each is swapped in by a gap-closure plan when it arrives (`45.2-RESEARCH.md` section 10).
-**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08
+**Depends on**: Phase 45.1 (45.1-01 for 45.2-01, 45.1-02 for 45.2-05, 45.1-03 for 45.2-06 and 45.2-13, 45.1-04 for 45.2-07, 45.1-05 for 45.2-08); Phase 70.1's 70.1-01 on main before wave 6 (45.2-16 reuses its marking reader) and, through it, Phase 71 (core); 46-07 for the workbench tasks; PR #191 (gap register fields) for 45.2-08 and 45.2-11. ACP-240(A), verified label policies and partner samples are not prerequisites: each is swapped in by a gap-closure plan when it arrives (`45.2-RESEARCH.md` section 10).
+**Requirements**: XCHG-05, XCHG-06, XCHG-07, XCHG-08, XCHG-09
 **Success Criteria** (what must be TRUE):
   1. Every export carries an ADatP-4774 originator label in the information owner's policy and an alternative label in the common partner policy, written from label policy profiles your security officer adopted, each value showing its provenance; an operational export that would use an assumed value is refused unless your security officer records an exception; a partner's labels are mapped in and joined, never lowered, and an unmappable label is refused. (XCHG-05)
   2. Every export carries an ADatP-4778 binding object with the seven ADatP-5636 mandatory metadata elements, signed by your organization's release key to the ADatP-4778.2 cryptographic artefact profile; partner binding objects and sidecar files are read in every form the texts allow, and a changed label, metadata entry or payload is refused. (XCHG-06)
   3. A ZTDF-compatible object on OpenTDF 4.3.0 carries the label and the binding as signed assertions, with every point where ZTDF may differ behind one profile; key access reaches partner key access servers listed and pinned in the signed policy, both ways; classical key access is capped at Protected B or its equivalent, recorded, and refused from 2036. (XCHG-07)
   4. An AC322 conformance matrix cites a passing test for every claim; control statements and the hosted registers carry evidence; our XML is checked against the texts' own schemas; a development round trip runs against the OpenTDF quickstart's KAS, and an acceptance trial with an ally's or vendor's KAS and its own samples is the acceptance check. (XCHG-08)
-**Research flags**: (1) AC322 is an architecture blueprint, not a ZTDF specification; never cite it for ZTDF. (2) No text, schema or example from an ADatP enters the repository; NATO values appear only in the NATO profile file and its test. (3) Signed bindings follow ADatP-4778.2 but are not yet checked with a partner (G384). (4) Not a cross-domain guard. (5) Partners have no post-quantum key access type (G356). (6) The texts' printed examples contain errata (research section 8). (7) The Canadian label policy is assumed and has no OID (G355).
-**Undo cost**: Medium. The label tables, profiles and partner pins are policy data; the exchange record values are permanent (settled at 45.2-07's checkpoint); the ZTDF profile is swappable by design.
-**Plans:** 12 plans in 9 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-23, all owner defaults confirmed 2026-11-24, owner actions and a hand-off ledger in `45.2-CONTEXT.md`)
+  5. Partners' files in formats that are not ZTDF (OpenTDF and TDF3 objects, binding objects and sidecars, labelled Office documents, marked and unlabelled files) arrive in quarantine through one adapter per format, are kept as our protected cell plus a ZTDF-compatible form where conversion is possible, with what was lost or assumed recorded, are never shown or kept as more trusted than their source proves, and become work only through an exchange officer's label, which never lowers the sender's; no key is ever unwrapped with RSA-OAEP SHA-1. (XCHG-09)
+**Research flags**: (1) AC322 is an architecture blueprint, not a ZTDF specification; never cite it for ZTDF. (2) No text, schema or example from an ADatP enters the repository; NATO values appear only in the NATO profile file and its test. (3) Signed bindings follow ADatP-4778.2 but are not yet checked with a partner (G384). (4) Not a cross-domain guard. (5) Partners have no post-quantum key access type (G356). (6) The texts' printed examples contain errata (research section 8). (7) The Canadian label policy is assumed and has no OID (G355). (8) ITSP.40.111 v5 does not recommend SHA-1, so stock OpenTDF senders' OAEP SHA-1 keys open only through their own key server (G455), and 2048-bit partner RSA keys end with 2030 (G502). (9) Labelled mail and chat are a NATO form but not built here (G503).
+**Undo cost**: Medium. The label tables, profiles and partner pins are policy data; the exchange record values are permanent (settled at 45.2-13's checkpoint, which replaced 45.2-07's); the ZTDF profile is swappable by design; the inbound adapters are added and removed in one registry.
+**Plans:** 17 plans in 10 waves (planned 2026-11-24 on `docs/phase-45.2-plan`; decisions D-01 to D-23, all owner defaults confirmed 2026-11-24, owner actions and a hand-off ledger in `45.2-CONTEXT.md`; amended 2026-11-25 on `docs/phase-45.2-inbound-adapters` with inbound format adapters, D-24 to D-35, seven defaults accepted by the owner 2026-11-25)
 **UI hint**: yes
 
 Plans:
 - [ ] 45.2-01-PLAN.md: Wave 1. Tracer: our own narrow XML reader and writer (4778.2 normalization); one label out as ADatP-4774 and back
 - [ ] 45.2-11-PLAN.md: Wave 1. Label policy profiles with provenance (NATO public-unverified, Canadian DND/CAF assumed), the operational rule, a gap row per unverified value
+- [ ] 45.2-13-PLAN.md: Wave 1. Inbound adapter interface, the record values checkpoint, tracer: an unlabelled partner file held and labelled by a person; never more trusted, never lower
+- [ ] 45.2-14-PLAN.md: Wave 1. One hardened archive reader for arrivals and the Office tools; the no-fetch rule for inbound adapters
 - [ ] 45.2-02-PLAN.md: Wave 2. The `labelXml` table adopting the profiles, every 4774 structure from the text's examples, labels coming in
 - [ ] 45.2-03-PLAN.md: Wave 2. ADatP-4778 binding objects with the ADatP-5636 mandatory metadata; sidecar files; every binding form read
 - [ ] 45.2-04-PLAN.md: Wave 3. Signed bindings to the ADatP-4778.2 cryptographic artefact profile; the `release-p256-<site>` key and certificate; key inventory rows
 - [ ] 45.2-05-PLAN.md: Wave 3. Part 2b: the ZTDF-compatible profile on OpenTDF 4.3.0, extending 45.1-02
 - [ ] 45.2-06-PLAN.md: Wave 4. Key access to partner key access servers (push and pull); partners, trust anchors and profile overrides in `exchangePartners`; the classical-key cap
-- [ ] 45.2-07-PLAN.md: Wave 5. The record checkpoint, NATO-format export and import with provenance, the native screens
-- [ ] 45.2-08-PLAN.md: Wave 6. AC322 conformance matrix, SECURITY.md, crypto inventory, data flow, control statements, G356 and G384, the exchange register rows
-- [ ] 45.2-09-PLAN.md: Wave 7. Schema and copy checks against the texts, full suites once, the integration PR after the owner's gate approval
-- [ ] 45.2-10-PLAN.md: Wave 8. Conformance harness and the development round trip against the OpenTDF quickstart's KAS (pinned, reviewed, registered first)
-- [ ] 45.2-12-PLAN.md: Wave 9. Acceptance trial with an ally's or vendor's KAS and its own samples (waits for them)
+- [ ] 45.2-15-PLAN.md: Wave 5. Inbound OpenTDF and TDF3 objects (OAEP SHA-1 senders only through rewrap, per ITSP.40.111 v5), ZTDF-profile objects kept as received, the ZTDF-compatible stored form, G455
+- [ ] 45.2-07-PLAN.md: Wave 6. NATO-format export recorded, the export dialog, the import dialog and the Received objects card with exchange-officer decisions
+- [ ] 45.2-16-PLAN.md: Wave 6. Inbound binding objects (standalone, sidecar, embedded, in Office packages) and marked files; every adapter under fuzz
+- [ ] 45.2-08-PLAN.md: Wave 7. AC322 conformance matrix, SECURITY.md, crypto inventory, data flow, control statements, G356 and G384, the exchange register rows
+- [ ] 45.2-17-PLAN.md: Wave 7. Markings on PDF files read in the workbench backend with the PDF reader the image already ships
+- [ ] 45.2-09-PLAN.md: Wave 8. Schema and copy checks against the texts, full suites once, the integration PR after the owner's gate approval
+- [ ] 45.2-10-PLAN.md: Wave 9. Conformance harness (every arrival format too) and the development round trip against the OpenTDF quickstart's KAS (pinned, reviewed, registered first)
+- [ ] 45.2-12-PLAN.md: Wave 10. Acceptance trial with an ally's or vendor's KAS and its own samples (waits for them)
 
 ### Phase 46: Native Theia foundation
 **Goal**: The Sterling workbench becomes a real, tested Theia product: its extension lives in a workspace package with its own build, tests and CI job; native widgets call engine code through one backend service pattern; every secret a person saves is stored per person in your organization's OpenBao (or the OS keyring on a single machine) and survives restarts; long-term keys never enter the session; the session knows who signed in; nothing in the image calls out except to addresses your policy lists.
@@ -930,6 +960,40 @@ Plans:
 - [ ] 48.1-18-PLAN.md: Wave 6. Statements and evidence rules for the 48.1 controls
 - [ ] 48.1-21-PLAN.md: Wave 6. Key separation in the inventory, key plan, playbooks and fit register text
 - [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench once Phase 71 (core)'s credential release check and 33.1's observer waves are on main: access and visit-clearance credentials, the agreements record and the clearance level for marked material (48.1-HANDOFFS.md H-18)
+
+### Phase 48.2: Live compliance evidence in the workbench (INSERTED)
+**Goal**: A Sterling Sovereign AI workbench, fresh from install or from a plain `docker run`, opens the Compliance view on its release's own evidence, verified against keys from your organization's configuration, with every state and freshness judged against the current time; at a site, the site's own evidence arrives live on top; nothing that cannot be verified is shown as passing.
+**Inserted**: 2026-11-25 from the owner's direction of 2026-11-24 and 2026-11-25 ("yes, plan that as long as the compliance evidence is always a real-time understanding of the product's compliance status"): the image shipped with no evidence and the view told people to mount the public projection.
+**Depends on**: Phases 44 and 48 (the status engine, evidence bundle, signed site evidence export); 46-09 for 48.2-07 (the release workflow); 47-32 (the live mount pattern), 48.1-15 (Kubernetes auth), 48.1-17 (site-key signing), 47-29 (offline rescan), 48-07 and 48-08 (statements) for the later waves. Waves 1 to 5 need nothing else in flight.
+**Requirements**: LCE-01, LCE-02, LCE-03, LCE-04, LCE-05, LCE-06, LCE-07, LCE-08, LCE-09, LCE-10
+**Success Criteria** (what must be TRUE):
+  1. Every release image carries its SBOM, vulnerability scan, evidence bundle with the engine's inputs, OSCAL package, gap register and road-to-production page in one data-only layer under a manifest the release key signs, and the view shows them as of the release build. (LCE-01)
+  2. Every cell shows its source, as-of time, freshness (Current, Ageing, Out of date) and verification, re-judged by the one status engine every 60 seconds and on every change; a vulnerability scan ages from its database's build date and goes out of date past the policy threshold, and a site rescan with a newer signed database brings it back. (LCE-02, LCE-03, LCE-06)
+  3. Evidence is verified before display against your organization's site key (or a release key a person configured on a single computer); a tampered source shows nothing but its reason, and an unverifiable one shows Not verified and never passes. (LCE-04)
+  4. A site collector's in-cluster facts and the operator's signed export, rescan and agreements reach every session within the collect interval plus about two minutes through a read-only mount, each with its own time, never cached as if current; air-gapped and disconnected edges work from local signed sources only. (LCE-05, LCE-06, LCE-09)
+  5. The view layers release then site evidence, keeps "Authorization is your organization's decision", and in Restricted Mode with no site evidence shows the release evidence clearly labelled, in the original theme with lifted cards. (LCE-07)
+  6. `compliance:refresh` writes the public projection 0644 so the README's read-only mount works for the workbench user; the phase's statements, evidence rules, documents and gap rows G475 to G479 exist. (LCE-08, LCE-10)
+**Plans:** 17 plans in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`, revised the same day after the independent plan check; decisions D-01 to D-30, six owner questions, defaults accepted by the owner 2026-11-25, hand-offs H-1 to H-10 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
+**UI hint**: yes (`48.2-UI-SPEC.md`, approved by the owner 2026-11-25; 48.2-10 Task 1 still checks that it is on main)
+
+Plans:
+- [ ] 48.2-01-PLAN.md: Wave 1. Tracer: a judgement re-judged now by the backend over a checked release folder; every bundle's judgement with full parity; the view's first use
+- [ ] 48.2-02-PLAN.md: Wave 1. compliance:refresh writes the public projection 0644 and 0755 with a umask test; gap rows G475 to G479 (after `feat/phase-48-statements`); wave 1's gate
+- [ ] 48.2-03-PLAN.md: Wave 2. Freshness in the engine: Current, Ageing, Out of date; the default table with the vulnerability and live kinds; tighten-only policy; the clock case; site observations replace release ones
+- [ ] 48.2-04-PLAN.md: Wave 2. A Node verifier for cosign key-mode P-256 bundles held equal to the pinned cosign; anchors only from configuration and checked against the site key; Verified, Not verified, Did not verify
+- [ ] 48.2-05-PLAN.md: Wave 3. The release evidence writer, content and command: SBOM, the scan dated by its database, the compliance package, the gap register and road-to-production; the no-package and no-bundle forms
+- [ ] 48.2-06-PLAN.md: Wave 3. Site evidence formats: the trust document your site key signs with the collector's key versions, the live feed, the operator's export, rescan and agreements, verification to observations
+- [ ] 48.2-17-PLAN.md: Wave 3. Only the install identity may write the trust anchor (Kyverno policy and Roles); every session gets the site key from the site file to check the anchor against
+- [ ] 48.2-07-PLAN.md: Wave 4 (after 46-09). The image build order, hotfixes included: the software image, its SBOM and scan, one data-only evidence layer proven by one script; the manifest signed in key mode with the P-256 release key
+- [ ] 48.2-08-PLAN.md: Wave 4. The live site layer in the session: the read-only mount watched, verified, layered and re-judged; the long poll; control text; the projection as a Not verified source
+- [ ] 48.2-09-PLAN.md: Wave 5. The site collector program: in-cluster facts with their own times, signed through OpenBao Transit at the trust document's key version, written to the live ConfigMap
+- [ ] 48.2-10-PLAN.md: Wave 5 (starts with the approved UI-SPEC). The Compliance view: release then site cards, the four facts per cell, Restricted Mode, live updates
+- [ ] 48.2-11-PLAN.md: Wave 6 (after 47-32). The collector CronJob, least-rights RBAC, the live and operator ConfigMaps, the projected session mount, network reach, the interval setting
+- [ ] 48.2-16-PLAN.md: Wave 6. The one focused browser check of the view on the built image: Restricted Mode, live site evidence, tampered, anchor mismatch, projection
+- [ ] 48.2-12-PLAN.md: Wave 7 (after 48.1-15 and 48.1-17). The collector's Transit key, versions and audience-bound sign-only role; the site trust document signed with your site key and installed as the install identity
+- [ ] 48.2-13-PLAN.md: Wave 8. Release evidence re-signed with the site key at bundle build and installed; one command to publish operator evidence as the publish identity; the site evidence runbook with key rotation
+- [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
+- [ ] 48.2-15-PLAN.md: Wave 10 (after 48-07 and 48-08). Statements and evidence rules, the documents with the real-time table, the full suites once, the release-preview check and the owner gate
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -2191,6 +2255,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 47. On-premise deployment stack and offline bundle | 21/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
+| 48.2. Live compliance evidence in the workbench | 0/17 | Planned 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

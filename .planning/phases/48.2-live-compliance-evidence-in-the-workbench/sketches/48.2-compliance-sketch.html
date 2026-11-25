@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>48.2 Compliance view: UI sketch, original theme with lifted cards (not shipped)</title>
+<!--
+  Throwaway sketch for the owner's review of 48.2-UI-SPEC.md. Not product code. Self-contained: no external requests.
+  Original theme (rounded cards, state badges with a 3px bar, the existing state colours) with the lifted cards of the
+  approved 74.3 contract ("Elevation"). The .dark and .light blocks stand in for Theia theme variables, so every other
+  rule uses --theia-* names and the --sterling-* tokens derived from them. Icons are inline SVG stand-ins for the
+  codicons the spec names. Sizes 13, 16, 20, 28px; weights 400 and 600; spacing 4, 8, 16, 24, 32, 48.
+  Fictional site, times and counts. "Now" in this sketch is 25 Nov 2026 14:02 UTC.
+-->
+<style>
+.dark {
+  --theia-ui-font-family: system-ui, sans-serif;
+  --theia-editor-font-family: ui-monospace, monospace;
+  --theia-editor-background: #181a1f;
+  --theia-editorWidget-background: #252830;
+  --theia-panel-border: #3a3f4b;
+  --theia-foreground: #d7dae0;
+  --theia-descriptionForeground: #9aa2b1;
+  --theia-focusBorder: #ee7887;
+  --theia-button-secondaryBackground: #343a46;
+  --theia-button-secondaryForeground: #d7dae0;
+  --theia-textLink-foreground: #6cb6ff;
+  --theia-editorWarning-foreground: #e5b95c;
+  --theia-errorForeground: #f48771;
+  --theia-input-background: #1b1e24;
+  --theia-input-border: #4a5060;
+  --theia-list-hoverBackground: #2a2d35;
+  --theia-textCodeBlock-background: #111317;
+  --theia-statusBar-background: #a62031;
+  --theia-statusBar-foreground: #ffffff;
+  --theia-widget-shadow: rgba(0, 0, 0, .55);
+  --sterling-state-met: #4ebba9;
+  --sterling-state-partly-met: #e1a652;
+  --sterling-state-not-met: #ed7d92;
+  --sterling-state-stale: #b39ae4;
+  --sterling-state-not-applicable: #8995a9;
+  --sterling-state-your-organizations-responsibility: #82ace9;
+  --sterling-card-surface: color-mix(in srgb, var(--theia-editorWidget-background) 94%, var(--theia-foreground) 6%);
+  --sterling-card-highlight: inset 0 1px 0 color-mix(in srgb, var(--theia-foreground) 10%, transparent);
+}
+.light {
+  --theia-ui-font-family: system-ui, sans-serif;
+  --theia-editor-font-family: ui-monospace, monospace;
+  --theia-editor-background: #ffffff;
+  --theia-editorWidget-background: #f8f8f8;
+  --theia-panel-border: #d4d4d4;
+  --theia-foreground: #1f1f1f;
+  --theia-descriptionForeground: #5f5f5f;
+  --theia-focusBorder: #a62031;
+  --theia-button-secondaryBackground: #e4e4e4;
+  --theia-button-secondaryForeground: #1f1f1f;
+  --theia-textLink-foreground: #005fb8;
+  --theia-editorWarning-foreground: #8a5a00;
+  --theia-errorForeground: #b3261e;
+  --theia-input-background: #ffffff;
+  --theia-input-border: #8a8a8a;
+  --theia-list-hoverBackground: #f0f0f0;
+  --theia-textCodeBlock-background: #f3f3f3;
+  --theia-statusBar-background: #a62031;
+  --theia-statusBar-foreground: #ffffff;
+  --theia-widget-shadow: rgba(0, 0, 0, .16);
+  --sterling-state-met: #13796f;
+  --sterling-state-partly-met: #b26515;
+  --sterling-state-not-met: #ba3d58;
+  --sterling-state-stale: #7858a1;
+  --sterling-state-not-applicable: #778498;
+  --sterling-state-your-organizations-responsibility: #3b67a9;
+  --sterling-card-surface: var(--theia-editor-background);
+  --sterling-card-highlight: inset 0 0 0 transparent;
+}
+body {
+  --sterling-elevation-1: 0 1px 2px var(--theia-widget-shadow), 0 4px 12px color-mix(in srgb, var(--theia-widget-shadow) 50%, transparent);
+  --sterling-state-not-verified: var(--theia-editorWarning-foreground);
+  --sterling-chart-track: color-mix(in srgb, var(--theia-editor-background) 89%, var(--theia-foreground));
+  margin: 0; padding: 32px; background: var(--theia-editor-background); color: var(--theia-foreground);
+  font: 13px/1.5 var(--theia-ui-font-family);
+}
+* { box-sizing: border-box; }
+.sk-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+.sk-head h1 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 0; }
+.sk-head p { margin: 4px 0 0; color: var(--theia-descriptionForeground); max-width: 90ch; }
+.sk-cap { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 48px 0 8px; }
+.sk-cap + p { margin: 0 0 16px; color: var(--theia-descriptionForeground); max-width: 90ch; }
+.sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(560px, 100%), 1fr)); gap: 24px; align-items: start; }
+.sk-frame { border: 1px dashed var(--theia-panel-border); }
+.sk-frame > .sk-label { margin: 0; padding: 4px 16px; border-bottom: 1px dashed var(--theia-panel-border); color: var(--theia-descriptionForeground); }
+
+.ic { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -3px; }
+.ic.fill { fill: currentColor; stroke: none; }
+
+/* the view */
+.view { container-type: inline-size; background: var(--theia-editor-background); overflow-anchor: none; }
+.page { max-width: 1200px; margin-inline: auto; padding: 32px 32px 48px; display: grid; gap: 16px; }
+@container (max-width: 680px) { .page { padding-inline: 16px; } }
+h1 { font-size: 28px; font-weight: 600; line-height: 1.15; margin: 0 0 8px; }
+h2 { font-size: 20px; font-weight: 600; line-height: 1.25; margin: 8px 0 0; }
+h3 { font-size: 16px; font-weight: 600; line-height: 1.25; margin: 0; overflow-wrap: anywhere; }
+p { margin: 0; }
+strong { font-weight: 600; }
+.muted { color: var(--theia-descriptionForeground); }
+.mono { font-family: var(--theia-editor-font-family); }
+.heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px 24px; }
+.heading > div > p { max-width: 68ch; color: var(--theia-descriptionForeground); }
+.heading-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.live { display: inline-flex; gap: 4px; align-items: center; color: var(--theia-descriptionForeground); }
+button, select, input { font: inherit; }
+.btn { min-height: 32px; padding: 4px 16px; border-radius: 5px; border: 1px solid var(--theia-panel-border); background: var(--theia-button-secondaryBackground); color: var(--theia-button-secondaryForeground); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.btn[disabled] { opacity: .65; cursor: default; }
+:is(button, select, input, a, summary, pre, [tabindex]):focus-visible { outline: 2px solid var(--theia-focusBorder); outline-offset: 2px; }
+a { color: var(--theia-textLink-foreground); }
+
+.card { background: var(--sterling-card-surface); border: 1px solid var(--theia-panel-border); border-radius: 12px; box-shadow: var(--sterling-card-highlight), var(--sterling-elevation-1); padding: 16px; }
+@container (min-width: 870px) { .card.roomy { padding: 24px; } }
+.sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; align-items: start; }
+.source { display: grid; gap: 8px; }
+.source-title { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; justify-content: space-between; }
+.source-title h3 { display: inline-flex; gap: 4px; align-items: center; }
+.source-title h3 .ic { color: var(--theia-descriptionForeground); }
+dl.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px 16px; margin: 0; }
+dl.facts dt { color: var(--theia-descriptionForeground); }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+.line { display: flex; gap: 4px; align-items: flex-start; }
+.vbadge { display: inline-flex; gap: 4px; align-items: center; border: 1px solid currentColor; border-radius: 8px; padding: 0 8px; white-space: nowrap; }
+.vbadge[data-v=verified] { color: var(--theia-foreground); }
+.vbadge[data-v=not-verified] .ic, .w { color: var(--theia-editorWarning-foreground); }
+.vbadge[data-v=did-not-verify] .ic, .e { color: var(--theia-errorForeground); }
+.vbadge span { color: var(--theia-foreground); }
+.s { color: var(--sterling-state-stale); }
+.notice { display: flex; gap: 8px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--theia-panel-border); border-inline-start: 3px solid var(--theia-editorWarning-foreground); background: var(--sterling-card-surface); box-shadow: var(--sterling-card-highlight), var(--sterling-elevation-1); }
+.notice[data-tone=error] { border-inline-start-color: var(--theia-errorForeground); }
+.notice[data-tone=error] > .ic { color: var(--theia-errorForeground); }
+.notice[data-tone=warning] > .ic { color: var(--theia-editorWarning-foreground); }
+.only-line { display: flex; gap: 4px; color: var(--theia-descriptionForeground); }
+details > summary { cursor: pointer; min-height: 24px; }
+pre.command { margin: 0; padding: 8px 16px; border-radius: 5px; background: var(--theia-textCodeBlock-background, var(--theia-editorWidget-background)); font: 13px/1.5 var(--theia-editor-font-family); overflow-x: auto; white-space: pre; }
+
+.attention { border-inline-start: 3px solid var(--sterling-state-not-met); display: grid; gap: 8px; }
+.attention h3 { font-size: 16px; }
+.warn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px; }
+.warn { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 8px; min-height: 32px; border-radius: 5px; font-weight: 600; text-align: start; color: var(--theia-foreground); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--st) 42%, var(--sterling-card-surface)); background: color-mix(in srgb, var(--st) 8%, var(--sterling-card-surface)); }
+.warn .ic { color: var(--st); }
+.warn strong { font-variant-numeric: tabular-nums; }
+.warn[aria-pressed=true] { border-color: var(--theia-focusBorder); }
+
+.filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); align-items: end; gap: 8px 16px; }
+.filters > .btn { justify-self: start; }
+.filters label { display: grid; gap: 4px; font-weight: 600; min-width: 0; }
+.filters :is(select, input) { min-height: 32px; padding: 4px 8px; border-radius: 5px; width: 100%; font-weight: 400; background: var(--theia-input-background); color: var(--theia-foreground); border: 1px solid var(--theia-input-border); }
+
+.visuals { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 5fr); gap: 16px; align-items: stretch; }
+@container (max-width: 870px) { .visuals { grid-template-columns: minmax(0, 1fr); } }
+.chart-hint { color: var(--theia-descriptionForeground); margin-top: 4px; }
+.status-body { display: grid; grid-template-columns: minmax(104px, 160px) minmax(0, 1fr); align-items: center; gap: 16px; margin-top: 16px; }
+.donut { width: min(100%, 160px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; }
+.donut-centre { width: 72%; aspect-ratio: 1; border-radius: 50%; background: var(--sterling-card-surface); display: grid; align-content: center; justify-items: center; gap: 4px; }
+.donut-centre strong { font-size: 28px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.donut-centre span { color: var(--theia-descriptionForeground); }
+.legend { display: grid; gap: 4px; }
+.legend button { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 4px 8px; min-height: 24px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--theia-foreground); text-align: start; cursor: pointer; }
+.legend button:hover { background: var(--theia-list-hoverBackground); }
+.legend strong { font-variant-numeric: tabular-nums; }
+.sw { width: 8px; height: 8px; border-radius: 2px; background: var(--st); }
+[data-st=met] { --st: var(--sterling-state-met); }
+[data-st=partly-met] { --st: var(--sterling-state-partly-met); }
+[data-st=not-met] { --st: var(--sterling-state-not-met); }
+[data-st=stale] { --st: var(--sterling-state-stale); }
+[data-st=not-verified] { --st: var(--sterling-state-not-verified); }
+[data-st=not-applicable] { --st: var(--sterling-state-not-applicable); }
+[data-st=org] { --st: var(--sterling-state-your-organizations-responsibility); }
+
+.table-region { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+caption { text-align: start; }
+caption h3 { margin-bottom: 4px; }
+caption p { color: var(--theia-descriptionForeground); margin-bottom: 8px; }
+th, td { padding: 4px 8px; border-bottom: 1px solid var(--theia-panel-border); text-align: end; vertical-align: top; }
+thead th { font-weight: 600; white-space: nowrap; }
+th[scope=row], thead th:first-child { text-align: start; font-weight: 400; }
+tfoot th, tfoot td { font-weight: 600; border-bottom: 0; }
+.lvl { display: grid; gap: 4px; width: 100%; min-height: 24px; padding: 4px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--theia-foreground); text-align: start; cursor: pointer; }
+.lvl:hover { background: var(--theia-list-hoverBackground); }
+.lvl small { color: var(--theia-descriptionForeground); font-size: 13px; }
+.bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--sterling-chart-track); }
+.bar span { background: var(--st); }
+
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.columns.single { grid-template-columns: minmax(0, 1fr); }
+@container (max-width: 650px) { .columns { grid-template-columns: minmax(0, 1fr); } }
+.results-title { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; margin: 24px 0 8px; }
+.results-title h2 { margin: 0; }
+ul.controls { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--theia-panel-border); }
+ul.controls button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: start; padding: 8px; border: 0; border-bottom: 1px solid var(--theia-panel-border); background: transparent; color: var(--theia-foreground); text-align: start; cursor: pointer; }
+ul.controls button:hover { background: var(--theia-list-hoverBackground); }
+ul.controls button[aria-expanded=true] { background: color-mix(in srgb, var(--theia-focusBorder) 10%, var(--theia-editor-background)); }
+ul.controls strong { overflow-wrap: anywhere; }
+.badge { display: inline-block; border-inline-start: 3px solid var(--st, var(--theia-descriptionForeground)); padding-inline-start: 8px; font-weight: 600; white-space: nowrap; }
+.factsline { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--theia-descriptionForeground); }
+.factsline > span { display: inline-flex; gap: 4px; align-items: center; }
+.factsline .ic { color: var(--theia-descriptionForeground); }
+.factsline .w { color: var(--theia-editorWarning-foreground); }
+.factsline .s { color: var(--sterling-state-stale); }
+.more { margin-top: 16px; }
+.detail { display: grid; gap: 8px; align-self: start; }
+.detail h2 { margin: 8px 0 0; }
+.component { border-top: 1px solid var(--theia-panel-border); padding-top: 8px; display: grid; gap: 4px; }
+.component h4 { font-size: 13px; font-weight: 600; margin: 4px 0 0; }
+.component ul { margin: 0; padding-inline-start: 16px; display: grid; gap: 4px; }
+.empty-msg { padding: 8px 16px; border-inline-start: 3px solid var(--theia-editorWarning-foreground); }
+
+.theia-status { display: flex; gap: 16px; padding: 0 8px; min-height: 24px; align-items: center; background: var(--theia-statusBar-background); color: var(--theia-statusBar-foreground); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.helper { color: var(--theia-descriptionForeground); font-weight: 400; }
+.sr-note { color: var(--theia-descriptionForeground); border-inline-start: 3px solid var(--theia-panel-border); padding-inline-start: 8px; }
+</style>
+</head>
+<body class="dark">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-package" viewBox="0 0 16 16"><path d="M2 4.5 8 2l6 2.5v7L8 14l-6-2.5z M2 4.5 8 7l6-2.5 M8 7v7"/></symbol>
+  <symbol id="i-server" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="4.5" rx="1"/><rect x="2.5" y="9" width="11" height="4.5" rx="1"/><path d="M5 4.75h.01M5 11.25h.01"/></symbol>
+  <symbol id="i-references" viewBox="0 0 16 16"><circle cx="4" cy="8" r="1.6"/><circle cx="12" cy="4" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M5.5 7.3 10.5 4.7M5.5 8.7l5 2.6"/></symbol>
+  <symbol id="i-file" viewBox="0 0 16 16"><path d="M4 1.5h5.5L12.5 4.5v10h-8.5z M9.5 1.5v3h3"/></symbol>
+  <symbol id="i-verified" viewBox="0 0 16 16"><path d="M8 1.5 9.6 3l2.2-.2.4 2.2 1.9 1.2-1 2 .9 2-1.9 1.1-.5 2.2-2.2-.3L8 14.5l-1.6-1.3-2.2.3-.5-2.2L1.8 10l1-2-1-2 1.9-1.1.4-2.2 2.2.2z"/><path d="m5.5 8 1.8 1.8L10.8 6.3"/></symbol>
+  <symbol id="i-unverified" viewBox="0 0 16 16"><path d="M8 1.5 9.6 3l2.2-.2.4 2.2 1.9 1.2-1 2 .9 2-1.9 1.1-.5 2.2-2.2-.3L8 14.5l-1.6-1.3-2.2.3-.5-2.2L1.8 10l1-2-1-2 1.9-1.1.4-2.2 2.2.2z"/><path d="M8 5v3.5M8 10.6v.01"/></symbol>
+  <symbol id="i-error" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m5.6 5.6 4.8 4.8m0-4.8-4.8 4.8"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 16 16"><path d="M1.5 8.5h3l1.5-4 2.5 8 1.8-5.5 1 1.5h3.2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/></symbol>
+  <symbol id="i-history" viewBox="0 0 16 16"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.5H5 M8 5v3l2 1.3"/></symbol>
+  <symbol id="i-question" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.2a1.8 1.8 0 1 1 2.6 1.6c-.6.3-.9.7-.9 1.4M8 11.3v.01"/></symbol>
+  <symbol id="i-slash" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="m3.8 12.2 8.4-8.4"/></symbol>
+  <symbol id="i-checklist" viewBox="0 0 16 16"><path d="m2 4 1.2 1.2L5.5 3M2 9l1.2 1.2L5.5 8M7.5 4.2h6.5M7.5 9.2h6.5M7.5 13h6.5"/></symbol>
+  <symbol id="i-broadcast" viewBox="0 0 16 16"><circle cx="8" cy="8" r="1.4"/><path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6M3.1 3.1a7 7 0 0 0 0 9.8M12.9 3.1a7 7 0 0 1 0 9.8"/></symbol>
+  <symbol id="i-disconnect" viewBox="0 0 16 16"><path d="M2 14 14 2M5.5 7 4 8.5a2.5 2.5 0 0 0 3.5 3.5L9 10.5M10.5 9 12 7.5A2.5 2.5 0 0 0 8.5 4L7 5.5"/></symbol>
+  <symbol id="i-watch" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4"/><path d="M6 4.3 6.5 1.5h3l.5 2.8M6 11.7l.5 2.8h3l.5-2.8M8 6v2l1.2.8"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 16 16"><path d="M8 2 14.5 13.5h-13z M8 6.5v3M8 11.5v.01"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1"/><path d="M11 5V2.5H2.5V11H5"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5H11"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9M10.5 3.5v9"/></symbol>
+  <symbol id="i-continue" viewBox="0 0 16 16"><path d="M3.5 3.5v9M6.5 3.5l7 4.5-7 4.5z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 16 16"><path d="M8 1.5 13.5 3.5v4c0 3.2-2.4 5.8-5.5 7-3.1-1.2-5.5-3.8-5.5-7v-4z"/></symbol>
+</svg>
+
+<div class="sk-head">
+  <div>
+    <h1>48.2 Compliance view: sketch for review</h1>
+    <p>Not shipped. Original theme with lifted cards (74.3 "Elevation"). Every line uses the exact copy of 48.2-UI-SPEC.md. Icons are stand-ins for the named codicons. Fictional site, times and counts; "now" is 25 Nov 2026 14:02 UTC.</p>
+  </div>
+  <button class="btn" type="button" id="theme"><svg class="ic"><use href="#i-refresh"/></svg>Show light theme</button>
+</div>
+
+<p class="sk-cap">S1 Layered and live: a site, release evidence then your site's evidence, one control open</p>
+<p>Release card first, then your site's card; every row shows source, as-of time, freshness, verification and the evidence count. The summary table replaces today's level bars and keeps a bar and a filter button per level.</p>
+<div class="sk-frame"><div class="view" id="s1"></div></div>
+
+<p class="sk-cap">Partial and empty states</p>
+<p>Each frame shows the header, the notices (at most one per kind, and one Did not verify notice per failed source) and the source cards, then the first rows. Everything below the rows (Needs attention, filters, charts) follows the same rules as S1 and is left out.</p>
+<div class="sk-grid" id="states"></div>
+
+<script>
+const I = (n, cls = '') => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const LEAD = 'Live evidence for Sterling Sovereign AI, judged against the time now. Authorization is your organization’s decision.';
+const vb = v => ({
+  verified: `<span class="vbadge" data-v="verified">${I('verified')}<span>Verified</span></span>`,
+  'not-verified': `<span class="vbadge" data-v="not-verified">${I('unverified')}<span>Not verified</span></span>`,
+  'did-not-verify': `<span class="vbadge" data-v="did-not-verify">${I('error')}<span>Did not verify</span></span>`
+})[v] || '';
+// mode: 'live' | 'lost' | 'held'
+const header = (live = 'Live · Updated just now', mode = 'live') => `
+  <header class="heading">
+    <div><h1>Compliance</h1><p>${LEAD}</p></div>
+    <div class="heading-side">
+      <p class="live">${I({ live: 'broadcast', lost: 'disconnect', held: 'pause' }[mode])}<span>${live}</span></p>
+      ${mode === 'live' ? `<button class="btn" type="button">${I('pause')}Pause live updates</button>` : ''}
+      ${mode === 'held' ? `<button class="btn" type="button">${I('continue')}Resume live updates</button>` : `<button class="btn" type="button">${I('refresh')}Check evidence now</button>`}
+    </div>
+  </header>`;
+const notice = (tone, icon, text) => `<div class="notice" data-tone="${tone}">${I(icon)}<p>${text}</p></div>`;
+const facts = rows => `<dl class="facts">${rows.map(([t, d]) => `<div><dt>${t}</dt><dd>${d}</dd></div>`).join('')}</dl>`;
+const scanFresh = (when, age, f) => `database built ${when} (${age}) · ${f === 'ageing' ? I('clock', 'w') + ' Ageing' : I('pulse') + ' Current'}`;
+const releaseCard = ({ v = 'verified', anchor = 'your organization’s site key', extra = '', scanUnknown = '' } = {}) => `
+  <section class="card source">
+    <div class="source-title"><h3>${I('package')}Release evidence</h3>${vb(v)}</div>
+    ${v === 'did-not-verify' ? '' : facts([
+      ['Release', 'Sterling Sovereign AI 0.4.39'],
+      ['Built', '24 Nov 2026 18:40 UTC'],
+      ...(v === 'verified' ? [['Verified with', anchor]] : []),
+      ['Checked', '25 Nov 2026 08:00 UTC'],
+      ['Vulnerability scan', scanUnknown ? `database built 24 Nov 2026 06:00 UTC (1 day ago) · ${I('question')} ${scanUnknown}` : scanFresh('24 Nov 2026 06:00 UTC', '1 day ago', 'current')]
+    ])}
+    ${extra}
+    ${v === 'did-not-verify' ? '' : '<details><summary>Show how this release was checked</summary><p class="muted">Release evidence and its signature: checked in this session at 25 Nov 2026 08:00 UTC with ' + anchor + '.</p></details>'}
+  </section>`;
+const siteCard = ({ v = 'verified', last = '25 Nov 2026 14:00 UTC (2 minutes ago)', items = [13, 2, 1], itemsHtml = '', msg = '', none = '' } = {}) => none ? `
+  <section class="card source">
+    <div class="source-title"><h3>${I('server')}Your site’s evidence</h3></div>
+    <p class="muted">${none}</p>
+  </section>` : `
+  <section class="card source">
+    <div class="source-title"><h3>${I('server')}Your site’s evidence</h3>${vb(v)}</div>
+    ${v === 'did-not-verify' ? msg : facts([
+      ['Site', '<span class="mono">site-hq-01</span>'],
+      ['Last update', last],
+      ['Items', itemsHtml || `${I('pulse')} ${items[0]} current · ${I('clock', 'w')} ${items[1]} ageing · ${I('history', 's')} ${items[2]} out of date`],
+      ['Freshness settings', 'your site’s'],
+      ['Site evidence export', 'signed 19 Nov 2026 10:12 UTC'],
+      ['Exchange agreements', 'next review 3 Mar 2027']
+    ]) + msg}
+  </section>`;
+const fresh = {
+  current: () => `<span>${I('pulse')}Current</span>`,
+  ageing: () => `<span>${I('clock', 'w')}Ageing</span>`,
+  ood: () => `<span>${I('history', 's')}Out of date</span>`,
+  unknownPaused: () => `<span>${I('question')}Unknown (live updates paused)</span>`,
+  unknownHeld: () => `<span>${I('question')}Unknown (live updates paused by you)</span>`,
+  unknownClock: () => `<span>${I('question')}Unknown (this computer’s clock is earlier than the release build)</span>`,
+  none: () => `<span>${I('slash')}No evidence</span>`
+};
+const srcIcon = { 'Release': 'package', 'Your site': 'server', 'Release and your site': 'package', 'Supplier reference site': 'references', 'Published projection': 'file' };
+const stateWord = { met: 'Met', 'partly-met': 'Partly met', 'not-met': 'Not met', stale: 'Stale', 'not-verified': 'Not verified', 'not-applicable': 'Not applicable', org: 'Your organization’s responsibility' };
+function row(id, title, st, src, asOf, fr, ver, n, open = false) {
+  const verIcon = ver === 'Verified' ? I('verified') : I('unverified', 'w');
+  const parts = [`<span>${I(srcIcon[src])}${src}</span>`];
+  if (asOf) parts.push(`<span>as of <time>${asOf}</time></span>`);
+  parts.push(fresh[fr]());
+  parts.push(`<span>${verIcon}${ver}</span>`);
+  if (n) parts.push(`<span>${I('checklist')}${n === 1 ? '1 evidence item' : n + ' evidence items'}</span>`);
+  return `<li><button type="button" aria-expanded="${open}" data-st="${st}"><strong>${id} · ${title}</strong><span class="badge">${stateWord[st]}</span><span class="factsline">${parts.join('')}</span></button></li>`;
+}
+const controls = (rows, count, { msg = '', detail = '' } = {}) => `
+  <div class="columns ${detail ? '' : 'single'}">
+    <section>
+      <div class="results-title"><h2>Controls</h2><p class="muted">${count}</p></div>
+      ${msg ? `<p class="empty-msg">${msg}</p>` : `<ul class="controls">${rows.join('')}</ul>`}
+    </section>
+    ${detail}
+  </div>`;
+
+/* S1 */
+const segs = [['met', 704], ['partly-met', 58], ['not-met', 26], ['stale', 17], ['not-verified', 0], ['not-applicable', 61], ['org', 108]];
+const total = segs.reduce((a, [, n]) => a + n, 0);
+let start = 0;
+const conic = 'conic-gradient(' + segs.filter(([, n]) => n).map(([s, n]) => { const a = start / total * 100, b = (start += n) / total * 100; return `var(--sterling-state-${s === 'org' ? 'your-organizations-responsibility' : s}) ${a}% ${b}%`; }).join(', ') + ')';
+const levels = [
+  ['Unclassified', 148, 121, 9, 0, 6, 2, [121, 9, 18]],
+  ['Protected A', 212, 168, 17, 0, 9, 3, [168, 17, 27]],
+  ['Protected B', 296, 214, 31, 0, 14, 5, [214, 31, 51]],
+  ['Hosted deployment: Protected B', 318, 201, 44, 0, 21, 7, [201, 44, 73]]
+];
+const bar = ([m, a, r]) => `<span class="bar" aria-hidden="true"><span data-st="met" style="flex-grow:${m}"></span><span data-st="not-met" style="flex-grow:${a}"></span><span data-st="org" style="flex-grow:${r}"></span></span>`;
+const summary = `
+  <section class="card roomy">
+    <div class="table-region" role="region" tabindex="0" aria-labelledby="sumcap">
+    <table>
+      <caption><h3 id="sumcap">Summary across levels</h3><p>Select a level to filter. Ageing and Out of date count controls by evidence age, so they overlap the other columns.</p></caption>
+      <thead><tr><th scope="col">Level</th><th scope="col">Controls</th><th scope="col">Met</th><th scope="col">Needs attention</th><th scope="col">Not verified</th><th scope="col">Ageing</th><th scope="col">Out of date</th></tr></thead>
+      <tbody>${levels.map(l => `<tr><th scope="row"><button class="lvl" type="button" aria-pressed="false">${l[0]}${bar(l[7])}</button></th><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td><td>${l[4]}</td><td>${l[5]}</td><td>${l[6]}</td></tr>`).join('')}
+        <tr><th scope="row"><button class="lvl" type="button" aria-pressed="false">Classified<small>No coverage claim</small>${bar([0, 0, 1])}</button></th><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr></tbody>
+      <tfoot><tr><th scope="row">All levels</th><td>974</td><td>704</td><td>101</td><td>0</td><td>50</td><td>17</td></tr></tfoot>
+    </table></div>
+  </section>`;
+const detailCM2 = `
+  <aside class="card detail" aria-label="Details for CM-2">
+    <div><button class="btn" type="button">Close details</button></div>
+    <h2>CM-2 · Baseline configuration</h2>
+    <span class="badge" data-st="partly-met">Partly met</span>
+    <p>One check did not pass; the others passed with current or ageing evidence.</p>
+    ${facts([['Source', 'Release and your site'], ['As of', '19 Nov 2026 10:12 UTC (6 days ago)'], ['Freshness', 'Ageing'], ['Verification', 'Verified'], ['Evidence', '4 evidence items']])}
+    <section class="component">
+      <h3>Workbench image</h3>
+      <p class="muted">Responsibility: Product</p>
+      <span class="badge" data-st="met">Met</span>
+      <h4>Evidence</h4>
+      <ul><li>Running release matches your site’s record · Passed · Your site · as of 25 Nov 2026 14:00 UTC · Current · Verified</li>
+          <li>Software list (SBOM) of the running image · Passed · Release · as of 24 Nov 2026 18:40 UTC · Current · Verified · <span class="mono">32007751f0a1</span> · <a href="#">CI run</a></li></ul>
+    </section>
+    <section class="component">
+      <h3>Site settings</h3>
+      <p class="muted">Responsibility: Shared</p>
+      <span class="badge" data-st="partly-met">Partly met</span>
+      <h4>Evidence</h4>
+      <ul><li>Image admission enforcing · Passed · Your site · as of 19 Nov 2026 10:12 UTC · Ageing · Verified</li>
+          <li>Refused images reported · Did not pass · Your site · as of 19 Nov 2026 10:12 UTC · Ageing · Verified</li></ul>
+    </section>
+    <details><summary>Official control text</summary><p class="muted">Loading official text…</p></details>
+  </aside>`;
+document.getElementById('s1').innerHTML = `<main class="page">
+  ${header()}
+  <h2>Evidence sources</h2>
+  <div class="sources">${releaseCard()}${siteCard()}</div>
+  <details><summary>How current each source is</summary>
+    <p class="muted">Release test results stay current while this session runs this release. Release vulnerability scan: ageing after 7 days, out of date after 30 days. Your site’s live facts: collected every 15 minutes, out of date after 2 hours. Your site’s evidence export: out of date after 7 days.</p></details>
+  <section class="card attention" aria-label="Needs attention">
+    <h3>Needs attention</h3>
+    <div class="warn-grid">
+      <button class="warn" type="button" data-st="not-met" aria-pressed="false">${I('warning')}<span>Not met</span><strong>26</strong></button>
+      <button class="warn" type="button" data-st="partly-met" aria-pressed="false">${I('warning')}<span>Partly met</span><strong>58</strong></button>
+      <button class="warn" type="button" data-st="stale" aria-pressed="false">${I('history')}<span>Stale evidence</span><strong>17</strong></button>
+      <button class="warn" type="button" data-st="stale" aria-pressed="false">${I('history')}<span>Out of date</span><strong>17</strong></button>
+    </div>
+  </section>
+  <div class="filters">
+    <label>Coverage level<select><option>All coverage levels</option></select></label>
+    <label>Evidence state<select><option>All states</option><option>Not verified</option></select></label>
+    <label>Freshness<select><option>All freshness</option><option>Current</option><option>Ageing</option><option>Out of date</option><option>Unknown</option><option>No evidence</option></select></label>
+    <label>Source<select><option>Release and your site</option><option>From the release</option><option>From your site</option><option>From the supplier reference site</option></select></label>
+    <label>Search controls<input type="search" placeholder="ID or control name"></label>
+    <button class="btn" type="button" disabled>Clear filters</button>
+  </div>
+  <div class="visuals">
+    <section class="card roomy">
+      <h3>Control status</h3><p class="chart-hint">Select a status to filter</p>
+      <div class="status-body">
+        <div class="donut" role="img" aria-label="974 control entries, 704 Met, 58 Partly met, 26 Not met, 17 Stale, 61 Not applicable, 108 Your organization’s responsibility" style="background:${conic}">
+          <div class="donut-centre" aria-hidden="true"><strong>974</strong><span>Control entries</span></div></div>
+        <div class="legend">${segs.map(([s, n]) => `<button type="button" data-st="${s}" aria-pressed="false"><span class="sw" aria-hidden="true"></span><span>${stateWord[s]}</span><strong>${n}</strong></button>`).join('')}</div>
+      </div>
+    </section>
+    ${summary}
+  </div>
+  ${controls([
+    row('SI-4', 'System monitoring', 'not-met', 'Your site', '25 Nov 2026 14:00 UTC', 'current', 'Verified', 3),
+    row('CM-2', 'Baseline configuration', 'partly-met', 'Release and your site', '19 Nov 2026 10:12 UTC', 'ageing', 'Verified', 4, true),
+    row('AU-6', 'Audit record review, analysis, and reporting', 'stale', 'Your site', '25 Nov 2026 09:14 UTC', 'ood', 'Verified', 2),
+    row('RA-5', 'Vulnerability monitoring and scanning', 'met', 'Release', '24 Nov 2026 06:00 UTC', 'current', 'Verified', 2),
+    row('AC-2', 'Account management', 'met', 'Release and your site', '24 Nov 2026 18:40 UTC', 'current', 'Verified', 4),
+    row('PE-3', 'Physical access control', 'org', 'Release', '', 'none', 'Verified', 0)
+  ], '24 of 974 control entries', { detail: detailCM2 })}
+  <div><button class="btn more" type="button">Show more controls</button></div>
+</main>`;
+
+/* while paused: state columns stay, Ageing and Out of date read Unknown */
+const pausedSummary = words => {
+  const u = `<span aria-hidden="true">–</span><span class="sr-only">${words}</span>`;
+  return `<section class="card">
+    <div class="table-region" role="region" tabindex="0" aria-label="Summary across levels">
+    <table>
+      <caption><h3>Summary across levels</h3><p>Select a level to filter. Ageing and Out of date count controls by evidence age, so they overlap the other columns.</p></caption>
+      <thead><tr><th scope="col">Level</th><th scope="col">Controls</th><th scope="col">Met</th><th scope="col">Needs attention</th><th scope="col">Not verified</th><th scope="col">Ageing</th><th scope="col">Out of date</th></tr></thead>
+      <tbody>${levels.slice(0, 2).map(l => `<tr><th scope="row"><button class="lvl" type="button" aria-pressed="false">${l[0]}${bar(l[7])}</button></th><td>${l[1]}</td><td>${l[2]}</td><td>${l[3]}</td><td>${l[4]}</td><td>${u}</td><td>${u}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th scope="row">All levels</th><td>974</td><td>704</td><td>101</td><td>0</td><td>${u}</td><td>${u}</td></tr></tfoot>
+    </table></div></section>`;
+};
+const pausedFilter = `<div class="filters">
+  <label>Freshness<select disabled aria-describedby="fp"><option>Out of date</option></select><span class="helper" id="fp">Freshness filter is off while live updates are paused.</span></label>
+  <label>Source<select><option>Release and your site</option></select></label></div>`;
+
+/* states */
+const cmd = `mkdir -p sterling-evidence
+cp sterling-release-cosign.pub sterling-evidence/supplier.pub
+cp sterling-evidence-0.4.39.sigstore.json sterling-evidence/release-0.4.39.sigstore.json
+--mount "type=bind,source=$PWD/sterling-evidence,target=/etc/sterling/evidence,readonly"`;
+const noKeyBlock = `
+  <p class="line">${I('unverified', 'w')}<span>Not verified: no release key is set up on this computer, so no state here is counted as met.</span></p>
+  <p>To verify it, download <span class="mono">sterling-release-cosign.pub</span> and <span class="mono">sterling-evidence-0.4.39.sigstore.json</span> from the 0.4.39 release, put them in one folder, and start the workbench with that folder mounted read-only:</p>
+  <pre class="command" tabindex="0" role="region" aria-label="Commands to verify the release evidence">${cmd}</pre>
+  <div><button class="btn" type="button">${I('copy')}Copy command</button></div>
+  <p class="muted">Add the last line to your docker run command. Check that the key’s fingerprint matches the one in the 0.4.39 release notes. The view checks the folder every 30 seconds, so files added to a mounted folder are picked up without a restart.</p>`;
+const onlyLine = `<p class="only-line">${I('package')}<span>This is the release’s own evidence. Nothing here shows how your site runs it.</span></p>`;
+const frame = (label, body) => `<div class="sk-frame"><p class="sk-label">${label}</p><div class="view"><main class="page">${body}</main></div></div>`;
+const states = [
+  frame('S2 Fresh install at a site: release evidence only', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard()}${siteCard({ none: 'No site evidence yet. It appears here within about 15 minutes of your site collector’s first run.' })}</div>
+    ${onlyLine}
+    ${controls([
+      row('SI-4', 'System monitoring', 'met', 'Supplier reference site', '24 Nov 2026 18:40 UTC', 'current', 'Verified', 3),
+      row('RA-5', 'Vulnerability monitoring and scanning', 'met', 'Release', '24 Nov 2026 06:00 UTC', 'current', 'Verified', 1),
+      row('PE-3', 'Physical access control', 'org', 'Release', '', 'none', 'Verified', 0)
+    ], '24 of 974 control entries')}`),
+  frame('S3 Restricted Mode: identical to the trusted view (the view reads no workspace content)', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard()}${siteCard({ none: 'No site evidence yet. It appears here within about 15 minutes of your site collector’s first run.' })}</div>
+    ${onlyLine}
+    ${controls([
+      row('SI-4', 'System monitoring', 'met', 'Supplier reference site', '24 Nov 2026 18:40 UTC', 'current', 'Verified', 3),
+      row('RA-5', 'Vulnerability monitoring and scanning', 'met', 'Release', '24 Nov 2026 06:00 UTC', 'current', 'Verified', 1)
+    ], '24 of 974 control entries')}
+    <p class="sr-note">Same cards, rows and counts as S2. No Restricted Mode banner in the view; the workbench's own status bar shows the mode.</p>
+    <div class="theia-status">${I('shield')}<span>Restricted Mode</span></div>`),
+  frame('S4 A single computer with no key mounted', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ v: 'not-verified', extra: noKeyBlock })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    ${onlyLine}
+    ${controls([
+      row('AC-2', 'Account management', 'not-verified', 'Release', '24 Nov 2026 18:40 UTC', 'current', 'Not verified', 4),
+      row('RA-5', 'Vulnerability monitoring and scanning', 'not-verified', 'Release', '24 Nov 2026 06:00 UTC', 'current', 'Not verified', 1)
+    ], '24 of 974 control entries')}`),
+  frame('S5 Your site’s evidence is out of date', `${header()}
+    ${notice('warning', 'history', 'Your site’s evidence was last collected 25 Nov 2026 09:14 UTC (4 hours ago), so it is out of date. The site collector may have stopped. Ask your organization’s administrator.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard()}${siteCard({ last: '25 Nov 2026 09:14 UTC (4 hours ago)', items: [0, 0, 14], msg: `<p class="line">${I('history', 's')}<span>Your site’s evidence was last collected 25 Nov 2026 09:14 UTC (4 hours ago). Live facts are out of date after 2 hours.</span></p>` })}</div>
+    ${controls([
+      row('SI-4', 'System monitoring', 'stale', 'Your site', '25 Nov 2026 09:14 UTC', 'ood', 'Verified', 3),
+      row('AU-6', 'Audit record review, analysis, and reporting', 'stale', 'Your site', '25 Nov 2026 09:14 UTC', 'ood', 'Verified', 2),
+      row('RA-5', 'Vulnerability monitoring and scanning', 'met', 'Release', '24 Nov 2026 06:00 UTC', 'current', 'Verified', 1)
+    ], '24 of 974 control entries')}`),
+  frame('S6 Did not verify: only the reason', `${header()}
+    ${notice('error', 'error', 'The release evidence did not verify: <span class="mono">bundle/dashboard/judgement.json</span> has changed since the evidence was signed. Nothing from it is shown.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ v: 'did-not-verify', extra: `<p class="line">${I('error', 'e')}<span><span class="mono">bundle/dashboard/judgement.json</span> has changed since the evidence was signed. Nothing from this source is shown.</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    ${controls([], '', { msg: 'No controls to show: no evidence source verified.' })}`),
+  frame('S6c Site key does not match (anchor-mismatch): one shared notice for both sources', `${header()}
+    ${notice('error', 'error', 'The release evidence and your site’s evidence did not verify: The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from them is shown.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ v: 'did-not-verify', extra: `<p class="line">${I('error', 'e')}<span>The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from this source is shown.</span></p>` })}${siteCard({ v: 'did-not-verify', msg: `<p class="line">${I('error', 'e')}<span>The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from this source is shown.</span></p>` })}</div>
+    ${controls([], '', { msg: 'No controls to show: no evidence source verified.' })}`),
+  frame('S13 A release with no control evidence (bundle: none): SBOM and scan only', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ extra: facts([['Software list (SBOM)', 'included'], ['Compliance package', 'not in this release']]) + `<p class="line">${I('package')}<span>This release carries no control evidence, so no control state can be judged. Its software list (SBOM) and vulnerability scan are shown.</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    ${controls([], '', { msg: 'No controls to show: this release carries no control evidence. Its software list and vulnerability scan are on the release card.' })}
+    <p class="sr-note">Needs attention, filters, charts and the summary are not shown: there is nothing to count.</p>`),
+  frame('S7 Live updates paused: connection lost', `${header('Live updates paused · Last updated 25 Nov 2026 13:58 UTC', 'lost')}
+    ${notice('warning', 'disconnect', 'Live updates paused: the view lost its connection to the workbench. Freshness shows as Unknown until it is back. Trying again on its own.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (live updates paused)' })}${siteCard({ itemsHtml: `${I('question')} Unknown (live updates paused)` })}</div>
+    ${pausedFilter}
+    ${pausedSummary('Unknown (live updates paused)')}
+    ${controls([
+      row('SI-4', 'System monitoring', 'not-met', 'Your site', '25 Nov 2026 13:45 UTC', 'unknownPaused', 'Verified', 3),
+      row('AC-2', 'Account management', 'met', 'Release and your site', '24 Nov 2026 18:40 UTC', 'unknownPaused', 'Verified', 4)
+    ], '24 of 974 control entries')}
+    <p class="sr-note">States and state counts stay as last judged. Every freshness word and count reads Unknown, never the last value. The Out of date button in Needs attention is hidden.</p>`),
+  frame('S7b Live updates paused by you (WCAG 2.2.2): Resume live updates restores them', `${header('Live updates paused by you · Last updated 25 Nov 2026 14:02 UTC', 'held')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (live updates paused by you)' })}${siteCard({ itemsHtml: `${I('question')} Unknown (live updates paused by you)` })}</div>
+    ${pausedSummary('Unknown (live updates paused by you)')}
+    ${controls([
+      row('SI-4', 'System monitoring', 'not-met', 'Your site', '25 Nov 2026 14:00 UTC', 'unknownHeld', 'Verified', 3),
+      row('AC-2', 'Account management', 'met', 'Release and your site', '24 Nov 2026 18:40 UTC', 'unknownHeld', 'Verified', 4)
+    ], '24 of 974 control entries')}
+    <p class="sr-note">No notice: the person chose this. "Check evidence now" is not offered while held. Screen readers hear "Live updates paused by you." once.</p>`),
+  frame('S8 This computer’s clock is earlier than the release build', `${header()}
+    ${notice('warning', 'watch', 'This computer’s clock is earlier than the release build, so no evidence reads current. Check this computer’s clock.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ scanUnknown: 'Unknown (this computer’s clock is earlier than the release build)', extra: `<p class="line">${I('watch', 'w')}<span>Freshness is Unknown: this computer’s clock is earlier than the release build (24 Nov 2026 18:40 UTC).</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    ${controls([
+      row('AC-2', 'Account management', 'stale', 'Release', '24 Nov 2026 18:40 UTC', 'unknownClock', 'Verified', 4)
+    ], '24 of 974 control entries')}`),
+  frame('S9 Published projection only: a development image with the projection mounted', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">
+      <section class="card source"><div class="source-title"><h3>${I('package')}Release evidence</h3></div>
+        <p class="muted">This workbench carries no release evidence. Images from a release carry their own; a development build does not.</p></section>
+      <section class="card source">
+        <div class="source-title"><h3>${I('file')}Published projection</h3>${vb('not-verified')}</div>
+        ${facts([['Source', 'your copy of the published dashboard'], ['Commit', '<span class="mono">32007751f0a1</span>'], ['Written', '25 Nov 2026 09:30 UTC']])}
+        <p class="line">${I('unverified', 'w')}<span>Not verified: checked on the computer that wrote it, but not signed. Its states are never counted.</span></p>
+        <div><button class="btn" type="button">Show published projection</button></div>
+      </section></div>
+    ${controls([
+      row('AC-2', 'Account management', 'not-verified', 'Published projection', '24 Nov 2026 02:10 UTC', 'current', 'Not verified', 4),
+      row('SI-4', 'System monitoring', 'not-verified', 'Published projection', '24 Nov 2026 02:10 UTC', 'ageing', 'Not verified', 3)
+    ], '24 of 974 control entries')}`)
+];
+document.getElementById('states').innerHTML = states.join('');
+
+const btn = document.getElementById('theme');
+btn.addEventListener('click', () => {
+  const dark = document.body.classList.toggle('dark');
+  document.body.classList.toggle('light', !dark);
+  btn.lastChild.textContent = dark ? 'Show light theme' : 'Show dark theme';
+});
+</script>
+</body>
+</html>

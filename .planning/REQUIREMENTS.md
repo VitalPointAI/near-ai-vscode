@@ -973,6 +973,24 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | ACCR-13 | Phase 44 | 44-06, 44-13, 44-15, 44-16, 44-18 |
 | ACCR-14 | Phase 44 | 44-03, 44-04, 44-05, 44-13, 44-18 |
 
+## Phase 44.1 amendment requirements: compliance coverage
+
+**Defined:** 2026-11-25 from the owner's brief, when the coverage amendment to Phase 44.1 was planned (`.planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-CONTEXT.md`). They extend ACCR-03, ACCR-04, ACCR-06, ACCR-07 and ACCR-10.
+
+- [ ] **COVR-01**: A generated, reviewable per-component applicability map, derived by rules from the component catalogue and the control families, says which controls each component implements, supports or has no part in; a component with no part shows "Not applicable to this component" with its reason, never Not met; your organization signs each stage in the repository, and a change takes effect only after a new sign-off, so no cell changes class unseen.
+- [ ] **COVR-02**: Every applicable (component, control) pair has a statement of what the built code does, or a named gap and phase where it is not built; the plans that already write statements keep their pairs.
+- [ ] **COVR-03**: Every statement has an evidence rule backed by a test in a CI job that writes a per-test report, a CI artefact collector or the site collector; a statement without such a rule is refused at source time and is never Met; freshness follows Phase 48.2 (Live compliance evidence).
+- [ ] **COVR-04**: Unclassified and Protected A first, then Protected B, then the Classified appliance and the overlays, each with its own sign-off.
+- [ ] **COVR-05**: A generated coverage measure gives counts per state and component; a required check fails when the number of applicable cells without a statement rises without a gated baseline change, or falls without the baseline being lowered.
+
+| Requirement | Phase | Plans |
+|-------------|-------|-------|
+| COVR-01 | Phase 44.1 | 44.1-05, 44.1-06, 44.1-07, 44.1-08, 44.1-23, 44.1-24 |
+| COVR-02 | Phase 44.1 | 44.1-09 to 44.1-22 |
+| COVR-03 | Phase 44.1 | 44.1-07, 44.1-08, 44.1-09 to 44.1-22 |
+| COVR-04 | Phase 44.1 | 44.1-06, 44.1-07, 44.1-10 to 44.1-21, 44.1-22, 44.1-23, 44.1-24 |
+| COVR-05 | Phase 44.1 | 44.1-07, 44.1-22 |
+
 ## Phases 45.1 and 45.2 requirements: NATO and Five Eyes exchange
 
 **Defined:** 2026-11-24 from the owner's decision O1 and NATO direction (`.planning/research/data-centric-access/RESEARCH.md` sections 2.2 and 11), when Phase 45.1 was planned. XCHG-05 … XCHG-08 were reworded 2026-11-24 when Phase 45.2 was planned from AC322 (DCRA v2), ADatP-4774, 4778, 4778.2, 5636 and the public OpenTDF specification 4.3.0 (`45.2-RESEARCH.md`), with unverified label values drafted as tracked assumptions; ACP-240(A) is not held, so ZTDF conformance stays unverified until it or a partner's KAS with its own samples arrives.
@@ -985,11 +1003,12 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **XCHG-06**: ADatP-4778 binding objects carrying the ADatP-5636 mandatory core metadata (the metadata label bound by the ADatP-5636 binding profile) are written for every export and read in every form the texts allow, including ADatP-4778.2 sidecar files; they are signed by your organization's release key to the ADatP-4778.2 cryptographic artefact profile, with an X.509 certificate from your organization's site PKI; a changed label, metadata entry or payload is refused.
 - [ ] **XCHG-07**: A ZTDF-compatible profile on the public OpenTDF specification 4.3.0 carries the 4774 label and the 4778 binding as signed assertions, with every point where ZTDF may differ behind one profile interface; key access reaches a partner's key access server listed and pinned in the signed policy, by wrapping to it and by rewrapping from it; classical key access is capped at the lowest of the partner's limit, the agreement's ceiling and Protected B or its equivalent, recorded, and refused from 2036. ZTDF conformance is unverified until ACP-240(A) or a partner's KAS with its own samples is available.
 - [ ] **XCHG-08**: Conformance evidence: an AC322 (DCRA v2) conformance matrix for data-centric security, ABAC and data-product metadata with a passing test behind every claim; negative tests for every refusal; our XML checked against the texts' own schemas; control statements and hosted register rows; a development round trip against the OpenTDF quickstart's KAS; and an acceptance trial with an ally's or vendor's KAS paired with its own samples as the acceptance check.
+- [ ] **XCHG-09** (added 2026-11-25, owner direction: be liberal in what we accept and strict in what we keep; 45.1 D-11, 45.2 D-24 to D-35): Partners' files in formats that are not ZTDF (OpenTDF and TDF3 objects, ADatP-4778 binding objects and sidecar files, Office documents carrying a binding object, files with a recognisable marking, unlabelled files) are accepted into quarantine through one adapter per arrival format, each declaring what it can check and what it must assume; every arrival is kept as your organization's protected cell plus a ZTDF-compatible form where conversion is possible, with the converter, its version and what was lost or assumed recorded; nothing is shown or kept as more trusted than its source proves; labels in policies the tables do not know, and arrivals without a checkable label, are held for an exchange officer, who can confirm, raise or set a label but never lower one; changed objects are refused; the parsers are limited against hostile input and fetch nothing; and your organization never unwraps a key with RSA-OAEP SHA-1 (ITSP.40.111 v5).
 
 | Requirement | Phase |
 |-------------|-------|
 | XCHG-01 … XCHG-04 | Phase 45.1 |
-| XCHG-05 … XCHG-08 | Phase 45.2 |
+| XCHG-05 … XCHG-09 | Phase 45.2 |
 
 ## Phase 46 requirements: Native Theia foundation
 
@@ -1007,6 +1026,36 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [x] **FND-T-08**: The workbench image and the hub use one Node major. (P11)
 - [x] **FND-T-09**: CI builds the workbench image on a digest-pinned UBI 9 base, writes a CycloneDX SBOM, scans it, and signs it with your organization's key on `main` (no keyless signing). (P10, image build)
 - [x] **FND-T-10**: Every resource the phase adds has a passing entry in `compliance/resources.json` and the fit check covers the workbench manifests; the copy lint accepts the Sterling edition names and scans the workbench's user strings. (D9; DESIGN section 15)
+
+## Phase 48.2 requirements: Live compliance evidence in the workbench
+
+**Defined:** 2026-11-25 from the owner's direction ("yes, plan that as long as the compliance evidence is always a real-time understanding of the product's compliance status"). Decisions and the real-time meaning per source: `.planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md`.
+**Core value:** The Compliance view always shows a real-time, verified understanding of the product's compliance status: the release's own evidence from the image, your site's evidence live on top, and nothing unverified shown as passing.
+**Status:** planned, 17 plans in 10 waves (revised 2026-11-25 after the plan check).
+
+- [ ] **LCE-01**: Every release image carries its own product evidence read-only at `/opt/sterling/evidence` (SBOM, vulnerability scan with its database build date, the evidence bundle with the engine inputs, the OSCAL package, the gap register and road-to-production) under a manifest the release key signs; its as-of time is the release build. [CM-8, SA-11, SR-4]
+- [ ] **LCE-02**: States and freshness are re-judged by the one status engine against the current time at start, every 60 seconds and on every change; each cell shows source, as-of time, freshness (Current, Ageing, Out of date) and verification. [CA-7]
+- [ ] **LCE-03**: A freshness policy gives each evidence kind an ageing and an out-of-date threshold; your organization can only tighten the release defaults; vulnerability evidence ages from its database build date; a clock earlier than the release build or future-dated evidence never reads current. [RA-5, RA-5(2), CA-7, AU-8]
+- [ ] **LCE-04**: Release and site evidence are verified (manifest hashes, signatures, purposes, times) against trust anchors from your organization's configuration before display; what does not verify is not shown; what cannot be verified is Not verified and never passing; no evidence is trusted for where it is found. [SI-7, SI-7(1), SR-4]
+- [ ] **LCE-05**: A scheduled site collector gathers in-cluster facts with their own collection times, signs them with a key your site key vouches for, and every session sees them within the interval plus about two minutes through a read-only mount, re-judged in place and never cached as if current. [CA-7, SI-4, AU-5, AU-6, CM-2]
+- [ ] **LCE-06**: The operator publishes the signed site evidence export, the offline rescan summary and the exchange agreements as signed site files; each shows with its own time; a site rescan with a newer signed database replaces the release scan. [CA-7, CA-3, RA-5, RA-5(2)]
+- [ ] **LCE-07**: The Compliance view layers release evidence then site evidence; "Authorization is your organization's decision" stays; in Restricted Mode and with no site evidence it shows the release evidence clearly labelled; original theme with lifted cards, codicons and Theia variables only. [CA-7]
+- [ ] **LCE-08**: `compliance:refresh` writes the public projection readable by the workbench user (files 0644, folders 0755) under any umask, with a test; the README's read-only mount works.
+- [ ] **LCE-09**: Air-gapped and disconnected edges work with local sources only (the image, the site collector, operator files, the signed database media); nothing fetches outside. [CA-7, SC-7]
+- [ ] **LCE-10**: Statements, evidence rules and documents for the controls this phase implements, gap rows G475 to G479, and the real-time definitions in the continuous monitoring strategy. [CA-7, CM-8, RA-5, SI-4, SA-11]
+
+| Requirement | Plans |
+|-------------|-------|
+| LCE-01 | 48.2-01, 48.2-05, 48.2-07 |
+| LCE-02 | 48.2-01, 48.2-03, 48.2-08, 48.2-10 |
+| LCE-03 | 48.2-03, 48.2-05, 48.2-14 |
+| LCE-04 | 48.2-01, 48.2-04, 48.2-06, 48.2-07, 48.2-12, 48.2-13, 48.2-16, 48.2-17 |
+| LCE-05 | 48.2-06, 48.2-08, 48.2-09, 48.2-11, 48.2-12, 48.2-17 |
+| LCE-06 | 48.2-06, 48.2-13, 48.2-14 |
+| LCE-07 | 48.2-10, 48.2-15, 48.2-16 |
+| LCE-08 | 48.2-02 |
+| LCE-09 | 48.2-04, 48.2-08, 48.2-09, 48.2-11 |
+| LCE-10 | 48.2-02, 48.2-15 |
 
 ## Phase 74.1 requirements: Model passports, use tiers and Western defaults (0.4.x)
 
