@@ -1,0 +1,25 @@
+{
+  "controls": [
+    "sa-400.08",
+    "sr-04"
+  ],
+  "gap": "G531",
+  "id": "g531",
+  "milestones": [
+    {
+      "phase": "74.1",
+      "title": "Western defaults by passport, with Command A+ approved through Cohere Model Vault or your organization's hosting"
+    },
+    {
+      "phase": "36",
+      "title": "Command A+ in a Cohere vault in Canada"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "The Sterling workbench prefers a reachable Command A+ for the standard and deep jobs (O3, accepted 2026-11-25; 74.1-05)"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The shipped defaults are of PRC origin until Phase 74.1 ships Western defaults, and those (Nemotron 3, gpt-oss-120b, Whisper, FLUX) are of US or German origin, so where models come from reads Partly met at best. Cohere's Command A+ (Apache-2.0) is the only Canadian-origin model family: run it on your organization's server or this computer (Phase 32.2), or in a Cohere vault in Canada (Phase 36, Partly met because Cohere can change the weights it serves), with your organization's passport, the artifact hash and your organization's evaluation, and prefer it where it is reachable (the owner accepted this on 2026-11-25, O3; 74.1-05). Sovereignty: models.",
+  "title": "No Canadian-origin model is the default for any job; the Western defaults are of allied origin"
+}

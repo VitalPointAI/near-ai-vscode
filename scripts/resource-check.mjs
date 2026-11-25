@@ -29,11 +29,13 @@ export const AREAS_FILE = 'compliance/architecture-areas.json';
 export const KINDS = Object.freeze(['npm', 'image', 'action', 'vendored', 'chart', 'tool', 'model']);
 export const SCOPES = Object.freeze(['runtime', 'build', 'test']);
 export const FITS = Object.freeze(['pass', 'pass-with-conditions', 'fail']);
-const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'role', 'architectureArea', 'roleNeedsReview', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt']);
+const FIELDS = Object.freeze(['id', 'kind', 'where', 'component', 'scope', 'purpose', 'role', 'architectureArea', 'roleNeedsReview', 'licence', 'controls', 'evidence', 'crypto', 'cveResponse', 'airGap', 'fit', 'conditions', 'reviewer', 'reviewedAt', 'supplier', 'supplierJurisdiction']);
 const ID_PREFIX = Object.freeze({ npm: 'npm:', image: 'image:', action: 'action:', vendored: 'vendor:', chart: 'chart:', tool: 'tool:', model: 'model:' });
 const CRYPTO = /^(none|uses-platform|unvalidated|validated:.+)$/;
 const AIR_GAP = /^(ok|no|needs-mirror:.+)$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
+// Phase 48.4 D-08: who publishes the resource and the country of that organization's legal seat, as its own pages state it, or unknown.
+const JURISDICTION = /^([A-Z]{2}|unknown)$/;
 const SHA = /^[0-9a-f]{40}$/;
 
 const read = (root, file) => readFileSync(path.join(root, file), 'utf8');
@@ -189,6 +191,10 @@ export function entryProblems(entry, known = { controls: new Set(), components: 
   else if (known.controls.size) for (const control of entry.controls.filter((control) => !known.controls.has(control))) out.push(say(`control "${control}" is not in the catalogues.`));
   if (!CRYPTO.test(entry.crypto ?? '')) out.push(say('crypto must be none, uses-platform, unvalidated or validated:<certificate or mode>.'));
   if (!AIR_GAP.test(entry.airGap ?? '')) out.push(say('airGap must be ok, no or needs-mirror:<what>.'));
+  if (!nonEmpty(entry.supplier)) out.push(say('supplier must name the organization that publishes it, or say unknown.'));
+  if (!(typeof entry.supplierJurisdiction === 'string' && JURISDICTION.test(entry.supplierJurisdiction))) {
+    out.push(say('supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'));
+  }
   if (!DATE.test(entry.reviewedAt ?? '') || Number.isNaN(Date.parse(`${entry.reviewedAt}T00:00:00Z`))) out.push(say('reviewedAt must be a date (YYYY-MM-DD).'));
   if (!FITS.includes(entry.fit)) out.push(say(`fit must be one of ${FITS.join(', ')}.`));
   else if (entry.fit === 'fail') out.push(say(`is marked fail: it does not fit the compliance requirements and may not be used. Remove it, or replace it with a resource that fits.${stringList(entry.conditions) ? ` Reason: ${entry.conditions.join(' ')}` : ''}`));
@@ -232,7 +238,8 @@ export function inventory(register, discovered) {
   const byId = new Map((register?.resources ?? []).map((entry) => [entry?.id, entry]));
   return [...discovered.resources.values()].sort((a, b) => a.id.localeCompare(b.id)).map((resource) => {
     const entry = byId.get(resource.id);
-    return { ...resource, registered: Boolean(entry), fit: entry?.fit ?? null, scope: entry?.scope ?? null, component: entry?.component ?? null, licence: entry?.licence ?? null };
+    return { ...resource, registered: Boolean(entry), fit: entry?.fit ?? null, scope: entry?.scope ?? null, component: entry?.component ?? null, licence: entry?.licence ?? null,
+      supplier: entry?.supplier ?? null, supplierJurisdiction: entry?.supplierJurisdiction ?? null };
   });
 }
 

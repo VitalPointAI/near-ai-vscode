@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ca-02",
+    "sa-400"
+  ],
+  "gap": "G536",
+  "id": "g536",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "The owner seeks a CAN/DGSI 100-8 SovereignReady review once the lab site's rows reach Met (O5, accepted 2026-11-25)"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Every credible sovereignty label is issued by an assessor at a stated assurance level (CAN/DGSI 100-8 and its SovereignReady programme; the EU framework's assurance levels). The sovereignty card is a self-check from evidence and says so. The owner decided on 2026-11-25 (O5) to seek a CAN/DGSI 100-8 SovereignReady review once the lab site's rows reach Met; the card's scope line then names that assessment and its level. Sovereignty: assessments.",
+  "title": "No independent sovereignty assessment exists; the sovereignty card is a self-check from evidence"
+}
