@@ -40,8 +40,8 @@ import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
-import { epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
-import { deviceAt, deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
+import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
+import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { checkpointHash } from '../../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
@@ -59,7 +59,7 @@ import type { SyncLocal } from './hubSync';
 import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGate';
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
-
+import { canWriteCurrentEpoch } from './wrapPlan';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
 export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
@@ -1115,14 +1115,7 @@ export class ReplicaProject {
     // Recovery instructions must still reach the roster while the base cell is awaiting rotation.
     const rosterControl = stream === this.anchor.project &&
       (Object.hasOwn(ROSTER_KIND_OWNER, kind) || kind === 'device.kem' || kind === 'session.certify');
-    if (!rosterControl) {
-      const latest = roster.positions.length - 1;
-      const holders = granteesAt(roster.cells, stream, latest, () => true);
-      if (epoch !== epochAt(roster.cells, stream, latest) ||
-          holders === undefined || holders.some((writer) => deviceAt(roster.members, writer, latest) === undefined)) {
-        return refuse('rekey-pending');
-      }
-    }
+    if (!rosterControl && !canWriteCurrentEpoch(roster, stream, epoch)) return refuse('rekey-pending');
     const chosen = options.signer ?? this.signerOf(kind);
     // 33.1 D-09: in a hosted project only the person signer signs a person-key kind, and a kind outside Phase 33's list only under its action.
     const person = this.deps.personSigner;

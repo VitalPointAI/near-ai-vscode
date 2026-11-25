@@ -1023,8 +1023,7 @@ export class ReplicaStore {
       seen.add(hash);
       fresh.push({ entry, hash });
     }
-    // The check runs outside the locks. A writer already flooded, or that this batch would flood, is not checked again; the decision is made under
-    // the locks, where an entry left unchecked whose writer turns out not to be flooded is deferred, so it is checked when it comes again.
+    // Checks run outside the locks and skip flooded writers. The lock defers an unchecked entry whose writer turns out to be eligible.
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
     const refusedHere = new Map<string, number>();
     for (const { entry, hash } of fresh) {

@@ -16,7 +16,8 @@ import { buildGrantPages, earlierEpochGrants, wrapsFor } from '../../domain/repl
 import type { WrapDevice } from '../../domain/replica/grantPages';
 import type { PayloadSigner, SignedPayload } from '../../domain/team/signedPayload';
 import type { RosterState } from '../../domain/replica/roster';
-import { x25519At } from '../../domain/replica/rosterMembers';
+import { epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
+import { deviceAt, x25519At } from '../../domain/replica/rosterMembers';
 import { WRAP_FEATURE, wrapFormatFor } from '../../domain/replica/wrapFormat';
 
 /** The D-07 sentence, word for word. */
@@ -56,6 +57,26 @@ export function wrapDeviceAt(roster: RosterState, writer: string, position: numb
   const x25519 = x25519At(roster.members, writer, position);
   const kem = kemKeysAt(roster, writer);
   return { writer, ...(x25519 === undefined ? {} : { x25519 }), ...(kem === undefined ? {} : { kem }) };
+}
+
+/** A later recipient may lack the founding grant. Its key can still be used if no device was removed during that epoch. */
+export function canWriteCurrentEpoch(roster: RosterState, cell: string, epoch: number): boolean {
+  const head = roster.positions.length - 1;
+  if (epochAt(roster.cells, cell, head) !== epoch) return false;
+  const holders = granteesAt(roster.cells, cell, head, () => true);
+  if (holders !== undefined) return holders.every((writer) => deviceAt(roster.members, writer, head) !== undefined);
+  const founded = epochsAt(roster.cells, cell, head).at(-1)?.from;
+  if (founded === undefined) return false;
+  for (const devices of roster.members.devices.values()) {
+    if (devices.some((device) => device.until !== undefined && device.until > founded && device.until <= head)) return false;
+  }
+  return true;
+}
+
+/** True when a required hybrid rotation has recipients but none can receive its new key. */
+export function awaitsHybridRecipients(roster: RosterState, info: WrapCell, recipients: readonly string[], routing?: RoutingTable): boolean {
+  return recipients.length > 0 && formatFor(roster, info, undefined, routing) === 2 &&
+    recipients.every((writer) => kemKeysAt(roster, writer) === undefined);
 }
 
 /** One epoch of a cell planned for a grant: its key and the format choice formatFor gave it (never switch-first: such an epoch is not planned). */

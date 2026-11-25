@@ -21,16 +21,8 @@
 // The join secret lives in this computer's secret storage from the invitation until a roster entry records its outcome (used or voided), and is then
 // forgotten (P-31-28). Nothing else is ever deleted.
 //
-// A removal or a clearance change and its rekeys (MJ-03): the roster entry is written first, then one cell.rekey per affected cell. Which cells still
-// need a new key is computed from the roster, not remembered: a cell whose current key is held by a device no longer admitted, or by a member no
-// longer cleared for it, while someone cleared is left on it. Every flow that writes or hands out keys (remove, change a member, admit) finishes such
-// cells first, and finishRekeys does it on its own, so an interrupted removal is always finished by the next one.
-//   removed (roster entry written) --each cell.rekey--> finished        removed --interrupted--> unfinished --finishRekeys or the next flow--> finished
-//
-// Clearance is decided here, by the writing host at write time (D-22, 31-RESEARCH.md): a cell's label is opened from its grant with the epoch key this
-// device holds and compared with the member's declared clearance by Phase 70 dominance, with the host clock and the project's scale table. The fold
-// never recomputes it; the signed grant is the authority. Removing a member or a device, or lowering a clearance, moves every affected cell to a new
-// key wrapped only to the devices still cleared (D-23), and the result says so in the agreed words.
+// The rekey flows use the roster to find interrupted rotations before handing out keys (MJ-03).
+// The writing host opens the cell's label and checks clearance with its clock and scales (D-22). The signed grant is the fold's authority.
 //
 // No result, message, file name or error holds a join secret, a MAC or a key (P-31-23). The invitation file holds the secret by design, inside its
 // signed payload, and the join request file holds the MAC by design; nothing else does.
@@ -58,7 +50,7 @@ import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
-import { SWITCH_FIRST_TEXT, formatFor, grantsTo, newEpochGrant, type PlannedEpoch } from './wrapPlan';
+import { SWITCH_FIRST_TEXT, awaitsHybridRecipients, formatFor, grantsTo, newEpochGrant, type PlannedEpoch } from './wrapPlan';
 import type { MemberRecord } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
@@ -1258,6 +1250,9 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
       ? rekeyPlans(shared, roster, { kind: 'clearance-lowered', writers: devices.map((device) => device.writer) }, { clearance: { member: input.member, value: input.clearance } }, gate)
       : { plans: [] as RekeyPlan[], cells: new Map<string, CellInfo>() };
     if (isResult(planned)) return planned;
+    if (planned.plans.some((plan) => awaitsHybridRecipients(roster, planned.cells.get(plan.cell) as CellInfo, plan.recipients, shared.routing))) {
+      return refused('rekey-awaiting-keys', 'The clearance was not changed. A computer that will keep access must publish compatible encryption keys first.');
+    }
     // The cells the member is newly cleared for, and their keys, are checked before anything is written too.
     const raisedCheck = changesClearance ? grantPlans(shared, roster, { clearance: input.clearance }, cellsAt(roster, project.keys, head.position, gate.scales), gate, head.position) : [];
     if (isResult(raisedCheck)) return raisedCheck;

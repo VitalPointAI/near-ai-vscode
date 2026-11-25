@@ -98,15 +98,29 @@ test('member removal: the rekey of every cell the member held is v2 only, and th
   }
 });
 
-test('removal with recipients awaiting hybrid keys keeps writes paused until recovery', async () => {
+test('clearance and removal handle an affected cell awaiting compatible hybrid keys', async () => {
   const lead = await unswitchedLead();
+  const labelled = await ensureLabelCell(lead.host, orgLabel('Internal'));
+  assert.ok(labelled.ok);
   const deputy = await bringIn(lead, 'removed-deputy', 'Quinn Planner', orgClearance('Internal'));
+  assert.ok(wrapsOn(lead.at).some(({ cell, writer, format }) => cell === labelled.cell && writer === deputy.writer && format === 1));
   ok(await nameDeputy(lead.host, deputy.member), 'name deputy');
   await syncTo(lead, deputy);
-  assert.ok('hash' in await switchToV2(deputy.host), 'the deputy switches the project');
+  const publish = (seat: Seat) => ensureDeviceKem(seat.p, {
+    loadKeys: () => loadOrCreateKemKeys(seat.at.secrets, { identityDir: identityDir(seat.at.global) })
+  });
+  const publication = await publish(deputy);
+  assert.ok(publication === 'published' || publication === 'present');
+  const switched = await switchToV2(deputy.host);
+  assert.ok('hash' in switched, JSON.stringify(switched));
   await syncTo(deputy, lead);
   const base = lead.p.projectId;
   const initial = (await lead.p.state()).roster;
+  const lowered = await updateMember(lead.host, { member: deputy.member, clearance: orgClearance('Public') });
+  assert.equal(lowered.ok, false);
+  assert.equal(lowered.reason, 'rekey-awaiting-keys');
+  assert.deepEqual((await lead.p.state()).roster.positions, initial.positions);
+  assert.deepEqual(formatsOf(lead.at, labelled.cell, 2), []);
   const slot = deviceAt(initial.members, lead.writer, initial.positions.length - 1)?.slot;
   assert.ok(slot !== undefined, 'the lead has a device slot');
   const data = { product: 'estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
@@ -118,14 +132,13 @@ test('removal with recipients awaiting hybrid keys keeps writes paused until rec
   assert.equal('refused' in refused && refused.refused, 'rekey-pending');
   assert.deepEqual(formatsOf(lead.at, base, 2), []);
 
-  assert.equal(await ensureDeviceKem(lead.p, {
-    loadKeys: () => loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) })
-  }), 'published');
+  assert.equal(await publish(lead), 'published');
   ok(await finishRekeys(lead.host), 'finish after the lead publishes hybrid keys');
   const written = await lead.p.appendOwn('doc.client', data);
   assert.ok('ok' in written);
   assert.equal(written.built.entry.header.epoch, 2);
   assert.deepEqual(formatsOf(lead.at, base, 2), [2]);
+  assert.deepEqual(formatsOf(lead.at, labelled.cell, 2), [2]);
 });
 
 test('device revocation: the rekey without the revoked device is v2 only', async () => {
