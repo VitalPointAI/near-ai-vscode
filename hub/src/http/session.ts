@@ -194,6 +194,8 @@ export class SessionRegistry {
       const standing = judged.standingAt(read.writer, now);
       if (standing === 'session-expired' || standing === 'quarantined' || standing === 'revoked') return refuse(standing);
       if (standing !== 'admitted') return refuse('not-admitted');
+      const member = judged.deviceOf(read.writer)?.member;
+      if (member !== undefined && this.underReview(open.project, member)) return refuse('access-under-review');
       if (!coversRequired(read.features, judged.state.required, hubReplicaFeatures())) return refuse('needs-update');
       return this.issue(socket, keying, { project: open.project, writer: read.writer, expiresAt: Math.min(now + TOKEN_TTL_MS, Date.parse(certificate.notAfter)), certificate: certificate.hash }, certificate.device);
     }
@@ -258,7 +260,7 @@ export class SessionRegistry {
       this.revokeDevice(record.writer, record.project);
       return refuseAuth('revoked');
     }
-    const member = roster.view.deviceKey(record.writer)?.member;
+    const member = roster.deviceOf(record.writer)?.member;
     if (member !== undefined && this.underReview(record.project, member)) return refuseAuth('access-under-review');
     return { ok: true, session: { project: record.project, writer: record.writer, expiresAt: record.expiresAt, ...(record.certificate === undefined ? {} : { certificate: record.certificate }) } };
   }

@@ -248,6 +248,13 @@ export class ProjectRoster {
     return deviceKeyOf(this.state.members, writer) === undefined ? this.view.sessionCertificate?.(writer) : undefined;
   }
 
+  /** The roster device a writer stands for: the device itself, or for a certified session key the device that certified it (D-62). It names
+   *  the member whose credentials and review status apply to the writer (71-09). */
+  deviceOf(writer: string): { publicKey: string; member: string } | undefined {
+    const certificate = this.sessionOf(writer);
+    return this.view.deviceKey(certificate === undefined ? writer : certificate.device);
+  }
+
   /** How many of a device's session key certificates are still before their notAfter at the hub's clock (LIMITS.liveSessionKeysPerDevice). */
   liveSessionsOf(device: string, now: number): number {
     return [...this.state.sessions.values()].filter((certificate) => certificate.device === device && Date.parse(certificate.notAfter) > now).length;

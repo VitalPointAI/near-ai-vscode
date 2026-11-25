@@ -223,7 +223,7 @@ export function composeHub(parts: HubParts): ComposedHub {
   // A newer list that sets a bit a member's entries cited ends that member's event streams at once; their next call is refused by the session.
   const endRefused = (): void => {
     events.end((owner) => {
-      const member = cache.peek(owner.project)?.view.deviceKey(owner.writer)?.member;
+      const member = cache.peek(owner.project)?.deviceOf(owner.writer)?.member;
       return member !== undefined && trust.underReview(owner.project, member, now());
     });
   };

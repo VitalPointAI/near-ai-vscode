@@ -478,6 +478,12 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         continue;
       }
       if (read.ok && ctx.trust !== undefined && carriesEvidence(read.opened.data)) {
+        // The member's credentials bind the roster device; a session key cites them through the device that certified it.
+        const device = roster.deviceOf(header.writer);
+        if (device === undefined) {
+          refuse('not-admitted', hash);
+          continue;
+        }
         const key = roster.ring(header.stream, header.epoch) as Buffer;
         const opened: Buffer[] = [];
         for (const ref of refsIn) {

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GENESIS_PREV, sealBlob } from '@ext/domain/replica/entry';
+import { KNOWN_REPLICA_FEATURES } from '@ext/domain/replica/features';
+import { buildSessionAnswer } from '@ext/domain/replica/hubFile';
+import { sessionCertifyData } from '@ext/domain/replica/sessionKeys';
 import { didKeyFromDevice } from '@ext/domain/did/didKey';
 import { hostPathOf } from '../src/store/trustStore';
 import { REVOCATIONS, SUSPENSIONS, bindingWithPlaces, issue, list, withComputers } from '@ext/test/helpers/credentialWorld';
@@ -19,6 +22,7 @@ import type { TrustWorld } from './helpers/trustWorld';
 // 'access-under-review'; a suspension lifted by a newer list lets them in again. All names, DIDs and keys are fictional and made at run time.
 
 const ENTRY_AT = '2026-11-24T11:00:00.000Z';
+const SAM_SLOT = 7;
 
 interface Site {
   hub: Hub;
@@ -47,7 +51,7 @@ async function makeSite(hub: Hub, trust: TrustWorld, hosted = true): Promise<Sit
   const world = createHubWorld();
   world.admitHub(hub.identity);
   const sam = world.device('MEMBER-SAM', 'mbr-sam');
-  world.admitMember(sam);
+  world.admitMember(sam, { slot: SAM_SLOT });
   const enrolled = await hub.enrolProject(world);
   assert.equal(enrolled?.status, 201, enrolled?.text ?? 'no answer');
   const lead = await hub.openSession(world.lead, world.project);
@@ -248,4 +252,53 @@ test('G467: the hub refuses a DID log whose computer uses another person\'s plac
   const refused = await post(many.log, many.did);
   assert.equal(refused.status, 422);
   assert.match(refused.text, /computer-slots/);
+}));
+
+// Integration of Phase 33 session keys (D-62) with 71-09: a session key stands for the person's device, so it cites through that device's
+// binding, and once a newer list puts that person under review the session key's token and any new session it asks for are refused too.
+test('a session key cites through its certifying device, and is refused access-under-review with that person once a newer list revokes', withSite(async (site) => {
+  const key = site.world.device('SAM-SESSION', site.sam.member);
+  const notAfter = new Date(TRUST_NOW + 10 * 60 * 60 * 1000).toISOString();
+  const data = sessionCertifyData({ project: site.world.project, member: site.sam.member, device: site.sam.writer, sessionKey: key.publicKey, slot: SAM_SLOT, notAfter }, (bytes) => key.signer.sign(bytes));
+  const certificate = site.world.write(site.sam, { kind: 'session.certify', data, at: ENTRY_AT, seq: site.chain.seq, prev: site.chain.prev });
+  const pushed = await site.samSession.connection.post(`/v1/projects/${site.world.project}/append`, { entries: [certificate.entry] }, site.samSession.token);
+  assert.deepEqual(pushed.json<{ refused: unknown[] }>().refused, [], pushed.text);
+  site.chain = { seq: site.chain.seq + 1, prev: certificate.hash };
+
+  const openKeySession = async (): Promise<{ response: HubResponse; opened?: OpenedSession }> => {
+    const connection = await site.hub.connect();
+    const challenge = await connection.post('/v1/session', { project: site.world.project });
+    assert.equal(challenge.status, 200, challenge.text);
+    const body = challenge.json<{ hub: string; challenge: string }>();
+    const answer = buildSessionAnswer(key.signer, { hub: body.hub, project: site.world.project, challenge: body.challenge, keying: connection.keying(), features: KNOWN_REPLICA_FEATURES, certificateEntry: certificate.entry, now: new Date(site.hub.now()) });
+    const response = await connection.post('/v1/session', { answer });
+    if (response.status !== 200) return { response };
+    const opened = response.json<{ project: string; token: string; expiresAt: string }>();
+    return { response, opened: { connection, token: opened.token, project: opened.project, expiresAt: opened.expiresAt } };
+  };
+  const first = await openKeySession();
+  assert.equal(first.response.status, 200, first.response.text);
+  const keySession = first.opened as OpenedSession;
+
+  // The session key's own base-stream entry cites Sam's binding, which names Sam's device, not the session key.
+  const sealKey = site.world.keyOf(site.world.project, 1);
+  const credentials = [site.clearance, site.binding, site.role];
+  const blobs = credentials.map((item) => sealBlob(sealKey, site.world.project, 1, Buffer.from(JSON.stringify(item.credential), 'utf8')));
+  for (const blob of blobs) assert.ok([200, 201].includes((await keySession.connection.put(`/v1/blobs/${blob.hash}`, Buffer.from(blob.bytes, 'base64url'), keySession.token)).status));
+  const written = site.world.write(key, { kind: 'posting.accept', data: evidenceOf(site), at: ENTRY_AT, seq: 0, prev: GENESIS_PREV });
+  const cited = await keySession.connection.post(`/v1/projects/${site.world.project}/append`, { entries: [written.entry], blobRefs: blobs.map((blob) => ({ entry: written.hash, blob: blob.hash })) }, keySession.token);
+  assert.deepEqual(cited.json<{ refused: unknown[] }>().refused, [], cited.text);
+  assert.ok(site.hub.trust.citedOf(site.world.project, site.sam.member).length > 0, 'the citation is kept for Sam');
+
+  const heads = `/v1/projects/${site.world.project}/heads`;
+  assert.equal((await keySession.connection.get(heads, keySession.token)).status, 200);
+  const revoked = await list(site.trust.world.revocationKey, REVOCATIONS, 'revocation', [site.clearance.revocationIndex], { version: 2, validFrom: '2026-11-24T10:05:00Z' });
+  await putList(site, REVOCATION_ROUTE, revoked);
+  const refused = await keySession.connection.get(heads, keySession.token);
+  assert.equal(refused.status, 403, refused.text);
+  assert.equal(refused.json<{ reason: string }>().reason, 'access-under-review');
+  const again = await openKeySession();
+  assert.equal(again.response.status, 403, again.response.text);
+  assert.equal(again.response.json<{ reason: string }>().reason, 'access-under-review');
+  assert.equal((await site.lead.connection.get(heads, site.lead.token)).status, 200, 'other members are unaffected');
 }));
