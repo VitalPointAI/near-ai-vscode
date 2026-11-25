@@ -204,47 +204,6 @@ export interface SterlingEvidenceService {
   getControlText(file: string): Promise<ControlTextResult>;
 }
 
-/** The words the Compliance view shows for release evidence (48.2-UI-SPEC copywriting contract). */
-export const RELEASE_EVIDENCE_TEXT = {
-  source: 'Release',
-  release: 'Release {version}',
-  asOf: 'as of {time}',
-  verified: 'Verified',
-  notVerified: 'Not verified',
-  current: 'Current',
-  ageing: 'Ageing',
-  outOfDate: 'Out of date',
-  unknown: 'Unknown',
-  noEvidence: 'No evidence',
-  noTrustKey: 'Not verified: no key from your organization’s configuration vouches for this release’s evidence, so nothing counts as Met.',
-  noSignature: 'Not verified: there is no signature for this release’s evidence, so nothing counts as Met.',
-  anchorUnconfirmed: 'Not verified: this session cannot confirm your organization’s site key, so nothing counts as Met. Ask your organization’s administrator.',
-  verifiedOrganization: 'Verified with your organization’s site key.',
-  verifiedSupplier: 'Verified with the supplier release key mounted on this computer.',
-  checkedAt: 'checked {time}',
-  clockNote: 'Freshness is Unknown: this computer’s clock is earlier than the release build ({time}).',
-  wouldBe: 'Would be {state} if verified.',
-  didNotVerify: 'The release evidence did not verify.',
-  didNotVerifyTail: 'Nothing from this source is shown.',
-  heading: 'Release evidence. Authorization is your organization’s decision.',
-} as const;
-
-/** One sentence per reason the release evidence did not verify (48.2-UI-SPEC `dnv.*`); `{file}` is the path inside the evidence folder. */
-export const RELEASE_DID_NOT_VERIFY_TEXT: Readonly<Record<ReleaseDidNotVerifyReason, string>> = {
-  missing: '{file} is missing from the release evidence.',
-  extra: '{file} is in the release evidence but not in its manifest.',
-  symlink: '{file} is a link, and the evidence may hold only plain files.',
-  size: '{file} is not the size its manifest records.',
-  hash: '{file} has changed since the evidence was signed.',
-  format: '{file} is in a format this release does not read.',
-  field: '{file} is in a format this release does not read.',
-  path: '{file} is in a format this release does not read.',
-  unreadable: '{file} could not be read.',
-  signature: 'The signature does not match this release’s evidence.',
-  'other-manifest': 'The signature is for different evidence than this release carries.',
-  'anchor-mismatch': 'The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator.',
-};
-
 // ---- 48.2-10: the Compliance view's words and pure presentation helpers (approved 48.2-UI-SPEC, 2026-11-25) ----
 // The browser shows what these give; they decide nothing about state, freshness or verification beyond the paused overlay (D-25).
 
