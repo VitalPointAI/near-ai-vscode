@@ -1,7 +1,9 @@
 // Success criterion 2 of Phase 48 on the real sources (48-08, D-12, D-14, VER-04, VER-05): a hosted component's statement reads Met on the
 // hosted Protected B level only from a collected passing result of its rule, and every hosted row traces to its rules and their results.
-// The report fixture holds the rows of a real local run of deploy/test/render.test.mjs (NEAR_AI_TEST_REPORT), read by the tests collector
-// through the bundle command exactly as CI reads the deploy package's report.
+// The report fixture holds the rows of a real local run of every deploy/test file (NEAR_AI_TEST_REPORT), read by the tests collector
+// through the bundle command exactly as CI reads the deploy package's report. A statement that also needs the running site reads Met only
+// with a fresh export signed by a key in the trust list, Stale once that export is older than 7 days, and missing-result with no export;
+// the export is signed by a key generated here, listed in a temporary trust list (no key is committed).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -12,6 +14,8 @@ import { run as runBundleCommand } from '../src/commands/bundle.ts';
 import { loadComponents } from '../src/components.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { loadTailoring } from '../src/tailoring.ts';
+import { buildUnsignedExport, signExport } from '../src/siteExport.ts';
+import { compliantFacts, freshKey, signersText } from './fixtures/collectors/deployment/helpers.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const COMPLIANCE = path.join(ROOT, 'compliance');
@@ -29,14 +33,24 @@ const BATCH = [
 const levels = () => (JSON.parse(readFileSync(path.join(COMPLIANCE, 'levels.json'), 'utf8')).levels as { id: string; components: string[] }[]);
 const reportRows = () => readFileSync(REPORT, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 
-/** Runs the bundle command over the checkout's real sources with the given deploy report rows (none: no tests input at all). */
-async function bundle(rows?: readonly unknown[]): Promise<{ dashboard: any; testRows: any[]; observations: any[] }> {
+/**
+ * Runs the bundle command over the checkout's real sources with the given deploy report rows (none: no tests input at all) and, when
+ * `exportAgeMs` is given, a site export of the compliant fixture facts signed that long before now by a fresh key in a temporary trust list.
+ */
+async function bundle(rows?: readonly unknown[], exportAgeMs?: number): Promise<{ dashboard: any; testRows: any[]; observations: any[] }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'near-ai-hosted-'));
   const collectors: Record<string, unknown> = {};
   if (rows) {
     const file = path.join(dir, 'test-report-deploy.ndjson');
     writeFileSync(file, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
     collectors.tests = { reports: [{ package: 'deploy', file }] };
+  }
+  if (exportAgeMs !== undefined) {
+    const key = freshKey();
+    const signedAt = new Date(Date.now() - exportAgeMs).toISOString();
+    writeFileSync(path.join(dir, 'export.json'), JSON.stringify(signExport(buildUnsignedExport('fixture-site', signedAt, compliantFacts(), key.publicKey), key.privateKeyPem)));
+    writeFileSync(path.join(dir, 'site-signers.json'), signersText(key));
+    collectors.deployment = { file: path.join(dir, 'export.json'), signersFile: path.join(dir, 'site-signers.json') };
   }
   const inputs = path.join(dir, 'inputs.json');
   writeFileSync(inputs, JSON.stringify({ repository: 'owner/repo', commit: 'a'.repeat(40), kind: 'pr', repoRoot: ROOT, collectors }));
@@ -74,6 +88,30 @@ test('a failed render-test row, or no deploy report, leaves each batch statement
     assert.equal(componentRow(absent.dashboard, control, component)?.reason, 'test-not-run', `${control}/${component}`);
     assert.notEqual(componentRow(absent.dashboard, control, component)?.state, 'met', `${control}/${component}`);
   }
+});
+
+const HOUR_MS = 60 * 60 * 1000;
+const KEYCLOAK = { control: 'ia-02', rules: ['keycloak.ia-02.live-no-otp', 'keycloak.ia-02.live-no-password', 'keycloak.ia-02.realm-actions', 'keycloak.ia-02.realm-flows'] };
+
+test('the Keycloak sign-in statement names the realm tests and both live authenticator observations', () => {
+  const rules = loadEvidenceRules(path.join(COMPLIANCE, 'evidence-rules')).filter((rule) => rule.component === 'keycloak' && rule.control === KEYCLOAK.control);
+  assert.deepEqual(rules.map((rule) => rule.id).sort(), KEYCLOAK.rules);
+  assert.deepEqual(rules.filter((rule) => rule.kind === 'observation').map((rule) => rule.observation).sort((a, b) => a!.subject.localeCompare(b!.subject)),
+    [{ collector: 'deployment', subject: 'keycloak/no-otp-authenticator' }, { collector: 'deployment', subject: 'keycloak/no-password-authenticator' }]);
+  for (const rule of rules.filter((item) => item.kind === 'test')) {
+    assert.equal(rule.test?.file, 'deploy/test/realm.test.mjs');
+    assert.ok(reportRows().some((row) => row.file === rule.test?.file && row.name === rule.test?.name && row.status === 'passed'), rule.id);
+  }
+});
+
+test('the Keycloak sign-in statement is Met with the passing realm tests and an export signed an hour ago, Stale at 8 days, missing-result without one', async () => {
+  const fresh = componentRow((await bundle(reportRows(), HOUR_MS)).dashboard, KEYCLOAK.control, 'keycloak');
+  assert.equal(fresh?.state, 'met', fresh?.reason);
+  assert.deepEqual(fresh.evidence.map((item: any) => item.rule).sort(), KEYCLOAK.rules);
+  const lapsed = componentRow((await bundle(reportRows(), 8 * 24 * HOUR_MS)).dashboard, KEYCLOAK.control, 'keycloak');
+  assert.equal(lapsed?.state, 'stale', lapsed?.reason);
+  const none = componentRow((await passingBundle()).dashboard, KEYCLOAK.control, 'keycloak');
+  assert.deepEqual([none?.state, none?.reason], ['not-met', 'missing-result']);
 });
 
 test('every hosted Protected B row lists every hosted component and traces each stated component to its rules and collected results', async () => {
