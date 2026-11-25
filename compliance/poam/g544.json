@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-04",
+    "ia-11",
+    "sa-11"
+  ],
+  "gap": "G544",
+  "id": "g544",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Repeat the browser cursor action and finish the serial undo, status, invitation confirmation and payload checks"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Verify the original named-hover assertion by moving the actual pointer over the selection geometry. Complete the following serial browser checks. Keep the separate native decision acceptance tracked in G542.",
+  "title": "Native staff browser checks stopped at cursor hover"
+}

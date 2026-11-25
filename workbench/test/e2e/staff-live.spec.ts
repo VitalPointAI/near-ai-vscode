@@ -228,11 +228,19 @@ test('tracer: A shares and invites, B joins through the page, A admits, and a wo
 test('cursors: B\'s cursor shows in A\'s editor with B\'s name', async () => {
   const left = await openProduct(a);
   const right = await openProduct(b);
+  // The previous test typed in A's editor, which can leave completion open over the hover target.
+  await a.page.keyboard.press('Escape');
   // B selects a word of the shared text (a double click); A sees the selection, the caret and the label, and the hover names B.
-  await right.locator('.view-line', { hasText: 'The enemy holds the river crossings.' }).first().dblclick({ position: { x: 40, y: 5 } });
+  await right.locator('.view-line', { hasText: 'The enemy holds the river crossings.' }).first()
+    .dblclick({ position: { x: 40, y: 5 }, timeout: 15_000 });
   await expect(left.locator('.sterling-cursor-caret')).toHaveCount(1, { timeout: 15_000 });
   await expect(left.locator('.sterling-cursor-label').first()).toContainText('Blake Rivers');
-  await left.locator('.sterling-cursor-selection').first().hover();
+  // Monaco paints the selection on a backdrop. Its hover handler listens to the text at the same coordinates.
+  const selection = left.locator('.sterling-cursor-selection').first();
+  await expect(selection).toBeVisible({ timeout: 15_000 });
+  const bounds = await selection.boundingBox({ timeout: 15_000 });
+  if (bounds === null) throw new Error('Blake’s selection has no visible bounds');
+  await a.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
   await expect(a.page.locator('.monaco-hover').first()).toContainText('Blake Rivers', { timeout: 15_000 });
 });
 
