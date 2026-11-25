@@ -201,7 +201,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
       // path here found no profile and reported "no model is reachable" while chat worked fine.
       startRun: panelCyberRunStarter(context, (root) => activeProvider(root, auth).then((active) => active?.provider.client), {
         root: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-        model: readModelTiers().standard,
+        // No chat-tier fallback (74.1-10): the run's model is the engagement's choice or the abliterated pick.
         gateHost: gate,
         stopped: () => isEmergencyStopped(),
         // Every ask goes to the same approval card the chat uses, so a shell or exploit step is

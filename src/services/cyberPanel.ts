@@ -76,6 +76,7 @@ async function depsFor(context: vscode.ExtensionContext, service: CyberPanelServ
     timeZone: () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } },
     sandboxTier: () => tier.tier,
     resolve: defaultResolve,
+    projectFolders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
     engagements: {
       create: (engagement) => engagements.create(engagement),
       get: (id) => engagements.get(id),
@@ -147,12 +148,12 @@ export function openCyberPanel(context: vscode.ExtensionContext, service: CyberP
   const view = vscode.window.createWebviewPanel('nearAiCyber', 'Cybersecurity', vscode.ViewColumn.Active, {
     enableScripts: true,
     retainContextWhenHidden: true,
-    localResourceRoots: [media]
+    localResourceRoots: [media, vscode.Uri.joinPath(context.extensionUri, 'media', 'shared')]
   });
   current = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();
-  view.webview.html = cyberPanelHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('cyber.js'), style: asset('cyber.css') });
+  view.webview.html = cyberPanelHtml({ cspSource: view.webview.cspSource, nonce: randomBytes(16).toString('base64'), script: asset('cyber.js'), style: asset('cyber.css'), base: view.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'shared', 'base.css')).toString() });
 
   const page: CyberPageHost = { webview: view.webview, onDidDispose: (listener) => view.onDidDispose(listener), reveal: () => view.reveal() };
   // The sandbox tier is detected once per panel open, and detection never installs anything (D-12).

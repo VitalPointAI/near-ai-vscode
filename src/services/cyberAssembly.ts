@@ -20,6 +20,7 @@ import { ShellSession } from '../agent/shell';
 import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
+import type { UseInput } from '../domain/gate/useTier';
 
 /**
  * The one rule for where a workspace's cyber store lives. The panel and the run stack both use it,
@@ -230,7 +231,7 @@ export function cyberAssembly(context: {
     const bounded = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const client = options.client;
     // CLAS-06: the role call runs inside the scan's session route, decided at the client and recorded in the run's log.
-    const reply = await withSessionRoute(options.route ?? defaultSessionRoute(), () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, signal: bounded }));
+    const reply = await withSessionRoute(options.route ?? cyberLaneRoute(defaultSessionRoute()), () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, signal: bounded }));
     return reply.text;
   };
   return cyberAssemblyCore({
@@ -253,6 +254,14 @@ export function cyberAssembly(context: {
     ...(options.requestApproval ? { requestApproval: options.requestApproval } : {}),
     ...(options.policy ? { policy: options.policy } : {})
   });
+}
+
+/** The use of every cyber request (74.1 D-17, design decision 4): a cyber engagement in the research lane, research only. */
+export const CYBER_USE: UseInput = Object.freeze({ cyber: true, lane: 'research' });
+
+/** `route` with the cyber lane's use, for a scan run with no gate runtime (the default route). */
+export function cyberLaneRoute(route: SessionRoute): SessionRoute {
+  return { ...route, useOf: () => CYBER_USE };
 }
 
 /** The ToolContext a cyber step's tool run receives: the workspace root, a shell, and a signal. */
@@ -394,7 +403,7 @@ export function panelCyberRunStarter(
     grants.outbound = new OutboundFingerprints();
     const assembly = cyberAssembly(host, {
       ...(options.root ? { workspaceRoot: options.root } : {}),
-      ...(gate ? { route: sessionRouteFrom(gate, { markOf: () => mark.current() }) } : {}),
+      ...(gate ? { route: sessionRouteFrom(gate, { markOf: () => mark.current(), use: CYBER_USE }) } : {}),
       ...(client ? { client } : {}),
       ...(model ? { model } : {}),
       toolContext,

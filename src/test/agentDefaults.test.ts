@@ -83,12 +83,10 @@ test('74.1 D-18: no file under src/ but agentDefaults.ts and shippedPassports.ts
   const prefixes = ['z-ai', 'zai-org', 'moonshotai', 'Qwen', 'deepseek-ai', 'nvidia', 'openai', 'anthropic', 'google', 'x-ai', 'black-forest-labs', 'CohereLabs', 'ibm-granite'];
   const literal = new RegExp(`['"\`](?:${prefixes.join('|')})/[A-Za-z0-9._-]+['"\`]`);
   const allowed = new Set(['src/domain/agentDefaults.ts', 'src/domain/gate/shippedPassports.ts']);
-  // Temporary (74.1-05): the cyber harness's fallback model goes with 74.1-10, which removes this exception.
-  const temporary = new Set(['src/services/cyberHandoff.ts']);
   const found: string[] = [];
   for (const file of sourceFiles(path.join(ROOT, 'src'))) {
     const relative = path.relative(ROOT, file).split(path.sep).join('/');
-    if (allowed.has(relative) || temporary.has(relative)) continue;
+    if (allowed.has(relative)) continue;
     readFileSync(file, 'utf8').split('\n').forEach((line, index) => { if (!/^\s*(\/\/|\*|\/\*)/.test(line) && literal.test(line)) found.push(`${relative}:${String(index + 1)}`); });
   }
   assert.deepEqual(found, []);

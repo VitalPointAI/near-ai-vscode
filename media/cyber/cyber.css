@@ -202,3 +202,11 @@ ul.tools li.tool {
   border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
   color: var(--vscode-errorForeground);
 }
+
+/* The research workspace banner (74.1-UI-SPEC S2): a lifted card from base.css, first in the header, with its 3px warning bar. */
+.research-banner { display: flex; gap: 8px; align-items: flex-start; padding: 16px; margin-bottom: 16px; line-height: 1.5; }
+.research-banner p { margin: 0; overflow-wrap: anywhere; }
+.research-banner .banner-icon { color: var(--vscode-editorWarning-foreground); display: inline-flex; padding-top: 2px; }
+.research-banner .banner-title { font-weight: 600; }
+.research-banner .banner-detail { display: flex; gap: 4px; align-items: flex-start; color: var(--vscode-descriptionForeground); }
+.research-banner .info-icon { color: var(--vscode-editorWarning-foreground); display: inline-flex; padding-top: 2px; }
