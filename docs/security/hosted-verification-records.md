@@ -63,11 +63,11 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 35 | image-registry | Zot (small sites): the same import rules | deployment observation, test rule | si-07 | rule image-registry.si-07.admission-policy |
 | 36 | image-registry | Zot: a FIPS build with `GOFIPS140` | document record, build evidence | sc-13 | gap G333 |
 | 37 | rke2 | UBI 9 base images: the host in FIPS mode | deployment observation (host FIPS mode per node) | sc-13 | rule rke2.sc-13.fips-hosts |
-| 38 | workbench | UBI 9 base images: the RHEL OpenSSL FIPS provider | document record (certificate), deployment observation | sc-13 | gap G342 |
+| 38 | workbench | UBI 9 base images: the RHEL OpenSSL FIPS provider | document record (certificate), deployment observation | sc-13 | rule workbench.sc-13.provider-record |
 | 39 | theia-cloud | No Debian or Alpine bases at Protected B | test rule (rendered production profile) | cm-07, sc-13 | gap G336 |
 | 40 | workbench | UBI 9 base | test rule (image build) | cm-02 | gap G342 |
-| 41 | workbench | Node with OpenSSL 3 and the FIPS provider on a FIPS host | test rule (P4 tests), deployment observation (FIPS mode reported by Node) | sc-13 | gap G342 |
-| 42 | workbench | Our signing and unwrapping go through OpenBao or the HSM | test rule (P4 tests) | sc-12 | gap G342 |
+| 41 | workbench | Node with OpenSSL 3 and the FIPS provider on a FIPS host | test rule (P4 tests), deployment observation (FIPS mode reported by Node) | sc-13 | rule workbench.sc-13.fips-provider |
+| 42 | workbench | Our signing and unwrapping go through OpenBao or the HSM | test rule (P4 tests) | sc-12 | rule workbench.sc-12.sign-after-step-up |
 | 43 | cert-manager | Not assessed: the fit check before use; a CA issuer chained to the OpenBao PKI, no ACME | test rule (rendered manifests: no ACME issuer) | sc-12, sc-23 | rule cert-manager.sc-12.issuers |
 | 44 | hub | Re-assessed for Kubernetes deployment | test rule (hub and Phase 47 manifest tests) | cm-06 | rule hub.cm-06.kubernetes |
 | 45 | hub | Several hubs per site, each serving a set of projects | test rule, deployment observation (hub workload settings) | ac-03 | rule hub.sc-07.separate-hubs |

@@ -4958,8 +4958,6 @@
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "sc-13",
-        "sc-12",
         "cm-02"
       ],
       "id": "G342",
@@ -4969,8 +4967,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add workbench statements with evidence rules for the UBI 9 base, Node with OpenSSL 3 and the RHEL FIPS provider on a FIPS host, and signing and unwrapping through OpenBao or the HSM: test rules on the Phase 46 image build and P4 tests, and an observation of the FIPS mode Node reports.",
-      "title": "The workbench image has no statements for its section 10 conditions"
+      "remediation": "Add the workbench statement for the UBI 9 base with a test rule whose result reaches the evidence bundle: the container suite that checks the running image (base, user, Node major) writes no test report today, so its results cannot be evidence. Signing and unwrapping through OpenBao and the FIPS provider have their rules (workbench.sc-12.sign-after-step-up, workbench.sc-13.fips-provider, workbench.sc-13.provider-record).",
+      "title": "The workbench image has no statement for its UBI 9 base"
     },
     {
       "appliesAt": "protected-a",
