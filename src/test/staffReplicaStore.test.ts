@@ -393,7 +393,7 @@ test('a guarded locally signed entry refuses a changed store before persisting a
   assert.equal(candidate.blobs.length, 1);
 
   assert.deepEqual(await second.appendOwn(chain(other, 1)), { ok: true, written: 1 });
-  assert.deepEqual(await first.ingestForeign([candidate.entry], candidate.blobs, async () => ({ kind: 'pass' } as const), expected),
+  assert.deepEqual(await first.ingestForeign([candidate.entry], candidate.blobs, async () => ({ ok: true } as const), expected),
     { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
   assert.equal(first.has(candidate.hash), false);
   assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
