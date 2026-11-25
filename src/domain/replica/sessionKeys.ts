@@ -17,12 +17,13 @@ import { REPLICA_KINDS, kindFamily } from './kinds';
 import type { RosterView } from './rosterView';
 import type { VerifiedEntry } from './verify';
 
-// The kinds only the person key may sign (D-60): every roster kind and the project genesis, the decision kinds, session.certify itself and a device's
-// key binding (device.kem, 33.2 D-03). One list,
-// checked by every client and by your organization's server.
+// The kinds only the person key may sign (D-60): every roster kind and the project genesis, the decision kinds, session.certify itself, a device's
+// key binding (device.kem, 33.2 D-03) and a posting's private record (the personnel family, 33.1 D-09). Read from the kinds registry by family, so a
+// later roster or personnel kind cannot be left off. One list, checked by every client and by your organization's server.
+const PERSON_KEY_FAMILIES: ReadonlySet<string> = new Set(['roster', 'session', 'device', 'personnel']);
 export const PERSON_KEY_KINDS: readonly string[] = Object.freeze([
   'project.genesis',
-  ...REPLICA_KINDS.filter((kind) => kindFamily(kind) === 'roster' || kindFamily(kind) === 'session' || kindFamily(kind) === 'device'),
+  ...REPLICA_KINDS.filter((kind) => PERSON_KEY_FAMILIES.has(kindFamily(kind) ?? '')),
   'version.decide', 'version.release', 'version.supersede', 'version.withdraw'
 ]);
 const PERSON_KEY_KIND_SET: ReadonlySet<string> = new Set(PERSON_KEY_KINDS);
