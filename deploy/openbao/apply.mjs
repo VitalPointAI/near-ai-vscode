@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // OpenBao as code (D-37 to D-41): mounts, the jwt auth bound to the site's Keycloak, the session and step-up roles, the policies, the PKI
 // intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13), the Raft snapshot job's role on it (D-73,
-// 47-24), the status-list key and the credential officers' step-up role (Phase 71, 71-12) and the key custodians' group. The audit device is
-// not here: OpenBao 2.7 refuses to enable audit devices
+// 47-24), the status-list key and the credential officers' step-up role (Phase 71, 71-12), the exchange keys and their officers' step-up roles
+// (Phase 45.1) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
 // through the API ("use declarative, config-based audit device management", spike S5), so it is an audit stanza in the server configuration
 // (deploy/values/openbao.yaml). Run at install and again on every update; a second run
 // changes nothing (each write is compared with what OpenBao already holds and skipped when equal).
@@ -22,7 +22,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
 export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'credential-issuers', 'guest-operator', 'guest-expiry',
-  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices', 'guest-account']);
+  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices', 'guest-account', 'exchange-receive', 'exchange-release']);
 /**
  * The policy every guest entity carries, and the only one (D-84; deploy/openbao/enrol.mjs attaches it): it denies the guest the staff KV path
  * kv/users/<entity>/ and gives them kv/guests/<entity>/ instead, so a security officer's removal reaches guests' secrets and nobody else's.
@@ -123,8 +123,42 @@ export function planNotes(site) {
     ? [`no jwt role ${ISSUER_ROLE}: the site file names no credentialIssuers, so nobody can sign status lists yet.`] : [];
 }
 
-/** A policy file's text, with ${site.siteName} filled in. */
-const policyText = (name, site) => readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8').replaceAll('${site.siteName}', site.siteName);
+/** A policy file's text, with ${site.siteName} filled in, and the site's key name in place of @SITE@ (the exchange keys, Phase 45.1). */
+const policyText = (name, site) => {
+  const text = readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8');
+  return text.includes('@SITE@') ? text.replaceAll('@SITE@', keySite(site)).replaceAll('${site.siteName}', site.siteName) : text.replaceAll('${site.siteName}', site.siteName);
+};
+
+const KEY_SITE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/** The site name as part of a Transit key name (exchange-receive-<site>, release-<site>), refused when it cannot be one. */
+export function keySite(site) {
+  if (!KEY_SITE.test(String(site.siteName ?? ''))) throw new Error(`the site setting siteName (${JSON.stringify(site.siteName)}) must be lowercase letters, digits and dashes, starting with a letter or digit, at most 63 characters: it names the site's keys.`);
+  return site.siteName;
+}
+
+const DUTY_SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
+/** The sign-in subjects a site file names for one duty (exchangeOfficers, releaseAuthorities): a list of distinct subjects, empty when absent. */
+export function namedSubjects(site, key) {
+  const value = site[key] ?? [];
+  if (!Array.isArray(value) || value.some((subject) => typeof subject !== 'string' || !DUTY_SUBJECT.test(subject)) || new Set(value).size !== value.length) {
+    throw new Error(`the site setting ${key} must be a list of distinct sign-in subjects (the Keycloak user ids of the people named at the key ceremony).`);
+  }
+  return value;
+}
+
+/**
+ * The exchange keys (Phase 45.1, D-03, D-07): created once, never exportable and never in a plaintext backup. One that already exists in another form
+ * stops the apply, because exportable cannot be turned off again and a key of another type is not the one partners were given.
+ */
+function exchangeKey(name, type) {
+  const body = { type, exportable: false, allow_plaintext_backup: false };
+  return { what: `transit key ${name} (${type}, not exportable)`, read: `transit/keys/${name}`, write: `transit/keys/${name}`, body,
+    compare: (current) => {
+      if (!current) return false;
+      if (current.type === type && current.exportable === false && current.allow_plaintext_backup === false) return true;
+      throw new Error(`transit key ${name} already exists as ${String(current.type)}, exportable ${String(current.exportable)}: it must be ${type} and not exportable. Stop and ask your organization's security officer.`);
+    } };
+}
 
 /**
  * The operations for a site, in order: { what, read?, write, body, compare? }. `read` is the path whose current value decides whether the
@@ -141,6 +175,11 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
   const issuers = credentialIssuers(site);
   const role = (name, extra) => ({ what: `jwt role ${name}`, read: `auth/jwt/role/${name}`, write: `auth/jwt/role/${name}`, body: {
     role_type: 'jwt', bound_audiences: [AUDIENCE], user_claim: 'sub', token_no_default_policy: true, ...extra } });
+  const exchangeSite = keySite(site);
+  // Phase 45.1: the step-up role of a named duty, bound to the step-up acr and to the subjects the site file names (never a group or a token claim).
+  // With nobody named there is no role, so nobody can use the key.
+  const dutyRole = (name, subjects, policy) => (subjects.length === 0 ? [] : [role(name, { bound_claims: { acr: stepUpAcr, sub: subjects }, bound_claims_type: 'string',
+    token_ttl: window, token_max_ttl: window, token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign', policy] })]);
   return [
     mount('kv', 'kv', { version: '2' }),
     mount('transit', 'transit'),
@@ -152,6 +191,9 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
       ? { jwt_validation_pubkeys: [jwtPubkey], bound_issuer: '' }
       : { oidc_discovery_url: `https://keycloak.${site.domain}/realms/${REALM}`, oidc_discovery_ca_pem: caPem ?? '' } },
     ...POLICIES.map((name) => ({ what: `policy ${name}`, read: `sys/policies/acl/${name}`, write: `sys/policies/acl/${name}`, body: { policy: policyText(name, site) } })),
+    // Phase 45.1: your organization's receiving key (decrypt only, D-07) and release key (export label bindings, D-03).
+    exchangeKey(`exchange-receive-${exchangeSite}`, 'rsa-3072'),
+    exchangeKey(`release-${exchangeSite}`, 'ed25519'),
     role('sterling-workbench', { ...BASE_TTL, token_policies: ['sterling-workbench'] }),
     // The only way to sign (D-34, D-39): the same audience and sub (so the same entity), the step-up acr required, and a token that cannot
     // outlive the step-up window.
@@ -169,6 +211,8 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     // The automatic end of guest accounts: only the client sterling-guest-expiry, only the policy guest-expiry, 5 minutes and no renewal.
     role(GUEST_EXPIRY.role, { bound_audiences: [GUEST_EXPIRY.client], bound_claims: { azp: GUEST_EXPIRY.client }, bound_claims_type: 'string', token_policies: ['guest-expiry'],
       token_ttl: GUEST_EXPIRY.ttl, token_max_ttl: GUEST_EXPIRY.ttl, token_explicit_max_ttl: GUEST_EXPIRY.ttl, token_period: 0 }),
+    ...dutyRole('sterling-exchange-receive-stepup', namedSubjects(site, 'exchangeOfficers'), 'exchange-receive'),
+    ...dutyRole('sterling-exchange-release-stepup', namedSubjects(site, 'releaseAuthorities'), 'exchange-release'),
     // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
     // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10). key_type any: the
     // Certificates cert-manager makes from Ingress annotations (Theia Cloud, Harbor) and the Theia Cloud webhook's use RSA 2048 keys, which

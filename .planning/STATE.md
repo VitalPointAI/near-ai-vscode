@@ -170,6 +170,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
 - 33.1-15 waits for 32.1-24 (nearAi.setup.message) on the base (33.1-17 finished 2026-11-24 once 33-23 and #187 reached Phase 33's branch)
 - 33.2-07 Task 3 (cards in the native Staff Room) waits on 33-24 staff-live-engine.ts and 33-26 reaching main
+- 45.1-03 Task 4 needs the replica feature list and roster.require (33-18), not on main; 45.1-04 needs 33.1-21's release act and release.copy binding slot, and 71-13's trust source, not on main
 
 ### Quick Tasks Completed
 
@@ -241,6 +242,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P34 | 1h30m | 3 tasks | 21 files |
 | Phase 33.1 P01 | 23 min | 3 tasks | 14 files |
 | Phase 33.1 P17 | 50 min | 3 tasks | 12 files |
+| Phase 45.1 P01 | 70 min | 2 tasks | 11 files |
+| Phase 45.1 P02 | 90 min | 3 tasks | 16 files |
 
 ## Decisions
 
@@ -361,3 +364,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 33.1]: 33.1-17: a step-up binds one action only on its own nonce's return route; appendOwn refuses person-key-required and action-required before signing
 - [Phase 33.2]: 33.2-06: every wrap path through wrapForDevice with wrapPlan.formatFor; new projects start switched; Protected B never v1; architecture check enforces it
 - [Phase 33.2]: 33.2-07: switch, move and give-keys actions and the card model; the native Staff Room wiring waits on 33-24 and 33-26
+- [Phase 45.1]: 45.1-01: a label with handling flags is refused for export; the bound label is our own Label, mapping 0 for release copies
+- [Phase 45.1]: 45.1-02: RSA exports name their OAEP hash (OpenTDF reference needs sha1); the receiving key uses SHA-256, the only hash Transit decrypts (G455)
+- [Phase 45.1]: 45.1-03 (owner, 2026-11-25, D-11): exchange.import gains arrived, stored and conversion?; every arrival quarantined; converting never raises trust; unknown format ids shown, never interpreted
+- [Phase 45.1]: 45.1-03 (owner, 2026-11-25, D-12): an agreement stands for a partner's people only when your organization has vetted the partner's clearance process (optional clearanceProcessVetted on agreements@1, organization layer only); otherwise the recipient's own verified credentials, or refused

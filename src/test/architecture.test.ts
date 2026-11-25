@@ -283,6 +283,10 @@ test('D-45: the baseline file is sorted and has no duplicate line', () => {
 
 // The two files that may make a wrap themselves: the v1 wrap (cellKeys.ts) and the v2 wrap with the one entry point (cellWrapV2.ts).
 const WRAP_MAKERS: ReadonlySet<string> = new Set(['domain/replica/cellKeys.ts', 'domain/replica/cellWrapV2.ts']);
+// Key agreement that wraps no cell key, each for its reason: it never reaches a staff replica grant.
+const OTHER_KEY_AGREEMENT: Readonly<Record<string, string>> = {
+  'domain/exchange/tdf.ts': 'OpenTDF key access for exchange with allies (45.1-02): P-256 ECDH to a partner\'s published key, never a cell key'
+};
 // Files that call the entry point (wrapForDevice, or grantPages' wrapsFor and earlierEpochGrants over it) and must choose the format with
 // wrapPlan.formatFor, except these, each for its reason.
 const FORMAT_CHOSEN_ELSEWHERE: Readonly<Record<string, string>> = {
@@ -299,7 +303,7 @@ function wrapPathProblems(sources: ReadonlyMap<string, string>): string[] {
   for (const [file, text] of sources) {
     const code = codeOf(text);
     if (!WRAP_MAKERS.has(file) && /\bwrapEpochKey\s*\(/.test(code)) problems.push(`${file}: calls wrapEpochKey outside the wrap modules`);
-    if (!WRAP_MAKERS.has(file) && /\bdiffieHellman\s*\(/.test(code)) problems.push(`${file}: does key agreement outside the wrap modules`);
+    if (!WRAP_MAKERS.has(file) && !Object.hasOwn(OTHER_KEY_AGREEMENT, file) && /\bdiffieHellman\s*\(/.test(code)) problems.push(`${file}: does key agreement outside the wrap modules`);
     const wraps = /\b(?:wrapForDevice|wrapsFor|earlierEpochGrants)\s*\(/.test(code);
     if (wraps && !Object.hasOwn(FORMAT_CHOSEN_ELSEWHERE, file) && !/\bformatFor\s*\(/.test(code)) problems.push(`${file}: wraps without wrapPlan.formatFor`);
   }

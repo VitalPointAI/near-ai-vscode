@@ -12,14 +12,17 @@ export const FEATURE_IDS = Object.freeze([
   // Phase 71 (D-12): trusted issuers, status lists, freshness and sensitivity requirements; organization-to-organization agreements.
   'credentials@1', 'agreements@1',
   // Phase 70.1 (D-16): how a label may be proposed and raised. Appended after Phase 71's ids; 45.1's label-interop@1 lands after it.
-  'classification@1'
+  'classification@1',
+  // Phase 45.1 (D-02): how your organization's labels are written for allies.
+  'label-interop@1'
 ] as const);
 export type FeatureId = (typeof FEATURE_IDS)[number];
 
 /** The sections of a v2 policy document, in the order the policy editor shows them (POLICY-SCHEMA section 2). `reserved` holds today's reserved v1 fields. */
 export const POLICY_SECTIONS = Object.freeze([
   'labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements',
-  'classification'
+  'classification',
+  'labelInterop'
 ] as const);
 export type PolicySectionName = (typeof POLICY_SECTIONS)[number];
 
@@ -41,7 +44,8 @@ const SECTION_FEATURES: Readonly<Record<PolicySectionName, FeatureId | undefined
   exportControl: 'export-control@1',
   credentials: 'credentials@1',
   agreements: 'agreements@1',
-  classification: 'classification@1'
+  classification: 'classification@1',
+  labelInterop: 'label-interop@1'
 });
 
 /** The feature a section needs in `requires`, or undefined for `reserved`. The envelope's `layer` and `parent` belong to `layers@1`, which every v2 document lists. */
