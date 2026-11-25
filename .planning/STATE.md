@@ -4,14 +4,14 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
-last_updated: "2026-11-25T12:34:16.032Z"
-state_head: 6c17e4d14812f20a4d762190d920924323e9158a
+stopped_at: Completed 47-21-PLAN.md; 47-20 stopped at its Task 1 checkpoint (keycloak-config-cli refuses the admin permission; decision needed, 47-20-CHECKPOINT.md)
+last_updated: "2026-11-25T20:26:34.169Z"
+state_head: f58e66ccc31da780debd98b72e59c937ecc2e088
 progress:
   total_phases: 12
   completed_phases: 1
   total_plans: 109
-  completed_plans: 70
+  completed_plans: 71
   percent: 8
 last_activity: 2026-11-19
 current_phase: 70
@@ -166,8 +166,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
-- 47-20 blocked: its precondition needs 71-12 (the revocation card that reads the requests) on the base; 71-12 has no SUMMARY on main
-- 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
+- 47-21 done on `feat/phase-47-20-21` without 48-11 and 47-32: its target-site check is written against 48-11's planned schema 2 shape and refuses every real target until 48-11 and 47-32 land (the plan's safe side); check the shape again when 48-11 executes
+- 47-20: keycloak-config-cli 6.5.1 cannot apply the guests-only admin permission (FGAP v2 admin-permissions client, HTTP 403); decide between an admin REST step after the realm applier, owner item 17's operator-run expire, or FGAP v1 (47-20-CHECKPOINT.md)
 
 ### Quick Tasks Completed
 
@@ -182,9 +182,9 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T12:34:15.827Z
-**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
-**Resume file:** None
+**Last session:** 2026-11-25T20:26:33.958Z
+**Stopped at:** Completed 47-21-PLAN.md; 47-20 stopped at its Task 1 checkpoint (keycloak-config-cli refuses the admin permission; decision needed, 47-20-CHECKPOINT.md)
+**Resume file:** .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-20-CHECKPOINT.md
 
 ## Performance Metrics
 
@@ -237,6 +237,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P23 | 45m | 3 tasks | 10 files |
 | Phase 47 P24 | 50m | 2 tasks | 10 files |
 | Phase 47 P34 | 1h30m | 3 tasks | 21 files |
+| Phase 47 P21 | 1h30m | 2 tasks | 6 files |
 
 ## Decisions
 
@@ -353,3 +354,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
 - [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience
 - [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
+- [Phase 47]: 47-21: a guest leaves a site only when named at both ends of a signed user export (guests@1), and only after the target site's newest signed evidence export shows its import reads guests@1; written against 48-11's planned schema 2 shape, so every real target refuses until 48-11 and 47-32 land
+- [Phase 47]: 47-20 stopped at its Task 1 checkpoint: the guests-only Keycloak permission probe passed every row with no realm-management role (client needs kc-admin-api and basic scopes), but keycloak-config-cli 6.5.1 refuses the admin-permissions client under fine-grained permissions v2; the fallback (admin REST step after the applier) is the coordinator's call (47-20-CHECKPOINT.md)
