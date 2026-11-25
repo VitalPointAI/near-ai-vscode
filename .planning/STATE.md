@@ -4,7 +4,7 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
+stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked. Phase 33 branch: completed 33.2-05-PLAN.md and 33-14
 last_updated: "2026-11-24T23:17:20.221Z"
 state_head: ba51cb06ad298cb8b868f13b51c77daf828ab364
 progress:
@@ -177,7 +177,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 ## Session
 
 **Last session:** 2026-11-24T23:17:19.980Z
-**Stopped at:** Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
+**Stopped at:** Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked. Phase 33 branch: completed 33.2-05-PLAN.md and 33-14
 **Resume file:** None
 
 ## Performance Metrics
@@ -330,3 +330,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-16: longhorn-crypto is a bootstrap secret made in memory before the first encrypted volume (OpenBao's own volume needs it); apply runs the secrets step after the unseal
 - [Phase 47]: 47-16: registry-images.tar is site-neutral in the bundle; install.mjs node-files names it for the site registry, checked against the signed manifest
 - [Phase 47]: 47-27: drill.mjs plan reads every schedule from the rendered releases; drill verify restores into scratch copies only, with --confirm <siteName>
+- [Phase 33.2]: 33.2-01: owner accepted the cell-wrap/v2 permanent shapes as proposed (2026-11-24); no new ITSP.40.111 v5 compliance issue
+- [Phase 33.2]: 33.2-02: device.kem is a base-cell, person-key kind folded beside the roster line; invitations carry the required features so join requests send kem only for wrap@2
+- [Phase 33.2]: 33.2-03: grant pages of at most 607 v2 wraps, committed by the founding hash; a missing page holds the grant missing-blob
+- [Phase 33.2]: 33.2-04: seeds only everywhere; publishing at open behind publishKem; v1 envelopes sealed again as v2 under the same data key; HUB_KEM_KEY optional
+- [Phase 33.2]: 33.2-05: cutover rule shared by fold and hub; wrap@2 known only where the probe passes; wrap@2 at creation behind wrapV2AtCreation until 33.2-06

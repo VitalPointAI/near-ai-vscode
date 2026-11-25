@@ -103,6 +103,8 @@ test('a host of a project that is not shared answers as today with or without th
   const { world } = await runWorkload();
   const plain = new StaffHost({ root: world.root, signer: async () => world.signer, keyStatus: async () => trusting(world.signer), headStore: world.headStore });
   const withStorage = world.host;
+  assert.equal(await plain.sharedReplica(), undefined);
+  assert.equal(await withStorage.sharedReplica(), undefined);
   assert.deepEqual(await withStorage.replay(), await plain.replay());
   const strip = (snapshot: Awaited<ReturnType<StaffHost['snapshot']>>) => ({ registry: snapshot.registry, decisions: snapshot.decisions, ledgerProblem: snapshot.ledgerProblem });
   assert.deepEqual(strip(await withStorage.snapshot()), strip(await plain.snapshot()));

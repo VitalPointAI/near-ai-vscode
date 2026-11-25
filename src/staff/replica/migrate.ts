@@ -381,6 +381,8 @@ export interface MigrationOptions {
   labelMapHash?: string;
   /** The lead's member id: derived from this device's writer id when absent. */
   leadMember?: string;
+  /** The lead's name as the person gave it, written to the roster at creation; the lead is shown by member id when absent. */
+  leadName?: string;
   /**
    * The clearance the staff lead declares for themselves (D-19; the command asks for it): written to the roster when it differs, and every label the
    * conversion needs must be one it covers. With none, only org/Public is covered (D-68). A resumed run is given the same clearance again.
@@ -889,7 +891,7 @@ export async function makeMultiUser(root: string, deps: MigrationDeps, options: 
   const settings = await staffSettings(absolute);
   const made = await ReplicaProject.createSharedProject(absolute, deps, {
     name: projectName(absolute, options.name), profile: settings.profile, level: settings.level,
-    labelMapHash: options.labelMapHash ?? createHash('sha256').update('').digest('hex'), lead: { member: leadMember }
+    labelMapHash: options.labelMapHash ?? createHash('sha256').update('').digest('hex'), lead: { member: leadMember, ...(options.leadName === undefined ? {} : { name: options.leadName }) }
   });
   if (!(made instanceof ReplicaProject)) return made.refused === 'already-shared' ? refuse('already-shared') : refuse('project-refused', `${MIGRATION_REFUSALS['project-refused']} ${made.message}`);
   const project = made;

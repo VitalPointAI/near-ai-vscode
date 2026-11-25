@@ -4,7 +4,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildSessionAnswer, certPinOf } from '@ext/domain/replica/hubFile';
+import { KNOWN_REPLICA_FEATURES } from '@ext/domain/replica/features';
+import { SESSION_VERSION, buildSessionAnswer, certPinOf, readSessionAnswer } from '@ext/domain/replica/hubFile';
+import { signPayload } from '@ext/domain/team/signedPayload';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
 import { AUTH_REFUSALS, SESSION_REFUSALS, TOKENS_PER_DEVICE } from '../src/http/session';
 import type { HubConnection, HubResponse } from './helpers/hubClient';
@@ -178,6 +180,41 @@ test('bad-signature: an answer whose content was changed after signing is refuse
     const flipped = Buffer.from(signed.sig, 'base64url');
     flipped[0] = (flipped[0] as number) ^ 1;
     refusedWith(await connection.post('/v1/session', { answer: { ...signed, sig: flipped.toString('base64url') } }), 'bad-signature');
+  }));
+
+// ---- The features a device announces (POST-01, D-07, 33-18): the hub compiles the extension's one feature registry and reads them from the answer. ----
+
+test('features: an answer announcing the registry the hub compiles opens a session, and the hub\'s own reader gives the features back', () =>
+  withHub({}, async (hub) => {
+    const { world } = await enrolled(hub);
+    assert.equal(SESSION_VERSION, 2);
+    assert.deepEqual([...KNOWN_REPLICA_FEATURES], ['cells@1', 'hub@1', 'replica@2', 'require@1']);
+    const connection = await hub.connect();
+    const { challenge } = await challengeOn(connection, world.project);
+    const answer = buildSessionAnswer(world.lead.signer, { hub: hub.identity.writer, project: world.project, challenge, keying: connection.keying(), features: KNOWN_REPLICA_FEATURES, now: new Date(hub.now()) });
+    const read = readSessionAnswer(answer, { hub: hub.identity.writer, project: world.project, challenge, keying: connection.keying() });
+    assert.deepEqual(read.ok ? read.features : read.reason, [...KNOWN_REPLICA_FEATURES]);
+    const opened = await connection.post('/v1/session', { answer });
+    assert.equal(opened.status, 200, opened.text);
+  }));
+
+test('features: a version 1 answer, or an answer whose features are unsorted or not name@N, is 400 malformed at the hub', () =>
+  withHub({}, async (hub) => {
+    const { world } = await enrolled(hub);
+    const connection = await hub.connect();
+    const fields = (challenge: string): Record<string, unknown> => ({ ...(signAnswer(hub, world.lead.signer, { hub: hub.identity.writer, project: world.project, challenge, keying: connection.keying() }) as { payload: Record<string, unknown> }).payload });
+    const versionOne = (payload: Record<string, unknown>): Record<string, unknown> => {
+      const copy: Record<string, unknown> = { ...payload, v: 1 };
+      delete copy.features;
+      return copy;
+    };
+    for (const change of [versionOne, (p: Record<string, unknown>) => ({ ...p, features: ['require@1', 'replica@2'] }), (p: Record<string, unknown>) => ({ ...p, features: ['Require@1'] })]) {
+      const { challenge } = await challengeOn(connection, world.project);
+      const answer = signPayload(world.lead.signer, 'staff-hub-session', change(fields(challenge)), { now: () => new Date(hub.now()) });
+      const response = await connection.post('/v1/session', { answer });
+      assert.equal(response.status, 400, response.text);
+      assert.equal(response.json().error, 'malformed');
+    }
   }));
 
 test('challenge-expired: an answer 61 seconds after its challenge is refused, and one at 59 seconds opens a session', () =>

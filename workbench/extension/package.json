@@ -55,6 +55,10 @@
     },
     {
       "frontend": "lib/browser/webview-origin-frontend-module"
+    },
+    {
+      "frontend": "lib/browser/staff-frontend-module",
+      "backend": "lib/node/staff-backend-module"
     }
   ]
 }

@@ -51,7 +51,8 @@ export interface FakeAnswer {
 
 export type FakeHandler = (req: FakeRequest) => FakeAnswer | Promise<FakeAnswer>;
 
-export interface SessionSeen { connection: number; keying: Buffer; answerOk: boolean; reason?: string }
+/** One session answer the server read; features is what the device signed it announces (POST-01, D-07). */
+export interface SessionSeen { connection: number; keying: Buffer; answerOk: boolean; reason?: string; features?: string[] }
 
 export interface FakeHubOptions {
   project: string;
@@ -196,7 +197,7 @@ export class FakeHubServer {
     const read = challenge === undefined
       ? { ok: false as const, reason: 'wrong-challenge' }
       : readSessionAnswer((value as { answer: unknown }).answer, { hub: this.options.hub, project: this.options.project, challenge, keying });
-    this.sessions.push({ connection: req.connection, keying, answerOk: read.ok, ...(read.ok ? {} : { reason: read.reason }) });
+    this.sessions.push({ connection: req.connection, keying, answerOk: read.ok, ...(read.ok ? { features: read.features } : { reason: read.reason }) });
     if (!read.ok) return { status: 403, json: { error: 'session-refused', reason: read.reason, message: 'Refused.' } };
     const token = randomBytes(32).toString('base64url');
     this.tokens.set(token, req.connection);

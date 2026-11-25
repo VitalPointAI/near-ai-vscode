@@ -12,8 +12,8 @@
 import { createHash } from 'node:crypto';
 import { canonicalBytes, fingerprintOf, isStrictBase64url } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, verifyPayload } from '../team/signedPayload';
-import type { PayloadSigner } from '../team/signedPayload';
+import { signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import type { AsyncPayloadSigner, PayloadSigner, SignRefused } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { IV_BYTES, KEY_BYTES, TAG_BYTES, openRaw, sealRaw } from '../state/keys';
 
@@ -89,9 +89,17 @@ export function blobAad(stream: string, epoch: number): Buffer {
 // Authority is the roster view's job (D-32), so the key status handed to verifyPayload is always active.
 const ALWAYS_ACTIVE: KeyStatusLookup = () => ({ state: 'active' });
 
+const HEADER_SIGNING = { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: HEADER_MAX_BYTES };
+
 export function signHeader(signer: PayloadSigner, unsigned: UnsignedHeader): EntryHeader {
-  const envelope = signPayload(signer, 'staff-replica', unsigned, { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: HEADER_MAX_BYTES });
+  const envelope = signPayload(signer, 'staff-replica', unsigned, HEADER_SIGNING);
   return { ...unsigned, sig: envelope.sig };
+}
+
+// signHeader with a signer that answers later (Phase 33 D-60). The same key gives the same header, because the signed bytes are the same.
+export async function signHeaderAsync(signer: AsyncPayloadSigner | PayloadSigner, unsigned: UnsignedHeader): Promise<EntryHeader | SignRefused> {
+  const envelope = await signPayloadAsync(signer, 'staff-replica', unsigned, HEADER_SIGNING);
+  return 'refused' in envelope ? envelope : { ...unsigned, sig: envelope.sig };
 }
 
 // Never throws. False unless the key hashes to the writer id and the signature over the header is valid.
@@ -179,6 +187,25 @@ export interface BuildEntryInput {
 
 // Seals and signs one entry. A body longer than INLINE_BODY_MAX_BYTES serialised moves its data into a sealed blob first.
 export function buildEntry(input: BuildEntryInput): BuiltEntry {
+  const sealed = sealEntry(input);
+  return builtOf(signHeader(input.signer, sealed.unsigned), sealed);
+}
+
+// buildEntry with a signer that answers later (Phase 33 D-60): sealed the same way, signed through signHeaderAsync. A signer's refusal comes back as
+// it is, and nothing is built.
+export async function buildEntryAsync(input: Omit<BuildEntryInput, 'signer'> & { signer: AsyncPayloadSigner | PayloadSigner }): Promise<BuiltEntry | SignRefused> {
+  const sealed = sealEntry(input);
+  const header = await signHeaderAsync(input.signer, sealed.unsigned);
+  return 'refused' in header ? header : builtOf(header, sealed);
+}
+
+interface SealedParts { unsigned: UnsignedHeader; body: string; blobs: SealedBlob[] }
+
+function builtOf(header: EntryHeader, sealed: SealedParts): BuiltEntry {
+  return { entry: { header, body: sealed.body }, hash: entryHash(header), blobs: sealed.blobs };
+}
+
+function sealEntry(input: Omit<BuildEntryInput, 'signer'> & { signer: { publicKey: string } }): SealedParts {
   const { signer, key, stream, seq, prev, epoch, body } = input;
   const writer = writerIdOf(signer.publicKey);
   const blobs: SealedBlob[] = [];
@@ -193,8 +220,7 @@ export function buildEntry(input: BuildEntryInput): BuiltEntry {
   const ids = { stream, writer, seq, prev, epoch };
   const wire = sealBody(key, ids, plaintext);
   const unsigned: UnsignedHeader = { v: ENTRY_VERSION, stream, writer, seq, prev, epoch, body: { hash: sha256Hex(wire), size: wire.length } };
-  const header = signHeader(signer, unsigned);
-  return { entry: { header, body: wire.toString('base64url') }, hash: entryHash(header), blobs };
+  return { unsigned, body: wire.toString('base64url'), blobs };
 }
 
 export type HeaderShapeReason = 'malformed-header' | 'unknown-header-version' | 'header-too-large';

@@ -21,6 +21,7 @@ import { hubAt, hubCellsAt, hubSignerAt } from '../domain/replica/rosterMembers'
 import { admitJoinRequest, finishRekeys, inviteToProject, joinFromInvite, nameDeputy, removeFromProject, reviewJoinRequest, updateMember } from '../staff/replica/membership';
 import type { MembershipResult } from '../staff/replica/membership';
 import { signPayload } from '../domain/team/signedPayload';
+import { term } from '../domain/org/terms';
 import { HUB_GRANT_TRADE_OFF, HUB_MEMBERSHIP_REFUSALS, HUB_NOT_TOLD_TEXT, admitHub, connectProjectToHub, fetchJoinRequests, grantCellToHub, hubStanding, inviteThroughHub, revokeHub, sendJoinRequestThroughHub } from '../staff/replica/hubMembership';
 import { HubTransport, enrolmentRequest } from '../staff/replica/hubTransport';
 import type { HubTransportOptions } from '../staff/replica/hubTransport';
@@ -773,6 +774,31 @@ test('sendJoinRequestThroughHub: each hub refusal (unknown, expired, used, voide
     }
     assert.equal(messages.size, cases.length, 'each refusal has its own sentence');
     assert.equal(joinHub.kept.length, 0);
+  } finally {
+    await joinHub.fake.close();
+  }
+});
+
+test('sendJoinRequestThroughHub invite-full (D-30): too many people waiting is its own plain sentence naming the lead word from term(), with the send-the-file way out', async () => {
+  const { lead, joinHub } = await leadOnHub();
+  try {
+    const invited = ok(await inviteThroughHub(lead.host, PERSON, { address: joinHub.fake.address }, openFake), 'invite through the hub');
+    const inviteText = (invited.file as { text: string }).text;
+    const joiner = install('joiner');
+    const requestText = (ok(await joinFromInvite(joiner.root, joiner.deps, inviteText, { name: PERSON.name }), 'join').file as { text: string }).text;
+    joinHub.joinRefusal = { status: 403, error: 'invite-full' };
+    const result = await sendJoinRequestThroughHub(inviteText, requestText, joiner.deps, openFake);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'hub-invite-full');
+    const leadWord = term('lead').toLowerCase();
+    assert.equal(result.message, `This invitation has too many people waiting. Ask the ${leadWord} for a new one. ${SEND_FILE_END}`);
+    assert.equal(result.message, HUB_MEMBERSHIP_REFUSALS['hub-invite-full']);
+    assert.ok(result.message.endsWith(SEND_FILE_END), result.message);
+    assert.ok(!result.message.includes('\u2014'), 'no em-dash');
+    assert.equal(joinHub.kept.length, 0, 'nothing kept');
+    // The allowed side: once the hub takes requests again the same request goes through.
+    joinHub.joinRefusal = undefined;
+    ok(await sendJoinRequestThroughHub(inviteText, requestText, joiner.deps, openFake), 'sent once the hub takes it');
   } finally {
     await joinHub.fake.close();
   }

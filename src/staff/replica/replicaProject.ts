@@ -26,41 +26,43 @@ import { identityDir as identityDirOf, loadOrCreateDeviceIdentity } from '../../
 import type { DeviceIdentity } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
+import type { AsyncPayloadSigner, PayloadSigner } from '../../domain/team/signedPayload';
+import { isPersonKeyKind } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
 import { buildGrant, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { grantHash, readGrant } from '../../domain/replica/cellKeys';
-import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntry, buildEntryAsync, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
 import type { FoldResult, FoldState } from '../../domain/replica/fold';
-import { WELCOME_MAX_BYTES, buildWelcome, readWelcome } from '../../domain/replica/invite';
+import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import { SLUG_PATTERN } from '../../domain/replica/kindSchemas/shared';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
+import { checkpointHash } from '../../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
 import type { Citation } from '../../domain/replica/chain';
 import type { HeadSet } from '../../domain/replica/transport';
-import { REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
-import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
+import { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, readAnchorFile, sameAnchor, writeAnchorFile } from './anchorFile';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
-import { DeviceKeyRing, loadOrCreateEncryptionKey } from './keyring';
+import { DeviceKeyRing, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from './keyring';
+import * as kemPublish from './kemPublish';
 import type { DeviceEncryptionKey } from './keyring';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, ReplicaStoreDeps, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import { foldCheckpoints, trustedCheckpointsOf } from './foldCheckpoints';
 import type { SyncLocal } from './hubSync';
+import { UPDATE_SENTENCE, clientReplicaFeatures, ensureRequireArmed, requireProblem } from './requireGate';
+import { WRAP_V2_FEATURE } from '../../domain/replica/features';
 
-/** Where the genesis pins live under the extension's global storage: <globalStorage>/staff-replica/<project>/genesis.json. */
-export const GENESIS_PIN_FOLDER = 'staff-replica';
-export const GENESIS_PIN_FILE = 'genesis.json';
-/** The most bytes a pin or project.json may hold; both are a few hundred bytes. */
-const ANCHOR_FILE_MAX_BYTES = 64 * 1024;
-const BASE64URL_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+// The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
+export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
 
 // Closed list of the host's refusals, in plain words. No message names a key, a secret or a full hash, and none uses a dash as punctuation.
 export const PROJECT_REFUSALS_HOST = {
@@ -70,7 +72,9 @@ export const PROJECT_REFUSALS_HOST = {
   'no-key': 'This computer does not hold the key for this part of the shared project, so nothing was written. Ask your staff lead to give this device access.',
   'pin-damaged': 'The record of which shared project this folder belongs to cannot be read, so the project was not opened. Nothing was changed. Ask your staff lead for help.',
   'already-shared': 'This project folder already holds a shared staff project, so a second one was not made. Nothing was changed.',
-  'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.'
+  'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.',
+  'needs-update': UPDATE_SENTENCE,
+  'signer-refused': 'Your key did not sign this change, so nothing was written.'
 } as const;
 export type ProjectRefusal = keyof typeof PROJECT_REFUSALS_HOST;
 /** A refusal; `store` names the store's own reason when the store refused. */
@@ -129,6 +133,22 @@ export interface ReplicaProjectDeps {
   cellOrder?: (roster: RosterState, keys: DeviceKeyRing) => ReplicaContext['cellOrder'];
   /** The memory-capped decode worker entries from outside pass (D-05); the project makes its own on first need when absent, and close() ends it. */
   decodeHost?: DecodeHost;
+  /** The features this build folds; clientReplicaFeatures() when absent. Tests set it to stand in for a newer version (POST-01) or a runtime
+   *  without wrap@2 (33.2 D-05). */
+  knownFeatures?: readonly string[];
+  /** A hosted session (Phase 33 D-60): the session key signs this device's ordinary writes, and the person key, through your organization's key store,
+   *  signs the person-key kinds. Absent on a single machine, where this device's key signs everything as before. */
+  sessionSigner?: PayloadSigner;
+  personSigner?: AsyncPayloadSigner;
+  /** Publish this computer's post-quantum keys at open (33.2 D-05). Off unless set: the host sets it where a project opens for live work, not for a
+   *  command's short open, whose flows promise to write nothing. A hosted session publishes through its own step-up instead. */
+  publishKem?: boolean;
+  /** Require wrap@2 beside require@1 when this computer makes a project shared and knows wrap@2 (33.2 D-05). Off until every wrap path writes
+   *  cell-wrap/v2 (33.2-06): before that, a switched project would refuse the X25519 grants today's paths still write. */
+  wrapV2AtCreation?: boolean;
+  /** A hosted session (Phase 33 D-61): the person key is this device (its writer), the opened X25519 key decrypts grants, and the session key signs the
+   *  store's marks and owns its files. No device key is made or read; needs sessionSigner, personSigner and keyStatus. */
+  hosted?: { personPublicKey: string; encryption: DeviceEncryptionKey };
 }
 
 /** This device as a shared project sees it. The signer signs; no private key leaves SecretStorage and memory. */
@@ -144,11 +164,16 @@ export interface LocalDevice {
 interface DeviceKeys { identity: DeviceIdentity; writer: string; encryption: DeviceEncryptionKey }
 
 async function deviceKeys(deps: ReplicaProjectDeps): Promise<DeviceKeys> {
+  if (deps.hosted !== undefined && deps.sessionSigner !== undefined) return { identity: deps.sessionSigner, writer: writerIdOf(deps.hosted.personPublicKey), encryption: deps.hosted.encryption };
+  if (deps.hosted !== undefined) throw new Error('A hosted session opens a shared project only with its session key.');
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
   const { identity } = await loadOrCreateDeviceIdentity(deps.secrets, { identityDir: dir, ...(deps.now === undefined ? {} : { now: deps.now }) });
   const encryption = await loadOrCreateEncryptionKey(deps.secrets, { identityDir: dir, identity });
   return { identity, writer: writerIdOf(identity.publicKey), encryption };
 }
+
+/** Whether a project made shared now requires wrap@2 from the start: asked for, and known on this computer (its probe passed). */
+const wrapV2AtCreation = (deps: ReplicaProjectDeps): boolean => deps.wrapV2AtCreation === true && (deps.knownFeatures ?? clientReplicaFeatures()).includes(WRAP_V2_FEATURE);
 
 function storeDeps(deps: ReplicaProjectDeps, identity: DeviceIdentity): ReplicaStoreDeps {
   const dir = deps.identityDir ?? identityDirOf(deps.globalStorageDir);
@@ -160,72 +185,6 @@ function storeDeps(deps: ReplicaProjectDeps, identity: DeviceIdentity): ReplicaS
   };
 }
 
-// ---- the pin and project.json ----------------------------------------------------------------------------------------------------------------------
-
-/** The genesis pin of a project in extension storage. */
-export function genesisPinFile(globalStorageDir: string, project: string): string {
-  if (!STREAM_ID_PATTERN.test(project)) throw new Error('A project id is 32 lowercase hex characters.');
-  return path.join(globalStorageDir, GENESIS_PIN_FOLDER, project, GENESIS_PIN_FILE);
-}
-
-/** The convenience copy of the pin in the project folder. */
-export function projectFile(root: string): string {
-  return path.join(path.resolve(root), ...REPLICA_PROJECT_FILE.split('/'));
-}
-
-/** A pinned anchor read from untrusted JSON: exact keys, every field in its pattern. A fresh object, never the input. */
-export function anchorOf(value: unknown): RosterAnchor | undefined {
-  if (!isRecord(value)) return undefined;
-  const keys = Object.keys(value).sort().join(',');
-  if (keys !== 'genesisHash,lead,project') return undefined;
-  const lead = value.lead;
-  if (!isRecord(lead) || Object.keys(lead).sort().join(',') !== 'member,publicKey,writer,x25519') return undefined;
-  const { genesisHash, project } = value;
-  const { member, writer, publicKey, x25519 } = lead;
-  if (typeof genesisHash !== 'string' || !HASH_PATTERN.test(genesisHash) || typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
-  if (typeof member !== 'string' || !SLUG_PATTERN.test(member) || typeof writer !== 'string' || !HASH_PATTERN.test(writer)) return undefined;
-  if (typeof publicKey !== 'string' || !BASE64URL_KEY.test(publicKey) || typeof x25519 !== 'string' || !BASE64URL_KEY.test(x25519)) return undefined;
-  return { genesisHash, project, lead: { member, writer, publicKey, x25519 } };
-}
-
-export function sameAnchor(a: RosterAnchor, b: RosterAnchor): boolean {
-  return a.genesisHash === b.genesisHash && a.project === b.project && a.lead.member === b.lead.member && a.lead.writer === b.lead.writer
-    && a.lead.publicKey === b.lead.publicKey && a.lead.x25519 === b.lead.x25519;
-}
-
-type AnchorRead = { kind: 'missing' } | { kind: 'anchor'; anchor: RosterAnchor } | { kind: 'damaged' };
-
-async function readAnchorFile(file: string): Promise<AnchorRead> {
-  try {
-    if ((await lstat(file)).isSymbolicLink()) return { kind: 'damaged' };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' };
-    return { kind: 'damaged' };
-  }
-  const read = await readWhole(file, ANCHOR_FILE_MAX_BYTES);
-  if (read.kind === 'missing') return { kind: 'missing' };
-  if (read.kind !== 'text') return { kind: 'damaged' };
-  try {
-    const value = JSON.parse(read.text) as unknown;
-    const anchor = isRecord(value) && value.v === 1 ? anchorOf(value.anchor) : undefined;
-    return anchor === undefined ? { kind: 'damaged' } : { kind: 'anchor', anchor };
-  } catch {
-    return { kind: 'damaged' };
-  }
-}
-
-/** Writes a pin or project.json. A file that holds the same anchor is left as it is; one that holds another is never replaced. */
-async function writeAnchorFile(file: string, anchor: RosterAnchor): Promise<boolean> {
-  const text = `${JSON.stringify({ v: 1, anchor }, null, 2)}\n`;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const before = await readAnchorFile(file);
-    if (before.kind === 'anchor') return sameAnchor(before.anchor, anchor);
-    if (before.kind === 'damaged') return false;
-    if (await writeIfUnchanged(file, await snapshotOf(file), text)) return true;
-  }
-  return false;
-}
-
 // ---- reading entries this device can open ----------------------------------------------------------------------------------------------------------
 
 interface OpenedBody { deps: Dep[]; roster: string; lamport: number; kind: string; data: unknown; blob?: string }
@@ -233,18 +192,6 @@ interface OpenedBody { deps: Dep[]; roster: string; lamport: number; kind: strin
 function parseJson(bytes: Buffer): unknown {
   try {
     return JSON.parse(bytes.toString('utf8')) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The project a welcome file names (its genesis stream), read only to find the pin; readWelcome checks everything else. */
-function welcomeProject(file: unknown): string | undefined {
-  try {
-    const value: unknown = typeof file === 'string' ? (Buffer.byteLength(file, 'utf8') <= WELCOME_MAX_BYTES ? JSON.parse(file) : undefined) : file;
-    if (!isRecord(value) || !isRecord(value.genesis) || !isRecord(value.genesis.header)) return undefined;
-    const stream = value.genesis.header.stream;
-    return typeof stream === 'string' && STREAM_ID_PATTERN.test(stream) ? stream : undefined;
   } catch {
     return undefined;
   }
@@ -274,6 +221,8 @@ export interface AppendOwnOptions {
   roster?: string;
   actor?: Actor;
   at?: string;
+  /** The signer, when not the one signerOf(kind) gives (Phase 33 D-60). */
+  signer?: PayloadSigner | AsyncPayloadSigner;
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
 export interface OwnEntry { hash: string; stream: string; seq: number; data: unknown }
@@ -289,6 +238,10 @@ export class ReplicaProject {
   private readonly grantList: unknown[] = [];
   private readonly lamports = new Map<string, number>();
   private foldState: FoldState | undefined;
+  // The checkpoints the fold uses (foldCheckpoints.ts): what each hub's witness trusts, seeded once from the witness memory, kept by each exchange.
+  private trusted: Map<string, SignedCheckpoint | undefined> | undefined;
+  private stored: SignedCheckpoint[] | undefined;
+  private checkpointKey = '';
   private ctx: ReplicaContext | undefined;
   private ctxKey: string | undefined;
   private rosterState: RosterState | undefined;
@@ -333,13 +286,18 @@ export class ReplicaProject {
     const store = await ReplicaStore.open(root, storeDeps(deps, device.identity));
     if (!(store instanceof ReplicaStore)) return storeRefused(store);
     const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-    return new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    const project = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+    // This computer's post-quantum keys, published once where the runtime passes the probe (33.2 D-05).
+    if (deps.publishKem === true && deps.personSigner === undefined && deps.sessionSigner === undefined) {
+      await kemPublish.ensureDeviceKem(project, { loadKeys: () => loadOrCreateKemKeys(deps.secrets, { identityDir: deps.identityDir ?? identityDirOf(deps.globalStorageDir) }) });
+    }
+    return project;
   }
 
   /**
    * Makes a new shared project in `root` with this device's person as the lead (D-07): a base cell key at epoch 1, its founding grant wrapped to
    * this device, and the genesis that commits to it. Written in this order: the key (SecretStorage), the pin (extension storage), the grant, the
-   * genesis, project.json. When the store already holds a genesis this device wrote and pinned (a crash before project.json), that one is used
+   * genesis, project.json, then roster.require { require@1 } so the feature check is armed from the start (Phase 33 D-08). When the store already holds a genesis this device wrote and pinned (a crash before project.json), that one is used
    * again instead of building a second (Pitfall 4). A folder that already holds a shared project made by this device returns it; one made by
    * another lead is refused already-shared.
    */
@@ -363,7 +321,9 @@ export class ReplicaProject {
       if (pin.kind !== 'anchor' || pin.anchor.genesisHash !== entryHash(entry.header) || pin.anchor.lead.writer !== device.writer) continue;
       if (!(await writeAnchorFile(projectFile(root), pin.anchor))) return refuse('pin-damaged');
       const ring = await DeviceKeyRing.load(deps.secrets, pin.anchor.project, { writer: device.writer, privateKey: device.encryption.privateKey });
-      return new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+      const reused = new ReplicaProject(path.resolve(root), pin.anchor, deps, store, ring, device);
+      const rearmed = await ensureRequireArmed(reused, { withWrapV2: wrapV2AtCreation(deps) });
+      return isProjectRefused(rearmed) ? rearmed : reused;
     }
 
     const now = deps.now?.() ?? new Date();
@@ -398,7 +358,12 @@ export class ReplicaProject {
     if (!(await writeAnchorFile(projectFile(root), anchor))) return refuse('pin-damaged');
     const created = new ReplicaProject(path.resolve(root), anchor, deps, store, ring, device);
     created.lamports.set(genesis.hash, 1);
-    return created;
+    // New shared work requires wrap@2 from the start where this computer knows it (33.2 D-05).
+    const armed = await ensureRequireArmed(created, { withWrapV2: wrapV2AtCreation(deps) });
+    if (isProjectRefused(armed)) return armed;
+    // The genesis names only the lead's member id; the name the person gave is the lead's first member.update (33-14), as every other member's is.
+    const named = input.lead.name === undefined ? undefined : await created.appendChecked(() => ({ kind: 'member.update', data: { member: input.lead.member, name: input.lead.name }, options: {}, check: () => undefined }));
+    return named !== undefined && isProjectRefused(named) ? named : created;
   }
 
   /**
@@ -441,7 +406,7 @@ export class ReplicaProject {
    * is refused pin-mismatch.
    */
   public static async joinFromWelcome(root: string, deps: ReplicaProjectDeps, welcome: unknown, anchor?: RosterAnchor): Promise<ReplicaProject | ProjectRefused> {
-    const project = anchor?.project ?? welcomeProject(welcome);
+    const project = anchor?.project ?? welcomeProjectOf(welcome);
     if (project === undefined || !STREAM_ID_PATTERN.test(project)) return refuse('welcome-refused');
     const pinFile = genesisPinFile(deps.globalStorageDir, project);
     const pin = await readAnchorFile(pinFile);
@@ -469,6 +434,11 @@ export class ReplicaProject {
 
   public get projectId(): string {
     return this.anchor.project;
+  }
+
+  /** Who signs this device's write of a kind (D-60): the person signer for a person-key kind when set, then the session key, then this device. */
+  public signerOf(kind: string): PayloadSigner | AsyncPayloadSigner {
+    return (isPersonKeyKind(kind) ? this.deps.personSigner : undefined) ?? this.deps.sessionSigner ?? this.device.identity;
   }
 
   public get deviceWriter(): string {
@@ -502,18 +472,46 @@ export class ReplicaProject {
    * Refused no-key when this device does not hold that key; when another window of this install wrote first, it is built again on the new head.
    */
   public appendOwn(kind: string, data: unknown, options: AppendOwnOptions = {}): Promise<AppendOwnResult> {
+    return this.appendPlanned<never>(() => ({ kind, data, options }));
+  }
+
+  /** Plans and checks a signed write against the current fold, then rechecks it if the store changed. */
+  public appendChecked<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
+    kind: string; data: unknown; options: AppendOwnOptions; check: (fold: FoldResult, hash: string) => R | undefined
+  }): Promise<AppendOwnResult | R> {
+    return this.appendPlanned(prepare, true);
+  }
+
+  private appendPlanned<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
+    kind: string; data: unknown; options: AppendOwnOptions; check?: (fold: FoldResult, hash: string) => R | undefined
+  }, checked = false): Promise<AppendOwnResult | R> {
     return this.exclusive(async () => {
+      let race: StoreRefused | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const { roster } = await this.foldNow();
-        const built = this.buildOwn(roster, kind, data, options);
+        const expected = checked ? this.store.appendSnapshot() : undefined;
+        const state = await this.foldNow();
+        if (checked && expected !== this.store.appendSnapshot()) continue;
+        const write = prepare(state);
+        if ('ok' in write) return write;
+        const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
         if (!('entry' in built)) return built;
-        const result = await this.store.appendOwn([built]);
+        if (write.check !== undefined) {
+          const prior = this.foldState;
+          if (prior === undefined) throw new Error('A checked write requires a current fold.');
+          const ctx = built.blobs.length === 0 ? prior.ctx : { ...prior.ctx, blobs: (hash: string) => built.blobs.find((blob) => blob.hash === hash) ?? prior.ctx.blobs(hash) };
+          const refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
+          if (refused !== undefined) return refused;
+        }
+        // Another key's entry (a session or person key, D-60) is stored as received; it is this device's own only when this device signed it.
+        const result = built.entry.header.writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected) : await this.storeSigned(built);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
         }
-        if (result.refused !== 'out-of-order') return storeRefused(result);
+        if (result.refused !== 'out-of-order' && result.refused !== 'snapshot-changed') return storeRefused(result);
+        race = result;
       }
+      if (checked) return storeRefused(race ?? { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
       return storeRefused({ refused: 'out-of-order', message: 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.' });
     });
   }
@@ -709,8 +707,9 @@ export class ReplicaProject {
   /** The blobs that entries waiting for a blob cite and this computer does not hold. */
   public wantedBlobs(): Promise<string[]> {
     return this.exclusive(async () => {
-      await this.foldNow();
-      const waiting = new Set(this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash));
+      const { fold } = await this.foldNow();
+      // Entries the decode check waits on for a blob, and entries the fold holds for one (a proposal's text, a compaction's state).
+      const waiting = new Set([...this.store.waitingForCheck().filter((item) => item.reason === 'awaiting-blob').map((item) => item.hash), ...fold.held.flatMap((item) => (item.reason === 'missing-blob' && item.hash !== undefined ? [item.hash] : []))]);
       const wanted = new Set<string>();
       for (const entry of this.store.rosterEntries()) {
         if (!waiting.has(entryHash(entry.header))) continue;
@@ -769,8 +768,14 @@ export class ReplicaProject {
   public putCheckpoint(signed: SignedCheckpoint): Promise<{ ok: true; hash: string } | ProjectRefused> {
     return this.exclusive(async () => {
       const stored = await this.store.putCheckpoint(signed);
+      this.stored = undefined;
       return 'ok' in stored ? stored : storeRefused(stored);
     });
+  }
+
+  /** After an exchange: the newest checkpoint this hub's witness trusts, or undefined when it distrusts the hub. The next fold uses it. */
+  public trustCheckpoint(hub: string, newest: SignedCheckpoint | undefined): void {
+    (this.trusted ??= new Map()).set(hub, newest);
   }
 
   /** Every stored checkpoint that reads back. */
@@ -897,6 +902,7 @@ export class ReplicaProject {
     const found: string[] = [];
     if (typeof body.blob === 'string' && HASH_PATTERN.test(body.blob)) found.push(body.blob);
     if (body.kind === 'doc.compact' && isRecord(body.data) && typeof body.data.stateBlob === 'string' && HASH_PATTERN.test(body.data.stateBlob)) found.push(body.data.stateBlob);
+    if (body.kind === 'version.propose' && isRecord(body.data) && typeof body.data.textBlob === 'string' && HASH_PATTERN.test(body.data.textBlob)) found.push(body.data.textBlob);
     return found;
   }
 
@@ -915,6 +921,8 @@ export class ReplicaProject {
       this.rosterState = await this.foldRosterAndKeys(rosterEntries);
       this.rosterKey = rosterKey();
     }
+    // POST-01 (D-06): a required feature this build lacks stops the project here, before any other family is folded. The store keeps every entry.
+    if (requireProblem(this.rosterState, this.deps.knownFeatures) !== undefined) throw new ReplicaProjectError(refuse('needs-update'));
     await this.recheckWaiting();
     const entries = this.store.entries();
     const roster = this.rosterState;
@@ -923,8 +931,12 @@ export class ReplicaProject {
       this.ctx = this.buildContext(roster);
       this.ctxKey = ctxKey;
     }
+    // A changed set of usable checkpoints folds everything again under it (the order and the join bases depend on it).
+    const checkpoints = await this.usableCheckpoints(roster);
+    const key = checkpoints.map(checkpointHash).join(',');
+    if (key !== this.checkpointKey) { this.checkpointKey = key; this.foldState = undefined; this.fed.clear(); }
     const fresh = entries.filter((entry) => !this.fed.has(entryHash(entry.header)));
-    if (this.foldState === undefined) this.foldState = createFoldState(this.ctx);
+    if (this.foldState === undefined) this.foldState = createFoldState(this.ctx, { checkpoints });
     if (fresh.length > 0 || this.foldState.ctx !== this.ctx) {
       this.foldState = addEntries(this.foldState, fresh, this.ctx);
       for (const entry of fresh) this.fed.add(entryHash(entry.header));
@@ -936,6 +948,13 @@ export class ReplicaProject {
       this.recordedHead = head;
     }
     return { roster, fold: this.foldState.result };
+  }
+
+  /** The stored checkpoints the witness of an admitted hub trusts (foldCheckpoints.ts); the witness memory is read once, at the first fold. */
+  private async usableCheckpoints(roster: RosterState): Promise<SignedCheckpoint[]> {
+    this.stored ??= (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint);
+    if (this.stored.length > 0) this.trusted ??= await trustedCheckpointsOf(this.deps.secrets, this.projectId, this.stored);
+    return foldCheckpoints(this.stored, this.trusted ?? new Map(), rosterView(roster), this.projectId, roster.positions.at(-1) as string);
   }
 
   /**
@@ -1093,7 +1112,14 @@ export class ReplicaProject {
     return body.lamport as number;
   }
 
-  private buildOwn(roster: RosterState, kind: string, data: unknown, options: AppendOwnOptions): BuiltEntry | ProjectRefused {
+  private async storeSigned(built: BuiltEntry): Promise<IngestResult | StoreRefused> {
+    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs));
+    // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
+    if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
+    return result;
+  }
+
+  private async buildOwn(roster: RosterState, kind: string, data: unknown, options: AppendOwnOptions): Promise<BuiltEntry | ProjectRefused> {
     const stream = options.stream ?? this.anchor.project;
     if (!STREAM_ID_PATTERN.test(stream)) throw new Error('Nothing was written: a stream id is 32 lowercase hex characters.');
     const cited = options.roster ?? roster.positions[roster.positions.length - 1];
@@ -1102,7 +1128,8 @@ export class ReplicaProject {
     const epoch = epochAt(roster.cells, stream, position);
     const key = epoch === undefined ? undefined : this.keys.epochKey(stream, epoch);
     if (epoch === undefined || key === undefined) return refuse('no-key');
-    const head = this.store.head(stream, this.device.writer);
+    const signer = options.signer ?? this.signerOf(kind);
+    const head = this.store.head(stream, writerIdOf(signer.publicKey));
     const deps: Dep[] = (options.deps ?? []).map((hash) => {
       const entry = this.entryByHash(hash);
       if (entry === undefined) throw new Error('Nothing was written: an entry this one depends on is not in this project\'s store.');
@@ -1111,12 +1138,11 @@ export class ReplicaProject {
     const preds = [...(head === undefined ? [] : [head.hash]), ...deps.map((dep) => dep.hash)];
     const lamport = 1 + Math.max(0, ...preds.map((hash) => this.lamportOf(hash)));
     const body = ROSTER_KIND_OWNER[kind] !== undefined && kind !== 'project.genesis' && isRecord(data) && !Object.hasOwn(data, 'rosterPrev') ? { ...data, rosterPrev: cited } : data;
-    const built = buildEntry({
-      signer: this.device.identity, key, stream, seq: head === undefined ? 0 : head.seq + 1, prev: head?.hash ?? GENESIS_PREV, epoch,
+    const built = await buildEntryAsync({
+      signer, key, stream, seq: head === undefined ? 0 : head.seq + 1, prev: head?.hash ?? GENESIS_PREV, epoch,
       body: { deps, roster: cited, lamport, at: options.at ?? this.now().toISOString(), actor: options.actor ?? { kind: 'person' }, kind, data: body }
     });
-    this.lamports.set(built.hash, lamport);
-    return built;
+    return 'entry' in built ? built : refuse('signer-refused', built.refused);
   }
 }
 
@@ -1131,7 +1157,7 @@ function sameKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>
 function rosterSignature(roster: RosterState): string {
   let grants = 0;
   for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
-  return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants)].join('|');
+  return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants), String(roster.sessions.size)].join('|');
 }
 
 /**
@@ -1168,6 +1194,7 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
       settle(await project.putCheckpoint(signed));
     },
     covered: (hub) => project.hubCells(hub),
-    missingDeps: () => project.missingDeps()
+    missingDeps: () => project.missingDeps(),
+    trustCheckpoint: (hub, newest) => project.trustCheckpoint(hub, newest)
   };
 }

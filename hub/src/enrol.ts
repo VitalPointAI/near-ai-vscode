@@ -14,7 +14,7 @@
 // current certificate pin; the hub among the base cell's grantees at the head. Then everything is stored in one enrolProject call.
 import { createHash, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
-import { readGrant, unwrapEpochKey } from '@ext/domain/replica/cellKeys';
+import { readGrant } from '@ext/domain/replica/cellKeys';
 import { BLOB_MAX_BYTES, HASH_PATTERN, STREAM_ID_PATTERN, entryHash, openBlob, openBody, parseHeaderShape, sha256Hex, verifyHeader } from '@ext/domain/replica/entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { ENROLMENT_ID_PATTERN, buildHubFile, certPinOf, checkEnrolmentMac, hubIdOf, isHubAddress, spkiPin } from '@ext/domain/replica/hubFile';
@@ -25,9 +25,9 @@ import { deviceAt, hubAt } from '@ext/domain/replica/rosterMembers';
 import type { KeyRing } from '@ext/domain/replica/rosterView';
 import { canonicalize } from '@ext/domain/team/canonical';
 import type { PayloadSigner, SignedPayload } from '@ext/domain/team/signedPayload';
-import { ProjectRoster } from './append/rosterCache';
+import { ProjectRoster, openHubWrap } from './append/rosterCache';
 import type { RosterCache } from './append/rosterCache';
-import type { HubEncryptionKey, HubSigningKey } from './keys';
+import type { HubEncryptionKey, HubKemKey, HubSigningKey } from './keys';
 import type { RateLimits } from './limits';
 import { StoreError } from './store/hubStore';
 import type { BlobInput, BlobRef, EntryRow, GrantInput, HubStore } from './store/hubStore';
@@ -44,11 +44,13 @@ export interface HubIdentity {
   x25519Private: KeyObject;
   certPin: string;
   address?: string;
+  /** The hub's post-quantum keys (33.2 D-03), when HUB_KEM_KEY is set: the hub file carries their binding and the hub opens v2 wraps. */
+  kem?: HubKemKey;
 }
 
 /** The hub's identity from its two keys and its certificate (PEM text or DER bytes) or the certificate's key. The pin is the SPKI pin, so a renewed
  *  certificate with the same key keeps it (32-RESEARCH Pitfall 6). */
-export function hubIdentityOf(signing: HubSigningKey, encryption: HubEncryptionKey, certificate: string | Buffer | KeyObject, address?: string): HubIdentity {
+export function hubIdentityOf(signing: HubSigningKey, encryption: HubEncryptionKey, certificate: string | Buffer | KeyObject, address?: string, kem?: HubKemKey): HubIdentity {
   const certPin = typeof certificate === 'string' || Buffer.isBuffer(certificate) ? certPinOf(certificate) : spkiPin(certificate);
   return {
     hub: hubIdOf(signing.writer),
@@ -60,6 +62,7 @@ export function hubIdentityOf(signing: HubSigningKey, encryption: HubEncryptionK
     x25519Private: encryption.privateKey,
     certPin,
     ...(address === undefined || address === '' ? {} : { address }),
+    ...(kem === undefined ? {} : { kem }),
   };
 }
 
@@ -105,6 +108,7 @@ export function issueHubFile(store: HubStore, identity: HubIdentity, options: { 
       enrolmentSecret: secret.toString('base64url'),
       expiresAt: new Date(expiresAt).toISOString(),
       now,
+      ...(identity.kem === undefined ? {} : { kem: { ...identity.kem.publicKeys, sig: identity.kem.sig } }),
     });
     return { ok: true, file, text: `${JSON.stringify(file)}\n` };
   } finally {
@@ -248,7 +252,7 @@ function baseKeys(grants: readonly unknown[], identity: HubIdentity, project: st
     wrapped = true;
     const slot = `${read.grant.cell}/${read.grant.epoch}`;
     if (keys.has(slot)) continue;
-    const key = unwrapEpochKey({ cell: read.grant.cell, epoch: read.grant.epoch, writer: identity.writer, privateKey: identity.x25519Private, wrap: mine.wrap });
+    const key = openHubWrap(identity, read.grant, mine.wrap);
     if (key !== undefined) keys.set(slot, key);
   }
   return { ring: (stream, epoch) => keys.get(`${stream}/${epoch}`), wrapped, opened: keys.size > 0 };

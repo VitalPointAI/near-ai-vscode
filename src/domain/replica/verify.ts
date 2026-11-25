@@ -10,6 +10,7 @@ import { BLOB_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, 
 import type { EntryBody, EntryHeader, SealedBlob } from './entry';
 import { validateBody, validateData } from './kinds';
 import type { ReplicaContext } from './rosterView';
+import { SESSION_REFUSALS, certifiedWriter, isPersonKeyKind } from './sessionKeys';
 
 // Closed reason maps: an id and one plain sentence each. No em-dashes.
 export const VERIFY_REJECTIONS = {
@@ -40,7 +41,10 @@ export const KEEP_REASONS = {
   'newer-version': 'Made by a newer version of the extension. It is kept and passed on and changes nothing here.',
   'hub-actor': 'Written by a hub watch. Nothing in this version accepts hub writes yet, so it is kept and changes nothing.',
   'folded-in-later-phase': 'This kind of entry is kept and passed on, and is not applied by this version yet.',
-  'observer-only': 'Written by an observer, who reads the project and writes only presence, so it is kept and changes nothing.'
+  'observer-only': 'Written by an observer, who reads the project and writes only presence, so it is kept and changes nothing.',
+  // A certified session key (Phase 33 D-60, D-62): a person-key kind, or an entry citing a roster where the certifying device no longer counts.
+  'person-key-required': SESSION_REFUSALS['person-key-required'],
+  'session-device-stopped': SESSION_REFUSALS['session-device-stopped']
 } as const;
 export type KeepReason = keyof typeof KEEP_REASONS;
 
@@ -50,9 +54,11 @@ export interface VerifiedEntry {
   body: EntryBody;
   // The kind's data: inline, or read from the blob.
   data: unknown;
-  // The member the roster view names for the writing device.
+  // The member the roster view names for the writing device, or the member a session key's certificate names.
   member: string;
   keep?: KeepReason;
+  // Set when the writer is a certified session key (Phase 33 D-62): the device that certified it and that device's slot, which its client ids use.
+  session?: { device: string; slot: number };
 }
 
 export type VerifyOutcome =
@@ -87,9 +93,12 @@ function verify(input: unknown, ctx: ReplicaContext): VerifyOutcome {
   const hash = entryHash(header);
   const where = { hash, header };
 
+  // A roster device first; otherwise a session key the roster fold placed a certificate for (D-62), checked with the certified key.
   const device = ctx.roster.deviceKey(header.writer);
-  if (device === undefined) return { status: 'held', reason: 'unknown-writer', ...where };
-  if (!verifyHeader(header, device.publicKey)) return { status: 'rejected', reason: 'bad-signature', ...where };
+  const certificate = device === undefined ? ctx.roster.sessionCertificate?.(header.writer) : undefined;
+  const signing = device ?? (certificate === undefined ? undefined : { publicKey: certificate.sessionKey, member: certificate.member });
+  if (signing === undefined) return { status: 'held', reason: 'unknown-writer', ...where };
+  if (!verifyHeader(header, signing.publicKey)) return { status: 'rejected', reason: 'bad-signature', ...where };
   if (header.body.size > INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD) return { status: 'rejected', reason: 'body-too-large', ...where };
 
   const wire = readWire(record.body, header.body.size);
@@ -127,11 +136,17 @@ function verify(input: unknown, ctx: ReplicaContext): VerifyOutcome {
   // A roster hash on a split branch nobody chose is named as such (D-11): the entry is kept and waits, and applies only if that branch is chosen.
   if (ctx.roster.rosterBranchPending?.(body.roster) === true) return { status: 'held', reason: 'roster-branch-not-chosen', ...where };
   if (!ctx.roster.hasRoster(body.roster)) return { status: 'held', reason: 'missing-roster', ...where };
-  const entry: VerifiedEntry = { hash, header, body, data, member: device.member };
-  if (!ctx.roster.isAdmitted(header.writer, body.roster)) entry.keep = 'unauthorised';
+  const entry: VerifiedEntry = { hash, header, body, data, member: signing.member };
+  if (certificate !== undefined) {
+    entry.session = { device: certificate.device, slot: certificate.slot };
+    // A session key never signs a person-key kind (D-60), and counts only while its certifying device does at the cited roster.
+    if (isPersonKeyKind(body.kind)) entry.keep = 'person-key-required';
+    else if (certifiedWriter(ctx.roster, header.writer, body.roster) === undefined) entry.keep = 'session-device-stopped';
+  } else if (!ctx.roster.isAdmitted(header.writer, body.roster)) entry.keep = 'unauthorised';
   // An observer reads and writes only presence (D-12; presence arrives in Phase 33), so every entry of a member who holds observer and not member at
   // the cited roster changes nothing.
-  else if (ctx.roster.hasRole(device.member, 'observer', body.roster) && !ctx.roster.hasRole(device.member, 'member', body.roster)) entry.keep = 'observer-only';
+  if (entry.keep !== undefined) return { status: 'verified', entry };
+  if (ctx.roster.hasRole(signing.member, 'observer', body.roster) && !ctx.roster.hasRole(signing.member, 'member', body.roster)) entry.keep = 'observer-only';
   else if (!checked.known) entry.keep = 'newer-version';
   return { status: 'verified', entry };
 }

@@ -18,6 +18,7 @@ import type { Hub } from './helpers/hubHarness';
 import { NOW_MS, createHubWorld } from './helpers/hubWorld';
 import type { HubWorld, WorldDevice, Written } from './helpers/hubWorld';
 import { MemorySecrets, memoryReplica } from './helpers/memoryReplica';
+import { RESTORE_MARKER } from '../src/restore';
 import type { MemoryReplica } from './helpers/memoryReplica';
 
 // Phase 32, plan 26 (D-30, D-45, D-54, D-63, D-70; DESIGN 10.9): the restore drill. The operator backs up the hub's state folder after a clean stop,
@@ -386,6 +387,51 @@ test('restore drill, revoked since (WR-02): a member device revoked after it wro
     const after = writeIn(world, b, [granted], 'member report after the revocation');
     await sync(live.hub, world, b);
     assert.ok(live.hub.store.entryByHash(world.project, (after[0] as Written).hash) === undefined, 'a revoked device wrote past its covered place');
+  }));
+
+test('restore drill with the marker (Phase 33 D-32): the restored hub takes back what members hand back, leaves restore mode by itself, and no forked-view finding on either member', () =>
+  withKept(async (kept, track) => {
+    const dir = kept.folder('state');
+    let live = track(await kept.instance(dir));
+    const { world, member } = await enrolledTeam(live.hub);
+    const base = [world.project];
+    const a = clientOf(world, world.lead);
+    const b = clientOf(world, member);
+    const reports: SyncReport[] = [];
+    const run = async (hub: Hub, client: Client): Promise<SyncReport> => {
+      const report = await sync(hub, world, client);
+      reports.push(report);
+      return report;
+    };
+    writeIn(world, a, base, 'first lead report');
+    writeIn(world, b, base, 'first member report');
+    for (const client of [a, b, a]) await run(live.hub, client);
+    await live.advance(MIN_GAP_MS);
+    for (const client of [a, b]) await run(live.hub, client);
+    await live.hub.close();
+    const backup = kept.copy(dir, 'backup');
+
+    live = track(await kept.instance(dir));
+    writeIn(world, a, base, 'second lead report');
+    writeIn(world, b, base, 'second member report');
+    for (const client of [a, b]) await run(live.hub, client);
+    await live.advance(MIN_GAP_MS);
+    for (const client of [a, b]) await run(live.hub, client);
+    await live.hub.close();
+
+    // The restore, done by the procedure: the backup goes back and the marker is written beside it.
+    kept.restore(backup, dir);
+    writeFileSync(path.join(dir, RESTORE_MARKER), '', { mode: 0o600 });
+    live = track(await kept.instance(dir));
+    assert.equal(live.hub.restore?.active(), true);
+    for (const client of [a, b]) await run(live.hub, client);
+    await live.advance(MIN_GAP_MS);
+    for (const client of [a, b]) await run(live.hub, client);
+    assert.equal(live.hub.restore?.active(), false, 'restore mode did not end once both members had asked');
+    assert.deepEqual(live.hub.restoreLogs.map((line) => line.event), ['hub.restore-started', 'hub.restore-ended']);
+    for (const report of reports) assert.ok(!kinds(report).includes('forked-view'), JSON.stringify(report.findings));
+    assert.deepEqual(hashesOf(a.replica), hashesOf(b.replica), 'A and B do not hold the same entries');
+    for (const hash of hashesOf(a.replica)) assert.ok(live.hub.store.entryByHash(world.project, hash), `the hub did not take back ${hash.slice(0, 8)}`);
   }));
 
 test('restore drill: the cold backup and the live state folder hold no byte of the hub\'s signing or encryption key (D-30)', () =>

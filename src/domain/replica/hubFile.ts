@@ -10,6 +10,8 @@
 // - Session answer (purpose staff-hub-session), signed by a device: the hub's writer id, the project, the hub's fresh challenge and 32 bytes of TLS
 //   keying material from exportKeyingMaterial(SESSION_KEYING_BYTES, SESSION_KEYING_LABEL), so the answer works only for that hub and project on that
 //   one TLS connection (D-35). This module checks the answer against what the hub expects; the device's standing in the roster is the hub's question.
+//   Version 2 adds the features the device folds (POST-01, D-07): at most MAX_FEATURES name@N ids, sorted and unique, signed with the rest, so a hub
+//   can refuse a session whose features do not cover the project's required set. An answer with no features field reads as an empty announcement.
 // - Enrolment MAC: HMAC-SHA256 under the hub file's enrolment secret over the enrolment id, hub id, project, genesis hash and roster head. The lead's
 //   device makes it and the hub checks it with the one function here (D-41).
 //
@@ -22,8 +24,13 @@ import type { KeyStatusLookup } from '../team/keyStatus';
 import { signPayload, verifyPayload } from '../team/signedPayload';
 import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
 import { isRecord } from '../team/validate';
-import { HASH_PATTERN, STREAM_ID_PATTERN, writerIdOf } from './entry';
+import { HASH_PATTERN, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, writerIdOf } from './entry';
+import type { SealedEntry } from './entry';
 import { X25519_KEY_BYTES, x25519BindingBytes } from './cellKeys';
+import { MAX_FEATURES, isReplicaFeature } from './features';
+import { kemBindingHolds } from './deviceKem';
+import type { DeviceKemData, KemBinding } from './deviceKem';
+import { kemProblem } from './kindSchemas/device';
 
 export const HUB_FILE_EXTENSION = '.near-staff-hub';
 export const HUB_FILE_VERSION = 1;
@@ -52,6 +59,8 @@ export interface HubFilePayload {
   enrolment: string;
   enrolmentSecret: string;
   expiresAt: string;
+  /** The hub's post-quantum keys with their binding signed by the hub's key (33.2 D-03); only from a hub that has a kem key. */
+  kem?: KemBinding;
 }
 
 export const HUB_FILE_REFUSALS = {
@@ -145,16 +154,31 @@ export function certPinOf(certificate: string | Buffer): string {
 
 /** A hub file payload read from hostile input: exact keys, every field of its shape, and the hub id and writer id derived from the signing key. */
 function hubFilePayloadOf(value: unknown): HubFilePayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, HUB_FILE_KEYS)) return undefined;
+  if (!isRecord(value)) return undefined;
+  const kemIn = own(value, 'kem');
+  if (!hasKeys(value, kemIn === undefined ? HUB_FILE_KEYS : [...HUB_FILE_KEYS, 'kem'])) return undefined;
+  if (kemIn !== undefined && kemProblem(kemIn, 'kem') !== undefined) return undefined;
   const [v, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt] = HUB_FILE_KEYS.map((key) => own(value, key));
   if (v !== HUB_FILE_VERSION || !isHubAddress(address) || !isHash(certPin)) return undefined;
   if (!isKey(publicKey, ED25519_PUBLIC_BYTES) || !isKey(x25519, X25519_KEY_BYTES) || !isKey(x25519Sig, ED25519_SIGNATURE_BYTES)) return undefined;
   if (typeof writer !== 'string' || writer !== writerIdOf(publicKey) || typeof hub !== 'string' || hub !== hubIdOf(writer)) return undefined;
   if (typeof enrolment !== 'string' || !ENROLMENT_ID_PATTERN.test(enrolment) || !isKey(enrolmentSecret, ENROLMENT_SECRET_BYTES) || !isTime(expiresAt)) return undefined;
-  return { v: HUB_FILE_VERSION, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt };
+  const payload: HubFilePayload = { v: HUB_FILE_VERSION, hub, address, certPin, publicKey, writer, x25519, x25519Sig, enrolment, enrolmentSecret, expiresAt };
+  if (kemIn !== undefined) {
+    const kem = kemIn as Record<string, string>;
+    payload.kem = { p256: kem.p256, mlkem768: kem.mlkem768, sig: kem.sig };
+  }
+  return payload;
 }
 
-const isBound = (file: Pick<HubFilePayload, 'x25519' | 'x25519Sig' | 'writer' | 'publicKey'>): boolean => verifySignature(x25519BindingBytes(file.x25519, file.writer), file.x25519Sig, file.publicKey);
+// Both bindings to the hub's signing key: the X25519 key, and the post-quantum keys when the file carries them.
+const isBound = (file: Pick<HubFilePayload, 'x25519' | 'x25519Sig' | 'writer' | 'publicKey' | 'kem'>): boolean =>
+  verifySignature(x25519BindingBytes(file.x25519, file.writer), file.x25519Sig, file.publicKey) && (file.kem === undefined || kemBindingHolds(file.kem, file.writer, file.publicKey));
+
+/** The hub's device.kem a lead's device writes from a hub file it read (33.2 D-03), or undefined for a hub file without post-quantum keys. */
+export function hubDeviceKemData(file: Pick<HubFilePayload, 'writer' | 'kem'>): DeviceKemData | undefined {
+  return file.kem === undefined ? undefined : { device: file.writer, p256: file.kem.p256, mlkem768: file.kem.mlkem768, sig: file.kem.sig };
+}
 
 /** x25519Sig is the hub's Ed25519 signature over x25519BindingBytes(x25519, the hub's writer id). now is the signing time; expiresAt must be after it. */
 export interface BuildHubFileInput {
@@ -166,6 +190,8 @@ export interface BuildHubFileInput {
   enrolmentSecret: string;
   expiresAt: string;
   now: Date;
+  /** The hub's post-quantum keys and their binding, when the hub has a kem key (33.2 D-03). */
+  kem?: KemBinding;
 }
 
 // Signs a hub file with the hub's own key. Throws a plain error, naming no secret, when a field is not valid, the expiry is not after now or the
@@ -185,10 +211,11 @@ export function buildHubFile(signer: PayloadSigner, input: BuildHubFileInput): S
     enrolmentSecret: input.enrolmentSecret,
     expiresAt: input.expiresAt
   };
+  if (input.kem !== undefined) payload.kem = { p256: input.kem.p256, mlkem768: input.kem.mlkem768, sig: input.kem.sig };
   if (!isHubAddress(payload.address)) throw new Error('The hub file was not made: the address must be a host name or IP address and a port, such as hub.example.org:8443.');
   if (hubFilePayloadOf(payload) === undefined) throw new Error('The hub file was not made: one of its fields is not valid.');
   if (Date.parse(payload.expiresAt) <= input.now.getTime()) throw new Error('The hub file was not made: its expiry must be after the time it is made.');
-  if (!isBound(payload)) throw new Error('The hub file was not made: the X25519 key is not bound to the hub\'s signing key.');
+  if (!isBound(payload)) throw new Error('The hub file was not made: the X25519 key or the post-quantum keys are not bound to the hub\'s signing key.');
   return signPayload(signer, 'staff-hub-file', payload, { now: () => input.now });
 }
 
@@ -219,19 +246,27 @@ export function readHubFile(file: unknown, now: Date): HubFileRead {
 export const SESSION_KEYING_LABEL = 'near-ai-hub-session/v1';
 export const SESSION_KEYING_BYTES = 32;
 export const CHALLENGE_BYTES = 32;
-export const SESSION_VERSION = 1;
+export const SESSION_VERSION = 2;
 /** A session answer is well under 1 KiB; anything over this is refused before it is parsed. */
 export const SESSION_ANSWER_MAX_BYTES = 8 * 1024;
-const SESSION_KEYS = ['v', 'hub', 'project', 'challenge', 'keying'] as const;
+const SESSION_KEYS = ['v', 'hub', 'project', 'challenge', 'keying', 'features'] as const;
+// Every key but features: an answer without the field reads as an empty announcement.
+const SESSION_KEYS_WITHOUT_FEATURES = SESSION_KEYS.slice(0, -1);
 const BASE64URL_TEXT = /^[A-Za-z0-9_-]+$/;
 
-/** hub is the hub's writer id (64 hex), project the project's stream id (32 hex), challenge and keying base64url of 32 bytes each. */
-export interface SessionAnswerPayload { v: 1; hub: string; project: string; challenge: string; keying: string }
+/**
+ * hub is the hub's writer id (64 hex), project the project's stream id (32 hex), challenge and keying base64url of 32 bytes each, features the
+ * replica features the device folds (at most MAX_FEATURES name@N ids, sorted and unique). certificate and certificateEntry, only in an answer signed
+ * by a person's session key (Phase 33 D-62), are the entry hash of the session.certify that vouches for that key and the sealed entry itself, so the
+ * hub can check the chain to the person's device before its first push has stored it. A device's answer carries neither.
+ */
+export interface SessionAnswerPayload { v: 2; hub: string; project: string; challenge: string; keying: string; features: string[]; certificate?: string; certificateEntry?: SealedEntry }
 /** Bytes or their base64url text. */
 export type SessionBytes = Uint8Array | string;
 /** What the hub expects: its own writer id, the project asked for, the challenge it gave on this connection and this connection's keying material. */
 export interface SessionExpectation { hub: string; project: string; challenge: SessionBytes; keying: SessionBytes }
-export interface BuildSessionAnswerInput extends SessionExpectation { now: Date }
+/** features: the replica features the device folds (KNOWN_REPLICA_FEATURES), in any order; signed sorted. None given signs an empty list. */
+export interface BuildSessionAnswerInput extends SessionExpectation { features?: readonly string[]; certificateEntry?: SealedEntry; now: Date }
 
 export const SESSION_REFUSALS = {
   malformed: 'This is not a session answer this version can read. Open a new session and answer its challenge.',
@@ -243,7 +278,7 @@ export const SESSION_REFUSALS = {
 } as const;
 export type SessionRefusal = keyof typeof SESSION_REFUSALS;
 export type SessionFailure = { ok: false; reason: SessionRefusal; message: string };
-export type SessionRead = { ok: true; publicKey: string; writer: string } | SessionFailure;
+export type SessionRead = { ok: true; publicKey: string; writer: string; features: string[]; certificate?: string; certificateEntry?: SealedEntry } | SessionFailure;
 
 const refuseSession = (reason: SessionRefusal): SessionFailure => ({ ok: false, reason, message: SESSION_REFUSALS[reason] });
 
@@ -264,27 +299,69 @@ function sameBytes(a: Buffer, b: Buffer): boolean {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
+// A feature list read from hostile input as a fresh copy: an array of at most MAX_FEATURES name@N ids in strictly increasing order (so sorted and
+// unique), or undefined.
+function featureListOf(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || value.length > MAX_FEATURES) return undefined;
+  const list: string[] = [];
+  for (const id of value as unknown[]) {
+    if (!isReplicaFeature(id)) return undefined;
+    const last = list[list.length - 1];
+    if (last !== undefined && !(last < id)) return undefined;
+    list.push(id);
+  }
+  return list;
+}
+
 function sessionPayloadOf(value: unknown): SessionAnswerPayload | undefined {
-  if (!isRecord(value) || !hasKeys(value, SESSION_KEYS)) return undefined;
-  const [v, hub, project, challenge, keying] = SESSION_KEYS.map((key) => own(value, key));
+  if (!isRecord(value)) return undefined;
+  // A session key's answer carries both certificate fields or neither.
+  const certified = Object.prototype.hasOwnProperty.call(value, 'certificate');
+  const extra = certified ? ['certificate', 'certificateEntry'] : [];
+  const announced = hasKeys(value, [...SESSION_KEYS, ...extra]);
+  if (!announced && !hasKeys(value, [...SESSION_KEYS_WITHOUT_FEATURES, ...extra])) return undefined;
+  const certificateEntry = certified ? certificateEntryOf(own(value, 'certificateEntry')) : undefined;
+  if (certified && (certificateEntry === undefined || entryHash(certificateEntry.header) !== own(value, 'certificate'))) return undefined;
+  const [v, hub, project, challenge, keying] = SESSION_KEYS_WITHOUT_FEATURES.map((key) => own(value, key));
   if (v !== SESSION_VERSION || !isHash(hub) || typeof project !== 'string' || !STREAM_ID_PATTERN.test(project)) return undefined;
   if (!isKey(challenge, CHALLENGE_BYTES) || !isKey(keying, SESSION_KEYING_BYTES)) return undefined;
-  return { v: SESSION_VERSION, hub, project, challenge, keying };
+  const features = announced ? featureListOf(own(value, 'features')) : [];
+  if (features === undefined) return undefined;
+  return { v: SESSION_VERSION, hub, project, challenge, keying, features, ...(certificateEntry === undefined ? {} : { certificate: entryHash(certificateEntry.header), certificateEntry }) };
+}
+
+// A sealed entry read from hostile input as a fresh copy: an exact header and a base64url body no larger than an inline body, or undefined.
+function certificateEntryOf(value: unknown): SealedEntry | undefined {
+  if (!isRecord(value) || !hasKeys(value, ['header', 'body'])) return undefined;
+  const shape = parseHeaderShape(own(value, 'header'));
+  const body = own(value, 'body');
+  if (!shape.ok || typeof body !== 'string' || !BASE64URL_TEXT.test(body) || body.length > Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD) * 4) / 3)) return undefined;
+  return { header: shape.header, body };
+}
+
+// The caller's features as a sorted copy, or the value itself when it is not a list, so the shape check refuses it. None given is an empty list.
+function sortedFeatures(value: unknown): unknown {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? [...(value as unknown[])].sort() : value;
 }
 
 // Signs a device's answer to the hub's challenge. Throws a plain error when a field is not valid.
 export function buildSessionAnswer(signer: PayloadSigner, input: BuildSessionAnswerInput): SignedPayload<SessionAnswerPayload> {
   const challenge = sessionText(input.challenge, CHALLENGE_BYTES);
   const keying = sessionText(input.keying, SESSION_KEYING_BYTES);
-  const payload = { v: SESSION_VERSION, hub: input.hub, project: input.project, challenge, keying };
+  const certificate = input.certificateEntry === undefined ? {} : { certificate: entryHash(input.certificateEntry.header), certificateEntry: input.certificateEntry };
+  const payload = { v: SESSION_VERSION, hub: input.hub, project: input.project, challenge, keying, features: sortedFeatures(input.features), ...certificate };
   const checked = sessionPayloadOf(payload);
-  if (checked === undefined) throw new Error('The session answer was not made: the hub must be a writer id, the project a project id, and the challenge and keying material 32 bytes each.');
+  if (checked === undefined) {
+    throw new Error(`The session answer was not made: the hub must be a writer id, the project a project id, the challenge and keying material 32 bytes each, and the features at most ${String(MAX_FEATURES)} different feature ids such as require@1.`);
+  }
   return signPayload(signer, 'staff-hub-session', checked, { now: () => input.now });
 }
 
 // The hub's check of a session answer (its JSON text or its parsed content) against what it expects on this connection. Checks, in order: size and
 // shape, the signature by the key the envelope names, then the hub, the project, the challenge and the keying material, with the last two compared in
-// constant time. Returns the device's key and writer id; whether that device may open a session is the roster's answer. Never throws.
+// constant time. Returns the device's key, writer id and announced features; whether that device may open a session is the roster's answer, and
+// whether its features cover the project's required set is the hub's check. Never throws.
 export function readSessionAnswer(answer: unknown, expected: SessionExpectation): SessionRead {
   try {
     const input = inputValue(answer, SESSION_ANSWER_MAX_BYTES);
@@ -301,7 +378,8 @@ export function readSessionAnswer(answer: unknown, expected: SessionExpectation)
     if (payload.project !== expected.project) return refuseSession('wrong-project');
     if (!sameBytes(Buffer.from(payload.challenge, 'base64url'), sessionBytes(expected.challenge))) return refuseSession('wrong-challenge');
     if (!sameBytes(Buffer.from(payload.keying, 'base64url'), sessionBytes(expected.keying))) return refuseSession('wrong-connection');
-    return { ok: true, publicKey, writer: writerIdOf(publicKey) };
+    const certificate = payload.certificateEntry === undefined ? {} : { certificate: payload.certificate as string, certificateEntry: payload.certificateEntry };
+    return { ok: true, publicKey, writer: writerIdOf(publicKey), features: payload.features, ...certificate };
   } catch {
     // Hostile input never throws out of the check.
     return refuseSession('malformed');

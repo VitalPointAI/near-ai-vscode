@@ -13,7 +13,9 @@
 //
 // h = sha256(SAFETY_CODE_DOMAIN NUL, then each field as a 4-byte big-endian length and its UTF-8 bytes, in this order: invite id, genesis hash, lead
 // signing key, lead X25519 key, inviter signing key, inviter X25519 key, joining signing key, joining X25519 key, joining nonce). The first 66 bits of
-// h, read as six 11-bit numbers from the most significant bit, pick the six words.
+// h, read as six 11-bit numbers from the most significant bit, pick the six words. When the join request carries the joining device's post-quantum
+// keys (33.2 D-03), the P-256 key and the ML-KEM key follow the nonce as two more fields, so a swapped key changes the words; without them the input
+// is byte for byte the one above.
 import { createHash } from 'node:crypto';
 import { SAFETY_WORDS } from './safetyWords';
 
@@ -22,11 +24,13 @@ export const SAFETY_CODE_WORDS = 6;
 const BITS_PER_WORD = 11;
 
 export interface SafetyCodeDevice { publicKey: string; x25519: string }
+/** The joining device; kem only when its join request carries post-quantum keys. */
+export interface SafetyCodeJoiner extends SafetyCodeDevice { kem?: { p256: string; mlkem768: string } }
 /**
  * lead: the founding lead the invitation names as the project's anchor. inviter: the device that signed the invitation (the lead's founding device, or
  * any device of the lead or the deputy). nonce: the joining device's fresh random value from its join request.
  */
-export interface SafetyCodeInput { invite: string; genesisHash: string; lead: SafetyCodeDevice; inviter: SafetyCodeDevice; joiner: SafetyCodeDevice; nonce: string }
+export interface SafetyCodeInput { invite: string; genesisHash: string; lead: SafetyCodeDevice; inviter: SafetyCodeDevice; joiner: SafetyCodeJoiner; nonce: string }
 
 function field(text: string): Buffer {
   const bytes = Buffer.from(text, 'utf8');
@@ -41,6 +45,7 @@ export function safetyCode(input: SafetyCodeInput): string[] {
     input.invite, input.genesisHash, input.lead?.publicKey, input.lead?.x25519, input.inviter?.publicKey, input.inviter?.x25519, input.joiner?.publicKey,
     input.joiner?.x25519, input.nonce
   ];
+  if (input.joiner?.kem !== undefined) fields.push(input.joiner.kem.p256, input.joiner.kem.mlkem768);
   for (const value of fields) if (typeof value !== 'string') throw new Error('Every safety code input is text.');
   const hash = createHash('sha256').update(Buffer.from(`${SAFETY_CODE_DOMAIN}\0`, 'utf8'));
   for (const value of fields as string[]) hash.update(field(value));

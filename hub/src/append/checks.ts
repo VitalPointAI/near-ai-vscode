@@ -3,11 +3,13 @@
 // the hub does not hold stay ciphertext and are checked by clients. Only base-stream bodies are opened, with the base cell key granted to the hub.
 //
 // Order. Per batch, before anything costly: its shape and size, then the pushing device's token bucket (before any signature, Pitfall 7), then the
-// project and the blobs the batch says its entries use (a missing blob refuses the whole batch, blob-missing). Per entry, in order: header shape and
+// project and the features it requires (needs-update when this hub lacks one, D-07), and in restore mode whether every entry is held or covered
+// (restoring, D-32). Per entry, in order: header shape and
 // size; the body's size and ciphertext hash; the stream is the project's; the writer's signature with its roster key; the writer admitted and neither
 // revoked nor quarantined at the head (a device revoked since may still fill a place a kept checkpoint of this hub covers, WR-02); the writer on the
 // stream's access list; the place (same hash again: held; another hash at a used seq: an equivocation proof, D-43; beyond the next seq: seq-gap;
-// wrong prev: prev-mismatch); and for base-stream entries the hub can open, a body that opens and, for roster kinds, a lead or deputy device at the
+// wrong prev: prev-mismatch); a blob the entry uses that the hub does not hold (blob-missing for that entry only, and its writer's later entries in
+// the batch then meet seq-gap, D-28); and for base-stream entries the hub can open, a body that opens and, for roster kinds, a lead or deputy device at the
 // roster the entry cites (D-11). A roster kind citing an older roster than the hub's head is stored: it is a concurrent branch the fold turns into a
 // split (D-09), and refusing it would cut the writer's log at a seq gap for good (CR-01).
 //
@@ -16,7 +18,14 @@
 // judges it when the key arrives. So a base-stream entry under an epoch whose grant to the hub has not come yet is stored as ciphertext the hub
 // cannot read, the writer's later entries (a revocation among them) follow it, and the grant, when it comes, folds them all. Refusing it instead
 // would leave that writer's base-stream log at a seq gap for good, and a retry would wait forever on a hub that is never granted the epoch.
-// Entries of other cells are never opened here, so they already follow the rule; a missing blob refuses the batch so the client sends it again.
+// Entries of other cells are never opened here, so they already follow the rule; a missing blob refuses only the entry that uses it, so the client
+// uploads the blob and sends that entry again while the rest of the batch is stored.
+//
+// Session keys (Phase 33 D-60, D-62): a writer that is not a roster device is checked with the key of the session.certify the fold placed for it. It
+// is taken only while its certifying device stands and the hub's clock is before the certificate's notAfter (session-expired otherwise); a kind
+// only the person key may sign is refused person-key-required wherever the hub can open the body; a certificate in the base stream refolds the
+// overlay, so the session's own entries after it in the same batch are judged with it; and a device may hold LIMITS.liveSessionKeysPerDevice live
+// certificates at a time (too-many-sessions).
 //
 // Cited evidence (71-09, evidencePep.ts): a base-stream entry the hub opens whose data carries `evidence` is checked with the fold's checkEvidence
 // and then checkFreshness against the hub's newest lists, at the hub's clock; it is refused 'stale-evidence' when it cites a list replaced longer
@@ -31,14 +40,21 @@ import { GENESIS_PREV, entryHash, openBlob, openBody, parseHeaderShape, sha256He
 import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { canonicalProof, proofHash } from '@ext/domain/replica/equivocation';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
-import { validateBody } from '@ext/domain/replica/kinds';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
+import { DEVICE_KEM_REFUSALS, deviceKemContext, deviceKemProblem } from '@ext/domain/replica/deviceKem';
+import type { DeviceKemData } from '@ext/domain/replica/deviceKem';
+import { missingFeatures } from '@ext/domain/replica/features';
+import { WRAP_FEATURE, WRAP_FORMAT_REFUSALS, wrapFormatProblem } from '@ext/domain/replica/wrapFormat';
+import { hubReplicaFeatures } from '../features';
+import { validateBody, validateData } from '@ext/domain/replica/kinds';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, isRosterWriterAt } from '@ext/domain/replica/roster';
+import { SESSION_REFUSALS, isPersonKeyKind } from '@ext/domain/replica/sessionKeys';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
 import type { CitedStatus, TrustStore } from '../store/trustStore';
 import { carriesEvidence, checkEntryEvidence } from './evidencePep';
 import type { RateLimits } from '../limits';
 import type { BlobRef, EntryRow, EquivocationRecord, GrantInput, HubStore, StoredEntry } from '../store/hubStore';
+import type { RestoreMode } from '../restore';
 import type { Place, ProjectRoster, RosterCache } from './rosterCache';
 
 export const APPEND_REFUSALS = {
@@ -46,7 +62,7 @@ export const APPEND_REFUSALS = {
   'unknown-project': 'This hub does not hold that project.',
   'batch-too-large': 'The append holds more entries or grants than one append may. Send it in smaller parts.',
   'rate-limited': 'This device is sending entries faster than the hub takes them. Wait the time the hub gives, then send again.',
-  'blob-missing': 'An entry uses a large part the hub does not hold. Upload that part, then send the entries again.',
+  'blob-missing': 'This entry uses a large part the hub does not hold. Upload that part, then send this entry again.',
   'malformed-header': 'The entry header is not in a shape this hub can read.',
   'unknown-header-version': 'The entry was written in a newer format than this hub reads. Update the hub.',
   'header-too-large': 'The entry header is larger than the hub accepts.',
@@ -66,7 +82,17 @@ export const APPEND_REFUSALS = {
   'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.',
   'stale-evidence': 'This entry relies on a status list that has since been replaced. Check again with the newest list, then send it again.',
   'evidence-malformed': 'The credentials and status lists this entry cites are not listed in a shape the hub can read.',
-  'evidence-refused': 'The credentials this entry cites do not hold at the hub.'
+  'evidence-refused': 'The credentials this entry cites do not hold at the hub.',
+  'needs-update': 'This shared work needs a newer version of your organization\'s server. Ask its operator to update it.',
+  restoring: 'Your organization\'s server is being restored. Send this change again in a moment.',
+  // Phase 33 D-60, D-62: a person's session key.
+  'session-expired': 'Your session key has ended. Sign in again.',
+  'person-key-required': SESSION_REFUSALS['person-key-required'],
+  'too-many-sessions': 'This device already has as many live session keys as your organization\'s server allows. Wait for one to end, then sign in again.',
+  // 33.2 D-03: a device's post-quantum key binding, checked with the fold's own function.
+  ...DEVICE_KEM_REFUSALS,
+  // 33.2 D-06: the cutover rule, the fold's own function.
+  ...WRAP_FORMAT_REFUSALS
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -90,6 +116,8 @@ export interface AppendContext {
   verify?: (header: EntryHeader, publicKey: string) => boolean;
   /** Your organization's trust host (71-09): with it, entries that cite evidence are checked; without it they are stored as today. */
   trust?: TrustStore;
+  /** Restore mode (restore.ts, D-32, D-45): while active, a batch is taken only when every entry in it is held or covered. */
+  restore?: Pick<RestoreMode, 'active' | 'allows'>;
 }
 
 export interface Refused {
@@ -212,6 +240,19 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   }
 }
 
+/** The kind of an entry whose body the hub holds a key for (the base cell, or a cell granted to the hub), or undefined when it cannot read it. */
+function kindOf(roster: ProjectRoster, header: EntryHeader, wire: Buffer): string | undefined {
+  const key = roster.ring(header.stream, header.epoch);
+  const plaintext = key === undefined ? undefined : openBody(key, header, wire);
+  if (plaintext === undefined) return undefined;
+  try {
+    const checked = validateBody(JSON.parse(plaintext.toString('utf8')) as unknown);
+    return checked.ok ? checked.body.kind : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True when a kept checkpoint of this hub names this writer log's head at or beyond the entry's place, and at that place names this very entry. */
 function coveredBefore(store: HubStore, project: string, header: EntryHeader, hash: string): boolean {
   const covered = store.coveredHead(project, header.stream, header.writer);
@@ -233,21 +274,44 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const { store, now } = ctx;
   const project = input.project;
   if (!/^[0-9a-f]{32}$/.test(project) || store.project(project) === undefined) return refuseBatch('unknown-project');
+  // The entries whose named blob the hub does not hold (WR-07, D-28): each is refused on its own below, never the whole batch.
+  const blobMissing = new Set<string>();
   for (const ref of refsIn) {
     if (!isRecord(ref) || typeof ref.entry !== 'string' || !HASH.test(ref.entry) || typeof ref.blob !== 'string' || !HASH.test(ref.blob)) return refuseBatch('malformed-batch');
-    if (store.blobInfo(project, ref.blob) === undefined) return refuseBatch('blob-missing');
+    if (store.blobInfo(project, ref.blob) === undefined) blobMissing.add(ref.entry);
   }
 
   const verify = ctx.verify ?? verifyHeader;
   const base = await ctx.cache.get(project);
+  // POST-01 (D-07): a project that requires a feature this hub does not fold takes no append, so an outdated hub never accepts writes it cannot
+  // judge. The whole batch is refused; no entry is called bad. Reads still answer.
+  if (missingFeatures(base.state.required, hubReplicaFeatures()).length > 0) return refuseBatch('needs-update');
+  // A session key pushing after its certificate's notAfter (Phase 33 D-62): the whole batch, 403, never retried. Its token normally ends first.
+  if (base.standingAt(input.device, now) === 'session-expired') return refuseBatch('session-expired');
+  // Restore mode (D-32, D-45): every entry must be one the hub holds or one at a place a kept or handed-back checkpoint covers. Anything else waits
+  // with a retryable answer until members have handed back what the hub lost. An entry that does not read is judged by the checks below.
+  if (ctx.restore?.active() === true) {
+    for (const raw of input.entries) {
+      const shape = parseHeaderShape(isRecord(raw) ? raw.header : undefined);
+      if (shape.ok && !ctx.restore.allows(project, shape.header, entryHash(shape.header))) return refuseBatch('restoring', { retryAfterSeconds: LIMITS.restoreRetrySeconds });
+    }
+  }
   // Grants offered with the batch are candidates in every overlay fold, so a cell created in this batch has its founding grant (and its access
   // list) for the entries after it. Only the grants the final fold places are kept.
   const offered: Array<{ index: number; value: unknown; hash: string; cell: string; epoch: number }> = [];
   const grantsRefused: Refused[] = [];
+  // The cutover rule (33.2 D-06) per grant or page, at the roster as the hub holds it before this batch; the fold applies it again after.
+  const switchedAt = base.state.requiredFrom.get(WRAP_FEATURE);
   grantsIn.forEach((value, index) => {
     const read = readGrant(value);
-    if (read.ok) offered.push({ index, value, hash: read.hash, cell: read.grant.cell, epoch: read.grant.epoch });
-    else grantsRefused.push({ index, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+    if (!read.ok) {
+      grantsRefused.push({ index, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+      return;
+    }
+    const founded = base.state.cells.cells.get(read.grant.cell)?.epochs.find((epoch) => epoch.epoch === read.grant.epoch)?.from;
+    const format = founded === undefined ? undefined : wrapFormatProblem(read.grant, founded, switchedAt);
+    if (format !== undefined) grantsRefused.push({ index, hash: read.hash, reason: format, message: APPEND_REFUSALS[format] });
+    else offered.push({ index, value, hash: read.hash, cell: read.grant.cell, epoch: read.grant.epoch });
   });
   const offeredValues = offered.map((grant) => grant.value);
 
@@ -332,16 +396,18 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       refuse('unknown-stream', hash);
       continue;
     }
-    const device = roster.view.deviceKey(header.writer);
-    if (device === undefined) {
+    // A roster device, or a session key the fold placed a certificate for (D-62), checked with its certified key.
+    const session = roster.sessionOf(header.writer);
+    const publicKey = roster.view.deviceKey(header.writer)?.publicKey ?? session?.sessionKey;
+    if (publicKey === undefined) {
       refuse('not-admitted', hash);
       continue;
     }
-    if (!verify(header, device.publicKey)) {
+    if (!verify(header, publicKey)) {
       refuse('bad-signature', hash);
       continue;
     }
-    const standing = roster.standing(header.writer);
+    const standing = roster.standingAt(header.writer, now);
     // WR-02 (D-54): standing is judged at the entry's place, not only at the head. A place at or below the furthest head a kept checkpoint of this
     // hub names for that log is one the hub accepted before, so after a restore the entry there is taken back even from a device revoked since
     // (at the covered head itself only the very entry the checkpoint names). Without it the hub could never cover that checkpoint's heads again
@@ -357,6 +423,11 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     }
     const existing = atPlace(header);
     if (existing !== undefined) {
+      if (existing.hash === hash && blobMissing.has(hash)) {
+        // Held already, but the reference it brings names a blob the hub does not hold: sent again once the blob is uploaded.
+        refuse('blob-missing', hash);
+        continue;
+      }
       if (existing.hash === hash) {
         if (!accepted.includes(hash)) accepted.push(hash);
         held.push(hash);
@@ -364,7 +435,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       }
       // D-43: a second validly signed header at a used place. The first stays the hub's entry; both headers are kept as proof, and the writer is
       // refused everywhere until the roster releases this place or revokes the device.
-      const proof = canonicalProof(existing.header, header, device.publicKey);
+      const proof = canonicalProof(existing.header, header, publicKey);
       const place = { writer: header.writer, stream: header.stream, seq: header.seq };
       equivocations.push({ proofHash: proofHash(proof), ...place, proof: canonicalize(proof), recordedAt: now });
       proofs.push(proof);
@@ -375,6 +446,11 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
     }
     const head = headOf(header.stream, header.writer);
     const next = head === undefined ? 0 : head.seq + 1;
+    // A blob the entry names is not here: this entry waits, and the head does not move, so the writer's later entries in the batch meet seq-gap.
+    if (header.seq === next && header.prev === (head === undefined ? GENESIS_PREV : head.hash) && blobMissing.has(hash)) {
+      refuse('blob-missing', hash);
+      continue;
+    }
     if (header.seq !== next) {
       refuse('seq-gap', hash);
       continue;
@@ -383,9 +459,20 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
       refuse('prev-mismatch', hash);
       continue;
     }
+    // A session key never signs a person-key kind (D-60). The hub refuses what it can read; a client's fold refuses the rest.
+    if (session !== undefined) {
+      const kind = kindOf(roster, header, wire);
+      if (kind !== undefined && isPersonKeyKind(kind)) {
+        refuse('person-key-required', hash);
+        continue;
+      }
+    }
     if (header.stream === project) {
       const read = await readBase(roster, store, project, header, wire, batchBlobs);
-      if (!read.ok && read.why === 'missing-blob') return refuseBatch('blob-missing');
+      if (!read.ok && read.why === 'missing-blob') {
+        refuse('blob-missing', hash);
+        continue;
+      }
       if (!read.ok && read.why === 'unreadable') {
         refuse('roster-unreadable', hash);
         continue;
@@ -426,6 +513,29 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         baseEntries.push({ header, body: raw.body as string });
         if (read.blob !== undefined) batchBlobs.set(read.blob.hash, read.blob);
         dirty = true;
+      } else if (read.opened.kind === 'session.certify') {
+        // A certificate takes no roster position, but the overlay folds it, so the session key's own entries later in this batch are judged with it.
+        if (roster.liveSessionsOf(header.writer, now) >= LIMITS.liveSessionKeysPerDevice) {
+          refuse('too-many-sessions', hash);
+          continue;
+        }
+        baseEntries.push({ header, body: raw.body as string });
+        dirty = true;
+      } else if (read.opened.kind === 'device.kem') {
+        // A device's post-quantum keys (33.2 D-03): judged at the roster the entry cites with the fold's deviceKemProblem. A cited roster the hub's
+        // line does not hold is stored, like a roster entry: the fold judges it once that roster applies.
+        const state = roster.state;
+        const problem = !validateData('device.kem', read.opened.data).ok
+          ? 'kem-binding-invalid'
+          : state.positionOf.has(read.opened.roster)
+            ? deviceKemProblem({ signer: header.writer, roster: read.opened.roster, data: read.opened.data as DeviceKemData }, deviceKemContext(state, (writer, position) => isRosterWriterAt(state, writer, position)))
+            : undefined;
+        if (problem !== undefined) {
+          refuse(problem, hash);
+          continue;
+        }
+        baseEntries.push({ header, body: raw.body as string });
+        dirty = true;
       }
     }
     entries.push({ index, hash, stream: header.stream, writer: header.writer, seq: header.seq, row: { header: canonicalize(header), body: raw.body as string, receivedAt: now } });
@@ -439,7 +549,9 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const grants: GrantInput[] = [];
   for (const grant of offered) {
     if (!roster.placedGrants.has(grant.hash)) {
-      grantsRefused.push({ index: grant.index, hash: grant.hash, reason: 'grant-not-placed', message: APPEND_REFUSALS['grant-not-placed'] });
+      // An epoch this batch founds is judged by the fold; its refusal names the cutover rule when that is the reason.
+      const reason = roster.state.refused.some((item) => item.hash === grant.hash && item.reason === 'old-wrap-after-switch') ? 'old-wrap-after-switch' : 'grant-not-placed';
+      grantsRefused.push({ index: grant.index, hash: grant.hash, reason, message: APPEND_REFUSALS[reason] });
     } else if (!base.placedGrants.has(grant.hash) && !grants.some((item) => item.hash === grant.hash)) {
       grants.push({ hash: grant.hash, cell: grant.cell, epoch: grant.epoch, body: canonicalize(grant.value), receivedAt: now });
     }

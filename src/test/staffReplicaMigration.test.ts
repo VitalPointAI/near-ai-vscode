@@ -656,7 +656,7 @@ test('observations are not imported, and registers, calculator records, gate rep
   try {
     const kinds = new Set<string>();
     for (const kind of REPLICA_KINDS) await project.findOwn(kind, () => { kinds.add(kind); return false; });
-    assert.deepEqual([...kinds].sort(), ['cell.create', 'doc.client', 'doc.update', 'member.update', 'product.create', 'project.genesis', 'project.import', 'version.propose']);
+    assert.deepEqual([...kinds].sort(), ['cell.create', 'doc.client', 'doc.update', 'member.update', 'product.create', 'project.genesis', 'project.import', 'roster.require', 'version.propose'], 'roster.require follows the genesis (Phase 33 D-08)');
   } finally {
     await project.close();
   }

@@ -6123,6 +6123,19 @@
     {
       "appliesAt": "now",
       "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "cm-08",
+        "sr-04"
+      ],
+      "id": "G422",
+      "ownerRole": "maintainers",
+      "remediation": "The workbench image now carries the staff engine with the vendored Yjs 13.6.33 and lib0 0.2.119 build (workbench/engine/vendor/yjs, hash-pinned in scripts/crdt-vendor.json), which the image SBOM written by syft does not list, because a bundled file has no package manifest. Add those two packages to the image's supply-chain record from scripts/crdt-vendor.json before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-24-SUMMARY.md.",
+      "title": "The workbench image SBOM does not list the Yjs build in the staff engine"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
       "closesInPhase": "47",
       "controls": [
         "cm-02",
@@ -6147,6 +6160,19 @@
       "ownerRole": "maintainers",
       "remediation": "The restore drill's postgres, opensearch and volume drivers and drain-check's Longhorn and OpenBao rules are tested on kubectl fixtures only. On the lab VM, cert-check, drain-check's etcd rule, upgrade-check's version and etcd snapshot rules and the escrow drill ran against a real RKE2 node. Run the postgres driver on 47-18's lab site, and the opensearch and volume drivers, the Longhorn drain rule and the OpenBao drain rule on Phase 48's multi-node lab-full rig, and record each in a sterling-restore-test/1 record. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-27-SUMMARY.md.",
       "title": "Restore drivers and maintenance checks for OpenSearch, Longhorn and an OpenBao cluster have not run live"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "cp-10",
+        "sa-11"
+      ],
+      "id": "G430",
+      "ownerRole": "maintainers",
+      "remediation": "A person who joins a shared project late now starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server after the trade-off: the server checkpoints no other cell, so there the history is read in full (nothing is left out, and the person is told so). A summary of a product's text also counts only once the registrations of the editing sessions it holds have arrived, and those are written before the checkpoint, so the text is complete only when the earlier history has been served. Decide how a summary may name the sessions it holds without their registrations, then build serving the earlier history after the start. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
+      "title": "A late joiner starts from a checkpoint only in cells the server holds, and its text waits for the earlier history"
     },
     {
       "appliesAt": "now",

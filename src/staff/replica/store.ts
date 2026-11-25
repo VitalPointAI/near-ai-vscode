@@ -70,6 +70,7 @@ import { isRecord } from '../../domain/team/validate';
 import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
+import * as startAgainCheck from './startAgainCheck';
 
 /** The cross-window lock file inside the store folder. */
 export const REPLICA_LOCK_FILE = 'replica.lock';
@@ -91,7 +92,7 @@ export const START_AGAIN_INTENT_FILE = `${REPLICA_DIR}.start-again.json`;
 /** The lock file in .planning/staff that Start Again, its recovery and every locked store operation take first. */
 export const START_AGAIN_LOCK_FILE = 'replica.start-again.lock';
 /** The steps of Start Again, in order; a test probe runs after each and can stop the process there. */
-export const START_AGAIN_STEPS = ['built', 'intent-written', 'set-aside', 'moved-in', 'marked'] as const;
+export const START_AGAIN_STEPS = ['built', 'intent-written', 'set-aside', 'rebuild-started', 'moved-in', 'marked'] as const;
 export type StartAgainStep = typeof START_AGAIN_STEPS[number];
 /** For tests only: awaited after each step of Start Again. */
 export type StartAgainProbe = (step: StartAgainStep) => Promise<void> | void;
@@ -121,6 +122,7 @@ export const STORE_REFUSALS = {
   unreadable: 'Part of the shared history in this project folder could not be read, so it was not opened. Nothing was changed. Check that the folder and its files can be read by your user account.',
   'not-a-store': 'The shared history folder in this project is not a folder this extension made, so it was not opened. Nothing was changed.',
   'out-of-order': 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.',
+  'snapshot-changed': 'The shared history changed before this update was saved, so nothing was written.',
   'start-again-unfinished': 'Starting this computer\'s shared history again did not finish, so the shared history was not opened. Nothing was deleted. Open the project again to finish it. If this message comes back, check that the folders in .planning/staff can be read and written by your user account.',
   'nothing-to-carry': 'There is no copy of this project\'s shared history on this computer to start again from, so nothing was changed. Ask your staff lead for a new welcome file and open it with Staff: Join Staff Project.'
 } as const;
@@ -730,9 +732,12 @@ export class ReplicaStore {
    * Builds a new store in `temporary` (which must not exist) from `source`, a store already read: this device's own entries, the grants and blobs that
    * match their names, project.json and the store's .gitignore. Every folder inside is synced; `temporary` itself is synced by the caller.
    */
-  private static async buildFrom(source: ReplicaStore, temporary: string): Promise<{ carried: number; grants: number; blobs: number }> {
+  private static async buildFrom(source: ReplicaStore, temporary: string, rebuilding = false): Promise<{ carried: number; grants: number; blobs: number }> {
     await mkdir(temporary);
-    await writeNewFile(path.join(temporary, '.gitignore'), STORE_GITIGNORE);
+    const ignoreFile = path.join(temporary, '.gitignore');
+    await writeNewFile(ignoreFile, STORE_GITIGNORE + '# Start Again is still copying this folder.\n');
+    await syncFolder(temporary);
+    if (rebuilding) await startAgainProbe?.('rebuild-started');
     let carried = 0;
     for (const file of source.files.values()) {
       if (file.writer !== source.own.writer || file.hashes.size === 0) continue;
@@ -759,6 +764,7 @@ export class ReplicaStore {
     const project = (await isPlainFile(projectFile)) ? await readWhole(projectFile, PROJECT_FILE_MAX_BYTES) : undefined;
     if (project?.kind === 'text') await writeNewFile(path.join(temporary, PROJECT_FILE_NAME), project.bytes);
     await syncTree(temporary);
+    await writeAtomic(ignoreFile, STORE_GITIGNORE);
     return { carried, grants, blobs };
   }
 
@@ -781,8 +787,7 @@ export class ReplicaStore {
   /**
    * Rolls an intent forward, under the .planning/staff lock; each step is checked on disk first, so running it twice is harmless:
    *   store and temporary there: the store is set aside (under the next free name when the intent's is taken), then the temporary moved in;
-   *   store gone, temporary there: the temporary is moved in;
-   *   both gone: the store is built again from the folder the intent names (never an empty store);
+   *   store gone: a matching temporary folder is moved in, or rebuilt from the source the intent names;
    *   store there, temporary gone: both renames are done.
    * Then this device's mark is written unless it already accepts the store (only for an intent of this device's own; another device's mark is its
    * own business), and the intent is removed. Anything else is start-again-unfinished, with nothing deleted.
@@ -817,7 +822,7 @@ export class ReplicaStore {
     const dir = path.join(root, REPLICA_DIR);
     const temporary = path.join(staff, intent.temporary);
     let store = await kindAt(dir);
-    let temp = await kindAt(temporary);
+    const temp = await kindAt(temporary);
     if (store === 'other' || temp === 'other') throw unfinished;
     if (store === 'folder' && temp === 'folder') {
       let setAside = intent.setAside;
@@ -832,20 +837,15 @@ export class ReplicaStore {
       await syncFolder(staff);
       store = 'none';
     }
-    if (store === 'none' && temp === 'none') {
-      // Built again from the folder the intent names; this device's own entries are only carried for an intent of its own.
+    if (store === 'none') {
       const from = intent.source === STORE_NAME ? intent.setAside : intent.source;
-      if (from === null || intent.writer !== own.writer || (await kindAt(path.join(staff, from))) !== 'folder') throw unfinished;
-      const source = new ReplicaStore(root, path.join(staff, from), deps, own);
-      await source.catchUp();
-      await ReplicaStore.buildFrom(source, temporary);
-      await syncFolder(temporary);
-      temp = 'folder';
-    }
-    if (store === 'none' && temp === 'folder') {
-      await rename(temporary, dir);
-      await syncFolder(staff);
-      store = 'folder';
+      const source = from === null ? undefined : path.join(staff, from);
+      await startAgainCheck.moveInChecked({ temporary, dir, staff, source, intent, completedIgnore: STORE_GITIGNORE, rebuild: async () => {
+        if (!source || intent.writer !== own.writer || await kindAt(source) !== 'folder') throw unfinished;
+        const readFrom = new ReplicaStore(root, source, deps, own);
+        await readFrom.catchUp();
+        await ReplicaStore.buildFrom(readFrom, temporary, true);
+      } });
     } else if (intent.setAside !== null && (await kindAt(path.join(staff, intent.setAside))) !== 'folder') {
       // The store is there and the temporary is gone, yet the folder it was set aside to is not: this may still be the old store. Left alone.
       throw unfinished;
@@ -945,12 +945,13 @@ export class ReplicaStore {
     }
   }
 
-  /**
-   * Appends this device's own built entries, in order, with their blobs. An entry already stored is skipped (a retry after a crash). Each new entry
-   * must carry this device's valid signature and follow the last one in its file (seq one higher, prev naming it), or nothing is written. Blobs go
-   * first, then the lines, then the mark.
-   */
-  public async appendOwn(built: readonly BuiltEntry[]): Promise<AppendResult> {
+  /** Identifies the loaded history, decode membership, and remembered roster head. */
+  public appendSnapshot(): string {
+    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null,
+      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort()]));
+  }
+  /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
+  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string): Promise<AppendResult> {
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
       if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
@@ -969,7 +970,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        // Plan the batch against the files as they are now, before anything is written.
+        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
         const planned = new Set<string>();
@@ -1593,8 +1594,7 @@ export class ReplicaStore {
   /**
    * Reads this device's mark and, when it changed since this store last read or wrote it, checks the files against it (refused rolled-back or damaged
    * when they are behind it) and takes its verdicts: an entry it holds stays held; an entry it covers is waiting when it lists it, and passed when it
-   * does not. Refused mark-unverified when a mark is there and does not verify (its lists file included), and rolled-back when it verifies but the
-   * lists file it names is not in the folder (an older copy of the folder, or part of it deleted).
+   * does not. An invalid mark is refused as mark-unverified; an otherwise valid mark with missing lists is refused as rolled-back.
    */
   private async syncMark(): Promise<void> {
     try {

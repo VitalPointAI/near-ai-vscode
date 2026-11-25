@@ -1,6 +1,12 @@
 **
 !src/
 !src/**
+!scripts/
+!scripts/crdt-vendor.json
+!vendor/
+!vendor/yjs/
+!vendor/yjs/yjs.cjs
+!vendor/yjs/LICENSES.txt
 !workbench/
 !workbench/package.json
 !workbench/package-lock.json

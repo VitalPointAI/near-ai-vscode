@@ -16,7 +16,7 @@ import type { CrdtDoc, InspectError } from './doc';
 import type { FamilyReducer, FoldView, ReduceOutcome } from './reducers';
 import type { VerifiedEntry } from './verify';
 
-export interface Registration { clientId: number; writer: string; member: string; actor: Actor; entry: string }
+export interface Registration { clientId: number; writer: string; member: string; actor: Actor; entry: string; roster: string }
 export interface AcceptedUpdate { hash: string; writer: string; actor: Actor; update: Uint8Array }
 // Which entry deleted which clock range (D-19). The first entry in fold order to delete a range is the one recorded.
 export interface DeletionRecord { entry: string; client: number; clock: number; length: number }
@@ -168,7 +168,8 @@ function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, v
   // view that cannot answer allows no agent registration.
   const actor = entry.body.actor;
   if (actor.kind === 'agent' && roster.canRunAgent?.(entry.member, actor.member, entry.body.roster) !== true) return refused('agent-seat-not-allowed');
-  if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== entry.header.writer) return refused('foreign-client-id');
+  // A certified session key takes its ids from its certifying device's slot (Phase 33 D-62), so the slot's owner is that device.
+  if (roster.clientIdOwner !== undefined && roster.clientIdOwner(data.clientId as number, entry.body.roster) !== (entry.session?.device ?? entry.header.writer)) return refused('foreign-client-id');
   const product = productText(state, entry.header.stream, data.product);
   if (product === undefined) return refused('too-many-products');
   const clientId = data.clientId as number;
@@ -180,7 +181,7 @@ function applyClient(state: TextState, entry: VerifiedEntry, data: UpdateData, v
   const count = product.registrationCounts.get(entry.header.writer) ?? 0;
   if (count >= MAX_REGISTRATIONS_PER_WRITER_PRODUCT) return refused('too-many');
   product.registrationCounts.set(entry.header.writer, count + 1);
-  product.registrations.set(clientId, { clientId, writer: entry.header.writer, member: entry.member, actor: entry.body.actor, entry: entry.hash });
+  product.registrations.set(clientId, { clientId, writer: entry.header.writer, member: entry.member, actor: entry.body.actor, entry: entry.hash, roster: entry.body.roster });
   return { status: 'applied' };
 }
 

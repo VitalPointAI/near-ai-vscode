@@ -25,12 +25,13 @@ export interface SecretSpec {
   description: string;
 }
 
-/** The hub's secrets. All four are needed to serve. */
+/** The hub's secrets. The first four are needed to serve; HUB_KEM_KEY is optional (33.2 D-03): without it the hub receives v1 wraps only. */
 export const HUB_SECRETS: readonly SecretSpec[] = [
   { name: 'HUB_TLS_CERT', kind: 'pem', required: true, description: "The hub's TLS certificate (and any chain), from your organization's CA or self-signed." },
   { name: 'HUB_TLS_KEY', kind: 'pem', required: true, description: "The private key of the hub's TLS certificate." },
   { name: 'HUB_SIGNING_KEY', kind: 'line', required: true, description: "The hub's Ed25519 signing key line, made with --generate-key signing." },
   { name: 'HUB_ENCRYPTION_KEY', kind: 'line', required: true, description: "The hub's X25519 encryption key line, made with --generate-key encryption." },
+  { name: 'HUB_KEM_KEY', kind: 'line', required: false, description: "The hub's post-quantum key line (P-256 and ML-KEM-768), made with --generate-key kem. Optional." },
 ];
 
 export class SecretError extends Error {

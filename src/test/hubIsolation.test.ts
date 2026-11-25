@@ -251,6 +251,22 @@ test('the hub job gives the older-Node refusal tests a real Node 24 and still ru
   assert.ok(old < keep && keep < current && current < firstNpm, 'Node 24 is recorded before 26.13.1 is installed, so 26.13.1 is first on PATH for npm');
 });
 
+// Phase 33 plan 14 (D-34, D-46): the real-hub tests start the built hub on Node 26.13.1 and fail in GitHub Actions without NEAR_AI_HUB_NODE.
+// The test job is the one canonical run of the real-hub staff scenarios (staffLiveScenario is in the suite); the hub job does not run them again.
+test('the test job gives the suite a built hub on 26.13.1 and the extension\'s Node first, and the hub job runs no second copy of the staff scenarios', async () => {
+  const workflow = await readWorkflow();
+  assert.ok(!ciJob(workflow, 'hub').includes('staffLiveScenario'), 'the hub job runs the hub\'s own suite only');
+  const testSteps = jobSteps(ciJob(workflow, 'test'));
+  const setups = testSteps.filter((step) => step.includes('uses: actions/setup-node@'));
+  assert.equal(setups.length, 2);
+  assert.ok(setups[0]?.includes("node-version: '26.13.1'") && setups[1]?.includes('node-version: ${{ env.NODE_VERSION }}'), 'the extension\'s Node is set up last, so it comes first on PATH');
+  const build = testSteps.find((step) => step.includes('name: Build the hub for the real-hub tests')) ?? '';
+  for (const needle of ['working-directory: hub', 'echo "NEAR_AI_HUB_NODE=$(command -v node)" >> "$GITHUB_ENV"', 'npm ci --ignore-scripts', 'npm run build']) {
+    assert.ok(build.includes(needle), `the test job's hub build must contain: ${needle}`);
+  }
+  assert.ok(testSteps.indexOf(build) < testSteps.indexOf(setups[1] as string), 'the hub is built on 26.13.1 before the extension\'s Node is set up');
+});
+
 test('the merge gates require the hub check after the relay check, and the workflow page lists it', async () => {
   const text = await readFile(path.join(REPO_ROOT, 'scripts', 'lib', 'workflow.mjs'), 'utf8');
   const line = text.split(/\r?\n/).find((candidate) => candidate.startsWith('export const CI_CHECKS'));

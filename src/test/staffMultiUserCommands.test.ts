@@ -891,7 +891,7 @@ test('start this computer\'s shared history again: a project that opens is left 
   const streamDir = path.join(first.root, '.planning', 'staff', 'replica', 'streams', project);
   const [ownFile] = readdirSync(streamDir);
   const lines = readFileSync(path.join(streamDir, ownFile), 'utf8').split('\n');
-  assert.equal(lines.length, 3, 'the genesis and the invitation');
+  assert.equal(lines.length, 4, 'the genesis, its roster.require (Phase 33 D-08) and the invitation');
   await writeFile(path.join(streamDir, ownFile), `${lines[0]}\n`);
   await run(C.invite);
   assert.equal(lastNotification().level, 'warn');
@@ -1220,6 +1220,28 @@ test('declare for yourself org/Internal: the confirmation names the labels the p
   says(result.message, ['now multi-user', 'you are its staff lead'], 'the result');
   hasNotices(result.message, 'the result');
   assert.deepEqual(await leadClearanceOf(at), INTERNAL, 'the roster at its head holds the declared clearance for the lead');
+});
+
+test('conversion shows the names of products whose ledger lines and versions were left behind', async () => {
+  const at = await staffProject('withheld-notices', 'org/Internal');
+  const host = hosts.staffHostFor(at.root);
+  assert.ok(host);
+  await writeBody(at.root, 'j5', 'public-annex', CLEAN_BODY);
+  const proposed = await callTool({ root: at.root, host } as StaffWorld, J5_TEAM, 'mcp__staff-products__propose', {
+    product: 'public-annex', kind: 'annex', label: 'org/Public', dependsOn: ['concept-of-operations@1']
+  }, 'lead-planner');
+  assert.ok(proposed.ok, proposed.text);
+  stub.quickPickAnswers.push('Internal');
+  stub.messageAnswers.push(multi.MAKE_MULTI_USER_ACTION);
+  await run(C.makeMultiUser);
+  const result = lastNotification();
+  assert.equal(result.level, 'info', result.message);
+  says(result.message, [
+    'now multi-user',
+    'Some history for public-annex was left out',
+    'Ask someone cleared for org/Public to make a single-machine copy and share it again.',
+    'public-annex was brought in without its versions'
+  ], 'the conversion notice');
 });
 
 test('copy notices: Make a Single-Machine Copy shows every notice the copy returns beyond the three every screen shows, each once', async () => {

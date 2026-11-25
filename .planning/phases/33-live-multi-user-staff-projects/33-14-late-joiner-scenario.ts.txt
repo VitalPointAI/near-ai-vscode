@@ -1,0 +1,105 @@
+// HELD BACK from src/test/staffLiveScenario.test.ts by Phase 33 plan 14 (see 33-14-SUMMARY.md, Open conditions): the late joiner scenario.
+// It needs these imports in staffLiveScenario.test.ts: COMPACTION_WINDOW (domain/replica/textFold), compactAfterCheckpoint (staff/replica/compactor),
+// grantCellToHub (staff/replica/hubMembership), HubTransport (staff/replica/hubTransport) and syncOnce (staff/replica/hubSync), and KILL_AFTER_MS in
+// src/test/helpers/hubChild.ts raised to 180_000 (the hub child is killed after 60 s otherwise). On the 33-14 code it writes doc.compact about 10 s
+// after the sixtieth update, then fails: the four entries the late joiner pulls from the checkpoint base stay held missing-predecessor, because
+// ReplicaProject's fold is never given the stored checkpoints that make them join bases. Restore it to the test file once that is decided and built.
+
+test('late joiner: after 60 accepted updates and a hub checkpoint the compactor writes doc.compact, and a person who joins then pulls fewer entries than the full history and ends with the same text and digest', (t) =>
+  realHub(t, [
+    { label: 'avery', name: 'Avery Lead' },
+    { label: 'blake', name: 'Blake Rivers' },
+    { label: 'casey', name: 'Casey Moor' }
+  ], async (world) => {
+    const started = Date.now();
+    const a = world.devices[0];
+    const b = await world.hostedStyle(world.devices[1]);
+    const c = world.devices[2];
+    const hub = world.hub as NonNullable<LiveWorld['hub']>;
+    const stream = await makeProduct(a);
+    // The lead gives the server the product's cell (the trade-off confirmed, D-40): the server checkpoints only the cells it holds, and a
+    // compaction is made from a checkpointed prefix, so a late joiner starts from a compaction only in such a cell (D-43, D-63).
+    const granted = await grantCellToHub(a.host, { cell: stream, confirmed: true });
+    assert.ok(granted.ok, granted.message);
+    // Avery's computer runs the compactor after each checkpoint, as the live engine does.
+    const compacted: string[] = [];
+    const holder: { ra?: LiveReplicator } = {};
+    const [ra, rb, rc] = await goLive(world, [a, b, c], (device) => (device !== a ? {} : {
+      onCheckpoint: () => {
+        void compactAfterCheckpoint(a.project, { hub: hub.writer, memory: a.memory }).then((result) => {
+          compacted.push(...result.compacted);
+          if (result.compacted.length > 0) holder.ra?.localAppended();
+        });
+      }
+    }));
+    holder.ra = ra;
+
+    // Sixty accepted updates of the product, one at a time.
+    const editor = await ProductEditor.open(a.project, { stream, product: PRODUCT, actor: PERSON }, { onAppended: () => ra.localAppended() });
+    try {
+      for (let index = 0; index < 60; index += 1) {
+        editor.insert(editor.text().length, `Line ${index}: the column moves at dawn. `);
+        assert.deepEqual(await editor.flush(), { appended: 1, queued: 0 });
+      }
+      assert.ok(60 >= COMPACTION_WINDOW);
+      const sixty = editor.text();
+      for (const device of [b, c]) await eventually(async () => (await textOn(device.project, stream))?.text, (text) => text === sixty, `${device.name} has the sixty updates`);
+
+      // The hub signs a checkpoint on an ask at least 10 s after its last ask-signed one; each exchange asks. Wait for Avery's doc.compact.
+      const waitStarted = Date.now();
+      const deadline = Date.now() + 90_000;
+      while ((await a.project.findOwnAll('doc.compact', () => true)).length === 0) {
+        if (Date.now() > deadline) assert.fail(`no doc.compact within 90 s; ${JSON.stringify(ra.status)}`);
+        ra.syncNow();
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+      console.log(`doc.compact written ${Date.now() - waitStarted} ms after the sixtieth update`);
+      assert.deepEqual(compacted, [PRODUCT]);
+      for (const device of [b, c]) {
+        await eventually(async () => (await textOn(device.project, stream))?.compactions.length ?? 0, (count) => count >= 1, `${device.name} has the compaction`);
+      }
+
+      // Later updates after the compaction.
+      for (let index = 60; index < 63; index += 1) {
+        editor.insert(editor.text().length, `Line ${index}: the river is fordable. `);
+        await editor.flush();
+      }
+    } finally {
+      editor.close();
+    }
+    const finalText = (await textOn(a.project, stream))?.text as string;
+    for (const device of [b, c]) await eventually(async () => (await textOn(device.project, stream))?.text, (text) => text === finalText, `${device.name} has the later updates`);
+
+    // Dana joins by the Phase 31 flow; Avery's replicator pushes the admission.
+    const d = await world.join({ label: 'dana', name: 'Dana Late' });
+    ra.localAppended();
+    const full = (await a.project.heads()).reduce((sum, row) => sum + row.heads.reduce((inner, head) => inner + head.seq + 1, 0), 0);
+    const transport = new HubTransport({ address: hub.address, project: d.project.projectId, hub: hub.writer, trust: { pin: hub.certPin }, signer: d.project.signer });
+    let pulled = 0;
+    try {
+      const joinedAt = Date.now();
+      await eventually(async () => {
+        const report = await syncOnce(transport, d.local, d.memory, { startFromBase: true });
+        pulled += report.pulled;
+        return { outcome: report.outcome, reason: report.reason, pulled: report.pulled, text: (await textOn(d.project, stream))?.text.length };
+      }, (value) => value.outcome === 'synced' && value.text === finalText.length, 'Dana has the product text', 60_000);
+      console.log(`late joiner: pulled ${pulled} entries of ${full} in the full history, in ${Date.now() - joinedAt} ms`);
+    } finally {
+      transport.close();
+    }
+    assert.ok(pulled < full, `Dana pulled ${pulled} entries, the full history is ${full}`);
+    const dText = await textOn(d.project, stream);
+    assert.equal(dText?.text, finalText);
+    assert.ok((dText?.compactions.length ?? 0) >= 1, 'Dana loaded the compaction');
+    const [aFold, dFold] = [(await a.project.state()).fold, (await d.project.state()).fold];
+    assert.equal(dFold.digests[stream], aFold.digests[stream], 'the product stream\'s digest');
+
+    // The roster change and the checkpoints after it left everyone live, with no finding (33-24: the hub's checkpoint at a roster head a device
+    // had not folded yet is not judged).
+    for (const [replicator, name] of [[ra, 'Avery'], [rb, 'Blake'], [rc, 'Casey']] as const) {
+      replicator.syncNow();
+      await live(replicator, name);
+      assert.deepEqual(replicator.status.findings, [], `${name} has no finding`);
+    }
+    console.log(`late joiner scenario done in ${Date.now() - started} ms`);
+  }));

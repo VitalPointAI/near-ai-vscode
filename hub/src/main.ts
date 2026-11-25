@@ -22,12 +22,13 @@ import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
 import { TrustStore, type OrganizationSource } from './store/trustStore';
 import { exportTrust, importTrust } from './trustTransfer';
-import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
+import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readKemKey, readSigningKey, type HubEncryptionKey, type HubKemKey, type HubSigningKey } from './keys';
 import { Logger, printKeyFile, stdoutLine } from './log/logger';
 import { Redactor } from './log/redact';
 import { HUB_SECRETS, loadSecrets, refusePlainSecretEnv, SecretError } from './secrets';
 import { finishStartup } from './startup';
 import { prepareStateDir, StateDirError } from './stateDir';
+import { RestoreMode, type RestoreLog } from './restore';
 
 declare const __HUB_VERSION__: string;
 
@@ -167,6 +168,10 @@ export interface HubParts {
   onJoinLog?: JoinLog;
   /** Your organization's signed rules and key (71-09); without them the trust routes answer 503 and the hub judges no evidence. */
   organization?: OrganizationSource;
+  /** The state directory: restore mode is read from its marker at start (Phase 33 D-32). No restore mode when absent. */
+  stateDir?: string;
+  /** Restore mode's two log lines (an event and a reason word). */
+  onRestoreLog?: RestoreLog;
 }
 
 export interface ComposedHub {
@@ -182,6 +187,8 @@ export interface ComposedHub {
   join: JoinDesk;
   /** The DID logs, status lists and cited status entries the hub hosts (71-09). */
   trust: TrustStore;
+  /** Restore mode (Phase 33 D-32); undefined when no state directory was given. */
+  restore: RestoreMode | undefined;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -220,6 +227,7 @@ export function composeHub(parts: HubParts): ComposedHub {
       return member !== undefined && trust.underReview(owner.project, member, now());
     });
   };
+  const restore = parts.stateDir === undefined ? undefined : RestoreMode.fromStateDir(parts.stateDir, { store, cache, now, ...(parts.onRestoreLog === undefined ? {} : { log: parts.onRestoreLog }) });
   const routes = createRoutes({
     trust: createTrustRoutes({ trust, cache, sessions, now, onListStored: endRefused }),
     evidence: trust,
@@ -235,6 +243,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onAccepted === undefined ? {} : { onAccepted: parts.onAccepted }),
     ...(parts.onEquivocation === undefined ? {} : { onEquivocation: parts.onEquivocation }),
     ...(parts.onFailure === undefined ? {} : { onFailure: parts.onFailure }),
+    ...(restore === undefined ? {} : { restore }),
   });
   const checkpoints =
     parts.signCheckpoints === false
@@ -260,7 +269,7 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence, checkpoints, join, trust };
+  return { server, sessions, cache, limits, events, presence, checkpoints, join, trust, restore };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
@@ -354,7 +363,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   if (argv[0] === '--generate-key') {
     const kind = KEY_KINDS.find((candidate) => candidate === argv[1]);
     if (argv.length !== 2 || kind === undefined) {
-      logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --generate-key signing, or --generate-key encryption' });
+      logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --generate-key signing, --generate-key encryption, or --generate-key kem' });
       process.exitCode = 1;
       return;
     }
@@ -426,9 +435,13 @@ export async function main(argv: readonly string[]): Promise<void> {
 
   let signing: HubSigningKey;
   let encryption: HubEncryptionKey;
+  let kem: HubKemKey | undefined;
   try {
     signing = readSigningKey(secrets.get('HUB_SIGNING_KEY') ?? '');
     encryption = readEncryptionKey(secrets.get('HUB_ENCRYPTION_KEY') ?? '', signing);
+    // The post-quantum keys are optional (33.2 D-03): without HUB_KEM_KEY the hub works as before and receives v1 wraps only.
+    const kemLine = secrets.get('HUB_KEM_KEY');
+    kem = kemLine === undefined ? undefined : readKemKey(kemLine, signing);
   } catch (error) {
     logger.error('hub.start_refused', { reason: 'keys', detail: error instanceof KeyFileError ? error.message : 'the hub keys could not be read' });
     process.exitCode = 1;
@@ -444,7 +457,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   // The identity a hub file and hub.admit name: both keys, and the pin of the certificate's key, so a renewal with the same key keeps it.
-  const identity = hubIdentityOf(signing, encryption, tls.cert, config.publicAddress);
+  const identity = hubIdentityOf(signing, encryption, tls.cert, config.publicAddress, kem);
 
   // --hub-file opens the store without the blob folder sweep: a running hub may share the folder, and this process writes one enrolment row only.
   let store: HubStore;
@@ -501,6 +514,8 @@ export async function main(argv: readonly string[]): Promise<void> {
       onCheckpointLog: (level, event, fields) => logger[level](event, fields),
       onJoinLog: (level, event, fields) => logger[level](event, fields),
       organization,
+      stateDir: config.stateDir,
+      onRestoreLog: (level, event, fields) => logger[level](event, fields),
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);

@@ -120,3 +120,16 @@ test('safetyCodeText joins the words with single spaces in lower case, and non-t
   assert.throws(() => safetyCode({ ...FIXED, nonce: undefined as unknown as string }), /text/);
   assert.throws(() => safetyCode({ ...FIXED, inviter: undefined as unknown as SafetyCodeInput['inviter'] }), /text/);
 });
+
+// 33.2 D-03: a join request's post-quantum keys are covered by the words when present, and absent they change nothing.
+test('without kem the words are the frozen v2 words; with kem, a swapped ML-KEM key or P-256 key gives other words', () => {
+  assert.deepEqual(safetyCode(FIXED), FIXED_WORDS);
+  assert.deepEqual(safetyCode({ ...FIXED, joiner: { ...FIXED.joiner, kem: undefined } }), FIXED_WORDS);
+  const kem = { p256: Buffer.alloc(65, 4).toString('base64url'), mlkem768: Buffer.alloc(1184, 5).toString('base64url') };
+  const withKem = safetyCodeText(safetyCode({ ...FIXED, joiner: { ...FIXED.joiner, kem } }));
+  assert.notEqual(withKem, safetyCodeText(FIXED_WORDS));
+  const otherMlkem = { ...kem, mlkem768: Buffer.alloc(1184, 6).toString('base64url') };
+  const otherP256 = { ...kem, p256: Buffer.alloc(65, 7).toString('base64url') };
+  assert.notEqual(safetyCodeText(safetyCode({ ...FIXED, joiner: { ...FIXED.joiner, kem: otherMlkem } })), withKem);
+  assert.notEqual(safetyCodeText(safetyCode({ ...FIXED, joiner: { ...FIXED.joiner, kem: otherP256 } })), withKem);
+});

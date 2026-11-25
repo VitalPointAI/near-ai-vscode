@@ -22,7 +22,8 @@ import type { Checkpoint, SignedCheckpoint } from '../../domain/replica/checkpoi
 import type { Citation } from '../../domain/replica/chain';
 import { GENESIS_PREV, entryHash, parseHeaderShape, sha256Hex, verifyHeader } from '../../domain/replica/entry';
 import type { EntryHeader, SealedBlob, SealedEntry } from '../../domain/replica/entry';
-import { createWitness, findingSentence, readWitness, serializeWitness, witnessBlob, witnessCheckpoint, witnessCitations, witnessEntry, witnessHeads, witnessOwn, witnessResponse } from '../../domain/replica/hubWitness';
+import { UPDATE_SENTENCE } from '../../domain/replica/features';
+import { createWitness, findingSentence, readWitness, readmitWitness, serializeWitness, witnessBlob, witnessCheckpoint, witnessCitations, witnessEntry, witnessHeads, witnessOwn, witnessResponse } from '../../domain/replica/hubWitness';
 import type { HubFinding, HubFindingKind, WitnessResult, WitnessState } from '../../domain/replica/hubWitness';
 import type { RosterView } from '../../domain/replica/rosterView';
 import type { HeadSet } from '../../domain/replica/transport';
@@ -62,6 +63,8 @@ export interface SyncLocal {
    * covers, a dep is the only sign of an entry the hub withholds while no head names it. Without it only the hub's heads and checkpoint heads are cited.
    */
   missingDeps?(): Promise<Citation[]>;
+  /** After each exchange: the newest checkpoint this hub's witness trusts, or undefined when it distrusts the hub (33-14, D-43). */
+  trustCheckpoint?(hub: string, newest: SignedCheckpoint | undefined): void | Promise<void>;
 }
 
 /** Where the witness state of each hub and project is kept between exchanges. */
@@ -101,7 +104,14 @@ export function hubMemoryOf(secrets: WitnessSecrets): HubMemory {
   };
 }
 
-export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention';
+export type SyncOutcome = 'synced' | 'offline' | 'refused' | 'attention' | 'needs-update';
+
+/** What a person sees while your organization's server is in restore mode (D-32): offline-like, never attention. */
+export const RESTORING_SENTENCE = 'Your organization\'s server is being restored. Your changes are kept here.';
+/** A person's session key has passed its certificate's notAfter at your organization's server (Phase 33 D-62). Refused, never retried. */
+export const SESSION_EXPIRED_SENTENCE = 'Your session key has ended. Sign in again.';
+/** A late joiner in a part of the project your organization's server keeps no summary of (D-43, D-63). Shown as information, never as a fault. */
+export const FULL_REPLAY_SENTENCE = 'Your organization\'s server keeps no summary of this part of the project, so this computer reads all of its history. Nothing is left out.';
 
 export interface SyncReport {
   outcome: SyncOutcome;
@@ -128,6 +138,8 @@ export interface SyncReport {
    * with the rest of their writer's log. They go in a later exchange once the blob is here; the blob's author pushes them meanwhile.
    */
   heldBack: number;
+  /** With startFromBase: the streams whose logs were read from their start because no trusted checkpoint covers them (FULL_REPLAY_SENTENCE). */
+  readInFull: string[];
   /** The transport failure or refusal reason id, when the exchange ended on one. */
   reason?: string;
   /** One plain sentence for the outcome when it was not synced. */
@@ -137,6 +149,11 @@ export interface SyncReport {
 
 export interface SyncOptions {
   now?: () => Date;
+  /**
+   * A late joiner (D-43, F5): a writer log this computer holds nothing of starts at the head a trusted version 2 checkpoint of this hub names,
+   * instead of seq 0, and its first pulled entry must follow that head. Without such a checkpoint the log is pulled from 0 as before.
+   */
+  startFromBase?: boolean;
 }
 
 /** The transport calls one exchange makes. HubTransport has them all. */
@@ -145,7 +162,8 @@ export type SyncTransport = Pick<HubTransport, 'project' | 'hub' | 'hubHeads' | 
 const ATTENTION_FINDINGS: ReadonlySet<HubFindingKind> = new Set(['rolled-back', 'forked-view', 'wrong-project']);
 const COUNTED_BY_WITNESS: ReadonlySet<HubFindingKind> = new Set(['withheld', 'delayed', 'rolled-back']);
 /** Refusals that may clear once the rest of a push is in (an admission, a grant or an earlier entry in another batch). */
-const RETRY_REFUSALS: ReadonlySet<string> = new Set(['not-admitted', 'unknown-stream', 'not-on-access-list', 'seq-gap', 'prev-mismatch']);
+// blob-missing (Phase 33 D-28): the hub refuses only that entry; the transport puts the batch's blobs and the next pass sends it again.
+const RETRY_REFUSALS: ReadonlySet<string> = new Set(['not-admitted', 'unknown-stream', 'not-on-access-list', 'seq-gap', 'prev-mismatch', 'blob-missing']);
 const MAX_PAGES_PER_WRITER = 10_000;
 const MAX_BLOBS_PER_EXCHANGE = 256;
 const PUSH_PASSES = 3;
@@ -169,11 +187,16 @@ const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 
 /** Thrown inside the exchange to end it where a finding stops it. */
 class Stop extends Error {}
 
+/** The key a writer signs with: a roster device's, or a person's session key the roster fold placed a certificate for (Phase 33 D-62). */
+function writerKey(roster: RosterView, writer: string): string | undefined {
+  return roster.deviceKey(writer)?.publicKey ?? roster.sessionCertificate?.(writer)?.sessionKey;
+}
+
 /** One header and body checked against the roster: signed by the writer's admitted key, and the body exactly what the header names. */
 function verifyDelivered(header: EntryHeader, body: unknown, roster: RosterView): string | undefined {
-  const device = roster.deviceKey(header.writer);
-  if (device === undefined) return 'unknown-writer';
-  if (!verifyHeader(header, device.publicKey)) return 'bad-signature';
+  const publicKey = writerKey(roster, header.writer);
+  if (publicKey === undefined) return 'unknown-writer';
+  if (!verifyHeader(header, publicKey)) return 'bad-signature';
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return 'body-mismatch';
   const bytes = Buffer.from(body, 'base64url');
   if (bytes.toString('base64url') !== body || bytes.length !== header.body.size || sha256Hex(bytes) !== header.body.hash) return 'body-mismatch';
@@ -189,11 +212,17 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
   const now = options.now ?? ((): Date => new Date());
   const hub = transport.hub;
   const project = transport.project;
-  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [], heldBack: 0 };
+  const report: SyncReport = { outcome: 'synced', pulled: 0, pushed: 0, blobs: 0, grants: 0, findings: [], repushed: false, handedBack: 0, notStored: 0, refusedByHub: [], heldBack: 0, readInFull: [] };
   const noted: HubFinding[] = [];
   let state = await memory.load(hub, project);
   let rolledBack = false;
   let roster = await local.roster();
+  // The lead's re-admission (D-42): each folded hub.readmit for this hub clears a distrusted witness once, before the witness is used.
+  const readmit = (): void => {
+    const member = roster.deviceKey(hub)?.member;
+    for (const hash of member === undefined ? [] : roster.hubReadmits?.(member) ?? []) state = readmitWitness(state, hash).state;
+  };
+  readmit();
 
   const apply = (result: WitnessResult): HubFinding[] => {
     state = result.state;
@@ -235,6 +264,13 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     // Session and heads.
     const heads = await transport.hubHeads();
     apply(witnessResponse(state, heads, []));
+    // A distrusted server cannot forge a change (every one is signed by a member's device), so its roster changes are still read: that is how
+    // the lead's hub.readmit reaches this computer and clears the mark (D-42). Nothing else is taken from it until then.
+    if (state.distrusted) {
+      await pull(heads.streams.filter((stream) => stream.stream === project));
+      roster = await local.roster();
+      readmit();
+    }
     if (apply(witnessHeads(state, heads, roster)).some((item) => item.kind === 'rolled-back')) rolledBack = true;
     const keptBefore = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
     let hubLatest: Checkpoint | undefined;
@@ -254,6 +290,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
       await local.putGrants(fetched);
       report.grants += fetched.length;
       roster = await local.roster();
+      readmit();
     }
 
     // Hand-back (D-70): when the hub's latest is older than the newest this computer kept, the newer hub checkpoints it holds go back to the hub.
@@ -276,7 +313,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     if (!rolledBack) {
       const cited: Citation[] = [];
       for (const stream of heads.streams) {
-        for (const head of stream.heads) if (roster.deviceKey(head.writer) !== undefined) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
+        for (const head of stream.heads) if (writerKey(roster, head.writer) !== undefined) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
       }
       const newest = state.newest === undefined ? undefined : readCheckpoint(state.newest.payload);
       for (const stream of newest?.streams ?? []) for (const head of stream.heads) cited.push({ stream: stream.stream, writer: head.writer, seq: head.seq, hash: head.hash });
@@ -310,12 +347,33 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
       report.reason = error.detail.reason ?? error.failure;
       report.message = HUB_TRANSPORT_FAILURES[error.failure];
       if (error.detail.retryAfterSeconds !== undefined) report.retryAfterSeconds = error.detail.retryAfterSeconds;
+      // POST-01 (D-07): this computer, or the hub, lacks a feature the shared work requires. Plain words, never attention.
+      if ((error.failure === 'hub-error' || error.failure === 'session-refused') && error.detail.reason === 'needs-update') {
+        report.outcome = 'needs-update';
+        report.message = UPDATE_SENTENCE;
+      }
+      // A person's session key that has ended (D-62): refused with its own sentence, never attention.
+      if (error.failure === 'session-refused' && error.detail.reason === 'session-expired') report.message = SESSION_EXPIRED_SENTENCE;
+      // Restore mode at the hub (D-32): offline with the time to try again, the entries stay queued. The checkpoint ask still goes, because every
+      // member's ask is what ends restore mode at the hub.
+      if (error.failure === 'hub-error' && error.detail.reason === 'restoring') {
+        report.outcome = 'offline';
+        report.message = RESTORING_SENTENCE;
+        try {
+          const asked = await transport.askCheckpoint([]);
+          if (asked.checkpoint !== undefined) await seeCheckpoint(asked.checkpoint);
+        } catch (late) {
+          if (!(late instanceof HubTransportError) && !(late instanceof Stop)) throw late;
+        }
+      }
     } else if (!(error instanceof Stop)) {
       await memory.save(state);
       throw error;
     }
   }
   await memory.save(state);
+  // The fold of this computer uses only what the witness trusts (foldCheckpoints.ts): the newest checkpoint, or none from a distrusted hub.
+  await local.trustCheckpoint?.(hub, state.distrusted || state.proof !== undefined ? undefined : state.newest);
   report.findings = collapse(noted);
   if (report.outcome === 'synced' && report.findings.some((item) => ATTENTION_FINDINGS.has(item.kind))) {
     report.outcome = 'attention';
@@ -338,7 +396,7 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     }
     pending.sort((a, b) => Number(b.stream === project) - Number(a.stream === project) || compareText(a.stream, b.stream) || compareText(a.writer, b.writer));
     for (;;) {
-      const ready = pending.filter((item) => roster.deviceKey(item.writer) !== undefined);
+      const ready = pending.filter((item) => writerKey(roster, item.writer) !== undefined);
       if (ready.length === 0) break;
       let stored = 0;
       for (const item of ready) {
@@ -346,15 +404,29 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
         stored += await pullWriter(item.stream, item.writer);
       }
       if (stored > 0) roster = await local.roster();
-      else if (pending.every((item) => roster.deviceKey(item.writer) === undefined)) break;
+      else if (pending.every((item) => writerKey(roster, item.writer) === undefined)) break;
     }
     // A writer the roster does not know after everything was pulled: what the hub says it holds from it is not taken.
     for (const item of pending) apply(witnessEntry(state, { hash: item.hash, verified: false, reason: 'unknown-writer' }));
   }
 
+  /** The head a trusted version 2 checkpoint of this hub names for a writer log, for a late joiner (startFromBase, D-43). */
+  function baseHeadOf(stream: string, writer: string): { seq: number; hash: string } | undefined {
+    if (options.startFromBase !== true || state.newest === undefined) return undefined;
+    const checkpoint = readCheckpoint(state.newest.payload);
+    if (checkpoint === undefined || checkpoint.v !== 2) return undefined;
+    const head = checkpoint.streams.find((item) => item.stream === stream)?.heads.find((item) => item.writer === writer);
+    return head === undefined ? undefined : { seq: head.seq, hash: head.hash };
+  }
+
   /** One writer's log, page by page from this computer's head: sorted by seq, each prev checked against the head, each header verified. */
   async function pullWriter(stream: string, writer: string): Promise<number> {
-    let head = await local.head(stream, writer);
+    // A late joiner holds nothing of this log: it starts after the head a trusted checkpoint names (already kept by seeCheckpoint), and the first
+    // entry pulled must follow exactly that head.
+    const holding = await local.head(stream, writer);
+    let head = holding ?? baseHeadOf(stream, writer);
+    // A late joiner reads in full a log no trusted checkpoint covers (a cell your organization's server does not hold, D-63): nothing is left out.
+    if (options.startFromBase === true && holding === undefined && head === undefined && !report.readInFull.includes(stream)) report.readInFull.push(stream);
     let stored = 0;
     for (let page = 0; page < MAX_PAGES_PER_WRITER; page += 1) {
       const answer = await transport.entries(stream, writer, head === undefined ? 0 : head.seq + 1);
@@ -430,7 +502,9 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
     const localStreams = [...(await local.heads())].sort((a, b) => Number(b.stream === project) - Number(a.stream === project) || compareText(a.stream, b.stream));
     let entries: SealedEntry[] = [];
     for (const stream of localStreams) {
-      for (const head of [...stream.heads].sort((a, b) => compareText(a.writer, b.writer))) {
+      // Devices before session keys (Phase 33 D-62): a session.certify in the base stream reaches the hub before the session key's own entries.
+      const sessionLast = (writer: string): number => Number(roster.deviceKey(writer) === undefined);
+      for (const head of [...stream.heads].sort((a, b) => sessionLast(a.writer) - sessionLast(b.writer) || compareText(a.writer, b.writer))) {
         const above = hubSeq.get(`${stream.stream}/${head.writer}`) ?? -1;
         if (head.seq > above) entries.push(...(await local.entriesAfter(stream.stream, head.writer, above)));
       }

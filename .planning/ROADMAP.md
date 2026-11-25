@@ -269,12 +269,12 @@ Plans:
   2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
   3. Two- and three-person scenarios over a real hub pass: co-edit, propose, guard, approve on another machine with equal digests; approve offline and reject online shows contested until a fresh decision; a late joiner loads from a compaction. (MUS-09)
   4. A two-compartment label leak test over the hub passes, README and SECURITY describe multi-user staff projects with the self-declared and not-accreditation sentences, and drop A is released in 0.4.x. (MUS-09)
-**Plans:** 20 plans in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
+**Plans:** 2/20 plans executed locally in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
 **UI hint**: yes
 
 Plans:
-- [ ] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
-- [ ] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
+- [x] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
+- [x] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
 - [ ] 33-03-PLAN.md: Wave 2. POST-01 `roster.require` with the fold-wide stop, and `hub.readmit` with the witness clearing
 - [ ] 33-04-PLAN.md: Wave 2. Editor binding core: no echo, undo only your own changes, read-only header, resync, seeded fuzz
 - [ ] 33-05-PLAN.md: Wave 2. Shared version acts, contested read model, changed-while-deciding refusal
@@ -383,15 +383,15 @@ Plans:
   4. New shared work starts switched; a lead switches an existing project in one step, each cell moves at its next epoch, late computers get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap. (WRAP-04)
   5. A Protected B cell is never wrapped with X25519; a CI check fails if any wrap path bypasses the one entry point; SECURITY.md says which wrap protects shared work, and ML-KEM-1024 with P-384 is reserved for Protected C and classified work. (WRAP-05)
 **Undo cost**: High. The wire format, `device.kem` and grant pages are permanent in shared logs; they are settled at 33.2-01's checkpoint.
-**Plans:** 8 plans in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
+**Plans:** 5/8 plans executed in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
-- [ ] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
-- [ ] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
-- [ ] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
-- [ ] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
+- [x] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
+- [x] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
+- [x] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
+- [x] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
+- [x] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
 - [ ] 33.2-06-PLAN.md: Wave 5. Every wrap path through one entry point; the Protected B rule; the CI check; SECURITY.md
 - [ ] 33.2-07-PLAN.md: Wave 6. The Switch, Move and Give keys cards in the native Staff Room
 - [ ] 33.2-08-PLAN.md: Wave 7. Close-out on the built image, the full suites once, the integration PR after the owner's gate approval
@@ -2232,9 +2232,9 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
-| 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
+| 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
 | 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
-| 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
+| 33.2. Post-quantum cell keys (cell-wrap/v2) | 5/8 | In Progress 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
