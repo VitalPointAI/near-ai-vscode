@@ -215,6 +215,8 @@ Users see feature names only, never phase numbers.
 
 ## 10. Amendments to existing designs
 
+> Amended 2026-11-25 (Phase 48.4, plan 48.4-01): a row for the sovereignty status design.
+
 "Applied" means a short dated note was added to that design file in this PR. "Follow-up" means a larger rewrite, done when the phase is planned.
 
 | Design | What changes | State |
@@ -251,6 +253,7 @@ Users see feature names only, never phase numbers.
 | | 10.2: WP-P0 re-based on the replica (pack = stream kinds plus fold rules), not `ledger.ts` | applied |
 | | 10.5: placed as Phases 42 (after 33.1) and 43 (after 39) | applied |
 | | 2.3: the capital profile is a v2 `directives.capital` section with `requires` | applied |
+| sovereignty-status (2026-11-25) | glossary rows, copy lint rule 6 phrases, the second status bar item | applied (48.4-01) |
 
 ## 11. Owner questions
 
