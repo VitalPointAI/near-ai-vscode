@@ -1,5 +1,5 @@
 {
   "component": "release-pipeline",
-  "applicableWithoutStatement": 297,
+  "applicableWithoutStatement": 293,
   "notApplicableAwaitingSignOff": 402
 }
