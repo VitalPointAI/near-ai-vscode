@@ -126,7 +126,7 @@ docker run --detach --name sterling-workbench-vsix \
   sterling-workbench --session-preference nearAi.autoInstallGsd=false
 ```
 
-Open [the VSIX workbench](http://localhost:18874/) using `localhost` so Theia can use separate `*.webview.localhost` origins. From the command palette choose **SovAI: Set Up**, **SovAI: Team Studio**, or **SovAI: Open Chat**. The compatibility container is for synthetic projects. It has no durable secret store, so it shows "Secrets are unavailable" and an extension's saved secrets fail visibly instead of living in memory.
+Open [the VSIX workbench](http://127.0.0.1:18874/) at `127.0.0.1` or `localhost`. Theia shows each extension page in a webview from its own origin, `<uuid>.webview.<page host>`. A subdomain of an IP address is not a valid name, so for a page at `127.0.0.1` or `[::1]` the workbench uses `<uuid>.webview.localhost` on the same port, which browsers serve from loopback. A hosted site needs the wildcard DNS record in `deploy/runbooks/site-install.md`. From the command palette choose **SovAI: Set Up**, **SovAI: Team Studio**, or **SovAI: Open Chat**. The compatibility container is for synthetic projects. It has no durable secret store, so it shows "Secrets are unavailable" and an extension's saved secrets fail visibly instead of living in memory.
 
 The Release workflow builds the `release` target, which bundles the release's verified VSIX at `/plugins` the same way.
 

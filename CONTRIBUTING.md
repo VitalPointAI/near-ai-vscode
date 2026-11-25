@@ -13,7 +13,8 @@ npm run test:e2e         # the extension in a real VS Code (needs xvfb-run on Li
 npm run verify:release   # package the VSIX and check what it contains
 ```
 
-CI uses Node.js 24.
+CI uses Node.js 24. The e2e run uses the VS Code version pinned in `src/test/e2e/run.ts`; the note
+there says how to move it to a newer VS Code.
 
 ## Branches
 

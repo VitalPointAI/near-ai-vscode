@@ -56,6 +56,9 @@
     {
       "frontend": "lib/browser/session-activity-frontend-module",
       "backend": "lib/node/session-activity-backend-module"
+    },
+    {
+      "frontend": "lib/browser/webview-origin-frontend-module"
     }
   ]
 }

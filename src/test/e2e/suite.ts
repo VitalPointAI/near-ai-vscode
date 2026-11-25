@@ -212,17 +212,23 @@ function projectTests(): Array<[string, () => Promise<void>]> {
         console.log(`  ${name} at ${report.width}px (asked ${target}px): page ${report.scrollWidth}/${report.clientWidth}, body ${report.bodyScrollWidth}/${report.bodyClientWidth}`);
         if (Math.abs(report.width - target) > 40) problems.push(`${name}: could not size the panel to ${target}px in 4 tries (it is ${report.width}px${trace ? `; ${trace()}` : ''})`);
       };
-      // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get.
-      await vscode.commands.executeCommand('nearAiChatView.focus');
-      for (const target of SIDEBAR_WIDTHS) {
-        await measure('chat', target, () => sizeSidebar(target), chatBesideEditor, () => `steps: ${sidebarTrace.join(', ')}`);
-        // The same width in each of the five sync states, with a realistic profile name: nothing a person must read may be cut short.
-        for (const [state, report] of await chatInEverySyncState()) checkOverflow('chat', report, state);
+      // The sidebar: VS Code's own resize commands, a step at a time, until the chat is as close as they get. The panel is
+      // justified while they run, so the side bars share the editor area's row (see sidebarStep), and centred again after.
+      await vscode.commands.executeCommand('workbench.action.alignPanelJustify');
+      try {
+        await vscode.commands.executeCommand('nearAiChatView.focus');
+        for (const target of SIDEBAR_WIDTHS) {
+          await measure('chat', target, () => sizeSidebar(target), chatBesideEditor, () => `steps: ${sidebarTrace.join(', ')}`);
+          // The same width in each of the five sync states, with a realistic profile name: nothing a person must read may be cut short.
+          for (const [state, report] of await chatInEverySyncState()) checkOverflow('chat', report, state);
+        }
+        // The chat shows the real profile and sync status again for the tests after this one.
+        await api.sidebar.refresh();
+        // Narrow again, so the editor area has room for the widest editor check.
+        await sizeSidebar(220);
+      } finally {
+        await vscode.commands.executeCommand('workbench.action.alignPanelCenter');
       }
-      // The chat shows the real profile and sync status again for the tests after this one.
-      await api.sidebar.refresh();
-      // Narrow again, so the editor area has room for the widest editor check.
-      await sizeSidebar(220);
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
       // Editor panels: the page in the first of two editor groups, sized by the groups' proportions.
       // Pages with little to show in a fresh project get wide sample data, as their hosts would send it.
@@ -993,9 +999,13 @@ async function sizeEditor(name: string, target: number, editor: number): Promise
 /**
  * One 60px step of the secondary sidebar (where the chat lives). VS Code's "view size" commands act
  * on whichever part has focus, and a webview's focus does not count, so they were unreliable here.
- * The editor-width commands name the editor area itself: with the primary sidebar and panel closed,
- * the only thing beside the editor area is the secondary sidebar, so it takes or gives the 60px.
- * (Mixing in the "view size" commands as a fallback made late steps land twice.)
+ * The editor-width commands name the editor area itself, and the 60px comes from the parts in the
+ * editor area's own row. VS Code 1.148 put its hidden Agents chat area in that row and, with the panel
+ * centred, left the side bars out of it, so every step went to the hidden area and the chat never
+ * moved. With the panel justified (the width test sets it), the side bars are in the editor's row
+ * in every version; with the primary sidebar and panel closed, the secondary sidebar is the only part
+ * there that can take or give the 60px. (Mixing in the "view size" commands as a fallback made late
+ * steps land twice.)
  */
 async function sidebarStep(grow: boolean, before: number): Promise<LayoutReport> {
   await vscode.commands.executeCommand(grow ? 'workbench.action.decreaseViewWidth' : 'workbench.action.increaseViewWidth');
@@ -1021,6 +1031,11 @@ async function chatBesideEditor(): Promise<void> {
  * nothing mean the sidebar is at its limit.
  */
 let sidebarTrace: string[] = [];
+/**
+ * Whether a step has ever moved the chat in this window. Until one has, steps that move nothing are not a late resize to retry
+ * but a resize method that does not work in this VS Code, so the check stops at once with the reason rather than retrying every width.
+ */
+let sidebarEverMoved = false;
 
 async function sizeSidebar(target: number): Promise<LayoutReport> {
   await chatBesideEditor();
@@ -1039,12 +1054,16 @@ async function sizeSidebar(target: number): Promise<LayoutReport> {
     const before = report.width;
     report = await sidebarStep(report.width < target, before);
     sidebarTrace.push(`${report.width < before ? 'narrower' : report.width > before ? 'wider' : 'no change'} ${report.width}`);
-    if (report.width !== before) { stuck = 0; continue; }
+    if (report.width !== before) { sidebarEverMoved = true; stuck = 0; continue; }
     // Nothing moved: set the layout up again (focus may have gone elsewhere) before trying again.
     stuck += 1;
     await chatBesideEditor();
     await pause(1_000);
     report = await settled('chat');
+  }
+  if (!sidebarEverMoved && Math.abs(report.width - target) > 30) {
+    throw new Error(`The chat's sidebar never moved: VS Code ${vscode.version}'s editor-width commands did not resize it (asked ${target}px; steps: ${sidebarTrace.join(', ')}). `
+      + 'VS Code has changed its layout; see sidebarStep in src/test/e2e/suite.ts and the VS Code version pinned in src/test/e2e/run.ts.');
   }
   return report;
 }

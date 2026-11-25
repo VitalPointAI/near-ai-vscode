@@ -1,5 +1,6 @@
-// The Get Started page and the right-hand rail from the Defence preview, in a real browser against the built image (test/e2e/get-started.spec.ts).
-// On an image that bundles the NEAR AI extension (the release target), a work-area page's Create button also creates a work area: the spec
+// The Get Started page and the right-hand rail from the Defence preview, in a real browser against the built image (test/e2e/get-started.spec.ts),
+// opened at 127.0.0.1 as the owner opens it. On an image that bundles the NEAR AI extension (the release target), the Team Studio and Chat
+// shortcuts must show the extension's pages in their webviews, and a work-area page's Create button also creates a work area: the spec
 // drives it, and this suite checks what was written to the workspace. The Release workflow runs it against the archived release image.
 // Run it with `npm run test:container`; it is not part of `npm test`. Hygiene: test/helpers/docker.ts.
 import assert from 'node:assert/strict';
@@ -30,10 +31,10 @@ test('the rail shortcuts and the Get Started work-area cards are present and ope
   assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
   if (!bundled) {
     assert.match(result.stdout, /\b2 passed\b/);
-    assert.match(result.stdout, /\b1 skipped\b/, 'the development image has no extension to create a work area with');
+    assert.match(result.stdout, /\b2 skipped\b/, 'the development image has no extension to show webview pages or create a work area with');
     return;
   }
-  assert.match(result.stdout, /\b3 passed\b/);
+  assert.match(result.stdout, /\b4 passed\b/);
   // On disk: one new work-area-<hex> folder in the workspace and nothing else, holding only the marker and its .gitignore, with the kind
   // and the title the person typed.
   const listing = await mustRun('docker', ['exec', name, 'node', '-e', `

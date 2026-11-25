@@ -36,6 +36,13 @@ function keepToHiddenScreen(env: NodeJS.ProcessEnv): string[] {
   return ['--ozone-platform=x11'];
 }
 
+/**
+ * The VS Code the e2e run downloads, pinned so a new VS Code release cannot change CI unannounced (1.148 changed the workbench
+ * layout and the chat width check stopped working overnight). To move to a newer VS Code: run
+ * `VSCODE_TEST_VERSION=<x.y.z> npm run test:e2e` locally, fix what it finds, then change this value in the same PR.
+ */
+const E2E_VSCODE_VERSION = '1.148.0';
+
 // Launches a real VS Code with the extension under development, once in a project set up with the
 // extension and once in an unrelated folder. Run under `xvfb-run` on Linux (`npm run test:e2e`).
 async function main(): Promise<void> {
@@ -46,7 +53,7 @@ async function main(): Promise<void> {
   const screenArgs = keepToHiddenScreen(process.env);
   const extensionDevelopmentPath = path.resolve(__dirname, '../../..');
   const extensionTestsPath = path.resolve(__dirname, 'suite.js');
-  const version = process.env.VSCODE_TEST_VERSION ?? 'stable';
+  const version = process.env.VSCODE_TEST_VERSION ?? E2E_VSCODE_VERSION;
   for (const scenario of ['project', 'plain'] as const) {
     const workspace = await mkdtemp(path.join(tmpdir(), `near-ai-e2e-${scenario}-`));
     if (scenario === 'project') await mkdir(path.join(workspace, '.planning', '.near-ai'), { recursive: true });
