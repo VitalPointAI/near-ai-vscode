@@ -8,6 +8,10 @@ import type { ConnectionBindingFact, RouteDecision, RouteFacts, RoutingTier } fr
 import { trustFactsFor } from '../domain/gate/trust';
 import type { TrustContext, TrustFacts } from '../domain/gate/trust';
 import type { ModelInfo } from '../domain/provider/messages';
+import type { UseTier } from '../domain/gate/models';
+import { useTierFor } from '../domain/gate/useTier';
+import type { UseInput } from '../domain/gate/useTier';
+import { currentSessionRoute, raiseSessionUse } from '../gate/sessionMark';
 
 /** What the client knows about one content request when its route is decided. */
 export interface RouteFactsInput {
@@ -25,10 +29,30 @@ export interface RouteFactsInput {
   readonly allowedModels?: readonly string[];
 }
 
-/** The RouteFacts of one request, from what the client read (CLAS-06, D-36). */
+/**
+ * The use of the request running now (74.1 D-13): from the current session route's own facts and its mark, by the shipped tables, never below the highest
+ * use the route has asked for (which it then raises). Outside every route it is chat you review, as before. Facts that cannot be read give the highest
+ * use for this request, never a lower one (fail closed).
+ */
+function requestUse(): { readonly use: UseTier; readonly useInput?: UseInput } {
+  const route = currentSessionRoute();
+  if (route === undefined) return { use: 'T1' };
+  let useInput: UseInput;
+  try {
+    const own = route.useOf?.() ?? {};
+    const mark = route.markOf().map((label) => ({ scale: label.scale, level: label.level }));
+    useInput = { ...own, mark: [...(own.mark ?? []), ...mark] };
+  } catch {
+    return { use: 'T3' };
+  }
+  return { use: raiseSessionUse(route, useTierFor(useInput)), useInput };
+}
+
+/** The RouteFacts of one request, from what the client read (CLAS-06, D-36), and the use of the session it runs in (74.1 D-13). */
 export function routeFactsFor(input: RouteFactsInput): RouteFacts {
   const { clientRoute, host, info, attestation, fact, now } = input;
   const facts: RouteFacts = {
+    ...requestUse(),
     clientRoute,
     host,
     nearEndpoint: isNearCloudEndpoint(host),

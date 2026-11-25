@@ -3,7 +3,8 @@
 // Keys are exact at every level (checkKeys), values are read as own properties and never spread, every result is frozen, and set-like lists are sorted
 // and unique so two sections that mean the same thing hash the same. A section that is exactly `{ v: 1 }` is the empty section (41-01's wire form) and
 // stays `{ v: 1 }`; any other section has `mode` (report) and `unknownMaxTier` (T0) filled, so a parsed section is its own wire form.
-// Report mode only in Phase 41: nothing here refuses a request. 41-10's passport step of decideRoute calls these helpers and records `wouldRefuse`.
+// Nothing here refuses a request. The passport step of decideRoute (passportStep.ts) calls these helpers; it refuses under `mode: enforce` and records
+// `wouldRefuse` under `report` (Phase 74.1 D-11, D-12).
 // This file imports nothing from bundle.ts: 41-10's routing.ts imports it, and bundle.ts imports routing.ts, which would make a load-time cycle.
 // ENDPOINT_CLASSES and SHIPPED_PASSPORTS are used only inside functions, never at module load; shippedPassports.ts imports types only from here.
 import { createHash } from 'node:crypto';
