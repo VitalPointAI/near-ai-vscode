@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sr-04",
+    "si-07"
+  ],
+  "gap": "G476",
+  "id": "g476",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "The bundle build on your organization's connected build host verifies the attestations with gh attestation verify and carries the result as signed site evidence"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The GitHub attestations of the installer and the compliance package are keyless and need the public Sigstore service, so an air-gapped workbench cannot check them; the Compliance view lists them as not checked here, with the gh attestation verify command. The bundle build on your organization's connected build host verifies them with gh attestation verify and carries the result as signed site evidence. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-16, D-29).",
+  "title": "Keyless GitHub attestations of the installer and compliance package cannot be checked inside an air-gapped workbench"
+}
