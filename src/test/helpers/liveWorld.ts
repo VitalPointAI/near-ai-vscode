@@ -5,24 +5,34 @@
 // entry by hand. Clocks follow the real time, because a real hub checks session answers and hub files against its own clock.
 //
 // FakeTimers is a manual clock with setTimeout and clearTimeout for the replicator's timers (Task 2). Fictional people and data only; no key text.
+//
+// The scenarios of 33-14 add: roles and agent seats per person, a person brought in after the world was made (the late joiner), a person going
+// offline for real (the replicator stopped and every transport call refused unreachable) and back, and a hosted-style person (D-60 to D-62): the
+// person's own device certifies a session key, the session key signs ordinary work and the session answer, and decisions go through an
+// asynchronous person signer over the device key, with no OpenBao.
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { entryHash } from '../../domain/replica/entry';
 import type { SealedBlob, SealedEntry } from '../../domain/replica/entry';
+import { sessionCertifyData } from '../../domain/replica/sessionKeys';
+import type { AsyncPayloadSigner, PayloadSigner } from '../../domain/team/signedPayload';
 import { readHubFile } from '../../domain/replica/hubFile';
 import { hubMemoryOf } from '../../staff/replica/hubSync';
 import type { HubMemory, SyncLocal } from '../../staff/replica/hubSync';
 import { connectProjectToHub } from '../../staff/replica/hubMembership';
+import { HubTransport, HubTransportError } from '../../staff/replica/hubTransport';
+import type { HubTransportOptions } from '../../staff/replica/hubTransport';
 import { LiveReplicator } from '../../staff/replica/liveReplicator';
-import type { LiveReplicatorOptions, LiveTimers } from '../../staff/replica/liveReplicator';
+import type { LiveReplicatorOptions, LiveTimers, LiveTransport } from '../../staff/replica/liveReplicator';
 import { admitJoinRequest, cellOrderHook, inviteToProject, joinFromInvite, openWelcome, updateMember } from '../../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../../staff/replica/membership';
 import { ReplicaProject, isProjectRefused, syncLocalOf } from '../../staff/replica/replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from '../../staff/replica/replicaProject';
 import { MemorySecrets, orgClearance } from './labelCellWorld';
 import { createFakeTransport } from './replicaFakeTransport';
+import { fixedSigner } from './replicaWorld';
 
 export interface LiveInstall { root: string; global: string; secrets: MemorySecrets; deps: ReplicaProjectDeps }
 
@@ -47,7 +57,15 @@ export interface LiveDevice {
   host: SharedProjectHost;
   local: SyncLocal;
   memory: HubMemory;
+  /** A hosted-style person's session key and its certificate (D-62); absent for a device on its own key. */
+  session?: LiveSession;
 }
+
+/** A hosted-style person's session: the session key, its session.certify entry, its notAfter, and the person signer's call count. */
+export interface LiveSession { signer: PayloadSigner; writer: string; certificate: SealedEntry; notAfter: string; person: AsyncPayloadSigner & { calls: number } }
+
+/** One person of a world: roles and agent seats are written by the lead once the person is in (the lead's own replace its defaults). */
+export interface LivePerson { label: string; name: string; roles?: string[]; agentSeats?: string[] }
 
 export interface LiveWorld {
   devices: LiveDevice[];
@@ -55,8 +73,43 @@ export interface LiveWorld {
   hub: LiveHub | undefined;
   /** A replicator for one device, connected to the world's hub (its address unless told otherwise), with the options given. */
   replicator(device: LiveDevice, options?: Partial<LiveReplicatorOptions>): LiveReplicator;
+  /** Brings one more person in by the Phase 31 flow, after the world was made (a late joiner). */
+  join(person: LivePerson): Promise<LiveDevice>;
+  /** Offline for real: the device's replicators stop, and every transport call it makes refuses unreachable until goOnline. */
+  goOffline(device: LiveDevice): Promise<void>;
+  /** Back online: the device's replicators start again. */
+  goOnline(device: LiveDevice): Promise<void>;
+  /**
+   * Makes a person hosted-style: their device certifies a session key valid for lifetimeMs, and the project is opened again over the same folder with
+   * the session key for ordinary work and an asynchronous person signer over the device key for decisions. The device is replaced in devices.
+   */
+  hostedStyle(device: LiveDevice, lifetimeMs?: number): Promise<LiveDevice>;
   /** Stops every replicator made and closes every project. */
   close(): Promise<void>;
+}
+
+/** An asynchronous person signer over a key, counting its calls (D-60: your organization's key store signs over the network). */
+export function asyncPersonSigner(signer: PayloadSigner): AsyncPayloadSigner & { calls: number } {
+  const wrapped = {
+    calls: 0,
+    fingerprint: signer.fingerprint,
+    publicKey: signer.publicKey,
+    sign: async (bytes: Buffer): Promise<string> => {
+      wrapped.calls += 1;
+      await new Promise((resolve) => setImmediate(resolve));
+      return signer.sign(bytes);
+    }
+  };
+  return wrapped;
+}
+
+/** A transport whose every call refuses unreachable: the computer is offline. */
+function unreachable(options: HubTransportOptions): LiveTransport {
+  const refuse = (): Promise<never> => Promise.reject(new HubTransportError('unreachable'));
+  return {
+    project: options.project, hub: options.hub, hubHeads: refuse, entries: refuse, append: refuse, getBlob: refuse, grant: refuse, askCheckpoint: refuse,
+    events: refuse, postPresence: refuse, leavePresence: refuse, close: () => undefined
+  } as unknown as LiveTransport;
 }
 
 export const LIVE_LEAD_MEMBER = 'mbr-lead';
@@ -80,7 +133,7 @@ function fileText(result: MembershipResult): string {
  * The lead (the first person) and everyone else, brought in by the Phase 31 flow. With a hub file, the lead connects the project to your
  * organization's server (admit and enrol) before anyone else joins, so every welcome already names the hub.
  */
-export async function createLiveWorld(options: { people: ReadonlyArray<{ label: string; name: string }>; hub?: { fileText: string } }): Promise<LiveWorld> {
+export async function createLiveWorld(options: { people: readonly LivePerson[]; hub?: { fileText: string } }): Promise<LiveWorld> {
   assert.ok(options.people.length >= 1, 'a world has at least the lead');
   const [first, ...others] = options.people;
   const leadAt = liveInstall(first.label);
@@ -88,7 +141,10 @@ export async function createLiveWorld(options: { people: ReadonlyArray<{ label: 
     name: 'Exercise Northwind', profile: 'j4', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: LIVE_LEAD_MEMBER }
   }), 'the lead makes the shared project');
   const leadHost: SharedProjectHost = { project: leadProject, deps: leadAt.deps };
-  done(await updateMember(leadHost, { member: LIVE_LEAD_MEMBER, roles: ['member', 'section_lead:j4'], clearance: orgClearance('Confidential') }), 'the lead declares a clearance');
+  done(await updateMember(leadHost, {
+    member: LIVE_LEAD_MEMBER, name: first.name, roles: first.roles ?? ['member', 'section_lead:j4'], clearance: orgClearance('Confidential'),
+    ...(first.agentSeats === undefined ? {} : { agentSeats: first.agentSeats })
+  }), 'the lead declares a clearance');
   const device = (label: string, name: string, member: string, at: LiveInstall, project: ReplicaProject): LiveDevice => ({
     label, name, member, at, project, host: { project, deps: at.deps }, local: syncLocalOf(project), memory: hubMemoryOf(at.secrets)
   });
@@ -103,16 +159,28 @@ export async function createLiveWorld(options: { people: ReadonlyArray<{ label: 
   }
 
   const devices: LiveDevice[] = [lead];
-  for (const person of others) {
+  const bringIn = async (person: LivePerson): Promise<LiveDevice> => {
     const at = liveInstall(person.label);
     const invited = done(await inviteToProject(leadHost, { name: person.name, seat: 'j4-planner', clearance: orgClearance('Internal') }), `invite ${person.name}`);
     const joined = done(await joinFromInvite(at.root, at.deps, fileText(invited), { name: person.name }), `${person.name} answers`);
     const admitted = done(await admitJoinRequest(leadHost, fileText(joined), { codeMatched: true }), `admit ${person.name}`);
+    const member = admitted.member as string;
+    if (person.roles !== undefined || person.agentSeats !== undefined) {
+      done(await updateMember(leadHost, {
+        member, ...(person.roles === undefined ? {} : { roles: person.roles }), ...(person.agentSeats === undefined ? {} : { agentSeats: person.agentSeats })
+      }), `${person.name}'s roles`);
+    }
     const welcomed = done(await openWelcome(at.root, at.deps, fileText(admitted)), `${person.name} opens the welcome`);
-    devices.push(device(person.label, person.name, admitted.member as string, at, opened(welcomed.project, `${person.name}'s project opens`)));
-  }
+    const made = device(person.label, person.name, member, at, opened(welcomed.project, `${person.name}'s project opens`));
+    devices.push(made);
+    return made;
+  };
+  for (const person of others) await bringIn(person);
 
-  const replicators: LiveReplicator[] = [];
+  const replicators: Array<{ label: string; replicator: LiveReplicator }> = [];
+  const offline = new Set<string>();
+  const replaced: ReplicaProject[] = [];
+  const mine = (target: LiveDevice): LiveReplicator[] => replicators.filter((item) => item.label === target.label).map((item) => item.replicator);
   return {
     devices,
     lead,
@@ -124,15 +192,46 @@ export async function createLiveWorld(options: { people: ReadonlyArray<{ label: 
         memory: target.memory,
         hub: hub === undefined ? undefined : { id: hub.id, writer: hub.writer, certPin: hub.certPin },
         address: () => Promise.resolve(address),
-        signer: target.project.signer,
+        signer: target.session?.signer ?? target.project.signer,
+        ...(target.session === undefined ? {} : { certificate: target.session.certificate }),
+        open: (settings) => (offline.has(target.label) ? unreachable(settings) : new HubTransport(settings)),
         ...extra
       });
-      replicators.push(replicator);
+      replicators.push({ label: target.label, replicator });
       return replicator;
     },
+    join: bringIn,
+    async goOffline(target) {
+      offline.add(target.label);
+      for (const replicator of mine(target)) await replicator.stop();
+    },
+    async goOnline(target) {
+      offline.delete(target.label);
+      for (const replicator of mine(target)) await replicator.start();
+    },
+    async hostedStyle(target, lifetimeMs = 12 * 60 * 60 * 1000) {
+      const { roster } = await target.project.state();
+      const slot = roster.members.devices.get(target.project.deviceWriter)?.find((record) => record.slot !== undefined)?.slot;
+      assert.ok(slot !== undefined, `${target.name}'s device has a slot`);
+      const key = fixedSigner(`LIVE-SESSION-${target.label}-${Date.now()}`);
+      const notAfter = new Date(Date.now() + lifetimeMs).toISOString();
+      const data = sessionCertifyData({ project: target.project.projectId, member: target.member, device: target.project.deviceWriter, sessionKey: key.publicKey, slot, notAfter },
+        (bytes) => key.signer.sign(bytes));
+      const certified = await target.project.appendOwn('session.certify', data);
+      assert.ok('ok' in certified, 'ok' in certified ? undefined : certified.message);
+      const person = asyncPersonSigner(target.project.signer);
+      const hosted = opened(await ReplicaProject.open(target.at.root, { ...target.at.deps, sessionSigner: key.signer, personSigner: person }), `${target.name}'s hosted session opens`);
+      replaced.push(target.project);
+      const made: LiveDevice = {
+        ...device(target.label, target.name, target.member, target.at, hosted),
+        session: { signer: key.signer, writer: key.writer, certificate: certified.built.entry, notAfter, person }
+      };
+      devices[devices.indexOf(target)] = made;
+      return made;
+    },
     async close() {
-      for (const replicator of replicators) await replicator.stop();
-      for (const item of devices) await item.project.close();
+      for (const { replicator } of replicators) await replicator.stop();
+      for (const item of [...devices.map((entry) => entry.project), ...replaced]) await item.close();
     }
   };
 }
