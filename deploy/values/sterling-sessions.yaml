@@ -7,3 +7,5 @@ siteEnv:
   openbaoAddr: "https://openbao.sterling-openbao.svc:8200"
   stepUpAcr: "${site.stepUpAcr}"
   stepUpMaxAgeSeconds: "${site.stepUpMaxAgeSeconds}"
+  # Your organization's site key, the same site value admission verifies every image with (48.2-17, D-17).
+  organizationPublicKey: "${site.organizationPublicKey}"

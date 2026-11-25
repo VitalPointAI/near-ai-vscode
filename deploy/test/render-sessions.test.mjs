@@ -1,5 +1,5 @@
 // The workbench sessions (D-25, D-29, hardening 13): the AppDefinition carries the site's lifecycle values and the workbench image from the
-// lock, the site environment has exactly its ten names and no secret, and the session environment policy refuses everything a launch
+// lock, the site environment has exactly its eleven names and no secret, and the session environment policy refuses everything a launch
 // request could add. Renders with the CI site; needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { readImagesLock, resolveImage } from '../bundle/lib/locks.mjs';
-import { listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
+import { listReleases, loadSite, renderRelease, renderSite, splitDocs } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
@@ -16,7 +16,7 @@ const HELM = process.env.HELM || 'helm';
 const kindOf = (doc) => /^kind:[ \t]*(\S+)/m.exec(doc)?.[1];
 const release = (name) => listReleases(ROOT).find((entry) => entry.name === name);
 const sessions = () => splitDocs(renderRelease(ROOT, release('sterling-sessions'), { site: SITE, helm: HELM }));
-const policy = () => sessions().find((doc) => kindOf(doc) === 'ValidatingPolicy');
+const policy = () => sessions().find((doc) => kindOf(doc) === 'ValidatingPolicy' && /^ {2}name: sterling-session-env$/m.test(doc));
 
 test('the AppDefinition: no prewarm pool, the site capacity and idle values, IfNotPresent, the workbench image from the lock', (t) => {
   const app = sessions().find((doc) => kindOf(doc) === 'AppDefinition');
@@ -46,11 +46,12 @@ test('the lab placeholder replaces the image only when the site asks for it', ()
   assert.doesNotMatch(yaml, /activityTracker/);
 });
 
-test('sterling-site-env has exactly the ten names and no secret', () => {
+test('sterling-site-env has exactly the eleven names and no secret', () => {
   const env = sessions().find((doc) => kindOf(doc) === 'ConfigMap' && /^ {2}name: sterling-site-env$/m.test(doc));
   const keys = env.split('\n').map((line) => /^ {2}(STERLING_[A-Z_]+):/.exec(line)?.[1]).filter(Boolean);
   assert.deepEqual(keys.sort(), ['STERLING_MODEL_SERVERS', 'STERLING_OPENBAO_ADDR', 'STERLING_OPENBAO_CA_FILE', 'STERLING_OPENBAO_JWT_MOUNT', 'STERLING_OPENBAO_JWT_ROLE',
-    'STERLING_OPENBAO_KV_MOUNT', 'STERLING_OPENBAO_TRANSIT_MOUNT', 'STERLING_OPEN_VSX_URL', 'STERLING_STEPUP_ACR', 'STERLING_STEPUP_MAX_AGE_SECONDS'].sort());
+    'STERLING_OPENBAO_KV_MOUNT', 'STERLING_OPENBAO_TRANSIT_MOUNT', 'STERLING_OPEN_VSX_URL', 'STERLING_ORGANIZATION_PUBLIC_KEY', 'STERLING_STEPUP_ACR', 'STERLING_STEPUP_MAX_AGE_SECONDS'].sort());
+  assert.doesNotMatch(env, /PRIVATE KEY/);
   assert.match(env, new RegExp(`STERLING_STEPUP_ACR: "${SITE.stepUpAcr}"`));
   assert.match(env, new RegExp(`STERLING_STEPUP_MAX_AGE_SECONDS: "${SITE.stepUpMaxAgeSeconds}"`));
   assert.match(env, /STERLING_OPENBAO_ADDR: "https:\/\/openbao\.sterling-openbao\.svc:8200"/);
@@ -92,6 +93,19 @@ test('the rendered site environment matches the fixture the workbench reads it f
   if (process.env.STERLING_WRITE_SITE_ENV_FIXTURE === '1') writeFileSync(SITE_ENV_FIXTURE, `${JSON.stringify(fixture, null, 2)}\n`);
   assert.deepEqual(JSON.parse(readFileSync(SITE_ENV_FIXTURE, 'utf8')), fixture,
     'workbench/test/fixtures/site-env.rendered.json no longer matches the chart render; regenerate it and run the workbench contract test');
+});
+
+// 48.2-17 (D-17): every session gets your organization's site key from the same site value the admission chart renders for image
+// verification, so a session can check the trust anchor it is given against the key admission already trusts.
+test('same key: STERLING_ORGANIZATION_PUBLIC_KEY is the key admission verifies every image with; a site without it stops the render', () => {
+  const env = siteEnvValues(renderRelease(ROOT, release('sterling-sessions'), { site: SITE, helm: HELM }));
+  const admission = splitDocs(renderRelease(ROOT, release('sterling-admission'), { site: SITE, helm: HELM })).find((doc) => /^ {2}name: site-images-signed$/m.test(doc) || /attestors:/.test(doc));
+  const block = /key:\n\s+data: \|\n((?:\s{12}.*\n?)+)/.exec(admission)[1];
+  const admissionKey = block.split('\n').map((line) => line.trim()).filter(Boolean).join('\n');
+  assert.ok(env.STERLING_ORGANIZATION_PUBLIC_KEY.includes('-----BEGIN PUBLIC KEY-----'));
+  assert.equal(env.STERLING_ORGANIZATION_PUBLIC_KEY.trim(), admissionKey);
+  assert.equal(env.STERLING_ORGANIZATION_PUBLIC_KEY.trim(), SITE.organizationPublicKey.trim());
+  assert.throws(() => renderRelease(ROOT, release('sterling-sessions'), { site: { ...SITE, organizationPublicKey: '' }, helm: HELM }), /organizationPublicKey/);
 });
 
 test('a modelServers left empty renders [], and one that is not a list of URLs stops the render', () => {
@@ -162,3 +176,93 @@ test('the policy allows only the oauth2-proxy-secrets Secret volume, and only in
   assert.ok(doc.includes('v.projected.sources.all(s, !has(s.secret))'));
   assert.ok(doc.includes("c.name == 'oauth2-proxy' || !has(c.volumeMounts) || c.volumeMounts.all(m, !(m.name in variables.secretVolumes))"));
 });
+
+// ---- 48.2-17 (D-17, D-21, D-23): only the install identity may write the trust anchor ----
+
+const NAMESPACE = 'theia-cloud';
+const INSTALL = `system:serviceaccount:${NAMESPACE}:sterling-evidence-install`;
+const NAMESPACE_CONTROLLER = 'system:serviceaccount:kube-system:namespace-controller';
+const PROTECTED = ['sterling-evidence-trust', 'sterling-release-evidence'];
+const named = (kind, name) => sessions().find((doc) => kindOf(doc) === kind && new RegExp(`^ {2}name: ${name}$`, 'm').test(doc));
+/** The rules of a rendered Role in the form this chart writes them: each `- apiGroups` item with its resources, resourceNames and verbs. */
+function roleRules(doc) {
+  return doc.split(/\n {2}- /).slice(1).map((item) => ({
+    resources: JSON.parse(/resources: (\[.*\])/.exec(item)[1].replace(/([a-z][a-z-]*)/g, '"$1"')),
+    resourceNames: /resourceNames: (\[.*\])/.exec(item) ? JSON.parse(/resourceNames: (\[.*\])/.exec(item)[1].replace(/([a-z][a-z-]*)/g, '"$1"')) : undefined,
+    verbs: JSON.parse(/verbs: (\[.*\])/.exec(item)[1].replace(/([a-z*][a-z-]*|\*)/g, '"$1"')),
+  }));
+}
+
+test('identities: the install and publish ServiceAccounts mount no token; the install Role creates and writes only the two anchors; publish writes only its own', () => {
+  for (const name of ['sterling-evidence-install', 'sterling-evidence-publish']) {
+    const account = named('ServiceAccount', name);
+    assert.ok(account, `ServiceAccount ${name}`);
+    assert.match(account, /^automountServiceAccountToken: false$/m);
+    const binding = named('RoleBinding', name);
+    assert.match(binding, new RegExp(`kind: Role\\n\\s+name: ${name}`));
+    assert.match(binding, new RegExp(`kind: ServiceAccount\\n\\s+name: ${name}\\n\\s+namespace: ${NAMESPACE}`));
+  }
+  assert.deepEqual(roleRules(named('Role', 'sterling-evidence-install')), [
+    { resources: ['configmaps'], resourceNames: undefined, verbs: ['create'] },
+    { resources: ['configmaps'], resourceNames: PROTECTED, verbs: ['get', 'update', 'patch', 'delete'] },
+  ]);
+  assert.deepEqual(roleRules(named('Role', 'sterling-evidence-publish')), [
+    { resources: ['configmaps'], resourceNames: ['sterling-site-evidence-operator'], verbs: ['get', 'update', 'patch'] },
+    { resources: ['configmaps'], resourceNames: ['sterling-evidence-trust'], verbs: ['get'] },
+  ]);
+  for (const name of PROTECTED) assert.ok(!sessions().some((doc) => kindOf(doc) === 'ConfigMap' && new RegExp(`^ {2}name: ${name}$`, 'm').test(doc)), `the chart never creates ${name}`);
+});
+
+const ALLOW = `request.userInfo.username == '${INSTALL}' || (request.operation == 'DELETE' && request.userInfo.username == '${NAMESPACE_CONTROLLER}')`;
+const APPLIES = "(object != null ? object.metadata.name : oldObject.metadata.name) in ['sterling-evidence-trust', 'sterling-release-evidence']";
+
+test('policy: sterling-evidence-trust-writes denies, failing closed, every write of the two anchors but the install identity\'s', () => {
+  const doc = named('ValidatingPolicy', 'sterling-evidence-trust-writes');
+  assert.ok(doc);
+  assert.match(doc, /validationActions: \[Deny\]/);
+  assert.match(doc, /failurePolicy: Fail/);
+  assert.match(doc, /operations: \[CREATE, UPDATE, DELETE\]/);
+  assert.match(doc, /resources: \[configmaps\]/);
+  assert.match(doc, new RegExp(`kubernetes\\.io/metadata\\.name: ${NAMESPACE}`));
+  assert.ok(doc.includes(`expression: ${JSON.stringify(APPLIES)}`), 'the match condition, exactly');
+  assert.ok(doc.includes(`expression: ${JSON.stringify(ALLOW)}`), 'the allow rule, exactly');
+  assert.equal([...doc.matchAll(/expression:/g)].length, 2, 'no other condition or rule');
+});
+
+/** The allow rule above, as a predicate, held equal to the CEL text the policy is asserted to carry. */
+const allows = ({ operation, username }) => username === INSTALL || (operation === 'DELETE' && username === NAMESPACE_CONTROLLER);
+const OTHERS = ['kubernetes-admin', 'system:serviceaccount:theia-cloud:sterling-evidence-publish', 'system:serviceaccount:theia-cloud:sterling-site-collector',
+  'system:serviceaccount:kube-system:generic-garbage-collector', 'system:serviceaccount:kube-system:namespace-controller-x'];
+
+test('namespace deletion: the namespace controller may DELETE and nothing else; the install identity may create, update and delete', () => {
+  assert.equal(ALLOW.includes(`'${INSTALL}'`) && ALLOW.includes(`'${NAMESPACE_CONTROLLER}'`), true, 'the predicate mirrors the policy text');
+  assert.equal(allows({ operation: 'DELETE', username: NAMESPACE_CONTROLLER }), true);
+  for (const operation of ['CREATE', 'UPDATE']) assert.equal(allows({ operation, username: NAMESPACE_CONTROLLER }), false, `${operation} (a PATCH is an UPDATE) by the namespace controller`);
+  for (const operation of ['CREATE', 'UPDATE', 'DELETE']) assert.equal(allows({ operation, username: INSTALL }), true, `${operation} by the install identity`);
+});
+
+test('no one else: a cluster administrator, the publish and collector identities and look-alike names are denied every write', () => {
+  for (const username of OTHERS) for (const operation of ['CREATE', 'UPDATE', 'DELETE']) assert.equal(allows({ operation, username }), false, `${operation} by ${username}`);
+  const doc = named('ValidatingPolicy', 'sterling-evidence-trust-writes');
+  assert.doesNotMatch(doc, /userInfo\.groups|startsWith|matches\(|endsWith|\*/, 'no group match and no prefix or wildcard match on usernames');
+});
+
+test('no other writer: across every rendered chart, only the install Role may write the anchors, and publish may create or delete no ConfigMap', () => {
+  const docs = renderSite(ROOT, { site: SITE, helm: HELM, all: true }).flatMap(({ yaml }) => splitDocs(yaml));
+  const roles = docs.filter((doc) => kindOf(doc) === 'Role' || kindOf(doc) === 'ClusterRole');
+  assert.ok(roles.length > 0);
+  for (const doc of roles) {
+    if (!PROTECTED.some((name) => doc.includes(name))) continue;
+    const name = /^ {2}name: (\S+)$/m.exec(doc)[1];
+    if (name === 'sterling-evidence-install') continue;
+    // Any other Role naming an anchor may only read it.
+    for (const rule of roleRules(doc)) {
+      if (!(rule.resourceNames ?? []).some((item) => PROTECTED.includes(item))) continue;
+      assert.deepEqual(rule.verbs, ['get'], `${name} may only read ${rule.resourceNames}`);
+    }
+  }
+  for (const rule of roleRules(named('Role', 'sterling-evidence-publish'))) {
+    assert.ok(!rule.verbs.some((verb) => ['create', 'delete', 'deletecollection', '*'].includes(verb)), 'publish creates or deletes no ConfigMap');
+  }
+});
+
