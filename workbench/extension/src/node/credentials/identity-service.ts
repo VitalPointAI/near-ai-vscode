@@ -12,12 +12,17 @@
  *   bindComputer(...)   in the person's own session, after the step-up: a DeviceBindingCredential { device, class } for a single computer's
  *                       did:key, once the person has compared the computer's six words. Returned as a .near-vc file the computer's wallet
  *                       imports; a lost computer is cut off by revoking that one credential, with no change to the person's DID.
+ *   collectInbox(check) at session start, after ensurePersonDid (71-12, D-15): each item an officer left in the person's own inbox
+ *                       (kv/users/<entity>/credentials-inbox/<hash>) is checked, moved into the person's own wallet folder
+ *                       (kv/users/<entity>/credentials-wallet/<hash>) and removed from the inbox; an item that does not check stays out of
+ *                       the wallet and is reported in one sentence. Only the person's own token reads either folder.
  *
  * Nothing is made half-way: a step-up refusal, or a secret store that does not answer, writes nothing and leaves the state pending with one
  * sentence and Retry. Never logs a DID log, a key, a token or an entity id. Nothing here imports Theia.
  */
 import { randomBytes } from 'node:crypto';
 import { IDENTITY_TEXT, type BoundComputerFile, type DeviceClass, type IdentityStatus } from '../../common/identity.js';
+import { INBOX_TEXT } from '../../common/issuer-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { KeyService } from '../key-service.js';
 import type { ActiveSession } from '../session-identity.js';
@@ -46,6 +51,21 @@ export interface IdentityKv {
   /** Creates only (check-and-set 0): 'exists' when something is there already. */
   create(path: string, data: Record<string, unknown>): Promise<'created' | 'exists'>;
   write(path: string, data: Record<string, unknown>): Promise<void>;
+  /** The names in a folder ("" for none); needed by the inbox pickup only. */
+  list?(folder: string): Promise<readonly string[]>;
+  /** Removes every version of an entry; needed by the inbox pickup only. */
+  remove?(path: string): Promise<void>;
+}
+
+/** Checks one inbox item's credential for the holder `did` (71-12's inboxVerifier): its label when it checks, or why not. */
+export type InboxCheck = (credential: unknown, did: string) => Promise<{ readonly ok: true; readonly hash: string; readonly label: string } | { readonly ok: false; readonly unchecked: boolean }>;
+
+/** What the pickup found: the sentences to tell the person (none when nothing arrived). */
+export interface InboxResult {
+  readonly arrived: number;
+  readonly refused: number;
+  readonly waiting: number;
+  readonly sentences: readonly string[];
 }
 
 /** The person's authenticated session with your organization's server (a hub session, 33-23); its answer status only. */
@@ -79,6 +99,9 @@ export interface IdentityService {
   status(): IdentityStatus;
   publishToHub(hub: HubTrustSession): Promise<ServiceResult<{ readonly posted: boolean }>>;
   bindComputer(didKey: string, words: string, deviceClass: DeviceClass): Promise<ServiceResult<BoundComputerFile>>;
+  collectInbox(check: InboxCheck): Promise<InboxResult>;
+  /** The sentences of the last pickup, given once: a second call answers none. */
+  inboxNews(): readonly string[];
 }
 
 export const PERSON_DID_FORMAT = 'sterling-person-did/1';
@@ -121,6 +144,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
   const randomId = deps.randomId ?? ((): string => randomBytes(8).toString('hex'));
   let current: IdentityStatus = { state: 'not-configured' };
   let running: Promise<IdentityStatus> | undefined;
+  let news: readonly string[] = [];
 
   /** The person key as a signer: each signature goes through KeyService.sign (the step-up), and must come from the key version read. */
   function signerFor(verificationMethod: string, keyVersion: number): EngineSigner {
@@ -253,8 +277,57 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     return ok({ fileName: `computer-${engine.deviceFingerprint(didKey).slice(4, 12)}.near-vc`, text: `${JSON.stringify(credential, null, 2)}\n` });
   }
 
-  return { ensurePersonDid, status: () => current, publishToHub, bindComputer };
+  async function collectInbox(check: InboxCheck): Promise<InboxResult> {
+    const nothing: InboxResult = { arrived: 0, refused: 0, waiting: 0, sentences: [] };
+    const entity = deps.entityId();
+    if (entity === undefined || deps.kv.list === undefined || deps.kv.remove === undefined) return nothing;
+    let own: OwnRecord | undefined;
+    try {
+      own = ownRecordOf(await deps.kv.read(ownRecordPath(entity)));
+    } catch {
+      return nothing;
+    }
+    if (own === undefined) return nothing;
+    const labels: string[] = [];
+    let refusedCount = 0;
+    let waiting = 0;
+    try {
+      for (const name of await deps.kv.list(`${inboxFolder(entity)}/`)) {
+        if (!/^[0-9a-f]{64}$/.test(name)) continue;
+        const item = await deps.kv.read(`${inboxFolder(entity)}/${name}`);
+        const checked = item?.format === 'sterling-inbox-item/1' ? await check(item.credential, own.did) : { ok: false as const, unchecked: false };
+        if (!checked.ok) {
+          // Left where it is: an officer can see it was not taken, and a check that could not run yet runs at the next session.
+          if (checked.unchecked) waiting += 1;
+          else refusedCount += 1;
+          continue;
+        }
+        await deps.kv.create(`users/${entity}/credentials-wallet/${checked.hash}`, { format: 'sterling-wallet-item/1', credential: item?.credential });
+        await deps.kv.remove(`${inboxFolder(entity)}/${name}`);
+        labels.push(checked.label);
+      }
+    } catch {
+      // The store stopped answering: what moved has moved, and the rest is picked up at the next session.
+    }
+    const sentences = [
+      ...(labels.length > 0 ? [INBOX_TEXT.arrived(labels)] : []),
+      ...(refusedCount > 0 ? [INBOX_TEXT.refused(refusedCount)] : []),
+      ...(waiting > 0 ? [INBOX_TEXT.unchecked] : []),
+    ];
+    news = sentences;
+    return { arrived: labels.length, refused: refusedCount, waiting, sentences };
+  }
+
+  function inboxNews(): readonly string[] {
+    const given = news;
+    news = [];
+    return given;
+  }
+
+  return { ensurePersonDid, status: () => current, publishToHub, bindComputer, collectInbox, inboxNews };
 }
+
+const inboxFolder = (entity: string): string => `users/${entity}/credentials-inbox`;
 
 /** KV v2 at the session's KV mount, with the session's own token: a 404 reads as nothing, a check-and-set refusal as 'exists'. */
 export function openBaoKv(session: () => ActiveSession | undefined): IdentityKv {
@@ -284,6 +357,16 @@ export function openBaoKv(session: () => ActiveSession | undefined): IdentityKv 
     async write(path, data) {
       const s = active();
       await s.client.request('POST', `${s.config.kvMount}/data/${path}`, { token: s.token, body: { data } });
+    },
+    async list(folder) {
+      const s = active();
+      const answer = await s.client.request('GET', `${s.config.kvMount}/metadata/${folder}?list=true`, { token: s.token });
+      const keys = (answer.json as { data?: { keys?: unknown } } | undefined)?.data?.keys;
+      return Array.isArray(keys) ? keys.filter((key): key is string => typeof key === 'string') : [];
+    },
+    async remove(path) {
+      const s = active();
+      await s.client.request('DELETE', `${s.config.kvMount}/metadata/${path}`, { token: s.token });
     },
   };
 }

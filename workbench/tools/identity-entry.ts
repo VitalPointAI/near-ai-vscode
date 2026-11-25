@@ -1,8 +1,11 @@
-// The identity engine the workbench backend calls (Phase 71, 71-10): the same pure did:webvh, credential and device-word code the extension, the
-// hub and the fold use, bundled by tools/build-engine.mjs into engine/identity.cjs and loaded by the backend on first use.
-export { buildGenesisEntry, verifyWebvhLog } from '../../src/domain/did/didWebvh';
-export { encodePublicKeyMultibase } from '../../src/domain/credentials/multibase';
-export { issueCredential } from '../../src/domain/credentials/profile';
+// The identity engine the workbench backend calls (Phase 71, 71-10 and 71-12): the same pure did:webvh, credential, status list and device-word code
+// the extension, the hub and the fold use, bundled by tools/build-engine.mjs into engine/identity.cjs and loaded by the backend on first use.
+export { buildGenesisEntry, methodsAt, verifyWebvhLog } from '../../src/domain/did/didWebvh';
+export { decodePublicKeyMultibase, encodePublicKeyMultibase } from '../../src/domain/credentials/multibase';
+export { credentialHash, issueCredential, readCredential, verifyCredential } from '../../src/domain/credentials/profile';
+export { issuerAuthority } from '../../src/domain/credentials/issuerAuthority';
+export { STATUS_LIST_VALIDITY_MS, buildStatusList, clearSuspension, setBit, signStatusList, statusAt, verifyStatusList } from '../../src/domain/credentials/statusList';
+export { PERSON_ATTRIBUTE_TYPES, ROLE_TYPES } from '../../src/domain/credentials/types';
 export { CREDENTIAL_CONTEXTS } from '../../src/domain/credentials/context';
 export { SCALE_PRESETS } from '../../src/domain/gate/labels';
 export { deviceFingerprint, deviceIdentityWords } from '../../src/domain/did/deviceWords';

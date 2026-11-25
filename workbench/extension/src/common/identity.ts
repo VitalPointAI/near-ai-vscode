@@ -31,6 +31,8 @@ export interface IdentityServiceRpc {
   status(): Promise<IdentityStatus>;
   retry(): Promise<IdentityStatus>;
   bindComputer(didKey: string, words: string, deviceClass: DeviceClass): Promise<ServiceResult<BoundComputerFile>>;
+  /** What arrived in the person's wallet at this session's start (71-12): sentences to show once; empty when nothing did. */
+  inboxNews(): Promise<readonly string[]>;
 }
 
 /** Every sentence the identity service shows (D-21): plain, "your organization", nothing that asks for a credential. */
