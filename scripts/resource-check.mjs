@@ -182,8 +182,8 @@ export function entryProblems(entry, known = { controls: new Set(), components: 
   else if (known.controls.size) for (const control of entry.controls.filter((control) => !known.controls.has(control))) out.push(say(`control "${control}" is not in the catalogues.`));
   if (!CRYPTO.test(entry.crypto ?? '')) out.push(say('crypto must be none, uses-platform, unvalidated or validated:<certificate or mode>.'));
   if (!AIR_GAP.test(entry.airGap ?? '')) out.push(say('airGap must be ok, no or needs-mirror:<what>.'));
-  if (entry.supplier !== undefined && !nonEmpty(entry.supplier)) out.push(say('supplier must name the organization that publishes it, or say unknown.'));
-  if (entry.supplierJurisdiction !== undefined && !(typeof entry.supplierJurisdiction === 'string' && JURISDICTION.test(entry.supplierJurisdiction))) {
+  if (!nonEmpty(entry.supplier)) out.push(say('supplier must name the organization that publishes it, or say unknown.'));
+  if (!(typeof entry.supplierJurisdiction === 'string' && JURISDICTION.test(entry.supplierJurisdiction))) {
     out.push(say('supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'));
   }
   if (!DATE.test(entry.reviewedAt ?? '') || Number.isNaN(Date.parse(`${entry.reviewedAt}T00:00:00Z`))) out.push(say('reviewedAt must be a date (YYYY-MM-DD).'));

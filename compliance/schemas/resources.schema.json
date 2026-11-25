@@ -14,7 +14,7 @@
     "resource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "where", "component", "scope", "purpose", "role", "architectureArea", "licence", "controls", "evidence", "crypto", "cveResponse", "airGap", "fit", "reviewer", "reviewedAt"],
+      "required": ["id", "kind", "where", "component", "scope", "purpose", "role", "architectureArea", "licence", "controls", "evidence", "crypto", "cveResponse", "airGap", "fit", "reviewer", "reviewedAt", "supplier", "supplierJurisdiction"],
       "properties": {
         "id": { "type": "string", "pattern": "^(npm|image|action|vendor|chart|tool):\\S+$" },
         "kind": { "enum": ["npm", "image", "action", "vendored", "chart", "tool"] },

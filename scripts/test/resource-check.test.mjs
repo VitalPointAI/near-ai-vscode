@@ -21,7 +21,7 @@ function fixture(files) {
 
 const entry = (id, kind, where, extra = {}) => ({
   id, kind, where, component: 'extension', scope: 'build', purpose: 'p', role: 'r', architectureArea: 'build-and-test', licence: 'MIT', controls: ['sa-15'], evidence: 'none', crypto: 'none',
-  cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', ...extra
+  cveResponse: 'npm audit', airGap: 'ok', fit: 'pass', reviewer: 'r', reviewedAt: '2026-11-23', supplier: 'Microsoft Corporation', supplierJurisdiction: 'US', ...extra
 });
 
 const REPO = {
@@ -104,12 +104,25 @@ test('48.4 D-08 supplier fields: supplier is text and supplierJurisdiction an IS
   }
 });
 
+test('48.4 D-08 supplier fields are required: an entry missing either is refused, naming the entry and the field', () => {
+  const { supplier, supplierJurisdiction, ...bare } = CLEAN[0];
+  assert.ok(supplier && supplierJurisdiction);
+  assert.deepEqual(run(REPO, [bare, ...CLEAN.slice(1)]), [
+    'compliance/resources.json npm:typescript: supplier must name the organization that publishes it, or say unknown.',
+    'compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'
+  ]);
+  assert.deepEqual(run(REPO, [{ ...bare, supplier }, ...CLEAN.slice(1)]),
+    ['compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.']);
+  const schema = JSON.parse(readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'compliance', 'schemas', 'resources.schema.json'), 'utf8'));
+  for (const field of ['supplier', 'supplierJurisdiction']) assert.ok(schema.definitions.resource.required.includes(field), `the schema requires ${field}`);
+});
+
 test('48.4 D-08 inventory: the --json inventory carries supplier and supplierJurisdiction per entry, unknown as written', () => {
   const root = fixture(REPO);
   const resources = [
     { ...CLEAN[0], supplier: 'Microsoft Corporation', supplierJurisdiction: 'US' },
     { ...CLEAN[1], supplier: 'unknown', supplierJurisdiction: 'unknown' },
-    CLEAN[2]
+    (({ supplier, supplierJurisdiction, ...rest }) => rest)(CLEAN[2])
   ];
   const rows = Object.fromEntries(inventory({ resources }, discover(root)).map((row) => [row.id, row]));
   assert.equal(rows['npm:typescript'].supplier, 'Microsoft Corporation');
