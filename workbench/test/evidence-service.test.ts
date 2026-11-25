@@ -108,3 +108,10 @@ test('absent: no release evidence folder gives none', async () => {
   const evidence = await service(path.join(tmpdir(), `sterling-no-evidence-${process.pid}-${Date.now()}`), { now: at(1) }).getEvidence();
   assert.deepEqual(evidence.release, { verification: 'none' });
 });
+
+test('plain data: getEvidence() survives JSON unchanged, as it crosses JSON-RPC', async () => {
+  for (const dir of [releaseFolder(), path.join(tmpdir(), `sterling-no-evidence-${process.pid}-${Date.now()}`)]) {
+    const evidence = await service(dir, { now: at(30) }).getEvidence();
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(evidence)), evidence);
+  }
+});

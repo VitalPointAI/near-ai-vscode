@@ -5,7 +5,11 @@ import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
 import URI from '@theia/core/lib/common/uri.js';
 import { FileDownloadService } from '@theia/filesystem/lib/common/download/file-download.js';
-import { refreshRecordMatches } from '../common/sterling-evidence.js';
+import {
+  EVIDENCE_SERVICE_PATH, RELEASE_DID_NOT_VERIFY_TEXT, RELEASE_EVIDENCE_TEXT, refreshRecordMatches, SterlingEvidenceService,
+  type EvidenceRow, type ReleaseEvidence
+} from '../common/sterling-evidence.js';
+import { bindFrontendService } from './frontend-service.js';
 import './sterling-compliance.css';
 
 const widgetId = 'sterling-compliance';
@@ -18,18 +22,22 @@ const stateWords = {
   'not-applicable': 'Not applicable',
   'your-organizations-responsibility': 'Your organization’s responsibility'
 } as const;
-type State = keyof typeof stateWords;
-const states = Object.keys(stateWords) as State[];
+type EngineState = keyof typeof stateWords;
+// The display state: the engine's state for verified evidence, "Not verified" for evidence no configured key vouches for (D-18). The
+// backend decides which; the browser never computes a state.
+const displayWords = { ...stateWords, 'not-verified': RELEASE_EVIDENCE_TEXT.notVerified } as const;
+type State = keyof typeof displayWords;
+const states = Object.keys(displayWords) as State[];
 const attentionStates = ['not-met', 'partly-met', 'stale'] as const;
 const attentionLabels = { 'not-met': 'Not met', 'partly-met': 'Partly met', stale: 'Stale evidence' };
 const priority: Record<State, number> = {
-  'not-met': 0, 'partly-met': 1, stale: 2, met: 3, 'your-organizations-responsibility': 4, 'not-applicable': 5
+  'not-met': 0, 'partly-met': 1, stale: 2, 'not-verified': 3, met: 4, 'your-organizations-responsibility': 5, 'not-applicable': 6
 };
 const pageSize = 24;
 
 type Evidence = { rule: string; collectedAt?: string; commit?: string; passed?: boolean; runUrl?: string };
-type Component = { component: string; responsibility: string; state: State; statement?: string; reasonText?: string; evidence?: Evidence[] };
-type Control = { control: string; label: string; title: string; level: string; state: State; reasonText: string; components: Component[]; textFile?: string; gap?: string };
+type Component = { component: string; responsibility: string; state: State; engineState?: EngineState; statement?: string; reasonText?: string; evidence?: Evidence[] };
+type Control = { control: string; label: string; title: string; level: string; state: State; engineState?: EngineState; reasonText: string; components: Component[]; textFile?: string; gap?: string; facts?: string };
 type Level = { id: string; title: string; claim: boolean };
 type Gap = { id: string; title: string; remediation: string; ownerRole: string; state: string };
 const sourceLabels = { main: 'Main branch', scheduled: 'Scheduled collection', release: 'Release', local: 'Local collection' } as const;
@@ -57,7 +65,7 @@ function itemList(value: unknown, check: (item: unknown) => boolean): boolean {
   return Array.isArray(value) && value.every(check);
 }
 
-function isState(value: unknown): value is State {
+function isState(value: unknown): value is EngineState {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(stateWords, value);
 }
 
@@ -108,19 +116,19 @@ function chooseOption(text: string, value: string): HTMLOptionElement {
 }
 
 function badge(state: State): HTMLElement {
-  const label = element('span', stateWords[state], 'sterling-evidence-badge');
+  const label = element('span', displayWords[state], 'sterling-evidence-badge');
   label.dataset.state = state;
   return label;
 }
 
 function countStates(rows: Control[]): Record<State, number> {
-  const counts: Record<State, number> = {met: 0, 'partly-met': 0, 'not-met': 0, stale: 0, 'not-applicable': 0, 'your-organizations-responsibility': 0};
+  const counts: Record<State, number> = {met: 0, 'partly-met': 0, 'not-met': 0, stale: 0, 'not-verified': 0, 'not-applicable': 0, 'your-organizations-responsibility': 0};
   for (const row of rows) counts[row.state]++;
   return counts;
 }
 
 function chartSummary(total: number, counts: Record<State, number>): string {
-  const statuses = states.filter(state => counts[state]).map(state => `${counts[state]} ${stateWords[state]}`);
+  const statuses = states.filter(state => counts[state]).map(state => `${counts[state]} ${displayWords[state]}`);
   return [`${total} control entries`, ...statuses].join(', ');
 }
 
@@ -157,6 +165,7 @@ function controlTextUrl(dashboard: Dashboard, control: Control): URL | undefined
 
 @injectable()
 class SterlingComplianceWidget extends BaseWidget {
+  @inject(SterlingEvidenceService) protected readonly evidence!: SterlingEvidenceService;
   private readonly body = element('div');
   private refreshRequest?: AbortController;
   private textRequest?: AbortController;
@@ -200,6 +209,22 @@ class SterlingComplianceWidget extends BaseWidget {
     const request = new AbortController();
     this.refreshRequest = request;
     this.showStatus('Loading published evidence…');
+    // The release's own evidence first (48.2-01): checked and judged now by the backend. With none, today's projection fetch follows.
+    let release: ReleaseEvidence | undefined;
+    try {
+      release = (await this.evidence.getEvidence()).release;
+    } catch {
+      release = undefined;
+    }
+    if (request.signal.aborted) return;
+    if (release?.verification === 'did-not-verify') {
+      this.showStatus(`${RELEASE_EVIDENCE_TEXT.didNotVerify} ${RELEASE_DID_NOT_VERIFY_TEXT[release.reason].replace('{file}', release.file)} ${RELEASE_EVIDENCE_TEXT.didNotVerifyTail}`);
+      return;
+    }
+    if (release?.verification === 'not-verified') {
+      this.showRelease(release);
+      return;
+    }
     try {
       const response = await fetch(new URL('compliance/dashboard.json', document.baseURI), { signal: request.signal, cache: 'no-store', mode: 'same-origin', redirect: 'error' });
       if (request.signal.aborted) return;
@@ -223,27 +248,58 @@ class SterlingComplianceWidget extends BaseWidget {
         this.showStatus('This evidence bundle has no matching verification record, so no states are shown. Write the projection with compliance:refresh, then reload.');
         return;
       }
-      this.showDashboard(data, refreshRecord);
+      this.showProjection(data, refreshRecord);
     } catch {
       if (!request.signal.aborted) this.showStatus('The public evidence bundle could not be loaded. Try reloading.');
     }
   }
 
-  private showDashboard(dashboard: Dashboard, verified: RefreshRecord): void {
+  private showProjection(dashboard: Dashboard, verified: RefreshRecord): void {
     const generated = Date.parse(dashboard.generatedAt);
     const metadata = element('p', `${sourceLabels[dashboard.source.kind]} · Bundle generated ${Number.isFinite(generated) ? dashboard.generatedAt : 'at an unknown time'} · Commit ${dashboard.commit.slice(0, 12)}`, 'sterling-evidence-meta');
     const verification = element('p', `Manifest verified · Signature: ${attestationWords[verified.attestation] ?? verified.attestation} · Fetched ${verified.fetchedAt} from ${verified.source}`, 'sterling-evidence-meta');
     const notice = element('p', 'This evidence bundle is older than 24 hours or has an invalid generation time. Check collection times before relying on it.', 'sterling-evidence-message');
     const age = Date.now() - generated;
     notice.hidden = age >= 0 && age <= 86_400_000;
+    this.showDashboard(dashboard, [metadata, verification, notice]);
+  }
 
+  /**
+   * The release's own evidence, judged now by the backend (48.2-01). No configured key vouches for it yet, so every line shows "Not verified"
+   * in place of its state, the engine's state only in the detail pane, and nothing counts as Met (D-18).
+   */
+  private showRelease(release: Extract<ReleaseEvidence, { verification: 'not-verified' }>): void {
+    const version = RELEASE_EVIDENCE_TEXT.release.replace('{version}', release.version);
+    const metadata = element('p', `${version} · ${RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', release.asOf)} · Commit ${release.commit.slice(0, 12)}`, 'sterling-evidence-meta');
+    const verification = element('p', RELEASE_EVIDENCE_TEXT.noTrustKey, 'sterling-evidence-message');
+    const freshnessWords = { current: RELEASE_EVIDENCE_TEXT.current, 'out-of-date': RELEASE_EVIDENCE_TEXT.outOfDate, none: RELEASE_EVIDENCE_TEXT.noEvidence } as const;
+    const facts = (row: EvidenceRow): string => [version, row.asOf ? RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', row.asOf) : undefined,
+      freshnessWords[row.freshness], RELEASE_EVIDENCE_TEXT.notVerified].filter(Boolean).join(' · ');
+    const rows: Control[] = release.rows.map(row => ({
+      control: row.control, label: row.label, title: row.title, level: row.level, reasonText: row.reasonText,
+      ...(row.textFile ? { textFile: row.textFile } : {}), ...(row.gap ? { gap: row.gap } : {}),
+      state: 'not-verified', engineState: row.state, facts: facts(row),
+      components: row.components.map(component => ({
+        component: component.component, responsibility: component.responsibility, state: 'not-verified' as const, engineState: component.state,
+        reasonText: component.reasonText, ...(component.statement ? { statement: component.statement } : {}),
+        evidence: component.evidence.map(({ rule, passed, collectedAt, commit, runUrl }) => ({ rule, passed, collectedAt, ...(commit ? { commit } : {}), ...(runUrl ? { runUrl } : {}) }))
+      }))
+    }));
+    const dashboard: Dashboard = {
+      schemaVersion: 1, generatedAt: release.asOf, commit: release.commit, source: { kind: 'release', ref: release.commit },
+      levels: release.levels.map(({ id, title, claim }) => ({ id, title, claim })), rows
+    };
+    this.showDashboard(dashboard, [metadata, verification]);
+  }
+
+  private showDashboard(dashboard: Dashboard, header: HTMLElement[]): void {
     const filters = element('div', undefined, 'sterling-evidence-filters');
     const levelSelect = element('select');
     levelSelect.append(chooseOption('All coverage levels', ''));
     for (const level of dashboard.levels) levelSelect.append(chooseOption(level.title, level.id));
     levelSelect.value = dashboard.levels.some(level => level.id === this.filters.level) ? this.filters.level : '';
     const stateSelect = element('select');
-    stateSelect.append(chooseOption('All states', ''), ...states.map(state => chooseOption(stateWords[state], state)));
+    stateSelect.append(chooseOption('All states', ''), ...states.map(state => chooseOption(displayWords[state], state)));
     stateSelect.value = this.filters.state;
     const search = element('input');
     search.type = 'search';
@@ -293,7 +349,7 @@ class SterlingComplianceWidget extends BaseWidget {
       swatch.dataset.state = state;
       swatch.setAttribute('aria-hidden', 'true');
       const count = element('strong');
-      button.append(swatch, element('span', stateWords[state]), count);
+      button.append(swatch, element('span', displayWords[state]), count);
       button.addEventListener('click', () => toggleState(state));
       legend.append(button);
       return { state, button, count };
@@ -380,7 +436,7 @@ class SterlingComplianceWidget extends BaseWidget {
           const segment = element('span', undefined, 'sterling-evidence-segment');
           segment.dataset.state = item;
           segment.style.flexGrow = String(counts[item]);
-          segment.title = `${stateWords[item]}: ${counts[item]}`;
+          segment.title = `${displayWords[item]}: ${counts[item]}`;
           entry.bar.append(segment);
         }
       }
@@ -407,6 +463,7 @@ class SterlingComplianceWidget extends BaseWidget {
           button.setAttribute('aria-expanded', 'false');
           button.setAttribute('aria-controls', detail.id);
           button.append(element('strong', `${control.label} · ${control.title}`), badge(control.state));
+          if (control.facts) button.append(element('span', control.facts, 'sterling-evidence-facts'));
           button.addEventListener('click', () => this.showControl(dashboard, control, detail, button));
           item.append(button);
           list.append(item);
@@ -429,7 +486,7 @@ class SterlingComplianceWidget extends BaseWidget {
       render();
       search.focus();
     });
-    this.body.replaceChildren(metadata, verification, notice, attention, filters, visuals, columns);
+    this.body.replaceChildren(...header, attention, filters, visuals, columns);
     render();
   }
 
@@ -457,6 +514,8 @@ class SterlingComplianceWidget extends BaseWidget {
     official.append(prose);
     const gap = dashboard.gaps?.find(item => item.id === control.gap);
     detail.replaceChildren(close, heading, badge(control.state), element('p', control.reasonText));
+    if (control.engineState) detail.append(element('p', RELEASE_EVIDENCE_TEXT.wouldBe.replace('{state}', stateWords[control.engineState]), 'sterling-evidence-meta'));
+    if (control.facts) detail.append(element('p', control.facts, 'sterling-evidence-meta'));
     for (const component of control.components) {
       const block = element('section', undefined, 'sterling-evidence-component');
       block.append(element('h3', component.component), element('p', `Responsibility: ${responsibilityWords[component.responsibility] ?? component.responsibility}`), badge(component.state));
@@ -543,6 +602,7 @@ class SterlingComplianceContribution extends AbstractViewContribution<SterlingCo
 }
 
 export default new ContainerModule(bind => {
+  bindFrontendService<SterlingEvidenceService>(bind, SterlingEvidenceService, EVIDENCE_SERVICE_PATH);
   bind(SterlingComplianceWidget).toSelf();
   bind(WidgetFactory).toDynamicValue(context => ({
     id: widgetId,

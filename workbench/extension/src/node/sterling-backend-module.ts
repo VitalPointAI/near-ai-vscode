@@ -3,6 +3,9 @@ import { BackendApplicationContribution, EarlyExpressMiddleware } from '@theia/c
 import { BackendRequestAllowedContribution } from '@theia/core/lib/node/request/backend-request-facade.js';
 import { readOutboundSettings } from './egress.js';
 import { SterlingRequestAllowList } from './egress-contribution.js';
+import { EVIDENCE_SERVICE_PATH, SterlingEvidenceService } from '../common/sterling-evidence.js';
+import { bindBackendService } from './backend-service.js';
+import { createEvidenceService } from './sterling-evidence-service.js';
 
 /**
  * `GET /healthz` answers 200 `ok` for the image's HEALTHCHECK and the container tests (research C11: Theia core has no health endpoint).
@@ -51,4 +54,6 @@ export default new ContainerModule(bind => {
   bind(BackendRequestAllowedContribution).toService(SterlingRequestAllowList);
   bind(OutboundSettingsContribution).toSelf().inSingletonScope();
   bind(BackendApplicationContribution).toService(OutboundSettingsContribution);
+  // The release evidence, checked and re-judged against the current time for the Compliance view (48.2-01, D-01, D-11).
+  bindBackendService<SterlingEvidenceService>(bind, SterlingEvidenceService, EVIDENCE_SERVICE_PATH, () => createEvidenceService());
 });

@@ -5,6 +5,7 @@
   --sterling-state-stale: #7858a1;
   --sterling-state-not-applicable: #778498;
   --sterling-state-your-organizations-responsibility: #3b67a9;
+  --sterling-state-not-verified: var(--theia-editorWarning-foreground);
   --sterling-chart-track: color-mix(in srgb, var(--theia-editor-background) 89%, var(--theia-foreground));
   --sterling-evidence-border: var(--theia-panel-border, color-mix(in srgb, var(--theia-foreground) 19%, transparent));
   --sterling-evidence-surface: var(--theia-editorWidget-background, var(--theia-editor-background));
@@ -215,6 +216,7 @@ body.theia-dark .sterling-compliance {
 .sterling-compliance [data-state='stale'] { --sterling-evidence-state: var(--sterling-state-stale); }
 .sterling-compliance [data-state='not-applicable'] { --sterling-evidence-state: var(--sterling-state-not-applicable); }
 .sterling-compliance [data-state='your-organizations-responsibility'] { --sterling-evidence-state: var(--sterling-state-your-organizations-responsibility); }
+.sterling-compliance [data-state='not-verified'] { --sterling-evidence-state: var(--sterling-state-not-verified); }
 .sterling-evidence-badge {
   display: inline-block;
   border-inline-start: 3px solid var(--sterling-evidence-state, var(--theia-descriptionForeground));
@@ -245,6 +247,7 @@ body.theia-dark .sterling-compliance {
 .sterling-evidence-controls button[aria-expanded='true'] { background: var(--sterling-evidence-selection); }
 .sterling-evidence-controls button > strong { overflow-wrap: anywhere; }
 .sterling-evidence-controls button > .sterling-evidence-badge { max-width: 20ch; }
+.sterling-evidence-controls button > .sterling-evidence-facts { grid-column: 1 / -1; font-size: 12px; color: var(--theia-descriptionForeground); overflow-wrap: anywhere; }
 .sterling-evidence-results-title {
   display: flex;
   align-items: baseline;
