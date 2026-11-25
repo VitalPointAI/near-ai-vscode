@@ -188,7 +188,7 @@ test('features: an answer announcing the registry the hub compiles opens a sessi
   withHub({}, async (hub) => {
     const { world } = await enrolled(hub);
     assert.equal(SESSION_VERSION, 2);
-    assert.deepEqual([...KNOWN_REPLICA_FEATURES], ['cells@1', 'hub@1', 'replica@2', 'require@1']);
+    assert.deepEqual([...KNOWN_REPLICA_FEATURES], ['cells@1', 'hub@1', 'positions@1', 'replica@2', 'require@1', 'verified-clearance@1']);
     const connection = await hub.connect();
     const { challenge } = await challengeOn(connection, world.project);
     const answer = buildSessionAnswer(world.lead.signer, { hub: hub.identity.writer, project: world.project, challenge, keying: connection.keying(), features: KNOWN_REPLICA_FEATURES, now: new Date(hub.now()) });

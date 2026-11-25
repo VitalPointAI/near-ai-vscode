@@ -5,7 +5,7 @@ import {
 } from '../domain/replica/features';
 
 test('the known replica feature registry is sorted and frozen', () => {
-  assert.deepEqual(KNOWN_REPLICA_FEATURES, ['cells@1', 'hub@1', 'replica@2', 'require@1']);
+  assert.deepEqual(KNOWN_REPLICA_FEATURES, ['cells@1', 'hub@1', 'positions@1', 'replica@2', 'require@1', 'verified-clearance@1']);
   assert.ok(Object.isFrozen(KNOWN_REPLICA_FEATURES));
   assert.equal(MAX_FEATURES, 16);
 });
@@ -24,7 +24,7 @@ test('replica feature ids reject malformed names, versions and non-text values',
 });
 
 test('missingFeatures reports ids outside the local registry', () => {
-  assert.deepEqual(missingFeatures(['positions@1', 'require@1']), ['positions@1']);
+  assert.deepEqual(missingFeatures(['later@1', 'require@1']), ['later@1']);
 });
 
 test('missingFeatures returns a sorted set without changing the required list', () => {
@@ -34,7 +34,7 @@ test('missingFeatures returns a sorted set without changing the required list', 
 });
 
 test('missingFeatures can check a supplied registry', () => {
-  assert.deepEqual(missingFeatures(['positions@1', 'require@1'], [...KNOWN_REPLICA_FEATURES, 'positions@1']), []);
+  assert.deepEqual(missingFeatures(['later@1', 'require@1'], [...KNOWN_REPLICA_FEATURES, 'later@1']), []);
 });
 
 test('coversRequired accepts an empty requirement and all announced known requirements', () => {
@@ -45,7 +45,7 @@ test('coversRequired accepts an empty requirement and all announced known requir
 test('coversRequired refuses missing announcements and unknown required features', () => {
   assert.equal(coversRequired([], ['require@1']), false);
   assert.equal(coversRequired(['cells@1'], ['require@1', 'cells@1']), false);
-  assert.equal(coversRequired(['positions@1', 'require@1'], ['positions@1', 'require@1']), false);
+  assert.equal(coversRequired(['later@1', 'require@1'], ['later@1', 'require@1']), false);
 });
 
 test('the update sentence names Sterling and the administrator, with no version number and no project', () => {

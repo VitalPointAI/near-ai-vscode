@@ -46,8 +46,8 @@ test('tracer: once the project requires a feature this hub lacks, appends are re
     const bytes = Buffer.from('fictional sealed blob bytes');
     const blobHash = createHash('sha256').update(bytes).digest('hex');
     assert.equal((await lead.connection.put(`/v1/blobs/${blobHash}`, bytes, lead.token)).status, 201);
-    // A newer lead requires positions@1, which this hub does not fold. That entry is the last the hub takes.
-    const requires = world.rosterEntry(world.lead, 'roster.require', { features: ['positions@1'] });
+    // A newer lead requires later@1, which this hub does not fold. That entry is the last the hub takes.
+    const requires = world.rosterEntry(world.lead, 'roster.require', { features: ['later@1'] });
     const taken = await lead.connection.post(appendPath, { entries: [requires.entry] }, lead.token);
     assert.equal(taken.status, 200, taken.text);
     const before = hub.store.heads(world.project);
@@ -99,10 +99,10 @@ test('a project that requires nothing accepts a session announcing no features (
     assert.equal(old.status, 200, JSON.stringify(old.body));
   }));
 
-test('a session announcing a feature this hub does not fold never covers it: a project requiring positions@1 refuses even a device that claims it', () =>
+test('a session announcing a feature this hub does not fold never covers it: a project requiring later@1 refuses even a device that claims it', () =>
   withHub({}, async (hub) => {
-    const world = await enrolled(hub, [['positions@1', 'require@1']]);
-    const claimed = await sessionWith(hub, world, [...KNOWN_REPLICA_FEATURES, 'positions@1'].sort());
+    const world = await enrolled(hub, [['later@1', 'require@1']]);
+    const claimed = await sessionWith(hub, world, [...KNOWN_REPLICA_FEATURES, 'later@1'].sort());
     assert.equal(claimed.status, 403);
     assert.equal(claimed.body.reason, 'needs-update');
   }));

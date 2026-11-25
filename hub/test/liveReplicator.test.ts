@@ -82,9 +82,9 @@ test('restoring: a hub started in restore mode answers a new change restoring, s
   });
 });
 
-test('needs-update: a project that requires positions@1, which neither this hub nor this build folds, puts the replicator in needs-update and it stays there', () =>
+test('needs-update: a project that requires later@1, which neither this hub nor this build folds, puts the replicator in needs-update and it stays there', () =>
   withHub({}, async (hub) => {
-    const { world } = await enrolled(hub, (w) => { w.rosterEntry(w.lead, 'roster.require', { features: ['positions@1', 'require@1'] }); });
+    const { world } = await enrolled(hub, (w) => { w.rosterEntry(w.lead, 'roster.require', { features: ['later@1', 'require@1'] }); });
     const a = liveClient(hub, world, world.lead);
     try {
       await a.replicator.start();

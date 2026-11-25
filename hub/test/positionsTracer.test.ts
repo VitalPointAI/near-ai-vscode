@@ -77,6 +77,8 @@ async function enrolled(hub: Hub): Promise<Setup> {
   const quinn = world.device('QUINN-LAPTOP', 'mbr-quinn');
   world.admitMember(pat);
   world.admitMember(quinn);
+  // Positions apply only once the lead requires positions@1 (33.1-03, D-05).
+  world.rosterEntry(world.lead, 'roster.require', { features: ['positions@1'] });
   await hub.enrolProject(world, { direct: true });
   return { world, pat, quinn };
 }

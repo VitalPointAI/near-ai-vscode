@@ -13,8 +13,20 @@ export const REPLICA_FEATURE_PATTERN = /^[a-z][a-z0-9-]{0,31}@[1-9][0-9]{0,2}$/;
 /** At most this many ids in one feature list (a session announcement or a roster.require entry). */
 export const MAX_FEATURES = 16;
 
-/** The features this build folds on any runtime, sorted. positions@1 is added by the release that folds positions. */
-export const KNOWN_REPLICA_FEATURES: readonly string[] = Object.freeze(['cells@1', 'hub@1', 'replica@2', 'require@1']);
+/** The features this build folds on any runtime, sorted. */
+export const KNOWN_REPLICA_FEATURES: readonly string[] = Object.freeze(['cells@1', 'hub@1', 'positions@1', 'replica@2', 'require@1', 'verified-clearance@1']);
+
+/**
+ * Positions, postings and the signed way of working (Phase 33.1 D-05, D-11): the roster applies no positions kind and no project.mode before a lead's
+ * roster.require names it, so a computer or a server that cannot fold positions stops with UPDATE_SENTENCE instead of folding them partly.
+ */
+export const POSITIONS_FEATURE = 'positions@1';
+
+/**
+ * A clearance above your organization's lowest level counts only from credentials (Phase 33.1 D-39, owner decision O11). A project feature, distinct
+ * from the policy section credentials@1: once a lead requires it, projectRequiresCredentials (roster.ts) is true for that project.
+ */
+export const VERIFIED_CLEARANCE_FEATURE = 'verified-clearance@1';
 
 /** Post-quantum cell keys (33.2 D-05): known only where the runtime passes cell-wrap/v2's start-up probe (probeWrapV2). */
 export const WRAP_V2_FEATURE = 'wrap@2';

@@ -31,15 +31,20 @@ import type { Actor, SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import type { CellGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
+import { POSITIONS_FEATURE, VERIFIED_CLEARANCE_FEATURE } from './features';
+import { DEFAULT_MODE, MODES } from '../org/modes';
+import type { ModeId, OrganizationSettings } from '../org/modes';
 import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
 import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt, granteesAt } from './rosterCells';
 import type { CellsState } from './rosterCells';
-import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, quarantinesOf, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
+import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, inviteAt, memberAt, quarantinesOf, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
-import { POSITION_REFUSALS, applyPositionEntry, createPostsState, positionAt, positionTakenAt, postingAt, postingReportedAt } from './rosterPositions';
+import {
+  POSITION_REFUSALS, applyPositionEntry, createPostsState, isModeId, modeRecordAt, positionAt, positionTakenAt, postingAt, postingPendingAt, postingReportedAt, settingsLooserThanMode
+} from './rosterPositions';
 import type { PositionRefusal, PostsState } from './rosterPositions';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
 import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
@@ -208,13 +213,54 @@ export function isRosterWriterAt(state: RosterState, writer: string, position: n
 /** The parts of an entry the position write rule reads: the same from a verified entry (the fold) and an opened base-stream body (the hub). */
 export interface PositionWrite { writer: string; kind: string; data: unknown; actor: Actor; at: string }
 
-// The kinds whose reducers exist (33.1-01); every other positions kind is refused as not yet applied until its plan applies it.
-const APPLIED_POSITION_KINDS: ReadonlySet<string> = new Set(['position.create', 'posting.order', 'posting.report']);
+// The kinds whose reducers exist (33.1-01, project.mode 33.1-03); every other positions kind is refused as not yet applied until its plan applies it.
+const APPLIED_POSITION_KINDS: ReadonlySet<string> = new Set(['position.create', 'posting.order', 'posting.report', 'project.mode']);
+
+/** True once a roster.require applied at or before the roster position names positions@1 (33.1-03, D-05). */
+export function positionsRequiredAt(state: Pick<RosterState, 'requiredFrom'>, position: number): boolean {
+  const from = state.requiredFrom.get(POSITIONS_FEATURE);
+  return from !== undefined && from <= position;
+}
+
+/** The project's mode at a roster position: the newest applied project.mode, or Corporate when none is signed (portfolio D12). */
+export function projectModeAt(state: Pick<RosterState, 'posts'>, position: number): ModeId {
+  return modeRecordAt(state.posts, position)?.mode ?? DEFAULT_MODE;
+}
+
+/** The signed settings at a roster position: those of the newest applied project.mode, or none (the mode's own defaults). */
+export function positionSettingsAt(state: Pick<RosterState, 'posts'>, position: number): OrganizationSettings {
+  return modeRecordAt(state.posts, position)?.settings ?? {};
+}
+
+/** True once the project requires verified-clearance@1 (D-39, O11): 71-07's declaredClearanceCounts reads it. Answered at the folded head. */
+export function projectRequiresCredentials(state: Pick<RosterState, 'required'>): boolean {
+  return state.required.includes(VERIFIED_CLEARANCE_FEATURE);
+}
+
+/**
+ * True while an invitation is open or a posting has not taken effect at the roster position (DESIGN 5.7), so the way of working cannot change. `at` is
+ * the signed time of the entry that would change it; without it an invitation past its expiry still counts as open, which only ever refuses more.
+ */
+export function modeChangeBlockedAt(state: RosterState, position: number, at?: string): boolean {
+  if (postingPendingAt(state.posts, position)) return true;
+  for (const invite of state.members.invites.keys()) if (inviteAt(state.members, invite, position, at)?.state === 'open') return true;
+  return false;
+}
+
+/** True when a member.invite with this data is refused at the roster position: a plain invitation in an assignment or appointment mode (D-11, D-34). */
+export function inviteClosedByModeAt(state: RosterState, data: unknown, position: number): boolean {
+  const invite = (typeof data === 'object' && data !== null ? data : {}) as { forMember?: unknown; observe?: unknown };
+  // A person's own other computer (forMember) is not a joining; an observer placement is 33.1-19's.
+  if (invite.forMember !== undefined || invite.observe !== undefined) return false;
+  return MODES[projectModeAt(state, position)].behaviour.joiningModel !== 'invitation';
+}
 
 /**
  * Why this position or posting write is refused at the roster position it cites, or undefined (D-01, D-02, D-09, D-12). The one rule the roster fold
  * and your organization's server both run, so they cannot disagree:
  * - only a person acts: an agent or hub actor is refused on every positions kind (DESIGN 3.4);
+ * - nothing applies before positions@1 is required at the cited roster (33.1-03, D-05), so a build that cannot fold positions stops first;
+ * - project.mode: the lead, a mode of the table, settings no looser than the mode, and no open invitation or posting not yet in effect (D-11);
  * - position.create: a device of the lead or the deputy (a roster writer), with a new position id;
  * - posting.order: a device of the lead (delegates come in 33.1-04), naming a position that exists and is vacant (handover is 33.1-05), a new
  *   posting id and an active member; a new person, a delegated grant, staged key changes and acting or temporary postings are not applied yet;
@@ -226,8 +272,17 @@ export type PositionWriteRefusal = Extract<RosterRefusal, 'person-only' | 'roste
 
 export function positionWriteProblem(state: RosterState, write: PositionWrite, cited: number): PositionWriteRefusal | undefined {
   if (write.actor.kind !== 'person') return 'person-only';
+  if (!positionsRequiredAt(state, cited)) return 'positions-not-required';
   if (!APPLIED_POSITION_KINDS.has(write.kind)) return 'roster-kind-pending';
   const signer = deviceAt(state.members, write.writer, cited)?.member;
+  if (write.kind === 'project.mode') {
+    // The lead position's holder (D-11), a mode of the table, settings no looser than it, and nothing pending (DESIGN 5.7).
+    if (signer === undefined || signer !== leadAt(state, cited)) return 'mode-not-allowed';
+    const mode = write.data as { mode: unknown; settings: OrganizationSettings };
+    if (!isModeId(mode.mode)) return 'unknown-mode';
+    if (settingsLooserThanMode(mode.mode, mode.settings).length > 0) return 'settings-looser-than-mode';
+    return modeChangeBlockedAt(state, cited, write.at) ? 'mode-change-pending' : undefined;
+  }
   if (write.kind === 'position.create') {
     if (!isRosterWriterAt(state, write.writer, cited)) return 'not-a-roster-writer';
     const position = (write.data as { position: string }).position;
@@ -255,6 +310,8 @@ const positionWriteOf = (entry: VerifiedEntry): PositionWrite => ({ writer: entr
 // writer for every other kind.
 function authorityProblem(state: RosterState, entry: VerifiedEntry, head: number): string | undefined {
   if (ROSTER_KIND_OWNER[entry.body.kind] === 'positions') return positionWriteProblem(state, positionWriteOf(entry), head);
+  // In an assignment or appointment mode a plain invitation may not be written at all (33.1-03, D-11), so it can neither apply nor split the roster.
+  if (entry.body.kind === 'member.invite' && inviteClosedByModeAt(state, entry.data, head)) return 'invite-not-in-mode';
   return isRosterWriterAt(state, entry.header.writer, head) ? undefined : 'not-a-roster-writer';
 }
 

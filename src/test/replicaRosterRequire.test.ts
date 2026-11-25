@@ -157,10 +157,10 @@ test('an older client (0.4.35, which has no roster.require) keeps the entry as m
 
 test('requireProblem on a folded roster names what this build lacks, and a newer build lacks nothing', () => {
   const s = staff();
-  requireBy(s, s.lead, ['positions@1', 'require@1'], s.head);
+  requireBy(s, s.lead, ['later@1', 'require@1'], s.head);
   const state = fold(s);
-  assert.deepEqual(requireProblem(state), { missing: ['positions@1'] });
-  assert.equal(requireProblem(state, [...KNOWN_REPLICA_FEATURES, 'positions@1']), undefined);
+  assert.deepEqual(requireProblem(state), { missing: ['later@1'] });
+  assert.equal(requireProblem(state, [...KNOWN_REPLICA_FEATURES, 'later@1']), undefined);
 });
 
 /** A project stand-in for ensureRequireArmed: its checked append plans against the given roster and records what it would write. */
