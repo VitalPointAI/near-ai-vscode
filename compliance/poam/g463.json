@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ac-16"
+  ],
+  "gap": "G463",
+  "id": "g463",
+  "milestones": [
+    {
+      "phase": "74.3",
+      "title": "The owner decides whether a classification@2 marking pattern may carry portion-marking brackets"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "The owner-confirmed marking pattern grammar of classification@1 (2026-11-25) is plain words: letters and digits, single spaces, - and /. A portion marking written (S) is therefore listed as the bare token S, which also matches any standalone capital S and can over-raise (the safe direction, which still costs people time). Decide with the owner whether a classification@2 marking pattern may carry the brackets of a portion marking, and until then list only portion tokens your organization's texts do not use as words. Source: 70.1-04 SUMMARY.",
+  "title": "Portion markings such as (S) match only as bare tokens"
+}

@@ -6200,6 +6200,67 @@
       "title": "SA&A drafts made before the rename call the system by its old name"
     },
     {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "74.3",
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G460",
+      "ownerRole": "maintainers",
+      "remediation": "Phase 70.1 ships the pure classification engine (src/domain/classify: assess, decide, the proposal record v1, the classification@1 section and the five label events) with no caller: nothing in the product proposes or raises a label from content yet, and no document says it does. Phase 74.3 wires the runner, the panel, affirmation and the spill report to it. Until then labels are set by people and by the session mark only. Source: 70.1-HANDOFFS.md E-01, E-04.",
+      "title": "The classification engine has no caller until Phase 74.3"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G461",
+      "ownerRole": "shared",
+      "poam": "g461",
+      "remediation": "Nothing ships as values (70.1 D-07): a level with no threshold has no automatic model raise, a section with no systemHigh gives no possible-spill outcome, and no marking pattern, code word or guide rule is built in. Your organization's security officer sets the cost ratios and recall targets per level, the system-high of each deployment layer, the English and French banner and portion markings, the code-word list (labelled at its own level) and the guide and compilation rules from your organization's security classification guide, signed in the classification@1 section. Phase 74.3 documents how. Source: 70.1-CONTEXT.md D-07, D-13, D-16.",
+      "title": "Classification thresholds, the system-high, markings, code words and guide rules are your organization's to set"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "si-10"
+      ],
+      "id": "G462",
+      "ownerRole": "maintainers",
+      "poam": "g462",
+      "remediation": "src/domain/classify/hidden.ts finds instructions hidden from the reader and aimed at a classifier by a fixed list of English and French phrases after normalising case, accents, compatibility forms and zero-width characters. A rephrased or optimised injection, or one in another language, is not found by it; the engine still never lowers a label whatever the text says (D-05, D-04). Phase 74.3 adds an evaluated hidden-instruction model role (74.3 D-24) beside the list, and the red-team set grows with it. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+      "title": "The hidden-instruction detector matches a fixed English and French phrase list"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G463",
+      "ownerRole": "shared",
+      "poam": "g463",
+      "remediation": "The owner-confirmed marking pattern grammar of classification@1 (2026-11-25) is plain words: letters and digits, single spaces, - and /. A portion marking written (S) is therefore listed as the bare token S, which also matches any standalone capital S and can over-raise (the safe direction, which still costs people time). Decide with the owner whether a classification@2 marking pattern may carry the brackets of a portion marking, and until then list only portion tokens your organization's texts do not use as words. Source: 70.1-04 SUMMARY.",
+      "title": "Portion markings such as (S) match only as bare tokens"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "si-10",
+        "ac-16"
+      ],
+      "id": "G464",
+      "ownerRole": "maintainers",
+      "poam": "g464",
+      "remediation": "assess() reads the visible text and the hidden parts it is given; white-on-white text, tiny fonts, PDF layers and office document metadata reach it only if the caller extracts them. Phase 74.3-03 extracts plain text, Markdown (HTML comments, zero-width text, image alt text, front matter) and staff product documents with their comments; ingested files of other formats are Phase 93's. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+      "title": "The classification engine sees only the hidden parts its caller extracts"
+    },
+    {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",

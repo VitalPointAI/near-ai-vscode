@@ -41,6 +41,15 @@ test('the policy events are a list of their own, kept apart from the gate\'s rul
   assert.equal(new Set(RECORD_RULE_IDS).size, RECORD_RULE_IDS.length, 'no id is on both lists');
 });
 
+test('Phase 70.1 (D-15): the five classification label events are appended to LABEL_EVENT_IDS in order and a record accepts each', () => {
+  assert.deepEqual([...LABEL_EVENT_IDS].slice(-5), ['label.auto-raised', 'label.exception-queued', 'label.exception-resolved', 'label.could-be-lower', 'label.affirmed']);
+  assert.deepEqual([...LABEL_EVENT_IDS].slice(0, 5), ['label.set', 'label.branch-accepted', 'label.mark-raised', 'label.declassify', 'label.declassify-rejected'], 'appended, never inserted');
+  for (const event of LABEL_EVENT_IDS.slice(-5)) {
+    const record = buildDecisionRecord(input(event, { outcome: 'allowed' }));
+    assert.equal(validateDecisionRecord({ ...record, api: { ...record.api, operation: event } }).ok, true, event);
+  }
+});
+
 test('a record is valid with every known rule, and refused with a rule or an operation nobody knows', () => {
   for (const rule of RECORD_RULE_IDS) assert.equal(validateDecisionRecord(buildDecisionRecord(input(rule))).ok, true, rule);
   // The check itself still refuses a rule nobody knows (the builder and the log put one under record.unknown-rule before it gets here).

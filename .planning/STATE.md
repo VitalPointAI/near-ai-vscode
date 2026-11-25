@@ -5,13 +5,13 @@ milestone_name: Governed agent platform
 current_plan: 21
 status: executing
 stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked. Phase 33 branch: completed 33.2-05-PLAN.md and 33-14
-last_updated: "2026-11-24T23:17:20.221Z"
-state_head: ba51cb06ad298cb8b868f13b51c77daf828ab364
+last_updated: "2026-11-25T12:49:20.617Z"
+state_head: 34fef33f8daafcc3b9fb201564b92469df3eb096
 progress:
   total_phases: 12
   completed_phases: 1
   total_plans: 109
-  completed_plans: 67
+  completed_plans: 70
   percent: 8
 last_activity: 2026-11-19
 current_phase: 70
@@ -335,3 +335,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 33.2]: 33.2-03: grant pages of at most 607 v2 wraps, committed by the founding hash; a missing page holds the grant missing-blob
 - [Phase 33.2]: 33.2-04: seeds only everywhere; publishing at open behind publishKem; v1 envelopes sealed again as v2 under the same data key; HUB_KEM_KEY optional
 - [Phase 33.2]: 33.2-05: cutover rule shared by fold and hub; wrap@2 known only where the probe passes; wrap@2 at creation behind wrapV2AtCreation until 33.2-06
+- [Phase 70.1]: 70.1-01 owner checkpoint 2026-11-25: permanent shapes accepted as built; model names servedModel and endpoint; no model is { none: cause }; numbers in basis points
+- [Phase 70.1]: 70.1 engine executed on feat/phase-70.1 (01-04 complete, 05 Tasks 1-2 done); open conditions G460-G464; integration PR waits for the owner's gate approval

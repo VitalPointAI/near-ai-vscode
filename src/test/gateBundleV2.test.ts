@@ -176,13 +176,16 @@ test('D-08: a fraction anywhere in a v2 document is wrong-type, before anything 
   assert.equal(reasonOf(v2((d) => { d.reserved.maxOfflineAge = { 'org/Restricted': -1 }; })), 'wrong-type');
 });
 
-test('features: KNOWN_BUNDLE_FEATURES is FEATURE_IDS, every section but reserved has its feature, and the list is the D-06 list plus export-control@1, credentials@1 and agreements@1', () => {
+test('features: KNOWN_BUNDLE_FEATURES is FEATURE_IDS, every section but reserved has its feature, and the list is the D-06 list plus export-control@1, credentials@1, agreements@1 and classification@1', () => {
   assert.deepEqual([...KNOWN_BUNDLE_FEATURES], [...FEATURE_IDS]);
   assert.deepEqual([...FEATURE_IDS], [
     'labels@1', 'endpoints@1', 'authorizations@1', 'residency@1', 'models@1', 'agents@1', 'people@1', 'onboarding@1', 'limits@1', 'layers@1', 'export-control@1',
-    'credentials@1', 'agreements@1'
+    'credentials@1', 'agreements@1', 'classification@1'
   ]);
-  assert.deepEqual([...POLICY_SECTIONS], ['labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements']);
+  assert.deepEqual([...POLICY_SECTIONS], [
+    'labels', 'endpoints', 'authorizations', 'models', 'agents', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements',
+    'classification'
+  ]);
   assert.equal(featureForSection('reserved'), undefined);
   assert.equal(featureForSection('exportControl'), 'export-control@1');
   for (const section of POLICY_SECTIONS) {
@@ -371,6 +374,12 @@ test('every section: the full document round-trips, and each section without its
   };
   full.agreements = { v: 1, items: [{ id: 'agreement-1', partner: 'Example Partner Organization', tokens: ['GBR'], levelCeiling: 'org/Restricted', compartments: [], until: '2027-11-24T00:00:00.000Z' }] };
   full.requires = [...full.requires, 'agreements@1', 'credentials@1'].sort();
+  // Phase 70.1 (D-16): the classification section.
+  full.classification = {
+    v: 1, thresholds: { 'org/Restricted': { costRatio: 9, recallTarget: 9500, secondFamily: false } },
+    markings: [{ id: 'banner-restricted', pattern: 'RESTRICTED', label: { scale: 'org', level: 'Restricted', compartments: [], releasability: [], handling: [] } }]
+  };
+  full.requires = [...full.requires, 'classification@1'].sort();
   const parsed = parsePolicyDocument(full);
   assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
   if (!parsed.ok) return;

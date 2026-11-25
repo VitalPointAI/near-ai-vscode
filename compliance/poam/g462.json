@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "si-10"
+  ],
+  "gap": "G462",
+  "id": "g462",
+  "milestones": [
+    {
+      "phase": "74.3",
+      "title": "An evaluated hidden-instruction model role checks hidden parts beside the fixed list"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "src/domain/classify/hidden.ts finds instructions hidden from the reader and aimed at a classifier by a fixed list of English and French phrases after normalising case, accents, compatibility forms and zero-width characters. A rephrased or optimised injection, or one in another language, is not found by it; the engine still never lowers a label whatever the text says (D-05, D-04). Phase 74.3 adds an evaluated hidden-instruction model role (74.3 D-24) beside the list, and the red-team set grows with it. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+  "title": "The hidden-instruction detector matches a fixed English and French phrase list"
+}

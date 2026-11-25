@@ -28,6 +28,8 @@ import { parseCredentialsSection } from './credentialsSection';
 import type { CredentialsSection } from './credentialsSection';
 import { parseAgreementsSection } from './agreementsSection';
 import type { AgreementsSection } from './agreementsSection';
+import { parseClassificationSection } from './classificationSection';
+import type { ClassificationSection } from './classificationSection';
 import { checkKeys, childPath, isRecord, ownValue, parseIsoMillis, refused } from './shape';
 import type { Fields, Parsed, Refusal } from './shape';
 import { MAX_PAYLOAD_BYTES, verifyPayload } from '../team/signedPayload';
@@ -83,11 +85,14 @@ export interface PolicyDocument {
   readonly credentials?: CredentialsSection;
   /** Agreements with other organizations (Phase 71, D-12). */
   readonly agreements?: AgreementsSection;
+  /** How a label may be proposed and raised (Phase 70.1, D-16): thresholds, the system-high, markings and the classifier roles. */
+  readonly classification?: ClassificationSection;
 }
 
 const ENVELOPE_REQUIRED = ['bundleVersion', 'vocabulary', 'issuer', 'issuedAt', 'expiresAt', 'layer', 'requires', 'labels', 'agents'] as const;
 const ENVELOPE_OPTIONAL = [
-  'parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements'
+  'parent', 'minClient', 'endpoints', 'authorizations', 'models', 'residency', 'people', 'onboarding', 'limits', 'reserved', 'exportControl', 'credentials', 'agreements',
+  'classification'
 ] as const;
 
 function has(value: Fields, key: string): boolean {
@@ -256,6 +261,11 @@ function parseSections(value: Fields, path: string, out: Record<string, unknown>
     const exportControl = parseExportControlSection(ownValue(value, 'exportControl'), scales, childPath(path, 'exportControl'));
     if (!exportControl.ok) return exportControl;
     out['exportControl'] = exportControl.value;
+  }
+  if (has(value, 'classification')) {
+    const classification = parseClassificationSection(ownValue(value, 'classification'), scales, childPath(path, 'classification'));
+    if (!classification.ok) return classification;
+    out['classification'] = classification.value;
   }
   return checkReservedSlots(out, path) ?? checkLegalBasis(out, path);
 }

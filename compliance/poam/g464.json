@@ -1,0 +1,21 @@
+{
+  "controls": [
+    "si-10",
+    "ac-16"
+  ],
+  "gap": "G464",
+  "id": "g464",
+  "milestones": [
+    {
+      "phase": "74.3",
+      "title": "The runner extracts hidden parts of plain text, Markdown and staff product documents"
+    },
+    {
+      "phase": "93",
+      "title": "Ingest extracts the hidden parts of the file formats it accepts"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "assess() reads the visible text and the hidden parts it is given; white-on-white text, tiny fonts, PDF layers and office document metadata reach it only if the caller extracts them. Phase 74.3-03 extracts plain text, Markdown (HTML comments, zero-width text, image alt text, front matter) and staff product documents with their comments; ingested files of other formats are Phase 93's. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+  "title": "The classification engine sees only the hidden parts its caller extracts"
+}
