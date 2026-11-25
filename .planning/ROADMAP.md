@@ -1005,11 +1005,11 @@ Plans:
   1. Every npm, OCI, Go, Maven, PyPI and RPM artefact passes the owner's gates (7-day age with a named-approver fast lane, name, install scripts, licence, integrity and signature, provenance regression, publisher change, malware, vulnerabilities, source form) before use; one named person approves a flag, two approve a flagged install script or a fast lane; every state has an exit and nothing is deleted. (SSR-01, SSR-02)
   2. An approval is a promotion record signed with your organization's site key in the HSM, never the release key, bound to the artefact's digest and stored beside it with its SBOM, scan and VEX as OCI referrers that survive every copy. (SSR-03)
   3. HQ runs Harbor (OIDC sign-in, audit log in the log store, Trivy off, one robot per job, no egress) and, at the build HQ, Verdaccio (no uplink, only the intake publishes); site Zot writes an audit log; each has a passing fit entry. (SSR-04)
-  4. CI fails on any dependency or image pin not in your organization's signed approved lists; image builds take their Go, Maven, RPM and PyPI inputs only from approved files with the network off; the offline bundle carries only approved content with its records, and the site import refuses anything else. (SSR-05)
+  4. CI fails on any dependency or image pin not in your organization's signed approved lists, judged by checking code and keys taken only from the protected base ref; image builds take their Go, Maven, RPM and PyPI inputs only from approved files with the network off; the offline bundle carries only approved content with its records, and the site import refuses anything else. (SSR-05)
   5. Your organization's Grype and OSV databases are synced, checked and signed daily; everything approved is rescanned daily; new KEV, malware or high findings, overdue reviews, unmatched signatures, old databases and a stopped intake raise alerts; OpenVEX is approved and signed; sites receive the database, VEX and withdrawals by signed refresh, and a withdrawal alerts and goes to the change board. (SSR-06)
   6. The supply-registry component has statements and evidence rules for the supply chain controls, the process document and runbook exist, the OSCAL package validates, gap rows G517 to G525 are on the road-to-production page, and a lab run proved the whole path on the real stack and an air-gapped site. (SSR-07)
-  7. On the owner's go, builds run on single-use runner VMs at HQ in Canada that reach only GitHub and HQ, publish straight to HQ Harbor, GHCR is optional and audits run offline; G517 is met, and G525 records that the source and job control plane stay on GitHub. (SSR-08)
-**Plans:** 25 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-36 in `48.3-CONTEXT.md`, D-01 to D-11 the owner's accepted defaults; hand-offs H-01 to H-14 in `48.3-HANDOFFS.md`; gaps G517 to G525, G526 spare; each wave with gate files lands as one combined pull request with one owner gate approval)
+  7. On the owner's go, builds run on single-use runner VMs at HQ in Canada that reach only GitHub and HQ, publish straight to HQ Harbor from protected pushes only, GHCR is optional and audits run offline; G517 is met, and G525 records that the source and job control plane stay on GitHub. On wait, G517 is a dated POA&M item, never claimed closed. (SSR-08)
+**Plans:** 25 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-38 in `48.3-CONTEXT.md`, D-01 to D-11 the owner's accepted defaults, D-37 the rule that CI never runs the verifying code or keys of the pull request it checks; revised 2026-11-25 after the independent plan check; hand-offs H-01 to H-19 in `48.3-HANDOFFS.md`; gaps G517 to G525, and G526 if the lab has no second approver; each wave with gate files lands as one combined pull request with one owner gate approval)
 
 Plans:
 - [ ] 48.3-01-PLAN.md: Wave 1. Tracer: the owner's policy and the state machine as pure code (gates, approver counts, licence expressions, tighten-only site policy, no stuck state)
@@ -1024,17 +1024,17 @@ Plans:
 - [ ] 48.3-10-PLAN.md: Wave 4. Registry audit (Harbor forward, Zot audit log) and isolation (no egress); the supply namespace and the status object with its one narrow writer
 - [ ] 48.3-11-PLAN.md: Wave 5. Verdaccio as a SovAI-built image, its chart and per-reader accounts
 - [ ] 48.3-12-PLAN.md: Wave 5. The bundle built only from HQ approved content with records checked, the site import's check, the 2026 SBOM Minimum Elements check (wave gate)
-- [ ] 48.3-13-PLAN.md: Wave 5. The npm intake: age-limited resolution, registry signatures, provenance, malware and vulnerability gates, exact-bytes publish; the signed approved lists
-- [ ] 48.3-14-PLAN.md: Wave 6 (on 47-18's lab). The CI input check; the npm and images baseline judged, approved by named people and signed by the owner
-- [ ] 48.3-15-PLAN.md: Wave 7. CI enforces the approved lists; the trusted key folder becomes a gate path (wave gate)
-- [ ] 48.3-16-PLAN.md: Wave 7. Go, Maven, PyPI and RPM snapshots recorded file by file, judged and signed into lists
-- [ ] 48.3-17-PLAN.md: Wave 8. oauth2-proxy and the Theia Cloud images built from approved Go and Maven files with the network off (wave gate)
+- [ ] 48.3-13-PLAN.md: Wave 5. The npm intake: age-limited resolution, registry signatures, provenance, malware and vulnerability gates, exact-bytes publish; the signed approved lists with serial, withdrawn and held entries; the verifying code and keys become gate paths
+- [ ] 48.3-14-PLAN.md: Wave 6 (on 47-18's lab). The npm and images baseline judged, approved by named people (install-script items held under G526 without a second approver) and signed by the owner; the build HQ key lands (wave gate)
+- [ ] 48.3-15-PLAN.md: Wave 7. The input check, which CI runs only from the protected base ref with the base's key, so a pull request cannot change what it is judged by (wave gate)
+- [ ] 48.3-16-PLAN.md: Wave 7. Go, Maven, PyPI and RPM snapshots recorded file by file, judged and signed into lists; snapshotsAtHq in the records; the fetch tool
+- [ ] 48.3-17-PLAN.md: Wave 8. oauth2-proxy and the Theia Cloud images built from approved Go and Maven files with the network off, fetched by the base ref's code (wave gate)
 - [ ] 48.3-18-PLAN.md: Wave 9. postgres, the test HSM image and the workbench take approved, signature-checked RPMs; trestle from approved wheels (wave gate)
 - [ ] 48.3-19-PLAN.md: Wave 8. Daily database sync and signing, rescans dated by the database, state moves, reconciliation, alert rules with guards
 - [ ] 48.3-20-PLAN.md: Wave 9. OpenVEX with approvals; the signed refresh with the database, VEX and withdrawals; the site's alert and change record
 - [ ] 48.3-21-PLAN.md: Wave 10. The process document and runbook, statements and evidence rules, the component in the hosted levels, OSCAL (wave gate)
 - [ ] 48.3-22-PLAN.md: Wave 10 (on 47-18's lab). Lab run on the real stack and an air-gapped site
-- [ ] 48.3-23-PLAN.md: Wave 11. Owner decision on runners in Canada; the runner egress allow-list and single-use runner VMs
+- [ ] 48.3-23-PLAN.md: Wave 11. Owner decision on runners in Canada (default wait: G517 becomes a dated POA&M item); on go, the runner egress allow-list and single-use runner VMs
 - [ ] 48.3-24-PLAN.md: Wave 12 (after the owner's go). The runner golden image and pin; build, image and publish jobs on HQ runners reading HQ's registries (wave gate)
 - [ ] 48.3-25-PLAN.md: Wave 13. Publication to HQ, GHCR optional, offline audits; G517 met (wave gate)
 

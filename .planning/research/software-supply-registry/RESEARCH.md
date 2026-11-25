@@ -607,11 +607,13 @@ Proposed so both pieces use the same words (the sovereignty-status research is n
 
 ## Open Questions
 
-1. **Verdaccio line: 6.11.x or 7.x?** The README names a maintained 6.x branch (Node 22+) and a 9-next master (Node 24+); npm's `latest` is 7.1.2. Recommendation: the planner reads the pinned version's changelog and Node requirement; pick the newest version older than the age gate that runs on `ubi9/nodejs-22`.
-2. **Does Verdaccio keep upstream `dist.signatures` and attestations when a tarball is published into it?** Unknown. Recommendation: don't rely on it; consumers rely on lockfile `integrity` plus our signed intake record.
-3. **Hauler vs ORAS for pushing referrers on non-image artifacts.** Recommendation: spike with hauler 2.1.2 first (already pinned).
-4. **Harbor accessory handling of `vuln` and `openvex` attestations.** Recommendation: lab spike in step 2.
-5. **Field-by-field check of our CycloneDX against the 2026 Minimum Elements.** Recommendation: a small task in step 2.
+**All five RESOLVED by Phase 48.3's plans (2026-11-25):** 1 by spike S-C (48.3-06; the version rule in 48.3-CONTEXT D-13 and D-36); 2 by not relying on it (D-17, D-20: lockfile integrity plus our signed record, exact bytes through the publish API, proven in 48.3-06); 3 by spike S-B (48.3-03; ORAS only if hauler cannot); 4 by spike S-A for Zot (48.3-02) and the lab run for Harbor (48.3-22); 5 by 48.3-12 (the field check against the 2026 Minimum Elements, G523).
+
+1. **(RESOLVED: 48.3-06, D-13, D-36) Verdaccio line: 6.11.x or 7.x?** The README names a maintained 6.x branch (Node 22+) and a 9-next master (Node 24+); npm's `latest` is 7.1.2. Recommendation: the planner reads the pinned version's changelog and Node requirement; pick the newest version older than the age gate that runs on `ubi9/nodejs-22`.
+2. **(RESOLVED: not relied on; D-17, D-20, 48.3-06) Does Verdaccio keep upstream `dist.signatures` and attestations when a tarball is published into it?** Unknown. Recommendation: don't rely on it; consumers rely on lockfile `integrity` plus our signed intake record.
+3. **(RESOLVED: spike S-B, 48.3-03) Hauler vs ORAS for pushing referrers on non-image artifacts.** Recommendation: spike with hauler 2.1.2 first (already pinned).
+4. **(RESOLVED: spike S-A, 48.3-02, for Zot; the lab run, 48.3-22, for Harbor) Harbor accessory handling of `vuln` and `openvex` attestations.** Recommendation: lab spike in step 2.
+5. **(RESOLVED: 48.3-12, G523) Field-by-field check of our CycloneDX against the 2026 Minimum Elements.** Recommendation: a small task in step 2.
 
 ## Environment Availability
 
