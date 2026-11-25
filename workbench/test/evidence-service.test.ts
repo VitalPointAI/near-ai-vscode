@@ -396,6 +396,17 @@ test('live: a site file landing in the mount reaches a waiting view within one 3
   assert.equal(timers.pending, 0, 'no timer left running');
 });
 
+test('check phase: a read asked for between two checks does not push the next check back; the file is read at the next 30-second tick', async () => {
+  // Found by the browser check (48.2-16): the page's first read lands between ticks, and the tick after it was skipped as "not due".
+  const { clock, trustDir, timers, reader } = siteSession();
+  await timers.advance(5_000);
+  assert.equal((await reader.getEvidence()).site.verification, 'none');
+  writeSite(trustDir, { trust: trustDocument(clock.now), live: liveFeed(clock.now - MINUTE, { openbao: openbao(clock.now), nodes: nodes(clock.now) }) });
+  await timers.advance(25_000);
+  assert.equal((await reader.getEvidence()).site.verification, 'verified', 'read at the tick 25 seconds after the file landed');
+  reader.dispose();
+});
+
 test('timeout: with no change, waitForEvidence resolves after 55 seconds with the same revision', async () => {
   const { timers, reader } = siteSession();
   const first = await reader.getEvidence();

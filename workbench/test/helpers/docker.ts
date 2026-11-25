@@ -102,9 +102,9 @@ export async function waitHealthy(name: string, url: string, timeoutMs = 120_000
   assert.fail(`The workbench did not answer /healthz within ${timeoutMs / 1000} s.\n${logs.stdout.slice(-4000)}\n${logs.stderr.slice(-4000)}`);
 }
 
-/** Runs one Playwright spec against the started workbench (WORKBENCH_URL), from workbench/. */
-export function runPlaywright(spec: string, env: NodeJS.ProcessEnv): Promise<Result> {
-  return run('npx', ['playwright', 'test', '-c', 'test/e2e/playwright.config.ts', spec], { cwd: workbenchRoot, env: { ...process.env, ...env } });
+/** Runs one Playwright spec against the started workbench (WORKBENCH_URL), from workbench/; `args` adds options such as `--grep`. */
+export function runPlaywright(spec: string, env: NodeJS.ProcessEnv, args: string[] = []): Promise<Result> {
+  return run('npx', ['playwright', 'test', '-c', 'test/e2e/playwright.config.ts', spec, ...args], { cwd: workbenchRoot, env: { ...process.env, ...env } });
 }
 
 /** Removes the containers this suite started and the image it built; never anything else. */

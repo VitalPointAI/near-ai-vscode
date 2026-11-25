@@ -506,10 +506,14 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
     }
   }
 
-  /** Reads the sources when due, judges when they changed or when a re-judge is due, and issues a new revision when the model differs. */
-  async function refresh(): Promise<void> {
+  /**
+   * Reads the sources when due, judges when they changed or when a re-judge is due, and issues a new revision when the model differs.
+   * The 30-second tick always reads (`tick`), so a read a caller asked for between two ticks never pushes the next one back: a file that
+   * lands in the mount is read within one check, not two (48.2-16).
+   */
+  async function refresh(tick = false): Promise<void> {
     const now = clock();
-    const changed = now - sourcesReadAt >= SOURCE_CHECK_MS ? await readSources(now) : false;
+    const changed = tick || now - sourcesReadAt >= SOURCE_CHECK_MS ? await readSources(now) : false;
     if (!snapshot || changed || now - judgedAt >= REJUDGE_MS) {
       const model = await judge(new Date(now));
       judgedAt = now;
@@ -530,8 +534,8 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
     }
   }
   /** One refresh at a time, in call order: a check asked for while one runs reads the sources again after it. */
-  function check(): Promise<void> {
-    const next = chain.then(() => refresh());
+  function check(tick = false): Promise<void> {
+    const next = chain.then(() => refresh(tick));
     chain = next.catch(() => undefined);
     return next;
   }
@@ -563,7 +567,7 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
 
   const service: EvidenceService = {
     start(): void {
-      interval ??= timers.setInterval(() => check(), SOURCE_CHECK_MS);
+      interval ??= timers.setInterval(() => check(true), SOURCE_CHECK_MS);
     },
     dispose(): void {
       if (interval !== undefined) timers.clearInterval(interval);
