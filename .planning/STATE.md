@@ -5,8 +5,8 @@ milestone_name: Governed agent platform
 current_plan: 21
 status: executing
 stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
-last_updated: "2026-11-24T23:17:20.221Z"
-state_head: ba51cb06ad298cb8b868f13b51c77daf828ab364
+last_updated: "2026-11-25T12:11:31.535Z"
+state_head: 7dce3ff2652e2d74ac62d5721cb7683f4651f70c
 progress:
   total_phases: 12
   completed_phases: 1
@@ -330,3 +330,4 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-16: longhorn-crypto is a bootstrap secret made in memory before the first encrypted volume (OpenBao's own volume needs it); apply runs the secrets step after the unseal
 - [Phase 47]: 47-16: registry-images.tar is site-neutral in the bundle; install.mjs node-files names it for the site registry, checked against the signed manifest
 - [Phase 47]: 47-27: drill.mjs plan reads every schedule from the rendered releases; drill verify restores into scratch copies only, with --confirm <siteName>
+- [Phase 70.1]: 70.1-01 owner checkpoint 2026-11-25: permanent shapes accepted as built; model names servedModel and endpoint; no model is { none: cause }; numbers in basis points
