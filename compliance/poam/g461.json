@@ -1,0 +1,20 @@
+{
+  "controls": [
+    "ac-16"
+  ],
+  "gap": "G461",
+  "id": "g461",
+  "milestones": [
+    {
+      "phase": "74.3",
+      "title": "The operator guide says how your organization's security officer sets thresholds, the system-high, markings, code words and guide rules"
+    },
+    {
+      "targetDate": "2027-03-31",
+      "title": "Your organization signs a classification@1 section before automatic raises are used at Protected A or above"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Nothing ships as values (70.1 D-07): a level with no threshold has no automatic model raise, a section with no systemHigh gives no possible-spill outcome, and no marking pattern, code word or guide rule is built in. Your organization's security officer sets the cost ratios and recall targets per level, the system-high of each deployment layer, the English and French banner and portion markings, the code-word list (labelled at its own level) and the guide and compilation rules from your organization's security classification guide, signed in the classification@1 section. Phase 74.3 documents how. Source: 70.1-CONTEXT.md D-07, D-13, D-16.",
+  "title": "Classification thresholds, the system-high, markings, code words and guide rules are your organization's to set"
+}
