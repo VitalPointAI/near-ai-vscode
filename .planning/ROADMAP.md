@@ -757,12 +757,12 @@ Plans:
   4. Base TDF objects from the public OpenTDF specification go out to a partner's key and come in through our own non-exportable receiving key in OpenBao. (XCHG-04)
 **Research flags**: (1) Never design the ZTDF half from vendor descriptions (research pitfall 13). (2) Not a cross-domain guard and not accreditation (pitfall 14). (3) The OAEP hash partners accept (45.1-02).
 **Undo cost**: Medium. The label table is policy data; the exchange records are permanent in shared logs (settled at 45.1-03's checkpoint).
-**Plans:** 1/5 plans executed in 5 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-10 and four owner items in `45.1-CONTEXT.md`)
+**Plans:** 2/5 plans executed in 5 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-10 and four owner items in `45.1-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
 - [x] 45.1-01-PLAN.md: Wave 1. Tracer: the `labelInterop` table (feature `label-interop@1`) and the signed label binding
-- [ ] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
+- [x] 45.1-02-PLAN.md: Wave 2. Base TDF from the public OpenTDF specification; partner key access; our receiving key in OpenBao
 - [ ] 45.1-03-PLAN.md: Wave 3. The exchange adapter at the release boundary, with the exchange record shapes checkpoint
 - [ ] 45.1-04-PLAN.md: Wave 4. The binding on every release copy; Export for a partner and Received objects in the workbench
 - [ ] 45.1-05-PLAN.md: Wave 5. SECURITY.md, the full suites once, the verification record, the integration PR after the owner's gate approval
@@ -2185,7 +2185,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 43. Programme and portfolio offices, the capital tab | 0/TBD | Not started (after Phases 42 and 39) | - |
 | 44. Accreditation evidence and compliance dashboard | 18/19 | In Progress (no dependency in flight; may run beside any phase) | - |
 | 44.1. Accreditation control implementation and evidence closure | 1/4 local | Control triage and implementation underway | - |
-| 45.1. NATO and Five Eyes exchange, part 1 | 1/5 | In Progress 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
+| 45.1. NATO and Five Eyes exchange, part 1 | 2/5 | In Progress 2026-11-24 (after Phase 71 plans 03, 06 and 07; 45.1-04 after 33.1-21) | - |
 | 45.2. NATO and Five Eyes exchange, part 2 (ZTDF) | 0/12 | Planned 2026-11-24 (after 45.1's plans; 45.2-12 waits for a partner's KAS and samples) | - |
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 21/33 | In Progress 2026-11-23 (beside 46) | - |
