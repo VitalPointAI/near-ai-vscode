@@ -6,6 +6,9 @@
 //           entity exists with its alias on the jwt mount (the alias name is the Keycloak user id, the `sub` the jwt roles bind to) and creates
 //           the two Transit keys, non-exportable: person-<entity> (ed25519, signing) and kek-<entity> (aes256-gcm96, key encryption). Until
 //           then the person can sign in but cannot sign. A second run changes nothing. The workbench never creates or deletes keys.
+//           A member of the Keycloak group guests (deploy/keycloak/guests.mjs, D-61, D-62) is a guest: the account must be enabled with a
+//           guestUntil in the future, and the entity is named guest-<Keycloak id> (staff: keycloak-<id>). A staff entity never becomes a
+//           guest entity or back.
 //   rebind: after the runbook has revoked the old credentials in Keycloak and the person has a new account with two new keys, moves the
 //           person's jwt alias from the old Keycloak user id to the new one, so the same entity, secrets and keys stay theirs.
 //
@@ -21,6 +24,9 @@ import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openbaoClient } from './apply.mjs';
+
+const GUESTS_GROUP = '/guests';
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 export const PASSWORDLESS = 'webauthn-passwordless';
 export const JWT_MOUNT = 'jwt';
@@ -54,13 +60,27 @@ async function jwtAccessor(bao) {
   return accessor;
 }
 
-/** The entity whose alias on the jwt mount is `sub`, as { entityId, aliasId } or null. */
+/** The entity whose alias on the jwt mount is `sub`, as { entityId, aliasId, name } or null. */
 async function lookupAlias(bao, accessor, sub) {
   const result = await bao('POST', 'identity/lookup/entity', { alias_name: sub, alias_mount_accessor: accessor });
   if (result.status === 204 || !result.data?.data) return null;
   const data = ok(result, 'look up entity');
   const alias = (data.aliases ?? []).find((entry) => entry.name === sub && entry.mount_accessor === accessor);
-  return { entityId: data.id, aliasId: alias?.id };
+  return { entityId: data.id, aliasId: alias?.id, name: data.name };
+}
+
+/**
+ * Whether the account is a guest, after the guest rules (D-61): an enabled account with a guestUntil in the future. Throws before any OpenBao
+ * call when a guest breaks one.
+ */
+async function guestAccount(keycloak, user, now) {
+  const guest = (await keycloak.groups(user.id)).some((group) => group.path === GUESTS_GROUP);
+  if (!guest) return false;
+  if (user.enabled === false) throw new Error(`${user.username ?? user.id}'s guest account is disabled; an ended guest is not enrolled.`);
+  const until = user.attributes?.guestUntil?.[0];
+  if (!until || !UTC_INSTANT.test(until)) throw new Error(`${user.username ?? user.id} is a guest without a valid end date (guestUntil ${JSON.stringify(until ?? null)}); set it with guests.mjs extend.`);
+  if (!(Date.parse(until) > now)) throw new Error(`${user.username ?? user.id}'s guest account ended at ${until}; extend it with guests.mjs extend before enrolling.`);
+  return true;
 }
 
 /** Refuses unless the Keycloak user has two distinct passwordless keys; returns the user. */
@@ -73,13 +93,33 @@ async function userWithTwoKeys(keycloak, username) {
 }
 
 /** Enrols a person (see the top of this file). Returns { entityId, created } (what was created this run). */
-export async function enrolPerson({ username, keycloak, bao }) {
+export async function enrolPerson({ username, keycloak, bao, now = Date.now() }) {
   const user = await userWithTwoKeys(keycloak, username);
+  const guest = await guestAccount(keycloak, user, now);
+  const prefix = guest ? 'guest' : 'keycloak';
   const created = [];
   const accessor = await jwtAccessor(bao);
   let found = await lookupAlias(bao, accessor, user.id);
+  if (found && typeof found.name === 'string' && !found.name.startsWith(`${prefix}-`)) {
+    throw new Error(`${username}'s OpenBao entity is ${found.name}, but the account is ${guest ? 'a guest' : 'staff'}; a staff entity never becomes a guest entity or back. An administrator checks the account.`);
+  }
+  if (!found && guest) {
+    // An entity of this name without the person's alias was not made by this script, or a run stopped half way. Only the second is adopted:
+    // it is enabled and names this Keycloak id. (A disabled one with no metadata can be written by any token that may disable guest entities.)
+    const existing = await bao('GET', `identity/entity/name/guest-${user.id}`);
+    if (existing.status === 200 && existing.data?.data) {
+      const entity = existing.data.data;
+      if (entity.disabled || entity.metadata?.keycloak_user_id !== user.id || entity.metadata?.account !== 'guest') {
+        throw new Error(`OpenBao already has an entity guest-${user.id} that this script did not make (disabled or without this account's id); an administrator checks it before ${username} is enrolled.`);
+      }
+      ok(await bao('POST', 'identity/entity-alias', { name: user.id, canonical_id: entity.id, mount_accessor: accessor }), 'create entity alias');
+      created.push('alias');
+      found = { entityId: entity.id };
+    }
+  }
   if (!found) {
-    const entity = ok(await bao('POST', 'identity/entity', { name: `keycloak-${user.id}`, metadata: { keycloak_user_id: user.id } }), 'create entity');
+    const metadata = guest ? { keycloak_user_id: user.id, account: 'guest' } : { keycloak_user_id: user.id };
+    const entity = ok(await bao('POST', 'identity/entity', { name: `${prefix}-${user.id}`, metadata }), 'create entity');
     ok(await bao('POST', 'identity/entity-alias', { name: user.id, canonical_id: entity.id, mount_accessor: accessor }), 'create entity alias');
     created.push('entity', 'alias');
     found = { entityId: entity.id };
@@ -108,7 +148,7 @@ export async function rebindPerson({ username, fromSub, keycloak, bao }) {
   return { entityId: old.entityId };
 }
 
-/** The Keycloak admin REST client the CLI uses: findUser(username), credentials(userId). */
+/** The Keycloak admin REST client the CLI uses: findUser(username), credentials(userId), groups(userId). */
 export function keycloakClient({ base, realm, token, caPem }) {
   const get = (apiPath) => new Promise((resolve, reject) => {
     const request = https.request(new URL(`/admin/realms/${encodeURIComponent(realm)}/${apiPath}`, base), { method: 'GET', ca: caPem, headers: { authorization: `Bearer ${token}` } }, (response) => {
@@ -121,7 +161,8 @@ export function keycloakClient({ base, realm, token, caPem }) {
   });
   return {
     findUser: async (username) => (await get(`users?username=${encodeURIComponent(username)}&exact=true`))[0],
-    credentials: (userId) => get(`users/${encodeURIComponent(userId)}/credentials`)
+    credentials: (userId) => get(`users/${encodeURIComponent(userId)}/credentials`),
+    groups: (userId) => get(`users/${encodeURIComponent(userId)}/groups`)
   };
 }
 

@@ -5,7 +5,8 @@
     "smtp": "The site's own mail server, which carries the passwordless registration link an administrator sends (D-33). A person can also enrol in person.",
     "redirectUris": "Where the sterling-sessions client may return after sign-in: the oauth2-proxy callback of every session host and the landing page.",
     "x509": "The optional smart-card sign-in (D-32), off by default. When enabled it becomes the browser flow; revocation is checked by a local OCSP responder or a CRL file refreshed on a schedule. webauthnRequired says whether the card is followed by a WebAuthn ceremony. The ingress must request and forward client certificates (47-13). The step-up level is not in this flow, so signing is refused while it is the browser flow.",
-    "hqBroker": "Optional sign-in through HQ's Keycloak for an edge site linked to HQ (D-36), off by default. issuer is HQ's realm address (https://keycloak.<HQ domain>/realms/sterling) and clientId the client HQ registered for this site; the client secret goes in the Secret keycloak-hq-broker (key client-secret) in sterling-identity, never in this file. HQ's first sign-in only links the local person with the same email (people arrive by signed user export, deploy/keycloak/users.mjs) and never creates one. People keep signing in here with their own keys when the link is down, and signing always needs a fresh ceremony with a key registered here."
+    "hqBroker": "Optional sign-in through HQ's Keycloak for an edge site linked to HQ (D-36), off by default. issuer is HQ's realm address (https://keycloak.<HQ domain>/realms/sterling) and clientId the client HQ registered for this site; the client secret goes in the Secret keycloak-hq-broker (key client-secret) in sterling-identity, never in this file. HQ's first sign-in only links the local person with the same email (people arrive by signed user export, deploy/keycloak/users.mjs) and never creates one. People keep signing in here with their own keys when the link is down, and signing always needs a fresh ceremony with a key registered here.",
+    "guests": "Guest accounts for people from outside your organization who observe shared work (D-58 to D-63, deploy/keycloak/guests.mjs). Turn guests on only on a release that includes 71-12: the security contact issues each guest's credentials in their own session, and without it a guest holds none. maxDays: the longest a guest's end date may be from the moment it is set; 0 or absent turns guests off at this site. checkMinutes: how often the automatic end looks for guests past their end date. sessionsNamespace: the namespace of the Theia Cloud Session records, which ending a guest stops."
   },
   "eventsExpirationSeconds": 7776000,
   "smtp": {
@@ -25,5 +26,10 @@
     "enabled": false,
     "issuer": "",
     "clientId": ""
+  },
+  "guests": {
+    "maxDays": 90,
+    "checkMinutes": 15,
+    "sessionsNamespace": "theia-cloud"
   }
 }

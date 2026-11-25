@@ -43,7 +43,12 @@ function fakeBao() {
     if (method === 'GET' && apiPath === 'sys/auth') return reply(200, { 'jwt/': { type: 'jwt', accessor: 'auth_jwt_1' } });
     if (apiPath === 'identity/lookup/entity') {
       const alias = [...aliases.values()].find((entry) => entry.name === body.alias_name && entry.mount_accessor === body.alias_mount_accessor);
-      return alias ? reply(200, { id: alias.canonical_id, aliases: [alias] }) : { status: 204, data: null };
+      return alias ? reply(200, { id: alias.canonical_id, name: entities.get(alias.canonical_id)?.name, aliases: [alias] }) : { status: 204, data: null };
+    }
+    if (method === 'GET' && apiPath.startsWith('identity/entity/name/')) {
+      const name = apiPath.slice('identity/entity/name/'.length);
+      const entry = [...entities.entries()].find(([, value]) => value.name === name);
+      return entry ? reply(200, { id: entry[0], ...entry[1] }) : { status: 404, data: { errors: [] } };
     }
     if (apiPath === 'identity/entity') { next += 1; const id = `entity-${next}`; entities.set(id, body); return reply(200, { id }); }
     if (apiPath === 'identity/entity-alias') { next += 1; const id = `alias-${next}`; aliases.set(id, { id, ...body }); return reply(200, { id }); }
@@ -56,12 +61,13 @@ function fakeBao() {
     }
     return { status: 404, data: { errors: [`unexpected ${method} ${apiPath}`] } };
   };
-  return { request, calls, keys, aliases, writes: () => calls.filter((call) => call.method === 'POST' && call.path !== 'identity/lookup/entity') };
+  return { request, calls, keys, aliases, entities, writes: () => calls.filter((call) => call.method === 'POST' && call.path !== 'identity/lookup/entity') };
 }
 
 const keycloak = (users) => ({
   findUser: async (username) => users[username]?.user,
-  credentials: async (id) => Object.values(users).find((entry) => entry.user.id === id)?.credentials ?? []
+  credentials: async (id) => Object.values(users).find((entry) => entry.user.id === id)?.credentials ?? [],
+  groups: async (id) => Object.values(users).find((entry) => entry.user.id === id)?.groups ?? []
 });
 
 test('one registered passwordless key is refused before any OpenBao call', async () => {

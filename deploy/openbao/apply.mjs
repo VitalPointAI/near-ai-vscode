@@ -19,7 +19,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
-export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager']);
+export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
