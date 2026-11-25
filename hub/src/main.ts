@@ -1,5 +1,6 @@
 // Copied from relay/src/main.ts and adapted for the hub (D-28).
 import { createPrivateKey, X509Certificate } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,11 +14,13 @@ import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
 import { createHubServer, endUploads, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
+import { createTrustRoutes } from './http/trustRoutes';
 import { JoinDesk, type JoinChecks, type JoinLog } from './join';
 import { EventHub, realScheduler, type Scheduler } from './live/events';
 import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
+import { TrustStore, type OrganizationSource } from './store/trustStore';
 import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
 import { Logger, printKeyFile, stdoutLine } from './log/logger';
 import { Redactor } from './log/redact';
@@ -161,6 +164,8 @@ export interface HubParts {
   joinChecks?: JoinChecks;
   /** The join desk's log lines (project id, invite id and a reason word). */
   onJoinLog?: JoinLog;
+  /** Your organization's signed rules and key (71-09); without them the trust routes answer 503 and the hub judges no evidence. */
+  organization?: OrganizationSource;
 }
 
 export interface ComposedHub {
@@ -174,6 +179,8 @@ export interface ComposedHub {
   checkpoints: Checkpointer | undefined;
   /** Invitations and join requests (32-25); its 7 day removal runs at start and every hour. */
   join: JoinDesk;
+  /** The DID logs, status lists and cited status entries the hub hosts (71-09). */
+  trust: TrustStore;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -182,6 +189,7 @@ export function composeHub(parts: HubParts): ComposedHub {
   const { store, identity } = parts;
   const cache = new RosterCache(store, identity, { now: () => new Date(now()) });
   const limits = new RateLimits(parts.rateLimits);
+  const trust = new TrustStore(store, parts.organization ?? { text: undefined, key: undefined });
   const sessions = new SessionRegistry({
     hub: identity.writer,
     store,
@@ -204,6 +212,7 @@ export function composeHub(parts: HubParts): ComposedHub {
   });
   join.start(parts.scheduler ?? realScheduler);
   const routes = createRoutes({
+    trust: createTrustRoutes({ trust, cache, sessions, now }),
     store,
     cache,
     sessions,
@@ -241,12 +250,25 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence, checkpoints, join };
+  return { server, sessions, cache, limits, events, presence, checkpoints, join, trust };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
 export function sweepBlobsOnce(store: HubStore, now: number): Promise<number> {
   return store.sweepBlobs(now);
+}
+
+/** Reads your organization's rules file from the configuration; undefined when unset or unreadable. */
+async function organizationOf(config: HubConfig): Promise<OrganizationSource> {
+  let text: string | undefined;
+  if (config.organizationPolicy !== undefined) {
+    try {
+      text = await readFile(config.organizationPolicy, 'utf8');
+    } catch {
+      text = undefined;
+    }
+  }
+  return { text, key: config.organizationKey };
 }
 
 /** The days of --hub-file: the default 7 when none is given, a whole number otherwise (issueHubFile checks the range). */
@@ -400,6 +422,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
   const openStore = store;
 
+  // Your organization's rules for the trust routes (71-09). A file that cannot be read leaves the routes answering 503; the projects keep syncing.
+  const organization = await organizationOf(config);
+  if (config.organizationPolicy !== undefined && organization.text === undefined) logger.warn('trust.policy_unreadable', { setting: 'HUB_ORGANIZATION_POLICY' });
+
   const health = new HealthRegistry({ version: __HUB_VERSION__, startedAt: Date.now() });
   let composed: ComposedHub;
   try {
@@ -411,6 +437,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
       onCheckpointLog: (level, event, fields) => logger[level](event, fields),
       onJoinLog: (level, event, fields) => logger[level](event, fields),
+      organization,
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);

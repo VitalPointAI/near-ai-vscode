@@ -23,7 +23,7 @@ export function newKey(): Key {
   return { multikey, did, signer: { verificationMethod: `${did}#${multikey}`, suite: 'eddsa-jcs-2022', sign: async (bytes) => new Uint8Array(cryptoSign(null, bytes, privateKey)) } };
 }
 
-export interface Person { did: string; issuing: Key; method: string; state: WebvhState; signer: CredentialSigner }
+export interface Person { did: string; issuing: Key; method: string; state: WebvhState; signer: CredentialSigner; /** The did:webvh log, for a host that serves it. */ log: string }
 
 function document(assertionKey: string): (did: string) => Record<string, unknown> {
   return (did) => ({
@@ -39,7 +39,7 @@ export async function person(path: string[], issuing: Key = newKey()): Promise<P
   const result = verifyWebvhLog(genesis.line, { now: Date.UTC(2026, 10, 24) });
   if (!result.ok) throw new Error(result.reason);
   const method = `${genesis.did}#issuing`;
-  return { did: genesis.did, issuing, method, state: result.state, signer: { ...issuing.signer, verificationMethod: method } };
+  return { did: genesis.did, issuing, method, state: result.state, signer: { ...issuing.signer, verificationMethod: method }, log: `${genesis.line}\n` };
 }
 
 export const REVOCATIONS = 'https://hq.example.org/v1/trust/status/revocation-1';

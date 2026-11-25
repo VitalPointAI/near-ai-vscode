@@ -138,10 +138,25 @@ export function closureOf(repoRoot: string, start: readonly string[]): Closure {
   return { files: [...seen].sort(), problems };
 }
 
+/**
+ * The credential checking the hub runs as your organization's trust host and enforcement point (Phase 71, 71-09): pure domain code outside
+ * src/domain/replica, so it is not in HUB_SIDE. Entries ending in '/' name every file under that folder. Its closure must stay as pure as the
+ * replica's (the workspace test checks it reaches no editor API, Yjs, package or vendor path).
+ */
+export const HUB_TRUST_SIDE: readonly string[] = ['domain/credentials/', 'domain/did/', 'domain/gate/credentialsSection', 'domain/gate/enrolment'];
+
 /** The hub-side modules and everything they import, value or type-only, as files under src. */
 export function hubSideClosure(repoRoot: string): string[] {
   const hubSide = readHubSide(repoRoot);
   const start = sourcesUnder(repoRoot, REPLICA).filter((file) => isHubSide(hubSide, stemOf(file)));
+  for (const entry of HUB_TRUST_SIDE) {
+    if (entry.endsWith('/')) start.push(...sourcesUnder(repoRoot, entry.slice(0, -1)));
+    else {
+      const file = resolveUnderSrc(repoRoot, entry);
+      if (file === undefined) throw new Error(`The hub trust module ${entry} names no file under src.`);
+      start.push(file);
+    }
+  }
   return closureOf(repoRoot, start).files;
 }
 

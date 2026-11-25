@@ -6,7 +6,7 @@ import { HUB_SECRETS } from './secrets';
 // back to the default directory, so it stops startup. The secret names and their NAME_FILE settings belong to the secret loader (src/secrets.ts),
 // which refuses a plain secret with its own sentence, so they are left to it here. Errors name the variable and never repeat its value.
 
-export const HUB_SETTINGS = ['HUB_HOST', 'HUB_PORT', 'HUB_STATE_DIR', 'HUB_PUBLIC_ADDRESS'] as const;
+export const HUB_SETTINGS = ['HUB_HOST', 'HUB_PORT', 'HUB_STATE_DIR', 'HUB_PUBLIC_ADDRESS', 'HUB_ORGANIZATION_POLICY', 'HUB_ORGANIZATION_KEY'] as const;
 
 export interface HubConfig {
   host: string;
@@ -14,6 +14,10 @@ export interface HubConfig {
   stateDir: string;
   /** The address devices use to reach this hub (host or host:port), when the operator set one. */
   publicAddress: string | undefined;
+  /** Your organization's signed rules (the organization layer with credentials@1), when set: the hub hosts trust routes only with them (71-09). */
+  organizationPolicy: string | undefined;
+  /** The public key (base64url, 32 bytes) those rules must be signed by. */
+  organizationKey: string | undefined;
 }
 
 export class ConfigError extends Error {
@@ -73,5 +77,19 @@ export function loadConfig(env: NodeJS.ProcessEnv, defaults: { stateDir: string 
     publicAddress = rawPublic;
   }
 
-  return { host, port, stateDir, publicAddress };
+  let organizationPolicy: string | undefined;
+  const rawPolicy = env.HUB_ORGANIZATION_POLICY;
+  if (rawPolicy !== undefined && rawPolicy !== '') {
+    if (!path.isAbsolute(rawPolicy)) throw new ConfigError('HUB_ORGANIZATION_POLICY', 'must be an absolute path to your organization\'s signed rules file');
+    organizationPolicy = rawPolicy;
+  }
+
+  let organizationKey: string | undefined;
+  const rawKey = env.HUB_ORGANIZATION_KEY;
+  if (rawKey !== undefined && rawKey !== '') {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(rawKey)) throw new ConfigError('HUB_ORGANIZATION_KEY', 'must be your organization\'s public key: 43 base64url characters');
+    organizationKey = rawKey;
+  }
+
+  return { host, port, stateDir, publicAddress, organizationPolicy, organizationKey };
 }
