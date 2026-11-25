@@ -52,6 +52,7 @@
 !src/domain/gate/labelInteropSection.ts
 !src/domain/gate/labels.ts
 !src/domain/gate/models.ts
+!src/domain/gate/passportState.ts
 !src/domain/gate/passportStep.ts
 !src/domain/gate/placeWords.ts
 !src/domain/gate/policyDocument.ts
