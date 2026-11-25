@@ -63,6 +63,22 @@ test('tracer: Blake\'s selection in his editor shows in Avery\'s editor over the
   }, { timers });
 });
 
+test('a selection still goes out when each part of the tab holds its own wrapper of the editor (found by the two-browser run)', async () => {
+  const timers = new FakeTimers();
+  await withProduct(async ({ avery, blake, stream }) => {
+    const left = await openBound(avery);
+    const tab = new FakeTab(blake.service);
+    const model = new FakeSourceModel(blake.uri, '');
+    const right = tab.open(model, { wrapperEach: true });
+    await until(() => tab.contribution.bindings().find((item) => item.model === model)?.state, (state) => state === 'bound', 'Blake\'s bound product');
+    const at = model.textModel.getValue().indexOf('three');
+    right.select(at, at);
+    await settle();
+    await cursorSent(blake, avery, stream);
+    await until(() => carets(left.editor).length, (count) => count === 1, 'Blake\'s caret in Avery\'s editor');
+  }, { timers });
+});
+
 test('the hover is plain text that renders no link, HTML or icon, and the label is the name as given', () => {
   const name = '"><style>body{display:none}</style><img src=x onerror=alert(1)> [x](javascript:alert(1)) $(zap) **Robin**';
   const markdown = plainMarkdown(name);
@@ -95,12 +111,18 @@ test('50 selection changes in one second send at most 10 cursor messages, and th
     const left = await openBound(avery);
     const right = await openBound(blake);
     await settle();
-    blake.replicator.posts.length = 0;
     const base = right.model.textModel.getValue().length - SEED.length;
+    // Warm the product's presence keys before measuring the burst.
+    right.editor.select(base, base);
+    await until(() => blake.replicator.posts.some((post) => post.cell === stream && post.sealed !== undefined), (sent) => sent, 'the first cursor message');
+    await timers.advance(1000);
+    blake.replicator.posts.length = 0;
     for (let index = 0; index < 50; index += 1) {
       right.editor.select(base + (index % SEED.length), base + (index % SEED.length));
-      await timers.advance(20);
+      if (index < 49) await timers.advance(20);
     }
+    // Measure the half-open first second. The send at 1000 ms belongs to the next window.
+    await timers.advance(19);
     const sent = blake.replicator.posts.filter((post) => post.cell === stream && post.sealed !== undefined).length;
     assert.ok(sent > 0 && sent <= 10, `cursor messages in one second: ${sent}`);
     await timers.advance(200);

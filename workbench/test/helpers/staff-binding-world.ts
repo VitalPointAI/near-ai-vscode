@@ -259,9 +259,10 @@ export class FakeTab {
   /** The connection drops: the backend detaches this tab's documents. */
   drop(): void { this.closeConnection?.(); }
 
-  open(model: SourceModel): FakeEditor {
+  /** Opens an editor; with `wrapperEach`, every part is handed its own wrapper object of the one editor, as Theia's editor source once did. */
+  open(model: SourceModel, options: { wrapperEach?: boolean } = {}): FakeEditor {
     const editor = fakeEditor(model);
-    for (const listener of this.created) listener(editor);
+    for (const listener of this.created) listener(options.wrapperEach === true ? { ...editor } : editor);
     return editor;
   }
 }
