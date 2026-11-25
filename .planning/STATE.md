@@ -4,15 +4,15 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 21
 status: executing
-stopped_at: Completed 47-15-PLAN.md
-last_updated: "2026-11-24T17:19:36.868Z"
-state_head: 3ef10383eced827c70c7da97655fbb74c8d339e8
+stopped_at: Phase 48.1 wave 1 executed (48.1-01 to 05 and 22); waiting on the wave 1 gate pull request (48.1-01 Task 3)
+last_updated: "2026-11-24T21:14:39.623Z"
+state_head: 7d9e2588787034faec8aeb95dd3c87d93ec9e26b
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 1
-  total_plans: 55
+  total_plans: 69
   completed_plans: 67
-  percent: 11
+  percent: 10
 last_activity: 2026-11-19
 current_phase: 70
 current_phase_name: Capability vocabulary, manifests and one gate with a floor
@@ -176,8 +176,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T17:19:36.678Z
-**Stopped at:** Completed 47-15-PLAN.md
+**Last session:** 2026-11-24T21:14:39.425Z
+**Stopped at:** Phase 48.1 wave 1 executed (48.1-01 to 05 and 22); waiting on the wave 1 gate pull request (48.1-01 Task 3)
 **Resume file:** None
 
 ## Performance Metrics
@@ -215,6 +215,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 69 P01 | 25min | 2 tasks | 10 files |
 | Phase 47 P13 | ~4h | 3 tasks | 24 files |
 | Phase 47 P15 | ~3h | 3 tasks | 21 files |
+| Phase 71 P01 | 46min | 3 tasks | 10 files |
+| Phase 71 P02 | 46min | 3 tasks | 7 files |
 
 ## Decisions
 
@@ -306,3 +308,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-13: pki_int CRL lifetime is the site setting crlExpiry, default 720h
 - [Phase 47]: 47-15: Spike S7 passed; Theia Cloud runs under Pod Security restricted only with the carried patches (security contexts for operator, service, landing page, webhook); oauth2-proxy alpha config, secrets from files
 - [Phase 47]: 47-15: forged X-Forwarded-Uri bypass closed: trusted_proxy_ips per site (fails closed), HAProxy overwrites forwarded headers, session NetworkPolicy (HAProxy and operator only)
+- [Phase 71]: 71-01: owner approved the three Digital Bazaar packages as exact-pinned test-only devDependencies (pass-with-conditions: no provenance, two-year-old cryptosuite, static loader); JCS verdict PASS
+- [Phase 71]: 71-02: did:webvh FULL, status lists FULL, O8 posture accepted with the ecdsa-jcs-2019 P-256 fallback (gap G350); owner items 1 and 2 answered defaults (solo installs declared, not verified; devices never issue; fallback issuers are policy-named officers)

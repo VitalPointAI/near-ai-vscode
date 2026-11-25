@@ -104,6 +104,7 @@ Conditions:
 - The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.
 - The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.
 - Never HashiCorp Vault (D-04).
+- Raft snapshots run on a schedule by a job whose token reads only sys/storage/raft/snapshot, onto an encrypted volume; a snapshot restores only with the HSM or the Shamir shares (47-24).
 
 ## tool:kms-pkcs11
 
@@ -161,3 +162,4 @@ Conditions:
 - The site HSM must hold a FIPS 140-3 Level 3 certificate and run in its approved mode.
 - HSM hardware is export-controlled: it follows your organization's Controlled Goods and ITAR procedures.
 - Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit.
+- It holds the development site signing key and the lab seal through the same PKCS#11 path the production HSM uses; the production preflight refuses it (D-80, 47-16).

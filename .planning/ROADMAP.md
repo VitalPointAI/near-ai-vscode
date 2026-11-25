@@ -904,15 +904,15 @@ Plans:
   3. Audit failures raise alerts that cannot be silently broken by a missing input; audit records are archived daily to write-once object storage with a signed, chained manifest whose signing is restricted to the archive's service account (a cluster administrator could sign the current day's manifest but cannot alter a day already archived, and a second signature in a day raises an alert), are kept 1,825 days, and leave the online store only after the archive holds them.
   4. Every hosted key is inventoried from code with its lifecycle; the supplier release key and the organization site key are separated as the owner decided, with the development site key in SoftHSM2 refused at production sites.
   5. Every 48.1 obligation shows on the hosted dashboard from current documents and passing tests, and its gap closes only on that evidence.
-**Plans:** 23 plans in 7 waves (planned 2026-11-24, revised the same day after the independent plan check and the owner's decisions a to d, all answered; decisions D-01 to D-27 in `48.1-CONTEXT.md`; cross-phase items in `48.1-HANDOFFS.md`; each wave lands as one combined pull request with one owner gate approval)
+**Plans:** 6/23 plans executed in 7 waves (planned 2026-11-24, revised the same day after the independent plan check and the owner's decisions a to d, all answered; decisions D-01 to D-27 in `48.1-CONTEXT.md`; cross-phase items in `48.1-HANDOFFS.md`; each wave lands as one combined pull request with one owner gate approval)
 
 Plans:
-- [ ] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
-- [ ] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
-- [ ] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
-- [ ] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
-- [ ] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
-- [ ] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
+- [x] 48.1-01-PLAN.md: Wave 1. Tracer: the generated-document path with the exchange and interconnection register, the drift check in the required docs job, the documents contract, every 48.1 gap row
+- [x] 48.1-02-PLAN.md: Wave 1. Alertmanager to the site mail server; OpenBao and audit-shipping alerts with target-up or series-count guards; the stale comment fixed
+- [x] 48.1-03-PLAN.md: Wave 1. Privacy inventory, retention and disposal (departed people's volumes), testing data, PIA input pack
+- [x] 48.1-04-PLAN.md: Wave 1. Eight hosted incident playbooks (the six named, plus credential issuer or status-list key compromise and a stale status list at an edge) and the continuous monitoring strategy (disconnected edges by signed file)
+- [x] 48.1-05-PLAN.md: Wave 1. Observer documents: releasability vocabulary and authority, agreements and clearances, rules of behaviour
+- [x] 48.1-22-PLAN.md: Wave 1 (own early pull request). The owner's one-command development site key: SoftHSM2 token under ~/.config/sterling-signing, key made inside it, only the public key and URI printed, safe to run twice
 - [ ] 48.1-06-PLAN.md: Wave 2. External services as a fit-checked `service` kind and their register; model-endpoints and the Controlled Goods and ITAR overlays in the hosted scope
 - [ ] 48.1-07-PLAN.md: Wave 2. Hosted threat model by trust boundary (every T-47 row), criticality analysis, hosted data flows
 - [ ] 48.1-08-PLAN.md: Wave 2. Key management plan and a code-checked key inventory; the cosign, timestamp and crypto-erase limits
@@ -1263,12 +1263,12 @@ Plans:
   7. Officers issue, revoke and suspend credentials from their own session with their person key after a passkey step-up; status lists are signed by the HQ status-list key in OpenBao, each signature authorized only by an officer's step-up; your organization's server serves the DID logs and status lists, and a trust export carries them to a disconnected edge. (DCAC-05, DCAC-06)
 **Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`. (2) Identity lifetime: persistent per person; rotation (`did:webvh` pre-rotation for the root, 71-02's verdict for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a device holding keys offline is trusted until its next contact, bounded by the per-level maximum offline age, now set in this phase (O6), and by rekeying. (7) Not post-quantum: every proof names its cryptosuite so a second suite can sit beside it. (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens. (9) On-chain keys come in L4: keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods. Flags 3 and 4 (spend in grants, nesting) moved to Phase 71.1.
 **Undo cost**: High. The DID methods, the credential profile, the status list format and the evidence citation shape are what edge devices hold offline and what shared logs cite; settle them before they ship.
-**Plans:** 14 plans in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
+**Plans:** 2/14 plans executed in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] 71-01-PLAN.md: Wave 1. Tracer and research item (a): one clearance credential through our `eddsa-jcs-2022` profile, cross-verified with Digital Bazaar and the W3C vectors (package check first)
-- [ ] 71-02-PLAN.md: Wave 1. Research items (b), (c) and O8: `did:webvh` hosting and caching, status list sizing and lifetimes, the FIPS posture with the fallback ready
+- [x] 71-01-PLAN.md: Wave 1. Tracer and research item (a): one clearance credential through our `eddsa-jcs-2022` profile, cross-verified with Digital Bazaar and the W3C vectors (package check first)
+- [x] 71-02-PLAN.md: Wave 1. Research items (b), (c) and O8: `did:webvh` hosting and caching, status list sizing and lifetimes, the FIPS posture with the fallback ready
 - [ ] 71-03-PLAN.md: Wave 2. The narrow VC 2.0 profile, every credential type, the second suite `ecdsa-jcs-2019`
 - [ ] 71-04-PLAN.md: Wave 2. `did:key` for devices from Phase 69 keys; `did:webvh` log verification from a cached copy
 - [ ] 71-05-PLAN.md: Wave 3. Bitstring Status List: build, sign, verify, staple, cite by hash
@@ -1369,11 +1369,31 @@ Plans:
   7. Route records, staff product headers and staff ledger entries carry the model, artifact hash and passport hash, and a per-project AI bill of materials (CycloneDX ML-BOM) lists every model used with its lineage. (MPRV-10)
 **Research flags**: (1) Owner confirmations O1 to O5 in the design (report mode for installs with no organization policy, staff tiers, 90-day acceptances, the acceptance signer before Phase 71, shipped Western passports capped at T2). (2) The questions for NEAR (N1 to N8): Western models in the TEE, provenance fields in `/v1/models`, change notice, the weights hash in attestation, a Canadian region, licence pass-through. (3) Exact Western model ids are pinned only when hosted; passports never match by brand name (Llama-Nemotron and OpenReasoning-Nemotron are different lineages). (4) Switching embeddings rebuilds the knowledge base index.
 **Undo cost**: Medium: passports and acceptances are written into signed bundles and records, so settle the schema in WP-0.
-**Plans:** 0 plans
+**Planned**: 2026-11-24 on `docs/phase-74.1-plan` (`.planning/phases/74.1-model-passports-use-tiers-and-western-defaults/`). The licence check found Command A+ 05-2026 under Apache 2.0 at Cohere and Hugging Face. Owner decisions of 2026-11-24: Command A+ runs through Cohere Model Vault or your organization's on-premise hosting, not NEAR AI's private hardware; report mode stays the default with a notice nobody can dismiss, and a security officer's signed Stop agent work now switch turns enforce on at once (mechanism recommended by Claude; 74.1-18 to 74.1-20 run when Phase 71 core including 71-09, 46-07 and 47-32 are on main; the rest of 74.1 merges in waves without them, with C-11 open until they land); under enforce every role needs your organization's evaluation; no self-signed exceptions (74.1-CONTEXT.md D-05, D-16, D-18a, D-20, D-28). Ten considerations (C-1 to C-10, 74.1-CONTEXT.md D-26) are filed in the gap register by 74.1-01 at execution as G407 to G416 (POA&M g408 to g416), with G417 (C-11, switch not landed) and G418 (C-12, the minute not measured) reserved for 74.1-16 and 74.1-17 if their condition holds, the next ids above PR #193's, re-checked at execution and before the integration PR merges. `/gsd-ui-phase 74.1` runs after wave 2 and before wave 3. Phase 74.3 depends on every plan; its interfaces are listed in 74.1-RESEARCH.md section 4.
+**Plans:** 20 plans in 8 waves
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 74.1 to break down)
+- [ ] 74.1-01-PLAN.md: Wave 1. Licences checked at the publishers and corrected (first task), Granite rows, every shipped model in the fit register, the ten considerations filed
+- [ ] 74.1-02-PLAN.md: Wave 1. Tracer: a PRC model refused for agent work under enforce, before anything is sent; record and trust fields
+- [ ] 74.1-03-PLAN.md: Wave 2. Every caller says its use; the project reaches the decision
+- [ ] 74.1-04-PLAN.md: Wave 2. A sentence for every reason, the T1 exception (your organization's only), the non-commercial licence rule, the models that would pass, no retry
+- [ ] 74.1-05-PLAN.md: Wave 2. Western defaults by passport in one place and the job resolver
+- [ ] 74.1-06-PLAN.md: Wave 3. Passport lifecycle, re-evaluation triggers, revocation, evaluation before any role under enforce
+- [ ] 74.1-07-PLAN.md: Wave 3. The research workspace
+- [ ] 74.1-08-PLAN.md: Wave 3. The different-family rule, the safety classifier and the run's models by job
+- [ ] 74.1-09-PLAN.md: Wave 4. Checking roles in team and staff runs; both families in records
+- [ ] 74.1-10-PLAN.md: Wave 4. The cyber harness and Compare Models in the research lane
+- [ ] 74.1-11-PLAN.md: Wave 4. Exceptions (t1-risk) drafted, signed and sent as a request under your organization's rules only
+- [ ] 74.1-12-PLAN.md: Wave 5. Picker and directory words, the end of bare "Private", Apply only for writing-approved answers
+- [ ] 74.1-13-PLAN.md: Wave 4. The empty-state card and the report-mode notice nobody can dismiss
+- [ ] 74.1-14-PLAN.md: Wave 5. Staff product headers and signed entries carry the model and approval
+- [ ] 74.1-15-PLAN.md: Wave 4. The per-project AI bill of materials (CycloneDX 1.6)
+- [ ] 74.1-16-PLAN.md: Wave 7. Compliance statements (SA-4, SR-3, SR-4, SA-11, CM-8, CM-6), the gap register, the docs
+- [ ] 74.1-17-PLAN.md: Wave 8. One full verification run, the owner's check on the Sterling container, the integration PR
+- [ ] 74.1-18-PLAN.md: Wave 5. The signed model switch: format, the security officer check, its effect, desktop and edge import
+- [ ] 74.1-19-PLAN.md: Wave 6. Stop agent work now and Return to report: the security officer's control in the workbench
+- [ ] 74.1-20-PLAN.md: Wave 6. The hosted path: the hub publishes the verified switch, sessions mount and apply it
 
 ### Phase 74.2: Your organization's attested model hosting (INSERTED)
 **Goal**: A model server your organization runs on confidential-computing hardware in a Canadian data centre counts as private once its attestation is verified, exactly like NEAR's private hardware, so Western models can serve labels that need attested hosting before NEAR hosts them.
@@ -2170,12 +2190,12 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 46. Native Theia foundation | 8/9 | 46-01 to 46-08 complete 2026-11-24 on `feat/phase-46-wave-1` (integration PR waits for the owner's gate approval); 46-09 (version safety, added 2026-11-24 by #185) not executed | - |
 | 47. On-premise deployment stack and offline bundle | 15/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
-| 48.1. Hosted SA&A completeness | 0/23 | Planned 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
+| 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
 | 70.1. Classification engine | 0/5 | Planned 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
-| 71. Identities and verified credentials (core), pulled forward | 0/14 | Planned 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
+| 71. Identities and verified credentials (core), pulled forward | 2/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |

@@ -3,7 +3,8 @@
   "namespace": "sterling-monitoring",
   "order": 84,
   "values": [
-    "deploy/values/prometheus.yaml"
+    "deploy/values/prometheus.yaml",
+    "deploy/values/prometheus-alerts.yaml"
   ],
   "site": "deploy/values/site.example/prometheus.yaml",
   "images": [
@@ -36,7 +37,21 @@
         "prometheus-node-exporter.image.repository": "repository",
         "prometheus-node-exporter.image.digest": "digest"
       }
+    },
+    {
+      "lock": "quay.io/prometheus/alertmanager",
+      "set": {
+        "alertmanager.image.repository": "name",
+        "alertmanager.image.tag": "tagAtDigest"
+      }
+    },
+    {
+      "lock": "quay.io/prometheus-operator/prometheus-config-reloader",
+      "set": {
+        "alertmanager.configmapReload.image.repository": "name",
+        "alertmanager.configmapReload.image.tag": "tagAtDigest"
+      }
     }
   ],
-  "note": "Prometheus v3.16.0 with kube-state-metrics and node-exporter (research Decision 4 metrics); no alertmanager or pushgateway."
+  "note": "Prometheus v3.16.0 with kube-state-metrics, node-exporter and Alertmanager v0.35.0 (research Decision 4 metrics; the alert rules are deploy/values/prometheus-alerts.yaml, 48.1-02); no pushgateway."
 }

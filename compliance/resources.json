@@ -2,6 +2,97 @@
   "note": "The compliance fit register: one reviewed entry per third-party resource the repository uses. scripts/resource-check.mjs (the lint CI job) fails when a resource has no entry, an entry is stale or fails, or a field is missing. See \"Adding a resource\" in compliance/README.md.",
   "resources": [
     {
+      "id": "npm:@digitalbazaar/eddsa-jcs-2022-cryptosuite",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "The reference eddsa-jcs-2022 cryptosuite, used only in tests to check our own credential proofs.",
+      "role": "Checks in tests that credentials we sign verify with the reference implementation and that its proofs verify with ours, and gives the RFC 8785 canonical form our canonical JSON is compared with. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
+      "architectureArea": "build-and-test",
+      "licence": "BSD-3-Clause",
+      "controls": [
+        "sa-11",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "The credential conformance tests in the test CI job (dist/test/credentialsConformance.test.js).",
+      "crypto": "unvalidated",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).",
+        "Test-only reference cryptography: Ed25519 and Multikey (and SHA-256) used only to check our own credentials in tests; it is not a validated module and never runs in the product.",
+        "No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.",
+        "Not updated since its only release (1.0.0, 2024-11-08, two years old); it predates the W3C Recommendation of 2025-05-15, so the frozen W3C vectors in our test are the arbiter if the two ever disagree."
+      ],
+      "reviewer": "Claude (agent review); owner approved 2026-11-24 (\"approved\", 71-01 package check)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@digitalbazaar/vc",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "The reference Verifiable Credentials library, used only in tests to issue and verify credentials against ours.",
+      "role": "Issues and verifies credentials in tests with a static document loader that holds the needed contexts and refuses any other address, so no test reaches the network. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
+      "architectureArea": "build-and-test",
+      "licence": "BSD-3-Clause",
+      "controls": [
+        "sa-11",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "The credential conformance tests in the test CI job (dist/test/credentialsConformance.test.js).",
+      "crypto": "unvalidated",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).",
+        "Test-only reference cryptography: Ed25519 and Multikey (and SHA-256) used only to check our own credentials in tests; it is not a validated module and never runs in the product.",
+        "No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version.",
+        "Brings JSON-LD and HTTP client code (jsonld, ky, undici); tests pass a static document loader, so no context is ever fetched."
+      ],
+      "reviewer": "Claude (agent review); owner approved 2026-11-24 (\"approved\", 71-01 package check)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "npm:@digitalbazaar/vc-bitstring-status-list",
+      "kind": "npm",
+      "where": [
+        "package.json"
+      ],
+      "component": "extension",
+      "scope": "test",
+      "purpose": "The reference Bitstring Status List library, used only in tests to check our status lists.",
+      "role": "Reads and checks status lists we build in tests, so our lists match the W3C Recommendation. Nothing from it ships. Without it we would trust our own reading of the specification alone.",
+      "architectureArea": "build-and-test",
+      "licence": "BSD-3-Clause",
+      "controls": [
+        "sa-11",
+        "sa-15",
+        "sr-03"
+      ],
+      "evidence": "The credential conformance tests in the test CI job (dist/test/credentialsConformance.test.js).",
+      "crypto": "none",
+      "cveResponse": "Exact pin in the root lockfile; advisories are recorded by the daily full npm audit (compliance-scheduled.yml, report-only); the blocking CI audit omits devDependencies. No Dependabot: bumped by hand in a reviewed PR.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Test only: a devDependency used as an oracle in src/test; no file outside src/test may import it, and it never ships (node_modules, src and dist/test are excluded from the extension package; the hub, relay and workbench images build from their own lockfiles).",
+        "No build provenance: the npm registry signature is checked (all 25 packages of the tree valid on 2026-11-24, 71-01-PACKAGE-CHECK.md), but the tarball cannot be tied to a commit by a signature; the GitHub release tag exists for the pinned version."
+      ],
+      "reviewer": "Claude (agent review); owner approved 2026-11-24 (\"approved\", 71-01 package check)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
       "id": "npm:@jsquash/jpeg",
       "kind": "npm",
       "where": [
@@ -950,7 +1041,7 @@
       "reviewedAt": "2026-11-24",
       "conditions": [
         "Runs VS Code extensions and pulls in @theia/ai-core and @theia/ai-mcp; outbound requests only to addresses your organization configures; MCP servers only when a person adds one.",
-        "npm audit --omit=dev in the workbench job is report-only until Theia ships a fix: on 2026-11-24 it reports one high advisory, zod 3.25.x below 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory exhaustion validating oversized collections), through @theia/plugin-ext > @theia/ai-mcp > @modelcontextprotocol/sdk; it validates MCP messages, and MCP traffic exists only when a person adds an MCP server."
+        "zod under @modelcontextprotocol/sdk (through @theia/plugin-ext > @theia/ai-mcp) is held at 4.6.7 by an override in workbench/package.json, because Theia 1.77.0 resolves zod 3.25.x, below 4.6.6 (GHSA-mrhx-c7xc-m3w5, high, memory exhaustion validating oversized collections); the SDK accepts zod ^3.25 || ^4.0. Remove the override when a Theia upgrade brings zod 4.6.6 or later. npm audit --omit=dev --audit-level=high in the workbench job blocks."
       ]
     },
     {
@@ -2686,7 +2777,7 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Prometheus 3.16.0: site metrics, needed by Phase 48's load test.",
-      "role": "Collects metrics about the site's nodes and Kubernetes objects. The Phase 48 load tests read them to measure a site. Alertmanager is off.",
+      "role": "Collects metrics about the site's nodes, Kubernetes objects, OpenBao and the log shipper, and evaluates the alert rules of deploy/values/prometheus-alerts.yaml. The Phase 48 load tests read its metrics to measure a site.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
@@ -2705,7 +2796,37 @@
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
         "Loki is AGPL and is not used (D-19).",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Alertmanager is off; metrics stay on the site."
+        "Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02)."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-24"
+    },
+    {
+      "id": "image:quay.io/prometheus/alertmanager",
+      "kind": "image",
+      "where": [
+        "deploy/bundle/images.lock.json"
+      ],
+      "component": "site-logging",
+      "scope": "runtime",
+      "purpose": "Alertmanager 0.35.0: sends the site's alerts (audit shipping, OpenBao seal and audit device, and later rules) to your organization's security operators by email.",
+      "role": "Receives the alerts Prometheus raises from deploy/values/prometheus-alerts.yaml and emails them to the site setting alertRecipients through the site's own mail server. It has one receiver and no webhook, chat or remote receiver.",
+      "architectureArea": "storage-logging-monitoring",
+      "licence": "Apache-2.0",
+      "controls": [
+        "au-05",
+        "si-04.05"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in deploy/bundle/images.lock.json; the deploy CI job renders every chart offline and fails when a rendered image is not digest-pinned or not in the lock; deploy/test/alerting.test.mjs checks that email to the site mail server is its only receiver.",
+      "crypto": "unvalidated",
+      "cveResponse": "Re-pinned by hand in a reviewed change when upstream publishes a fixed release (watch the project's security advisories). No scan of this third-party image runs in CI yet; Phase 48 adds a scan of the bundle's images.",
+      "airGap": "needs-mirror:the pinned digest in the site registry, carried with its signature by the offline bundle",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "One receiver: email to the site setting alertRecipients through the site's own mail server, which the site lists in egressAllow when it is outside the cluster; no webhook, chat or remote receiver (48.1-02, D-16).",
+        "Mail uses STARTTLS (smtp_require_tls). The mail server's certificate must chain to a CA the image trusts; a site whose mail server uses only its own CA mounts that CA for Alertmanager or relays through a server the image trusts, or alerts are not delivered.",
+        "Alert text names pods, nodes and alert names only; it carries no record content, secrets or personal information.",
+        "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -2719,7 +2840,7 @@
       "component": "site-logging",
       "scope": "runtime",
       "purpose": "Reloads the Prometheus configuration when it changes.",
-      "role": "Reloads Prometheus when its configuration changes, without a restart.",
+      "role": "Reloads Prometheus and Alertmanager when their configuration changes, without a restart.",
       "architectureArea": "storage-logging-monitoring",
       "licence": "Apache-2.0",
       "controls": [
@@ -2738,7 +2859,7 @@
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
         "Loki is AGPL and is not used (D-19).",
         "The upstream image is not built on UBI 9 and carries no validated cryptographic module: it is conditional at Protected B (SC-13) until it is rebuilt on UBI 9 with the OpenSSL FIPS provider on a FIPS-mode host, or your organization's authorizing official accepts it.",
-        "Alertmanager is off; metrics stay on the site."
+        "Metrics stay on the site; alerts go only to the site mail server through Alertmanager (48.1-02)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3532,7 +3653,8 @@
         "Volumes are LUKS-encrypted with a class-level key in a Kubernetes Secret, with RKE2 secrets-encryption on; the install check refuses a class without encrypted: \"true\".",
         "Longhorn images are not rebuilt by us: the Protected B base-image row is open.",
         "Host packages (dm_crypt, cryptsetup, open-iscsi) come from the site's own OS repository; no secret is stored on workspace volumes (D-17).",
-        "longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods."
+        "longhorn-system is exempted from the restricted Pod Security profile because Longhorn needs privileged pods.",
+        "The longhorn-crypto key, which any backup restore needs once the cluster is gone, is escrowed with the RKE2 keys and checked daily by the sterling-escrow-currency job (47-25)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3567,7 +3689,8 @@
         "Seal keys are held in a validated site HSM through the kms-pkcs11 plugin, or by Shamir shares under the key ceremony.",
         "The kms-pkcs11 plugin is v0.3.0, young, and tested on SoftHSM2 only; Shamir is the fallback.",
         "The audit device is shipped to the site log store; tamper-evidence of the audit log is gap G2 and still open.",
-        "Never HashiCorp Vault (D-04)."
+        "Never HashiCorp Vault (D-04).",
+        "Raft snapshots run on a schedule by a job whose token reads only sys/storage/raft/snapshot, onto an encrypted volume; a snapshot restores only with the HSM or the Shamir shares (47-24)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3724,7 +3847,9 @@
         "au-02",
         "au-03",
         "au-09",
-        "au-12"
+        "au-12",
+        "cp-09",
+        "cp-10"
       ],
       "evidence": "Vendored tarball pinned by the SHA-256 its chart repository index publishes (deploy/charts/charts.lock.json); node deploy/charts/vendor.mjs --check and the deploy CI job render it offline and assert the hardening invariants (D-56).",
       "crypto": "none",
@@ -3734,7 +3859,8 @@
       "conditions": [
         "Logs and audit records ship only to the site store; no outbound output is configured.",
         "Audit indices are append-only by role and exported daily to a write-once target with a signed digest manifest; that tamper-evidence is gap G2 and not solved in Phase 47.",
-        "Loki is AGPL and is not used (D-19)."
+        "Loki is AGPL and is not used (D-19).",
+        "audit-* and logs-* are snapshotted on a schedule to a filesystem repository on an encrypted volume, without the security index, with a tested restore (47-24). Multi-node sites need the snapshot volume as ReadWriteMany on the encrypted class, confirmed on Phase 48's lab-full rig."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -3838,7 +3964,7 @@
       ],
       "component": "release-pipeline",
       "scope": "build",
-      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, and of the Sterling release image the Release workflow attests.",
+      "purpose": "Writes CycloneDX SBOMs of the relay image, of every rebuilt deployment image, of the workbench image in the workbench CI job, of the Sterling release image the Release workflow attests, and of every image in each offline bundle, made on the connected build host (47-29).",
       "role": "Writes the CycloneDX SBOM of the relay image, of every rebuilt deployment image and of the Sterling workbench image, the one the Release workflow attests. The SBOM lists everything inside an image; the vulnerability scan and your organization's assessors read it.",
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
@@ -3865,9 +3991,9 @@
       "where": [
         "compliance/ci/tool-pins.json"
       ],
-      "component": "release-pipeline",
-      "scope": "build",
-      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job.",
+      "component": "offline-bundle",
+      "scope": "runtime",
+      "purpose": "Scans SBOMs for known fixed vulnerabilities (report-only) in CI and in the Release workflow's image job; the offline bundle build scans the SBOM of every image it carries, and sites rescan offline from the bundle's SBOMs on the import host, as cosign runs there (47-29).",
       "role": "Scans the SBOMs, including the workbench image's in CI and in the Release workflow, for known vulnerabilities that have a fix, so they are seen before a release.",
       "architectureArea": "release-and-supply-chain",
       "roleNeedsReview": true,
@@ -3878,13 +4004,21 @@
         "ra-05",
         "si-02",
         "sr-04",
-        "sr-11"
+        "sr-11",
+        "ra-05.02",
+        "cm-04"
       ],
       "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
       "crypto": "unvalidated",
       "cveResponse": "Bumped by hand in a reviewed change (compliance/ci/TOOLS.md): the new SHA-256 is compared with the publisher's checksum before the pin changes. No automated advisory feed for pinned tools.",
-      "airGap": "needs-mirror:the Grype vulnerability database (grype db import of a downloaded archive)",
-      "fit": "pass",
+      "airGap": "needs-mirror:the vulnerability database, downloaded on the connected build host and shipped in the signed bundle or a signed database file",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "The vulnerability database is fetched only on the connected build host, from Anchore's listing at grype.anchore.io, with the listing's checksum verified, and reaches sites only inside the signed bundle or as a file signed with your organization's key.",
+        "At sites grype runs with database auto-update, age validation and application update checks off, against a private cache, and reports the database's build date.",
+        "Scans are report-only; the site change board decides.",
+        "Go cryptography in grype is not FIPS-validated and protects nothing here."
+      ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
     },
@@ -4047,7 +4181,11 @@
         "sc-13",
         "sc-28",
         "si-02",
-        "sr-11"
+        "sr-11",
+        "au-08",
+        "au-08.01",
+        "sc-45",
+        "cp-09"
       ],
       "evidence": "Pinned by SHA-256 in compliance/ci/tool-pins.json and checked by compliance/ci/install-tool.sh before anything is extracted or placed; compliance/test/toolPins.test.ts keeps every pin well formed.",
       "crypto": "unvalidated",
@@ -4058,7 +4196,9 @@
         "Production sites run the RKE2 FIPS build with Canal as the only CNI (the only CNI RKE2 rebuilds for FIPS), on hosts in FIPS mode.",
         "RKE2 runs with profile: cis and the DISA STIG settings, an audit policy that records Theia Cloud resources at Request and Secrets at Metadata only, and secrets-encryption on.",
         "k3s is for the lab and demos only and never appears in production values (D-14).",
-        "SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here."
+        "SUSE documents the FIPS build on BoringCrypto (CMVP certificate 4968); that the certificate covers this 1.37 build in its operating environment is not yet confirmed, so the crypto stays unvalidated here.",
+        "Every node and the import host run chrony from the site's own OS repository, configured only with the site's on-site authoritative time source (a GNSS-disciplined NTP appliance or a stratum-1 server). The node install refuses a clock that is unsynchronised, on its local clock, or beyond time.maxClockErrorMs (D-71, 47-22).",
+        "The server token, which any etcd restore needs, and the secrets-encryption configuration are escrowed on custody media held by two key custodians apart from the backups; escrow-node.sh check finds a stale escrow after a rotation (D-73, 47-25)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"
@@ -4124,7 +4264,8 @@
         "SoftHSM2 is test scope only and never appears in production values (D-38).",
         "The site HSM must hold a FIPS 140-3 Level 3 certificate and run in its approved mode.",
         "HSM hardware is export-controlled: it follows your organization's Controlled Goods and ITAR procedures.",
-        "Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit."
+        "Pinned to the 2.7.0 commit and tree because upstream publishes no release tarball or checksum; the tag archive bytes are confirmed against git archive of the signed commit.",
+        "It holds the development site signing key and the lab seal through the same PKCS#11 path the production HSM uses; the production preflight refuses it (D-80, 47-16)."
       ],
       "reviewer": "Claude (agent review; owner to confirm)",
       "reviewedAt": "2026-11-24"

@@ -11,3 +11,12 @@ server:
       memory: 2Gi
     limits:
       memory: 4Gi
+# Alertmanager's mail settings (48.1-02, D-16). The smarthost is the site's own mail server: keep it the same host and port as smtp in
+# deploy/values/site.example/sterling-keycloak-realm.yaml (STARTTLS on 587, no login), and list it in egressAllow when it is outside the
+# cluster. The recipients are the site setting alertRecipients in the site file, which has no default.
+alertmanager:
+  config:
+    global:
+      smtp_smarthost: "mail.${site.domain}:587"
+      smtp_from: "sterling-alerts@${site.domain}"
+      smtp_require_tls: true

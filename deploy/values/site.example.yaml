@@ -7,6 +7,7 @@
     "registry": "The host and port the site registry serves on (for example registry.site.example:5000). Every image is pulled from it by digest.",
     "registryKind": "zot (the lab and small sites) or harbor (HQ and large sites).",
     "clusterCidrs": "pod and service are the RKE2 defaults; nodes is the site's node network (required, no default).",
+    "alertRecipients": "The email addresses, separated by commas, of your organization's security operators who receive the site's alerts (AU-5): audit shipping, OpenBao seal and audit device failures and the other rules of deploy/values/prometheus-alerts.yaml. Mail goes only through the site's own mail server (deploy/values/site.example/prometheus.yaml). Required: there is no default, so alerts never go nowhere (D-11).",
     "egressAllow": "The only addresses outside the cluster that pods may reach, each one something your organization's signed policy allows (for example the site mail server or an approved model endpoint), D-01. Empty means none.",
     "storageProvider": "longhorn installs the reference Longhorn release and its encrypted class (D-17); any other value (for example ceph or nfs) means the site supplies its own encrypted storage class, named in storageClass with storageEncryptionAtRest saying how; the install preflight (47-16) checks it.",
     "storageClass": "The storage class every workspace and data volume uses; it must be encrypted at rest (D-17).",
@@ -31,6 +32,7 @@
     "service": "10.43.0.0/16",
     "nodes": ""
   },
+  "alertRecipients": "",
   "egressAllow": [],
   "storageProvider": "longhorn",
   "storageClass": "sterling-encrypted",
