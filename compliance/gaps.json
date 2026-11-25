@@ -5769,6 +5769,48 @@
       "title": "Some OpenTDF forms are refused as not supported yet"
     },
     {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G510",
+      "ownerRole": "owner",
+      "poam": "g510",
+      "remediation": "No allied test cell is arranged to check your organization's exports and partners' objects against an ally's own key access server and samples, so the exchange is checked only against the public OpenTDF quickstart, which proves wiring and never counts as acceptance. Your organization asks the DND project technical authority for an introduction to the Canadian Joint Warfare Centre (CJWC) experimentation and interoperability team, which runs the FMN trials and Project OLYMPUS (owner action a). The acceptance trial (plan 45.2-12) runs once the cell supplies a test key access server with its own samples. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No allied test cell is arranged for the acceptance trial"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G511",
+      "ownerRole": "owner",
+      "poam": "g511",
+      "remediation": "No vendor has supplied sample containers paired with a non-production key access server of its own, so the exchange cannot yet be checked against a second implementation; a sample paired with an unrelated key server does not count. Your organization asks Virtru's systems-integrator team or XQ Message for such samples (owner action c). The acceptance trial (plan 45.2-12) may use them in place of an allied test cell. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No vendor samples paired with a non-production key access server"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "sc-12",
+        "ia-05.02"
+      ],
+      "id": "G512",
+      "ownerRole": "owner",
+      "poam": "g512",
+      "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+      "title": "Partners' signing certificates are checked without fetching revocation lists"
+    },
+    {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48.1",
