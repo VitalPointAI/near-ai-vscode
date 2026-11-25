@@ -78,7 +78,7 @@ class FakeReplicator implements EngineReplicator {
   async joinFrame(invite: string) { if (await this.options.isLeadDevice()) this.options.onJoinRequest(invite); }
 }
 
-interface Spies { projected: Array<ReadonlySet<string> | undefined>; compacted: number; armed: number }
+interface Spies { projected: Array<ReadonlySet<string> | undefined>; compacted: number; armed: number; compactedFor?: string[] }
 
 /** The real engine bundle with the replicator faked and the projector, compactor and require arming counted. */
 function spiedEngine(spies: Spies, compacted: string[] = []): StaffEngine {
@@ -86,7 +86,7 @@ function spiedEngine(spies: Spies, compacted: string[] = []): StaffEngine {
     ...engine,
     LiveReplicator: FakeReplicator as never,
     projectLive: async (_root: string, _input: never, options: { bound?: ReadonlySet<string> }) => { spies.projected.push(options.bound); return { written: [], left: [] }; },
-    compactAfterCheckpoint: async () => { spies.compacted += 1; return { compacted }; },
+    compactAfterCheckpoint: async (_project: never, input: { hub: string }) => { spies.compacted += 1; spies.compactedFor?.push(input.hub); return { compacted }; },
     ensureRequireArmed: async (project: never) => { spies.armed += 1; return engine.ensureRequireArmed(project); },
   } as StaffEngine;
 }
@@ -246,17 +246,19 @@ test('rows reach every listener and the workspace status store; the projector ru
   }
 });
 
-test('after a checkpoint the compactor runs, and a compaction it wrote is pushed', async () => {
+test('after a checkpoint the compactor runs for the server\'s writer id, and a compaction it wrote is pushed', async () => {
   const world = await worldOfTwo();
   try {
     const [avery] = world.devices;
-    const spies: Spies = { projected: [], compacted: 0, armed: 0 };
+    const spies: Spies = { projected: [], compacted: 0, armed: 0, compactedFor: [] };
     FakeReplicator.made = [];
     const live = engineFor(avery, { engine: { ...spiedEngine(spies, ['c'.repeat(64)]), hubStanding: async () => [{ hub: 'hub-north', writer: 'd'.repeat(64), certPin: 'e'.repeat(64), standing: 'admitted' as const }] } });
     await live.start();
     FakeReplicator.made[0].options.onCheckpoint({});
     await settle();
     assert.equal(spies.compacted, 1);
+    // Found in 33-14: the hub id here named no witness and no checkpoint signer, so the engine never compacted.
+    assert.deepEqual(spies.compactedFor, ['d'.repeat(64)], 'the compactor names the server by its writer id, as the exchange does');
     assert.equal(FakeReplicator.made[0].appended, 1);
     await live.stop();
   } finally {

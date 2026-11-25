@@ -258,7 +258,8 @@ export class StaffLiveEngine {
   private async compact(live: LiveProject, hub: EngineHubStanding | undefined, memory: object): Promise<void> {
     if (hub === undefined || this.stopped) return;
     try {
-      const { compacted } = await this.options.engine.compactAfterCheckpoint(live.project as never, { hub: hub.hub, memory } as never);
+      // The compactor and the witness memory name your organization's server by its writer id, as the exchange does (transport.hub).
+      const { compacted } = await this.options.engine.compactAfterCheckpoint(live.project as never, { hub: hub.writer, memory } as never);
       if (compacted.length > 0) live.replicator?.localAppended();
     } catch {
       this.log('staff: compaction was skipped after a checkpoint');

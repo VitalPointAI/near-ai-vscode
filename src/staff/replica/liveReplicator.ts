@@ -20,6 +20,11 @@
 //
 // Node I/O only, no editor API, and no value import that loads Yjs or the fold (only hubSync and hubTransport, which the hub's tests bundle), so
 // hub/test can bundle this file with a memory replica. The connection state is the pure machine of src/domain/replica/syncMachine.ts.
+//
+// 33-14: onCheckpoint runs after an exchange that made a newer checkpoint of this hub the trusted newest one in this computer's witness, not when
+// the frame arrives. The frame came before the exchange that reads the checkpoint, and the device whose own ask made the hub sign hears no
+// frame at all, so the compactor ran on the previous checkpoint or not at all.
+import { checkpointHash } from '../../domain/replica/checkpoint';
 import { CONNECT_GIVE_UP_MS, initialSyncState, syncTimerOf, transition } from '../../domain/replica/syncMachine';
 import type { SyncEvent, SyncMachineState, SyncState } from '../../domain/replica/syncMachine';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
@@ -62,6 +67,7 @@ export interface LiveReplicatorOptions {
   resumeGapMs?: number;
   /** The presence frame's data as the hub sent it ({ project, cell, devices, left }). */
   onPresence?: (frame: Record<string, unknown>) => void;
+  /** After an exchange that made a newer checkpoint of this hub the trusted newest one here: { project, checkpoint } (its checkpointHash). */
   onCheckpoint?: (frame: Record<string, unknown>) => void;
   onRoster?: (frame: Record<string, unknown>) => void;
   /** One short line per step, for logs and tests. Never holds project text. */
@@ -391,6 +397,7 @@ export class LiveReplicator {
     const run = (async () => {
       this.log(`exchange ${wake}`);
       let report: SyncReport;
+      const newestBefore = await this.newestCheckpoint(transport);
       try {
         report = await syncOnce(this.watched(transport, generation), this.options.local, this.options.memory, { now: this.now });
       } catch (error) {
@@ -415,6 +422,11 @@ export class LiveReplicator {
       if (report.retryAfterSeconds !== undefined) event.retryAfterMs = report.retryAfterSeconds * 1000;
       this.log(`exchange ${wake} done ${report.outcome}`);
       this.fire(event);
+      const newestAfter = await this.newestCheckpoint(transport);
+      if (newestAfter !== undefined && newestAfter !== newestBefore && generation === this.generation) {
+        this.log('checkpoint newer');
+        this.options.onCheckpoint?.({ project: transport.project, checkpoint: newestAfter });
+      }
     })();
     this.inFlight = run;
     try {
@@ -426,6 +438,17 @@ export class LiveReplicator {
         this.again = undefined;
         if (next !== undefined && generation === this.generation && this.machine.state === 'live') this.schedule(next);
       }
+    }
+  }
+
+  /** The hash of the newest checkpoint this computer's witness trusts for this hub and project, or undefined (none, or memory unreadable). */
+  private async newestCheckpoint(transport: LiveTransport): Promise<string | undefined> {
+    if (this.options.onCheckpoint === undefined) return undefined;
+    try {
+      const newest = (await this.options.memory.load(transport.hub, transport.project)).newest;
+      return newest === undefined ? undefined : checkpointHash(newest);
+    } catch {
+      return undefined;
     }
   }
 
@@ -472,7 +495,7 @@ export class LiveReplicator {
       } else if (frame.event === 'presence') {
         this.options.onPresence?.(presenceData(transport.project, frame));
       } else if (frame.event === 'checkpoint') {
-        this.options.onCheckpoint?.(report.data);
+        // The exchange reads the checkpoint into the witness; onCheckpoint runs after it (exchange).
         this.schedule('checkpoint');
       } else if (frame.event === 'roster') {
         this.options.onRoster?.(report.data);

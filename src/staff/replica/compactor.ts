@@ -60,6 +60,11 @@ interface PrepareCompactionInput extends Omit<CompactionCheckpointInput, 'roster
   readonly writer: string;
   /** The target cell epoch at rosterHead, supplied by the local roster caller. */
   readonly epoch: number;
+  /**
+   * The hub's earlier checkpoints this computer kept (33-14). The hub orders a checkpoint's entries with every earlier one of its chain nested first,
+   * so the prefix is folded and its order recomputed under them; without them any checkpoint after the first fails order-tip-mismatch.
+   */
+  readonly earlier?: readonly SignedCheckpoint[];
 }
 
 export interface PreparedCompaction {
@@ -122,9 +127,13 @@ export async function prepareCompaction(input: PrepareCompactionInput): Promise<
   const localHeads = checkpointHeads(verified, context.roster);
   if (localHeads.size !== checkpoint.streams.length ||
       checkpoint.streams.some((item) => !isDeepStrictEqual(item.heads, localHeads.get(item.stream)))) return;
-  const folded = foldEntries(entries, boundedContext);
+  const earlier = (input.earlier ?? []).filter((signed) => {
+    const read = verifyCheckpoint(signed, context.roster);
+    return read.ok && read.hash !== witness.hash && read.checkpoint.v === CHECKPOINT_VERSION && read.checkpoint.project === input.project && read.checkpoint.signer === input.hub;
+  });
+  const folded = foldEntries(entries, boundedContext, { checkpoints: [...earlier, witness.signed] });
   if (folded.held.length || folded.order.length !== verified.length || blobChars > MAX_PREPARATION_BLOB_CHARS ||
-      !recomputeCheckpoint(checkpoint, verified, folded.digests).ok) return;
+      !recomputeCheckpoint(checkpoint, verified, folded.digests, earlier.map((signed) => signed.payload)).ok) return;
   const output = productOutput(folded, stream, product);
   if (!output || output.incomplete || output.problem || output.compactions.some((item) => !item.verified)) return;
 
@@ -166,7 +175,7 @@ export type CompactionRefused = { ok: false; reason: keyof typeof COMPACTION_REF
 const refuseCompaction = (reason: keyof typeof COMPACTION_REFUSALS): CompactionRefused => ({ ok: false, reason, message: COMPACTION_REFUSALS[reason] });
 
 /** The part of a ReplicaProject the compactor uses. */
-export type CompactorProject = Pick<ReplicaProject, 'state' | 'context' | 'appendChecked' | 'ingestForeign' | 'entriesAfter' | 'projectId' | 'deviceWriter'>;
+export type CompactorProject = Pick<ReplicaProject, 'state' | 'context' | 'appendChecked' | 'ingestForeign' | 'entriesAfter' | 'projectId' | 'deviceWriter'> & Partial<Pick<ReplicaProject, 'checkpoints'>>;
 
 /**
  * Whether a product may be compacted now: at least COMPACTION_WINDOW accepted updates since the newest compaction of it in the fold, by any writer.
@@ -213,6 +222,7 @@ export async function compactAfterCheckpoint(project: CompactorProject, input: {
   const compacted: string[] = [];
   const witness = await compactionCheckpoint({ project: project.projectId, hub: input.hub, roster: context.roster, rosterHead, memory: input.memory });
   if (witness === undefined) return { compacted };
+  const earlier = project.checkpoints === undefined ? [] : await project.checkpoints();
   // The checkpointed prefix: each writer's entries up to the head the checkpoint names, and that head exactly.
   const entries: SealedEntry[] = [];
   for (const { stream, heads } of witness.signed.payload.streams) {
@@ -229,7 +239,7 @@ export async function compactAfterCheckpoint(project: CompactorProject, input: {
     if (epoch === undefined) continue;
     const prepared = await prepareCompaction({
       project: project.projectId, hub: input.hub, rosterHead, memory: input.memory, context, entries,
-      stream: output.stream, product: output.product, writer: project.deviceWriter, epoch
+      stream: output.stream, product: output.product, writer: project.deviceWriter, epoch, earlier
     });
     if (prepared === undefined) continue;
     const published = await publishCompaction(project, prepared);

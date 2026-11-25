@@ -3,7 +3,7 @@
 // timer, an action, the lead or an update. All names and data are fictional.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { signCheckpoint } from '../domain/replica/checkpoint';
+import { checkpointHash, signCheckpoint } from '../domain/replica/checkpoint';
 import type { Checkpoint, SignedCheckpoint } from '../domain/replica/checkpoint';
 import { GENESIS_PREV, buildEntry, entryHash } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
@@ -99,6 +99,8 @@ interface Server {
   append: (batch: AppendBatch) => AppendAnswer;
   grant: (hash: string) => { kind: 'missing' | 'refused'; hash: string; reason?: string };
   appends: AppendBatch[];
+  /** The checkpoint the hub hands back to an ask, if any (as it does to the device whose own ask made it sign). */
+  asked?: SignedCheckpoint;
 }
 
 function scriptedServer(): Server {
@@ -123,7 +125,7 @@ function scriptedServer(): Server {
         append: (batch: AppendBatch) => Promise.resolve().then(() => { server.appends.push(batch); return server.append(batch); }),
         getBlob: (hash: string) => Promise.resolve({ kind: 'missing' as const, hash }),
         grant: (hash: string) => Promise.resolve(server.grant(hash)),
-        askCheckpoint: () => Promise.resolve({ project: PROJECT, kept: 0 }),
+        askCheckpoint: () => Promise.resolve({ project: PROJECT, kept: 0, ...(server.asked === undefined ? {} : { checkpoint: server.asked }) }),
         events: (): Promise<EventReader> => {
           const waiting: EventReport[] = [];
           let wake: (() => void) | undefined;
@@ -232,6 +234,27 @@ test('checkpoint and equivocation frames each run one exchange', async () => {
   await settle();
   await r.timers.advance(COALESCE_MS);
   assert.ok(r.log.includes('exchange checkpoint') && r.log.includes('exchange equivocation'), r.log.join('\n'));
+  await done(r);
+});
+
+// Found in 33-14 over a real hub: onCheckpoint ran on the frame, before the exchange that reads the checkpoint, and the device whose own ask made
+// the hub sign hears no frame, so the compactor never saw the newest checkpoint.
+test('onCheckpoint runs once after an exchange makes a newer checkpoint the trusted newest one, and not for a frame that brings nothing newer', async () => {
+  const log = myLog(6);
+  const calls: Array<Record<string, unknown>> = [];
+  const r = await rig({ local: memoryLocal(() => rosterWith(), log), onCheckpoint: (frame) => calls.push(frame) });
+  assert.deepEqual(calls, [], 'no checkpoint yet');
+  const signed = checkpointAt(log, 5);
+  r.server.asked = signed;
+  r.replicator.syncNow();
+  await settle();
+  await r.timers.advance(COALESCE_MS);
+  assert.deepEqual(calls, [{ project: PROJECT, checkpoint: checkpointHash(signed) }], r.log.join('\n'));
+  r.server.frame('checkpoint', { project: PROJECT, checkpoint: { v: 1 } });
+  await settle();
+  await r.timers.advance(COALESCE_MS);
+  assert.ok(r.log.includes('exchange checkpoint'), r.log.join('\n'));
+  assert.equal(calls.length, 1, 'the same newest checkpoint calls nothing again');
   await done(r);
 });
 
