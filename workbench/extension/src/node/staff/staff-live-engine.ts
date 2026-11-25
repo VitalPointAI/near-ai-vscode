@@ -157,6 +157,27 @@ export class StaffLiveEngine {
     return this.certificates.get(id);
   }
 
+  /**
+   * Hosted: certifies this session's key in the project at `root` before anything else is written there (33-30). A conversion's ordinary entries
+   * are signed by the session key, and the fold takes them only once a session.certify names it (D-62). The certificate is the one the project
+   * keeps for the session (reopen uses it). True when the session key is certified there, or on a single machine, where there is none.
+   */
+  public async certifyAt(root: string): Promise<boolean> {
+    if (this.options.hosted === undefined) return true;
+    let opened: EngineProject | { refused: string; message: string } | undefined;
+    try {
+      opened = await this.options.engine.ReplicaProject.open(root, this.depsFor() as never);
+    } catch {
+      return false;
+    }
+    if (opened === undefined || this.options.engine.isProjectRefused(opened)) return false;
+    try {
+      return (await this.certify(opened)) !== undefined;
+    } finally {
+      await opened.close();
+    }
+  }
+
   /** Opens a folder that became shared, or opens it again after its server changed (33-27): its replicator starts as at start. */
   public async reopen(root: string): Promise<void> {
     if (this.stopped) return;
