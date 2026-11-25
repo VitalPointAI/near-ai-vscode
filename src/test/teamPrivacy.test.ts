@@ -62,7 +62,7 @@ test('privacy: private in the frontmatter marks the team private; any, tee and l
   assert.equal(parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: private'), 'clients.md').private, true);
   assert.equal(parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: tee'), 'clients.md').private, true);
   assert.equal(parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: any'), 'clients.md').private, undefined);
-  assert.throws(() => parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: secret'), 'clients.md'), /The team has "privacy: secret" in its frontmatter; use privacy: private/);
+  assert.throws(() => parseTeam(FILE.replace('owner: ops', 'owner: ops\nprivacy: secret'), 'clients.md'), /The agent team has "privacy: secret"; use privacy: private \(private models only: verified private hardware or this computer\)/);
   const rendered = renderTeam('Clients', 'Works', [{ name: 'a', instructions: 'Do it. Report it.' }], { private: true });
   assert.match(rendered, /^---\nname: Clients\ndescription: Works\nprivacy: private\n---\n/);
   assert.equal(parseTeam(rendered, 'clients.md').private, true);

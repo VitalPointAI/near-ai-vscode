@@ -5,6 +5,8 @@ import { redactSecrets } from '../domain/redaction';
 import { emptyStateCard } from '../domain/gate/emptyState';
 import { MODEL_ROW_TEXT, ROW_PLACE_ORDER, catalogRows, modelRow } from '../domain/gate/modelRow';
 import type { ModelRow } from '../domain/gate/modelRow';
+// 74.1-12 (S4, S6): the row and Insert at cursor words live with the row helper; the chat's host and page read them from here.
+export { APPLY_TEXT, MODEL_ROW_TEXT, applyAllowed } from '../domain/gate/modelRow';
 import type { UseTier } from '../domain/gate/models';
 import type { EmptyStateCard } from '../domain/gate/emptyState';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';

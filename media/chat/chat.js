@@ -349,7 +349,9 @@
       const wrapper = el('div', 'code-block');
       const header = el('header');
       header.append(el('span', '', block.lang || 'text'));
-      header.append(iconButton('insert', 'Insert at cursor', () => post({ type: 'insert-code', text: block.code })));
+      // 74.1-12 (S6): an answer whose model may not write to a file keeps Insert focusable but aria-disabled, with the reason under the answer.
+      const insert = iconButton('insert', 'Insert at cursor', () => { if (insert.getAttribute('aria-disabled') !== 'true') post({ type: 'insert-code', text: block.code }); });
+      header.append(insert);
       const copy = iconButton('copy', 'Copy', () => {
         navigator.clipboard.writeText(block.code).then(() => {
           copy.innerHTML = ICONS.check;
@@ -486,6 +488,18 @@
     card.querySelectorAll('button').forEach((button) => button.remove());
     if (option.after) { card.append(el('p', 'after-use', option.after)); announce(option.after); }
     input.focus();
+  }
+
+  // Insert at cursor on one answer (74.1-12, S6): the reason once under the answer; Insert stays focusable and is not activated when not allowed.
+  function applyRule(node, apply) {
+    if (!apply || typeof apply.reason !== 'string' || node.querySelector('.apply-reason')) return;
+    const line = el('p', 'apply-reason', apply.reason);
+    line.id = 'apply-reason-' + String(++policyUid);
+    const badge = node.querySelector('.trust-badge');
+    if (badge && badge.parentNode === node) node.insertBefore(line, badge); else node.append(line);
+    if (apply.allowed === false) {
+      node.querySelectorAll('button[aria-label="Insert at cursor"]').forEach((button) => { button.setAttribute('aria-disabled', 'true'); button.setAttribute('aria-describedby', line.id); });
+    }
   }
 
   // The report-only notice: no close or dismiss control; it goes only when the host says the rules turned to enforce.
@@ -1658,6 +1672,7 @@
         // Drawn only under its own run's answer: a run id with no answer on the page, or a state that is not one of the three, draws nothing.
         const reply = typeof m.runId === 'string' ? replies.get(m.runId) : undefined;
         if (reply) trustKit.renderTrustBadge(document, reply.node, m.badge, postFor, m.runId);
+        if (reply && m.badge && m.badge.apply) applyRule(reply.node, m.badge.apply);
         break;
       }
       case 'assistant-cost': {

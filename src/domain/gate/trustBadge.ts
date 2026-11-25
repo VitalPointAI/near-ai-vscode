@@ -1,6 +1,7 @@
 // The trust badge on each cloud answer (CLAS-08): three plain states, chosen here and only here from the checks that actually ran. The badge never says
 // more than was proven: a check that is still running, timed out, could not run or failed is Not verified, and Verified private model needs every input at
 // its best. Pure: no vscode, no network, nothing outside src/domain.
+import { applyAllowed } from './modelRow';
 import { createHash } from 'node:crypto';
 import type { ConnectionBindingFact } from './routing';
 import type { TrustFacts, TrustLine, TrustPlace } from './trust';
@@ -108,6 +109,8 @@ export interface TrustBadge {
   readonly replayed?: true;
   /** The trust line (D-38): "Runs on {place} · {verified} · {allowed}", its verified part always this badge's own state. */
   readonly line?: TrustLine;
+  /** Insert at cursor on this answer (74.1 D-21, P4): absent when allowed with nothing to say; otherwise whether it may write, and why. */
+  readonly apply?: { readonly allowed: boolean; readonly reason?: string };
 }
 
 /** 0 for Not verified, 1 for Model verified, connection not proven, 2 for Verified private model: a stronger state has a higher rank. */
@@ -139,6 +142,13 @@ function withCause(lead: string, cause: string | undefined): string {
  * and no other check of the chat failed. Model verified, connection not proven when everything but the connection holds. Not verified otherwise, with a
  * reason for each input that was not at its best.
  */
+/** Insert at cursor on the answer, from its trust facts (74.1 D-21): undefined when allowed with nothing to say. */
+function applyOf(facts: TrustBadgeFacts): TrustBadge['apply'] {
+  if (facts.trust === undefined) return undefined;
+  const found = applyAllowed(facts.trust, 'This model');
+  return found.allowed && found.reason === undefined ? undefined : found;
+}
+
 export function trustBadgeFor(facts: TrustBadgeFacts): TrustBadge | undefined {
   if (facts.route === 'local') return undefined;
   const reasons: string[] = [];
@@ -165,7 +175,8 @@ export function trustBadgeFor(facts: TrustBadgeFacts): TrustBadge | undefined {
     state = 'model-verified';
     reasons.push(withCause(TRUST_BADGE_TEXT.connectionNotProven, connectionCause(facts)));
   }
-  return { state, title: TRUST_BADGE_TITLES[state], explanation: TRUST_BADGE_TEXT.explanation[state], reasons, helpers: TRUST_BADGE_TEXT.helpers, line: badgeLine(facts, state) };
+  const apply = applyOf(facts);
+  return { state, title: TRUST_BADGE_TITLES[state], explanation: TRUST_BADGE_TEXT.explanation[state], reasons, helpers: TRUST_BADGE_TEXT.helpers, line: badgeLine(facts, state), ...(apply === undefined ? {} : { apply }) };
 }
 
 /** A line of three parts, joined as trustLine joins them. */

@@ -518,3 +518,5 @@ body.vscode-high-contrast .trust-badge, body.vscode-high-contrast-light .trust-b
 .empty-state .who { margin-top: 8px; }
 .link-button { background: none; border: 0; padding: 0; min-height: 24px; color: var(--vscode-textLink-foreground); cursor: pointer; }
 .link-button:hover { text-decoration: underline; }
+.apply-reason { margin: 8px 0 0; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+button[aria-disabled="true"][aria-label="Insert at cursor"] { opacity: 0.5; cursor: default; }

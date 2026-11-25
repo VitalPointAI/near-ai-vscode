@@ -155,3 +155,35 @@ export function catalogRows(
     };
   });
 }
+
+/** Insert at cursor on an answer (74.1 D-21, P4, 74.1-UI-SPEC S6). Placeholders in braces are filled by code. */
+export const APPLY_TEXT = Object.freeze({
+  applyBlocked: '{model} is approved only for {use}, so its answer cannot be applied to a file. You can copy the text.',
+  applyReportOnly: '{model} is approved only for {use}. Applying its answer to a file is outside your organization\'s model policy (report only).'
+});
+
+/** The approval an answer's trust facts carry: a model approval's use, an exception's chat you review, or research only. */
+export interface ApplyFacts {
+  readonly allowedBy: ReadonlyArray<{ readonly kind: string; readonly passport?: string; readonly maxTier?: UseTier; readonly authorizationKind?: string }>;
+  readonly wouldRefuse?: readonly string[];
+}
+
+/**
+ * Whether Insert at cursor may write an answer into a file (74.1 D-21, P4, Q1): yes when the answer's model is approved for agent work; in report mode
+ * yes, with the line that it is outside the policy; under enforce no, with the reason (only a surface whose use is chat you review can show such an
+ * answer). Copy always stays.
+ */
+export function applyAllowed(facts: ApplyFacts, model: string): { readonly allowed: boolean; readonly reason?: string } {
+  const approval = facts.allowedBy.find((record) => record.kind === 'model-approval');
+  const exception = facts.allowedBy.some((record) => record.kind === 'authorization' && record.authorizationKind === 't1-risk');
+  const reported = facts.wouldRefuse?.includes('route.passport') === true;
+  // No approval step ran for this answer (no policy, or an older path): there is nothing to say and nothing to refuse here.
+  if (approval === undefined && !exception && !reported) return { allowed: true };
+  const approved: UseTier = approval?.maxTier ?? 'T0';
+  const covers: UseTier = exception && rank(approved) < rank('T1') ? 'T1' : approved;
+  if (rank(covers) >= rank('T2')) return { allowed: true };
+  const name = approval?.passport ?? model;
+  const use = covers === 'T1' ? ROW_USE_WORDS.T1 : 'research';
+  if (reported) return { allowed: true, reason: fill(APPLY_TEXT.applyReportOnly, { model: name, use }) };
+  return { allowed: false, reason: fill(APPLY_TEXT.applyBlocked, { model: name, use }) };
+}
