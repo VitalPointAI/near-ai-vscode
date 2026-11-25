@@ -357,6 +357,11 @@
         "category": "NEAR AI"
       },
       {
+        "command": "nearAi.identity.showThisComputer",
+        "title": "Show This Computer's Identity",
+        "category": "NEAR AI"
+      },
+      {
         "command": "nearAi.staff.approveProduct",
         "title": "Staff: Approve a Product",
         "category": "NEAR AI"

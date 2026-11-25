@@ -41,6 +41,7 @@ import { OPEN_FAILED_TEXT, defaultPolicyEditorPort, discardDraft, draftFiles, po
 import type { PolicyEditorPort } from './policyEditorWiring';
 export type { PolicyEditorPort } from './policyEditorWiring';
 export { NO_DRAFT_TEXT, POLICY_APPLIED_TEXT } from './policyEditorWiring';
+import { DEVICE_IDENTITY_TEXT, SHOW_DEVICE_IDENTITY_COMMAND, thisComputerIdentity } from '../gate/deviceIdentityCommand';
 import { registerSetupStep } from './setupSteps';
 import type { SetupStep } from './setupSteps';
 
@@ -378,6 +379,20 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
   });
   attempt("Add Your Organization's Rules", () => {
     keep(vscode.commands.registerCommand(ADD_ORGANIZATION_RULES_COMMAND, () => addOrganizationRules(host, { globalStorageDir: context.globalStorageUri.fsPath, secrets: context.secrets, now: clock, tell, ...(context.globalState === undefined ? {} : { memento: context.globalState }) })));
+  });
+  attempt('this computer\'s identity', () => {
+    keep(vscode.commands.registerCommand(SHOW_DEVICE_IDENTITY_COMMAND, async () => {
+      const view = await thisComputerIdentity(context.secrets).catch(() => undefined);
+      if (view === undefined) {
+        void Promise.resolve(vscode.window.showInformationMessage(DEVICE_IDENTITY_TEXT.none)).catch(() => undefined);
+        return;
+      }
+      const choice = await vscode.window.showInformationMessage(view.message, DEVICE_IDENTITY_TEXT.copy);
+      if (choice === DEVICE_IDENTITY_TEXT.copy) {
+        await vscode.env.clipboard.writeText(view.didKey);
+        void Promise.resolve(vscode.window.showInformationMessage(DEVICE_IDENTITY_TEXT.copied)).catch(() => undefined);
+      }
+    }));
   });
   attempt('the policy reset', () => {
     keep(vscode.commands.registerCommand(RESET_POLICY_COMMAND, () => resetPolicy(host)));
