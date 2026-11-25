@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
+import { projectScopeId } from '../domain/contextGraph';
 import type { ContextGraphNodeDto, MemoryScope } from '../domain/contextGraph';
 import type { ContextGraphMemory } from '../services/contextGraphMemory';
 import { modelList, resolveModelId } from '../gsd/library';
@@ -285,7 +286,7 @@ export function memoryTools(memory: ContextGraphMemory, scopes: { project: Memor
 
 /** The project's memory scope, shared by the chat and the memory command so both see the same facts. */
 export function projectMemoryScope(root: string): MemoryScope {
-  return { kind: 'project', id: `project-${createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 32)}` };
+  return { kind: 'project', id: projectScopeId(root) };
 }
 
 /** Facts in a scope that contain at least one word of the query, best matches first. */

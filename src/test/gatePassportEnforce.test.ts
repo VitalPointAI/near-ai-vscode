@@ -154,8 +154,8 @@ test('D-13: a session\'s use only rises: after agent work, a later chat request 
 
 test('D-13: sessionRouteFrom takes the use in its options', () => {
   const route = sessionRouteFrom(testGateRuntime(), { use: () => ({ checkingJob: true }) });
-  assert.deepEqual(route.useOf?.(), { checkingJob: true });
-  assert.equal(sessionRouteFrom(testGateRuntime()).useOf, undefined);
+  assert.deepEqual(route.useOf?.(), { context: 'interactive', checkingJob: true }, 'the runtime\'s context, then the caller\'s own facts (74.1-03)');
+  assert.deepEqual(sessionRouteFrom(testGateRuntime()).useOf?.(), { context: 'interactive' });
 });
 
 test('D-11: route.passport is a route rule decideRoute reaches, no longer named ahead, with the generic sentence and one sentence per gap', () => {

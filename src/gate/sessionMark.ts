@@ -26,7 +26,7 @@ import { clearancesInForce } from './clearances';
 import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
 import type { UseTier } from '../domain/gate/models';
-import { raiseUseTier } from '../domain/gate/useTier';
+import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
 
 /**
@@ -99,8 +99,14 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  * The route of one run, from its gate runtime: the runtime's policy, actor, sink and clock. `markOf` defaults to the empty mark (the default label);
  * plan 22 gives a chat's runs the chat's mark. `attestation` is the chat's shared object, so a sub-agent and its parent share one route state.
  */
-export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: () => UseInput } = {}): SessionRoute {
-  return {
+export function sessionRouteFrom(
+  runtime: GateRuntime,
+  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute } = {}
+): SessionRoute {
+  // 74.1 D-13: the runtime's context and the project's facts, then the caller's own facts, which can only add to them (useTierFor takes the highest row).
+  const own = options.use;
+  const project = runtime.project?.kind === undefined ? {} : { project: { kind: runtime.project.kind, ...(runtime.project.exercise === true ? { exercise: true } : {}) } };
+  const route: SessionRoute = {
     markOf: options.markOf ?? (() => EMPTY_MARK),
     bundleState: runtime.bundleState,
     actor: runtime.actor,
@@ -112,8 +118,23 @@ export function sessionRouteFrom(runtime: GateRuntime, options: { markOf?: () =>
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
     ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice }),
-    ...(options.use === undefined ? {} : { useOf: options.use })
+    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) })
   };
+  // A sub-agent's route starts at the use its parent is at now: the highest it has asked for, or what its own facts give.
+  if (options.parent !== undefined) raiseSessionUse(route, parentUse(options.parent));
+  return route;
+}
+
+/** The use a parent route passes to a child: its high-water raised by what its own facts and mark give now; operational work if they cannot be read. */
+function parentUse(parent: SessionRoute): UseTier {
+  const held = useHighWater.get(parent) ?? 'T0';
+  try {
+    const own = parent.useOf?.() ?? {};
+    const mark = parent.markOf().map((label) => ({ scale: label.scale, level: label.level }));
+    return raiseUseTier(held, useTierFor({ ...own, mark: [...(own.mark ?? []), ...mark] }));
+  } catch {
+    return 'T3';
+  }
 }
 
 // ---- The use of a session (74.1 D-13) ----

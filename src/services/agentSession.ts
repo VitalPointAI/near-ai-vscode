@@ -775,7 +775,7 @@ export class AgentConversation {
         let routeOfRun: SessionRoute | undefined;
         const onAnswerChecked: AnswerCheckListener = (chatId, result, checked) => { if (routeOfRun) this.answerChecked(runId, routeOfRun, attestation, chatId, result, { ...checked, client: request.client }); };
         const onNotice = (text: string): void => this.post({ type: 'notice', text });
-        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked, onNotice }) : defaultSessionRoute();
+        const runRoute = gate ? sessionRouteFrom(gate, { attestation, markOf: () => mark.current(), onAnswerChecked, onNotice, use: { tools: true } }) : defaultSessionRoute();
         routeOfRun = runRoute;
         // Coherence review S4: in TEE-only mode every request of the run counts as private only when the gate's own check passes, not on the catalog's word.
         const runAll = () => withSessionRoute(runRoute, () => run.run(this.messages, abort.signal));
@@ -1713,7 +1713,7 @@ export class AgentConversation {
             // The sub-agent's own route names it in its records, and shares the parent's mark and attestation state, so a helper is routed as its lead is
             // (research 9.1); outside a parent route (a test) it starts from the chat's own state.
             const parentRoute = currentSessionRoute();
-            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf } : {}), attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}), ...(parentRoute?.onNotice ? { onNotice: parentRoute.onNotice } : {}) }) : parentRoute ?? defaultSessionRoute();
+            const childRoute = childGate ? sessionRouteFrom(childGate, { ...(parentRoute ? { markOf: parentRoute.markOf, parent: parentRoute } : {}), use: { tools: true, context: 'sub-agent' }, attestation: parentRoute?.attestation ?? this.routeAttestation, ...(parentRoute?.onAnswerChecked ? { onAnswerChecked: parentRoute.onAnswerChecked } : {}), ...(parentRoute?.onNotice ? { onNotice: parentRoute.onNotice } : {}) }) : parentRoute ?? defaultSessionRoute();
             const childMessages: AgentMessage[] = [{ role: 'system', content: system }, { role: 'user', content: spawn.prompt }];
             // Coherence review S4: a private member (its own line, or a private team's) is sent only when the gate's own check passes: a model on this
             // computer, or a private NEAR AI Cloud model over a connection proven to end inside its private hardware. The catalog's word only chose the model.
