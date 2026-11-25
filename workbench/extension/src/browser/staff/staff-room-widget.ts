@@ -10,7 +10,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget.js';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import type { ServiceResult } from '../../common/service-result.js';
 import { StaffStatusServer } from '../../common/staff-live.js';
-import { STAFF_ROOM_TEXT, StaffRoomServer, type StaffRoom, type StaffRoomAction } from '../../common/staff-room.js';
+import { STAFF_ROOM_TEXT, StaffRoomServer, type StaffRoom, type StaffRoomAction, type StaffSignedResult } from '../../common/staff-room.js';
 import { reasonsFieldId, StaffRoomEvents, staffRoomView } from './staff-room-view.js';
 import './staff-room.css';
 
@@ -62,6 +62,13 @@ export class StaffRoomWidget extends ReactWidget {
         return this.answer(await this.server.propose(room.project, action.product ?? ''));
       case 'dismiss':
         return this.server.dismiss(room.project, action.product ?? '', action.hash ?? '');
+      case 'switch-keys':
+        return this.signed(await this.server.switchToV2(room.project, this.here()));
+      case 'move-keys':
+      case 'move-keys-now':
+        return this.signed(await this.server.moveCellsToV2(room.project, action.id === 'move-keys-now', this.here()));
+      case 'give-keys':
+        return this.signed(await this.server.giveKeys(room.project, this.here()));
       case 'make-copy':
         await this.messages.info(STAFF_ROOM_TEXT.copyLater);
         return;
@@ -75,9 +82,18 @@ export class StaffRoomWidget extends ReactWidget {
     if (pending === undefined) return;
     const field = this.node.querySelector<HTMLTextAreaElement>(`#${CSS.escape(reasonsFieldId(room))}`);
     const reasons = (field?.value ?? '').split('\n').map((line) => line.trim()).filter((line) => line !== '');
-    const result = await this.server.decide(pending.ticket, outcome, reasons, `${window.location.pathname}${window.location.search}`);
+    return this.signed(await this.server.decide(pending.ticket, outcome, reasons, this.here()), STAFF_ROOM_TEXT.decided);
+  }
+
+  /** This page's path, where a confirmation with the passkey or security key comes back to. */
+  private here(): string {
+    return `${window.location.pathname}${window.location.search}`;
+  }
+
+  /** An act signed by the person key: done (the room redraws), refused with its sentence, or a trip to confirm first. */
+  private async signed(result: StaffSignedResult<unknown>, done?: string): Promise<void> {
     if (result.kind === 'ok') {
-      await this.messages.info(STAFF_ROOM_TEXT.decided);
+      if (done !== undefined) await this.messages.info(done);
       return;
     }
     if (result.kind === 'step-up') {

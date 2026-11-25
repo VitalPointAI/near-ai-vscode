@@ -189,6 +189,11 @@ export interface StaffRoomApi {
   pendingConfirmation(products: never): unknown[];
   chooseRosterBranch(shared: never, branch: string): Promise<unknown>;
   describeRosterBranches(shared: never): Promise<unknown[]>;
+  /** 33.2-07: the cards of the switch to post-quantum keys this computer sees, and their three actions (src/staff/replica/wrapUpgrade.ts). */
+  wrapCardsFor(shared: never): Promise<unknown[]>;
+  switchToV2(shared: never): Promise<unknown>;
+  moveCellsToV2(shared: never, options?: { readonly includeWaiting?: boolean }): Promise<unknown>;
+  giveKeys(shared: never): Promise<unknown>;
 }
 
 /** The engine names the staff backend calls. */

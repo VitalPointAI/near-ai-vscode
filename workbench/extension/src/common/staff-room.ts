@@ -33,7 +33,7 @@ export interface StaffRoomPerson {
 }
 
 export interface StaffRoomCard {
-  readonly kind: 'update' | 'early-share-copy' | 'contested' | 'join' | 'roster-split' | 'owner-prompt' | 'agent';
+  readonly kind: 'update' | 'early-share-copy' | 'contested' | 'join' | 'roster-split' | 'owner-prompt' | 'agent' | 'switch-keys' | 'move-keys' | 'give-keys';
   readonly id: string;
   readonly text: string;
   readonly actions: readonly StaffRoomAction[];
@@ -81,11 +81,14 @@ export interface StaffRoom {
   readonly pending?: StaffPendingDecision;
 }
 
-/** The answer of decide and settle: written, refused with the sentence (and a fix), or a confirmation needed first. */
-export type StaffDecisionResult =
-  | { readonly kind: 'ok'; readonly value: { readonly hash: string } }
+/** The answer of an act signed by the person key: written, refused with the sentence (and a fix), or a confirmation needed first. */
+export type StaffSignedResult<T> =
+  | { readonly kind: 'ok'; readonly value: T }
   | { readonly kind: 'refused'; readonly reason: string; readonly fix?: string }
   | { readonly kind: 'step-up'; readonly reason: string; readonly fix: string; readonly url: string };
+
+/** The answer of decide and settle. */
+export type StaffDecisionResult = StaffSignedResult<{ readonly hash: string }>;
 
 export interface StaffRoomClient {
   /** A room changed; every tab redraws it. */
@@ -105,6 +108,11 @@ export interface StaffRoomServer {
   choose(project: string, branch: string): Promise<ServiceResult<string>>;
   propose(project: string, product: string): Promise<ServiceResult<string>>;
   dismiss(project: string, product: string, hash: string): Promise<void>;
+  /** The switch to post-quantum keys (33.2 D-05): the lead's switch, then moving the shared work to new keys, then keys for late computers. */
+  switchToV2(project: string, returnTo: string): Promise<StaffSignedResult<string>>;
+  /** Moves the parts whose computers all have post-quantum keys; with includeWaiting, the others now too. */
+  moveCellsToV2(project: string, includeWaiting: boolean, returnTo: string): Promise<StaffSignedResult<string>>;
+  giveKeys(project: string, returnTo: string): Promise<StaffSignedResult<string>>;
 }
 
 /** Every sentence of the Staff Room's own (the room's words come from the model). */
@@ -123,4 +131,9 @@ export const STAFF_ROOM_TEXT = {
   reasons: 'Your reasons',
   confirm: 'Confirm with your passkey or security key',
   finish: 'Finish your decision',
+  keysAlreadySwitched: 'This shared work already uses post-quantum keys.',
+  keysNotLead: 'Only the lead or the deputy can do this.',
+  keysNotPublished: 'Your computer has not published its post-quantum keys yet. It does when you next open this shared work.',
+  keysNotSwitched: 'This shared work has not switched to post-quantum keys yet.',
+  keysNothingToDo: 'Nothing is ready for new keys right now. Look again.',
 } as const;

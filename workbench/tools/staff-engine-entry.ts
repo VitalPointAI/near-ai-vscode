@@ -51,3 +51,5 @@ export { memberNameAt, staffRoomLive, whoCanSee } from '../../src/domain/staff/s
 export { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../../src/staff/replica/versionActs';
 export { changesSinceRows, contestedCards, pendingConfirmation } from '../../src/staff/replica/contested';
 export { chooseRosterBranch, describeRosterBranches } from '../../src/staff/replica/membership';
+// 33.2-07: the switch to post-quantum keys in the Staff Room: this computer's cards and the three actions (switch, move, give keys).
+export { giveKeys, moveCellsToV2, switchToV2, wrapCardsFor } from '../../src/staff/replica/wrapUpgrade';

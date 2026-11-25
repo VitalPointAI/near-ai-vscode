@@ -13,6 +13,7 @@
  *   exchange   after each one that brought something, the projector writes the product files not open in an editor (33-06)
  *   checkpoint the compactor runs when due (33-06)
  *   join       a join-request frame reaches the clients only on a lead or deputy device (D-12)
+ *   keys       the switch to post-quantum keys (33.2 D-05): this computer's cards, and switchToV2, moveCellsToV2 and giveKeys for the Staff Room
  *   update     a project that requires a feature this build lacks stops with the D-67 sentence; its store keeps every entry
  *   stop       replicators stopped, projects closed, the session keys and the opened encryption key dropped
  *
@@ -23,6 +24,7 @@ import type { OpenedEncryptionKey } from './encryption-key.js';
 import type { SecretStorageLike } from './keystore-secrets.js';
 import type { EngineHubStanding, EngineLiveStatus, EngineProject, EngineReplicator, StaffEngine } from './staff-engine.js';
 import type { StaffJoinRequest, StaffStatusRow } from '../../common/staff-live.js';
+import { STAFF_ROOM_TEXT } from '../../common/staff-room.js';
 import { publishPersonKem } from './person-kem.js';
 
 /** What a hosted session brings (33-23): its session keys and the person's opened encryption key. */
@@ -57,6 +59,29 @@ interface LiveProject {
   pulled: number;
   bound: Set<string>;
   readonly subscriptions: Array<{ dispose(): void }>;
+}
+
+/** The answer of a key action: done, or refused with its reason and the sentence a person reads. */
+export type StaffKeysAnswer = { readonly ok: true } | { readonly ok: false; readonly reason: string; readonly message: string };
+
+/** wrapUpgrade.ts WrapActionSkip, in words. */
+const KEYS_SKIPPED: Readonly<Record<string, string>> = {
+  'already-switched': STAFF_ROOM_TEXT.keysAlreadySwitched,
+  'not-a-lead-device': STAFF_ROOM_TEXT.keysNotLead,
+  'keys-not-published': STAFF_ROOM_TEXT.keysNotPublished,
+  'not-switched': STAFF_ROOM_TEXT.keysNotSwitched,
+  'nothing-to-do': STAFF_ROOM_TEXT.keysNothingToDo,
+};
+
+/** A key action's result as plain data: a skip, the project's refusal or a membership refusal keeps its sentence; a move or a grant of nothing is nothing to do. */
+function keysAnswer(result: unknown): StaffKeysAnswer {
+  const value = result as { ok?: boolean; skipped?: unknown; refused?: string; reason?: string; message?: string; rekeyed?: unknown[]; given?: unknown[] };
+  const nothing = { ok: false, reason: 'nothing-to-do', message: STAFF_ROOM_TEXT.keysNothingToDo } as const;
+  if (typeof value.skipped === 'string') return { ok: false, reason: value.skipped, message: KEYS_SKIPPED[value.skipped] ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if (value.refused !== undefined) return { ok: false, reason: value.refused, message: value.message ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if (value.ok === false) return { ok: false, reason: value.reason ?? 'refused', message: value.message ?? STAFF_ROOM_TEXT.keysNothingToDo };
+  if ((value.rekeyed !== undefined && value.rekeyed.length === 0) || (value.given !== undefined && value.given.length === 0)) return nothing;
+  return { ok: true };
 }
 
 type RowListener = (row: StaffStatusRow) => void;
@@ -149,6 +174,36 @@ export class StaffLiveEngine {
   public shared(id: string): { readonly project: EngineProject; readonly deps: object; readonly root: string } | undefined {
     const live = this.find(id);
     return live === undefined ? undefined : { project: live.project, deps: live.deps, root: live.root };
+  }
+
+  /** The cards of the switch to post-quantum keys this computer sees in an open project (33.2 D-05), with the host's clearance check. */
+  public async wrapCards(id: string): Promise<unknown[]> {
+    const live = this.find(id);
+    return live === undefined ? [] : this.options.engine.wrapCardsFor({ project: live.project, deps: live.deps } as never);
+  }
+
+  /** The lead's switch: one roster.require wrap@2, signed by the person key (a step-up in a hosted session). */
+  public switchToV2(id: string): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.switchToV2(shared));
+  }
+
+  /** One scheduled rekey per part whose computers all have post-quantum keys; with includeWaiting, the others now too. */
+  public moveCellsToV2(id: string, includeWaiting: boolean): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.moveCellsToV2(shared, { includeWaiting }));
+  }
+
+  /** A later grant of the current key to each computer that published its post-quantum keys late. */
+  public giveKeys(id: string): Promise<StaffKeysAnswer> {
+    return this.keysAct(id, (shared) => this.options.engine.giveKeys(shared));
+  }
+
+  private async keysAct(id: string, act: (shared: never) => Promise<unknown>): Promise<StaffKeysAnswer> {
+    const live = this.find(id);
+    if (live === undefined) return { ok: false, reason: 'not-open', message: STAFF_ROOM_TEXT.notOpen };
+    const answer = keysAnswer(await act({ project: live.project, deps: live.deps } as never));
+    if (answer.ok) live.replicator?.localAppended();
+    else this.log(`staff: a key change was not written (${answer.reason})`);
+    return answer;
   }
 
   /** A bound editor wrote changes (33-25): the replicator pushes them. */

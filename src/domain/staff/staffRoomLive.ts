@@ -15,6 +15,8 @@ import { deviceAt, memberAt } from '../replica/rosterMembers';
 import type { SyncState } from '../replica/syncMachine';
 import { presenceText, SYNC_WORDS, syncAccessibleName, syncAction, syncSentence } from './liveSentences';
 import type { SentenceStatus, SyncAction } from './liveSentences';
+import { GIVE_KEYS_ACTION_TEXT, MOVE_CARD_EXPLAIN_TEXT, MOVE_CARD_TEXT, MOVE_NOW_TEXT, MOVE_WAITING_TEXT, SWITCH_CARD_TEXT, SWITCH_NOT_READY_TEXT } from './wrapSwitchModel';
+import type { WrapCard } from './wrapSwitchModel';
 
 /** D-23: the banner while offline, word for word. */
 export const OFFLINE_BANNER_TEXT = 'You are offline. Your changes are kept here and will sync when your organization\'s server is back. Decisions you make now may become contested if someone else decides the same thing.';
@@ -120,10 +122,13 @@ export interface StaffRoomLiveInput {
   readonly earlyShareCopyNeeded?: boolean;
   /** Owner prompts this person put away this session, as product and hash. */
   readonly dismissed?: readonly string[];
+  /** The switch to post-quantum keys (33.2 D-05): this computer's next step, as wrapSwitchCards gives it. */
+  readonly wrapCards?: readonly WrapCard[];
 }
 
 export interface StaffRoomAction {
-  readonly id: SyncAction | 'admit' | 'decline' | 'choose' | 'approve' | 'reject' | 'propose' | 'dismiss' | 'make-copy';
+  readonly id: SyncAction | 'admit' | 'decline' | 'choose' | 'approve' | 'reject' | 'propose' | 'dismiss' | 'make-copy'
+    | 'switch-keys' | 'move-keys' | 'move-keys-now' | 'give-keys';
   readonly label: string;
   /** The button's accessible name: the label with what it acts on. */
   readonly accessibleName: string;
@@ -150,7 +155,8 @@ export type StaffRoomCard =
   | { readonly kind: 'join'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
   | { readonly kind: 'roster-split'; readonly id: string; readonly text: string; readonly branches: ReadonlyArray<{ readonly text: string; readonly action: StaffRoomAction }>; readonly actions: readonly StaffRoomAction[] }
   | { readonly kind: 'owner-prompt'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] }
-  | { readonly kind: 'agent'; readonly id: string; readonly text: string; readonly trustLine?: string; readonly actions: readonly StaffRoomAction[] };
+  | { readonly kind: 'agent'; readonly id: string; readonly text: string; readonly trustLine?: string; readonly actions: readonly StaffRoomAction[] }
+  | { readonly kind: 'switch-keys' | 'move-keys' | 'give-keys'; readonly id: string; readonly text: string; readonly actions: readonly StaffRoomAction[] };
 
 export interface StaffRoomRow {
   readonly product: string;
@@ -195,6 +201,29 @@ function newestVersions(versions: readonly StaffRoomVersionInput[]): Map<string,
     if (known === undefined || version.number > known.number) out.set(version.product, version);
   }
   return out;
+}
+
+/**
+ * The switch to post-quantum keys as Staff Room cards (33.2 D-05, D-11): each with its sentence and at least one way forward. Move moves the ready
+ * parts first; while some wait, its other action moves them now and leaves their late computers to Give keys.
+ */
+function wrapCardsOf(cards: readonly WrapCard[]): StaffRoomCard[] {
+  return cards.map((card): StaffRoomCard => {
+    if (card.kind === 'switch') {
+      const names = card.notReady.length === 0 ? '' : ` ${SWITCH_NOT_READY_TEXT} ${card.notReady.join(', ')}.`;
+      return { kind: 'switch-keys', id: 'switch-keys', text: `${card.explain}${names}`, actions: [action('switch-keys', SWITCH_CARD_TEXT, '')] };
+    }
+    if (card.kind === 'move') {
+      return {
+        kind: 'move-keys', id: 'move-keys', text: card.waiting.length === 0 ? MOVE_CARD_EXPLAIN_TEXT : `${MOVE_CARD_EXPLAIN_TEXT} ${MOVE_WAITING_TEXT}`,
+        actions: [
+          ...(card.ready.length === 0 ? [] : [action('move-keys', MOVE_CARD_TEXT, '')]),
+          ...(card.waiting.length === 0 ? [] : [action('move-keys-now', MOVE_NOW_TEXT, '')]),
+        ],
+      };
+    }
+    return { kind: 'give-keys', id: 'give-keys', text: card.text, actions: [action('give-keys', GIVE_KEYS_ACTION_TEXT, '')] };
+  });
 }
 
 /** The Staff Room of one shared work, as plain data. */
@@ -250,6 +279,7 @@ export function staffRoomLive(input: StaffRoomLiveInput): StaffRoomLiveView {
       });
     }
   }
+  cards.push(...wrapCardsOf(input.wrapCards ?? []));
   const newest = newestVersions(input.versions);
   const dismissed = new Set(input.dismissed ?? []);
   for (const product of input.products) {

@@ -11,7 +11,12 @@ import type { KemPublicKeys } from '../domain/replica/cellWrapV2';
 import { signKemBinding } from '../domain/replica/deviceKem';
 import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
 import { WRAP_FEATURE } from '../domain/replica/wrapFormat';
-import { MOVE_CARD_TEXT, SWITCH_CARD_EXPLAIN_TEXT, SWITCH_CARD_TEXT, giveKeysText, wrapSwitchCards } from '../domain/staff/wrapSwitchModel';
+import { staffRoomLive } from '../domain/staff/staffRoomLive';
+import type { StaffRoomCard } from '../domain/staff/staffRoomLive';
+import {
+  GIVE_KEYS_ACTION_TEXT, MOVE_CARD_EXPLAIN_TEXT, MOVE_CARD_TEXT, MOVE_NOW_TEXT, MOVE_WAITING_TEXT, SWITCH_CARD_EXPLAIN_TEXT, SWITCH_CARD_TEXT, SWITCH_NOT_READY_TEXT,
+  giveKeysText, wrapSwitchCards,
+} from '../domain/staff/wrapSwitchModel';
 import type { WrapCard } from '../domain/staff/wrapSwitchModel';
 import type { SignedPayload } from '../domain/team/signedPayload';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld } from './helpers/replicaRosterWorld';
@@ -142,4 +147,39 @@ test('table: every transition between no card, Switch, Move and Give keys, as th
     step();
     assert.deepEqual(kinds(cardsOf(s, s.world.lead)), expected, what);
   }
+});
+
+// The cards as the Staff Room draws them (33-26 attention cards): each with its words and the one way forward, the names in the sentence.
+const roomCards = (cards: readonly WrapCard[]): StaffRoomCard[] => [...staffRoomLive({
+  status: { state: 'live', findings: [] }, isLeadDevice: true, people: [], products: [], versions: [], contested: [], unconfirmed: [], joins: [], splits: [], agents: [], wrapCards: cards,
+}).cards];
+const shown = (card: StaffRoomCard): [string, string, string[][]] => [card.kind, card.text, card.actions.map((action) => [action.id, action.label, action.accessibleName])];
+
+test('in the Staff Room, Switch names who has no keys, Move moves what is ready or everything now, and Give keys gives; each has one way forward', () => {
+  const s = scene();
+  publish(s, s.world.lead);
+  assert.deepEqual(roomCards(cardsOf(s, s.world.lead)).map(shown), [
+    ['switch-keys', `${SWITCH_CARD_EXPLAIN_TEXT} ${SWITCH_NOT_READY_TEXT} Pat Analyst.`, [['switch-keys', SWITCH_CARD_TEXT, SWITCH_CARD_TEXT]]],
+  ]);
+  assert.equal(SWITCH_CARD_EXPLAIN_TEXT, 'This protects shared work against future quantum computers.', 'post-quantum is explained once, on the card (D-11)');
+  switchOn(s);
+  assert.deepEqual(roomCards(cardsOf(s, s.world.lead)).map(shown), [
+    ['move-keys', `${MOVE_CARD_EXPLAIN_TEXT} ${MOVE_WAITING_TEXT}`, [['move-keys-now', MOVE_NOW_TEXT, MOVE_NOW_TEXT]]],
+  ], 'only waiting parts: the card still has its way forward, now');
+  publish(s, s.pat);
+  assert.deepEqual(roomCards(cardsOf(s, s.world.lead)).map(shown), [
+    ['move-keys', MOVE_CARD_EXPLAIN_TEXT, [['move-keys', MOVE_CARD_TEXT, MOVE_CARD_TEXT]]],
+  ]);
+  assert.deepEqual(roomCards([{ kind: 'move', text: MOVE_CARD_TEXT, ready: ['a'], waiting: ['b'] }]).map(shown), [
+    ['move-keys', `${MOVE_CARD_EXPLAIN_TEXT} ${MOVE_WAITING_TEXT}`, [['move-keys', MOVE_CARD_TEXT, MOVE_CARD_TEXT], ['move-keys-now', MOVE_NOW_TEXT, MOVE_NOW_TEXT]]],
+  ], 'ready parts move first; the rest wait or move now');
+  const s2 = scene();
+  publish(s2, s2.world.lead);
+  switchOn(s2);
+  rekeyV2(s2, [s2.world.lead]);
+  publish(s2, s2.pat);
+  assert.deepEqual(roomCards(cardsOf(s2, s2.world.lead)).map(shown), [
+    ['give-keys', 'One computer is ready for keys. Give keys.', [['give-keys', GIVE_KEYS_ACTION_TEXT, GIVE_KEYS_ACTION_TEXT]]],
+  ]);
+  assert.deepEqual(roomCards([]), [], 'no card, nothing drawn');
 });

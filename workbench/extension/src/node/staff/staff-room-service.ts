@@ -9,6 +9,9 @@
  * that version that folded meanwhile refuses with CHANGED_WHILE_DECIDING_TEXT and writes nothing. A confirmation that is too old answers with the
  * link that confirms it; the stamp stays, so the same decision finishes when the person comes back. Only a person decides: the acts run as a person.
  *
+ * The switch to post-quantum keys (33.2 D-05): the room shows this computer's Switch, Move or Give keys card, and its actions run in the live
+ * engine. Each refusal comes back as its sentence; a confirmation that is too old answers with the link that confirms it, as a decision does.
+ *
  * No log line holds text, a key, a token or a name.
  */
 import { randomUUID } from 'node:crypto';
@@ -19,18 +22,19 @@ import { ok, refused, type ServiceResult } from '../../common/service-result.js'
 import { stepUpUrl } from '../../common/session-identity.js';
 import {
   STAFF_ROOM_PATH, STAFF_ROOM_TEXT, StaffRoomServer, type StaffDecisionResult, type StaffPendingDecision, type StaffRoom, type StaffRoomClient,
-  type StaffRoomLiveView,
+  type StaffRoomLiveView, type StaffSignedResult,
 } from '../../common/staff-room.js';
 import type { StaffStatusRow } from '../../common/staff-live.js';
 import { bindBackendService } from '../backend-service.js';
 import type { EngineProject, StaffEngine } from './staff-engine.js';
-import type { StaffLiveEngine } from './staff-live-engine.js';
+import type { StaffKeysAnswer, StaffLiveEngine } from './staff-live-engine.js';
 
 /** How long a begun decision keeps its stamp: the step-up trip and back (Pitfall N8.4). */
 export const DECISION_WINDOW_MS = 15 * 60_000;
 
 /** What the Staff Room reads of the session's live engine. */
-export type RoomLiveSource = Pick<StaffLiveEngine, 'projects' | 'shared' | 'projectionInput' | 'onStatus' | 'onJoinRequest' | 'localAppended'>;
+export type RoomLiveSource = Pick<StaffLiveEngine, 'projects' | 'shared' | 'projectionInput' | 'onStatus' | 'onJoinRequest' | 'localAppended'
+  | 'wrapCards' | 'switchToV2' | 'moveCellsToV2' | 'giveKeys'>;
 
 /** A person in the people list (livePresence.ts PresencePerson). */
 export interface RoomPerson {
@@ -129,18 +133,8 @@ export class StaffRoomService implements StaffRoomServer {
       void this.push(ticket.project);
       return ok({ hash: result.hash });
     }
-    if (result.reason === 'signer-refused' && result.message === KEY_SERVICE_TEXT.stepUpNeeded) {
-      // The stamp stays for the trip to confirm: the same decision finishes when the person comes back (Pitfall N8.4).
-      const acr = this.options.stepUpAcr?.();
-      if (acr !== undefined) {
-        try {
-          return { kind: 'step-up', reason: result.message, fix: KEY_SERVICE_TEXT.confirm, url: stepUpUrl(returnTo, acr) };
-        } catch {
-          return refused(result.message, KEY_SERVICE_TEXT.confirm);
-        }
-      }
-      return refused(result.message, KEY_SERVICE_TEXT.confirm);
-    }
+    // The stamp stays for the trip to confirm: the same decision finishes when the person comes back (Pitfall N8.4).
+    if (isStepUp(result)) return this.stepUp(result.message, returnTo);
     this.tickets.delete(ticketId);
     void this.push(ticket.project);
     this.log(`staff: a decision was not written (${result.reason})`);
@@ -187,6 +181,41 @@ export class StaffRoomService implements StaffRoomServer {
     set.add(`${product}:${hash}`);
     this.dismissed.set(project, set);
     await this.push(project);
+  }
+
+  public switchToV2(project: string, returnTo: string): Promise<StaffSignedResult<string>> {
+    return this.keys(project, returnTo, (live) => live.switchToV2(project));
+  }
+
+  public moveCellsToV2(project: string, includeWaiting: boolean, returnTo: string): Promise<StaffSignedResult<string>> {
+    return this.keys(project, returnTo, (live) => live.moveCellsToV2(project, includeWaiting));
+  }
+
+  public giveKeys(project: string, returnTo: string): Promise<StaffSignedResult<string>> {
+    return this.keys(project, returnTo, (live) => live.giveKeys(project));
+  }
+
+  /** A key action in the live engine; the room is sent again either way, so a card that went away goes from every tab. */
+  private async keys(project: string, returnTo: string, act: (live: RoomLiveSource) => Promise<StaffKeysAnswer>): Promise<StaffSignedResult<string>> {
+    const live = this.options.live();
+    if (live === undefined || live.shared(project) === undefined) return refused(STAFF_ROOM_TEXT.notOpen);
+    const answer = await act(live);
+    void this.push(project);
+    if (answer.ok) return ok(project);
+    return isStepUp(answer) ? this.stepUp(answer.message, returnTo) : refused(answer.message);
+  }
+
+  /** A person key that wants a fresh confirmation: the link that confirms it and comes back to `returnTo`, or the fix alone without one. */
+  private stepUp(message: string, returnTo: string): StaffSignedResult<never> {
+    const acr = this.options.stepUpAcr?.();
+    if (acr !== undefined) {
+      try {
+        return { kind: 'step-up', reason: message, fix: KEY_SERVICE_TEXT.confirm, url: stepUpUrl(returnTo, acr) };
+      } catch {
+        return refused(message, KEY_SERVICE_TEXT.confirm);
+      }
+    }
+    return refused(message, KEY_SERVICE_TEXT.confirm);
   }
 
   private acts(shared: { project: EngineProject; deps: object }): RoomActs {
@@ -274,6 +303,7 @@ export class StaffRoomService implements StaffRoomServer {
       agents: [],
       earlyShareCopyNeeded: versions.some((item) => item.stream === project.projectId),
       dismissed: [...(this.dismissed.get(row.project) ?? [])],
+      wrapCards: await live.wrapCards(row.project).catch(() => []),
     } as never) as StaffRoomLiveView;
     const pending = [...this.tickets.values()].find((ticket) => ticket.project === row.project && ticket.expires > this.now());
     return { project: row.project, root: row.root, view, ...(pending === undefined ? {} : { pending: this.pendingOf(pending) }) };
@@ -298,6 +328,10 @@ export class StaffRoomService implements StaffRoomServer {
     this.options.log?.(line);
   }
 }
+
+/** A refusal of the person key that a fresh confirmation with the passkey or security key lifts. */
+const isStepUp = (result: { readonly reason?: string; readonly message: string }): boolean =>
+  result.reason === 'signer-refused' && result.message === KEY_SERVICE_TEXT.stepUpNeeded;
 
 /** The roster as far as the room reads it; the rest goes back to the engine untouched. */
 interface RosterLike {

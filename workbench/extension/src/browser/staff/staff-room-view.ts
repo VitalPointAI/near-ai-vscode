@@ -52,6 +52,9 @@ const ICONS: Readonly<Record<StaffRoomCard['kind'], string>> = {
   'roster-split': 'codicon-git-merge',
   'owner-prompt': 'codicon-versions',
   agent: 'codicon-hubot',
+  'switch-keys': 'codicon-shield',
+  'move-keys': 'codicon-sync',
+  'give-keys': 'codicon-key',
 };
 
 function button(room: StaffRoom, action: StaffRoomAction, handlers: StaffRoomHandlers, primary = false, key?: string): unknown {
