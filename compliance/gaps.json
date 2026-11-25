@@ -7158,8 +7158,8 @@
       "id": "G543",
       "ownerRole": "maintainers",
       "poam": "g543",
-      "remediation": "The two-browser staff test fixture connects both workbenches to an internal Docker network for the hub and to an ordinary bridge for host browser access. Its Node hook checks outbound calls under test. The ordinary bridge still supplies a route outside the test world. Put the workbenches on a Docker network with no outside route and prove browser access from the test host plus the no-egress condition before closing the Phase 33 plan 30 acceptance. Source: Phase 33 plan 30 Task 1 (D-65).",
-      "title": "The two-browser staff test still needs network isolation evidence"
+      "remediation": "On 2026-11-25 the built-image browser fixture passed with both workbenches, the hub and OpenBao attached only to one internal Docker bridge. Host loopback forwards preserved browser access. The outbound hook and browser payload checks passed. Repeat the topology and browser checks in CI on the combined branch. Source: Phase 33 plan 30 Task 1 (D-65) and its summary.",
+      "title": "The isolated two-browser staff fixture awaits combined CI"
     },
     {
       "appliesAt": "now",

@@ -22,7 +22,8 @@ The recovery branch `feat/codex-phase-33-29-30` starts at Claude’s committed `
 - The inherited invitation check exercises confirmation for sharing an invitation. Decision confirmation, two independent decisions that become contested, and refusal when the version changes while the dialog is open are all required by Task 3.
 - `StaffRoomWidget` opens a settle-only decision from a contested card. `StaffRoomService` can propose a version. The browser needs an entry point to submit a version and begin its first decision, and the version fold requires a roster holder of the submitted decision role.
 - The 33-26 service tests already cover a stale confirmation on a decision, a contested card and settling, and stamp changes. This is service-level evidence. The built-image browser checks remain blocking.
-- The workbenches reach the hub through an internal Docker network and use a separate ordinary bridge to publish browser ports. The Node outbound hook is a runtime assertion. The fixture still needs evidence of an absent external route.
+- The G543 test failed against the original fixture because a workbench had two network attachments (`00e92597`). The fixture change places both workbenches, the hub and OpenBao on exactly one internal Docker bridge (`c2d52d1e`). Host-only loopback forwarders preserve the browser origins. The browser run reached both workbenches while Docker inspection verified all four attachments. The outbound hook and payload assertions also passed.
+- The first topology run verified the attachments but hit a full checkout volume during the invitation download. With space restored, the fresh build and test rerun from the scratch volume passed all six browser cases and four wrapper checks in 5:14.05, with 355,820 KiB peak local runner RSS. Workbench lint passed, and the existing OpenBao identity and key checks passed 14 of 14. Logs are `.claude/worktrees/codex-staff-ci/g543-browser-retry.log` and `.claude/worktrees/codex-staff-ci/g543-openbao-regression.log`.
 - Gap-register suite: 21 passed. The road-to-production generator check passed after recording G542, G543 and G544.
 
 ## Next planning input
@@ -32,5 +33,5 @@ Use the existing version state machine: a proposed, reviewed version becomes awa
 ## Open conditions
 
 - **G542**: Plan and verify the native submit and first-decision flow through the existing authorization rules, and run the three decision checks in two workbench sessions. Plan 33-30 remains blocked and does not satisfy dependencies for 33-32 or 33.2-08.
-- **G543**: Prove the two-browser test world lacks a route outside its private network while allowing the host browser to reach both workbenches.
+- **G543**: Repeat the passing internal-bridge topology and browser access checks on the combined branch in CI.
 - **G544**: Repeat the six locally passing browser cases in CI on the combined branch before closing the record.
