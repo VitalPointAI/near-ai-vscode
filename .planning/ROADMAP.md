@@ -1009,8 +1009,8 @@ Plans:
   5. Your organization's Grype and OSV databases are synced, checked and signed daily; everything approved is rescanned daily; new KEV, malware or high findings, overdue reviews, unmatched signatures, old databases and a stopped intake raise alerts; OpenVEX is approved and signed; sites receive the database, VEX and withdrawals by signed refresh, and a withdrawal alerts and goes to the change board. (SSR-06)
   6. The supply-registry component has statements and evidence rules for the supply chain controls, the process document and runbook exist, the OSCAL package validates, gap rows G517 to G525 are on the road-to-production page, and a lab run proved the whole path on the real stack and an air-gapped site. (SSR-07)
   7. On the owner's go, builds run on single-use runner VMs at HQ in Canada that reach only GitHub and HQ, publish straight to HQ Harbor from protected pushes only, GHCR is optional and audits run offline; G517 is met, and G525 records that the source and job control plane stay on GitHub. On wait, G517 is a dated POA&M item, never claimed closed. (SSR-08)
-  8. A release's workbench image and VSIX have been rebuilt independently from the tagged source and approved files, compared byte for byte, and recorded as reproduced or differs, with any difference named in G525. (SSR-05, SSR-07)
-**Plans:** 27 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-39 in `48.3-CONTEXT.md`, D-39 the reproducible-build check, D-01 to D-11 the owner's accepted defaults, D-37 the rule that CI never runs the verifying code or keys of the pull request it checks; revised twice on 2026-11-25 after the independent plan checks; hand-offs H-01 to H-21 in `48.3-HANDOFFS.md`; gaps G517 to G525, and G526 if the lab has no second approver; each wave with gate files lands as one combined pull request with one owner gate approval)
+  8. A release's workbench image and VSIX have been rebuilt independently from the tagged source and approved files, compared byte for byte, and recorded as reproduced or differs in a record signed with the site key that verifyRebuild checks and the offline bundle carries to sites, with any difference named in G525. (SSR-05, SSR-07)
+**Plans:** 28 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-39 in `48.3-CONTEXT.md`, D-39 the reproducible-build check, D-01 to D-11 the owner's accepted defaults, D-37 the rule that CI never runs the verifying code or keys of the pull request it checks; revised three times on 2026-11-25 after the independent plan checks; hand-offs 48.3 H-01 to 48.3 H-22 in `48.3-HANDOFFS.md`; gaps G517 to G525, and G526 if the lab has no second approver; each wave with gate files lands as one combined pull request with one owner gate approval)
 
 Plans:
 - [ ] 48.3-01-PLAN.md: Wave 1. Tracer: the owner's policy and the state machine as pure code (gates, approver counts, licence expressions, tighten-only site policy, no stuck state)
@@ -1038,8 +1038,9 @@ Plans:
 - [ ] 48.3-23-PLAN.md: Wave 11. Owner decision on runners in Canada (default wait: G517 becomes a dated POA&M item); on go, the runner egress allow-list and single-use runner VMs
 - [ ] 48.3-24-PLAN.md: Wave 12 (after the owner's go). The runner golden image and pin; build, image and publish jobs on HQ runners reading HQ's registries (wave gate)
 - [ ] 48.3-25-PLAN.md: Wave 13. Publication to HQ, GHCR optional, the exchange register, offline audits; G517 met (wave gate)
-- [ ] 48.3-26-PLAN.md: Wave 12 (on go or wait). The reproducible-build check: a release's image and VSIX rebuilt independently at the lab from the tag and approved files, compared byte for byte, the result recorded, G525 honest about what differs
+- [ ] 48.3-26-PLAN.md: Wave 12 (on go or wait). The reproducible-build check: a release's image and VSIX rebuilt independently at the lab from the tag and approved files, compared byte for byte, the result signed by the owner and checked by verifyRebuild, G525 honest about what differs
 - [ ] 48.3-27-PLAN.md: Wave 2. Gap rows G522, G524 and G525 with POA&M items, the totals and the page
+- [ ] 48.3-28-PLAN.md: Wave 13 (after 48.2-13). The signed rebuild record verified, re-signed with the site key, carried in the offline bundle and installed in the release-evidence mount as rebuild-<version>.json
 
 ## Milestone v0.5.0: Governed agent platform
 
@@ -2302,7 +2303,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 48.2. Live compliance evidence in the workbench | 0/17 | Planned 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
-| 48.3. Software supply registry | 0/27 | Planned 2026-11-25 (owner: all eleven research defaults accepted; runner move behind an owner checkpoint; waves 1 to 3 can start now, wave 4 after 47-29 and 48.1-17, waves 6 and 10 on 47-18's lab; hand-offs in 48.3-HANDOFFS.md) | - |
+| 48.3. Software supply registry | 0/28 | Planned 2026-11-25 (owner: all eleven research defaults accepted; runner move behind an owner checkpoint; waves 1 to 3 can start now, wave 4 after 47-29 and 48.1-17, waves 6 and 10 on 47-18's lab; hand-offs in 48.3-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |

@@ -1061,7 +1061,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-25 from the owner's direction ("For the SBoM, we likely need to host them in our own package registry so we can manage updates to them/properly test them for vulnerabilities and trust"), the research `.planning/research/software-supply-registry/RESEARCH.md`, and the owner's answers "accept supply registry defaults" and "let's look to become fully sovereign compliant". Decisions: `.planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md`.
 **Core value:** Every dependency and image SovAI builds with or runs is reviewed once by your organization's rules and people, signed with your organization's site key, rescanned every day, and delivered to air-gapped sites with its evidence.
-**Status:** planned, 27 plans in 13 waves.
+**Status:** planned, 28 plans in 13 waves.
 
 - [ ] **SSR-01**: Every artefact of every ecosystem (npm, OCI images, charts, tools, Go, Maven, PyPI, RPM, the vulnerability databases) passes the intake gates before use: age 7 days with a named-approver fast lane, name, install scripts, licence, integrity and signature, provenance regression, publisher change, malware, vulnerabilities and source form; automatic approval when every gate passes, one named person for a flag, two for a flagged install script or a fast lane; an organization may only tighten the policy. [SR-3, SR-5, SR-6, SR-10, SR-11, CM-7(5), SI-3, SA-15(3)]
 - [ ] **SSR-02**: One explicit state machine (requested, quarantined, waiting, in review, approved, refused, under review again, withdrawn) in which every open state has a release time or an owner and a due date, nothing reaches approved without the approvals the policy names, approvers are named people proven at sign-in, and a withdrawal never deletes anything. [SR-3, CM-3, AC-5, IA-2]
@@ -1078,9 +1078,9 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | SSR-02 | 48.3-01, 48.3-05, 48.3-08, 48.3-14 |
 | SSR-03 | 48.3-02, 48.3-03, 48.3-05, 48.3-08, 48.3-13 |
 | SSR-04 | 48.3-06, 48.3-07, 48.3-09, 48.3-10, 48.3-11 |
-| SSR-05 | 48.3-08, 48.3-12, 48.3-13, 48.3-14, 48.3-15, 48.3-16, 48.3-17, 48.3-18, 48.3-26 |
+| SSR-05 | 48.3-08, 48.3-12, 48.3-13, 48.3-14, 48.3-15, 48.3-16, 48.3-17, 48.3-18, 48.3-26, 48.3-28 |
 | SSR-06 | 48.3-03, 48.3-10, 48.3-19, 48.3-20 |
-| SSR-07 | 48.3-04, 48.3-07, 48.3-12, 48.3-21, 48.3-22, 48.3-26, 48.3-27 |
+| SSR-07 | 48.3-04, 48.3-07, 48.3-12, 48.3-21, 48.3-22, 48.3-26, 48.3-27, 48.3-28 |
 | SSR-08 | 48.3-23, 48.3-24, 48.3-25 |
 
 ## Phase 74.1 requirements: Model passports, use tiers and Western defaults (0.4.x)
