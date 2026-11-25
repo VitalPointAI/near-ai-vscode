@@ -21,8 +21,9 @@ const MODULE = process.env.STERLING_PKCS11_MODULE || '/usr/lib/softhsm/libsofths
 const SO_PIN = 'so-pin-8164';
 const USER_PIN = 'user-pin-2937';
 const TOOLS = ['softhsm2-util', 'pkcs11-tool', 'script'];
+// No rm, unlink or shred: the script never deletes, so the tools to do it are not on its PATH.
 const UTILITIES = ['sh', 'cat', 'mkdir', 'chmod', 'mv', 'cp', 'date', 'base64', 'tr', 'fold', 'awk', 'grep', 'sed', 'id', 'dirname', 'basename', 'ls', 'wc', 'head',
-  'mktemp', 'rm', 'rmdir', 'stty'];
+  'stty'];
 const FORBIDDEN = [path.join(homedir(), '.config', 'sterling-signing'), path.join(homedir(), '.near-credentials')];
 const which = (name) => ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].map((dir) => path.join(dir, name)).find((file) => existsSync(file));
 
@@ -125,7 +126,7 @@ function pemOf(stdout) {
   return { pem: `${lines.slice(0, end + 1).join('\n')}\n`, rest: lines.slice(end + 1) };
 }
 
-/** No PIN on the terminal (which shows the same bytes script copies into the script's session file), on standard output or in any file. */
+/** No PIN on the terminal (which shows the same bytes script copies back to the script), on standard output or in any file. */
 function assertNoPin(box, result) {
   for (const text of [result.transcript, result.stdout]) assert.ok(!text.includes(SO_PIN) && !text.includes(USER_PIN), 'no PIN on the terminal or standard output');
   for (const file of files(box.root)) {
@@ -135,7 +136,6 @@ function assertNoPin(box, result) {
       assert.ok(!text.includes(SO_PIN) && !text.includes(USER_PIN), `no PIN in ${file}`);
     }
   }
-  assert.deepEqual(readdirSync(box.temp).filter((name) => name.startsWith('new-dev-site-key.')), [], 'the copy of pkcs11-tool\'s output is removed');
 }
 
 test('makes a real SoftHSM2 token and key on a terminal, a second run changes nothing, and --rotate archives', async (t) => {

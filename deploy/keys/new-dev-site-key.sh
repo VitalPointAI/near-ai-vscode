@@ -17,18 +17,17 @@
 #   4. Makes an EC P-256 key pair labelled sterling-site, id 01, inside the token with pkcs11-tool (which asks for the token PIN
 #      itself), and stops unless the private key is sensitive and never extractable. pkcs11-tool runs under script(1), on a terminal
 #      of its own: OpenSC's PIN prompt (util_getpass in src/tools/util.c) turns echo off on standard output's terminal and fails with
-#      "util_getpass error" when standard output is not one, so its output cannot be read through a pipe. script keeps a copy of
-#      what pkcs11-tool prints (echo is off on that terminal, so the PIN is not in it) in a 0600 file in a 0700 temporary folder; the script reads
-#      the private key's Access line from it and removes that file and folder when it exits.
+#      "util_getpass error" when standard output is not one, so its output cannot be read through a pipe. script hands a copy of
+#      what pkcs11-tool prints straight back to this script through a file descriptor (/dev/fd/3), never through a file, and this
+#      script reads the private key's Access line from it. Echo is off on that terminal, so the PIN is not in the copy.
 #   5. Prints the public key (PEM) and the PKCS#11 URI, without any PIN, and saves the public key, and only it, to
 #      ~/.config/sterling-signing/site-key.pub.pem. Put that public key in your site file as organizationPublicKey.
 # A run where the key already exists makes nothing: it logs in the same way (pkcs11-tool asks for the token PIN) and runs the same
 # check on the existing private key, because SoftHSM2 shows a private key only after a login. --show does not log in or check.
 #
 # PINs are only ever typed into the token tools' own prompts: never passed as arguments, written to a file, printed or logged.
-# Nothing is ever deleted, apart from that temporary copy of pkcs11-tool's output: a second run refuses to make a key where one exists,
-# and --rotate, or a private key that fails the check, moves the token folder, its configuration and the saved public key to
-# ~/.config/sterling-signing/softhsm/.archive/<UTC time>/.
+# Nothing is ever deleted: a second run refuses to make a key where one exists, and --rotate, or a private key that fails the check,
+# moves the token folder, its configuration and the saved public key to ~/.config/sterling-signing/softhsm/.archive/<UTC time>/.
 #
 # --test (for deploy/test/dev-site-key.test.mjs only) runs without a terminal, and only when SOFTHSM2_CONF names a softhsm2.conf in a
 # folder strictly inside a temporary folder ($TMPDIR or /tmp) that is not the home folder and holds neither the home folder nor
@@ -248,23 +247,13 @@ archive_existing() {
   say "Archived the earlier token, its configuration and public key to $ARCHIVE (nothing was deleted)."
 }
 
-# Removes the temporary copy of pkcs11-tool's output, and only it, when the script exits.
-SESSION_DIR=""
-remove_session() {
-  if [ -n "$SESSION_DIR" ]; then rm -f "$SESSION_DIR/session"; rmdir "$SESSION_DIR" 2>/dev/null || :; fi
-}
-trap remove_session EXIT
-trap 'exit 1' HUP INT TERM
-
 # Runs pkcs11-tool with the arguments given on a terminal of its own (script from util-linux), so that it can ask for the token PIN, and
-# keeps a copy of what it prints in $SESSION_DIR/session. The terminal shows the prompt and the output as usual. Echo is turned off on
-# that terminal first (stty -echo, or nothing runs): pkcs11-tool turns it off only once its prompt is up, so a PIN typed before the
-# prompt would otherwise be echoed into the copy. Every argument is a fixed word or the checked module path; anything that would need
-# quoting stops the script before anything runs.
+# sets SESSION to a copy of what it prints. The terminal shows the prompt and the output as usual (script's standard output goes to
+# standard error); script writes its copy to /dev/fd/3, which is this command substitution, so the copy never touches the disk, and the
+# substitution's status is pkcs11-tool's (script -e). Echo is turned off on that terminal first (stty -echo, or nothing runs):
+# pkcs11-tool turns it off only once its prompt is up, so a PIN typed before the prompt would otherwise be echoed into the copy.
+# Every argument is a fixed word or the checked module path; anything that would need quoting stops the script before anything runs.
 pkcs11_on_terminal() {
-  if [ -z "$SESSION_DIR" ]; then
-    SESSION_DIR=$(mktemp -d "${TMPDIR:-/tmp}/new-dev-site-key.XXXXXX") || fail "could not make a temporary folder for pkcs11-tool's output"
-  fi
   line="stty -echo && pkcs11-tool"
   for word in "$@"; do
     case "$word" in
@@ -272,14 +261,14 @@ pkcs11_on_terminal() {
     esac
     line="$line $word"
   done
-  SHELL=/bin/sh script -q -e -c "$line" "$SESSION_DIR/session" >&2
+  SESSION=$(SHELL=/bin/sh script -q -e -c "$line" /dev/fd/3 3>&1 >&2)
 }
 
 # Stops unless the private key $KEY_LABEL (id $KEY_ID) that pkcs11-tool printed in the session is sensitive and never extractable. OpenSC
 # prints it with an Access line such as "sensitive, always sensitive, never extractable, local". A key that fails, or no such key, means
 # the token is archived (moved, not deleted) so nothing uses it.
 require_safe_private_key() {
-  access=$(tr -d '\r' < "$SESSION_DIR/session" | awk -v want="$KEY_LABEL" -v wantid="$KEY_ID" '
+  access=$(printf '%s\n' "$SESSION" | tr -d '\r' | awk -v want="$KEY_LABEL" -v wantid="$KEY_ID" '
     function close_object() { if (p && label == want && id == wantid && found == "") found = acc; p = 0 }
     /^[^ ]/ { close_object() }
     /^Private Key Object/ { p = 1; label = ""; id = ""; acc = ""; next }

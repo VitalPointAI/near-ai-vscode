@@ -21,8 +21,7 @@ const SO_PIN = 'so-pin-7391';
 const USER_PIN = 'user-pin-5528';
 /** What the owner types for a new token: the SO PIN twice and the user PIN twice (softhsm2-util), then the user PIN (pkcs11-tool). */
 const PINS = `${SO_PIN}\n${SO_PIN}\n${USER_PIN}\n${USER_PIN}\n${USER_PIN}\n`;
-const UTILITIES = ['sh', 'cat', 'mkdir', 'chmod', 'mv', 'cp', 'date', 'base64', 'tr', 'fold', 'awk', 'grep', 'sed', 'id', 'dirname', 'basename', 'ls', 'wc', 'head',
-  'mktemp', 'rm', 'rmdir'];
+const UTILITIES = ['sh', 'cat', 'mkdir', 'chmod', 'mv', 'cp', 'date', 'base64', 'tr', 'fold', 'awk', 'grep', 'sed', 'id', 'dirname', 'basename', 'ls', 'wc', 'head'];
 const fixtureKey = (name) => readFileSync(path.join(FAKES, `key-${name}.spki.b64`), 'utf8').trim();
 
 /** A temporary sandbox: bin (base utilities, plus the fake token tools when installed), a fake home, and the sterling-signing folder. */
@@ -120,9 +119,7 @@ test('makes the token and an EC P-256 key inside it, and prints only the PEM pub
   const wrapped = calls.find((call) => call[0] === 'script');
   assert.deepEqual(wrapped.slice(0, 5), ['script', '-q', '-e', '-c', `stty -echo && ${gen.join(' ')}`],
     'pkcs11-tool runs on a terminal of its own, with echo off before its prompt so a PIN typed early is not copied');
-  const session = wrapped[5];
-  assert.equal(path.dirname(path.dirname(session)), box.temp, 'the copy of its output is in a folder of its own in the temporary folder');
-  assert.ok(!existsSync(path.dirname(session)), 'and is removed with that folder when the script exits');
+  assert.equal(wrapped[5], '/dev/fd/3', 'script hands its copy of the output straight back, never through a file');
   for (const [flag, value] of [['--module', box.module], ['--token-label', 'sterling-site-dev'], ['--key-type', 'EC:prime256v1'], ['--label', 'sterling-site'], ['--id', '01']]) {
     assert.equal(gen[gen.indexOf(flag) + 1], value, `keypairgen ${flag}`);
   }
