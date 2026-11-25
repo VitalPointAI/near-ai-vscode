@@ -355,7 +355,7 @@ test('guarded append refuses another writer’s new entry before writing its own
   const first = await opened(root, depsFor(lead, secrets));
   const other = fixedSigner('guard-other-writer');
   const second = await opened(root, depsFor(other, secrets));
-  const expected = first.appendSnapshot();
+  const expected = await first.appendSnapshot();
   const ownHead = first.head(STREAM, lead.writer);
   const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
   assert.equal(candidate.blobs.length, 1);
@@ -366,14 +366,14 @@ test('guarded append refuses another writer’s new entry before writing its own
   assert.deepEqual(first.head(STREAM, lead.writer), ownHead);
   assert.equal(first.has(candidate.hash), false);
   assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
-  assert.deepEqual(await first.appendOwn([candidate], first.appendSnapshot()), { ok: true, written: 1 });
+  assert.deepEqual(await first.appendOwn([candidate], await first.appendSnapshot()), { ok: true, written: 1 });
 });
 
 test('guarded append detects another window recording a roster head even when writer logs stay unchanged', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));
   const second = await opened(root, depsFor(lead, secrets));
-  const expected = first.appendSnapshot();
+  const expected = await first.appendSnapshot();
   const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash } });
   assert.deepEqual(await second.recordRosterHead(built[1].hash), { ok: true });
   assert.deepEqual(await first.appendOwn([candidate], expected),
@@ -387,7 +387,7 @@ test('a guarded locally signed entry refuses a changed store before persisting a
   const first = await opened(root, depsFor(lead, secrets));
   const other = fixedSigner('guard-other-signer');
   const second = await opened(root, depsFor(other, secrets));
-  const expected = first.appendSnapshot();
+  const expected = await first.appendSnapshot();
   const signer = fixedSigner('guarded-person-signer');
   const [candidate] = chain(signer, 1, { big: true });
   assert.equal(candidate.blobs.length, 1);
@@ -424,8 +424,8 @@ test('only the first of two guarded same-device appends from one snapshot writes
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));
   const second = await opened(root, depsFor(lead, secrets));
-  const expected = first.appendSnapshot();
-  assert.equal(expected, second.appendSnapshot());
+  const expected = await first.appendSnapshot();
+  assert.equal(expected, await second.appendSnapshot());
   const from = { seq: 2, hash: built[2].hash };
   const [candidate] = chain(lead, 1, { from, tag: 'first' });
   const [rival] = chain(lead, 1, { from, tag: 'second' });

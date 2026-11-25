@@ -945,10 +945,13 @@ export class ReplicaStore {
     }
   }
 
-  /** Identifies the loaded history, decode membership, and remembered roster head. */
-  public appendSnapshot(): string {
+  /** Identifies the loaded history, remembered roster head, and immutable grant files. */
+  public async appendSnapshot(): Promise<string> {
+    const unreadable: UnreadableFile[] = [];
+    const cells = (await this.listDir(['grants'], unreadable)).filter((cell) => STREAM_ID_PATTERN.test(cell));
+    const grants = await Promise.all(cells.map(async (cell) => [cell, await this.listDir(['grants', cell], unreadable)]));
     return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null,
-      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort()]));
+      [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort(), grants, unreadable.map(({ file }) => file).sort()]));
   }
   /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
   public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string): Promise<AppendResult> {
@@ -970,7 +973,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
+        if (expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
         const planned = new Set<string>();
@@ -1047,7 +1050,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
+        if (expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
@@ -1263,12 +1266,8 @@ export class ReplicaStore {
 
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
-  /**
-   * Runs `work` under the .planning/staff lock (so no Start Again runs meanwhile; an unfinished one is finished first), then the in-process register
-   * lock (same-process order) and, inside it, the cross-window file lock (other windows and processes), after checking that no symbolic link is on the
-   * way to the store. A store folder that is gone while this device's mark remains, or while a folder beside it holds project.json, is refused
-   * rolled-back and not made again (32-CONTEXT D-03). None of the locks is re-entrant: `work` never calls another locked method.
-   */
+  /** Take the Start Again, register and cross-window locks in order. Refuse a missing live store (32 D-03).
+   * The locks are not re-entrant. */
   private locked<T>(work: () => Promise<T>): Promise<T> {
     return withStartAgainLock(this.root, async () => {
       if (await intentPresent(this.root)) await ReplicaStore.rollForward(this.root, this.deps, this.own);

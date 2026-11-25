@@ -465,9 +465,9 @@ export class ReplicaProject {
     return this.exclusive(async () => {
       let race: StoreRefused | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const expected = this.store.appendSnapshot();
+        const expected = await this.store.appendSnapshot();
         const state = await this.foldNow();
-        if (expected !== this.store.appendSnapshot()) continue;
+        if (expected !== await this.store.appendSnapshot()) continue;
         const write = prepare(state);
         if ('ok' in write) return write;
         const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
