@@ -7133,6 +7133,19 @@
       "poam": "g512",
       "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
       "title": "Partners' signing certificates are checked without fetching revocation lists"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "ac-03",
+        "sc-12"
+      ],
+      "id": "G551",
+      "ownerRole": "maintainers",
+      "poam": "g551",
+      "remediation": "A clearance reduction and its cell key rotations are separate signed entries. If a computer has verified the reduction but has yet to verify rotation of every affected cell, local writes can still use a key known to an earlier recipient whose device remains a member. Record the affected cells and pending rotations in authenticated roster state, pause local writes under the previous keys, and resume only once the new keys are verified and wrapped to cleared recipients.",
+      "title": "An unfinished clearance reduction can leave local writes using the old cell key"
     }
   ]
 }

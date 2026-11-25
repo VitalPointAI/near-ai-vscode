@@ -1885,11 +1885,11 @@ under that cell's key, so only the devices cleared for the cell can read it.
 - **The cell's label is sealed inside the grant.** The level and compartments of a cell are
   sealed under a key derived from the cell key, so a device below the cell learns only that an
   unnamed cell exists, not what it is or what is in it.
-- **Removal gives the cell a new key.** Removing a member, revoking a device or lowering a
-  clearance writes a new epoch for every cell the change affects, wrapped only to the devices
-  still cleared. The person or device removed keeps what it already had and cannot open anything
-  written after. The lead is told: "They keep what they already received. They will not receive
-  anything new."
+- **A completed rotation limits access to new work.** After a verified rotation, an affected
+  cell has a new key wrapped to devices that still have access. A device that lost access keeps
+  what it received under the old key. Once this computer verifies a removal or revocation, it
+  pauses local writes under any key the removed device received. If a clearance reduction is
+  recorded and its key rotation is still pending, local writes may use the old key (G551).
 - **New devices can read the history of their cells.** A device admitted later receives wraps
   for the earlier epochs of the cells it is cleared for, so the history of those cells stays
   readable on it.
