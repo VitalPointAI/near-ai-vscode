@@ -717,12 +717,36 @@ Plans:
 4. Assess Unclassified and Protected A first. Review Protected B, the Classified appliance, and each applicable overlay when scope is established. Authorization remains with the responsible organization.
 5. The submission review confirms that the report's applicable sponsor and deployment fields contain verified entries, with a rationale and authority for each exclusion. Its diagrams reflect the assessed deployment's components, trust boundaries, data flows, and operating dependencies. The submission includes the linked evidence, completed applicable forms, sponsor concurrence, independent assessor findings, and the authorized decision or the sponsor's confirmed submission route and outstanding decision step. Generated draft text and unfilled fields remain tracked until the sponsor or assessor supplies the required information.
 
-**Plans:** 4 planned waves, starting with the evidence pipeline and the existing supplier control mappings.
+**Requirements**: COVR-01 to COVR-05 (coverage amendment, 2026-11-25); extends ACCR-03, ACCR-04, ACCR-06, ACCR-07 and ACCR-10.
+
+**Coverage amendment (2026-11-25, owner brief):** the dashboard at 32007751 has 12,242 component cells reading "No statement yet", because every component is assessed against every control. The amendment adds a reviewed per-component applicability map (a component with no part shows "Not applicable to this component" with its reason; estimated about 8,030 cells, two thirds), statements and evidence for every applicable pair (about 1,780 pairs, of which about 287 are generated from the inventory), a rule that a statement needs evidence a CI job reports, and a coverage ratchet in the required `docs` job. Order: Unclassified and Protected A, then Protected B, then the appliance and the overlays. Decisions in `44.1-CONTEXT.md`, measurement and estimate in `44.1-RESEARCH.md`, cross-phase pairs in `44.1-HANDOFFS.md`.
+
+**Plans:** 24 plans: the first 4 as planned, then the coverage amendment's 20 plans in 8 waves (05, then 06 and 08, then 07, then 09, then 10 to 21 in parallel, then 22, 23 and 24).
 
 - [x] 44.1-01-PLAN.md: Verify evidence reaches the local assessor package and map existing audit and incident practices with their documented limits. Check the published bundle after the reviewed release.
-- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner.
-- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions.
+- [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner (amended: triage over applicable cells once 44.1-07 lands).
+- [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions (amended: product steps in 44.1-23 and 44.1-24).
 - [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
+- [ ] 44.1-05-PLAN.md: Tracer: one component's "Not applicable to this component" with its reason, from a signed rule to the real hosted level.
+- [ ] 44.1-06-PLAN.md: The full applicability rules from the catalogue, the generated map and its drift check, and your organization's stage 1 review.
+- [ ] 44.1-07-PLAN.md: The coverage measure and ratchet in the required docs job, the stage 1 sign-off, and the machinery gate.
+- [ ] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
+- [ ] 44.1-09-PLAN.md: Supply-chain and inventory statements for every component, generated from the inventory with each component's evidence.
+- [ ] 44.1-10-PLAN.md: Extension statements and evidence.
+- [ ] 44.1-11-PLAN.md: Hub statements and evidence.
+- [ ] 44.1-12-PLAN.md: Release pipeline (the supplier's process) statements and evidence.
+- [ ] 44.1-13-PLAN.md: Model endpoints and relay statements and evidence, with links for the relay's unbuilt messaging.
+- [ ] 44.1-14-PLAN.md: Workbench statements and evidence.
+- [ ] 44.1-15-PLAN.md: Keycloak statements and evidence.
+- [ ] 44.1-16-PLAN.md: oauth2-proxy and Theia Cloud statements and evidence.
+- [ ] 44.1-17-PLAN.md: OpenBao and HSM statements and evidence.
+- [ ] 44.1-18-PLAN.md: RKE2 and cert-manager statements and evidence.
+- [ ] 44.1-19-PLAN.md: Ingress and image registry statements and evidence.
+- [ ] 44.1-20-PLAN.md: Offline bundle statements and evidence.
+- [ ] 44.1-21-PLAN.md: Site logging and site storage statements and evidence.
+- [ ] 44.1-22-PLAN.md: Integration: held rows, new gaps, the full suite once, the measured coverage and both statement gates.
+- [ ] 44.1-23-PLAN.md: Protected B: statements checked against its expectations and the stage 2 sign-off.
+- [ ] 44.1-24-PLAN.md: The appliance and the overlays in the map, after 44.1-03's scope decision, and the stage 3 sign-off.
 
 ### Export-controlled technical data: Controlled Goods Program and ITAR (Phase 45, added 2026-11-20)
 
