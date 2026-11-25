@@ -75,12 +75,12 @@ plan_head_after: 6c17e4d14812f20a4d762190d920924323e9158a
 RED: 9 cases failed (the end record, the retention setting, the three new policies, the two changed ones, the roles, and the per-person rule's exception). GREEN after:
 - `guests.mjs`: every end of an enrolled guest files `sterling-guest-ended/1` (`entity`, `keycloakId`, `endedAt`, `removeAfter`) at `kv/data/site/guest-ended/guest-<id>-<end time>`, with `cas: 0`. A guest can't be created without `guests.retentionDays` (example: 365). `end` and `expire` now need `--realm-site`.
 - **Policies:**
-  - `guest-secrets-removal` lists and reads the records, creates and reads removal records, reads guest entities, and lists and deletes `kv/metadata/users/*`.
+  - `guest-secrets-removal` lists and reads the records, creates and reads removal records, reads guest entities, and lists and deletes `kv/metadata/guests/*` (guests' secrets only; see the review fixes below; it first named `kv/metadata/users/*`).
   - `guest-retention-check` reads the records and writes only the notice.
   - `security-officer-notices` reads only the notice.
   - `guest-operator` and `guest-expiry` may create end records.
 - **Roles:** jwt `guest-secrets-removal` (step-up acr plus the officers' subjects, the step-up window, that policy only), jwt `security-officer-notices` (the officers, 60 s), and kubernetes `guest-retention-check`. Officer ids must be lowercase UUIDs.
-- **The per-person rule** in `openbao.test.mjs` now has exactly one named exception, `guest-secrets-removal.hcl`'s `kv/metadata/users/*`. The test asserts that it exists and that no other policy can delete another person's secrets.
+- **The per-person rule** in `openbao.test.mjs` now has exactly one named exception, `guest-secrets-removal.hcl`'s `kv/metadata/guests/*`. The test asserts that it exists and that no other policy can delete another person's secrets.
 
 ## Task 2: the retention check and its alert
 
@@ -121,7 +121,16 @@ removal token: policies ["guest-secrets-removal"], ttl 300 s, explicit max 300 s
 - Workbench `dist/test/*.test.js`: 119 run, 119 pass. `tsc --noEmit` is clean on `extension/tsconfig.json` and `tsconfig.json`.
 - The root copy lint: 35 run, 35 pass.
 - `compliance/test/*.test.ts`: 550 run, 550 pass. `build-road-to-production --check` and the secret scan are clean.
-- Added by this plan: 2 cases in guests.test.mjs, 4 in openbao.test.mjs and 5 in guest-secrets-service.test.ts. One existing case in openbao.test.mjs gained the one exception D-84 names, and asserts that exception. The expected writes of two guests.test.mjs cases now include the end record, and the gap count assertion went from 423 to 422.
+- Added by this plan: 2 cases in guests.test.mjs, 4 in openbao.test.mjs and 5 in guest-secrets-service.test.ts. One existing case in openbao.test.mjs gained the one exception D-84 names, and asserts that exception. The expected writes of two guests.test.mjs cases now include the end record, and the gap count assertion in the pull request's diff went from 422 to 424 (G448 and G449; merging main's own register entries later made it 434).
+
+## Review fixes (PR #207 agent review)
+
+- **Guests' secrets live apart from staff's.** New entity policy `guest-account`: `enrol.mjs` attaches it to every guest entity it makes or adopts (and refuses a guest entity holding any other policy). It denies `kv/users/<entity>/` on the same path `sterling-workbench` grants, so the deny wins, and gives the guest `kv/guests/<entity>/`. The workbench reads `identity_policies` from `lookup-self`: with `guest-account` the session's space is `guests`, and the key store and the person's DID record use `guests/<entity>/`. A re-login that changes the space fails the session. `guest-secrets-removal` now lists and deletes `kv/metadata/guests/*` only, so no officer request, the workbench's or a hand-made one, reaches a staff member's secrets. `guests.mjs` accepts `guest-account` as the one policy a guest may hold.
+- **Residual risk, stated plainly:** OpenBao still cannot tell which guest. For the step-up window a named officer's hand-made request could delete the secrets of a guest who is still active. The workbench checks that the guest is disabled and past retention, and OpenBao's audit log records every request with the officer's entity (T-47-140).
+- **Record first, then delete.** `remove()` writes the create-only removal record (cas 0) before any delete. If another officer wrote it first, the officer is told so and nothing is deleted; if the write fails, nothing is deleted. If a delete fails, the record stays, the guest is listed again, and the next removal finishes the deletes without a second record.
+- **Guests stay off until 71-12.** The example realm settings ship `guests.maxDays: 0`. `guests.mjs create` and `extend` refuse a nonzero `maxDays` while this release has no `credential-issuers` policy (the 71-12 card), with a plain message and before any call; the site file cannot claim otherwise (G449).
+- **The fail-closed check never passes a guest it could not check.** When a Keycloak or OpenBao read fails, `expireGuests` lists that guest as `unchecked` (the CLI prints it and exits 1), never as fine; a guest past their end is still ended.
+- The `RAFT_SNAPSHOT` doc comment sits on its own constant again.
 
 ## Deviations from Plan
 
@@ -139,7 +148,7 @@ None.
 
 | Flag | File | Description |
 |------|------|-------------|
-| threat_flag: per-person-exception | deploy/openbao/policies/guest-secrets-removal.hcl | A named officer's step-up token can list and delete any person's KV secrets for at most the step-up window; the workbench refuses anything but a disabled guest past retention, and OpenBao audits every request (T-47-140, accepted residual risk under D-84) |
+| threat_flag: per-person-exception | deploy/openbao/policies/guest-secrets-removal.hcl | A named officer's step-up token can list and delete guests' KV secrets (`kv/metadata/guests/*`) for at most the step-up window, and never a staff member's: every guest entity carries `guest-account`, which keeps its secrets under `kv/guests/` and denies it `kv/users/`. Residual: a hand-made request in the window could delete the secrets of a guest who is still active; the workbench refuses anything but a disabled guest past retention, and OpenBao audits every request (T-47-140, accepted residual risk under D-84) |
 
 ## Self-Check: PASSED
 
