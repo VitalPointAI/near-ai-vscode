@@ -229,6 +229,10 @@ None.
   - No file they test is touched by this plan, but their pass on a short-path checkout was not shown here.
   - 33-16's full run on CI is the check.
 - The lead's name reaches the roster only when the creating flow passes it: `MigrationOptions.leadName`, for 33-28's Share flow.
+- For 33-16, which assembles the Phase 33 integration branch: the coordinator asked that `fix/dev-site-key-pin-prompt` (`97e604dc`, gap G445) ride in the same PR, so the owner approves the gate files once.
+  - It fixes the dev site-key script's PIN prompt, adds a real-SoftHSM2 test, and adds an `apt-get install softhsm2 opensc` step to ci.yml's deploy job.
+  - Merge it into the integration branch, keeping both sides' ci.yml changes: this plan changed the test and hub jobs, and that branch changes the deploy job.
+  - Include its tests in the capped runs. It is not merged here.
 - `.planning/phases/33-live-multi-user-staff-projects/33-14-late-joiner-scenario.ts.txt` is the held-back copy, now restored into the test file. It can be deleted; I left it until someone confirms.
 
 ## Self-Check: PASSED
