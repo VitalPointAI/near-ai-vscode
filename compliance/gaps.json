@@ -6065,6 +6065,20 @@
       "ownerRole": "maintainers",
       "remediation": "Three limits of the sync hub as your organization's trust host (Phase 71, 71-09). First, an address for an identity log is first come, first served: a member could post a log for someone else's address before that person does, which blocks that person there until an administrator clears it; people's addresses end in a random id, so the address must be known in advance. Second, a hub that holds no copy of a status list takes the first copy at any version, so a hub started empty (not restored from its backup) could be given an old list by a member before an officer publishes the current one. Third, the hub checks cited evidence only on entries it can open (the project's base part); entries in other cells are checked by the people who read them. Close the first two by having the officer's backend publish each person's log and the current lists when the hub is set up (71-10, 71-12), and record the third in SECURITY.md (71-14).",
       "title": "The sync hub's trust routes take first copies on trust and check evidence only where they can read"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ia-02",
+        "ia-04",
+        "ia-05"
+      ],
+      "id": "G427",
+      "ownerRole": "maintainers",
+      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer needs status list indexes from your organization's issuance setup (71-12); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
+      "title": "People's identities are made but not yet published, and computers cannot be bound yet"
     }
   ]
 }

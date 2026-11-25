@@ -60,7 +60,7 @@
 
 ### Delegation (Phase 71: DLGT-01; Phase 71.1: DLGT-02 to DLGT-08, split 2026-11-24)
 
-- [ ] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
+- [x] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
 - [ ] **DLGT-02**: A child's capabilities are the intersection of the parent's grant, the member's declared tools and the task's request, enforced in the gate, never in the prompt, and a property test shows no delegation widens.
 - [ ] **DLGT-03**: Every grant is a delegation credential (the VCRD-02 profile) signed by its delegator, carrying an expiry, a budget, a level cap, roles, compartments and a depth limit, and recorded in the signed log; an expired, unsigned or tampered grant is refused. *(Revised 2026-11-15; was: a signed grant with an expiry and a budget.)*
 - [ ] **DLGT-04**: Delegation depth (default: the lead plus members; members spawn only when marked as orchestrators) and fan-out (per turn and per tree) are capped as data in the grant.
@@ -284,7 +284,7 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | CLAS-06 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-07 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-08 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
-| DLGT-01 | Phase 71: Identities and verified credentials (core) | Pending |
+| DLGT-01 | Phase 71: Identities and verified credentials (core) | Complete |
 | DLGT-02 | Phase 71.1: Agent delegation that only narrows | Pending |
 | DLGT-03 | Phase 71.1: Agent delegation that only narrows | Pending |
 | DLGT-04 | Phase 71.1: Agent delegation that only narrows | Pending |

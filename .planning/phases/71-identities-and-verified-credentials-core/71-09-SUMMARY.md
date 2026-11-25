@@ -131,6 +131,10 @@ Tasks 1 and 2 are done. Task 3 (the rekey card for the lead) is blocked: its pre
 
 **7. The hub's open event streams of a member now under review are ended when a list is stored,** as the plan's threat T-71-34 asks; their next call is refused by the session check.
 
+**8. [Rule 3 - Blocking] The hub image's allow-list, found by the full hub suite (fix eafc17c8).** `.dockerignore` lets in only the hub-side closure, and `dockerContext.test.ts` forbade any `src/domain/gate/` file in it. The credential checker reads your organization's signed rules through the gate's pure readers. So the `!src/` lines were regenerated from `hubSideClosure`, and the rule now holds for the replica side's own closure, which still reaches no gate file.
+
+**9. [Rule 1 - Bug] The compliance count pin.** `compliance/test/gaps.test.ts` pins the number of gaps. The G426 commit did not raise it; the full compliance run found it, and it now says 412 (G426 and G427).
+
 ## Not done: Task 3
 
 The hub does not send `credential-revoked` and no rekey card exists. The task's precondition, 33-26's `src/domain/staff/staffRoomLive.ts` on `main`, is not met on `main` or any branch. So the lead is not told of a revocation, though the hub still refuses the revoked member. This is plan work, not a gap: Task 3 runs when 33-26 lands.

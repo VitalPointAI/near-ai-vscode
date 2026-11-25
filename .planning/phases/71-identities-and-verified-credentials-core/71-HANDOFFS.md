@@ -15,7 +15,7 @@
   - (a) Put the tests at the flat level with a `credentials-` prefix, for example `workbench/test/credentials-identity-service.test.ts`, and update the plan's verify command and `71-VALIDATION.md`.
   - (b) Widen the runner to `dist/test/**/*.test.js` while keeping `dist/test/container/` out. This changes the workbench `test` script for every phase, so coordinate it first.
 - **Check after either fix:** the run's `ℹ tests` count includes the new file's tests. A test file that compiles but never runs would let a plan's verify step pass with nothing checked.
-- **Status:** open, for 71-10 (the first plan that adds a workbench test).
+- **Status:** 71-10 took option (a): `workbench/test/credentials-identity-service.test.ts`. Open for 71-12 and 71-13, which add their own flat `credentials-` files.
 
 ## H-71-02: the command-line credential check lives at `deploy/tools/credential-check.mjs`, not `scripts/`
 
@@ -30,4 +30,4 @@
 - **For:** 71-10 (posting a person's log), 71-11 (export and import), 71-12 (publishing lists), 71-13 (the session), and Phase 47's site values.
 - **Routes:** `GET|POST /v1/trust/did/<path>/did.jsonl`, `GET|PUT /v1/trust/did/<path>/did-witness.json`, `GET|PUT /v1/trust/status/<name>`, where a list's id in `credentials@1.statusLists` is `https://<host>/v1/trust/status/<name>`. Every route needs a hub session of a device whose member holds the `member` role at the hub's roster head; observers and guests get 403 `not-staff`.
 - **Settings:** `HUB_ORGANIZATION_POLICY` (absolute path of your organization's signed rules) and `HUB_ORGANIZATION_KEY` (its issuer key, 43 base64url characters). Without both, or when the rules do not verify or hold no `credentials` section, the trust routes answer 503 `no-policy` and the hub judges no evidence.
-- **Open for 71-10:** a person's backend in a hosted session has no hub session of its own (hub sessions belong to a project device). How the workbench posts a person's first log is a decision for 71-10 (see its summary).
+- **For 33-23:** a person's backend has no hub session of its own; decision D-24 posts the person's first log through their first hub session. 33-23's hosted hub session calls `IdentityService.publishToHub` (`workbench/extension/src/node/credentials/identity-service.ts`) once it is open (G427).
