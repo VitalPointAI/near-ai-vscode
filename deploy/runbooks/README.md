@@ -10,6 +10,7 @@ These runbooks are for the people who install and run a Sterling site: site oper
 | `bundle-update.md` | Updating a site with a newer bundle, and going back to the previous one |
 | `key-ceremony.md` | The HQ offline root, a site intermediate, the HSM or Shamir unseal, your organization's signing keys, escrow custody |
 | `enrolment.md` | Enrolling a person with two keys |
+| `guest-accounts.md` | Guest accounts for people from outside your organization: turning guests on, creating, enrolling, extending, ending, a guest at another site, and removing their records |
 | `re-enrolment-and-recovery.md` | Replacing a lost key after an administrator confirms the person in person (no recovery codes) |
 | `moving-a-person.md` | Moving a person and their keys between sites with two-person approval |
 | `backup-and-restore.md` | What is backed up, where, and how to restore each part |
@@ -21,6 +22,6 @@ These runbooks are for the people who install and run a Sterling site: site oper
 
 1. `key-ceremony.md`, part 1: your organization's signing keys exist and the public key is on the install media.
 2. `site-install.md`, from the bundle check to `install.mjs retire-bootstrap`. It stops twice for `key-ceremony.md`: the OpenBao initialisation and unseal, and the site intermediate.
-3. `enrolment.md` for every person; `re-enrolment-and-recovery.md` and `moving-a-person.md` when needed.
+3. `enrolment.md` for every person; `guest-accounts.md` for guests, only once guests are turned on; `re-enrolment-and-recovery.md` and `moving-a-person.md` when needed.
 4. `backup-and-restore.md` and `recovery-plan.md`: confirm the schedules with `drill.mjs plan` and run the first drill.
 5. `bundle-update.md` and `maintenance.md` from then on.
