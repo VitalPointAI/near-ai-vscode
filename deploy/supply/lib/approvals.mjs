@@ -29,19 +29,38 @@ export async function approverFromLogin({ baoAddr, jwt, role, caPem }) {
   return { subject, entity, at: new Date(seconds * 1000).toISOString() };
 }
 
+/** D-28: a VEX not_affected returning an artefact to approved needs two approvers for a KEV match or a critical with a fix, one otherwise. */
+function vexApproversNeeded(finding) {
+  const criticalWithFix = String(finding?.severity ?? '').toLowerCase() === 'critical' && finding?.fixAvailable === true;
+  return finding?.kev === true || criticalWithFix ? 2 : 1;
+}
+
 /**
- * Whether approvals meet the policy: { ok, missing, problems }. Only distinct subjects that your organization lists count.
- * Options: approversNeeded, approvers (the listed subjects).
+ * Whether approvals meet the policy: { ok, missing, problems }. Only distinct subjects that your organization lists count, and in a fast lane
+ * the person who asked for it does not count (D-03, D-18). Options: approversNeeded, approvers (the listed subjects), fastLane
+ * ({ requestedBy }), and kind 'vex-not-affected' with its finding, which sets the count by D-28 (the larger of that and approversNeeded).
  */
-export function sufficient(approvals, { approversNeeded, approvers }) {
+export function sufficient(approvals, { approversNeeded, approvers, fastLane, kind, finding } = {}) {
   const problems = [];
   const listed = new Set(approvers ?? []);
   const counted = new Set();
+  const requester = fastLane?.requestedBy;
   for (const approval of approvals ?? []) {
     if (!listed.has(approval?.subject)) { problems.push(`${approval?.subject ?? 'An approval without a subject'} is not one of your organization's listed approvers.`); continue; }
+    if (requester && approval.subject === requester) { problems.push(`${requester} asked for the fast lane and cannot approve it.`); continue; }
     counted.add(approval.subject);
   }
-  const missing = Math.max(0, (approversNeeded ?? 0) - counted.size);
+  const needed = Math.max(approversNeeded ?? 0, kind === 'vex-not-affected' ? vexApproversNeeded(finding) : 0);
+  const missing = Math.max(0, needed - counted.size);
   if (missing > 0) problems.push(`${missing} more approval${missing === 1 ? '' : 's'} from a different listed approver ${missing === 1 ? 'is' : 'are'} needed.`);
   return { ok: problems.length === 0, missing, problems };
+}
+
+/**
+ * Every signature or attestation made with a site key ({ digest, keyId, at }) that no record ({ digest, keyId }) stands behind (D-27): the
+ * input of the SupplySignatureUnmatched alert. A record under another key does not match.
+ */
+export function reconcile(signatures, records) {
+  const recorded = new Set((records ?? []).map((record) => `${record.digest} ${record.keyId}`));
+  return (signatures ?? []).filter((signature) => !recorded.has(`${signature.digest} ${signature.keyId}`));
 }
