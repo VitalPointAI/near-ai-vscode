@@ -20,7 +20,7 @@ import { randomBytes } from 'node:crypto';
 import { dominates } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleTable } from '../../domain/gate/labels';
-import { buildGrant, earlierEpochGrants, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { earlierEpochGrants, grantHash, newEpochKey, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import { SEALED_OVERHEAD, sealBlob } from '../../domain/replica/entry';
 import type { Actor } from '../../domain/replica/entry';
 import { kindFamily } from '../../domain/replica/kinds';
@@ -172,7 +172,7 @@ async function createCell(shared: SharedProjectHost, roster: RosterState, info: 
   let cell = '';
   do cell = randomBytes(16).toString('hex'); while (roster.cells.cells.has(cell));
   const key = newEpochKey();
-  const founding = buildGrant(project.signer, {
+  const founding = await project.signGrant({
     cell, epoch: 1, roster: head.hash, labelSealed: sealLabel(key, cell, 1, info.raw),
     wraps: [{ writer: project.deviceWriter, wrap: wrapEpochKey({ cell, epoch: 1, writer: project.deviceWriter, recipient: self, epochKey: key }) }]
   });
