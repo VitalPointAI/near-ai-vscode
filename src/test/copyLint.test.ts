@@ -6,7 +6,7 @@
 // purpose, so it can never pass silently), review the diff of src/test/copy-lint-baseline.json, and run it again without the flag. A new hit is fixed in the
 // copy with the glossary's user word, never by raising the baseline; re-record only to move a count with code that moved, or to drop counts a fix removed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -14,7 +14,7 @@ import { MODES, ModeId, ModeRow } from '../domain/org/modes';
 import {
   ALLOWED_CLAIM_CONTEXTS, ALLOWED_CONTEXTS, BASELINE_PATH, COMPLIANCE_CLAIMS, COPY_RULES, CopyCounts, DISTINCTIVE_MODE_WORDS, GLOSSARY_WORDS, MODEL_INSTRUCTIONS,
   REPO_ROOT, baselineText, checkTightness, compareWithBaseline, copySourceFiles, countHits, extractCopy, extractPackage, increaseMessage, modeWordsFromTable,
-  documentationFiles, productNameHits, readBaseline, scanRepository, writeBaselineAndFail
+  documentationFiles, overclaimHits, productNameHits, readBaseline, scanRepository, writeBaselineAndFail
 } from './helpers/copyLintScan';
 
 const EM_DASH = String.fromCharCode(0x2014);
@@ -376,6 +376,54 @@ test('D-64 rule 7: a phrase in a file listed in the claim contexts is not counte
   assert.equal(counted('src/services/compliancePage.ts', 'Supplier certified on the date shown.'), undefined);
   assert.equal(counted('src/services/compliancePage.ts', 'The extension is compliant.'), 1, 'only the listed phrases');
   assert.equal(counted('src/services/other.ts', 'Supplier certified on the date shown.'), 1, 'only the listed file');
+});
+
+// ---- Rule 7: sovereignty overclaims (48.4 D-35; GLOSSARY section 5 rule 6) ----
+
+const OVERCLAIMS = ['fully sovereign', '100% sovereign', '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign'];
+
+test('48.4 D-35 overclaim in copy: each sovereignty overclaim counts once, in any case, in a command title, a message and a workbench common module', () => {
+  const common = 'workbench/extension/src/common/example.ts';
+  for (const phrase of OVERCLAIMS) {
+    for (const variant of [phrase, phrase.toUpperCase(), phrase.replace(/^./, (first) => first.toUpperCase())]) {
+      const manifest = { contributes: { commands: [{ command: 'nearAi.example', title: `SovAI: Show ${variant} status`, category: 'SovAI' }] } };
+      assert.equal(countHits(extractPackage(manifest), 'package.json')['package.json']?.['compliance-claim'], 1, `title: ${variant}`);
+      const message = `import * as vscode from 'vscode';\nvoid vscode.window.showInformationMessage('This workspace is ${variant} now.');\n`;
+      assert.equal(countHits(extractCopy(message, SERVICE), SERVICE)[SERVICE]?.['compliance-claim'], 1, `message: ${variant}`);
+      const module = `export const STATUS = 'This workspace is ${variant} now.';\n`;
+      assert.equal(countHits(extractCopy(module, common), common)[common]?.['compliance-claim'], 1, `common module: ${variant}`);
+    }
+  }
+  // The longest phrase wins: "certified sovereign" and "sovereignty certified" are one claim each, never also "certified".
+  assert.equal(one('The product is certified sovereign.')['compliance-claim'], 1);
+  assert.equal(one('The product is sovereignty certified.')['compliance-claim'], 1);
+  // The product's name is a name, never a claim.
+  assert.equal(one('Sterling Sovereign AI keeps your rules.')['compliance-claim'], undefined);
+  for (const phrase of OVERCLAIMS) assert.ok(COMPLIANCE_CLAIMS.includes(phrase), phrase);
+});
+
+test('48.4 D-35 honest negation: a sentence that negates the overclaim before it is not counted', () => {
+  for (const honest of ['SovAI is not fully sovereign today.', 'Nothing here is 100% Canadian.', 'It is never sovereign by default.']) {
+    assert.equal(one(honest)['compliance-claim'], undefined, honest);
+    assert.deepEqual(overclaimHits(honest), [], honest);
+  }
+  assert.deepEqual(overclaimHits('This is not new. SovAI is fully sovereign.'), ['fully sovereign'], 'a negation in an earlier sentence does not cover it');
+  // overclaimHits reads only the six sovereignty phrases, never the general claims.
+  assert.deepEqual(overclaimHits('The extension is certified and compliant.'), []);
+});
+
+test('48.4 D-35 overclaim in documentation: the guides and README files never overclaim, and a planted line is named with its file and phrase', () => {
+  const scan = (root: string): string[] => documentationFiles(root).flatMap((file) =>
+    overclaimHits(readFileSync(path.join(root, file), 'utf8')).map((phrase) => `${file}: ${phrase}`));
+  // A fixture repository with one honest and one overclaiming page.
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-overclaim-'));
+  mkdirSync(path.join(root, 'docs'), { recursive: true });
+  mkdirSync(path.join(root, 'docs-site', 'content', 'security'), { recursive: true });
+  writeFileSync(path.join(root, 'README.md'), '# Sterling Sovereign AI\n\nSovAI is not fully sovereign, and the card says why.\n');
+  writeFileSync(path.join(root, 'docs-site', 'content', 'security', 'planted.md'), '# Planted\n\nThis product is 100% Canadian\nand more.\n');
+  assert.deepEqual(scan(root), ['docs-site/content/security/planted.md: 100% Canadian']);
+  // The real repository: the whole file at once, like rule 8.
+  assert.deepEqual(scan(REPO_ROOT), [], 'say what the sovereignty card shows, never "fully sovereign", "100% Canadian" or another overclaim');
 });
 
 // ---- The baseline (Task 1, final in Task 3) ----

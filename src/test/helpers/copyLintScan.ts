@@ -595,15 +595,29 @@ function bareTeamHits(text: string): number {
 }
 
 /**
- * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product. The longest phrase wins, so "ITAR compliant" counts once and not
- * also as "compliant".
+ * The sovereignty overclaims (48.4 D-35; GLOSSARY section 5 rule 6): a product named Sterling Sovereign AI must never call itself any of these. The
+ * sovereignty card shows a state with its evidence instead. They are compliance claims in user copy (rule 7) and are also read in the documentation
+ * files (overclaimHits). "Sterling Sovereign AI" is a name and is stripped before matching (EDITION_NAME).
+ */
+export const SOVEREIGNTY_OVERCLAIMS: readonly string[] = Object.freeze([
+  'fully sovereign', '100% sovereign', '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign'
+]);
+
+/**
+ * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product, the sovereignty overclaims included. The longest phrase wins, so
+ * "ITAR compliant" counts once and not also as "compliant", and "certified sovereign" not also as "certified".
  */
 export const COMPLIANCE_CLAIMS: readonly string[] = Object.freeze([
-  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'compliant', 'accredited', 'certified'
+  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', ...SOVEREIGNTY_OVERCLAIMS, 'compliant',
+  'accredited', 'certified'
 ]);
 const CLAIM_MATCHERS = COMPLIANCE_CLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
-/** A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited"). */
-const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
+const OVERCLAIM_MATCHERS = SOVEREIGNTY_OVERCLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
+/**
+ * A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited", "nothing here is 100%
+ * Canadian").
+ */
+const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|nothing|none|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
 const SENTENCE_BREAK = /[.!?]\s+|\n/;
 
 /** Where a compliance phrase may appear, and why. */
@@ -619,13 +633,27 @@ export interface ClaimContext {
  */
 export const ALLOWED_CLAIM_CONTEXTS: readonly ClaimContext[] = Object.freeze([]);
 
+/** True when the hit's own sentence negates it before the phrase. */
+function negated(text: string, hit: Hit): boolean {
+  const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
+  return NEGATION.test(sentence);
+}
+
 function claimHits(text: string, allowed: ReadonlySet<string>): number {
   const hits = longestFirst(CLAIM_MATCHERS.flatMap(({ phrase, regex }) => hitsOf(text, regex, phrase)));
-  return hits.filter((hit) => {
-    if (allowed.has(hit.key.toLowerCase())) return false;
-    const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
-    return !NEGATION.test(sentence);
-  }).length;
+  return hits.filter((hit) => !allowed.has(hit.key.toLowerCase()) && !negated(text, hit)).length;
+}
+
+/**
+ * The sovereignty overclaims in `text` (48.4 D-35), one entry per hit in order of appearance, with the same negation rule as rule 7. Used over whole
+ * documentation files (documentationFiles), where the extension's copy rules are not run. The product's name is stripped first.
+ */
+export function overclaimHits(text: string): string[] {
+  const plain = text.replace(EDITION_NAME, ' ');
+  return longestFirst(OVERCLAIM_MATCHERS.flatMap(({ phrase, regex }) => hitsOf(plain, regex, phrase)))
+    .filter((hit) => !negated(plain, hit))
+    .sort((a, b) => a.start - b.start)
+    .map((hit) => hit.key);
 }
 
 export interface CountOptions {
