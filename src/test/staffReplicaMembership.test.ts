@@ -11,12 +11,13 @@ import test, { after, mock } from 'node:test';
 import type { ScaleTable } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
-import { entryHash } from '../domain/replica/entry';
+import { entryHash, sealBlob } from '../domain/replica/entry';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
+import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
 import type { SecretStorageLike } from '../services/auth';
@@ -783,6 +784,27 @@ async function writeInBase(p: ReplicaProject): Promise<{ hash: string; entry: un
   assert.ok('ok' in written, 'the entry is written');
   return { hash: written.hash, entry: written.built.entry, blobs: written.built.blobs, epoch: written.built.entry.header.epoch };
 }
+
+test('managed access pauses ordinary writes and prepared blobs until there is verified cell authority', async () => {
+  const at = install('managed-missing-proof');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  const ordinary = await writeInBase(p);
+  assert.equal(ordinary.epoch, 1);
+  const armed = await p.appendOwn('roster.require', { features: ['cell-access@1'] });
+  assert.ok('ok' in armed);
+  const { roster, position } = await head(p);
+  const key = p.keys.epochKey(p.projectId, 1);
+  const slot = deviceAt(roster.members, p.deviceWriter, position)?.slot;
+  assert.ok(key !== undefined && slot !== undefined);
+  const contentBlob = sealBlob(key, p.projectId, 1, Buffer.from('fictional draft'));
+  const result = await p.appendOwn('doc.client',
+    { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } }, { contentBlob });
+  assert.equal(isProjectRefused(result) && result.refused, 'rekey-pending');
+  assert.equal(existsSync(path.join(at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
+});
 
 /** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */
 async function reads(reader: ReplicaProject, written: { hash: string; entry: unknown; blobs: Array<{ hash: string; bytes: string }> }): Promise<boolean> {
