@@ -262,13 +262,17 @@ export function sameFields(current, body) {
   });
 }
 
-/** A minimal OpenBao HTTP client: request(method, path, body) -> { status, data }. */
-export function openbaoClient({ addr, token, caPem }) {
+/**
+ * A minimal OpenBao HTTP client: request(method, path, body) -> { status, data }. Without a token no X-Vault-Token header is sent (a login);
+ * with timeoutMs a request that takes longer fails. TLS is always verified, against caPem when given.
+ */
+export function openbaoClient({ addr, token, caPem, timeoutMs }) {
   const base = new URL(addr);
   const transport = base.protocol === 'https:' ? https : http;
   return (method, apiPath, body) => new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
-    const request = transport.request(new URL(`/v1/${apiPath}`, base), { method, ca: caPem, headers: { 'X-Vault-Token': token, ...(payload ? { 'content-type': 'application/json' } : {}) } }, (response) => {
+    const headers = { ...(token ? { 'X-Vault-Token': token } : {}), ...(payload ? { 'content-type': 'application/json' } : {}) };
+    const request = transport.request(new URL(`/v1/${apiPath}`, base), { method, ca: caPem, headers }, (response) => {
       let text = '';
       response.on('data', (chunk) => { text += chunk; });
       response.on('end', () => {
@@ -278,6 +282,7 @@ export function openbaoClient({ addr, token, caPem }) {
       });
     });
     request.on('error', reject);
+    if (timeoutMs) request.setTimeout(timeoutMs, () => request.destroy(new Error(`OpenBao did not answer within ${timeoutMs / 1000} seconds`)));
     if (payload) request.write(payload);
     request.end();
   });
