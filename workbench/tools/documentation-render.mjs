@@ -118,7 +118,10 @@ export function createDocumentationRenderer({ root }) {
     if (/<(script|style|foreignObject|image|use|a)\b|@import|https?:\/\/(?!www\.w3\.org\/)|\son\w+=/i.test(svg)) {
       throw new Error(`${source}: a drawn diagram holds markup the Documentation view does not allow.`);
     }
-    return `<figure class="sterling-doc-diagram">${svg}</figure>\n`;
+    // The drawn width lets the view shrink a wide diagram only as far as its labels stay readable, then scroll it (sterling-documentation.css).
+    const drawn = Number(svg.match(/^<svg [^>]*?\swidth="([\d.]+)"/)?.[1]);
+    const width = Number.isFinite(drawn) && drawn > 0 ? ` style="--sterling-diagram-width:${Math.ceil(drawn)}px"` : '';
+    return `<figure class="sterling-doc-diagram"${width}>${svg}</figure>\n`;
   }
 
   const md = new MarkdownIt({ html: false, linkify: true, typographer: false });

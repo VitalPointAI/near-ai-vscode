@@ -49,6 +49,29 @@ test('figures and diagrams render as images and SVG, never as source, and load o
   await expect(diagrams.first()).toBeVisible();
   await expectNoRawSyntax(page);
 
+  // Wide diagrams are not cut off at the text column (seen at 1600 px): a diagram that does not fit whole gets the article's full width,
+  // shrinks to it but not below 85% of its drawn size (labels stay readable), and past that its own box scrolls to its right edge.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  for (const diagram of await diagrams.all()) {
+    const fit = await diagram.evaluate((svg) => {
+      const box = svg.parentElement as HTMLElement;
+      const article = box.closest('article') as HTMLElement;
+      const style = getComputedStyle(article);
+      const articleWidth = article.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const whole = svg.getBoundingClientRect().right <= box.getBoundingClientRect().right;
+      box.scrollLeft = box.scrollWidth;
+      const scale = svg.getBoundingClientRect().width / (svg as SVGSVGElement).viewBox.baseVal.width;
+      const hidden = svg.getBoundingClientRect().right - box.getBoundingClientRect().right;
+      box.scrollLeft = 0;
+      return { whole, fullWidth: box.getBoundingClientRect().width >= articleWidth - 1, scale, hidden, scrolls: getComputedStyle(box).overflowX };
+    });
+    expect(fit.whole || fit.fullWidth, 'a diagram that does not fit whole uses the article width').toBe(true);
+    expect(fit.scale).toBeGreaterThanOrEqual(0.849);
+    expect(fit.scale).toBeLessThanOrEqual(1.001);
+    expect(fit.hidden, 'diagram right edge reachable inside its box').toBeLessThanOrEqual(1);
+    expect(fit.scrolls).toBe('auto');
+  }
+
   await openTopic(page, 'Features and settings');
   const screenshots = page.locator('.sterling-documentation article img');
   await expect(screenshots).toHaveCount(4);

@@ -79,15 +79,22 @@
   font-size: 0.9em;
   color: var(--theia-descriptionForeground);
 }
+.sterling-documentation > article { container-type: inline-size; }
+/* A diagram may use the whole article width, not only the text column, and scrolls sideways inside its own framed box: never clipped. */
 .sterling-documentation .sterling-doc-diagram {
   --sterling-diagram-bg: var(--theia-editor-background);
   --sterling-diagram-fg: var(--theia-editor-foreground);
-  overflow: auto;
+  margin: 1.25em calc(50% - 50cqi);
+  border: 1px solid var(--theia-panel-border);
+  overflow-x: auto;
 }
-/* Wide diagrams keep their drawn size (13 px labels) and scroll sideways; shrinking them to the column makes the labels unreadable. */
+/* Fit the box, keeping the aspect ratio, but never larger than drawn and never below 85% of it (13, 12 and 11 px labels stay at
+   about 11, 10 and 9 px); past that the box scrolls. --sterling-diagram-width is the drawn width, set by documentation-render.mjs. */
 .sterling-documentation .sterling-doc-diagram svg {
   display: block;
-  max-width: none;
+  width: 100%;
+  max-width: var(--sterling-diagram-width, none);
+  min-width: calc(var(--sterling-diagram-width, 0px) * 0.85);
   height: auto;
   margin-inline: auto;
 }
