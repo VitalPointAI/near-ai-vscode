@@ -693,3 +693,20 @@ test('every workflow image build retries only a Red Hat registry refusal, and a 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the required docs job blocks on the applicability drift check and the coverage ratchet; the compliance job reports coverage without failing (44.1-07, D-19)', () => {
+  const ci = jobs(read('ci.yml'));
+  const docs = steps(ci.get('docs'));
+  const step = (pattern) => docs.find((item) => pattern.test(item));
+  for (const pattern of [/npm --prefix compliance ci --ignore-scripts/, /node compliance\/src\/cli\.ts applicability --check/, /node compliance\/src\/cli\.ts coverage --check/]) {
+    const found = step(pattern);
+    assert.ok(found, `docs job step ${pattern}`);
+    assert.doesNotMatch(found, /continue-on-error/, `${pattern} must block`);
+  }
+  const install = docs.findIndex((item) => /npm --prefix compliance ci --ignore-scripts/.test(item));
+  assert.ok(install < docs.findIndex((item) => /coverage --check/.test(item)), 'the compliance package is installed before the checks');
+  const summary = steps(ci.get('compliance')).find((item) => /coverage --bundle compliance\/out\/bundle/.test(item));
+  assert.ok(summary, 'the compliance job prints the coverage summary');
+  assert.match(summary, /continue-on-error: true/);
+  assert.match(summary, /GITHUB_STEP_SUMMARY/);
+});
