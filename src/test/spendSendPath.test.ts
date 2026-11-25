@@ -19,7 +19,10 @@ const BASE = 'https://cloud-api.near.ai/v1';
 const MAIN = 'moonshotai/kimi-k3';
 const FAST = 'Qwen/Qwen3.6-35B-A3B-FP8';
 /** nano-USD per token: [input, output]. */
-const PRICE: Record<string, [number, number]> = { [MAIN]: [1000, 3000], [FAST]: [150, 600], 'z-ai/glm-5.3': [500, 2000] };
+// 74.1-08: a run's safety classifier is never of the writer's family and comes from the owner's classifier order, so the catalogue offers gpt-oss
+// (the first of that order); with no eligible classifier an auto step would rightly ask the person instead.
+const SAFETY = 'openai/gpt-oss-120b';
+const PRICE: Record<string, [number, number]> = { [MAIN]: [1000, 3000], [FAST]: [150, 600], 'z-ai/glm-5.3': [500, 2000], [SAFETY]: [100, 400] };
 
 class MemorySecrets implements SecretStorageLike {
   private readonly values = new Map<string, string>();
