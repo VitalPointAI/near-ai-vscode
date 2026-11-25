@@ -2,6 +2,9 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ModelInfo, NearAiError, RouteRefusedError, SpendLimitError } from './nearAiClient';
 import { redactSecrets } from '../domain/redaction';
+import { emptyStateCard } from '../domain/gate/emptyState';
+import type { EmptyStateCard } from '../domain/gate/emptyState';
+import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import { GSD_COMMANDS } from '../domain/gsdCommands';
 import { ActivitySessionSummary, AttributionSnapshot } from '../domain/activity';
 import { normalizePrompt, PromptResponse, StructuredPrompt, isPromptId, isSessionId, progressCardFromEvent, ProgressCard, safeProgressText } from '../domain/chatProgress';
@@ -543,6 +546,24 @@ export function providerErrorMessage(error: unknown): string {
   // mid-reply; its message already says what happened and what to do.
   if (error instanceof Error && (error.name === 'ModelUnavailableError' || error.name === 'ModelStalledError')) return redactSecrets(error.message);
   return 'The NEAR AI request could not be completed. Check your connection and try again.';
+}
+
+/**
+ * What the chat posts for a failed turn (74.1 D-22, 74.1-UI-SPEC S8): the sentence, and for a route.passport refusal that no model would pass, the
+ * empty-state card in place of the reply. With models that would pass, the refusal's own sentence lists them and no card is shown.
+ */
+export function providerErrorPost(error: unknown, options: { readonly hasOrgHostingOption?: boolean; readonly hasVault?: boolean } = {}): { type: 'assistant-error'; text: string; card?: EmptyStateCard } {
+  const text = providerErrorMessage(error);
+  if (!(error instanceof RouteRefusedError) || error.rule !== 'route.passport' || error.passport === undefined) return { type: 'assistant-error', text };
+  const refusal = error.passport;
+  if (refusal.alternatives !== undefined && refusal.alternatives.length > 0) return { type: 'assistant-error', text };
+  const label = refusal.labels.length === 0 ? '' : refusal.labels.map((key) => labelKeyShown(key)).join(', ');
+  // No closed option is offered here: the gate already decided every catalogue model for this request, and none would pass (UI security rule 4).
+  const card = emptyStateCard({
+    use: refusal.use, label, routingTier: 'unknown', place: refusal.place ?? 'this place', catalog: [], allows: () => false, whoToAsk: refusal.whoToAsk,
+    organization: refusal.organization, hasOrgHostingOption: options.hasOrgHostingOption === true, hasVault: options.hasVault === true
+  });
+  return { type: 'assistant-error', text, card };
 }
 
 // ---- Cybersecurity panel ------------------------------------------------------------------------

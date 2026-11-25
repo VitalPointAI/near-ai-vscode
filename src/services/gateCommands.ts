@@ -32,6 +32,7 @@ import { labelKeyShown, levelShown, scaleShown, setActiveScaleSource } from '../
 import { localHostPatternNotice, patternLocalHosts } from '../domain/gate/routing';
 import type { SecretStorageLike } from './auth';
 import { SHOW_POLICY_COMMAND, createGateStatusBar, expiryDate, policyProblem } from './gateStatusBar';
+import { onReportNoticeChange, reportNoticeStatus, startReportModeNotice } from './reportModeNotice';
 import type { GateStatusTimers } from './gateStatusBar';
 import { ADD_ORGANIZATION_RULES_COMMAND, addOrganizationRules, startNotices } from './organizationRules';
 import type { NoticeMemento } from './organizationRules';
@@ -333,9 +334,12 @@ function registerPolicySurfaces(context: GateActivationContext, host: GateHost, 
       const mark = chat?.mark()?.current();
       return chat === undefined || mark === undefined ? undefined : { mark, defaultLabel: chat.defaultLabel() };
     };
-    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
+    const bar = createGateStatusBar({ read: () => ({ state: host.bundleState(), now: clock(), layers: host.policyLayers() }), chatMark, reportNotice: () => reportNoticeStatus(host.policyLayers()), ...(statusTimers === undefined ? {} : { timers: statusTimers }) });
     const refresh = (): void => { bar.update(host.bundleState(), clock(), host.policyLayers()); };
     keep({ dispose: () => { bar.dispose(); } });
+    // 74.1-13: the report-only notice of this window's session, raised by a would-refuse of route.passport and cleared by enforce.
+    keep(startReportModeNotice(host));
+    keep(onReportNoticeChange(refresh));
     keep({ dispose: host.onDidChange(refresh) });
     // D-33: the item shows the label of the chat in view, so it changes when another chat is shown or that chat's label changes.
     keep({ dispose: onChatInViewChange(refresh) });

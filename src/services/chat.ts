@@ -33,7 +33,7 @@ import { redactSyncText, SYNC_PROMPT_DISMISSED_KEY, syncPanelMessage } from './s
 import { copyAttachmentIntoProject, PreparedAttachments, prepareAttachments, stageAttachment, StagedAttachment } from '../agent/attachments';
 import { libraryTeamAllowed, projectTeamAllowed, TeamConsent, TeamDefinition, TeamLibrary, teamAgents, workingTeamFor } from '../agent/teams';
 import type { GsdAgent } from '../gsd/library';
-import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, parseChatWebviewMessage, providerErrorMessage, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
+import { attachmentsClearedMessage, modelOptions, modelPrivacyLabel, modelsAsPrivateAs, parseChatWebviewMessage, providerErrorMessage, providerErrorPost, discoverGsdArtifacts, isSafeArtifactPath, GsdArtifactLink, profileStatusMessage } from './chatBridge';
 import type { ChatWebviewMessage } from './chatBridge';
 import { sharedActivityFeed } from './activityView';
 import { runTitleFor } from './activityOverview';
@@ -1003,7 +1003,7 @@ async function initializeChat(context: vscode.ExtensionContext, auth: AuthServic
       await sendArtifacts(panel);
     } catch (error) {
       await state.activity.append(session.sessionId, { status: 'failed', summary: 'Agent run failed.', errorCode: error instanceof Error ? error.name : 'unknown' });
-      tab.post({ type: 'assistant-error', text: providerErrorMessage(error) });
+      tab.post(providerErrorPost(error));
     } finally {
       // Files this turn read but never gave to a run go back to the composer (carried ones are put back by `receive`).
       if (readStaged && !delivered) for (const attachment of staged) { state.attachments.set(attachment.id, attachment); postStaged(attachment); }

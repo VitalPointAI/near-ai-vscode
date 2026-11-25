@@ -333,6 +333,17 @@ function securityContactOf(effective: PolicyDocument): { readonly contact?: { re
   return contact === undefined ? {} : { contact: Object.freeze({ name: contact.name, how: contact.how }) };
 }
 
+// ---- The report-only notice (74.1 D-22) ----
+
+/** Told once per would-refuse of route.passport (report mode): the notice service listens. A listener that throws never changes a request. */
+export const passportReportListeners = new Set<() => void>();
+
+function notePassportReport(): void {
+  for (const listener of [...passportReportListeners]) {
+    try { listener(); } catch { /* a notice never changes a request */ }
+  }
+}
+
 // ---- The record of a model request (GATE-07, D-20, D-52) ----
 
 /** The rules of a routine allowed request, whose record is the short one: no reason, no tier beside the capability's, and no label at the default mark. */
@@ -401,6 +412,8 @@ export interface RouteRecordContext {
  * the default label, no label. The connection state is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
  */
 export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext): DecisionRecord {
+  // 74.1 D-22: every model request's decision passes here once; one route.passport would-refuse raises the report-only notice for the session.
+  if (decision.allowed && decision.wouldRefuse?.includes('route.passport') === true) notePassportReport();
   const recordId = (route.newRecordId ?? randomUUID)();
   const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
   const model = recordedModelName(request.model);
