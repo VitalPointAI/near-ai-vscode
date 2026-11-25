@@ -1057,6 +1057,32 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | LCE-09 | 48.2-04, 48.2-08, 48.2-09, 48.2-11 |
 | LCE-10 | 48.2-02, 48.2-15 |
 
+## Phase 48.3 requirements: Software supply registry
+
+**Defined:** 2026-11-25 from the owner's direction ("For the SBoM, we likely need to host them in our own package registry so we can manage updates to them/properly test them for vulnerabilities and trust"), the research `.planning/research/software-supply-registry/RESEARCH.md`, and the owner's answers "accept supply registry defaults" and "let's look to become fully sovereign compliant". Decisions: `.planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md`.
+**Core value:** Every dependency and image SovAI builds with or runs is reviewed once by your organization's rules and people, signed with your organization's site key, rescanned every day, and delivered to air-gapped sites with its evidence.
+**Status:** planned, 25 plans in 13 waves.
+
+- [ ] **SSR-01**: Every artefact of every ecosystem (npm, OCI images, charts, tools, Go, Maven, PyPI, RPM, the vulnerability databases) passes the intake gates before use: age 7 days with a named-approver fast lane, name, install scripts, licence, integrity and signature, provenance regression, publisher change, malware, vulnerabilities and source form; automatic approval when every gate passes, one named person for a flag, two for a flagged install script or a fast lane; an organization may only tighten the policy. [SR-3, SR-5, SR-6, SR-10, SR-11, CM-7(5), SI-3, SA-15(3)]
+- [ ] **SSR-02**: One explicit state machine (requested, quarantined, waiting, in review, approved, refused, under review again, withdrawn) in which every open state has a release time or an owner and a due date, nothing reaches approved without the approvals the policy names, approvers are named people proven at sign-in, and a withdrawal never deletes anything. [SR-3, CM-3, AC-5, IA-2]
+- [ ] **SSR-03**: An approval is a promotion record signed with your organization's site key in the HSM (never the supplier release key), binding the artefact digest, the gate results, the approvers, the policy hash and the database date; the record, SBOM, scan and VEX sit beside the artefact as OCI referrers and survive every copy. [SR-4, SR-11, SR-11(1), CM-14, SI-7, SA-10(1)]
+- [ ] **SSR-04**: Your organization's software registry at HQ: Harbor with OIDC sign-in, its audit log in the log store, Trivy off, one robot account per job and no egress; Verdaccio for npm with no uplink, publishing only by the intake and per-reader accounts; site Zot writes an audit log; each has a passing fit entry. [AC-2, AC-6, AU-2, AU-12, IA-2, CM-7, SC-7]
+- [ ] **SSR-05**: Builds use only approved inputs: every npm, Go, Maven, PyPI, RPM and base-image input is checked against a signed approved list before anything from it runs, image builds run their dependency steps with the network off, the bundle is built only from HQ's approved content with the records carried to sites, and our own releases are re-verified at HQ before any site receives them. [CM-7(5), CM-8, CM-8(3), SA-10, SA-10(1), SR-5, SI-7(1)]
+- [ ] **SSR-06**: Continuous monitoring: the Grype and OSV databases synced daily, checked and signed; every stored SBOM rescanned daily; new KEV, malware or above-threshold findings raise an alert and move the artefact to under review again; OpenVEX authored, approved, signed and attached; the signed refresh carries the database, VEX and withdrawals to sites, where a withdrawal raises an alert and goes to the change board. [RA-5, RA-5(2), SI-2, SI-2(2), SI-5]
+- [ ] **SSR-07**: The compliance obligations: fit entries for every added resource, the `supply-registry` component, statements and evidence rules in their own file, the supply chain document and the operator runbook, a valid OSCAL package, the 2026 SBOM Minimum Elements check, gap rows G517 to G525, and a lab run against real registries. [SR-3, SA-15, CM-8, RA-5]
+- [ ] **SSR-08**: CI and publication in Canada, behind an owner checkpoint: single-use self-hosted runners at HQ with egress limited to GitHub and HQ, builds reading only HQ's registries, publication straight to HQ Harbor, GHCR optional, `npm audit` replaced by offline scans; G517 met. [SA-10, SR-3, SR-5, SC-7, SA-9]
+
+| Requirement | Plans |
+|-------------|-------|
+| SSR-01 | 48.3-01, 48.3-08, 48.3-13, 48.3-16 |
+| SSR-02 | 48.3-01, 48.3-05, 48.3-08, 48.3-14 |
+| SSR-03 | 48.3-02, 48.3-03, 48.3-05, 48.3-08, 48.3-13 |
+| SSR-04 | 48.3-06, 48.3-07, 48.3-09, 48.3-10, 48.3-11 |
+| SSR-05 | 48.3-08, 48.3-12, 48.3-13, 48.3-14, 48.3-15, 48.3-16, 48.3-17, 48.3-18 |
+| SSR-06 | 48.3-03, 48.3-10, 48.3-19, 48.3-20 |
+| SSR-07 | 48.3-04, 48.3-07, 48.3-12, 48.3-21, 48.3-22 |
+| SSR-08 | 48.3-23, 48.3-24, 48.3-25 |
+
 ## Phase 74.1 requirements: Model passports, use tiers and Western defaults (0.4.x)
 
 **Defined:** 2026-11-24 from `.planning/research/model-provenance/DESIGN.md` (sections 5 to 10 and 14; owner decisions 1 to 5 and O1 to O5) and the ROADMAP's success criteria, added when Phase 74.1 was planned. Phase 41 delivered the schema half (FND-08); these requirements are the enforcement, the research workspace, the defaults and the surfaces.

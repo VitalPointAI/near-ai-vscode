@@ -996,6 +996,48 @@ Plans:
 - [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
 - [ ] 48.2-15-PLAN.md: Wave 10 (after 48-07 and 48-08). Statements and evidence rules, the documents with the real-time table, the full suites once, the release-preview check and the owner gate
 
+### Phase 48.3: Software supply registry (INSERTED)
+**Goal**: Every dependency and image that Sterling Sovereign AI builds with or runs is pulled only from your organization's software registry, after review: an intake judges it once with your organization's policy, named people approve what is flagged, your organization's site key signs the approval, and the SBOM, scan, VEX and record sit beside it; everything approved is rescanned daily against a vulnerability database your organization syncs and signs itself; air-gapped sites receive it, with the database and withdrawals, in the signed bundle and refresh files; and builds and publication move to runners in Canada once the owner says go.
+**Inserted**: 2026-11-25 from the owner's direction ("For the SBoM, we likely need to host them in our own package registry so we can manage updates to them/properly test them for vulnerabilities and trust"), the research on `docs/research-software-supply-registry`, the owner's answer "accept supply registry defaults" (all eleven research questions) and "let's look to become fully sovereign compliant" (the runner move planned, behind an owner checkpoint).
+**Depends on**: 47-29 (the scan library, offline rescan and signed database refresh), 48.1-17 (signing with the organization site key through PKCS#11), 48.1-22 (the development site key, done); 47-26 and 48.1-06 for the register order; 47-18's lab for the baseline and the lab run. Waves 1 to 3 need nothing else in flight.
+**Requirements**: SSR-01, SSR-02, SSR-03, SSR-04, SSR-05, SSR-06, SSR-07, SSR-08
+**Success Criteria** (what must be TRUE):
+  1. Every npm, OCI, Go, Maven, PyPI and RPM artefact passes the owner's gates (7-day age with a named-approver fast lane, name, install scripts, licence, integrity and signature, provenance regression, publisher change, malware, vulnerabilities, source form) before use; one named person approves a flag, two approve a flagged install script or a fast lane; every state has an exit and nothing is deleted. (SSR-01, SSR-02)
+  2. An approval is a promotion record signed with your organization's site key in the HSM, never the release key, bound to the artefact's digest and stored beside it with its SBOM, scan and VEX as OCI referrers that survive every copy. (SSR-03)
+  3. HQ runs Harbor (OIDC sign-in, audit log in the log store, Trivy off, one robot per job, no egress) and, at the build HQ, Verdaccio (no uplink, only the intake publishes); site Zot writes an audit log; each has a passing fit entry. (SSR-04)
+  4. CI fails on any dependency or image pin not in your organization's signed approved lists; image builds take their Go, Maven, RPM and PyPI inputs only from approved files with the network off; the offline bundle carries only approved content with its records, and the site import refuses anything else. (SSR-05)
+  5. Your organization's Grype and OSV databases are synced, checked and signed daily; everything approved is rescanned daily; new KEV, malware or high findings, overdue reviews, unmatched signatures, old databases and a stopped intake raise alerts; OpenVEX is approved and signed; sites receive the database, VEX and withdrawals by signed refresh, and a withdrawal alerts and goes to the change board. (SSR-06)
+  6. The supply-registry component has statements and evidence rules for the supply chain controls, the process document and runbook exist, the OSCAL package validates, gap rows G517 to G525 are on the road-to-production page, and a lab run proved the whole path on the real stack and an air-gapped site. (SSR-07)
+  7. On the owner's go, builds run on single-use runner VMs at HQ in Canada that reach only GitHub and HQ, publish straight to HQ Harbor, GHCR is optional and audits run offline; G517 is met, and G525 records that the source and job control plane stay on GitHub. (SSR-08)
+**Plans:** 25 plans in 13 waves (planned 2026-11-25 on `docs/phase-48.3-plan`; decisions D-01 to D-36 in `48.3-CONTEXT.md`, D-01 to D-11 the owner's accepted defaults; hand-offs H-01 to H-14 in `48.3-HANDOFFS.md`; gaps G517 to G525, G526 spare; each wave with gate files lands as one combined pull request with one owner gate approval)
+
+Plans:
+- [ ] 48.3-01-PLAN.md: Wave 1. Tracer: the owner's policy and the state machine as pure code (gates, approver counts, licence expressions, tighten-only site policy, no stuck state)
+- [ ] 48.3-02-PLAN.md: Wave 1. Spike S-A: cosign 3.1.4 attestation types, OCI referrers on Zot, an attestation signed through a PKCS#11 token attached with stock cosign, copies
+- [ ] 48.3-03-PLAN.md: Wave 1. Spike S-B: whether hauler 2.1.2 carries referrers for images and files through the bundle path; ORAS only if not
+- [ ] 48.3-04-PLAN.md: Wave 1. Gap rows G517 to G525 with POA&M items and the road-to-production page
+- [ ] 48.3-05-PLAN.md: Wave 2. Promotion records and approvals: named approvers proven by a device sign-in with passkey step-up through OpenBao; two-person and fast-lane rules; signature reconciliation
+- [ ] 48.3-06-PLAN.md: Wave 2. Spike S-C: the Verdaccio version and tree judged and read from source, the owner's legitimacy checkpoint, then an isolated run proving exact bytes and refused publishes
+- [ ] 48.3-07-PLAN.md: Wave 3. Gate PR: the supply-registry component, osv-scanner pinned, Verdaccio and Harbor's HQ role fit-checked (owner approval)
+- [ ] 48.3-08-PLAN.md: Wave 4 (after 47-29 and 48.1-17). The OCI intake: gather with no key, decide and sign on the signing host, publish with referrers; the review command; our releases re-verified from GHCR
+- [ ] 48.3-09-PLAN.md: Wave 4. HQ Harbor: OIDC and audit settings generated for the install, no admin group; projects, immutable tags, robots and readers as code
+- [ ] 48.3-10-PLAN.md: Wave 4. Registry audit (Harbor forward, Zot audit log) and isolation (no egress); the supply namespace and the status object with its one narrow writer
+- [ ] 48.3-11-PLAN.md: Wave 5. Verdaccio as a SovAI-built image, its chart and per-reader accounts
+- [ ] 48.3-12-PLAN.md: Wave 5. The bundle built only from HQ approved content with records checked, the site import's check, the 2026 SBOM Minimum Elements check (wave gate)
+- [ ] 48.3-13-PLAN.md: Wave 5. The npm intake: age-limited resolution, registry signatures, provenance, malware and vulnerability gates, exact-bytes publish; the signed approved lists
+- [ ] 48.3-14-PLAN.md: Wave 6 (on 47-18's lab). The CI input check; the npm and images baseline judged, approved by named people and signed by the owner
+- [ ] 48.3-15-PLAN.md: Wave 7. CI enforces the approved lists; the trusted key folder becomes a gate path (wave gate)
+- [ ] 48.3-16-PLAN.md: Wave 7. Go, Maven, PyPI and RPM snapshots recorded file by file, judged and signed into lists
+- [ ] 48.3-17-PLAN.md: Wave 8. oauth2-proxy and the Theia Cloud images built from approved Go and Maven files with the network off (wave gate)
+- [ ] 48.3-18-PLAN.md: Wave 9. postgres, the test HSM image and the workbench take approved, signature-checked RPMs; trestle from approved wheels (wave gate)
+- [ ] 48.3-19-PLAN.md: Wave 8. Daily database sync and signing, rescans dated by the database, state moves, reconciliation, alert rules with guards
+- [ ] 48.3-20-PLAN.md: Wave 9. OpenVEX with approvals; the signed refresh with the database, VEX and withdrawals; the site's alert and change record
+- [ ] 48.3-21-PLAN.md: Wave 10. The process document and runbook, statements and evidence rules, the component in the hosted levels, OSCAL (wave gate)
+- [ ] 48.3-22-PLAN.md: Wave 10 (on 47-18's lab). Lab run on the real stack and an air-gapped site
+- [ ] 48.3-23-PLAN.md: Wave 11. Owner decision on runners in Canada; the runner egress allow-list and single-use runner VMs
+- [ ] 48.3-24-PLAN.md: Wave 12 (after the owner's go). The runner golden image and pin; build, image and publish jobs on HQ runners reading HQ's registries (wave gate)
+- [ ] 48.3-25-PLAN.md: Wave 13. Publication to HQ, GHCR optional, offline audits; G517 met (wave gate)
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -2257,6 +2299,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
 | 48.2. Live compliance evidence in the workbench | 0/17 | Planned 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
+| 48.3. Software supply registry | 0/25 | Planned 2026-11-25 (owner: all eleven research defaults accepted; runner move behind an owner checkpoint; waves 1 to 3 can start now, wave 4 after 47-29 and 48.1-17, waves 6 and 10 on 47-18's lab; hand-offs in 48.3-HANDOFFS.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
