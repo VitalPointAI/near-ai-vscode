@@ -70,7 +70,7 @@ export const PROJECT_REFUSALS_HOST = {
   'not-shared': 'This project folder holds a shared staff project that this computer has not joined, so it was not opened. Nothing was changed. To work in it, ask your staff lead for an invitation.',
   'store-refused': 'The shared history in this project folder could not be opened, so nothing was changed.',
   'no-key': 'This computer does not hold the key for this part of the shared project, so nothing was written. Ask your staff lead to give this device access.',
-  'rekey-pending': 'This part needs a current key before you can write to it. Sync the project or ask your staff lead to finish the key change.',
+  'rekey-pending': 'This part needs a current key before you can write to it. Sync the project or ask the person who manages access to finish the key change.',
   'pin-damaged': 'The record of which shared project this folder belongs to cannot be read, so the project was not opened. Nothing was changed. Ask your staff lead for help.',
   'already-shared': 'This project folder already holds a shared staff project, so a second one was not made. Nothing was changed.',
   'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.',
