@@ -149,12 +149,13 @@ export class StaffRemoteCursors {
   }
 
   private track(editor: SourceEditor): void {
+    // Matched by model: each part may be handed its own wrapper of the same editor, but a model has one wrapper (binding-part.ts sourceModel).
     editor.onSelection?.((anchor, head) => {
-      const entry = this.binding.bindings().find((item) => item.state === 'bound' && item.doc !== undefined && item.editors.has(editor));
+      const entry = this.binding.bindings().find((item) => item.state === 'bound' && item.doc !== undefined && item.model === editor.model);
       if (entry?.doc !== undefined) void this.server.selection(entry.doc, anchor, head).catch(() => undefined);
     });
     // An editor opened on a model that already has cursors shows them.
-    const entry = this.binding.bindings().find((item) => item.editors.has(editor));
+    const entry = this.binding.bindings().find((item) => item.model === editor.model);
     const cursors = entry?.doc === undefined ? undefined : this.latest.get(entry.doc);
     if (cursors !== undefined) this.cursorsOf(editor)?.show(cursors);
   }
