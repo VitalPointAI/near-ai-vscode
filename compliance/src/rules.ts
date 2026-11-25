@@ -3,7 +3,7 @@
 // apart from one that did not run (D-21, pitfall 15).
 import { lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { sourcePathForReport, type EvidenceRule, type Observation, type ReasonCode, type RuleResult, type TestReportRow, type WindowKind } from './model.ts';
+import { sourcePathForReport, type ComponentInput, type EvidenceRule, type Observation, type ReasonCode, type RuleResult, type TestReportRow, type WindowKind } from './model.ts';
 
 /** Where a rule is being evaluated: the commit the evidence was collected at, when, and (for relay or hub reports) the package prefix. */
 export interface RuleContext {
@@ -165,4 +165,52 @@ export function evaluateObservationRule(rule: EvidenceRule, observations: readon
     window,
     ...(newest.runUrl ? { runUrl: newest.runUrl } : {})
   };
+}
+
+// ---- What counts as evidence (44.1-08, D-18) --------------------------------------------------------------------------------------------------
+
+/**
+ * The test folders whose CI job writes a per-test report the bundle reads (`test-report-<job>.ndjson`): the root `test` job (src/test and
+ * scripts/test), relay, hub, workbench and deploy. A rule on a test anywhere else (compliance/test, docs-site/test) never gets a result.
+ */
+export const REPORTED_TEST_ROOTS = Object.freeze(['src/test', 'scripts/test', 'relay/test', 'hub/test', 'workbench/test', 'deploy/test'] as const);
+
+/** The collectors whose observations the bundle gathers: the CI artefact collectors and the site collector (`deployment`). Same ids as bundle.ts COLLECTORS. */
+export const ACCEPTED_OBSERVATION_COLLECTORS = Object.freeze(['tests', 'ci', 'secret-scan', 'documents', 'crypto', 'audit', 'sbom', 'release', 'attestation', 'settings', 'review-trail', 'code-scanning', 'deployment'] as const);
+
+export type UnacceptableReason = 'no rule' | 'not in a reported test job' | 'not from a known collector';
+
+/** One statement no acceptable rule backs. `exempt` is true for a component assessed only at claim-false levels (the appliance keeps its no-rules row). */
+export interface StatementWithoutAcceptableRule {
+  readonly component: string;
+  readonly control: string;
+  readonly statement: string;
+  readonly reason: UnacceptableReason;
+  readonly exempt: boolean;
+}
+
+/** True when a rule is backed by evidence some CI job or collector reports. */
+export function isAcceptableRule(rule: EvidenceRule): boolean {
+  if (rule.kind === 'test') {
+    const file = rule.test?.file.replaceAll('\\', '/') ?? '';
+    return !file.split('/').includes('..') && REPORTED_TEST_ROOTS.some((root) => file.startsWith(`${root}/`));
+  }
+  return (ACCEPTED_OBSERVATION_COLLECTORS as readonly string[]).includes(rule.observation?.collector ?? '');
+}
+
+/**
+ * Every statement with no rule, or whose rules are all unacceptable (a test outside REPORTED_TEST_ROOTS, an observation on an unknown collector).
+ * A statement needs at least one acceptable rule; a statement without evidence is never Met (D-03, D-18). Components assessed only at claim-false
+ * levels are listed with `exempt: true`.
+ */
+export function statementsWithoutAcceptableRule(components: readonly ComponentInput[], rules: readonly EvidenceRule[], levels: readonly { readonly components: readonly string[]; readonly claim?: boolean }[]): StatementWithoutAcceptableRule[] {
+  const claimed = new Set(levels.filter((level) => level.claim !== false).flatMap((level) => level.components));
+  const found: StatementWithoutAcceptableRule[] = [];
+  for (const component of components) for (const requirement of component.implemented) for (const statement of requirement.statements) {
+    const tied = rules.filter((rule) => rule.component === component.id && rule.control === requirement.control && rule.statement === statement.id);
+    if (tied.some(isAcceptableRule)) continue;
+    const reason: UnacceptableReason = tied.length === 0 ? 'no rule' : tied.some((rule) => rule.kind === 'test') ? 'not in a reported test job' : 'not from a known collector';
+    found.push({ component: component.id, control: requirement.control, statement: statement.id, reason, exempt: !claimed.has(component.id) });
+  }
+  return found;
 }

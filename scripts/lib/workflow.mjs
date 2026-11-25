@@ -618,7 +618,10 @@ export const GATE_PATHS = Object.freeze([
   /^compliance\/evidence-rules\//,
   /^compliance\/responsibility\//,
   /^compliance\/profiles\//,
-  /^compliance\/levels\.json$/
+  /^compliance\/levels\.json$/,
+  // The reviewed applicability map and the coverage ratchet's baseline (44.1, D-11, D-19): a change needs the owner.
+  /^compliance\/applicability\//,
+  /^compliance\/coverage\//
 ]);
 
 export function gateFileChanges(paths) {
