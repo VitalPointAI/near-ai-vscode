@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 23
 status: executing
-stopped_at: Completed 45.1-02-PLAN.md
-last_updated: "2026-11-25T03:57:14.809Z"
-state_head: 28d6ef3900a316a253d33aac46814ca98ee0d551
+stopped_at: 45.1-03 Task 1 owner checkpoint (exchange record shapes)
+last_updated: "2026-11-25T03:57:59.046Z"
+state_head: f773072ed5adfa0b984ebfa5f1f036134d60bdfa
 progress:
   total_phases: 12
   completed_phases: 1
@@ -162,6 +162,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
+- 45.1-03 Task 1: owner confirms the exchange record shapes (exchange.export, exchange.import, exchange@1) before any shared log holds them
+- 45.1-03 Task 3 needs the replica feature list and roster.require (33-18), not on main; 45.1-04 needs 33.1-21's release act and release.copy binding slot, not on main
 
 ### Quick Tasks Completed
 
@@ -176,9 +178,9 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T03:57:14.610Z
-**Stopped at:** Completed 45.1-02-PLAN.md
-**Resume file:** None
+**Last session:** 2026-11-25T03:57:58.859Z
+**Stopped at:** 45.1-03 Task 1 owner checkpoint (exchange record shapes)
+**Resume file:** .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-03-PLAN.md
 
 ## Performance Metrics
 
