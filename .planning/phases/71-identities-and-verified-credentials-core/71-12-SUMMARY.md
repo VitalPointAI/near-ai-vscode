@@ -74,7 +74,7 @@ plan_head_after: 81286bde
 
 All three tasks are done. An officer issues, revokes and suspends credentials in their own session, signed by their own person key, and the status lists are signed by the site's status-list key only through a step-up by a named officer. The revocation inbox that 47-20 and 47-31 file into reaches the officers who issued to that person, and a person's credentials reach their wallet at their next sign-in.
 
-None of it is reachable in a hosted session yet: it needs 71-13's trust source (your organization's rules in the session), 33-23's hub session and the site's settings. All of that is G465. Binding a computer still has no status list places (G466).
+None of it is reachable in a hosted session yet: it needs 71-13's trust source (your organization's rules in the session), 33-23's hub session and the site's settings. All of that is G465. Binding a computer now takes its places from the person's own computer slots (D-25, owner 2026-11-25, which closed G466); see the D-25 section.
 
 ## OpenBao as built (for the 48.1 key inventory and Phase 47)
 
@@ -185,18 +185,57 @@ The issuer token is revoked after every call. `revoke` and `suspend` set the bit
 
 **9. The hosted wallet is a KV folder of the person's own**, plus a one-time notice in the browser (`IdentityServiceRpc.inboxNews`). The extension's `Wallet` is SecretStorage under a host-dependent Theia key, which the backend cannot address reliably, so 71-13 joins the two (G465).
 
-**10. G465 and G466 added; the gap count pin is 422.** `road-to-production.md` is regenerated.
+**10. G465 added, G466 added and then closed by D-25, G467 added; the gap count pin is 422.** `road-to-production.md` is regenerated.
 
 ## Not done here
 
 - **71-13 is not started.** Its precondition is not met: 33-24 is only on `feat/phase-33-engine-wave-1`, not on `main`.
 - **71-14 is not started.** It depends on 71-13 and ends at an owner checkpoint.
 
+## D-25: a person claims their own computer's status list places (owner, 2026-11-25; closes G466)
+
+The owner chose option (a), and it is built on this branch.
+
+- **OpenBao** (`deploy/openbao/policies/sterling-workbench.hcl`, the session policy):
+  - create and read on `kv/data/site/device-slots/{{identity.entity.id}}/slot-1` to `slot-5`, five exact paths and no others;
+  - create on `kv/data/site/status-index/device-*`;
+  - create on `kv/data/site/revocation-requests/{{identity.entity.name}}-computer-lost-*`.
+
+  `credential-issuers` gains read on `kv/data/site/device-slots/*`, and list and delete on its metadata. No path lets a person update, delete or list a slot, claim under another entity, or sign a status list.
+- **The cap of 5** is the five slot names. OpenBao has no sixth path, and `deviceSlotAllocator` (`workbench/extension/src/node/credentials/device-slots.ts`) refuses a sixth computer with "You already have 5 computers bound. Report one as lost, …".
+- **Index space:** device places come from index 98,304 up (`DEVICE_INDEX_FROM`). Officers' places now come from below it (`issuer-service.ts`).
+- **`bindComputer`** (71-10) uses that allocator in the backend module instead of refusing. A slot that already holds the same computer is used again, so a binding that stopped at the step-up never uses up a slot. A slot taken by another session is never overwritten.
+- **A lost computer:**
+  1. The person runs SovAI: Report a Lost Computer. It files `sterling-revocation-request/1` with reason `computer-lost` and the slot, under `keycloak-<sub>`, or `guest-<sub>` for a guest.
+  2. The officer sees that one computer in "Credentials to revoke" and revokes it (`revokeComputer`, after the step-up).
+  3. `resolveRequest` then removes the request and the slot, which frees it.
+
+  For `disabled`, `removed` and `guest-ended` requests, all of the person's computers are listed and must be revoked before the request is removed. Their slots are kept as the record.
+- **Tests added:**
+  - `deploy/test/openbao.test.mjs`, 3:
+    - own five slots only, never a sixth, never another entity's, never changed;
+    - device places only, no list signature, a lost-computer report only under the person's own name;
+    - officers read and free slots.
+
+    The existing exact list of session paths gains the new paths.
+  - `workbench/test/credentials-device-slots.test.ts`, 7:
+    - the first slot and its device places;
+    - the cap;
+    - no overwrite;
+    - never under another entity;
+    - a retry after the step-up reuses the slot;
+    - no lists, nothing claimed;
+    - a lost computer is reported once, and a guest's report goes under the guest name.
+  - `credentials-issuer-service.test.ts`, 2:
+    - the lost-computer flow end to end;
+    - an ended person's computers, and officers' places below the device quarter.
+  - The card test gains the computer row.
+
 ## Open conditions
 
 - **G465:** issuance is built but not reachable in a hosted session. It needs 71-13's trust source (your organization's rules in the session, and the hosted wallet joined to the extension's), 33-23's hub session, and Phase 47 to render `STERLING_STATUS_LIST_KEY` and `STERLING_OPENBAO_ISSUER_ROLE` and name `credentialIssuers` at the key ceremony.
-- **G466:** a person cannot yet get status list places to bind their own computer. This needs a decision on who claims them.
-- **G427** (71-10) stays open. Its third part now waits on G466's decision.
+- **G467:** a computer binding signed outside the workbench path is not counted or revocable through the slots, and device places are not limited per person in OpenBao (D-25's residual risk).
+- **G427** (71-10) stays open. Its third part now needs only the status lists in the session (G465); binding itself is built (D-25).
 
 ## Known Stubs
 
