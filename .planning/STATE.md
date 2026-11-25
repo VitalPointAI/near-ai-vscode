@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
-last_updated: "2026-11-25T12:34:16.032Z"
-state_head: 6c17e4d14812f20a4d762190d920924323e9158a
+stopped_at: "Phase 48.3: waves 1 and 2 executed but 48.3-06 (stopped at its owner Verdaccio legitimacy checkpoint)"
+last_updated: "2026-11-25T20:16:07.371Z"
+state_head: ed741c238c20f6015891557eda0797cdea87def5
 progress:
   total_phases: 12
   completed_phases: 1
@@ -50,6 +50,8 @@ Phase 31 executed 2026-11-20 on `feat/phase-31-staff-roster`: all 23 plans in 10
 Phase 32 (Your organization's sync hub; drop A; MUS-07, MUS-08): planned 2026-11-20 on `docs/phase-32-plan`, 28 plans in 14 waves. Part A (32-01..32-07) fixes the PR #130 review findings carried over, Part B (32-08..32-13) keeps each product in the cell for its label so Make Multi-User converts labelled projects, then Part C (32-14..32-28) builds the `hub/` service, its Compose profile and CI job, append checks, TLS-bound sessions, live events and presence, signed checkpoints, joining through the hub, the client transport, the malicious-hub harness and the operator section. Decisions D-01..D-71 are in 32-CONTEXT.md, with the ones for the owner to confirm listed there. Execution branches `feat/phase-32-NN-<slug>` into `feat/phase-32-sync-hub`.
 
 Phase 41 (One foundation, the organization policy foundation F1; FND-01..09): planned 2026-11-20 on `docs/phase-41-plan`, 15 plans in 5 waves (41-01 the signed contract alone, then layers, enrolment, labels, passports, modes, provider interfaces and the editor shell in parallel, then store and host, the decision core, the copy lint and the architecture test, then the privacy inputs and the commands, then the copy sweep, docs and close-out). It starts after the coherence safety patch merges. Decisions D-01..D-64 are in 41-CONTEXT.md, with the ones for the owner to confirm listed there. Executed 2026-11-20: all 15 plans in 5 waves on `feat/phase-41-foundation` (plan branches merged locally), the code review's 2 critical and 5 major findings fixed with regression tests, one integration PR against main.
+
+Phase 48.3 (Software supply registry; SSR-01 to SSR-08): planned 2026-11-25 on `docs/phase-48.3-plan` (71512eaf, after the independent plan check), 28 plans in 13 waves; the owner accepted all eleven research defaults. Executed 2026-11-25 on `feat/phase-48.3` (one branch, owner's instruction; no PR yet): wave 1 complete (48.3-01 the policy and state machine as pure code, 44 tests; 48.3-02 spike S-A: cosign 3.1.4 attestations are OCI 1.1 referrers on Zot, stock cosign cannot open a PKCS#11 key so site-key records are signed on the token by our code and pushed as referrers in cosign's shape, which stock cosign verifies, `--type vuln` needs cosign's own schema, `cosign copy` loses referrers while save and load keep them; 48.3-03 spike S-B: hauler 2.1.2 carries signatures and referrers for images and for file artifacts taken from the registry by digest, ORAS not needed; 48.3-04 gaps G517 to G521 and G523) and wave 2 except 48.3-06 (48.3-27 gaps G522, G524, G525: 443 gaps, 368 POA&M items; 48.3-05 records, approvals, OpenBao role supply-approver, realm client sterling-supply-review). Stopped at 48.3-06, which opens with the owner's Verdaccio legitimacy checkpoint; its read-only first task also needs osv-scanner, which is not pinned yet. Findings for later plans: OpenBao refuses a login whose mapped claim is not a string (auth_time comes as the string claim sterling_auth_time); Keycloak 26.8.2's device endpoint ignores a request's acr_values and uses the client's default ACR values.
 
 Next, in order (owner, 2026-11-18):
 1. Finish 0.4.33: the release PR from `release/0.4.33` (Phase 70's part 4e, the trust badge, and the new team's icon fix), then publishing once the owner approves that version.
@@ -178,9 +180,9 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T12:34:15.827Z
-**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
-**Resume file:** None
+**Last session:** 2026-11-25T20:15:52.787Z
+**Stopped at:** Phase 48.3: waves 1 and 2 executed but 48.3-06 (stopped at its owner Verdaccio legitimacy checkpoint)
+**Resume file:** .planning/phases/48.3-software-supply-registry/48.3-06-PLAN.md
 
 ## Performance Metrics
 
@@ -340,3 +342,6 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
 - [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience
 - [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
+- [Phase 48.3]: 48.3-02: site-key supply records are signed on the token by our code (statement, DSSE PAE, pkcs11-tool ECDSA, Sigstore bundle v0.3) and pushed as OCI 1.1 referrers in the shape stock cosign writes and verifies; the legacy attach tag and the referrer-dropping copy command are not used
+- [Phase 48.3]: 48.3-03: hauler 2.1.2 carries signatures and referrers for images and for file artifacts added from the registry by digest; ORAS not needed
+- [Phase 48.3]: 48.3-05: role supply-approver maps the string claim sterling_auth_time (OpenBao refuses non-string mapped claims); the review client sets default and minimum ACR to the step-up because the Keycloak 26.8.2 device endpoint ignores request acr_values
