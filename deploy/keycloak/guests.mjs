@@ -148,7 +148,7 @@ const isGuestGroups = (groups) => groups.some((group) => group.path === GUESTS_G
  * The approver's authority (D-61): the lead exists, is enabled and is not a guest; the approver exists, is enabled and is not a guest, has a
  * DID in the site's people directory, and holds a SecurityContactCredential that the verifier tool accepts now. Only reads; throws GuestRefusal.
  */
-async function checkApproval({ request, keycloak, bao, checkCredential, now }) {
+export async function checkApproval({ request, keycloak, bao, checkCredential, now }) {
   const lead = await findUser(keycloak, request.requestedBy);
   if (!lead?.id) throw new GuestRefusal(`The lead ${request.requestedBy} has no account at this site.`);
   if (lead.enabled === false) throw new GuestRefusal(`The lead ${request.requestedBy}'s account is disabled.`);

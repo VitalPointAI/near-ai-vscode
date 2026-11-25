@@ -6,8 +6,8 @@
 // Run: env COSIGN=compliance/out/tools/cosign node scripts/run-tests.mjs deploy/test/federation.test.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { X509Certificate, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { X509Certificate, generateKeyPairSync, randomBytes, sign as edSign } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { before, test } from 'node:test';
@@ -16,7 +16,9 @@ import { cosignBinary } from '../bundle/lib/cosign.mjs';
 import { loadSite } from '../bundle/lib/render.mjs';
 import { signFile, verifySignedFile } from '../bundle/signed-file.mjs';
 import { HQ_BROKER, HQ_FIRST_LOGIN_FLOW, HQ_SECRET_ENV, checkRealm, prepareRealm } from '../keycloak/apply.mjs';
-import { FORMAT, PASSWORDLESS, STORED_FIELDS, USERS_FEATURES, exportUsers, importUsers } from '../keycloak/users.mjs';
+import { FORMAT, PASSWORDLESS, STORED_FIELDS, USERS_FEATURES, exportUsers, exportUsersToFile, importUsers } from '../keycloak/users.mjs';
+import { SITE_EXPORT_PURPOSE, verifyEnvelope as verifyCopy } from '../keycloak/site-evidence.mjs';
+import { fingerprintOf, signingInput, verifyEnvelope } from '../../compliance/src/signed.ts';
 import { MOUNT, exportCrl, importCrl, importIntermediate, pemBlocks, requestIntermediate } from '../openbao/pki-files.mjs';
 
 process.env.COSIGN_PASSWORD = 'federation-test';
@@ -59,8 +61,10 @@ function fakeKeycloak(people = []) {
     const parts = route.split('/');
     if (method === 'GET' && route === 'users') {
       const name = new URLSearchParams(query).get('username').toLowerCase();
-      return { status: 200, data: [...users.values()].filter((user) => user.username === name).map(({ credentials, ...user }) => user) };
+      return { status: 200, data: [...users.values()].filter((user) => user.username === name).map(({ credentials, groups, ...user }) => user) };
     }
+    // The groups of a person (47-21: a member of /guests is a guest); people made without groups belong to none.
+    if (method === 'GET' && parts[2] === 'groups') return { status: 200, data: (users.get(parts[1]).groups ?? []).map((groupPath) => ({ path: groupPath, name: groupPath.slice(1) })) };
     if (method === 'GET' && parts[2] === 'credentials') {
       return { status: 200, data: users.get(parts[1]).credentials.map(({ secretData, ...credential }, index) => ({ id: `${parts[1]}-c${index}`, ...credential,
         credentialData: JSON.stringify({ ...JSON.parse(credential.credentialData), ...DISPLAY }) })) };
@@ -68,7 +72,7 @@ function fakeKeycloak(people = []) {
     if (method === 'POST' && route === 'users') {
       if (!storable(body.credentials ?? [])) return { status: 500, data: { error: 'Cannot parse the JSON' } };
       const id = `id-${users.size}`;
-      users.set(id, { ...body, username: body.username.toLowerCase(), id, credentials: body.credentials ?? [] });
+      users.set(id, { ...body, username: body.username.toLowerCase(), id, credentials: body.credentials ?? [], groups: body.groups ?? [] });
       return { status: 201, data: null };
     }
     if (method === 'PUT' && parts.length === 2) {
@@ -103,9 +107,9 @@ test('a person and both passwordless keys move by a verified signed file, and a 
   const file = await exportedAda();
   const document = JSON.parse(readFileSync(file, 'utf8'));
   assert.equal(document.format, FORMAT);
-  // 47 D-69: people alone need no feature, and this import reads none yet; a file with requires [] is accepted (the import below).
+  // 47 D-69: people alone need no feature, so a site on 47-14 alone still imports this file; this import reads guests@1 (47-21).
   assert.deepEqual(document.requires, []);
-  assert.deepEqual(USERS_FEATURES, []);
+  assert.deepEqual(USERS_FEATURES, ['guests@1']);
   for (const credential of document.users[0].credentials) assert.deepEqual(Object.keys(JSON.parse(credential.credentialData)), STORED_FIELDS);
   const edge = fakeKeycloak();
   const imported = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID });
@@ -160,14 +164,216 @@ for (const [name, makeFile] of [
   });
 }
 
-test('a file needing a feature this import does not read (guests@1 today) is refused whole, naming it, with zero Keycloak calls', async () => {
-  const file = await exportedAda((document) => ({ ...document, requires: ['guests@1'] }));
-  const edge = fakeKeycloak();
-  const result = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID });
-  assert.equal(result.ok, false);
-  assert.match(result.reason, /needs guests@1, which this site's import does not read/);
-  assert.deepEqual(edge.calls, []);
-  assert.equal(edge.users.size, 0);
+test('a file needing a feature this import does not read is refused whole, naming it, with zero Keycloak calls', async () => {
+  // A site on 47-14 alone reads no feature (USERS_FEATURES []): a file naming a guest needs guests@1, so such a site never makes the guest an
+  // ordinary member (T-47-125). This release reads guests@1 but not a later id.
+  for (const [features, needs] of [[[], 'guests@1'], [USERS_FEATURES, 'marking@1']]) {
+    const file = await exportedAda((document) => ({ ...document, requires: [needs] }));
+    const edge = fakeKeycloak();
+    const result = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID, features });
+    assert.equal(result.ok, false);
+    assert.match(result.reason, new RegExp(`needs ${needs}, which this site's import does not read`));
+    assert.deepEqual(edge.calls, []);
+    assert.equal(edge.users.size, 0);
+  }
+});
+
+// --- Guests between sites (47-21, D-64, 47 D-69) ----------------------------------------------------------------------------------------
+
+const NOW = Date.parse('2026-11-24T12:00:00.000Z');
+const DAY = 86_400_000;
+const GUEST_UNTIL = '2026-12-20T17:00:00Z';
+const GUEST_DID = 'did:key:z6MkfictionalAdaObserverKey0000000000000000000000';
+// The source site's guest: lifecycle attributes only (47-19), two passwordless keys, a member of /guests.
+const ADA_GUEST = { username: 'ada.observer', email: 'ada.observer@guests.sterling.example', firstName: 'Ada', lastName: 'Observer', enabled: true, emailVerified: false,
+  groups: ['/guests'], attributes: { guestUntil: [GUEST_UNTIL], guestRequestedBy: ['lead.hq'], guestApprovedBy: ['sec.hq'], guestApprovalRef: ['VR-001'] },
+  credentials: [webauthn('Z3Vlc3Qtb25l', 'guest key 1'), webauthn('Z3Vlc3QtdHdv', 'guest key 2')] };
+const didOf = async () => GUEST_DID;
+
+// Site evidence exports (48-02's envelope, 48-11's schema 2): each site signs its own with its Ed25519 key, listed in the sites file (32.1 D-62).
+const siteKey = () => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const raw = publicKey.export({ format: 'der', type: 'spki' }).subarray(12);
+  return { privateKey, publicKey: raw.toString('base64url'), fingerprint: fingerprintOf(raw) };
+};
+const EDGE_KEY = siteKey();
+const OTHER_SITE_KEY = siteKey();
+const sitesFile = () => {
+  const file = scratch('sites.json');
+  writeFileSync(file, JSON.stringify({ sites: [
+    { id: 'edge-1', name: 'Edge one', role: 'site', publicKey: EDGE_KEY.publicKey, fingerprint: EDGE_KEY.fingerprint },
+    { id: 'edge-2', name: 'Edge two', role: 'site', publicKey: OTHER_SITE_KEY.publicKey, fingerprint: OTHER_SITE_KEY.fingerprint }] }));
+  return file;
+};
+const signExport = (key, payload, signedAt) => {
+  const unsigned = { v: 1, purpose: SITE_EXPORT_PURPOSE, signer: { fingerprint: key.fingerprint, publicKey: key.publicKey }, signedAt, payload };
+  return { ...unsigned, sig: edSign(null, signingInput(SITE_EXPORT_PURPOSE, unsigned), key.privateKey).toString('base64url') };
+};
+/** A folder of site exports; each entry { key, site, ageDays, schema, users } becomes one signed file. */
+const exportsFolder = (entries) => {
+  const folder = scratch('site-exports');
+  mkdirSync(folder);
+  entries.forEach(({ key = EDGE_KEY, site = 'edge-1', ageDays = 1, schema = 2, users = ['guests@1'] }, index) => {
+    const signedAt = new Date(NOW - ageDays * DAY).toISOString();
+    const facts = schema === 2 ? { sterling: { release: '0.4.40', reads: { policy: ['work-areas@1'], ...(users ? { users } : {}) } } } : {};
+    writeFileSync(path.join(folder, `export-${index}.json`), JSON.stringify(signExport(key, { schema, site, generatedAt: signedAt, facts }, signedAt)));
+  });
+  return folder;
+};
+
+/** Exports through the same path as the CLI: the target-site check, then Keycloak, then the signed file. */
+const guestExport = async ({ people = [ADA, ADA_GUEST], usernames = ['ada', 'ada.observer'], includeGuests = ['ada.observer'], target } = {}) => {
+  const hq = fakeKeycloak(people);
+  const out = scratch('users-with-guests.json');
+  const run = exportUsersToFile(hq.admin, { usernames, includeGuests, sourceSite: 'hq', rpId: RP_ID, out, key: ORG.private, didOf, now: NOW, created: '2026-11-24T00:00:00.000Z',
+    target: target === undefined ? { site: 'edge-1', sitesFile: sitesFile(), siteExports: exportsFolder([{}]) } : target });
+  return { hq, out, run };
+};
+
+test('export refuses a guest it is not told to include, an ended guest and a guest past their end, before writing any file (D-64)', async () => {
+  for (const [people, usernames, includeGuests, pattern] of [
+    [[ADA, ADA_GUEST], ['ada', 'ada.observer'], [], /ada\.observer is a guest\. Guests stay at their site unless you name them with --include-guests \(D-64\)/],
+    [[ADA, { ...ADA_GUEST, enabled: false }], ['ada.observer'], ['ada.observer'], /ada\.observer's guest account has ended/],
+    [[ADA, { ...ADA_GUEST, attributes: { ...ADA_GUEST.attributes, guestEndedAt: ['2026-11-20T00:00:00Z'] } }], ['ada.observer'], ['ada.observer'], /ada\.observer's guest account has ended/],
+    [[ADA, { ...ADA_GUEST, attributes: { ...ADA_GUEST.attributes, guestUntil: ['2026-11-01T00:00:00Z'] } }], ['ada.observer'], ['ada.observer'], /ada\.observer's end date 2026-11-01T00:00:00Z has passed/],
+    [[ADA, ADA_GUEST], ['ada'], ['ada'], /--include-guests names ada, who is not a guest here/]
+  ]) {
+    const { out, run } = await guestExport({ people, usernames, includeGuests });
+    await assert.rejects(run, pattern);
+    assert.equal(existsSync(out), false);
+  }
+});
+
+test('a named guest travels with their end, lead, approver, approval and DID only, and the file needs guests@1; staff records are unchanged', async () => {
+  const { out, run } = await guestExport();
+  await run;
+  assert.equal(verifySignedFile(out, ORG.public).ok, true);
+  const document = JSON.parse(readFileSync(out, 'utf8'));
+  assert.deepEqual(document.requires, ['guests@1']);
+  const [staff, guest] = document.users;
+  assert.deepEqual(Object.keys(staff).sort(), ['credentials', 'email', 'emailVerified', 'enabled', 'firstName', 'lastName', 'username']);
+  assert.deepEqual(guest.guest, { until: GUEST_UNTIL, requestedBy: 'lead.hq', approvedBy: 'sec.hq', approvalRef: 'VR-001' });
+  assert.equal(guest.did, GUEST_DID);
+  for (const field of ['serves', 'nationality', 'organization', 'agreements', 'attributes', 'groups']) {
+    assert.equal(JSON.stringify(guest).includes(`"${field}"`), false, `${field} is a credential or Keycloak detail and never travels`);
+  }
+  assert.deepEqual(guest.credentials.map((credential) => JSON.parse(credential.credentialData).credentialId), ['Z3Vlc3Qtb25l', 'Z3Vlc3QtdHdv']);
+  // Without a guest the file is as 47-14 wrote it, so a site on 47-14 alone still imports it.
+  const plain = fakeKeycloak([ADA, ADA_GUEST]);
+  const staffOnly = await exportUsers(plain.admin, { usernames: ['ada'], sourceSite: 'hq', rpId: RP_ID, created: '2026-11-24T00:00:00.000Z' });
+  assert.deepEqual(staffOnly.requires, []);
+  assert.equal(staffOnly.users[0].guest, undefined);
+});
+
+test('export --include-guests writes no file unless the target site\'s recent signed export shows its import reads guests@1 (T-47-125)', async () => {
+  const sites = sitesFile();
+  for (const [target, pattern] of [
+    [{}, /--target-site, --sites and --site-exports/],
+    [{ site: 'edge-9', sitesFile: sites, siteExports: exportsFolder([{}]) }, /edge-9 is not in your sites file/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([]) }, /edge-1 has no signed evidence export from the last 7 days/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ ageDays: 8 }]) }, /edge-1 has no signed evidence export from the last 7 days/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ schema: 1 }]) }, /edge-1's newest export does not say which release it runs/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ key: OTHER_SITE_KEY }]) }, /edge-1 has no signed evidence export from the last 7 days/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ users: [] }]) }, /edge-1 runs Sterling 0\.4\.40, whose user import does not read guests@1/],
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ users: null }]) }, /edge-1 runs Sterling 0\.4\.40, whose user import does not read guests@1/],
+    // The newest verified export decides: an older one that read guests@1 does not outweigh a newer one that does not.
+    [{ site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ ageDays: 3 }, { ageDays: 1, users: [] }]) }, /does not read guests@1/]
+  ]) {
+    const { hq, out, run } = await guestExport({ target });
+    await assert.rejects(run, pattern);
+    assert.equal(existsSync(out), false);
+    assert.deepEqual(hq.calls, [], 'the target is checked before Keycloak is asked anything');
+  }
+  const { out, run } = await guestExport({ target: { site: 'edge-1', sitesFile: sites, siteExports: exportsFolder([{ ageDays: 6 }]) } });
+  await run;
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')).requires, ['guests@1']);
+});
+
+test('the site export verifier deploy/ carries accepts and refuses exactly what compliance/src/signed.ts does', () => {
+  const now = new Date(NOW);
+  const good = signExport(EDGE_KEY, { schema: 2, site: 'edge-1', generatedAt: new Date(NOW).toISOString(), facts: {} }, new Date(NOW).toISOString());
+  const keys = [{ fingerprint: EDGE_KEY.fingerprint, publicKey: EDGE_KEY.publicKey }];
+  const changed = structuredClone(good);
+  changed.payload.site = 'edge-2';
+  for (const [envelope, options] of [[good, { keys }], [changed, { keys }], [good, { keys: [] }], [good, { keys, purpose: 'other' }], [{ ...good, signedAt: new Date(NOW + DAY).toISOString() }, { keys }], [{ ...good, v: 2 }, { keys }]]) {
+    const opts = { purpose: SITE_EXPORT_PURPOSE, now, ...options };
+    const ours = verifyCopy(envelope, opts);
+    const theirs = verifyEnvelope(envelope, opts);
+    assert.deepEqual({ ok: ours.ok, reason: ours.reason }, { ok: theirs.ok, reason: theirs.reason });
+  }
+  assert.equal(verifyCopy(good, { purpose: SITE_EXPORT_PURPOSE, now, keys }).ok, true);
+});
+
+/** The destination's approval and rules: lead.one asks, sec.one approves under a SecurityContactCredential the verifier tool accepts. */
+const LEAD_EDGE = { username: 'lead.one', email: 'lead.one@sterling.example', firstName: 'Lead', lastName: 'One', enabled: true, credentials: [] };
+const SEC_EDGE = { username: 'sec.one', email: 'sec.one@sterling.example', firstName: 'Sec', lastName: 'One', enabled: true, credentials: [] };
+const edgeBao = () => {
+  const calls = [];
+  const bao = async (method, apiPath) => {
+    calls.push(`${method} ${apiPath}`);
+    if (apiPath === 'identity/entity/name/keycloak-id-1') return { status: 200, data: { data: { id: 'entity-sec-one' } } };
+    if (apiPath === 'kv/data/site/people/entity-sec-one') return { status: 200, data: { data: { data: { did: 'did:key:z6MkfictionalSecOne' } } } };
+    return { status: 404, data: null };
+  };
+  return { bao, calls };
+};
+const GUEST_RULES = { maxDays: 90, checkMinutes: 15, sessionsNamespace: 'theia-cloud', retentionDays: 365, issuing: true };
+const guestImport = (overrides = {}) => ({ settings: GUEST_RULES, requestedBy: 'lead.one', approvedBy: 'sec.one', approverCredential: '/media/sec.one.credential.json',
+  trust: '/media/trust', approvalRef: 'VR-002', bao: edgeBao().bao, checkCredential: () => ({ ok: true, message: 'holds' }), now: NOW, ...overrides });
+const guestFile = async (change = (document) => document) => {
+  const { out, run } = await guestExport();
+  await run;
+  return signedDocument(change(JSON.parse(readFileSync(out, 'utf8'))));
+};
+
+for (const [name, makeFile, options] of [
+  ['a guest record that --include-guests does not name', () => guestFile(), { includeGuests: [] }],
+  ['a guest record at a site whose guests are off', () => guestFile(), { includeGuests: ['ada.observer'], guests: guestImport({ settings: { ...GUEST_RULES, maxDays: 0 } }) }],
+  ['a guest record at a site on a release without the credential card (71-12)', () => guestFile(), { includeGuests: ['ada.observer'], guests: guestImport({ settings: { ...GUEST_RULES, issuing: false } }) }],
+  ['a guest record without the destination\'s approval reference', () => guestFile(), { includeGuests: ['ada.observer'], guests: guestImport({ approvalRef: '' }) }],
+  ['a guest record whose end has passed', () => guestFile((document) => { document.users[1].guest.until = '2026-11-01T00:00:00Z'; return document; }), { includeGuests: ['ada.observer'], guests: guestImport() }],
+  ['a guest record in a file whose requires does not name guests@1', () => guestFile((document) => ({ ...document, requires: [] })), { includeGuests: ['ada.observer'], guests: guestImport() }],
+  ['a guest record carrying how the guest serves', () => guestFile((document) => { document.users[1].guest.serves = 'industry'; return document; }), { includeGuests: ['ada.observer'], guests: guestImport() }],
+  ['a guest record without a DID', () => guestFile((document) => { delete document.users[1].did; return document; }), { includeGuests: ['ada.observer'], guests: guestImport() }]
+]) {
+  test(`import refuses ${name} with zero Keycloak calls`, async () => {
+    const file = await makeFile();
+    const edge = fakeKeycloak([LEAD_EDGE, SEC_EDGE]);
+    const result = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID, ...options });
+    assert.equal(result.ok, false);
+    assert.ok(result.reason);
+    assert.deepEqual(edge.calls, []);
+  });
+}
+
+test('import makes a named guest a guest here: in /guests, ending no later than the source and within this site\'s maxDays, under this site\'s approval', async () => {
+  const file = await guestFile();
+  const edge = fakeKeycloak([LEAD_EDGE, SEC_EDGE]);
+  const result = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID, includeGuests: ['ada.observer'], guests: guestImport() });
+  assert.equal(result.ok, true, result.reason);
+  assert.deepEqual(result.results.map(({ username, result: outcome, added }) => [username, outcome, added]), [['ada', 'created', 2], ['ada.observer', 'created', 2]]);
+  assert.deepEqual(result.results[1].guest, { until: GUEST_UNTIL, did: GUEST_DID });
+  const guest = [...edge.users.values()].find((user) => user.username === 'ada.observer');
+  assert.deepEqual(guest.groups, ['/guests']);
+  assert.deepEqual(guest.attributes, { guestUntil: [GUEST_UNTIL], guestRequestedBy: ['lead.one'], guestApprovedBy: ['sec.one'], guestApprovalRef: ['VR-002'] });
+  assert.deepEqual(guest.requiredActions, [], 'the keys arrive, so the registration action stays off');
+  assert.deepEqual(guest.credentials.map((credential) => JSON.parse(credential.credentialData).credentialId), ['Z3Vlc3Qtb25l', 'Z3Vlc3QtdHdv']);
+  assert.equal([...edge.users.values()].find((user) => user.username === 'ada').groups.length, 0, 'staff stay staff');
+  // The end is the earlier of the source's and this site's longest stay.
+  const shortStay = fakeKeycloak([LEAD_EDGE, SEC_EDGE]);
+  await importUsers(shortStay.admin, { file, publicKey: ORG.public, rpId: RP_ID, includeGuests: ['ada.observer'], guests: guestImport({ settings: { ...GUEST_RULES, maxDays: 10 } }) });
+  assert.deepEqual([...shortStay.users.values()].find((user) => user.username === 'ada.observer').attributes.guestUntil, [new Date(NOW + 10 * DAY).toISOString().replace('.000Z', 'Z')]);
+  // A second import changes nothing; an approver whose credential does not hold stops the guest before any write.
+  const again = await importUsers(edge.admin, { file, publicKey: ORG.public, rpId: RP_ID, includeGuests: ['ada.observer'], guests: guestImport() });
+  assert.deepEqual(again.results.map(({ result: outcome }) => outcome), ['unchanged', 'unchanged']);
+  const refused = fakeKeycloak([LEAD_EDGE, SEC_EDGE]);
+  await assert.rejects(importUsers(refused.admin, { file, publicKey: ORG.public, rpId: RP_ID, includeGuests: ['ada.observer'], guests: guestImport({ checkCredential: () => ({ ok: false, message: 'A cited credential is revoked.' }) }) }),
+    /sec\.one's SecurityContactCredential does not hold: A cited credential is revoked/);
+  assert.deepEqual(refused.calls.filter((call) => !call.startsWith('GET')), []);
+  // A staff account of the same name never becomes a guest, and gets no keys.
+  const staffHere = fakeKeycloak([LEAD_EDGE, SEC_EDGE, { ...ADA_GUEST, groups: [], attributes: {}, credentials: [] }]);
+  await assert.rejects(importUsers(staffHere.admin, { file, publicKey: ORG.public, rpId: RP_ID, includeGuests: ['ada.observer'], guests: guestImport() }), /ada\.observer has an account here that is not a guest/);
+  assert.deepEqual(staffHere.calls.filter((call) => !call.startsWith('GET')), []);
 });
 
 // --- PKI intermediate and revocation lists --------------------------------------------------------------------------------------------
