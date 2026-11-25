@@ -114,6 +114,10 @@ jobs:
     name: release-content
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # actions: read only to download main's last package for the size report.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,6 +127,16 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --ignore-scripts
+      # The size report's base (report-only): the package main's last successful CI run uploaded. Nothing fails without it.
+      - name: Download main's last package for the size report
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run="$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json databaseId,headSha --jq '.[0] // empty | "\(.databaseId) \(.headSha)"')"
+          if [ -n "$run" ]; then gh run download "${run%% *}" --name "vsix-${run##* }" --dir base-vsix || true; fi
+          base="$(find base-vsix -name '*.vsix' 2>/dev/null | head -n 1)"
+          if [ -n "$base" ]; then echo "NEAR_AI_BASE_VSIX=$base" >> "$GITHUB_ENV"; fi
       - name: Package the VSIX and check what it contains
         run: npm run verify:release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -799,7 +813,7 @@ jobs:
               const installers = readdirSync(directory, { withFileTypes: true }).filter(item => item.isFile() && item.name.endsWith(".vsix"));
               if (installers.length !== 1) throw new Error("Expected one installer from the successful build for this commit");
               const installer = `${directory}/${installers[0].name}`;
-              if (statSync(installer).size > 14 * 1024 * 1024) throw new Error("The installer exceeds the release size budget");
+              if (statSync(installer).size > 64 * 1024 * 1024) throw new Error("The installer exceeds the release sanity ceiling");
               const file = "compliance/out/vsix-sbom.cdx.json";
               writeFileSync(file, openZip(installer, { maxEntryBytes: 1_048_576 }).read("extension/sbom.cdx.json"));
               sboms.push({ subject: "vsix", file });

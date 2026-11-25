@@ -5551,8 +5551,8 @@
       "id": "G373",
       "ownerRole": "maintainers",
       "poam": "g373",
-      "remediation": "CI refuses an extension package over 14 MiB, and the package has little room left. Watch its size in each release, and move large bundled data out of the package before the limit blocks a release.",
-      "title": "The extension package is close to its size limit"
+      "remediation": "CI checks the extension package against a 64 MiB sanity ceiling and 4,000 entries, which catch an accidental inclusion such as node_modules or source artwork; the former 14 MiB cap was self-imposed, and the owner raised it on 2026-11-25 (\"keep it efficient, but it can grow\"). The release-content job prints the package size and its change from main's last package, and warns when one change grows it by more than 1 MiB. Watch that report, and move large bundled data out of the package when it stops being needed.",
+      "title": "The extension package's size is watched, not tightly capped"
     },
     {
       "appliesAt": "now",

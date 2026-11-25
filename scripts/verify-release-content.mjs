@@ -197,11 +197,12 @@ for (const folder of tileFolders) {
   if (strays.length) fail(`files in ${folder} that no index lists: ${strays.slice(0, 5).join(', ')}`);
 }
 
-// The size gate (research note on the map tiles, section 6): the package stays at most 14 MiB and 4,000 files.
-const VSIX_MAX_BYTES = 14 * 1024 * 1024;
+// A sanity ceiling, not a budget (owner, 2026-11-25): the package may grow, but 64 MiB still catches an accidental inclusion such as
+// node_modules or source artwork. The 4,000-entry limit stays. Growth is made visible instead: see the size report below.
+const VSIX_MAX_BYTES = 64 * 1024 * 1024;
 const VSIX_MAX_ENTRIES = 4000;
 const vsixBytes = statSync(vsixPath).size;
-if (vsixBytes > VSIX_MAX_BYTES) fail(`the package is ${vsixBytes} bytes, over the ${VSIX_MAX_BYTES}-byte gate`);
+if (vsixBytes > VSIX_MAX_BYTES) fail(`the package is ${vsixBytes} bytes, over the ${VSIX_MAX_BYTES}-byte sanity ceiling`);
 if (entries.length > VSIX_MAX_ENTRIES) fail(`the package has ${entries.length} entries, over the ${VSIX_MAX_ENTRIES}-entry gate`);
 
 // The built Yjs bundle (scripts/crdt-vendor.json): the packaged vendor/yjs/yjs.cjs must have exactly the bytes whose SHA-256 the manifest records.
@@ -219,3 +220,29 @@ if (packageJson.main !== './dist/extension.js') fail(`package.json main must rem
 
 if (process.exitCode) process.exit();
 console.log(`Release content verified: ${entries.length} entries (${(vsixBytes / 1048576).toFixed(2)} MiB), ${runtimeJavaScript.length} runtime JavaScript files, and ${required.length} required release assets.`);
+
+// The size report (report-only): the package's size, and with NEAR_AI_BASE_VSIX (main's last package, or the previous release's) the change
+// from it. A change over 1 MiB prints a GitHub warning that names the largest new or grown entries. It never fails the check.
+const mib = (bytes) => `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+const kib = (bytes) => `${bytes < 0 ? '-' : '+'}${(Math.abs(bytes) / 1024).toFixed(1)} KiB`;
+console.log(`Package size: ${mib(vsixBytes)} (${vsixBytes} bytes, ${entries.length} of ${VSIX_MAX_ENTRIES} entries allowed).`);
+const baseFile = process.env.NEAR_AI_BASE_VSIX?.trim();
+if (baseFile) {
+  try {
+    const base = openZip(baseFile);
+    const baseBytes = statSync(baseFile).size;
+    const growth = vsixBytes - baseBytes;
+    console.log(`Change from the base package (${relative(root, resolve(baseFile))}, ${mib(baseBytes)}): ${kib(growth)}.`);
+    if (growth > 1024 * 1024) {
+      const before = new Set(base.entries);
+      const grown = entries
+        .map((entry) => [entry, (zip.compressedSize(entry) ?? 0) - (before.has(entry) ? base.compressedSize(entry) ?? 0 : 0)])
+        .filter(([, bytes]) => bytes > 0).sort((a, b) => b[1] - a[1]).slice(0, 10);
+      console.log(`::warning title=The extension package grew by ${kib(growth)}::Largest new or grown entries: ${grown.map(([entry, bytes]) => `${entry} (${kib(bytes)})`).join(', ')}`);
+    }
+  } catch (error) {
+    console.log(`No size comparison: the base package ${baseFile} could not be read (${error instanceof Error ? error.message : String(error)}).`);
+  }
+} else {
+  console.log('No size comparison: NEAR_AI_BASE_VSIX is not set.');
+}
