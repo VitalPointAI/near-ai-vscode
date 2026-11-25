@@ -680,8 +680,17 @@ function stricter(tier: UseTier, expires: number, id: string, than: { tier: UseT
   return id < than.passport.id;
 }
 
-/** Why a passport does not cover a request (provenance 12.2): the ids 41-10 records as `wouldRefuse` and 74.1 turns into refusals. */
-export type PassportGap = 'unknown' | 'expired' | 'tier-exceeded' | 'hosting-mismatch' | 'acceptance-missing';
+/** Why a passport does not cover a request (provenance 12.2): recorded beside route.passport (74.1 D-11). */
+export type PassportGap = 'unknown' | 'expired' | 'tier-exceeded' | 'hosting-mismatch' | 'acceptance-missing' | 'acceptance-expired' | 'licence' | 'artifact-mismatch';
+
+/**
+ * Licences that do not allow your organization's own use beyond research (74.1 D-06): a passport under one serves research only, except on a vendor's own
+ * service, where the vendor's commercial terms apply. Sorted; a fixed list, no policy key.
+ */
+export const NON_COMMERCIAL_LICENCES = Object.freeze(['CC-BY-NC-4.0', 'CC-BY-NC-ND-4.0', 'CC-BY-NC-SA-4.0', 'FLUX-Non-Commercial', 'LicenseRef-Non-Commercial'] as const);
+
+/** The classes where a vendor runs the model under its own commercial service terms (74.1 D-06). */
+const VENDOR_CLASSES: readonly EndpointClass[] = Object.freeze(['vendor-region', 'vendor-tee']);
 
 export interface PassportCoverInput {
   /** resolvePassport's answer for the model. */
@@ -692,12 +701,17 @@ export interface PassportCoverInput {
   readonly endpointClass: EndpointClass;
   /** A valid `t1-risk` authorization covers this model, project and label (authorizationCovers, 41-01). */
   readonly t1RiskCovers: boolean;
+  /** A `t1-risk` authorization for this model and scope exists but has ended (74.1 D-11, `acceptance-expired`). */
+  readonly t1RiskExpired?: boolean;
+  /** The SHA-256 of the weights the place reports, when it reports one (attested or measured): compared with the passport's artifact. */
+  readonly observedArtifact?: string;
   readonly now: number;
 }
 
 /**
  * Whether the passport covers the request, in the order of provenance 12.2: status (no passport and an expired one allow only T0), then the tier (T1 above
- * a T0 passport needs a t1-risk authorization in scope, never more than T1), then the hosting class. Pure; it refuses nothing itself.
+ * a T0 passport needs a t1-risk authorization in scope, never more than T1; an ended one is `acceptance-expired`), then the licence (74.1 D-06), then the
+ * hosting class, then the artifact (an observed hash that differs from the passport's). Pure; it refuses nothing itself.
  */
 export function passportCovers(input: PassportCoverInput): { readonly covers: true } | { readonly covers: false; readonly why: PassportGap } {
   const use = input.use;
@@ -709,8 +723,11 @@ export function passportCovers(input: PassportCoverInput): { readonly covers: tr
   const tier = effectiveMaxTier(passport, input.now);
   if (tierRank(use) > tierRank(tier)) {
     if (!(use === 'T1' && tier === 'T0' && !expired)) return { covers: false, why: 'tier-exceeded' };
-    if (!input.t1RiskCovers) return { covers: false, why: 'acceptance-missing' };
+    if (!input.t1RiskCovers) return { covers: false, why: input.t1RiskExpired === true ? 'acceptance-expired' : 'acceptance-missing' };
   }
+  const nonCommercial = (NON_COMMERCIAL_LICENCES as readonly string[]).includes(passport.licence.id);
+  if (nonCommercial && use !== 'T0' && !VENDOR_CLASSES.includes(input.endpointClass)) return { covers: false, why: 'licence' };
   if (!passport.hosting.includes(input.endpointClass)) return { covers: false, why: 'hosting-mismatch' };
+  if (input.observedArtifact !== undefined && passport.artifact !== undefined && input.observedArtifact !== passport.artifact.sha256) return { covers: false, why: 'artifact-mismatch' };
   return { covers: true };
 }

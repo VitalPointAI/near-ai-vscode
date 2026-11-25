@@ -303,9 +303,16 @@ export function routePolicyFor(
     organization: organization !== undefined,
     requireAccreditedDevice: effective.agents.requireAccreditedDevice === true,
     deviceId: deviceFingerprint,
+    ...securityContactOf(effective),
     now,
     policyVersion
   });
+}
+
+/** The first security contact of the effective policy, which every passport refusal names (74.1 D-11). */
+function securityContactOf(effective: PolicyDocument): { readonly contact?: { readonly name: string; readonly how: string } } {
+  const contact = effective.onboarding?.contacts.find((entry) => entry.topic === 'security');
+  return contact === undefined ? {} : { contact: Object.freeze({ name: contact.name, how: contact.how }) };
 }
 
 // ---- The record of a model request (GATE-07, D-20, D-52) ----

@@ -15,7 +15,7 @@ import type { EndpointClass, EndpointRegion, PolicyEndpoint } from './endpoints'
 import { LABEL_TOKEN_PATTERN, labelKey } from './labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from './labels';
 import type { ModelsSection, UseTier } from './models';
-import { PASSPORT_GAP_TEXT, SHIPPED_REPORT_MODELS, authorizationRecord, passportStep } from './passportStep';
+import { PASSPORT_GAP_TEXT, SHIPPED_REPORT_MODELS, authorizationRecord, passportStep, whoToAsk } from './passportStep';
 import type { PassportGapId, PassportStepResult } from './passportStep';
 import { residencyAllows } from './residency';
 import type { ResidencySection } from './sections';
@@ -410,6 +410,8 @@ export interface RouteFacts {
    * `tierByLevel` and `tierByProject`, which only the decision has and which can only raise it.
    */
   readonly useInput?: UseInput;
+  /** The SHA-256 of the weights the place reports for this model, when it reports one (an attested or measured hash; 74.1 D-11 `artifact-mismatch`). */
+  readonly observedArtifact?: string;
   /** Team Mode's `allowedModels` (D-37): when given, a request for a model whose id is not listed is refused, with or without a policy. */
   readonly allowedModels?: readonly string[];
 }
@@ -531,8 +533,10 @@ export interface RoutePolicy {
   readonly requireAccreditedDevice: boolean;
   /** This device's id, the subject an accredited-device authorization names. */
   readonly deviceId?: string;
-  /** The project of the request. Absent in this phase, so an authorization scoped to projects covers nothing (D-54). */
+  /** The project of the request (74.1 D-13); absent outside a folder, where an authorization scoped to projects covers nothing (D-54). */
   readonly project?: string;
+  /** Your organization's security contact, named in every passport refusal (74.1 D-11); absent: the generic words. */
+  readonly contact?: { readonly name: string; readonly how: string };
   /** Epoch milliseconds, for authorizations and passports. */
   readonly now: number;
 }
@@ -826,8 +830,11 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
     enforce = models.mode === 'enforce';
     checked = facts.useInput === undefined ? facts.use ?? 'T1' : raiseUseTier(facts.use ?? 'T1', useTierFor(facts.useInput, models));
     passport = passportStep(models, {
-      modelId: facts.model?.id ?? '', use: checked, endpointClass: endpoint?.class ?? 'closed-api', labelKeys: keysOf(labels),
-      ...(policy.project === undefined ? {} : { project: policy.project }), authorizations: policy.authorizations, now: policy.now
+      modelId: facts.model?.id ?? '', use: checked, labelKeys: keysOf(labels), authorizations: policy.authorizations, now: policy.now,
+      whoToAsk: whoToAsk(policy.contact, policy.organization),
+      ...(endpoint === undefined ? {} : { place: { class: endpoint.class, region: endpoint.region, ...(endpoint.provider === undefined ? {} : { provider: endpoint.provider }) } }),
+      ...(policy.project === undefined ? {} : { project: policy.project }),
+      ...(facts.observedArtifact === undefined ? {} : { observedArtifact: facts.observedArtifact })
     });
   } catch {
     passport = { covers: false, records: [] };
@@ -835,7 +842,7 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
   const passportFacts = passportFactsOf(passport, checked);
   if (!passport.covers) {
     if (enforce) {
-      const reason = passport.gap === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap];
+      const reason = passport.gap === undefined || passport.details === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap](passport.details);
       return { allowed: false, tier: decision.tier, rule: 'route.passport', reason, ...(endpoint === undefined ? {} : { endpoint }), ...passportFacts };
     }
     wouldRefuse.add('route.passport');

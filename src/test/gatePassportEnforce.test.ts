@@ -7,7 +7,8 @@ import type { Mark } from '../domain/gate/dominance';
 import { parseModelsSection, passportHash, resolvePassport } from '../domain/gate/models';
 import type { ModelsSection } from '../domain/gate/models';
 import { SCALE_PRESETS } from '../domain/gate/labels';
-import { PASSPORT_GAPS, PASSPORT_GAP_TEXT } from '../domain/gate/passportStep';
+import { PASSPORT_GAPS } from '../domain/gate/passportStep';
+import type { PassportGapId } from '../domain/gate/passportStep';
 import { DEFAULT_ROUTING, ROUTE_REFUSALS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD, decideRoute } from '../domain/gate/routing';
 import type { RoutePolicy, RouteFacts } from '../domain/gate/routing';
 import type { UseInput } from '../domain/gate/useTier';
@@ -77,6 +78,14 @@ function routeWith(models: ModelsSection | undefined, useOf: (() => UseInput) | 
   };
 }
 
+/** Each gap's own words (74.1-04 gives every gap a sentence naming the model and the uses); every refusal starts "Nothing was sent.". */
+const GAP_WORDS: Partial<Record<PassportGapId, RegExp>> = {
+  'tier-exceeded': /is approved for research only \(in the research workspace\), and this request is agent work\./,
+  'acceptance-missing': /is approved for research only\. Chat you review needs an exception/,
+  unknown: /has no approval from your organization\./
+};
+const saysGap = (message: string, gap: PassportGapId): boolean => message.startsWith('Nothing was sent. ') && (GAP_WORDS[gap]?.test(message) ?? false);
+
 const ask = (client: NearAiClient, model: string) => client.completeOnce(model, [{ role: 'user', content: 'hello' }], { maxTokens: 32 });
 
 test('tracer: under enforce, agent work for a PRC-origin model is refused before anything is sent, with route.passport and the gap\'s sentence', async () => {
@@ -84,8 +93,7 @@ test('tracer: under enforce, agent work for a PRC-origin model is refused before
   const records: DecisionRecord[] = [];
   await assert.rejects(
     () => withSessionRoute(routeWith(modelsSection('enforce'), () => ({ tools: true }), records), () => ask(near.client, PRC_MODEL)),
-    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.passport' && error.message === PASSPORT_GAP_TEXT['tier-exceeded']
-      && error.message.startsWith('Nothing was sent.')
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.passport' && saysGap(error.message, 'tier-exceeded')
   );
   assert.deepEqual(near.content, [], 'the fake fetch was never given the content request');
   assert.equal(records.length, 1);
@@ -113,7 +121,7 @@ test('D-13: chat you review (no tools) for a PRC-origin model needs a risk accep
   const near = await nearClient();
   await assert.rejects(
     () => withSessionRoute(routeWith(modelsSection('enforce'), () => ({})), () => ask(near.client, PRC_MODEL)),
-    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.passport' && error.message === PASSPORT_GAP_TEXT['acceptance-missing']
+    (error: unknown) => error instanceof RouteRefusedError && error.rule === 'route.passport' && saysGap(error.message, 'acceptance-missing')
   );
   assert.equal(near.content.length, 0);
 });
@@ -142,13 +150,13 @@ test('D-13: a session\'s use only rises: after agent work, a later chat request 
   use = {};
   await assert.rejects(
     () => withSessionRoute(route, () => ask(near.client, PRC_MODEL)),
-    (error: unknown) => error instanceof RouteRefusedError && error.message === PASSPORT_GAP_TEXT['tier-exceeded'],
+    (error: unknown) => error instanceof RouteRefusedError && saysGap(error.message, 'tier-exceeded'),
     'agent work (tier-exceeded), not chat you review (acceptance-missing)'
   );
   // A new route starts again from its own use.
   await assert.rejects(
     () => withSessionRoute(routeWith(modelsSection('enforce'), () => use), () => ask(near.client, PRC_MODEL)),
-    (error: unknown) => error instanceof RouteRefusedError && error.message === PASSPORT_GAP_TEXT['acceptance-missing']
+    (error: unknown) => error instanceof RouteRefusedError && saysGap(error.message, 'acceptance-missing')
   );
 });
 
@@ -163,11 +171,7 @@ test('D-11: route.passport is a route rule decideRoute reaches, no longer named 
   assert.equal((ROUTE_RULES_NAMED_AHEAD as readonly string[]).includes('route.passport'), false);
   assert.match(ROUTE_REFUSALS['route.passport'], /^Nothing was sent\. /);
   assert.deepEqual([...PASSPORT_GAPS], ['unknown', 'expired', 'tier-exceeded', 'acceptance-missing', 'acceptance-expired', 'revoked', 'hosting-mismatch', 'artifact-mismatch', 'licence', 'not-evaluated']);
-  for (const gap of PASSPORT_GAPS) {
-    assert.match(PASSPORT_GAP_TEXT[gap], /^Nothing was sent\. /, gap);
-    assert.match(PASSPORT_GAP_TEXT[gap], /Who to ask: your organization's security contact\.$/, gap);
-    assert.doesNotMatch(PASSPORT_GAP_TEXT[gap], /\bT[0-3]\b|—/, gap);
-  }
+  // Each gap's sentence is checked in gatePassportRefusals.test.ts (74.1-04).
   const facts: RouteFacts = { clientRoute: 'near', host: NEAR, nearEndpoint: true, model: { id: PRC_MODEL, privacyBoundary: 'tee' }, attestationFailed: false, now: Date.now(), use: 'T2' };
   const decision = decideRoute(PUBLIC, DEFAULT_ROUTING, facts, undefined, undefined, routePolicy(modelsSection('enforce'))());
   assert.deepEqual({ allowed: decision.allowed, rule: decision.rule, passportGap: decision.passportGap }, { allowed: false, rule: 'route.passport', passportGap: 'tier-exceeded' });
@@ -222,7 +226,7 @@ test('D-23: the allowed gpt-oss request names its passport and no gap; an unlist
     { useTier: 'T2', passport: 'openai/gpt-oss', passportHash: resolved === undefined ? undefined : passportHash(resolved.passport) });
   assert.equal(Object.prototype.hasOwnProperty.call(allowed, 'passportGap'), false);
   await assert.rejects(() => withSessionRoute(routeWith(modelsSection('enforce'), () => ({}), records), () => ask(near.client, UNLISTED_MODEL)),
-    (error: unknown) => error instanceof RouteRefusedError && error.message === PASSPORT_GAP_TEXT.unknown);
+    (error: unknown) => error instanceof RouteRefusedError && saysGap(error.message, 'unknown'));
   const unknown = nearAiOf(records[1]);
   assert.equal(unknown['passportGap'], 'unknown');
   assert.equal(Object.prototype.hasOwnProperty.call(unknown, 'passport'), false);

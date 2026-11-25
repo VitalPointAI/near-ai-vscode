@@ -13,7 +13,7 @@ import type { Label } from '../domain/gate/labels';
 import {
   DEFAULT_ROUTING, ENDPOINT_SCHEME_TEXT, PRIVATE_FLOOR_TEXT, ROUTE_REFUSALS, ROUTE_RULES, ROUTE_RULES_NAMED_AHEAD, decideRoute as decideRouteOnce, effectiveClearances, endpointOf, parseRouting
 } from '../domain/gate/routing';
-import { PASSPORT_GAP_TEXT } from '../domain/gate/passportStep';
+import { PASSPORT_GAP_TEXT, whoToAsk } from '../domain/gate/passportStep';
 import type { RouteDecision, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
 import type { AuthorizationBody } from '../domain/gate/authorizations';
 import type { VerifiedAuthorization } from '../domain/gate/routing';
@@ -361,7 +361,7 @@ test('D-42, 74.1 D-11: a T0 model on NEAR AI private hardware at use T1 is repor
   assert.equal(reported.allowedBy?.some((record) => record.kind === 'model-approval'), false);
   const enforced = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...DEEPSEEK, use: 'T1' }, undefined, undefined, policyWith({ models: ENFORCE }));
   assert.deepEqual({ allowed: enforced.allowed, rule: enforced.rule, reason: enforced.reason, passportGap: enforced.passportGap },
-    { allowed: false, rule: 'route.passport', reason: PASSPORT_GAP_TEXT['acceptance-missing'], passportGap: 'acceptance-missing' });
+    { allowed: false, rule: 'route.passport', reason: PASSPORT_GAP_TEXT['acceptance-missing']({ model: 'deepseek-ai/DeepSeek-V3.1', use: 'T1', whoToAsk: whoToAsk(undefined, false) }), passportGap: 'acceptance-missing' });
 });
 
 test('D-42: a t1-risk authorization covering the model clears the report and is recorded with the model approval', () => {
