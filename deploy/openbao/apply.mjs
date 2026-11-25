@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // OpenBao as code (D-37 to D-41): mounts, the jwt auth bound to the site's Keycloak, the session and step-up roles, the policies, the PKI
-// intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
+// intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13), the status-list key and the credential officers'
+// step-up role (Phase 71, 71-12) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
 // through the API ("use declarative, config-based audit device management", spike S5), so it is an audit stanza in the server configuration
 // (deploy/values/openbao.yaml). Run at install and again on every update; a second run
 // changes nothing (each write is compared with what OpenBao already holds and skipped when equal).
@@ -19,7 +20,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
-export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager']);
+export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'credential-issuers']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
@@ -56,7 +57,37 @@ export function crlExpiry(site) {
   return String(value);
 }
 
-const policyText = (name) => readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8');
+/**
+ * The credential issuers (Phase 71, 71-12; D-14, D-15): the jwt role whose token signs status lists with the site's status-list key, bound to
+ * the step-up acr and to the officers the site file names (credentialIssuers, their Keycloak subjects, set at the key ceremony). Who is an
+ * officer comes only from the site file, never from a Keycloak group or a token claim.
+ */
+export const ISSUER_ROLE = 'sterling-issuer-stepup';
+const SITE_NAME = /^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$/;
+const SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._@:-]{0,254}$/;
+/** The Transit key that signs the site's status lists. */
+export function statusListKey(site) {
+  if (typeof site.siteName !== 'string' || !SITE_NAME.test(site.siteName)) {
+    throw new Error(`the site setting siteName (${JSON.stringify(site.siteName)}) must be lower-case letters, digits and "-", as it names the status-list key.`);
+  }
+  return `status-list-${site.siteName}`;
+}
+/** The site's officer subjects (optional; an empty list means nobody can sign status lists yet). */
+export function credentialIssuers(site) {
+  const subjects = site.credentialIssuers ?? [];
+  if (!Array.isArray(subjects) || !subjects.every((sub) => typeof sub === 'string' && SUBJECT.test(sub)) || new Set(subjects).size !== subjects.length) {
+    throw new Error('the site setting credentialIssuers must be a list of distinct Keycloak subjects (the officers named at the key ceremony).');
+  }
+  return [...subjects];
+}
+/** Sentences the dry run prints besides the operations. */
+export function planNotes(site) {
+  return credentialIssuers(site).length === 0
+    ? [`no jwt role ${ISSUER_ROLE}: the site file names no credentialIssuers, so nobody can sign status lists yet.`] : [];
+}
+
+/** A policy file's text, with ${site.siteName} filled in. */
+const policyText = (name, site) => readFileSync(path.join(HERE, 'policies', `${name}.hcl`), 'utf8').replaceAll('${site.siteName}', site.siteName);
 
 /**
  * The operations for a site, in order: { what, read?, write, body, compare? }. `read` is the path whose current value decides whether the
@@ -68,22 +99,29 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
   if (!stepUpAcr || !Number.isInteger(window) || window <= 0) throw new Error('the site file needs stepUpAcr and a positive whole stepUpMaxAgeSeconds.');
   const mount = (where, type, options) => ({ what: `mount ${where}/ (${type})`, read: 'sys/mounts', write: `sys/mounts/${where}`, body: { type, ...(options ? { options } : {}) },
     compare: (mounts) => mounts?.[`${where}/`]?.type === type });
+  const keyName = statusListKey(site);
+  const issuers = credentialIssuers(site);
   const role = (name, extra) => ({ what: `jwt role ${name}`, read: `auth/jwt/role/${name}`, write: `auth/jwt/role/${name}`, body: {
     role_type: 'jwt', bound_audiences: [AUDIENCE], user_claim: 'sub', token_no_default_policy: true, ...extra } });
   return [
     mount('kv', 'kv', { version: '2' }),
     mount('transit', 'transit'),
+    // The status-list key (D-14): signs every status list of the site, only through the issuer role below.
+    { what: `transit key ${keyName}`, read: `transit/keys/${keyName}`, write: `transit/keys/${keyName}`, body: { type: 'ed25519', exportable: false, allow_plaintext_backup: false } },
     { ...mount('pki_int', 'pki'), body: { type: 'pki', config: { max_lease_ttl: '43800h' } } },
     { what: 'auth jwt/', read: 'sys/auth', write: 'sys/auth/jwt', body: { type: 'jwt' }, compare: (auths) => auths?.['jwt/']?.type === 'jwt' },
     { what: 'jwt config (the site Keycloak)', read: 'auth/jwt/config', write: 'auth/jwt/config', body: jwtPubkey
       ? { jwt_validation_pubkeys: [jwtPubkey], bound_issuer: '' }
       : { oidc_discovery_url: `https://keycloak.${site.domain}/realms/${REALM}`, oidc_discovery_ca_pem: caPem ?? '' } },
-    ...POLICIES.map((name) => ({ what: `policy ${name}`, read: `sys/policies/acl/${name}`, write: `sys/policies/acl/${name}`, body: { policy: policyText(name) } })),
+    ...POLICIES.map((name) => ({ what: `policy ${name}`, read: `sys/policies/acl/${name}`, write: `sys/policies/acl/${name}`, body: { policy: policyText(name, site) } })),
     role('sterling-workbench', { ...BASE_TTL, token_policies: ['sterling-workbench'] }),
     // The only way to sign (D-34, D-39): the same audience and sub (so the same entity), the step-up acr required, and a token that cannot
     // outlive the step-up window.
     role('sterling-workbench-stepup', { bound_claims: { acr: stepUpAcr }, bound_claims_type: 'string', token_ttl: window, token_max_ttl: window,
       token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign'] }),
+    // The officers' step-up (D-14, D-15): the same step-up and window, and only the named officers' subjects; it alone holds credential-issuers.
+    ...(issuers.length === 0 ? [] : [role(ISSUER_ROLE, { bound_claims: { acr: stepUpAcr, sub: issuers }, bound_claims_type: 'string', token_ttl: window,
+      token_max_ttl: window, token_explicit_max_ttl: window, token_period: 0, token_policies: ['sterling-workbench', 'sterling-workbench-sign', 'credential-issuers'] })]),
     // Certificates of at most 90 days (max_ttl in seconds); cert-manager renews them well before. client_flag is on because OpenSearch's
     // nodes present the same certificate to each other on the transport layer (plugins.security.nodes_dn, 47-10). key_type any: the
     // Certificates cert-manager makes from Ingress annotations (Theia Cloud, Harbor) and the Theia Cloud webhook's use RSA 2048 keys, which
@@ -172,6 +210,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const caPem = option('--ca-file') ? readFileSync(option('--ca-file'), 'utf8') : undefined;
     const jwtPubkey = option('--jwt-pubkey') ? readFileSync(option('--jwt-pubkey'), 'utf8') : undefined;
     const operations = planApply(site, { jwtPubkey, caPem });
+    for (const note of planNotes(site)) console.error(note);
     if (argv.includes('--dry-run')) {
       console.log(JSON.stringify(operations.map(({ what, write, body }) => ({ what, write, body })), null, 2));
     } else {
