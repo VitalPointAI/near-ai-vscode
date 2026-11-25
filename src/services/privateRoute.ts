@@ -11,14 +11,19 @@ import type { ModelInfo } from '../domain/provider/messages';
 import type { UseTier } from '../domain/gate/models';
 import { useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
-import { currentSessionRoute, raiseSessionUse } from '../gate/sessionMark';
+import { currentSessionRoute, defaultSessionRoute, passportTriggeredRecordFor, raiseSessionUse } from '../gate/sessionMark';
+import { resolvePassport } from '../domain/gate/models';
+import { SHIPPED_REPORT_MODELS } from '../domain/gate/passportStep';
+import { passportState } from '../domain/gate/passportState';
+import type { ObservedPlace } from '../domain/gate/passportState';
+import { passportTriggerLog } from '../gate/passportTriggers';
 
 /** What the client knows about one content request when its route is decided. */
 export interface RouteFactsInput {
   readonly clientRoute: RouteFacts['clientRoute'];
   readonly host: string;
   /** The model's entry in the client's own cached catalog; undefined when the model is unknown or the catalog has not loaded. */
-  readonly info: Pick<ModelInfo, 'id' | 'privacyBoundary'> | undefined;
+  readonly info: Pick<ModelInfo, 'id' | 'privacyBoundary' | 'forwardedTo'> | undefined;
   /** The answer-check state of the route: failed, unproven or ok. */
   readonly attestation: 'ok' | 'failed' | 'unproven';
   readonly fact: ConnectionBindingFact;
@@ -50,6 +55,41 @@ function requestUse(): { readonly use: UseTier; readonly useInput?: UseInput } {
   return { use: raiseSessionUse(route, useTierFor(useInput)), useInput };
 }
 
+/**
+ * What was observed about the passport of the request's model (74.1 D-15): the place first seen for its hash and the place now (the catalogue's
+ * `privacyBoundary` and `forwardedTo`), and the triggers fired for it. A trigger the place fires now is kept once in the trigger log and recorded once as
+ * `route.passport-triggered` through the route's sink. Only with a route policy (step 7 runs only then) and the log set at activation; anything that cannot
+ * be read leaves nothing observed, so the passport decides alone (never more than it would).
+ */
+function observedFor(input: RouteFactsInput): Pick<RouteFacts, 'observed'> {
+  const log = passportTriggerLog();
+  const info = input.info;
+  if (log === undefined || info === undefined) return {};
+  try {
+    const route = currentSessionRoute() ?? defaultSessionRoute();
+    const policy = route.routePolicy?.(input.now);
+    if (policy === undefined) return {};
+    const resolved = resolvePassport(policy.models ?? SHIPPED_REPORT_MODELS, info.id, input.now);
+    if (resolved === undefined) return {};
+    // A catalogue that has not said where the model runs (its privacy list not loaded) says nothing about a change of place: nothing is kept or compared.
+    const current: ObservedPlace | undefined = info.privacyBoundary === undefined ? undefined : { privacyBoundary: info.privacyBoundary, ...(info.forwardedTo === undefined ? {} : { forwardedTo: info.forwardedTo }) };
+    const place = current === undefined ? {} : { firstSeen: log.seen(resolved.hash, current), current };
+    const state = passportState(resolved, { ...place, fired: log.fired(resolved.hash) }, input.now);
+    if (state.state === 'expired' && state.reason !== 'date' && log.fire(resolved.hash, state.reason)) {
+      const provider = input.clientRoute === 'local' ? 'local' : input.clientRoute === 'near' ? 'near-ai' : 'unknown';
+      try {
+        route.sink?.record(passportTriggeredRecordFor(route, {
+          model: info.id, provider, ...(info.privacyBoundary === undefined ? {} : { privacyBoundary: info.privacyBoundary }),
+          passport: { id: resolved.passport.id, hash: resolved.hash }, trigger: state.reason
+        }));
+      } catch { /* D-21: a record that cannot be kept never changes the request */ }
+    }
+    return { observed: Object.freeze({ passportHash: resolved.hash, ...place, fired: log.fired(resolved.hash) }) };
+  } catch {
+    return {};
+  }
+}
+
 /** The RouteFacts of one request, from what the client read (CLAS-06, D-36), and the use of the session it runs in (74.1 D-13). */
 export function routeFactsFor(input: RouteFactsInput): RouteFacts {
   const { clientRoute, host, info, attestation, fact, now } = input;
@@ -66,6 +106,7 @@ export function routeFactsFor(input: RouteFactsInput): RouteFacts {
     localModelAvailable: input.localModelAvailable,
     sessionless: input.sessionless,
     ...(input.allowedModels === undefined ? {} : { allowedModels: input.allowedModels }),
+    ...observedFor(input),
     ...(input.catalog === undefined ? {} : { candidates: Object.freeze([...input.catalog.values()].map((entry) => Object.freeze({ id: entry.id, ...(entry.privacyBoundary === undefined ? {} : { privacyBoundary: entry.privacyBoundary }) }))) })
   };
   return facts;

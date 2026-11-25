@@ -5,10 +5,12 @@
 import { authorizationCovers } from './authorizations';
 import type { EndpointClass, EndpointRegion } from './endpoints';
 import { USE_TIERS, passportCovers, resolvePassport } from './models';
-import type { ModelsSection, ResolvedPassport, UseTier } from './models';
+import type { ModelsSection, ReevaluationTrigger, ResolvedPassport, UseTier } from './models';
 import type { AllowingRecord, VerifiedAuthorization } from './routing';
 import { dateShown, placeShown } from './placeWords';
 import { USE_TIER_WORDS } from './useTier';
+import { passportEvaluated, passportState } from './passportState';
+import type { ObservedFacts } from './passportState';
 
 /** Why a passport does not cover a request (74.1 D-11): each is the reason recorded beside the one rule `route.passport`. */
 export const PASSPORT_GAPS = Object.freeze([
@@ -35,6 +37,8 @@ export interface PassportGapDetails {
   readonly approvedUse?: UseTier;
   /** When the approval ends (or ended). */
   readonly expiresAt?: string;
+  /** The re-evaluation trigger that ended the approval before its date (74.1 D-15). */
+  readonly trigger?: ReevaluationTrigger;
   readonly licence?: string;
   /** The ended risk acceptance: who signed it and when it ended. */
   readonly acceptance?: { readonly name: string; readonly expiresAt: string };
@@ -61,10 +65,21 @@ function forward(details: PassportGapDetails): string {
 }
 const end = (details: PassportGapDetails): string => `${forward(details)} ${details.whoToAsk}`;
 
+/** What each re-evaluation trigger found, in the words a refusal and the trigger's record use (74.1 D-15). */
+export const TRIGGER_WORDS: Readonly<Record<ReevaluationTrigger, string>> = Object.freeze({
+  'artifact-change': 'the model files at its place are not the ones approved',
+  quantization: 'its model files were reduced to a different precision',
+  'fine-tune': 'the model was trained further',
+  'licence-change': 'its licence changed',
+  'us-law-change': 'a United States law that applies to it changed',
+  'canada-law-change': 'a Canadian law that applies to it changed',
+  'hosting-change': 'the place it runs changed'
+});
+
 /** One sentence per gap, in the refusal form: nothing was sent, what, why, what you can do, and who to ask (EXPERIENCE.md section 3). */
 export const PASSPORT_GAP_TEXT: Readonly<Record<PassportGapId, (details: PassportGapDetails) => string>> = Object.freeze({
   unknown: (d: PassportGapDetails) => `Nothing was sent. ${d.model} has no approval from your organization. A model with no approval may be used only for research, in the research workspace. Choose a model approved for ${words(d.use)}, or ask for this one to be reviewed.${end(d)}`,
-  expired: (d: PassportGapDetails) => `Nothing was sent. The approval of ${d.model} ended on ${dateShown(d.expiresAt ?? '')}. An approval that has ended allows research only, in the research workspace. Choose a model with a current approval, or ask for this one to be approved again.${end(d)}`,
+  expired: (d: PassportGapDetails) => `Nothing was sent. The approval of ${d.model} ended ${d.trigger === undefined ? `on ${dateShown(d.expiresAt ?? '')}` : `because ${TRIGGER_WORDS[d.trigger]}`}. An approval that has ended allows research only, in the research workspace. Choose a model with a current approval, or ask for this one to be approved again.${end(d)}`,
   'tier-exceeded': (d: PassportGapDetails) => `Nothing was sent. ${d.model} is approved for ${words(d.approvedUse)}, and this request is ${words(d.use)}. Choose a model approved for ${words(d.use)}, or ask for this model's approval to be reviewed.${end(d)}`,
   'acceptance-missing': (d: PassportGapDetails) => `Nothing was sent. ${d.model} is approved for research only. Chat you review needs an exception that a named person in your organization signed for this model, project and label, and none covers this request. Choose a model approved for chat you review, or ask for an exception.${end(d)}`,
   'acceptance-expired': (d: PassportGapDetails) => `Nothing was sent. The exception by ${d.acceptance?.name ?? 'a named person'} that let ${d.model} serve chat you review ended on ${dateShown(d.acceptance?.expiresAt ?? '')}, so the model is research only again. Ask for the exception to be renewed, or choose a model approved for chat you review.${end(d)}`,
@@ -74,6 +89,11 @@ export const PASSPORT_GAP_TEXT: Readonly<Record<PassportGapId, (details: Passpor
   licence: (d: PassportGapDetails) => `Nothing was sent. The licence of ${d.model} (${d.licence ?? 'its licence'}) allows research only outside the vendor's own service. Use it through the vendor's service, or choose another model.${end(d)}`,
   'not-evaluated': (d: PassportGapDetails) => `Nothing was sent. Your organization has not evaluated ${d.model} for ${words(d.use)}, and under its rules a model takes any role above research only after that evaluation. Choose an evaluated model, or ask for this one to be evaluated.${end(d)}`
 });
+
+/** The reason of the `route.passport-triggered` record: which approval ended and why. It refuses nothing itself; the passport step does. */
+export function passportTriggeredText(model: string, trigger: ReevaluationTrigger): string {
+  return `The approval of ${model} ended because ${TRIGGER_WORDS[trigger]}. It allows research only until your organization signs a new approval.`;
+}
 
 /** The models section a policy with none runs: report mode with the shipped passports alone (provenance O1, 74.1 D-12). */
 export const SHIPPED_REPORT_MODELS: ModelsSection = Object.freeze({ v: 1, mode: 'report', unknownMaxTier: 'T0' });
@@ -107,6 +127,8 @@ export interface PassportStepInput {
   readonly authorizations: readonly VerifiedAuthorization[];
   /** The weights' hash the place reports, when it reports one. */
   readonly observedArtifact?: string;
+  /** What was observed about the passport with this hash (74.1 D-15): read only when it is the request's own passport. */
+  readonly observed?: ObservedFacts & { readonly passportHash: string };
   readonly whoToAsk: string;
   readonly now: number;
 }
@@ -166,15 +188,29 @@ export function passportStep(models: ModelsSection, input: PassportStepInput): P
   const candidates = input.authorizations.filter((candidate) => !candidate.selfSigned);
   const risks = candidates.filter((candidate) => input.labelKeys.every((key) => authorizationCovers(candidate.body, question(key), input.now)));
   // An acceptance that would cover this request had it not ended: the sentence names its person and its end.
-  const ended = risks.length > 0 ? undefined : candidates.find((candidate) => {
+  const endedRisk = risks.length > 0 ? undefined : candidates.find((candidate) => {
     const endsAt = Date.parse(candidate.body.expiresAt);
     return endsAt <= input.now && input.labelKeys.every((key) => authorizationCovers(candidate.body, question(key), endsAt - 1));
   });
   const endpointClass = input.place?.class ?? 'closed-api';
-  const verdict = passportCovers({
-    resolved, use: input.use, endpointClass, t1RiskCovers: risks.length > 0, t1RiskExpired: ended !== undefined, now: input.now,
+  // 74.1 D-15: the passport's state before its tier. Revoked serves nothing, research included; a fired re-evaluation trigger ends it for every use above
+  // research. An approval past its date is passportCovers' `expired`, as before.
+  const observed = input.observed !== undefined && input.observed.passportHash === resolved?.hash ? input.observed : {};
+  const state = passportState(resolved, observed, input.now);
+  const ended = state.state === 'expired' && state.reason !== 'date' ? state.reason : undefined;
+  const covered = passportCovers({
+    resolved, use: input.use, endpointClass, t1RiskCovers: risks.length > 0, t1RiskExpired: endedRisk !== undefined, now: input.now,
     ...(input.observedArtifact === undefined ? {} : { observedArtifact: input.observedArtifact })
   });
+  // 74.1 D-16 (owner-confirmed): every use above research needs your organization's evaluation of the model, except chat you review that a t1-risk
+  // exception allows for a model approved for research only, whose own assessment reference stands in for it.
+  const exception = resolved !== undefined && input.use === 'T1' && resolved.maxTier === 'T0' && risks.length > 0;
+  const verdict: { readonly covers: boolean; readonly why?: PassportGapId } =
+    state.state === 'revoked' ? { covers: false, why: 'revoked' }
+      : ended !== undefined && input.use !== 'T0' ? { covers: false, why: 'expired' }
+        : !covered.covers ? covered
+          : input.use !== 'T0' && !exception && !passportEvaluated(resolved, input.use, input.now) ? { covers: false, why: 'not-evaluated' }
+            : { covers: true };
   const found = resolved === undefined ? {} : { resolved };
   if (!verdict.covers) {
     const passport = resolved?.passport;
@@ -183,15 +219,17 @@ export function passportStep(models: ModelsSection, input: PassportStepInput): P
       use: input.use,
       ...(resolved === undefined ? {} : { approvedUse: resolved.maxTier }),
       ...(passport === undefined ? {} : { expiresAt: passport.expiresAt, licence: passport.licence.id, approvedPlaces: passport.hosting.map((place) => placeShown({ class: place, region: 'unstated' })) }),
-      ...(ended === undefined ? {} : { acceptance: { name: ended.body.namedPerson.name, expiresAt: ended.body.expiresAt } }),
+      ...(verdict.why === 'expired' && ended !== undefined ? { trigger: ended } : {}),
+      ...(endedRisk === undefined ? {} : { acceptance: { name: endedRisk.body.namedPerson.name, expiresAt: endedRisk.body.expiresAt } }),
       place: placeShown(input.place === undefined ? { class: 'closed-api', region: 'unstated' } : { ...input.place }),
       whoToAsk: input.whoToAsk
     };
-    return { covers: false, gap: verdict.why, ...found, records: [], details };
+    return { covers: false, ...(verdict.why === undefined ? {} : { gap: verdict.why }), ...found, records: [], details };
   }
   if (resolved === undefined) return { covers: true, records: [] };
   const records: AllowingRecord[] = [Object.freeze({ kind: 'model-approval' as const, passport: resolved.passport.id, maxTier: resolved.maxTier, expiresAt: resolved.passport.expiresAt })];
   // A use above the passport's tier went only because a named person accepted the risk: that record allowed it too.
-  if (USE_TIERS.indexOf(input.use) > USE_TIERS.indexOf(resolved.maxTier)) records.push(...risks.map((risk) => authorizationRecord(risk)));
+  // Its assessment reference is recorded with it: it stands in for your organization's evaluation of the model (74.1 D-16).
+  if (USE_TIERS.indexOf(input.use) > USE_TIERS.indexOf(resolved.maxTier)) records.push(...risks.map((risk) => Object.freeze({ ...authorizationRecord(risk), evidence: risk.body.evidence })));
   return { covers: true, resolved, records };
 }

@@ -20,7 +20,8 @@ import { chatInView, isChatInView, onChatInViewChange, queueChatNotice } from '.
 import type { ChatInView } from './chatInView';
 import { holdsReads, labelMapKey, resolveLabel, setLabelEntry, setProjectLabel } from '../domain/gate/labelMap';
 import type { LabelMapPayload } from '../domain/gate/labelMap';
-import { BundleStoreError } from '../gate/bundleStore';
+import { BundleStoreError, gateDir } from '../gate/bundleStore';
+import { PASSPORT_TRIGGER_FILE, createPassportTriggerLog, setPassportTriggerLog } from '../gate/passportTriggers';
 import { writeFileAtomic } from '../team/teamFile';
 import { GateHost } from '../gate/host';
 import { LABEL_MAP_RESIGN_QUESTION, LABEL_MAP_RESTORE_QUESTION, LabelMapError, USE_BRANCH_LABELS_ACTION } from '../gate/labelMapStore';
@@ -291,7 +292,9 @@ export function registerGate(context: GateActivationContext, options: RegisterGa
   const clearScales = setActiveScaleSource(() => host.labelPolicy().scales);
   // Coherence review S4: TEE-only mode puts the private floor on every model request, so the gate's own check decides what counts as private.
   const clearPrivateOnly = setPrivateOnlySetting(() => vscode.workspace.getConfiguration('nearAi').get<string>('privacyMode') === 'tee-only');
-  try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }); } catch { /* replaced at the next activation */ }
+  // 74.1 D-15: a re-evaluation trigger seen on a model's place is kept once per passport hash in global storage, so it still holds after a restart.
+  const clearTriggers = setPassportTriggerLog(createPassportTriggerLog({ file: path.join(gateDir(context.globalStorageUri.fsPath), PASSPORT_TRIGGER_FILE), onProblem: tell }));
+  try { context.subscriptions?.push({ dispose: clearScales }, { dispose: clearPrivateOnly }, { dispose: clearTriggers }); } catch { /* replaced at the next activation */ }
   // Coherence review S1: a policy whose local hosts hold a *. pattern is told once in this window what changed and how to fix the entry.
   // D-20, D-27: the one-time notices first; the migration notice names the same hosts, so the pattern notice waits for the next window after it.
   void host.state().then(async (state) => {

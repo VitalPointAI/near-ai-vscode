@@ -6,6 +6,10 @@ import { createHash, createPrivateKey, createPublicKey, sign as edSign } from 'n
 import { MAX_DAYS_BY_KIND, SUBJECT_FOR_KIND } from '../../domain/gate/authorizations';
 import type { AuthorizationBody, AuthorizationKind, AuthorizationScope, AuthorizationSubject, NamedPerson } from '../../domain/gate/authorizations';
 import { defaultBundlePayload } from '../../domain/gate/bundle';
+import { SCALE_PRESETS } from '../../domain/gate/labels';
+import { parseModelsSection } from '../../domain/gate/models';
+import type { ModelsSection } from '../../domain/gate/models';
+import { SHIPPED_PASSPORTS } from '../../domain/gate/shippedPassports';
 import { MAX_ORGANIZATION_LAYER_BYTES, documentFromBundle } from '../../domain/gate/policyDocument';
 import type { PolicyDocument, PolicyLayerName } from '../../domain/gate/policyDocument';
 import { fingerprintOf } from '../../domain/team/canonical';
@@ -158,6 +162,25 @@ export function fixtureModelsSection(): Record<string, unknown> {
     }],
     order: [FIXTURE_PASSPORT_ID]
   };
+}
+
+/** Your organization's evaluation of a model's exact files (74.1 D-16), fictional: the report's id, its hash and its date. */
+export const FIXTURE_EVALUATION = Object.freeze({ report: 'EVAL-EXAMPLE-2026-0042', sha256: '4'.repeat(64), at: '2026-11-01T00:00:00.000Z' });
+
+/**
+ * A models section in `mode` whose passports are the shipped rows with these ids, each carrying your organization's evaluation (74.1 D-16, C-4): under
+ * enforce a model takes any role above research only after that evaluation, and no shipped row carries one. Your organization's passport replaces the
+ * shipped row by id, so everything else is the shipped row's. `extra` adds other keys of the section (an order, defaults).
+ */
+export function evaluatedModels(mode: 'enforce' | 'report', ids: readonly string[], extra: Record<string, unknown> = {}): ModelsSection {
+  const passports = ids.map((id) => {
+    const shipped = SHIPPED_PASSPORTS.find((passport) => passport.id === id);
+    if (shipped === undefined) throw new Error(`no shipped passport ${id}`);
+    return { ...JSON.parse(JSON.stringify(shipped)) as Record<string, unknown>, evaluation: { ...FIXTURE_EVALUATION } };
+  });
+  const parsed = parseModelsSection({ v: 1, mode, unknownMaxTier: 'T0', passports, ...extra }, SCALE_PRESETS);
+  if (!parsed.ok) throw new Error(`evaluatedModels: ${parsed.reason} ${parsed.path}`);
+  return parsed.value;
 }
 
 /** A people.organization block with every setting written (D-40): corporate by default, military allowed, nothing turned on that a mode lacks. */

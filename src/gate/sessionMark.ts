@@ -25,7 +25,8 @@ import type { PolicyLayersView } from './organizationStore';
 import { clearancesInForce } from './clearances';
 import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
-import type { UseTier } from '../domain/gate/models';
+import type { ReevaluationTrigger, UseTier } from '../domain/gate/models';
+import { passportTriggeredText } from '../domain/gate/passportStep';
 import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
 
@@ -466,6 +467,39 @@ export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, re
     bundleHash,
     ...(mark.length === 0 ? {} : { mark }),
     attestation: request.attestation
+  });
+}
+
+/**
+ * The record that a re-evaluation trigger ended a model's approval (`route.passport-triggered`, 74.1 D-15): written once per passport hash and trigger,
+ * beside the request's own record. It refuses nothing itself; the passport step does. The capability's tier is the one the model's place serves (this
+ * computer, private hardware, or the cloud). Names the passport by id and hash, never a host or a path.
+ */
+export function passportTriggeredRecordFor(
+  route: SessionRoute,
+  request: { readonly model: string; readonly provider: 'near-ai' | 'local' | 'unknown'; readonly privacyBoundary?: string; readonly passport: { readonly id: string; readonly hash: string }; readonly trigger: ReevaluationTrigger }
+): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const model = recordedModelName(request.model);
+  const tier: InferTier = request.privacyBoundary === 'local' ? 'local-only' : request.privacyBoundary === 'tee' ? 'attested-cloud' : 'any-cloud';
+  let bundleHash = '';
+  try { bundleHash = routingOf(route).bundleHash; } catch { /* no policy hash then */ }
+  return buildDecisionRecord({
+    recordId,
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider: request.provider },
+    callId: `route.passport-triggered-${recordId}`,
+    capability: { verb: 'infer', tier, provider: request.provider, model },
+    resource: { name: model, type: 'model' },
+    outcome: 'allowed',
+    rule: 'route.passport-triggered',
+    reason: passportTriggeredText(model, request.trigger),
+    bundleHash,
+    passport: request.passport,
+    passportGap: 'expired'
   });
 }
 
