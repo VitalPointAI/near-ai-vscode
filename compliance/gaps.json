@@ -6200,6 +6200,27 @@
       ],
       "remediation": "The compliance job does not wait for the workbench job (the workbench is not a required check), so the workbench image SBOM cannot reach the sbom collector as subject workbench-image, and the workbench test report is read only when its upload finished before the compliance job started. Decide with the owner whether the compliance job waits for the workbench job, or whether a later job collects the workbench evidence; until then a workbench rule can read test-not-run on a commit whose tests passed.",
       "title": "The compliance job can miss the workbench evidence"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "au-12",
+        "si-02",
+        "si-07",
+        "sc-13"
+      ],
+      "id": "G482",
+      "ownerRole": "owner",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Hosted statements that need the running site (the live Keycloak realm, its version and events, the OpenBao audit device, the audit of Session and Workspace records, nodes and sessions in FIPS mode, signed image admission, registry audit and verified image signatures, SBOMs and provenance) rest on deployment observations. There is no reference site export under compliance/site-evidence/ and the site trust list is empty, so each of those rules reads as a missing result. Add the reference rig's operator key to compliance/attestations/site-signers.json and commit its signed export (48-09); the export must then be renewed at least every 7 days or the rows turn Stale.",
+      "title": "No reference site evidence export or site signer key yet"
     }
   ]
 }
