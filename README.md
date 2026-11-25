@@ -280,12 +280,9 @@ section, and each section card in the Staff Room has **Task in chat**. A team
 file deleted or renamed in your teams shows as missing with **Set up again**. A
 project set up before this was recorded is offered the matching teams already in
 your teams to **Link**, after you confirm. Staff projects work on one machine
-by default. Several people on their own computers sharing one staff project is
-a preview: turn on `nearAi.staff.multiUserPreview` to try the invite, join and
-admit commands, **Make This Staff Project Multi-User** and **Make a
-Single-Machine Copy**. You can convert a project with labelled products when your
-declared clearance covers those products. Operators can deploy the sync hub, and
-live editing across computers comes in a later release. **SovAI: Update Team…** recognises a
+by default. To work on one with other people, see **Work on a staff project with
+other people** under The Sterling workbench; a project with labelled products can
+be shared when your declared clearance covers those products. **SovAI: Update Team…** recognises a
 staff team and brings it up to date for the project's current staff settings,
 keeping members you changed. A J3 team's plan moves into execution only when
 a person approves its transition brief; from then on the J3 keeps the
@@ -1438,6 +1435,85 @@ browser. It carries Sterling Sovereign AI inside it, in the Canadian Defence Edi
 
 The image runs as a non-root user, keeps telemetry off and contacts no outside server unless
 you configure one. It has no sign-in of its own, so run it on `127.0.0.1` only.
+
+### Work on a staff project with other people
+
+When your organization hosts SovAI, several people can work on one staff project at the same
+time, each in their own session. Your organization runs the server that carries the shared work
+between those sessions; its operator sets it up from `relay/README.md`. The server passes on
+sealed changes. It holds the list of the people in each shared project, and it reads a part of a
+project only when the lead gives it that part.
+
+- **Start sharing.** Open the staff project's work-area page (Planning or Exercises & Training).
+  In **Share with people**, choose **Share this work**, then **Connect your organization's
+  server** with the hub file its operator gave you, then **Invite a person** with their name,
+  position and the clearance you declare for them. Your browser saves the invitation file; give
+  it to that person privately.
+- **Join.** The person opens the invitation file in SovAI, which opens the join flow already
+  filled in, and chooses **Send my join request**. You both see six words. Compare them out loud
+  or in person, then choose **The six words match** and **Admit**. Give them the welcome file
+  your browser saves; they open it with **Open a welcome file** and the shared work goes live for
+  them.
+- **Confirm with your passkey.** Changes to who is in the shared work, decisions, and trusting
+  your organization's server again are signed by your own key, which stays in your
+  organization's key store, each after you confirm with your passkey or security key. What you
+  type is signed by a short-lived key of your session.
+- **Edit together.** A product of the shared work that you open in the editor is shared: what
+  you type reaches the others, their changes appear in your editor, and undo and redo take back
+  only your own changes. The product's header stays as the project keeps it. If the product file
+  changes on disk outside the editor, SovAI asks whether to **Take This Change as My Edit** or
+  **Restore** the shared text. A second tab of your session shows the product read-only.
+- **The Staff Room.** It shows the sync state with one action, such as **Sync Now**; each
+  product with its version, the changes since, its label and Who can see this; join requests, to
+  the lead or deputy only; and contested decisions.
+- **Decide.** Approving or rejecting a version asks for your reasons, then for your passkey or
+  security key. If someone else decided that version while you were deciding, nothing is saved
+  and you are asked to look again.
+- **Contested decisions.** If two people decide the same version at the same time, for example
+  one of them while offline, neither decision applies. The Staff Room shows the version as
+  contested, with both names and their reasons, and a new decision from that card settles it.
+- **The sync word.** While a shared project is open, the status bar shows one word, such as
+  "Synced", "Offline" or "Needs attention", with a sentence that says why. Select it to sync now.
+- **Offline.** When your session cannot reach your organization's server you keep working, and
+  the Staff Room says: "You are offline. Your changes are kept here and will sync when your
+  organization's server is back. Decisions you make now may become contested if someone else
+  decides the same thing."
+- **An update is needed.** A shared project can require features that a newer SovAI brings.
+  Until your session has them, the shared work stops and says: "This shared work needs a newer
+  version of Sterling. Ask your administrator to update it." Everything already received is
+  kept, so the work goes on after the update.
+- **Post-quantum keys.** New shared work starts with post-quantum keys. For older shared work
+  the lead or deputy chooses **Switch to post-quantum keys**, then **Move all shared work to the
+  new keys**, on cards in the Staff Room; a computer that holds a part's key can **Give keys** to
+  one that published its keys later.
+- **If the server goes back to an older copy.** Sessions say so and stop trusting it until the
+  lead or deputy compares twelve words with the server's operator and chooses **Trust your
+  organization's server again** in Share with people.
+- **Work alone again.** **Make a single-machine copy** in Share with people copies what this
+  session holds into a project of your own; the shared work is not changed.
+
+Not in SovAI yet: the Staff Room lists only you for now, so SovAI does not show who else is
+working on the shared work, other people's cursors or Show Who Wrote This. A person who joins
+late starts from a checkpoint your organization's server signed only in the parts of the project
+that server holds. In every other part SovAI reads the whole history and says: "Your
+organization's server keeps no summary of this part of the project, so this computer reads all of
+its history. Nothing is left out." A product's text is complete only once the earlier history has
+arrived, and SovAI does not fetch that history after the start yet, so the text a late joiner sees
+can be incomplete.
+
+People and clearances in shared work are what the lead declares. The results of Share with
+people show these three notices:
+
+- Until verified credentials arrive, your clearance comes from your own policy file, which your
+  own device key signs, so it is self-declared. It is not an enforced clearance boundary.
+- Labels and routing are an organizational control that helps prevent mistakes. They check what
+  NEAR AI itself sends to a model and what its own file tools read, and they cannot see
+  everything a shell command or an add-on server does. They do not make this device accredited
+  for classified information. Until verified credentials arrive, your clearance is the one you
+  declared yourself, so it is not an enforced boundary.
+- People and clearances in this project are declared by the staff lead, not verified.
+
+See SECURITY.md, "Multi-user staff projects", for what each part protects and its limits.
 
 ## Get started in two minutes
 
