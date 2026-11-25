@@ -8,9 +8,8 @@
 # needs deletion_allowed set on it first, which is a key configuration change behind the existing key-move Control Group
 # (transit/keys/+/config).
 #
-# The guest's KV data (kv/metadata/users/<entity id>/...) is not here: every policy that reaches a person's KV path must name it through the
-# entity template (deploy/test/openbao.test.mjs), and a removal path names another person's entity. How that data is removed is an open
-# decision (compliance/gaps.json G447).
+# The guest's KV data (kv/metadata/users/<entity id>/...) is not here: a security officer removes it in the workbench after a passkey
+# step-up, through policy guest-secrets-removal, the one tested exception to the per-person template rule (D-84, owner 2026-11-25).
 
 path "identity/entity/name/guest-*" {
   capabilities = ["delete"]

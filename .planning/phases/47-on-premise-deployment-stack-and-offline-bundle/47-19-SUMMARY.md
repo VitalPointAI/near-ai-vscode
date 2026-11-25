@@ -180,10 +180,10 @@ None.
 
 ## Hand-offs
 
+- G447 is closed by 47-34 (owner decision 2026-11-25, D-84): a security officer removes ended guests' secrets in the workbench after a passkey step-up, and is reminded by email and in the workbench until they do.
 - 47-20 builds the in-cluster job on `expireGuests`, `endGuest` and the role `guest-expiry`; 47-31 moves the shared functions (`fileRevocationRequest` among them) into `deploy/keycloak/lib/offboard.mjs`.
 
 ## Open conditions
 
-- G447 (owner): how a guest's KV secrets are removed after the retention period.
 - G449: guests stay off at every site until a release includes 71-12 (the security contact's issuing and the revocation card that reads the requests); 71-12 is not on main.
 - G423: the registration link through a real mail server and a real WebAuthn registration are not shown here (synthetic keys); they belong to the lab run with guests on (47-18).

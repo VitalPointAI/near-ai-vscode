@@ -6150,19 +6150,6 @@
     },
     {
       "appliesAt": "protected-a",
-      "blocksProduction": false,
-      "closesInPhase": "47",
-      "controls": [
-        "ac-02",
-        "si-12"
-      ],
-      "id": "G447",
-      "ownerRole": "owner",
-      "remediation": "The guest-removal policy (deploy/openbao/policies/guest-removal.hcl, 47-19) deletes a guest's OpenBao entity and Transit keys behind two key-custodians approvals, but not the guest's own secrets under kv/users/<entity>/. Every policy that reaches a person's KV path must name it through the entity template (deploy/test/openbao.test.mjs), and a removal path has to name another person's entity, so the planned kv/metadata/users/* delete was left out rather than weaken that rule. Until the owner decides, the removal step after the retention period cannot remove a guest's KV secrets. Options: a scoped exception to the rule for deletes behind a two-custodian Control Group, or removing that data with a quorum-generated root token at the removal ceremony.",
-      "title": "A guest's KV secrets cannot yet be removed after the retention period"
-    },
-    {
-      "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
