@@ -1,5 +1,5 @@
 {
   "component": "model-endpoints",
-  "applicableWithoutStatement": 101,
+  "applicableWithoutStatement": 93,
   "notApplicableAwaitingSignOff": 250
 }
