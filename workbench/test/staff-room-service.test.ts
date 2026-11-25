@@ -17,7 +17,8 @@ import { appendProductEntry, proposeVersion } from '../../src/staff/replica/labe
 import { updateMember } from '../../src/staff/replica/membership.ts';
 import { VersionActs } from '../../src/staff/replica/versionActs.ts';
 import { bringIn, leadWith, ok, orgClearance, streamEntries, syncTo, type Seat } from '../../src/test/helpers/labelCellWorld.ts';
-import { engine, FakeReplicator } from './helpers/staff-binding-world.ts';
+import { engine, FakeReplicator, relayPresence, settle, until, withProduct } from './helpers/staff-binding-world.ts';
+import { FakeTimers } from '../../src/test/helpers/liveWorld.ts';
 
 const PRODUCT = 'logistics-estimate';
 const LABEL = 'org/Internal';
@@ -195,4 +196,21 @@ test('a version the shared record does not hold opens no decision', async () => 
   } finally {
     await live.stop();
   }
+});
+
+test('the people list shows each person presence heard, with the name and position this roster gives, and Last seen once they leave (33-29)', async () => {
+  const timers = new FakeTimers();
+  await withProduct(async ({ avery, blake }) => {
+    const service = new StaffRoomService({ live: () => avery.live, engine });
+    const project = avery.device.project.projectId;
+    const peopleOf = async () => (await service.rooms()).find((room) => room.project === project)?.view.people ?? [];
+    assert.deepEqual((await peopleOf()).map((person) => person.name), ['Avery Lead'], 'only this person before anyone is heard');
+    await settle();
+    relayPresence(blake, avery);
+    const people = await until(peopleOf, (list) => list.some((person) => person.name === 'Blake Rivers' && person.live), 'Blake in the people list');
+    assert.equal(people.find((person) => person.name === 'Blake Rivers')?.position, 'j4-planner');
+    await blake.live.stop();
+    relayPresence(blake, avery);
+    await until(peopleOf, (list) => list.some((person) => person.name === 'Blake Rivers' && !person.live), 'Blake shown as last seen');
+  }, { timers });
 });
