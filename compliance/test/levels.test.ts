@@ -91,9 +91,16 @@ test('each hosted level and the hosted overlay list exactly the hosted component
   assert.deepEqual(overlay.attachedTo, ['hosted-protected-a', 'hosted-protected-b']);
 });
 
-test('every hosted platform row of hosted Protected B ac-02 reads No statement yet', async () => {
+test('every hosted platform row of hosted Protected B ac-02 reads No statement yet, unless it has a statement, which this bundle never makes Met', async () => {
   const row = (await dashboard()).rows.find((item: any) => item.level === 'hosted-protected-b' && item.control === 'ac-02');
-  for (const id of PLATFORM) assert.equal(row.components.find((item: any) => item.component === id)?.reason, 'no-statement', id);
+  const stated = new Set(loadComponents(path.join(ROOT, 'compliance', 'components')).components
+    .filter((component) => component.implemented.some((item) => item.control === 'ac-02' && item.statements.length > 0)).map((component) => component.id));
+  assert.ok(PLATFORM.some((id) => !stated.has(id)), 'at least one platform component still has no ac-02 statement');
+  for (const id of PLATFORM) {
+    const component = row.components.find((item: any) => item.component === id);
+    if (stated.has(id)) assert.deepEqual([component?.state === 'met', component?.reason === 'no-statement'], [false, false], id);
+    else assert.equal(component?.reason, 'no-statement', id);
+  }
 });
 
 test('no hosted component without statements reads Met on any hosted row', async () => {

@@ -1,7 +1,197 @@
-{"file":"deploy/test/render.test.mjs","path":[],"name":"helm is available for the render tests","status":"passed","skip":null,"ms":36.569955}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"every vendored chart matches charts.lock.json and no unlisted tarball is present","status":"passed","skip":null,"ms":8.19432}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"every rendered release meets the global invariants","status":"passed","skip":null,"ms":1599.256894}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"the harness refuses descriptor mistakes before helm can render an upstream default","status":"passed","skip":null,"ms":5.36895}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"site substitution keeps JSON valid and a local chart renders once per instance with the image from the lock","status":"passed","skip":null,"ms":110.041972}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"a required site setting left empty is refused, never rendered as an empty default (D-11)","status":"passed","skip":null,"ms":2.161947}
-{"file":"deploy/test/render.test.mjs","path":[],"name":"vendor refuses a lock entry whose file leaves deploy/charts/vendored/ before reading, downloading or writing anything","status":"passed","skip":null,"ms":0.751772}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"one Alertmanager runs from the lock by digest, and its only receiver mails the site mail server","status":"passed","skip":null,"ms":2.833}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"a site file without alert recipients is refused, never sent nowhere","status":"passed","skip":null,"ms":3.398}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"OpenBao sealed and its audit device failing raise alerts with a severity, a summary and the review runbook","status":"passed","skip":null,"ms":5.396}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"every alert source has a guard, and absent() is never used on a series that appears only after an event","status":"passed","skip":null,"ms":1.123}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"OpenBao turns telemetry on for a metrics-only TLS listener, and the site Prometheus reads it with the site CA","status":"passed","skip":null,"ms":1.042}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"Fluent Bit output failures and audit records not reaching the store raise alerts guarded by the scrape target","status":"passed","skip":null,"ms":1.755}
+{"file":"deploy/test/alerting.test.mjs","path":[],"name":"Fluent Bit exposes metrics on its built-in HTTP server with scrape annotations, and names its audit input and its one output","status":"passed","skip":null,"ms":0.543}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a correctly signed bundle passes and the copy step runs exactly once","status":"passed","skip":null,"ms":597.119}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a manifest changed after signing is refused and nothing is copied","status":"passed","skip":null,"ms":403.473}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a manifest signed with a different key is refused","status":"passed","skip":null,"ms":383.47}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"an archive whose SHA-256 differs from the signed manifest is refused","status":"passed","skip":null,"ms":432.027}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a store item that is missing, extra or has another digest is refused","status":"passed","skip":null,"ms":463.731}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"an item carrying the reserved unpublished digest is refused even when signed","status":"passed","skip":null,"ms":370.504}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a manifest of another format is refused","status":"passed","skip":null,"ms":357.4}
+{"file":"deploy/test/bundle-verify.test.mjs","path":[],"name":"a signed file changed after signing is refused by verifySignedFile (revocation lists, user exports, intermediates)","status":"passed","skip":null,"ms":413.763}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"a valid SecurityContactCredential exits 0 with one sentence that names only the holder and the type","status":"passed","skip":null,"ms":386.068}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"a revoked or a suspended credential exits 1 with one plain sentence","status":"passed","skip":null,"ms":256.843}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"an expired credential exits 1","status":"passed","skip":null,"ms":152.317}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"another holder, another type or another scope exits 1","status":"passed","skip":null,"ms":323.037}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"a credential issued by a device key exits 1, whatever it says","status":"passed","skip":null,"ms":111.735}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"a changed credential exits 1","status":"passed","skip":null,"ms":144.692}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"a status list signed by a key other than the one your organization's rules name exits 1","status":"passed","skip":null,"ms":171.676}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"wrong usage exits 2 with the usage line","status":"passed","skip":null,"ms":301.867}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"without its engine the tool refuses and names the signed offline bundle","status":"passed","skip":null,"ms":56.959}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"the output never carries the credential or its claims","status":"passed","skip":null,"ms":143.191}
+{"file":"deploy/test/credentialCheck.test.mjs","path":[],"name":"the engine imports only node: built-ins, and the offline bundle's deploy tree carries it beside the tool","status":"passed","skip":null,"ms":116.257}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"makes the token and an EC P-256 key inside it, and prints only the PEM public key and the PKCS#11 URI","status":"passed","skip":null,"ms":808.85}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"installs softhsm2 and opensc from deploy/host-packages.json only after the owner types yes","status":"passed","skip":null,"ms":957.602}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"stops and archives the token when the new private key is extractable or not sensitive","status":"passed","skip":null,"ms":550.06}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"refuses before any tool runs without a terminal, or with --test outside a temporary folder","status":"passed","skip":null,"ms":142.687}
+{"file":"deploy/test/dev-site-key.test.mjs","path":["--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it"],"name":"the shallow owner path, with TMPDIR=$HOME","status":"passed","skip":null,"ms":41.482}
+{"file":"deploy/test/dev-site-key.test.mjs","path":["--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it"],"name":"the configuration directly in the owner folder, with a temporary folder that holds the home","status":"passed","skip":null,"ms":42.397}
+{"file":"deploy/test/dev-site-key.test.mjs","path":["--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it"],"name":"TMPDIR=$HOME, away from the owner folder","status":"passed","skip":null,"ms":111.782}
+{"file":"deploy/test/dev-site-key.test.mjs","path":["--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it"],"name":"a symlink into the owner folder","status":"passed","skip":null,"ms":40.478}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"--test refuses any configuration that would write into or above the owner folder, or a temporary folder holding it","status":"passed","skip":null,"ms":242.003}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"a second run, or --show, creates nothing and prints the existing public key and URI","status":"passed","skip":null,"ms":1117.082}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"a token left without its key is never reused or overwritten: the script points at --rotate","status":"passed","skip":null,"ms":134.829}
+{"file":"deploy/test/dev-site-key.test.mjs","path":[],"name":"--rotate archives the whole token folder and the saved public key by moving them, then makes a new key","status":"passed","skip":null,"ms":810.33}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"validateRecord accepts a complete record and refuses each inconsistency","status":"passed","skip":null,"ms":3.276}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"cronIntervalMinutes finds the longest gap and refuses what it cannot read","status":"passed","skip":null,"ms":19.975}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"plan reports a schedule that cannot meet the RPO, naming both numbers","status":"passed","skip":null,"ms":23.477}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"verify refuses without --confirm, or with another site name, before any runner call","status":"passed","skip":null,"ms":1.348}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the postgres driver restores the newest dump into a scratch pod with no listener, checks it, and removes the pod","status":"passed","skip":null,"ms":3.067}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the registry-input driver passes only when checkBundle accepts the retained bundle, with its created time as the backup time","status":"passed","skip":null,"ms":0.95}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the escrow driver passes only when checkEscrow reports the escrow current","status":"passed","skip":null,"ms":0.844}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"verify writes one record with a step per driver in recovery order and the site targets copied in","status":"passed","skip":null,"ms":2.327}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"record --add-step appends a validated manual step, and record --check exits 1 on an invalid record","status":"passed","skip":null,"ms":2.488}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the opensearch driver restores audit-* renamed beside the live data, counts it, and deletes the copies, the credential on stdin only","status":"passed","skip":null,"ms":2.62}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the volume driver restores the newest backup through a temporary class with the site class parameters, and removes all three objects","status":"passed","skip":null,"ms":2.862}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"components the site does not run are recorded as not-run with the reason, not as failures","status":"passed","skip":null,"ms":1.362}
+{"file":"deploy/test/drill.test.mjs","path":[],"name":"the lab-only steps are refused outside the lab and never run inside it","status":"passed","skip":null,"ms":1.457}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"escrow-node.sh save writes both files 0600 in a 0700 folder with a record whose digests match","status":"passed","skip":null,"ms":120.725}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"escrow-node.sh check passes on unchanged files and fails naming the file after one byte of the encryption configuration changes","status":"passed","skip":null,"ms":432.554}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"escrow-node.sh save refuses an out folder inside the data folder and one that already holds a record","status":"passed","skip":null,"ms":168.741}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"escrow.mjs export writes longhorn-crypto.json 0600 and a digest record; check fails after the Secret data changes","status":"passed","skip":null,"ms":9.196}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"escrow.mjs never prints a Secret value or passes one as a command argument","status":"passed","skip":null,"ms":3.588}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"record-key-backup writes an hsm-key-backup record and refuses anything that would carry key material","status":"passed","skip":null,"ms":7.192}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"the longhorn-crypto record holds one digest per key, over the decoded value","status":"passed","skip":null,"ms":1.178}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"export applies the in-cluster record ConfigMap on stdin, holding digests and names and no value","status":"passed","skip":null,"ms":7.294}
+{"file":"deploy/test/escrow.test.mjs","path":[],"name":"the rendered escrow-currency CronJob mounts the key and the record read-only and runs no command naming a value","status":"passed","skip":null,"ms":185.634}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a person and both passwordless keys move by a verified signed file, and a second import changes nothing","status":"passed","skip":null,"ms":507.751}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a person already here gets only the keys they lack; a person of the same username with another email gets none","status":"passed","skip":null,"ms":460.706}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file changed after signing is refused with zero Keycloak calls","status":"passed","skip":null,"ms":373.098}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file signed with another key is refused with zero Keycloak calls","status":"passed","skip":null,"ms":705.796}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file of an unknown format is refused with zero Keycloak calls","status":"passed","skip":null,"ms":363.116}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file from another relying-party id is refused with zero Keycloak calls","status":"passed","skip":null,"ms":371.164}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file with no requires list is refused with zero Keycloak calls","status":"passed","skip":null,"ms":358.396}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file whose requires is not a list is refused with zero Keycloak calls","status":"passed","skip":null,"ms":277.693}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file whose requires is not sorted and unique is refused with zero Keycloak calls","status":"passed","skip":null,"ms":270.89}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file whose requires holds something other than name@N ids is refused with zero Keycloak calls","status":"passed","skip":null,"ms":273.145}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file carrying a password credential is refused with zero Keycloak calls","status":"passed","skip":null,"ms":268.53}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"a file needing a feature this import does not read (guests@1 today) is refused whole, naming it, with zero Keycloak calls","status":"passed","skip":null,"ms":292.664}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"csr and export-crl write files that verify with the site public key; the CSR and its key come from OpenBao","status":"passed","skip":null,"ms":623.148}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"an intermediate signed by the HQ root becomes the default issuer and the chain is written for siteCaChain","status":"passed","skip":null,"ms":510.366}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses a certificate file changed after signing with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":265.973}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses a certificate file signed with another key with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":219.763}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses an intermediate issued by another root with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":231.209}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses a certificate that is not a CA certificate with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":254.595}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses an intermediate that is no longer valid with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":232.708}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-intermediate refuses a file with text outside the certificate with zero OpenBao calls and no file written","status":"passed","skip":null,"ms":230.839}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"import-crl places a verified revocation list at every path and writes nothing for a refused one","status":"passed","skip":null,"ms":948.931}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"the HQ broker renders off for the CI site and on, linking only, when the realm site file turns it on","status":"passed","skip":null,"ms":2.467}
+{"file":"deploy/test/federation.test.mjs","path":[],"name":"checkRealm refuses a broker that would create people, ask for a password, be the default or overwrite local people","status":"passed","skip":null,"ms":5.101}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight: the CI site with a published bundle and a synchronised import host passes","status":"passed","skip":null,"ms":27.933}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight refuses each unsafe site setting before anything changes (D-08, D-11, D-17, D-31, D-57)","status":"passed","skip":null,"ms":38.279}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight refuses unpublished images, omitted items and the lab placeholder unless --lab (D-12, D-55)","status":"passed","skip":null,"ms":15.283}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight refuses a site file with no time source and an import host whose clock fails (D-71)","status":"passed","skip":null,"ms":11.137}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight refuses SoftHSM2 as the OpenBao seal outside the lab (softhsm-seal-token, D-38)","status":"passed","skip":null,"ms":29.926}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"preflight runs the CI hardening invariants on the site's own render (D-56)","status":"passed","skip":null,"ms":12.837}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"install.mjs preflight on the CI site reports the omitted workbench unless --lab","status":"passed","skip":null,"ms":5770.598}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"node-files writes the clock files, the pins and the RKE2 files; chrony.conf names only the CI site servers","status":"passed","skip":null,"ms":3.159}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"the registry images archive is site-neutral in the bundle and named for the site registry by node-files (Pitfall 8)","status":"passed","skip":null,"ms":39.729}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"bootstrap-ca makes a 90-day CA and the registry certificate, kept 0600 in a 0700 state folder, once (D-16)","status":"passed","skip":null,"ms":43.542}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"secrets: values travel only on stdin, kv is written only when absent, and a short volume key is refused (D-41, G420)","status":"passed","skip":null,"ms":4.016}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"registry: the import password reaches htpasswd and the cluster on stdin only","status":"passed","skip":null,"ms":41.381}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"apply installs the enabled releases in descriptor order, running the as-code steps between them","status":"passed","skip":null,"ms":19.794}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"apply stops at the unseal ceremony and before an unsigned intermediate, then resumes with --from","status":"passed","skip":null,"ms":26.681}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"apply again on an installed site only upgrades; admission goes to Deny only after the import found every signature","status":"passed","skip":null,"ms":76.796}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"retire-bootstrap waits for site-pki to serve openbao-tls and zot-tls, then removes the bootstrap CA and administrator","status":"passed","skip":null,"ms":53.071}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"apply puts the rendered OpenSearch objects through the API with the credential on stdin only, again on a second run","status":"passed","skip":null,"ms":66.447}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"ConfigMap values decode YAML quoting exactly, backslashes included","status":"passed","skip":null,"ms":0.205}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"install.mjs --help lists every step","status":"passed","skip":null,"ms":0.31}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"record-digests writes a published digest only after its signature verifies, for names the lock lists","status":"passed","skip":null,"ms":0.793}
+{"file":"deploy/test/install.test.mjs","path":[],"name":"apply makes the bootstrap volume key before the storage class, on stdin only, and never replaces an existing one","status":"passed","skip":null,"ms":35.539}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"cert-check passes a Ready certificate that renews in time","status":"passed","skip":null,"ms":37.63}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"cert-check names a certificate that is not Ready","status":"passed","skip":null,"ms":0.394}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"cert-check names a certificate overdue for renewal and one within 7 days of expiry","status":"passed","skip":null,"ms":0.365}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"cert-check names a site CA chain certificate inside the horizon with the key ceremony action","status":"passed","skip":null,"ms":85.738}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"cert-check names the API server certificate inside the horizon with the RKE2 renewal action","status":"passed","skip":null,"ms":33.507}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"drain-check refuses breaking etcd quorum and allows a drain that keeps a majority","status":"passed","skip":null,"ms":1.428}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"drain-check refuses taking an OpenBao server while another is not Ready","status":"passed","skip":null,"ms":0.919}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"drain-check refuses removing a volume's only healthy replica, warns for a degraded one, and skips Longhorn on other storage","status":"passed","skip":null,"ms":0.8}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"drain-check warns with the hubs and the number of sessions the drain interrupts","status":"passed","skip":null,"ms":1.411}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"upgrade-check refuses a missing version, a downgrade, a skipped minor version, a node not Ready and mixed versions","status":"passed","skip":null,"ms":2.454}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"upgrade-check refuses backups older than the limit and prints the command that takes a fresh one","status":"passed","skip":null,"ms":1.062}
+{"file":"deploy/test/maintenance.test.mjs","path":[],"name":"upgrade-check includes every cert-check problem","status":"passed","skip":null,"ms":0.448}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"one registered passwordless key is refused before any OpenBao call","status":"passed","skip":null,"ms":2.815}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"two passwordless records with one credential id count as one key and are refused","status":"passed","skip":null,"ms":0.394}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"two distinct keys: entity, alias on the jwt mount and both non-exportable Transit keys; a second run changes nothing","status":"passed","skip":null,"ms":1.943}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"re-enrolment moves the alias to the new Keycloak account, so the same entity keeps its keys","status":"passed","skip":null,"ms":3.62}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"a session token reads only its own signing key under transit/keys/, and signing is only in the step-up policy","status":"passed","skip":null,"ms":1.593}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"71-10: a session creates and reads only its own people directory entry: no other person's, no wildcard, no update, list or delete","status":"passed","skip":null,"ms":1.92}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"the read reaches no other key: not another person's, not the KEK, not a longer name, and no list, export, rotate, config or change","status":"passed","skip":null,"ms":7.591}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"every key-move path needs two approvals from key-custodians","status":"passed","skip":null,"ms":0.728}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"every per-person path is templated on the entity and no policy names a literal entity id","status":"passed","skip":null,"ms":2.023}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"the rendered server configuration has the kms-pkcs11 plugin, its seal, TLS on, and no injector, CSI or HashiCorp image","status":"passed","skip":null,"ms":169.758}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"with a Shamir site file no seal stanza renders, and a missing seal choice stops the render","status":"passed","skip":null,"ms":266.01}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"apply.mjs gives only the step-up role the signing policy, bound to the step-up acr and capped at the step-up window","status":"passed","skip":null,"ms":128.908}
+{"file":"deploy/test/openbao.test.mjs","path":[],"name":"the install policy reaches only the static application secrets under kv/data/apps/","status":"passed","skip":null,"ms":0.182}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"the realm as shipped passes at both levels","status":"passed","skip":null,"ms":10.256}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"no flow has a password, OTP or recovery-code step, every binding is one of ours, and no client allows direct grants","status":"passed","skip":null,"ms":14.729}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"the password, OTP and recovery-code actions are off and passwordless registration is on","status":"passed","skip":null,"ms":9.381}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"emails are unique and only administrators may change them; no self-registration or password reset","status":"passed","skip":null,"ms":1.978}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"at both levels the passwordless policy requires user verification and resident keys, on the one shared rpId token","status":"passed","skip":null,"ms":6.013}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"signInKeys selects the level: passkeys has attestation none and no allowlist, hardware-only attestation direct and the site allowlist","status":"passed","skip":null,"ms":9.058}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"the step-up levels are the same at both sign-in levels: acr means a fresh WebAuthn ceremony, not hardware","status":"passed","skip":null,"ms":7.92}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"acr.loa.map has two levels, level 2 lasts the site step-up window (a site token, never a literal), and events are recorded","status":"passed","skip":null,"ms":6.418}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"client sterling-sessions is confidential, standard flow only, and puts its audience, acr and auth_time in the access token","status":"passed","skip":null,"ms":4.258}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"the smart-card flow exists but is bound only when the site turns it on","status":"passed","skip":null,"ms":1.652}
+{"file":"deploy/test/realm.test.mjs","path":[],"name":"Keycloak renders from the locked official image, reaches Postgres with verify-full TLS and writes JSON logs (needs helm)","status":"passed","skip":null,"ms":282.67}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"every Certificate is issued by site-pki or site-pki-hub; the bootstrap CA issues only OpenBao's first certificate, which site-pki re-issues","status":"passed","skip":null,"ms":3.328}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"the only issuers are site-bootstrap-ca (CA type) and the vault-type site-pki and site-pki-hub, which sign only through pki_int","status":"passed","skip":null,"ms":2.124}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"ConfigMap sterling-site-ca is in every namespace that verifies site TLS, and the issuers trust the same chain","status":"passed","skip":null,"ms":136.084}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"the hubs' certificates come from site-pki-hub and no Ingress routes to a hub","status":"passed","skip":null,"ms":0.685}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"HAProxy is the default ingress class on node ports, and the client-certificate settings render only when the site turns smart cards on","status":"passed","skip":null,"ms":500.703}
+{"file":"deploy/test/render-pki.test.mjs","path":[],"name":"the intermediate's revocation list outlasts the media trip to an edge site: 30 days unless the site sets at least a day","status":"passed","skip":null,"ms":2.056}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the AppDefinition: no prewarm pool, the site capacity and idle values, IfNotPresent, the workbench image from the lock","status":"passed","skip":null,"ms":287.275}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the lab placeholder replaces the image only when the site asks for it","status":"passed","skip":null,"ms":88.75}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"sterling-site-env has exactly the ten names and no secret","status":"passed","skip":null,"ms":227.925}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the rendered site environment matches the fixture the workbench reads it from","status":"passed","skip":null,"ms":166.813}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"a modelServers left empty renders [], and one that is not a list of URLs stops the render","status":"passed","skip":null,"ms":262.508}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the session proxy lets only the activity tracker's two paths through without sign-in, anchored (oauth2-proxy matches unanchored)","status":"passed","skip":null,"ms":2.981}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the session environment policy selects only labelled session Deployments and Pods in theia-cloud, and fails closed","status":"passed","skip":null,"ms":128.881}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the policy refuses envFrom other than sterling-site-env, any Secret or ConfigMap key in env, and names outside the allow-list","status":"passed","skip":null,"ms":134.199}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"STERLING_LISTEN_HOST is \"0.0.0.0\" in the template, and the policy accepts only that or the pod IP from the downward API","status":"passed","skip":null,"ms":151.342}
+{"file":"deploy/test/render-sessions.test.mjs","path":[],"name":"the policy allows only the oauth2-proxy-secrets Secret volume, and only in the oauth2-proxy container","status":"passed","skip":null,"ms":100.771}
+{"file":"deploy/test/render-site.test.mjs","path":[],"name":"every rendered StorageClass is a Longhorn class encrypted with the class key","status":"passed","skip":null,"ms":14.836}
+{"file":"deploy/test/render-site.test.mjs","path":[],"name":"Fluent Bit ships the API audit log and every container log to the site OpenSearch, and nowhere else","status":"passed","skip":null,"ms":4.825}
+{"file":"deploy/test/render-site.test.mjs","path":[],"name":"Prometheus writes and reads nowhere outside the site, and OpenSearch runs with its security plugin","status":"passed","skip":null,"ms":4.578}
+{"file":"deploy/test/render-site.test.mjs","path":[],"name":"Harbor is behind HTTPS on the HAProxy ingress, with no Trivy scanner and none of the chart's public default credentials","status":"passed","skip":null,"ms":0.96}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"each hub is a StatefulSet of one with the Compose hardening, its secret files and its own volume","status":"passed","skip":null,"ms":106.535}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"two hubs in a site render two StatefulSets with their own volumes, and no Ingress routes to any hub","status":"passed","skip":null,"ms":3910.824}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"71-11: a hub item naming your organization's rules and key mounts the rules read-only and passes both settings to the hub","status":"passed","skip":null,"ms":138.55}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"71-11: without the rules and key a hub renders with its trust routes off, and naming only one of them stops the render","status":"passed","skip":null,"ms":193.131}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"sessions reach a hub by its cluster address and members by its node port, both plain TCP to the hub's own TLS","status":"passed","skip":null,"ms":205.654}
+{"file":"deploy/test/render-stateful.test.mjs","path":[],"name":"Keycloak's Postgres is one TLS-only replica with its certificate, a nightly dump, and both volumes on the site class","status":"passed","skip":null,"ms":60.968}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"oauth2-proxy verifies TLS, sets secure cookies, reads its secrets from files, and its alpha configuration carries step-up and the forwarded identity","status":"passed","skip":null,"ms":2.418}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"the operator runs one session per person, no eager start, on the site class and size, with our oauth2-proxy by digest","status":"passed","skip":null,"ms":2.543}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"the start page keeps persistence on and starts the workbench AppDefinition","status":"passed","skip":null,"ms":0.394}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"every Theia Cloud Ingress is HAProxy's with a site-pki certificate, and no Theia Cloud chart renders a working issuer","status":"passed","skip":null,"ms":1.822}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"every Theia Cloud workload is one of our images by digest, pulled IfNotPresent, and passes Pod Security restricted","status":"passed","skip":null,"ms":1.0}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"no client-supplied header can change the path oauth2-proxy authorizes: trusted proxies from the site, sessions reachable only from HAProxy and the operator","status":"passed","skip":null,"ms":2659.567}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"the service and the operator verify TLS with the site chain: both mount sterling-site-ca, and the operator JVM trusts only its truststore","status":"passed","skip":null,"ms":0.766}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"the operator build removes the session probe's trust-all and refuses an upstream it does not recognise","status":"passed","skip":null,"ms":28.11}
+{"file":"deploy/test/render-theia.test.mjs","path":[],"name":"the service entrypoint starts only with the site CA, and its OIDC client verifies Keycloak with it","status":"passed","skip":null,"ms":22.152}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"helm is available for the render tests","status":"passed","skip":null,"ms":99.342}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"every vendored chart matches charts.lock.json and no unlisted tarball is present","status":"passed","skip":null,"ms":51.2}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"every rendered release meets the global invariants","status":"passed","skip":null,"ms":3859.044}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"the shared invariants catch each ruled-out pattern (the same code the site preflight runs)","status":"passed","skip":null,"ms":12.849}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"the harness refuses descriptor mistakes before helm can render an upstream default","status":"passed","skip":null,"ms":9.002}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"site substitution keeps JSON valid and a local chart renders once per instance with the image from the lock","status":"passed","skip":null,"ms":199.95}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"a required site setting left empty is refused, never rendered as an empty default (D-11)","status":"passed","skip":null,"ms":2.6}
+{"file":"deploy/test/render.test.mjs","path":[],"name":"vendor refuses a lock entry whose file leaves deploy/charts/vendored/ before reading, downloading or writing anything","status":"passed","skip":null,"ms":1.171}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"the audit policy records Theia Cloud writes at Request and Secrets and ConfigMaps at Metadata only","status":"passed","skip":null,"ms":10.701}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"Pod Security enforces restricted everywhere except exactly six namespaces","status":"passed","skip":null,"ms":3.364}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"the server config keeps the CIS profile, Canal, no bundled ingress, secrets encryption, audit, Pod Security and snapshots","status":"passed","skip":null,"ms":0.522}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"registries.yaml mirrors only to the site registry","status":"passed","skip":null,"ms":2.15}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"k3s appears in no production node or values file (D-14)","status":"passed","skip":null,"ms":9.884}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"every namespace a release uses has an egress policy entry (D-01)","status":"passed","skip":null,"ms":19.222}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"the rendered network release has one site-only egress policy per namespace and no open rule","status":"passed","skip":null,"ms":133.09}
+{"file":"deploy/test/rke2.test.mjs","path":[],"name":"admission exempts only the Zot pod, by its exact pinned digest in its own namespace, never on a Harbor site, and refuses a wider exception","status":"passed","skip":null,"ms":704.373}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"chronyConf on the CI site names exactly the site servers with iburst, and no pool or allow directive","status":"passed","skip":null,"ms":8.521}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"nts true adds the nts option to every server and trusts the site CA; nts false adds neither","status":"passed","skip":null,"ms":0.441}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"bad time settings are refused: no source, a malformed server, a refclock outside PHC, SHM or SOCK, a non-positive limit","status":"passed","skip":null,"ms":1.273}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"the captured lines parse; clockProblems accepts synced and refuses unsynced, local and far with the measured bound","status":"passed","skip":null,"ms":1.354}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"check-time.sh gives the same verdict as clockProblems on every fixture","status":"passed","skip":null,"ms":246.682}
+{"file":"deploy/test/time.test.mjs","path":[],"name":"install-node.sh requires the clock files and runs check-time.sh before the etcd user, the RPM and RKE2","status":"passed","skip":null,"ms":1.047}

@@ -1,0 +1,114 @@
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"the first active session makes the person's did:webvh naming their Transit key, signs once, and writes their record and directory entry","status":"passed","skip":null,"ms":35.115}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"a second session finds the identity and signs, writes and posts nothing","status":"passed","skip":null,"ms":3.934}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"a step-up refusal writes nothing and leaves the identity pending with one sentence and Retry; Retry succeeds once signing works","status":"passed","skip":null,"ms":3.885}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"a secret store that does not answer leaves the identity pending; one that stops between the two writes is finished without a second signature","status":"passed","skip":null,"ms":4.181}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"at the first hub session the log is posted once, through that session, at its own path; a refusal is retried at the next session","status":"passed","skip":null,"ms":8.48}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"without a DID domain or the engine bundle nothing is made, and nothing is signed","status":"passed","skip":null,"ms":1.493}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"binding a computer refuses words that differ, a missing step-up and missing status lists, and makes nothing","status":"passed","skip":null,"ms":5.99}
+{"file":"dist/test/credentials-identity-service.test.js","path":[],"name":"after the words match and a fresh step-up, the binding names this computer's did:key and the person's did:webvh and verifies with the person key","status":"passed","skip":null,"ms":6.912}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"a Markdown image in the checkout or published from this repository is bundled; any other address becomes a note","status":"passed","skip":null,"ms":11.051}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"a missing or outside image stops the build with the page named","status":"passed","skip":null,"ms":1.555}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"a mermaid diagram is drawn to an inline SVG that follows the theme and loads nothing","status":"passed","skip":null,"ms":133.164}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"an MDX figure, components and import lines become plain HTML or a clear note, never JSX text","status":"passed","skip":null,"ms":2.986}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"a raw HTML block keeps its picture and text but never its scripts, handlers or remote sources","status":"passed","skip":null,"ms":2.684}
+{"file":"dist/test/documentation-render.test.js","path":[],"name":"the bundled guides with figures render them: three diagrams in the architecture overview, four screenshots in the README","status":"passed","skip":null,"ms":105.957}
+{"file":"dist/test/egress.test.js","path":[],"name":"unset, empty or [] settings give no model servers, no Open VSX address and an empty allow list","status":"passed","skip":null,"ms":1.842}
+{"file":"dist/test/egress.test.js","path":[],"name":"a JSON array of model servers gives one exact pattern per host and port, and a comma inside an address is kept","status":"passed","skip":null,"ms":0.448}
+{"file":"dist/test/egress.test.js","path":[],"name":"anything but a JSON array of strings is refused naming the setting, a comma-separated list included","status":"passed","skip":null,"ms":0.726}
+{"file":"dist/test/egress.test.js","path":[],"name":"http is accepted only to a loopback model server","status":"passed","skip":null,"ms":0.248}
+{"file":"dist/test/egress.test.js","path":[],"name":"a model server address with credentials, a query, a fragment, or a relative path is refused","status":"passed","skip":null,"ms":0.302}
+{"file":"dist/test/egress.test.js","path":[],"name":"more than 32 model servers are refused; 32 are accepted","status":"passed","skip":null,"ms":0.362}
+{"file":"dist/test/egress.test.js","path":[],"name":"STERLING_OPEN_VSX_URL adds its address; an invalid one is refused naming it","status":"passed","skip":null,"ms":0.28}
+{"file":"dist/test/egress.test.js","path":[],"name":"the same host listed twice gives one pattern, and no pattern ever holds a wildcard","status":"passed","skip":null,"ms":0.282}
+{"file":"dist/test/egress.test.js","path":[],"name":"the contribution returns exactly the patterns of the settings it was given, and Theia allows only those","status":"passed","skip":null,"ms":0.527}
+{"file":"dist/test/key-service.test.js","path":[],"name":"a fresh step-up signs: login to the step-up role, sign with that token, then revoke it, in that order","status":"passed","skip":null,"ms":48.667}
+{"file":"dist/test/key-service.test.js","path":[],"name":"acr missing or different, auth_time missing, too old or in the future: refused with the fix, and no OpenBao call","status":"passed","skip":null,"ms":9.303}
+{"file":"dist/test/key-service.test.js","path":[],"name":"STERLING_STEPUP_ACR unset: signing is not set up on this site, and no OpenBao call","status":"passed","skip":null,"ms":4.486}
+{"file":"dist/test/key-service.test.js","path":[],"name":"a refused step-up login is the same plain refusal and makes no sign call","status":"passed","skip":null,"ms":5.53}
+{"file":"dist/test/key-service.test.js","path":[],"name":"a message that is not base64, or larger than 64 KiB, is refused without a call","status":"passed","skip":null,"ms":9.086}
+{"file":"dist/test/key-service.test.js","path":[],"name":"a missing signing key (400 or 404) is refused plainly, and the step-up token is still revoked","status":"passed","skip":null,"ms":9.125}
+{"file":"dist/test/key-service.test.js","path":[],"name":"generateWrappedDataKey returns the vault:vN: ciphertext from datakey/wrapped with the session token","status":"passed","skip":null,"ms":3.904}
+{"file":"dist/test/key-service.test.js","path":[],"name":"unwrapDataKey refuses a malformed ciphertext without a call and decrypts a valid one with the session token, no step-up needed","status":"passed","skip":null,"ms":3.465}
+{"file":"dist/test/key-service.test.js","path":[],"name":"personPublicKey reads the latest version of the person's own signing key with the session token, no step-up needed","status":"passed","skip":null,"ms":3.711}
+{"file":"dist/test/key-service.test.js","path":[],"name":"personPublicKey: a missing key, a refusal and an answer that is not one ed25519 public key are plain refusals","status":"passed","skip":null,"ms":10.036}
+{"file":"dist/test/key-service.test.js","path":[],"name":"local mode: long-term keys are not available on this computer, for every method, with no call","status":"passed","skip":null,"ms":0.822}
+{"file":"dist/test/key-service.test.js","path":[],"name":"an inactive hosted session is refused not-ready for every method, with no call","status":"passed","skip":null,"ms":0.555}
+{"file":"dist/test/key-service.test.js","path":[],"name":"an OpenBao that refuses or does not answer gives a plain refusal with no token, key or entity id","status":"passed","skip":null,"ms":2002.655}
+{"file":"dist/test/key-service.test.js","path":[],"name":"the RPC object has sign and generateWrappedDataKey, and no unwrapDataKey or personPublicKey","status":"passed","skip":null,"ms":6.24}
+{"file":"dist/test/key-store.test.js","path":[],"name":"setPassword POSTs {data:{password}} to kv/data/users/<id>/<enc>/<enc> with the session token","status":"passed","skip":null,"ms":16.527}
+{"file":"dist/test/key-store.test.js","path":[],"name":"getPassword reads data.data.password and answers undefined for a secret that is not there (404)","status":"passed","skip":null,"ms":4.765}
+{"file":"dist/test/key-store.test.js","path":[],"name":"keys lists kv/metadata/users/<id>/<enc service>?list=true and decodes the names, skipping folders","status":"passed","skip":null,"ms":6.398}
+{"file":"dist/test/key-store.test.js","path":[],"name":"findCredentials and findPassword read what keys lists","status":"passed","skip":null,"ms":15.055}
+{"file":"dist/test/key-store.test.js","path":[],"name":"deletePassword DELETEs the metadata path and answers true, or false when the secret did not exist","status":"passed","skip":null,"ms":4.631}
+{"file":"dist/test/key-store.test.js","path":[],"name":"without an active session every method rejects with the not-ready sentence and makes no OpenBao call","status":"passed","skip":null,"ms":1.328}
+{"file":"dist/test/key-store.test.js","path":[],"name":"an OpenBao refusal or silence becomes a plain sentence with no secret, token or entity id","status":"passed","skip":null,"ms":2.983}
+{"file":"dist/test/key-store.test.js","path":[],"name":"the unavailable store rejects all six methods with its reason and never resolves","status":"passed","skip":null,"ms":0.385}
+{"file":"dist/test/key-store.test.js","path":[],"name":"hosted settings choose the OpenBao store without touching the keyring","status":"passed","skip":null,"ms":0.249}
+{"file":"dist/test/key-store.test.js","path":[],"name":"local settings with a keytar that does not load choose unavailable; saving fails and memory is never used","status":"passed","skip":null,"ms":0.566}
+{"file":"dist/test/key-store.test.js","path":[],"name":"local settings with a keytar that loads and answers choose the keyring, which round-trips a password","status":"passed","skip":null,"ms":0.398}
+{"file":"dist/test/key-store.test.js","path":[],"name":"Theia's KeyStoreService binding is rebound to the delegating store, and a call before the choice is made waits for it","status":"passed","skip":null,"ms":52.715}
+{"file":"dist/test/kv-path.test.js","path":[],"name":"for 500 awkward strings the encoding round-trips, never repeats, and every segment is a safe single path part","status":"passed","skip":null,"ms":19.041}
+{"file":"dist/test/kv-path.test.js","path":[],"name":"secretPath has exactly four parts under users/<entity id>/ for any service and account","status":"passed","skip":null,"ms":26.641}
+{"file":"dist/test/kv-path.test.js","path":[],"name":"secretPath refuses an entity id that is not a UUID","status":"passed","skip":null,"ms":0.807}
+{"file":"dist/test/kv-path.test.js","path":[],"name":"a string with an unpaired surrogate is refused, so two such strings can never share a path","status":"passed","skip":null,"ms":0.308}
+{"file":"dist/test/kv-path.test.js","path":[],"name":"decodeSegment refuses a name the encoding could not have made","status":"passed","skip":null,"ms":0.678}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"with STERLING_OPENBAO_ADDR unset or empty the session is local","status":"passed","skip":null,"ms":50.262}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"hosted mode takes the defaults jwt, sterling-workbench, sterling-workbench-stepup, kv, transit and 300","status":"passed","skip":null,"ms":0.589}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"http is accepted only to a loopback address","status":"passed","skip":null,"ms":0.75}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"an address with a user name, a password, a query, a fragment or a path is refused","status":"passed","skip":null,"ms":0.521}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"mount names, the roles, the step-up window and the session user are checked, each refusal naming its setting","status":"passed","skip":null,"ms":0.948}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"the client sends X-Vault-Token only when a token is given, and JSON bodies round-trip","status":"passed","skip":null,"ms":22.38}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"a 404 answers { status: 404 } without throwing","status":"passed","skip":null,"ms":4.836}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"connection refused and a slow answer are unreachable","status":"passed","skip":null,"ms":203.742}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"a request that fails before it is sent is unreachable, and nothing fires when its timeout would have","status":"passed","skip":null,"ms":401.238}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"a 403 on login is refused with its status; a 500 is a bad response","status":"passed","skip":null,"ms":3.492}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"an answer over 1 MiB or with invalid JSON is a bad response","status":"passed","skip":null,"ms":9.336}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"error texts name the method, the path with users/<id> hidden, and the status, never a header or a body","status":"passed","skip":null,"ms":1.377}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"over https the client trusts the CA in caFile, and without it the call is unreachable","status":"passed","skip":null,"ms":11.191}
+{"file":"dist/test/openbao-client.test.js","path":[],"name":"a CA file that cannot be read is refused when the client is made, naming STERLING_OPENBAO_CA_FILE","status":"passed","skip":null,"ms":0.334}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"the tracker gets the session start, then the time of the last use, as epoch milliseconds","status":"passed","skip":null,"ms":2.684}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"only exactly \"Bearer <session secret>\" is answered; anything else is 401 with one word","status":"passed","skip":null,"ms":0.538}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"the popup turns the state to idle-warned until the person next uses the page","status":"passed","skip":null,"ms":0.314}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"every other /monitor path and method is 404, the operator's free-text message included; other paths are not answered at all","status":"passed","skip":null,"ms":0.587}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"without the session secret or with the tracker off the state is off, use is ignored, and /monitor is 404 for everyone","status":"passed","skip":null,"ms":0.391}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"no answer carries anything about the person or the secret","status":"passed","skip":null,"ms":0.642}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"the tracker address is a pod IP in hosted mode only; loopback, a wildcard or unset is none, and a name stops the backend","status":"passed","skip":null,"ms":9.482}
+{"file":"dist/test/session-activity.test.js","path":[],"name":"the listener on the tracker address answers the tracker and 404s everything else, the workbench's own paths included","status":"passed","skip":null,"ms":62.198}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"local mode: status is local with or without headers, session() is undefined and OpenBao is never called","status":"passed","skip":null,"ms":70.426}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"hosted: a valid token with the matching person logs in once, reads the entity id, and goes active","status":"passed","skip":null,"ms":22.624}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"a token observed before start is used as soon as start runs","status":"passed","skip":null,"ms":7.312}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"no token within IDENTITY_TIMEOUT_MS is failed token-missing, and a later token recovers without Retry","status":"passed","skip":null,"ms":8.538}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"the person check is case-insensitive","status":"passed","skip":null,"ms":8.092}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"the email header, the token email or THEIACLOUD_SESSION_USER disagreeing is failed person-mismatch with no login","status":"passed","skip":null,"ms":183.424}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"login refused (403) is failed store-refused; a new token does not leave it, and Retry runs the start path again","status":"passed","skip":null,"ms":69.509}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"OpenBao unreachable is failed store-unreachable (connection refused, and a timeout), and Retry recovers","status":"passed","skip":null,"ms":205.657}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"an entity id that is not a UUID is failed store-refused, and that token is revoked","status":"passed","skip":null,"ms":9.046}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"an expired token and a token without a readable payload are ignored","status":"passed","skip":null,"ms":60.648}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"in active, a token or email header naming someone else is ignored and never replaces the latest token","status":"passed","skip":null,"ms":9.772}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"with a 20 s lease renew-self runs at about 10 s and again at half of each new lease","status":"passed","skip":null,"ms":134.067}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"a refused renewal re-logs in once with the latest unexpired token; if that fails too the state is failed with its reason","status":"passed","skip":null,"ms":13.072}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"a refused renewal with every forwarded token expired is failed token-missing, and a new token recovers","status":"passed","skip":null,"ms":13.248}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"stop() from active revokes the token once and ends stopped with session() undefined","status":"passed","skip":null,"ms":62.336}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"a revoke that fails or times out still ends stopped","status":"passed","skip":null,"ms":305.821}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"stop() from identity or failed makes no OpenBao call","status":"passed","skip":null,"ms":0.983}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"session().acr and authTime follow the latest observed token without a new login; status offers step-up when configured","status":"passed","skip":null,"ms":3.252}
+{"file":"dist/test/session-identity.test.js","path":[],"name":"stepUpUrl builds the same-origin /oauth2/start link and refuses any other origin","status":"passed","skip":null,"ms":0.62}
+{"file":"dist/test/site-env-contract.test.js","path":[],"name":"the fixture holds the site example and a site with model servers","status":"passed","skip":null,"ms":1.818}
+{"file":"dist/test/site-env-contract.test.js","path":[],"name":"every STERLING_* value the site-example render gives the pod is read by the workbench's settings readers","status":"passed","skip":null,"ms":2.982}
+{"file":"dist/test/site-env-contract.test.js","path":[],"name":"every STERLING_* value the model-servers render gives the pod is read by the workbench's settings readers","status":"passed","skip":null,"ms":0.315}
+{"file":"dist/test/sterling-evidence.test.js","path":[],"name":"a verified refresh record for exactly the same commit vouches for the dashboard","status":"passed","skip":null,"ms":1.611}
+{"file":"dist/test/sterling-evidence.test.js","path":[],"name":"missing, unverified, malformed or other-commit records never vouch","status":"passed","skip":null,"ms":0.413}
+{"file":"dist/test/sterling-evidence.test.js","path":[],"name":"the documentation collection must be a non-empty list of complete pages","status":"passed","skip":null,"ms":0.606}
+{"file":"dist/test/sterling-resource-inventory.test.js","path":[],"name":"a catalogue keeps its evidence fields and archived entries, and says it is a catalogue","status":"passed","skip":null,"ms":4.458}
+{"file":"dist/test/sterling-resource-inventory.test.js","path":[],"name":"a catalogue entry cites its evidence and claims no holding: no quantity, status, asset DID or usage policy","status":"passed","skip":null,"ms":1.073}
+{"file":"dist/test/sterling-resource-inventory.test.js","path":[],"name":"only a catalogue may hold archived entries, and stored image digests are SHA-256 hex","status":"passed","skip":null,"ms":3.021}
+{"file":"dist/test/sterling-work-area-resource-links.test.js","path":[],"name":"links to the open area or its immediate opaque child and preserves unrelated metadata","status":"passed","skip":null,"ms":4.861}
+{"file":"dist/test/sterling-work-area-resource-links.test.js","path":[],"name":"two concurrent selections keep both source-scoped links","status":"passed","skip":null,"ms":1.255}
+{"file":"dist/test/sterling-work-area-resource-links.test.js","path":[],"name":"refuses unscoped, remote and malformed resource references before touching files","status":"passed","skip":null,"ms":1.457}
+{"file":"dist/test/sterling-work-area-resource-links.test.js","path":[],"name":"refuses linked components, malformed metadata and a same-length rewrite after the read","status":"passed","skip":null,"ms":1.767}
+{"file":"dist/test/sterling-work-area-resource-links.test.js","path":[],"name":"a capability record keeps its components, as labels and titles, for Get Started to list","status":"passed","skip":null,"ms":0.816}
+{"file":"dist/test/team-preview.test.js","path":[],"name":"the invalid sample returns the parser's own message as plain data","status":"passed","skip":null,"ms":6.454}
+{"file":"dist/test/team-preview.test.js","path":[],"name":"a valid sample is ready; a sample without a team file and an unknown id are missing","status":"passed","skip":null,"ms":2.055}
+{"file":"dist/test/team-preview.test.js","path":[],"name":"a missing engine bundle is \"unavailable\" when read, never an error when the reader is made","status":"passed","skip":null,"ms":3.694}
+{"file":"dist/test/team-preview.test.js","path":[],"name":"fixtures reached through a linked parent still load; a fixture linked out of its folder does not","status":"passed","skip":null,"ms":13.335}
+{"file":"dist/test/team-preview.test.js","path":[],"name":"bindBackendService binds one handler for the path that resolves the service lazily and returns refusals as values","status":"passed","skip":null,"ms":2.002}
