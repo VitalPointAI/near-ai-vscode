@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { chmod, lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -15,7 +17,7 @@ import {
   type SecretSources,
   type SecretSpec,
 } from '../src/secrets';
-import { launchHub, within } from './helpers/hubProcess';
+import { hubRoot, launchHub, within } from './helpers/hubProcess';
 import { makeTlsFixture } from './helpers/tlsFixture';
 
 // Phase 32, plan 14 (D-26, D-29, D-30), ported from relay/test/secrets.test.ts: every rule of the hub's secret loader. The sources are passed in
@@ -251,6 +253,65 @@ test('a symbolic link to a valid 0600 file loads, and a symbolic link to a file 
     await symlink(open, link);
     assert.match((await refusal(loadSecret(LINE, sources(dirs, { [`${NAME}_FILE`]: link })))).message, /group or others/);
   });
+});
+
+// G540: on Kubernetes the kubelet writes Secret files owned by root and, under the pod's fsGroup, at least 0440, so the chart (deploy/hub) cannot
+// give the hub an owner-only Secret file. Its init container runs deploy/hub/files/stage-secrets.cjs with the hub image's Node to copy them into a
+// memory volume. This runs that file on a folder laid out the way the kubelet lays out a Secret volume, under the names the chart's HUB_*_FILE
+// settings use, and loads the result with the real loader.
+test('G540: the chart\'s key files as the kubelet writes them (0440) are refused, and the copies its init container makes are 0400, ours, and load', async () => {
+  const repo = path.dirname(hubRoot());
+  const template = readFileSync(path.join(repo, 'deploy/hub/templates/statefulset.yaml'), 'utf8');
+  const script = readFileSync(path.join(repo, 'deploy/hub/files/stage-secrets.cjs'), 'utf8');
+  const folder = '/run/secrets/hub/';
+  const settings = new Map([...template.matchAll(/\{ name: (HUB_[A-Z_]+_FILE), value: (\S+) \}/g)].map(([, name, value]) => [name!, value!]));
+  for (const spec of HUB_SECRETS.filter((entry) => entry.required)) assert.ok(settings.has(`${spec.name}_FILE`), `the chart does not set ${spec.name}_FILE`);
+  for (const [name, value] of settings) assert.ok(value.startsWith(folder) && !value.slice(folder.length).includes('/'), `${name} = ${value}`);
+  const tls = makeTlsFixture();
+  try {
+    await withDirs(async (dirs) => {
+      const values: Record<string, string> = {
+        HUB_TLS_CERT: tls.certPem,
+        HUB_TLS_KEY: tls.keyPem,
+        HUB_SIGNING_KEY: generateKeyFile('signing'),
+        HUB_ENCRYPTION_KEY: generateKeyFile('encryption'),
+      };
+      // The Secret volume: the files in a timestamped folder, ..data pointing at it, and each name a link through ..data.
+      const volume = path.join(dirs.root, 'secret-volume');
+      const data = path.join(volume, '..2026_11_25_00_00_00.000000001');
+      await mkdir(data, { recursive: true });
+      await symlink(path.basename(data), path.join(volume, '..data'));
+      for (const [name, file] of settings) {
+        const value = values[name.slice(0, -'_FILE'.length)];
+        assert.ok(value !== undefined, `no test value for ${name}`);
+        await put(path.join(data, path.basename(file)), value.startsWith('-----') ? value : `${value}\n`, 0o440);
+        await symlink(path.join('..data', path.basename(file)), path.join(volume, path.basename(file)));
+      }
+      const envIn = (dir: string) => Object.fromEntries([...settings].map(([name, file]) => [name, path.join(dir, path.basename(file))]));
+
+      const refused = await refusal(loadSecrets(HUB_SECRETS, sources(dirs, envIn(volume)), new Redactor()));
+      assert.match(refused.message, /group or others/);
+
+      // node -e <file> <Secret volume> <memory volume>, twice: a pod whose init container runs again finds its earlier copies.
+      const staged = path.join(dirs.root, 'staged');
+      await mkdir(staged, { mode: 0o700 });
+      for (let run = 0; run < 2; run += 1) {
+        const result = spawnSync(process.execPath, ['-e', script, volume, staged], { encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr);
+      }
+      assert.deepEqual((await readdir(staged)).sort(), [...settings.values()].map((file) => path.basename(file)).sort());
+      for (const file of await readdir(staged)) {
+        const info = await lstat(path.join(staged, file));
+        assert.ok(info.isFile(), `${file} is a regular file, not a link`);
+        assert.equal(info.mode & 0o777, 0o400, `${file} is owner-only`);
+        assert.equal(info.uid, process.getuid?.(), `${file} belongs to the user that ran the copy`);
+      }
+      const loaded = await loadSecrets(HUB_SECRETS, sources(dirs, envIn(staged)), new Redactor());
+      assert.deepEqual(Object.fromEntries(loaded), values);
+    });
+  } finally {
+    tls.cleanup();
+  }
 });
 
 test('loadSecrets registers every value with the redactor: the whole value, the key part of a key line and each line of a PEM key', async () => {

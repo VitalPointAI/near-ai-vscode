@@ -1,6 +1,7 @@
 // The stateful workloads (D-18, D-42 to D-44): each sync hub is a single-writer StatefulSet with the Compose hardening, reached over TLS it
 // ends itself, and Keycloak's Postgres is one TLS-only replica with a nightly dump. Renders with the CI site; needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -38,6 +39,44 @@ test('each hub is a StatefulSet of one with the Compose hardening, its secret fi
   assert.match(set, /name: hub-hub-a-keys/);
   assert.doesNotMatch(set, /HorizontalPodAutoscaler/);
   assert.ok(!docs.some((doc) => kindOf(doc) === 'HorizontalPodAutoscaler'));
+});
+
+// G540: the hub refuses a key file that group or others can read (hub/src/secrets.ts), and the kubelet's Secret files are root's and at least 0440
+// under fsGroup. hub/test/secrets.test.ts runs deploy/hub/files/stage-secrets.cjs and loads its copies with the hub's loader; this checks the chart
+// runs exactly that file, as the hub's user, and that the hub reads only its copies.
+test('G540: the hub reads owner-only (0400) copies of its key files, made as its own user by an init container from the Secret volume', () => {
+  const [set] = renderHubs(SITE.hubs).filter((doc) => kindOf(doc) === 'StatefulSet');
+  const between = (from, to) => {
+    const start = set.indexOf(`\n${from}`);
+    const end = set.indexOf(`\n${to}`, start + 1);
+    assert.ok(start >= 0 && end > start, `${from.trim()} comes before ${to.trim()}`);
+    return set.slice(start, end);
+  };
+  const pod = between('      securityContext:', '      initContainers:');
+  const init = between('      initContainers:', '      containers:');
+  const hub = between('      containers:', '      volumes:');
+  const volumes = between('      volumes:', '  volumeClaimTemplates:');
+  // One user for both containers: the pod's, overridden by neither, so the copies belong to the user the hub runs as.
+  for (const expected of [/runAsUser: 65532/, /runAsGroup: 65532/, /fsGroup: 65532/, /runAsNonRoot: true/]) assert.match(pod, expected);
+  for (const container of [init, hub]) assert.doesNotMatch(container, /runAsUser|runAsGroup|runAsNonRoot/);
+  // The hub image's own Node, hardened like the hub, runs the chart's staging file from the Secret volume into the memory volume.
+  assert.deepEqual([...init.matchAll(/^ {8}- name: (\S+)/gm)].map((match) => match[1]), ['stage-secrets']);
+  assert.equal(/^ {10}image: (\S+)$/m.exec(init)?.[1], /^ {10}image: (\S+)$/m.exec(hub)?.[1]);
+  for (const expected of [/readOnlyRootFilesystem: true/, /allowPrivilegeEscalation: false/, /drop: \[ALL\]/]) assert.match(init, expected);
+  const args = JSON.parse(/^ {10}args: (\[.*\])$/m.exec(init)?.[1] ?? 'null');
+  assert.deepEqual(args, ['-e', readFileSync(path.join(ROOT, 'deploy/hub/files/stage-secrets.cjs'), 'utf8'), '/run/secrets/hub-source', '/run/secrets/hub']);
+  assert.ok(init.includes('{ name: secret-files, mountPath: /run/secrets/hub-source, readOnly: true }'));
+  assert.ok(init.includes('{ name: secrets, mountPath: /run/secrets/hub }'));
+  // The hub mounts only the copies, read-only.
+  assert.ok(hub.includes('{ name: secrets, mountPath: /run/secrets/hub, readOnly: true }'));
+  assert.doesNotMatch(hub, /secret-files/);
+  assert.match(volumes, /\n {8}- name: secrets\n {10}emptyDir:\n {12}medium: Memory\n/);
+  const projected = /\n {8}- name: secret-files\n {10}projected:\n {12}defaultMode: 0440\n([\s\S]*?)(?=\n {8}- name:|$)/.exec(volumes);
+  assert.ok(projected, 'secret-files projects the two Secrets');
+  const files = [...projected[1].matchAll(/path: (\S+) \}/g)].map((match) => match[1]).sort();
+  assert.deepEqual(files, ['encryption.key', 'signing.key', 'tls.crt', 'tls.key']);
+  // Each HUB_*_FILE setting names one of those files among the copies, and every file is named.
+  assert.deepEqual([...hub.matchAll(/\{ name: HUB_\w+_FILE, value: \/run\/secrets\/hub\/(\S+) \}/g)].map((match) => match[1]).sort(), files);
 });
 
 test('two hubs in a site render two StatefulSets with their own volumes, and no Ingress routes to any hub', () => {

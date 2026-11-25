@@ -6716,6 +6716,20 @@
       ],
       "remediation": "Hosted workbench sessions send prompts and context up to Protected A or B to the model servers your organization's signed policy lists (the model-servers exchange), but compliance/levels.json does not list model-endpoints in the hosted levels, so the model servers have no rows there and no section in the hosted applicability map. Plan 48.1-06 (D-12) adds model-endpoints to hosted-protected-a, hosted-protected-b and hosted-itsp-10-171. When it lands, the applicability map gains a model-endpoints section at those levels that your organization must review before it takes effect, and the existing hosted sections, whose reasons name the components that carry each facet, must be re-checked and signed again. This closes when 48.1-06 has landed and the hosted stages are signed with the model-endpoints section.",
       "title": "The hosted levels do not yet assess the model servers"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "cm-06",
+        "ia-05",
+        "sc-12"
+      ],
+      "id": "G540",
+      "ownerRole": "maintainers",
+      "poam": "g540",
+      "remediation": "The site stack's hub chart (deploy/hub) mounted the hub's TLS, signing and encryption key files from its Secrets with mode 0440, and the hub's loader (hub/src/secrets.ts) refuses any key file that group or others can read, so a hub on the site cluster would stop at start. Kubernetes cannot give a non-root user an owner-only Secret file: the kubelet writes Secret files owned by root and, under the pod's fsGroup, makes each one at least 0440 whatever defaultMode says (the user fields of KEP-5936 are alpha in Kubernetes 1.37 and leave the fsGroup bits). The chart now copies the files in an init container, the hub image's own Node running deploy/hub/files/stage-secrets.cjs as the hub's user 65532, into a memory volume where each is created 0400 and owned by 65532, and the hub reads only those copies; the loader's rule is unchanged. deploy/test/render-stateful.test.mjs checks that the chart runs that file as the hub's user and points every HUB_*_FILE setting at the copies, and hub/test/secrets.test.ts runs the file on a Secret volume laid out as the kubelet writes it and loads the copies with the hub's loader. Neither has run on a cluster. This closes when a hub on the lab cluster (RKE2 v1.37) has started and the record shows each file under /run/secrets/hub in the running pod as 0400 and owned by 65532, and the hub's secrets.loaded line.",
+      "title": "The hub key files' mount mode conflicts with the hub loader"
     }
   ]
 }

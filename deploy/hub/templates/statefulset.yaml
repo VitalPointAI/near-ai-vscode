@@ -1,9 +1,9 @@
 {{- /*
 One sync hub (D-42, D-43, MUS 10.1 and 10.9): a StatefulSet of exactly one replica with its own volume, because the hub's SQLite store must
 never have two writers (research Pitfall 10); no autoscaler, and a rolling update of one replica stops the old pod before the new one starts.
-The pod has the same hardening as the Compose service in relay/compose.yaml. The hub ends TLS itself; its four secret files come read-only
-from Secret hub-<name>-tls (cert-manager, site-pki-hub) and Secret hub-<name>-keys (the hub's own --generate-key output, kept in OpenBao
-kv/apps/hubs/<name> and written by the install script).
+The pod has the same hardening as the Compose service in relay/compose.yaml. The hub ends TLS itself; its four secret files come from Secret
+hub-<name>-tls (cert-manager, site-pki-hub) and Secret hub-<name>-keys (the hub's own --generate-key output, kept in OpenBao
+kv/apps/hubs/<name> and written by the install script), copied owner-only for the hub by the init container stage-secrets (G540).
 
 Your organization's rules for the trust routes (Phase 71, 71-09 and 71-11): when the hub item names organizationPolicy (a ConfigMap or a Secret,
 and the key holding the signed organization layer) and organizationKey (your organization's public key, base64url), the layer is mounted
@@ -54,6 +54,25 @@ spec:
         fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      # The hub refuses a key file that group or others can read (hub/src/secrets.ts). The kubelet writes Secret files owned by root and, with
+      # fsGroup set, makes each one at least 0440 whatever defaultMode says, so no Secret volume can give the hub's user an owner-only file
+      # (G540). This container, the hub image's own Node as the hub's user, copies each file of the Secret volume into the memory volume
+      # `secrets`, created 0400 and owned by that user (files/stage-secrets.cjs). The hub reads only those copies.
+      initContainers:
+        - name: stage-secrets
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["-e", {{ .Files.Get "files/stage-secrets.cjs" | toJson }}, "/run/secrets/hub-source", "/run/secrets/hub"]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: secret-files, mountPath: /run/secrets/hub-source, readOnly: true }
+            - { name: secrets, mountPath: /run/secrets/hub }
       containers:
         - name: hub
           image: {{ .Values.image | quote }}
@@ -105,9 +124,8 @@ spec:
             - { name: organization-policy, mountPath: /run/organization, readOnly: true }
             {{- end }}
       volumes:
-        # 0440, not 0400: projected files are owned by root with the pod's fsGroup (65532) as their group, so owner-only 0400 would leave
-        # the hub (uid 65532) unable to read them; group read keeps them to this pod's user.
-        - name: secrets
+        # The Secret files as the kubelet writes them: owned by root, group the pod's fsGroup (65532), 0440. Only stage-secrets mounts them.
+        - name: secret-files
           projected:
             defaultMode: 0440
             sources:
@@ -121,8 +139,14 @@ spec:
                   items:
                     - { key: signing, path: signing.key }
                     - { key: encryption, path: encryption.key }
+        # The owner-only copies the hub reads, kept in memory like the Secret volume itself.
+        - name: secrets
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
         {{- if $trust }}
-        # Your organization's signed rules (public, verified by the hub against organizationKey); read-only, group read as for the secrets.
+        # Your organization's signed rules (public, verified by the hub against organizationKey); read-only and group read (0440). The hub reads
+        # them with no owner-only rule, as they hold no secret.
         - name: organization-policy
           {{- if $org.configMap }}
           configMap:
