@@ -6195,7 +6195,7 @@
       ],
       "id": "G490",
       "ownerRole": "maintainers",
-      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. The draft rules move about 8,030 cells, two thirds, to Not applicable. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
+      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. The draft rules move about 8,016 cells, two thirds, to Not applicable; 44.1-07 replaces this estimate here with the count it measures on the signed map. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
       "title": "The dashboard assesses every component against every control"
     },
     {
