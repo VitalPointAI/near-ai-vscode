@@ -4,8 +4,8 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
-last_updated: "2026-11-25T12:34:16.032Z"
+stopped_at: Completed 71-13-PLAN.md; 71-14 Tasks 1 and 2 done on feat/phase-71-13-14 (docs, full suites, 71-VERIFICATION.md); 71-14 Task 3 (the owner's gate approval of the integration PR) waits for the owner; no PR opened
+last_updated: "2026-11-25T20:48:07.000Z"
 state_head: 6c17e4d14812f20a4d762190d920924323e9158a
 progress:
   total_phases: 12
@@ -167,6 +167,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
 - 47-20 blocked: its precondition needs 71-12 (the revocation card that reads the requests) on the base; 71-12 has no SUMMARY on main
+- 71-14 Task 3 waits for the owner: approve the agent-review gate run of the Phase 71 integration PR (feat/phase-71-13-14 holds 71-13 and 71-14; no PR opened). DCAC-04 stays partial until 71-09 Task 3 (needs 33-26). New gaps G468 (extension wallet) and G469 (held-back part in the sync status).
 - 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
 
 ### Quick Tasks Completed
@@ -182,8 +183,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T12:34:15.827Z
-**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked. Gate integration branch: Phase 33 (33.2-05, 33-14), 71-12, 70.1, 48-07/08, 44.1-02 to 08, 48.2 waves 1 to 5 and 48.2-16
+**Last session:** 2026-11-25T20:48:07.000Z
+**Stopped at:** Completed 71-13-PLAN.md; 71-14 Tasks 1 and 2 done on feat/phase-71-13-14 (docs, full suites, 71-VERIFICATION.md); 71-14 Task 3 (the owner's gate approval of the integration PR) waits for the owner; no PR opened
 **Resume file:** None
 
 ## Performance Metrics
@@ -233,6 +234,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 71 P10 | ~40min | 1 of 3 tasks | 2 files |
 | Phase 71 P11 | ~1h | 3 tasks | 8 files |
 | Phase 71 P12 | about 3 hours | 3 tasks | 23 files |
+| Phase 71 P13 | about 2 h 30 min (lock waits) | 3 tasks | 32 files |
+| Phase 71 P14 | about 1 h 30 min (full suites) | 2 of 3 tasks (Task 3 is the owner's gate) | 9 files |
 | Phase 47 P19 | 2h | 3 tasks | 15 files |
 | Phase 47 P23 | 45m | 3 tasks | 10 files |
 | Phase 47 P24 | 50m | 2 tasks | 10 files |
@@ -349,6 +352,10 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 70.1]: 70.1-01 owner checkpoint 2026-11-25: permanent shapes accepted as built; model names servedModel and endpoint; no model is { none: cause }; numbers in basis points
 - [Phase 70.1]: 70.1 engine executed on feat/phase-70.1 (01-04 complete, 05 Tasks 1-2 done); open conditions G460-G464; integration PR waits for the owner's gate approval
 - [Phase 71]: 71-12: status list places are claimed once in kv/site/status-index with cas 0; revoke, suspend and lift are open to any current role holder for that type
+- [Phase 71]: 71-13: an epoch key reaches the engine only after keyReleaseFor (fresh view, checkFreshness, mayRelease) at settle, every read and the reading path; unmarked and lowest-level parts need no credentials (O11); an ended session or a refused OpenBao token releases nothing
+- [Phase 71]: 71-13: the hosted session runs the extension's own Wallet and HubTrustSource from the staff engine bundle; your organization's rules come from STERLING_ORGANIZATION_POLICY and STERLING_ORGANIZATION_POLICY_KEY; officers' role credentials travel beside each issued credential
+- [Phase 71]: 71-13: credential code reads only sub, acr, auth_time and exp from a sign-in token (TokenFacts, static test)
+- [Phase 71]: 71-14: every credential statement in SECURITY.md and README is a code constant checked word for word; the self-declared clearance sentences begin "Without your organization's credential rules"
 - [Phase 47]: 47-19: the guest approver's DID comes from the site's people directory; guests.mjs uses its own guest-operator policy; guest-removal has no KV path until the owner decides G447
 - [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
 - [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience

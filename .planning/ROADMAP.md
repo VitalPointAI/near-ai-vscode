@@ -1344,7 +1344,7 @@ Plans:
 - [x] 71-10-PLAN.md: Wave 6. Identities in use: a person's `did:webvh` at first sign-in, your organization's root DID and role credentials offline, binding a computer
 - [x] 71-11-PLAN.md: Wave 6. The trust export carries logs, status lists and the issuer section to edges
 - [x] 71-12-PLAN.md: Wave 7. Issuance from the officer's own session: the Issue credential card, the status-list key in OpenBao, revoke and suspend
-- [ ] 71-13-PLAN.md: Wave 8. Freshness in the session: the credential state, key release in hosted sessions, sign-in tokens that only authenticate
+- [x] 71-13-PLAN.md: Wave 8. Freshness in the session: the credential state, key release in hosted sessions, sign-in tokens that only authenticate
 - [ ] 71-14-PLAN.md: Wave 9. SECURITY.md and README, the full suites once, the verification record, the integration PR after the owner's gate approval
 
 ### Phase 71.1: Agent delegation that only narrows (INSERTED)
@@ -2261,7 +2261,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
 | 70.1. Classification engine | 4/5 | In Progress 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
-| 71. Identities and verified credentials (core), pulled forward | 12/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
+| 71. Identities and verified credentials (core), pulled forward | 13/14 | In Progress 2026-11-25 (71-13 done; 71-14's docs, full suites and verification record done, its integration PR waits for the owner's gate approval) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |
