@@ -1,5 +1,5 @@
 {
   "component": "hub",
-  "applicableWithoutStatement": 545,
+  "applicableWithoutStatement": 529,
   "notApplicableAwaitingSignOff": 276
 }
