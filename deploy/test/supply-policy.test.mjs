@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { evaluate, licenceAllowed, mergePolicy, policyHash } from '../supply/lib/policy.mjs';
-import { transition, newRecord } from '../supply/lib/states.mjs';
+import { STATES, newRecord, openStates, overdue, transition } from '../supply/lib/states.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const POLICY = JSON.parse(readFileSync(path.join(ROOT, 'deploy/supply/policy.json'), 'utf8'));
@@ -241,4 +241,135 @@ test('a site policy may not loosen the defaults', () => {
   looser({ review: { dueWorkingDays: 10 } }, 'review.dueWorkingDays', 10, 5);
   assert.throws(() => mergePolicy(POLICY, { fastLane: { needsReason: false } }), /may only tighten the defaults: fastLane.needsReason false/);
   assert.throws(() => mergePolicy(POLICY, { version: 2 }), /may only tighten the defaults: version cannot be set by your organization/);
+});
+
+// Task 3: the whole state machine (D-15) and its invariants.
+const A = { subject: '11111111-1111-4111-8111-111111111111', entity: 'entity-a', at: NOW.toISOString() };
+const B = { subject: '22222222-2222-4222-8222-222222222222', entity: 'entity-b', at: NOW.toISOString() };
+const evaluatedWith = (facts, at = NOW) => ({ type: 'evaluated', result: evaluate(facts, POLICY, at), policy: POLICY });
+const inReview = (facts = variant('publisher-change')) => transition(quarantined(), evaluatedWith(facts), NOW);
+const approvedRecord = () => transition(quarantined(), evaluatedWith(base('npm')), NOW);
+const later = (days) => new Date(NOW.getTime() + days * DAY);
+
+test('each transition of D-15', () => {
+  const requested = newRecord({ ecosystem: 'npm', name: 'left-pad', version: '1.3.0' }, 'intake', NOW);
+  assert.equal(requested.state, 'requested');
+  assert.equal(transition(requested, { type: 'gathered' }, NOW).state, 'quarantined');
+  assert.equal(transition(quarantined(), evaluatedWith(variant('malware')), NOW).state, 'refused');
+  assert.equal(transition(quarantined(), evaluatedWith(variant('fast-lane-without-reason')), NOW).state, 'waiting');
+  assert.equal(inReview().state, 'in-review');
+  assert.equal(approvedRecord().state, 'approved');
+
+  const waiting = transition(quarantined(), evaluatedWith(variant('fast-lane-without-reason')), NOW);
+  assert.throws(() => transition(waiting, evaluatedWith(variant('fast-lane-without-reason')), NOW), /not yet released/);
+  const afterRelease = later(6);
+  const moved = transition(waiting, evaluatedWith(variant('fast-lane-without-reason'), afterRelease), afterRelease);
+  assert.deepEqual([moved.state, moved.decidedBy], ['approved', 'automatic']);
+  assert.equal(transition(waiting, evaluatedWith(variant('malware')), NOW).state, 'refused', 'a hard gate ends a wait at once');
+  assert.equal(transition(waiting, evaluatedWith({ ...variant('fast-lane-without-reason'), publisher: 'new-maintainer' }, afterRelease), afterRelease).state, 'in-review');
+
+  assert.equal(transition(inReview(), { type: 'approve', approval: A }, NOW).state, 'approved');
+  assert.equal(transition(inReview(), { type: 'refuse', by: A.subject, reason: 'typosquat' }, NOW).state, 'refused');
+  const reviewAgain = transition(approvedRecord(), { type: 'finding', finding: { id: 'CVE-2026-1', severity: 'high', kev: false }, policy: POLICY }, NOW);
+  assert.equal(reviewAgain.state, 'under-review-again');
+  assert.equal(transition(approvedRecord(), { type: 'yanked', policy: POLICY }, NOW).state, 'under-review-again');
+  assert.equal(transition(reviewAgain, { type: 'approve', approval: A, reference: 'vex:sha256:abc' }, NOW).state, 'approved');
+  assert.throws(() => transition(reviewAgain, { type: 'approve', approval: A }, NOW), /VEX statement or an accepted risk/);
+  assert.equal(transition(reviewAgain, { type: 'withdraw', by: A.subject, reason: 'confirmed bad' }, NOW).state, 'withdrawn');
+});
+
+test('every open state has an exit', () => {
+  const samples = {
+    requested: [newRecord({ ecosystem: 'npm', name: 'left-pad', version: '1.3.0' }, 'intake', NOW), { type: 'gathered' }, NOW],
+    quarantined: [quarantined(), evaluatedWith(base('npm')), NOW],
+    waiting: [transition(quarantined(), evaluatedWith(variant('fast-lane-without-reason')), NOW), evaluatedWith(variant('fast-lane-without-reason'), later(6)), later(6)],
+    'in-review': [inReview(), { type: 'refuse', by: A.subject, reason: 'no' }, NOW],
+    approved: [approvedRecord(), { type: 'yanked', policy: POLICY }, NOW],
+    'under-review-again': [transition(approvedRecord(), { type: 'yanked', policy: POLICY }, NOW), { type: 'withdraw', by: A.subject, reason: 'bad' }, NOW],
+  };
+  assert.deepEqual([...openStates()].sort(), Object.keys(samples).sort());
+  assert.deepEqual([...STATES].sort(), [...openStates(), 'refused', 'withdrawn'].sort());
+  for (const state of openStates()) {
+    const [record, event, at] = samples[state];
+    assert.equal(record.state, state);
+    assert.notEqual(transition(record, event, at).state, state, `${state} has an exit`);
+  }
+  const final = [
+    transition(quarantined(), evaluatedWith(variant('malware')), NOW),
+    transition(transition(approvedRecord(), { type: 'yanked', policy: POLICY }, NOW), { type: 'withdraw', by: A.subject, reason: 'bad' }, NOW),
+  ];
+  for (const record of final) {
+    for (const event of [{ type: 'gathered' }, evaluatedWith(base('npm')), { type: 'approve', approval: A, reference: 'x' }, { type: 'refuse', by: A.subject },
+      { type: 'finding', finding: { id: 'x', kev: true }, policy: POLICY }, { type: 'yanked', policy: POLICY }, { type: 'withdraw', by: A.subject }]) {
+      assert.throws(() => transition(record, event, NOW), new RegExp(`${event.type} is not possible while left-pad@1.3.0 is ${record.state}\\.`));
+    }
+  }
+});
+
+test('no stuck waits', () => {
+  assert.throws(() => transition(quarantined(), { type: 'evaluated', result: { outcome: 'waiting', flags: [], approversNeeded: 0 }, policy: POLICY }, NOW), /releaseAt/);
+  const review = inReview();
+  assert.equal(review.ownerRole, 'supply-approver');
+  assert.equal(review.dueAt, '2026-12-02T12:00:00.000Z', '5 working days from Wednesday 2026-11-25');
+  const kev = transition(approvedRecord(), { type: 'finding', finding: { id: 'CVE-2026-2', severity: 'medium', kev: true }, policy: POLICY }, NOW);
+  assert.deepEqual([kev.ownerRole, kev.dueAt], ['supply-approver', '2026-11-26T12:00:00.000Z']);
+  const mal = transition(approvedRecord(), { type: 'finding', finding: { id: 'MAL-2026-3', mal: true }, policy: POLICY }, NOW);
+  assert.equal(mal.dueAt, '2026-11-26T12:00:00.000Z');
+  const friday = new Date('2026-11-27T12:00:00.000Z');
+  const fridayKev = transition(approvedRecord(), { type: 'finding', finding: { id: 'CVE-2026-4', kev: true }, policy: POLICY }, friday);
+  assert.equal(fridayKev.dueAt, '2026-11-30T12:00:00.000Z', 'Saturday and Sunday are skipped');
+  const yanked = transition(approvedRecord(), { type: 'yanked', policy: POLICY }, NOW);
+  assert.equal(yanked.dueAt, '2026-12-02T12:00:00.000Z');
+  assert.equal(overdue(review, later(7)), false, 'at the due time it is not yet overdue');
+  assert.equal(overdue(review, later(8)), true);
+  assert.equal(overdue(review, later(1)), false);
+  assert.equal(overdue(approvedRecord(), later(30)), false, 'only reviews can be overdue');
+  const stillReview = { ...review };
+  overdue(stillReview, later(30));
+  assert.equal(stillReview.state, 'in-review', 'overdue never changes the state');
+});
+
+test('no approval without approvers', () => {
+  const twoNeeded = inReview(variant('postinstall'));
+  assert.equal(twoNeeded.approversNeeded, 2);
+  const once = transition(twoNeeded, { type: 'approve', approval: A }, NOW);
+  assert.equal(once.state, 'in-review');
+  assert.deepEqual(once.approvals.map((a) => a.subject), [A.subject]);
+  const twice = transition(once, { type: 'approve', approval: { ...A, at: later(1).toISOString() } }, later(1));
+  assert.equal(twice.state, 'in-review', 'the same subject twice counts once');
+  assert.equal(twice.approvals.length, 1);
+  const done = transition(twice, { type: 'approve', approval: B }, later(1));
+  assert.deepEqual([done.state, done.decidedBy], ['approved', 'people']);
+  assert.throws(() => transition(twoNeeded, { type: 'approve', approval: { entity: 'x' } }, NOW), /subject/);
+  assert.throws(() => transition(quarantined(), { type: 'evaluated', result: { outcome: 'checks-passed', flags: ['licence'], approversNeeded: 1 }, policy: POLICY }, NOW), /automatic approval/);
+  assert.throws(() => transition(quarantined(), { type: 'evaluated', result: { outcome: 'in-review', flags: ['licence'], approversNeeded: 0 }, policy: POLICY }, NOW), /approver/);
+  const kev = transition(approvedRecord(), { type: 'finding', finding: { id: 'CVE-2026-2', kev: true }, policy: POLICY }, NOW);
+  assert.equal(kev.approversNeeded, 2, 'a KEV match needs two approvers to return to approved (D-28)');
+  assert.deepEqual(kev.approvals, [], 'earlier approvals do not count again');
+  assert.equal(transition(kev, { type: 'approve', approval: A, reference: 'vex:1' }, NOW).state, 'under-review-again');
+});
+
+test('nothing deleted', () => {
+  const steps = [];
+  let record = newRecord({ ecosystem: 'npm', name: 'left-pad', version: '1.3.0', purl: 'pkg:npm/left-pad@1.3.0' }, 'intake', NOW);
+  for (const [event, at] of [
+    [{ type: 'gathered' }, NOW],
+    [evaluatedWith(variant('publisher-change')), NOW],
+    [{ type: 'approve', approval: A }, NOW],
+    [{ type: 'finding', finding: { id: 'CVE-2026-5', severity: 'high' }, policy: POLICY }, later(2)],
+    [{ type: 'withdraw', by: B.subject, reason: 'confirmed bad' }, later(3)],
+  ]) {
+    const next = transition(record, event, at);
+    for (const key of Object.keys(record)) assert.ok(Object.hasOwn(next, key), `${event.type} keeps ${key}`);
+    assert.deepEqual(next.history.slice(0, record.history.length), record.history, `${event.type} keeps the history`);
+    assert.deepEqual(next.artefact, record.artefact);
+    steps.push(next);
+    record = next;
+  }
+  assert.equal(record.state, 'withdrawn');
+  assert.equal(record.withdrawnAt, later(3).toISOString());
+  assert.equal(record.withdrawnBy, B.subject);
+  assert.deepEqual(record.previousApprovals.map((a) => a.subject), [A.subject], 'the approvals before the finding are kept');
+  assert.equal(record.history.length, 5);
+  assert.equal(Object.isFrozen(STATES), true);
 });
