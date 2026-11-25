@@ -60,7 +60,7 @@ export function recordLaneOf(use: UseInput | undefined): 't0' | undefined {
 /** True when `child` is `parent` or inside it, both already absolute and resolved. */
 export function isInside(child: string, parent: string): boolean {
   const relative = path.relative(parent, child);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 /**

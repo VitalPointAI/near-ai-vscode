@@ -63,6 +63,11 @@ test('Q2: a file in an open project is found as the project\'s; a file elsewhere
   const { project, root } = folders();
   writeFileSync(path.join(root, 'download.pdf'), 'x');
   assert.equal(projectFolderOf(path.join(project, 'secret.ts'), [project], realpathSync), project);
+  const projectNotes = path.join(project, '..notes');
+  mkdirSync(projectNotes);
+  writeFileSync(path.join(projectNotes, 'notes.txt'), 'project notes');
+  assert.equal(projectFolderOf(path.join(projectNotes, 'notes.txt'), [project], realpathSync), project);
+  assert.equal(projectFolderOf(root, [project], realpathSync), undefined, 'the parent is outside the project');
   assert.equal(projectFolderOf(path.join(root, 'download.pdf'), [project], realpathSync), undefined);
   assert.equal(projectFolderOf(path.join(root, 'project-two', 'x.ts'), [project], realpathSync), undefined, 'a sibling folder whose name starts the same is not the project');
 });
