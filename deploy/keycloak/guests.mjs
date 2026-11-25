@@ -72,10 +72,15 @@ export function utcInstant(value) {
 export const attribute = (user, name) => user?.attributes?.[name]?.[0];
 
 /**
- * Whether this release includes the credential issuing and revocation card (71-12): it ships the OpenBao policy credential-issuers, which
- * apply.mjs then lists. Without it a guest would hold no credentials and an early end's revocation request would reach no officer (G449).
+ * Whether officers can issue and revoke a guest's credentials on this release (71-12's card): it ships the OpenBao policy credential-issuers,
+ * which apply.mjs then lists, and the card is reachable in a hosted session. Without both a guest would hold no credentials and an early end's
+ * revocation request would reach no officer (G449).
+ *
+ * 71-12 is in this release, but its card is not reachable in a hosted session until 71-13 gives the session your organization's rules (G465),
+ * so guests stay off. Set this to true only in the change that closes G465.
  */
-export const credentialIssuingShipped = () => POLICIES.includes('credential-issuers');
+export const CREDENTIAL_CARD_REACHABLE = false;
+export const credentialIssuingShipped = () => POLICIES.includes('credential-issuers') && CREDENTIAL_CARD_REACHABLE;
 
 /**
  * The guests settings of the realm site file: { maxDays, checkMinutes, sessionsNamespace, retentionDays, issuing }. Guests are off when
