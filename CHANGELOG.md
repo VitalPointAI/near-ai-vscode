@@ -42,6 +42,11 @@ whose figures render. NEAR AI stays only as a model provider.
 - **Documentation with its figures.** Guides are rendered when the image is built, with their
   screenshots and diagrams bundled, so the Documentation view shows pictures instead of source
   and fetches nothing from outside.
+- **Contributing and Environment packs are back in Documentation.** The two guides the docs
+  site publishes had dropped out of the workbench's Documentation view; Environment packs is
+  listed under Reference and Contributing under Developing again.
+- **Wide diagrams are no longer cut off.** A diagram wider than the page now shrinks to fit or
+  scrolls inside its own frame, instead of losing its right-hand side.
 - **A hardened image.** The workbench runs on Red Hat UBI 9 with Node 26 as a non-root user,
   listens on `127.0.0.1` by default, keeps telemetry off, and contacts no outside server unless
   you configure one. Each release checks this before publishing.
