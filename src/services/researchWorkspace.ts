@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { constants, lstatSync, realpathSync } from 'node:fs';
+import { mkdir, open, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { GateRuntime } from '../domain/gate/decide';
@@ -124,28 +124,68 @@ async function notice(text: string, error = false): Promise<void> {
   await post({ type: 'notice', text, error });
 }
 
+/** Read only the same regular file whose location passed the attachment check. */
+async function readAttachment(file: string, allowed: (resolved: string) => boolean): Promise<Buffer> {
+  const resolved = realpathSync(file);
+  const refusal = () => new Error('This attachment changed or is outside the permitted location.');
+  if (!allowed(resolved)) throw refusal();
+  const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isFile()) throw new Error('it is not a file');
+    if (opened.size > MAX_FILE_BYTES) throw new Error('it is larger than 2 MB');
+    const verifyLocation = () => {
+      if (realpathSync(file) !== resolved || !allowed(resolved)) throw refusal();
+      const current = lstatSync(resolved, { bigint: true });
+      if (!current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino
+        || current.size !== opened.size || current.mtimeNs !== opened.mtimeNs || current.ctimeNs !== opened.ctimeNs) throw refusal();
+    };
+    verifyLocation();
+    const bytes = Buffer.alloc(Number(opened.size) + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    verifyLocation();
+    if (offset !== Number(opened.size)) throw refusal();
+    return bytes.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
+}
+
 /** Adds a file: refused when it is in an open project (Q2); attached as it is inside the workspace's folder; copied in first from anywhere else. */
 async function addFile(file: string): Promise<void> {
   if (deps === undefined || chat === undefined) return;
+  const workspace = deps;
+  const currentChat = chat;
   const name = path.basename(file);
-  if (projectFolderOf(file, deps.projectFolders(), realpathSync) !== undefined) {
+  const inProject = (value: string): boolean => projectFolderOf(value, workspace.projectFolders(), realpathSync) !== undefined;
+  if (inProject(file)) {
     await notice(`${RESEARCH_TEXT.laneNotice} ${fillText(RESEARCH_TEXT.projectFileRefused, { file: name })}`);
     return;
   }
-  if (chat.files.length >= MAX_FILES) return;
-  if (laneAttachmentAllowed(file, filesDir(deps.folder), realpathSync)) {
-    if (!chat.files.includes(realpathSync(file))) chat.files.push(realpathSync(file));
+  const folder = filesDir(workspace.folder);
+  if (currentChat.files.length >= MAX_FILES) return;
+  if (laneAttachmentAllowed(file, folder, realpathSync)) {
+    const resolved = realpathSync(file);
+    if (!currentChat.files.includes(resolved)) currentChat.files.push(resolved);
     await postTranscript();
     return;
   }
   try {
-    const stat = statSync(file);
-    if (!stat.isFile()) throw new Error('it is not a file');
-    if (stat.size > MAX_FILE_BYTES) throw new Error('it is larger than 2 MB');
-    await mkdir(filesDir(deps.folder), { recursive: true });
-    const target = path.join(filesDir(deps.folder), `${randomBytes(4).toString('hex')}-${name}`);
-    await copyFile(file, target);
-    chat.files.push(realpathSync(target));
+    const bytes = await readAttachment(file, (resolved) => !inProject(file) && !inProject(resolved));
+    await mkdir(folder, { recursive: true });
+    const resolvedFolder = realpathSync(folder);
+    if (resolvedFolder !== filesDir(realpathSync(workspace.folder)) || inProject(resolvedFolder)) {
+      throw new Error('the workspace attachment folder is unavailable');
+    }
+    const target = path.join(resolvedFolder, `${randomBytes(4).toString('hex')}-${name}`);
+    await writeFile(target, bytes, { flag: 'wx', mode: 0o600 });
+    if (chat !== currentChat || deps !== workspace || currentChat.files.length >= MAX_FILES) return;
+    currentChat.files.push(target);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     await notice(fillText(RESEARCH_TEXT.fileCopyFailed, { file: name, reason: reason.replace(/\.$/, '') }), true);
@@ -159,11 +199,16 @@ async function addFile(file: string): Promise<void> {
 const reachesOut = (text: string): boolean => /^\s*\//.test(text) || /(^|\s)@[^\s@]+/.test(text);
 
 /** The user message as the model receives it: the text, then each attached file of the workspace's folder (text only). */
-async function userMessage(text: string, files: readonly string[]): Promise<string> {
+async function userMessage(text: string, files: readonly string[], workspace: ResearchWorkspaceDeps): Promise<string> {
   const parts = [text];
   for (const file of files) {
-    if (deps === undefined || !laneAttachmentAllowed(file, filesDir(deps.folder), realpathSync)) continue;
-    const body = (await readFile(file, 'utf8')).slice(0, MAX_TEXT);
+    const bytes = await readAttachment(file, (resolved) => {
+      const projects = workspace.projectFolders();
+      return laneAttachmentAllowed(resolved, filesDir(workspace.folder), realpathSync)
+        && projectFolderOf(file, projects, realpathSync) === undefined
+        && projectFolderOf(resolved, projects, realpathSync) === undefined;
+    });
+    const body = bytes.toString('utf8').slice(0, MAX_TEXT);
     parts.push(`Attached file ${path.basename(file).replace(/^[0-9a-f]{8}-/, '')}:\n\n${body}`);
   }
   return parts.join('\n\n');
@@ -180,10 +225,21 @@ async function send(text: string): Promise<void> {
   const model = chat.model;
   if (model === undefined || text.trim() === '') return;
   if (reachesOut(text)) { await notice(RESEARCH_TEXT.laneNotice); await post({ type: 'returned', text }); return; }
-  const endpoint = await deps.endpointFor(model);
+  const workspace = deps;
+  const currentChat = chat;
+  const endpoint = await workspace.endpointFor(model);
+  if (chat !== currentChat || deps !== workspace || running !== undefined) return;
   if (endpoint === undefined) { await notice(RESEARCH_TEXT.noModels, true); await post({ type: 'returned', text }); return; }
-  const files = [...chat.files];
-  const content = await userMessage(text.slice(0, MAX_TEXT), files);
+  const files = [...currentChat.files];
+  let content: string;
+  try {
+    content = await userMessage(text.slice(0, MAX_TEXT), files, workspace);
+  } catch (error) {
+    await notice(providerErrorMessage(error), true);
+    await post({ type: 'returned', text });
+    return;
+  }
+  if (chat !== currentChat || deps !== workspace || running !== undefined) return;
   const history: AgentMessage[] = chat.turns.filter((turn) => turn.notice !== true).map((turn) => ({ role: turn.role, content: turn.text }));
   const messages: AgentMessage[] = [...history, { role: 'user', content }];
   chat.turns.push({ role: 'user', text: content });

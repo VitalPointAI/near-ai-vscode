@@ -26,6 +26,7 @@ function harness(options: { answer?: string; fail?: Error } = {}) {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'research-')));
   const storage = path.join(root, 'global-storage', 'research-workspace');
   const project = path.join(root, 'project');
+  const projects = [project];
   mkdirSync(project, { recursive: true });
   writeFileSync(path.join(project, 'secret.ts'), 'const key = 1;');
   writeFileSync(path.join(root, 'paper.txt'), 'A public paper.');
@@ -88,11 +89,11 @@ function harness(options: { answer?: string; fail?: Error } = {}) {
     models: async () => [glm],
     endpointFor: async () => endpoint,
     runtime: async () => runtime,
-    projectFolders: () => [project]
+    projectFolders: () => projects
   };
   const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
   return {
-    workspace, posted, clipboard, openAnswers, created, sent, runtime, root, storage, project,
+    workspace, posted, clipboard, openAnswers, created, sent, runtime, root, storage, project, projects,
     open: async () => { await workspace.openResearchWorkspace(deps); await handlers.message?.({ type: 'ready' }); },
     send: async (message: unknown) => { await handlers.message?.(message); await settle(); },
     html: () => panel.webview.html,
@@ -163,6 +164,38 @@ test('Q2: a project file, dropped or picked, is refused with the lane notice and
   for (const notice of notices) assert.equal(notice.text, 'This is the research workspace. It cannot open project files, run commands or use tools. secret.ts is in a project, so it was not added.');
   assert.equal(existsSync(path.join(h.storage, 'files')), false, 'nothing was copied');
   assert.deepEqual(h.last('transcript')?.files ?? [], []);
+  h.close();
+});
+
+test('a copied attachment that now belongs to an open project is refused before sending', async () => {
+  const h = harness();
+  await h.open();
+  await h.send({ type: 'choose-model', model: GLM });
+  await h.send({ type: 'drop-file', uri: pathToFileURL(path.join(h.root, 'paper.txt')).toString() });
+  h.projects.push(h.storage);
+  await h.send({ type: 'send', text: 'Summarise it.' });
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.last('returned')?.text, 'Summarise it.');
+  assert.equal(h.last('notice')?.error, true);
+  assert.equal(h.last('transcript')?.files.length, 1);
+  await h.send({ type: 'remove-file', index: 0 });
+  await h.send({ type: 'send', text: 'Try again without the file.' });
+  assert.deepEqual(h.sent[0]?.messages, [{ role: 'user', content: 'Try again without the file.' }]);
+  h.close();
+});
+
+test('a saved attachment that grows beyond the size limit is refused before sending', async () => {
+  const h = harness();
+  await h.open();
+  await h.send({ type: 'choose-model', model: GLM });
+  await h.send({ type: 'drop-file', uri: pathToFileURL(path.join(h.root, 'paper.txt')).toString() });
+  const folder = path.join(h.storage, 'files');
+  const [copy] = readdirSync(folder);
+  writeFileSync(path.join(folder, copy as string), Buffer.alloc(2_000_001, 65));
+  await h.send({ type: 'send', text: 'Summarise it.' });
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.last('returned')?.text, 'Summarise it.');
+  assert.match(h.last('notice')?.text, /larger than 2 MB/);
   h.close();
 });
 
