@@ -18,6 +18,7 @@ const COMMANDS = Object.freeze([
   'hosted-docs',
   'applicability',
   'coverage',
+  'supply-chain-statements',
 ] as const);
 const commandName = /^[a-z][a-z0-9-]*$/;
 
