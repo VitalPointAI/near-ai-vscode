@@ -167,10 +167,13 @@ test('in the browser smoke, with the NEAR AI chat open on the release image and 
   // started that many and, when there are any, opens the NEAR AI chat. The development target has no /plugins.
   const plugins = await mustRun('docker', ['exec', containerName(name), 'node', '-e',
     "const fs = require('fs'); console.log(fs.existsSync('/plugins') ? fs.readdirSync('/plugins').filter((entry) => !entry.startsWith('.')).length : 0)"]);
-  // At localhost, as the README says, so the chat's <uuid>.webview.localhost origin loads (published on 127.0.0.1 only).
-  const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: `http://localhost:${port}`, STERLING_EXPECT_PLUGINS: plugins.stdout.trim() });
-  assert.equal(result.code, 0, `Playwright failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
-  assert.match(result.stdout, /\b1 passed\b/);
+  // At 127.0.0.1, as the owner opens it, and at localhost, as the README also allows; the chat's webview origin is
+  // <uuid>.webview.localhost on the same port either way (published on 127.0.0.1 only).
+  for (const host of ['127.0.0.1', 'localhost']) {
+    const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: `http://${host}:${port}`, STERLING_EXPECT_PLUGINS: plugins.stdout.trim() });
+    assert.equal(result.code, 0, `Playwright at ${host} failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
+    assert.match(result.stdout, /\b1 passed\b/);
+  }
   // One loopback call through the hook, so an empty or missing log cannot pass for a quiet one.
   await healthyInside(name);
   const lines = await copiedLog(name);

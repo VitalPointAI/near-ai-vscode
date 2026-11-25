@@ -1,10 +1,11 @@
 // The browser side of the no-egress proof (46-03; D-26, D-28): from the first navigation, every request the page, its frames and its service
 // workers make, and every WebSocket it opens, while Get Started, the Team preview and (on the release image) the bundled NEAR AI chat open,
 // and through a fixed window once the workbench is ready, goes to the page's own origin, one of its webview origins, a data: URL or a blob:
-// URL. A webview origin is Theia's default endpoint for the page's host, `<uuid>.webview.<host>` on the same scheme and port; nothing wider.
-// The container suite (test/container/egress.test.ts) opens the page at `localhost`, where Chromium serves those hosts from loopback (at
-// 127.0.0.1 they are not valid names and the chat cannot load). It starts the image under the outbound recording hook, with no model servers
-// configured, checks the backend side, and sets STERLING_EXPECT_PLUGINS to the number of plugins the image bundles.
+// URL. A webview origin is Theia's default endpoint for the page's host, `<uuid>.webview.<host>` on the same scheme and port, where a page
+// at 127.0.0.1 or [::1] uses localhost as its host (no subdomain of an address is a valid name; extension/src/common/webview-origin.ts);
+// nothing wider. The container suite (test/container/egress.test.ts) opens the page at 127.0.0.1 and at localhost (Chromium serves every
+// *.localhost name from loopback). It starts the image under the outbound recording hook, with no model servers configured, checks the
+// backend side, and sets STERLING_EXPECT_PLUGINS to the number of plugins the image bundles.
 //
 // Ready means Get Started and the Team preview are shown and, when the image bundles plugins (the release image bundles only the NEAR AI
 // extension), Theia has reported starting them (its "Start of N plugin(s)" line comes after the plugin host started them and ran their
@@ -21,7 +22,8 @@ test('Get Started, the Team preview and the bundled NEAR AI chat request only th
   const expectedPlugins = Number.parseInt(process.env.STERLING_EXPECT_PLUGINS ?? '', 10);
   expect(expectedPlugins, 'STERLING_EXPECT_PLUGINS is the number of plugins the image bundles (the container suite sets it)').toBeGreaterThanOrEqual(0);
   const base = new URL(baseURL ?? '');
-  const webviewHost = new RegExp(`^${UUID}\\.webview\\.${base.hostname.replaceAll('.', '\\.')}$`);
+  const parent = base.hostname === '127.0.0.1' || base.hostname === '[::1]' ? 'localhost' : base.hostname;
+  const webviewHost = new RegExp(`^${UUID}\\.webview\\.${parent.replaceAll('.', '\\.')}$`);
   const socketProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
   const elsewhere: string[] = [];
   const seen = { page: 0, webview: 0 };

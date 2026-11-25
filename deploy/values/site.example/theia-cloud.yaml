@@ -2,7 +2,8 @@
 hosts:
   configuration:
     # Host name prefixes under the site domain: the start page (sessions.<domain>, which the realm's redirectUris name, 47-08), the
-    # service API and the sessions.
+    # service API and the sessions. The workbench's webviews use *.webview.<instance>.<domain>, which needs its own wildcard DNS record
+    # (deploy/runbooks/site-install.md).
     landing: sessions
     service: sessions-api
     instance: ws

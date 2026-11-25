@@ -16,11 +16,16 @@ preloading:
   enable: false
 
 # Host names under the site domain: <landing>.<domain> (the start page), <service>.<domain> (the service API), <instance>.<domain> (the
-# sessions). The prefixes are per site.
+# sessions). The prefixes are per site. The workbench's webviews are served from <uuid>.webview.<instance>.<domain> (Theia's default
+# pattern; the sterling-sessions AppDefinition lists the same prefix in ingressHostnamePrefixes), so the instances Ingress also has a rule and
+# a certificate name for *.webview.<instance>.<domain>, which the site PKI's ingress role issues. Each site needs a wildcard DNS record for
+# that name (deploy/runbooks/site-install.md). Upstream notes that a change to this list needs the chart reinstalled, not upgraded.
 hosts:
   usePaths: false
   configuration:
     baseHost: "${site.domain}"
+  allWildcardInstances:
+    - "*.webview."
 
 # Sign-in through the site's Keycloak (47-08): realm sterling, client sterling-sessions. No secret is a value here: oauth2-proxy and the
 # service read the client secret, and oauth2-proxy the cookie secret, from Secret oauth2-proxy-secrets (keys client-secret, cookie-secret)

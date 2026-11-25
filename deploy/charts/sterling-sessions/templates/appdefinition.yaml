@@ -7,6 +7,10 @@ use. Try again in a few minutes, or ask your administrator.") is not a chart val
 The session start timeout is the launch request's timeout, set by whoever starts sessions (the landing page, 47-15), so no session waits
 silently. Theia Cloud AppDefinitions have no environment field: the site environment reaches the pod through envFrom sterling-site-env in
 our operator template (47-09).
+Webviews: the workbench serves each of the bundled extension's pages (Chat, Team Studio, Agent Activity, Governance) from its own origin,
+Theia's default <uuid>.webview.<session host>. ingressHostnamePrefixes makes the operator add each session's path under *.webview.<instance
+host> as well; the theia-cloud release gives the instances Ingress the same host (hosts.allWildcardInstances) with its certificate name,
+and each site needs the wildcard DNS record (deploy/runbooks/site-install.md).
 */ -}}
 {{- $a := .Values.appDefinition -}}
 {{- $image := ternary .Values.labPlaceholder.image $a.image (eq ($a.usePlaceholder | toString) "true") -}}
@@ -29,6 +33,8 @@ spec:
   port: {{ $a.port }}
   {{- end }}
   ingressname: {{ $a.ingressName | quote }}
+  ingressHostnamePrefixes:
+    - "*.webview."
   minInstances: 0
   maxInstances: {{ $a.maxInstances | int }}
   timeout: {{ $a.maxSessionMinutes | int }}
