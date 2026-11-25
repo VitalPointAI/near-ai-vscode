@@ -36,7 +36,7 @@ export interface IssueRequest {
   readonly personName: string;
   /** The type's own claims (for a clearance: scale and atLeast). */
   readonly claims: Readonly<Record<string, string>>;
-  /** The end date, YYYY-MM-DD; the credential ends at the start of that day, UTC. */
+  /** The last day, YYYY-MM-DD; the credential holds through that day, UTC. */
   readonly until: string;
   /** inbox: the person's wallet inbox in your organization's secret store; file: a .near-vc file for a single computer. */
   readonly delivery: 'inbox' | 'file';
@@ -70,6 +70,8 @@ export interface IssuedCredentialView {
   readonly validUntil: string;
   /** Unknown when your organization's server could not be asked. */
   readonly state: 'active' | 'suspended' | 'revoked' | 'unknown';
+  /** The review sentence of each action, read before the step-up. */
+  readonly reviews: { readonly revoke: string; readonly suspend: string; readonly lift: string };
 }
 
 export type RevocationReason = 'disabled' | 'removed' | 'guest-ended';
@@ -88,6 +90,10 @@ export type RevocationRequestView =
   | { readonly id: string; readonly current: false; readonly message: string };
 
 export interface IssuerServiceRpc {
+  /** The types the officer's role credentials and your organization's rules allow now, each with its form. */
+  issuableTypes(): Promise<ServiceResult<readonly IssuableType[]>>;
+  /** The review sentence, or the form's first refusal; signs nothing. */
+  review(request: IssueRequest): Promise<ServiceResult<IssueReview>>;
   issue(request: IssueRequest): Promise<ServiceResult<IssueResult>>;
   /** The credentials this officer issued. */
   listIssued(): Promise<ServiceResult<readonly IssuedCredentialView[]>>;

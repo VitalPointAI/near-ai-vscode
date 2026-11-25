@@ -9,6 +9,7 @@ import { REVOCATIONS, SUSPENSIONS, issue as issueFixture, list as signedList, ma
 import { decodePublicKeyMultibase } from '../../src/domain/credentials/multibase.ts';
 import { verifyStatusList, statusAt } from '../../src/domain/credentials/statusList.ts';
 import { ISSUER_TEXT, type IssueRequest } from '../extension/src/common/issuer-service.ts';
+import { ISSUE_FORM_TEXT } from '../../src/domain/credentials/issueForm.ts';
 import { KEY_SERVICE_TEXT } from '../extension/src/common/key-service.ts';
 import { ok, refused } from '../extension/src/common/service-result.ts';
 import { createIdentityService, ownRecordPath, type IdentityKv } from '../extension/src/node/credentials/identity-service.ts';
@@ -73,12 +74,12 @@ async function signedRole(root: Person, officer: Person, credentialType = 'Clear
   return issueFixture(root.signer, root.did, 'IssuerRoleCredential', { id: officer.did, credentialType, scale: 'ca-classified', upTo }, { validUntil });
 }
 
-async function setup(options: { roleUpTo?: string; noRole?: boolean; roleUntil?: string } = {}) {
+async function setup(options: { roleUpTo?: string; noRole?: boolean; roleUntil?: string; suites?: string[] } = {}) {
   const world = await makeWorld();
   // One status-list key for the site (D-14): both lists name it.
   const statusKey = newKey();
   const policy: IssuerPolicy = {
-    section: { ...world.section, statusLists: [{ uri: REVOCATIONS, purpose: 'revocation', key: statusKey.multikey }, { uri: SUSPENSIONS, purpose: 'suspension', key: statusKey.multikey }] },
+    section: { ...world.section, ...(options.suites === undefined ? {} : { suites: options.suites }), statusLists: [{ uri: REVOCATIONS, purpose: 'revocation', key: statusKey.multikey }, { uri: SUSPENSIONS, purpose: 'suspension', key: statusKey.multikey }] },
     scales: world.policy.scales,
   } as unknown as IssuerPolicy;
   const alex = await person(['people', 'alex-subject']);
@@ -136,7 +137,7 @@ async function setup(options: { roleUpTo?: string; noRole?: boolean; roleUntil?:
   }
 
   const request = (overrides: Partial<IssueRequest> = {}): IssueRequest => ({
-    type: 'ClearanceCredential', subject: alex.did, personName: 'Alex', claims: { scale: 'ca-classified', atLeast: 'Secret' }, until: '2027-03-01', delivery: 'inbox', ...overrides,
+    type: 'ClearanceCredential', subject: alex.did, personName: 'Alex', claims: { scale: 'ca-classified', atLeast: 'Secret' }, until: '2027-02-28', delivery: 'inbox', ...overrides,
   });
   const listBit = (uri: string, index: number, purpose: 'revocation' | 'suspension'): boolean | undefined => {
     const text = hub.lists.get(uri.slice(uri.lastIndexOf('/') + 1));
@@ -185,8 +186,10 @@ test('no fresh step-up: refused with the passkey sentence, and nothing is signed
 test('without the role, above the role\'s ceiling, past the role\'s end, or to a did:key: refused before any signature or login', async () => {
   const cases: Array<[Parameters<typeof setup>[0], Partial<IssueRequest>, string]> = [
     [{ noRole: true }, {}, ISSUER_TEXT.noRole],
-    [{ roleUpTo: 'Confidential' }, {}, ISSUER_TEXT.noRole],
-    [{ roleUntil: '2027-01-01T00:00:00Z' }, { until: '2027-03-01' }, ISSUER_TEXT.noRole],
+    [{ roleUpTo: 'Confidential' }, {}, ISSUE_FORM_TEXT.aboveCeiling],
+    [{ roleUntil: '2027-01-01T00:00:00Z' }, { until: '2027-03-01' }, ISSUE_FORM_TEXT.pastRole],
+    // The form passes, and issuerAuthority itself refuses: your organization's rules no longer accept this kind of signature.
+    [{ suites: ['ecdsa-jcs-2019'] }, {}, ISSUER_TEXT.noRole],
     [{}, { subject: newKey().did }, ISSUER_TEXT.notAPerson],
     [{}, { type: 'IssuerRoleCredential', claims: { credentialType: 'ClearanceCredential' } }, ISSUER_TEXT.noRole],
   ];
@@ -361,4 +364,16 @@ test('at Alex\'s next session the item verifies, moves into the wallet and leave
   // Without the rules or the server in this session, items wait and the person is told so.
   const later = await identity.collectInbox(inboxVerifier({ engine: () => engine, policy: () => undefined, hub: () => s.hub, now: () => NOW }));
   assert.deepEqual(later.sentences, ['Credentials sent to you cannot be checked in this session yet, so they wait until they can.']);
+});
+
+test('the card\'s form and review: the types the officer may issue, and the review sentence before any step-up or signature', async () => {
+  const s = await setup();
+  const types = await s.serviceFor(s.officer).issuableTypes();
+  assert.equal(types.kind, 'ok');
+  if (types.kind !== 'ok') return;
+  assert.deepEqual(types.value.map((entry) => [entry.type, entry.ceiling]), [['ClearanceCredential', 'Secret on the Canadian classified scale']]);
+  assert.deepEqual(await s.serviceFor(s.officer).review(s.request(), PERSON),
+    ok({ sentence: 'You are about to issue: Secret clearance on the Canadian classified scale to Alex, until 28 February 2027.' }));
+  assert.deepEqual(await s.serviceFor(s.officer).review(s.request({ claims: { scale: 'ca-classified', atLeast: 'Top Secret' } }), PERSON), refused(ISSUE_FORM_TEXT.aboveCeiling));
+  assert.equal(s.officer.signs + s.vaultEvents.logins, 0, 'reviewing signs nothing');
 });

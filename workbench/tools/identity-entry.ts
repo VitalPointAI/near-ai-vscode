@@ -6,6 +6,7 @@ export { credentialHash, issueCredential, readCredential, verifyCredential } fro
 export { issuerAuthority } from '../../src/domain/credentials/issuerAuthority';
 export { STATUS_LIST_VALIDITY_MS, buildStatusList, clearSuspension, setBit, signStatusList, statusAt, verifyStatusList } from '../../src/domain/credentials/statusList';
 export { PERSON_ATTRIBUTE_TYPES, ROLE_TYPES } from '../../src/domain/credentials/types';
+export { issuableTypes, liftSentence, reviewSentence, revokeSentence, suspendSentence, typeLabel, validUntilFor, validateForm } from '../../src/domain/credentials/issueForm';
 export { CREDENTIAL_CONTEXTS } from '../../src/domain/credentials/context';
 export { SCALE_PRESETS } from '../../src/domain/gate/labels';
 export { deviceFingerprint, deviceIdentityWords } from '../../src/domain/did/deviceWords';

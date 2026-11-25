@@ -20,7 +20,7 @@
  * none of them reaches the browser. Nothing here imports Theia.
  */
 import { randomInt } from 'node:crypto';
-import { ISSUER_TEXT, REVOCATION_REASON_TEXT, type IssueRequest, type IssueResult, type IssuedCredentialView, type RevocationReason, type RevocationRequestView } from '../../common/issuer-service.js';
+import { ISSUER_TEXT, REVOCATION_REASON_TEXT, type IssuableType, type IssueFormField, type IssueReview, type IssueRequest, type IssueResult, type IssuedCredentialView, type RevocationReason, type RevocationRequestView } from '../../common/issuer-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { KeyService } from '../key-service.js';
 import type { EngineSigner } from './identity-service.js';
@@ -47,7 +47,21 @@ export interface IssuerEngine {
   readonly STATUS_LIST_VALIDITY_MS: number;
   readonly PERSON_ATTRIBUTE_TYPES: readonly string[];
   readonly ROLE_TYPES: readonly string[];
+  // The Issue credential form (src/domain/credentials/issueForm.ts).
+  issuableTypes(roles: readonly { readonly type: string; readonly validFrom: string; readonly validUntil: string; readonly claims: Readonly<Record<string, unknown>> }[],
+    policy: { readonly issuance: IssuerPolicy['section']['issuance']; readonly scales: unknown }, at: number): readonly FormIssuable[];
+  validateForm(issuable: FormIssuable, values: FormValuesView, scales: unknown, today: number): { readonly ok: true; readonly validUntil: string } | { readonly ok: false; readonly field: string; readonly message: string };
+  reviewSentence(type: string, values: FormValuesView, scales: unknown, today: number): string;
+  revokeSentence(type: string, personName: string): string;
+  suspendSentence(type: string, personName: string): string;
+  liftSentence(type: string, personName: string): string;
+  typeLabel(type: string): string;
+  validUntilFor(lastDay: string): string;
 }
+
+/** issueForm.ts's Issuable and FormValues, as the service passes them through. */
+export interface FormIssuable { readonly type: string; readonly label: string; readonly ceiling?: string; readonly roleValidUntil: string; readonly fields: readonly IssueFormField[] }
+interface FormValuesView { readonly personName: string; readonly subject: string; readonly until: string; readonly claims: Readonly<Record<string, string>> }
 
 export type Purpose = 'revocation' | 'suspension';
 export interface ReadView {
@@ -172,6 +186,8 @@ function issuedOf(data: Record<string, unknown> | undefined): Issued | undefined
 }
 
 export interface IssuerService {
+  issuableTypes(): Promise<ServiceResult<readonly IssuableType[]>>;
+  review(request: IssueRequest, caller: IssuerCaller): Promise<ServiceResult<IssueReview>>;
   issue(request: IssueRequest, caller: IssuerCaller): Promise<ServiceResult<IssueResult>>;
   listIssued(caller: IssuerCaller): Promise<ServiceResult<readonly IssuedCredentialView[]>>;
   revoke(hash: string, caller: IssuerCaller): Promise<ServiceResult<IssuedCredentialView>>;
@@ -307,6 +323,42 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
     return result.ok && result.role !== undefined && Date.parse(read.value.validUntil) <= Date.parse(result.role.validUntil);
   }
 
+  /** The types the officer may issue now (the form's view of their roles), each with its form. */
+  function issuable(context: Context): readonly FormIssuable[] {
+    const roles = context.roles.filter((role) => role.statusClear).map((role) => ({ type: role.read.type, validFrom: role.read.validFrom, validUntil: role.read.validUntil, claims: role.read.claims }));
+    return context.engine.issuableTypes(roles, { issuance: context.policy.section.issuance, scales: context.policy.scales }, now());
+  }
+  const valuesOf = (request: IssueRequest): FormValuesView => ({ personName: request.personName, subject: request.subject, until: request.until, claims: request.claims });
+
+  /** The form's refusal for a request, with the field's own sentence; undefined when it passes. */
+  function checkForm(context: Context, request: IssueRequest): ServiceResult<never> | undefined {
+    const found = issuable(context).find((entry) => entry.type === request.type);
+    if (found === undefined) return refused(ISSUER_TEXT.noRole);
+    const check = context.engine.validateForm(found, valuesOf(request), context.policy.scales, now());
+    return check.ok ? undefined : refused(check.message);
+  }
+
+  async function issuableTypes(): Promise<ServiceResult<readonly IssuableType[]>> {
+    return run({ presence: 'person', context: 'interactive' }, async () => {
+      const context = await contextFor();
+      return ok(issuable(context).map((entry) => ({
+        type: entry.type, label: entry.label, ...(entry.ceiling === undefined ? {} : { ceiling: entry.ceiling }), roleValidUntil: entry.roleValidUntil, fields: entry.fields,
+      })));
+    });
+  }
+
+  async function review(request: IssueRequest, caller: IssuerCaller): Promise<ServiceResult<IssueReview>> {
+    return run(caller, async () => {
+      if (typeof request?.subject !== 'string' || typeof request.type !== 'string' || typeof request.until !== 'string' || request.claims === null || typeof request.claims !== 'object') {
+        return refused(ISSUER_TEXT.badRequest);
+      }
+      const context = await contextFor();
+      const form = checkForm(context, request);
+      if (form !== undefined) return form;
+      return ok({ sentence: context.engine.reviewSentence(request.type, valuesOf(request), context.policy.scales, now()) });
+    });
+  }
+
   function listFor(policy: IssuerPolicy, purpose: Purpose): string {
     const found = policy.section.statusLists.find((list) => list.purpose === purpose);
     return found === undefined ? stop(ISSUER_TEXT.noRules) : found.uri;
@@ -318,7 +370,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
     });
     return {
       '@context': [...context.engine.CREDENTIAL_CONTEXTS], type: ['VerifiableCredential', request.type], issuer: context.did,
-      validFrom: iso(now()), validUntil: `${request.until}T00:00:00Z`,
+      validFrom: iso(now()), validUntil: context.engine.validUntilFor(request.until),
       credentialSubject: { id: request.subject, ...request.claims },
       credentialStatus: [entry('revocation', revocation), entry('suspension', suspension)],
     };
@@ -350,6 +402,8 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
       }
       const context = await contextFor();
       if (!context.engine.PERSON_ATTRIBUTE_TYPES.includes(request.type)) return refused(ISSUER_TEXT.noRole);
+      const form = checkForm(context, request);
+      if (form !== undefined) return form;
       const revocationList = listFor(context.policy, 'revocation');
       const suspensionList = listFor(context.policy, 'suspension');
       // Authority first, on the very credential to be signed (its places are filled in after): no step-up, no place, no signature without it.
@@ -406,7 +460,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
     return found;
   }
 
-  async function viewOf(context: Context, hash: string, issued: Issued, labels: (type: string) => string): Promise<IssuedCredentialView> {
+  async function viewOf(context: Context, hash: string, issued: Issued): Promise<IssuedCredentialView> {
     let state: IssuedCredentialView['state'] = 'active';
     try {
       if (await bitSet(context, issued.revocation, 'revocation')) state = 'revoked';
@@ -414,16 +468,19 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
     } catch {
       state = 'unknown';
     }
-    return { hash, type: issued.type, label: labels(issued.type), personName: issued.personName, validUntil: issued.validUntil, state };
+    const { engine } = context;
+    return {
+      hash, type: issued.type, label: engine.typeLabel(issued.type), personName: issued.personName, validUntil: issued.validUntil, state,
+      reviews: { revoke: engine.revokeSentence(issued.type, issued.personName), suspend: engine.suspendSentence(issued.type, issued.personName), lift: engine.liftSentence(issued.type, issued.personName) },
+    };
   }
-  const plainType = (type: string): string => type.replace(/Credential$/, '').replace(/([a-z])([A-Z])/g, '$1 $2');
 
   async function listIssued(caller: IssuerCaller): Promise<ServiceResult<readonly IssuedCredentialView[]>> {
     return run(caller, async () => {
       const context = await contextFor();
       return withVault(async (vault) => {
         const mine = (await register(vault)).filter((entry) => entry.issued.issuer === context.did);
-        return ok(await Promise.all(mine.map((entry) => viewOf(context, entry.hash, entry.issued, plainType))));
+        return ok(await Promise.all(mine.map((entry) => viewOf(context, entry.hash, entry.issued))));
       });
     });
   }
@@ -471,7 +528,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
         } else {
           await changeBit(context, vault, what === 'revoke' ? found.issued.revocation : found.issued.suspension, what === 'revoke' ? 'revocation' : 'suspension', true);
         }
-        return ok(await viewOf(context, hash, found.issued, plainType));
+        return ok(await viewOf(context, hash, found.issued));
       });
     });
   }
@@ -511,7 +568,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
           const entity = await vault.entityId(request.entityName);
           const entries = entity === undefined ? [] : await register(vault, entity);
           const mine = entries.filter((entry) => entry.issued.issuer === context.did);
-          const credentials = await Promise.all(mine.map((entry) => viewOf(context, entry.hash, entry.issued, plainType)));
+          const credentials = await Promise.all(mine.map((entry) => viewOf(context, entry.hash, entry.issued)));
           const reasonText = (REASONS as readonly string[]).includes(request.reason) ? REVOCATION_REASON_TEXT[request.reason as RevocationReason] : request.reason;
           views.push({
             id, current: true, personName: entries.find((entry) => entry.issued.personName !== '')?.issued.personName ?? 'A person',
@@ -553,7 +610,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
   }
 
   return {
-    issue, listIssued, listRevocationRequests, resolveRequest, roles,
+    issuableTypes, review, issue, listIssued, listRevocationRequests, resolveRequest, roles,
     revoke: (hash, caller) => act(hash, caller, 'revoke'),
     suspend: (hash, caller) => act(hash, caller, 'suspend'),
     clearSuspension: (hash, caller) => act(hash, caller, 'clear'),

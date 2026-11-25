@@ -119,6 +119,8 @@ export default new ContainerModule(bind => {
   bindBackendService<IssuerServiceRpc>(bind, IssuerServiceRpc, ISSUER_SERVICE_PATH, context => {
     const service = context.container.get<IssuerService>(IssuerServiceId);
     return {
+      issuableTypes: () => service.issuableTypes(),
+      review: request => service.review(request, CARD_CALLER),
       issue: request => service.issue(request, CARD_CALLER),
       listIssued: () => service.listIssued(CARD_CALLER),
       revoke: hash => service.revoke(hash, CARD_CALLER),
