@@ -33,7 +33,8 @@ export const SEALED_OVERHEAD = IV_BYTES + TAG_BYTES;
 const HEADER_KEYS = ['v', 'stream', 'writer', 'seq', 'prev', 'epoch', 'body', 'sig'] as const;
 
 export interface Dep { writer: string; seq: number; hash: string }
-export type Actor = { kind: 'person' } | { kind: 'agent'; member: string; run: string } | { kind: 'hub'; watch: string };
+// A person actor may name the position the act is made as (Phase 33.1 D-10): inside the sealed body, accepted only behind positions@1.
+export type Actor = { kind: 'person'; position?: string } | { kind: 'agent'; member: string; run: string } | { kind: 'hub'; watch: string };
 
 export interface EntryHeader {
   v: 2;
@@ -261,7 +262,7 @@ export function isActorShape(value: unknown): value is Actor {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
   const only = (...allowed: string[]): boolean => keys.length === allowed.length && allowed.every((key) => keys.includes(key));
-  if (value.kind === 'person') return only('kind');
+  if (value.kind === 'person') return only('kind') || (only('kind', 'position') && typeof value.position === 'string' && ACTOR_NAME.test(value.position));
   if (value.kind === 'agent') return only('kind', 'member', 'run') && typeof value.member === 'string' && ACTOR_NAME.test(value.member) && typeof value.run === 'string' && RUN_ID.test(value.run);
   if (value.kind === 'hub') return only('kind', 'watch') && typeof value.watch === 'string' && ACTOR_NAME.test(value.watch);
   return false;

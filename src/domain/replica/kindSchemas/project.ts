@@ -113,7 +113,8 @@ export function isLegacyFile(value: unknown): value is string {
 // ---- a small table-driven checker the family files of this plan share ----
 
 export type Check = (value: unknown, path: string) => string | undefined;
-export interface Shape { required: Record<string, Check>; optional?: Record<string, Check>; atLeastOneOf?: readonly string[] }
+// rule: a check across fields (this needs that, these never together), run after every field passed its own check.
+export interface Shape { required: Record<string, Check>; optional?: Record<string, Check>; atLeastOneOf?: readonly string[]; rule?: (data: Record<string, unknown>, path: string) => string | undefined }
 
 export const slugCheck: Check = (value, path) => (isSlug(value) ? undefined : invalidAt(path));
 export const hashCheck: Check = (value, path) => (isHash(value) ? undefined : invalidAt(path));
@@ -153,7 +154,7 @@ export function validateShape(shapes: Readonly<Record<string, Shape>>, kind: str
     if (problem !== undefined) return problem;
   }
   if (shape.atLeastOneOf !== undefined && !shape.atLeastOneOf.some((key) => hasOwn(data, key))) return invalidAt(path, 'nothing to change');
-  return undefined;
+  return shape.rule?.(data, path);
 }
 
 // Returns a reason, or undefined when the data is valid.

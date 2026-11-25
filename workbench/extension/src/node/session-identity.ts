@@ -52,6 +52,10 @@ export interface ActiveSession {
   readonly acr?: string;
   /** Seconds since the epoch, from the latest forwarded token. */
   readonly authTime?: number;
+  /** The latest forwarded token's subject (33.1 D-09). */
+  readonly sub?: string;
+  /** The subject of the token the session became active with: a step-up binds an action only when the two are the same person (33.1-17). */
+  readonly activeSub?: string;
   readonly client: OpenBaoClient;
   readonly config: HostedConfig;
 }
@@ -166,6 +170,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
   let baoToken: string | undefined;
   let entityId: string | undefined;
   let space: KvSpace = 'users';
+  let activeSub: string | undefined;
   let leaseEndsAt = 0;
   let identityTimer: unknown;
   let renewTimer: unknown;
@@ -282,6 +287,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
         baoToken = fresh.token;
         entityId = fresh.entity;
         space = fresh.space;
+        activeSub = forwarded.claims.sub;
         moveTo('active');
         scheduleRenewal(fresh.lease, mine);
       } catch (error) {
@@ -300,6 +306,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
     clearTimers();
     baoToken = undefined;
     entityId = undefined;
+    activeSub = undefined;
     moveTo('identity');
     const mine = generation;
     identityTimer = clock.setTimeout(() => {
@@ -381,6 +388,8 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
         forwardedToken: latest.jwt,
         ...(claims.acr === undefined ? {} : { acr: claims.acr }),
         ...(claims.authTime === undefined ? {} : { authTime: claims.authTime }),
+        ...(claims.sub === undefined ? {} : { sub: claims.sub }),
+        ...(activeSub === undefined ? {} : { activeSub }),
         client: client!,
         config,
       };

@@ -10,6 +10,7 @@ import { LEGACY_FILE_MAX_BYTES } from '../domain/replica/kindSchemas/project';
 import { PROJECT_REFUSALS, projectReducer } from '../domain/replica/projectFold';
 import type { ProjectOutput } from '../domain/replica/projectFold';
 import type { FoldView } from '../domain/replica/reducers';
+import { ROSTER_KIND_OWNER } from '../domain/replica/roster';
 import { verifyEntry } from '../domain/replica/verify';
 import type { VerifiedEntry } from '../domain/replica/verify';
 import type { ProductTextOutput } from '../domain/replica/textFold';
@@ -65,6 +66,9 @@ const PROJECT_AND_ROSTER: Sample[] = [
   { kind: 'roster.require', data: { features: ['positions@1', 'require@1'], rosterPrev: PREV }, required: ['features', 'rosterPrev'] },
   { kind: 'hub.readmit', data: { hub: 'hub-main', certPin: HASH('9'), fromCheckpoint: HASH('a'), rosterPrev: PREV }, required: ['hub', 'certPin', 'rosterPrev'] }
 ];
+
+// The roster kinds Phase 33.1 adds, routed to the positions module.
+const ROSTER_KIND_OWNER_33_1: ReadonlySet<string> = new Set(Object.keys(ROSTER_KIND_OWNER).filter((kind) => ROSTER_KIND_OWNER[kind] === 'positions'));
 
 function reasonOf(kind: string, data: unknown): string {
   const check = validateData(kind, data);
@@ -556,11 +560,12 @@ test('roster entries are kept folded-in-later-phase and change no state, yet sta
   assert.deepEqual(keptOnly.families, baseline.families);
 });
 
-test('the closed kind list has 55 kinds and the 22 project and roster samples are all of them', () => {
-  assert.equal(REPLICA_KINDS.length, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
-  assert.equal(new Set(REPLICA_KINDS).size, 55, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03');
-  // device.kem is the device family's (33.2 D-03), not a roster kind, though its name starts with device.
-  const owned = REPLICA_KINDS.filter((kind) => kind !== 'device.kem' && (kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind)));
+test('the closed kind list has 71 kinds and the 22 project and roster samples are all of them', () => {
+  assert.equal(REPLICA_KINDS.length, 71, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1');
+  assert.equal(new Set(REPLICA_KINDS).size, 71, 'roster.require (POST-01), hub.readmit (D-42) and session.certify (D-62), Phase 33; device.kem, 33.2 D-03; 14 roster and 2 personnel kinds of Phase 33.1');
+  // device.kem is the device family's (33.2 D-03), not a roster kind, though its name starts with device. Phase 33.1's roster kinds have their
+  // samples in replicaPositionSchemas.test.ts.
+  const owned = REPLICA_KINDS.filter((kind) => kind !== 'device.kem' && !ROSTER_KIND_OWNER_33_1.has(kind) && (kind.startsWith('project.') || /^(member|device|hub|cell|lead|roster|deputy|invite)\./.test(kind)));
   assert.equal(owned.length, 22, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33');
   assert.deepEqual([...owned].sort(), PROJECT_AND_ROSTER.map((sample) => sample.kind).sort());
 });

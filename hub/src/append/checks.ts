@@ -37,7 +37,7 @@
 // A roster entry the fold refuses is still stored, because it is the writer's log; the roster head simply does not move.
 import { readGrant } from '@ext/domain/replica/cellKeys';
 import { GENESIS_PREV, entryHash, openBlob, openBody, parseHeaderShape, sha256Hex, verifyHeader } from '@ext/domain/replica/entry';
-import type { EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
+import type { Actor, EntryHeader, SealedBlob, SealedEntry } from '@ext/domain/replica/entry';
 import { canonicalProof, proofHash } from '@ext/domain/replica/equivocation';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { DEVICE_KEM_REFUSALS, deviceKemContext, deviceKemProblem } from '@ext/domain/replica/deviceKem';
@@ -46,7 +46,8 @@ import { missingFeatures } from '@ext/domain/replica/features';
 import { WRAP_FEATURE, WRAP_FORMAT_REFUSALS, wrapFormatProblem } from '@ext/domain/replica/wrapFormat';
 import { hubReplicaFeatures } from '../features';
 import { validateBody, validateData } from '@ext/domain/replica/kinds';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, isRosterWriterAt } from '@ext/domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, ROSTER_REFUSALS, isRosterWriterAt, positionWriteProblem } from '@ext/domain/replica/roster';
+import { POSITION_REFUSALS } from '@ext/domain/replica/rosterPositions';
 import { SESSION_REFUSALS, isPersonKeyKind } from '@ext/domain/replica/sessionKeys';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
@@ -92,7 +93,12 @@ export const APPEND_REFUSALS = {
   // 33.2 D-03: a device's post-quantum key binding, checked with the fold's own function.
   ...DEVICE_KEM_REFUSALS,
   // 33.2 D-06: the cutover rule, the fold's own function.
-  ...WRAP_FORMAT_REFUSALS
+  ...WRAP_FORMAT_REFUSALS,
+  // Phase 33.1: positions and postings, judged by the fold's own rule (positionWriteProblem) at the roster the entry cites.
+  'person-only': ROSTER_REFUSALS['person-only'],
+  'roster-kind-pending': ROSTER_REFUSALS['roster-kind-pending'],
+  'not-an-active-member': ROSTER_REFUSALS['not-an-active-member'],
+  ...POSITION_REFUSALS
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -201,8 +207,9 @@ function headerSize(header: unknown): number | undefined {
 interface OpenedBase {
   kind: string;
   roster: string;
-  at: string;
   data: unknown;
+  actor: Actor;
+  at: string;
 }
 
 /** Why a base-stream body was not read: no key for its epoch yet (held: stored, judged by the fold later), its blob not held (the batch is sent
@@ -224,7 +231,7 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   const checked = validateBody(parsed);
   if (!checked.ok) return { ok: false, why: 'unreadable' };
   const body = checked.body;
-  if (body.blob === undefined) return { ok: true, opened: { kind: body.kind, roster: body.roster, at: body.at, data: body.data } };
+  if (body.blob === undefined) return { ok: true, opened: { kind: body.kind, roster: body.roster, data: body.data, actor: body.actor, at: body.at } };
   let blob = batchBlobs.get(body.blob) ?? roster.blob(body.blob);
   if (blob === undefined) {
     const bytes = await store.readBlob(project, body.blob);
@@ -234,7 +241,7 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   const opened = openBlob(key, header.stream, header.epoch, blob);
   if (opened === undefined) return { ok: false, why: 'unreadable' };
   try {
-    return { ok: true, opened: { kind: body.kind, roster: body.roster, at: body.at, data: JSON.parse(opened.toString('utf8')) as unknown }, blob };
+    return { ok: true, opened: { kind: body.kind, roster: body.roster, data: JSON.parse(opened.toString('utf8')) as unknown, actor: body.actor, at: body.at }, blob };
   } catch {
     return { ok: false, why: 'unreadable' };
   }
@@ -512,8 +519,12 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         // A cited roster the hub's line does not hold is stored too: the fold applies nothing from it unless that roster is applied, and then
         // judges the writer there.
         const rosterPrev = kind === 'project.genesis' ? ORIGIN_ROSTER : isRecord(data) && typeof data.rosterPrev === 'string' ? data.rosterPrev : read.opened.roster;
-        if (roster.isRosterWriterAtRoster(header.writer, rosterPrev) === false) {
-          refuse('not-a-roster-writer', hash);
+        // A position or posting write (Phase 33.1) is judged by the fold's own rule, which also lets the posted member report for their posting.
+        const cited = roster.state.positionOf.get(rosterPrev);
+        const problem = ROSTER_KIND_OWNER[kind] !== 'positions' ? (roster.isRosterWriterAtRoster(header.writer, rosterPrev) === false ? 'not-a-roster-writer' : undefined)
+          : cited === undefined ? undefined : positionWriteProblem(roster.state, { writer: header.writer, kind, data, actor: read.opened.actor, at: read.opened.at }, cited);
+        if (problem !== undefined) {
+          refuse(problem, hash);
           continue;
         }
         baseEntries.push({ header, body: raw.body as string });

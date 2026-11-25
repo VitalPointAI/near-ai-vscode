@@ -21,7 +21,7 @@ import { KEY_SERVICE_TEXT } from '../../common/key-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { SessionIdentityStatus } from '../../common/session-identity.js';
 import type { KeyService } from '../key-service.js';
-import { isPublicKeyText, personSigner, signerFingerprint, type PersonSigner } from './person-signer.js';
+import { isPublicKeyText, personSigner, signerFingerprint, type ActionGate, type PersonSigner } from './person-signer.js';
 import type { StaffEngine } from './staff-engine.js';
 
 /** How long a session key's certificate lasts (D-62); your organization's server refuses it after notAfter. */
@@ -91,6 +91,8 @@ export interface SessionKeyOptions {
   /** The person key's raw Ed25519 public key, base64url (the Transit key person-<entity>). Absent: read through KeyService.personPublicKey. */
   readonly personPublicKey?: string;
   readonly engine: Pick<StaffEngine, 'sessionCertifyData' | 'writerIdOf'>;
+  /** The session's pending actions (33.1-17): the person signer signs an action id only under the step-up bound to it. */
+  readonly actions?: ActionGate;
 }
 
 /**
@@ -121,7 +123,7 @@ async function start(
   const personKey: string = personPublicKey;
 
   const { engine } = options;
-  const person = personSigner(keyService, personKey, keyVersion);
+  const person = personSigner(keyService, personKey, { keyVersion, actions: options.actions });
   const pair = generateKeyPairSync('ed25519');
   let privateKey: KeyObject | undefined = pair.privateKey;
   const publicKey = Buffer.from(pair.publicKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64url');

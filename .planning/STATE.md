@@ -168,6 +168,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
 - 47-20 blocked: its precondition needs 71-12 (the revocation card that reads the requests) on the base; 71-12 has no SUMMARY on main
 - 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
+- 33.1-15 waits for 32.1-24 (nearAi.setup.message) on the base (33.1-17 finished 2026-11-24 once 33-23 and #187 reached Phase 33's branch)
 
 ### Quick Tasks Completed
 
@@ -237,6 +238,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P23 | 45m | 3 tasks | 10 files |
 | Phase 47 P24 | 50m | 2 tasks | 10 files |
 | Phase 47 P34 | 1h30m | 3 tasks | 21 files |
+| Phase 33.1 P01 | 23 min | 3 tasks | 14 files |
+| Phase 33.1 P17 | 50 min | 3 tasks | 12 files |
 
 ## Decisions
 
@@ -353,3 +356,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
 - [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience
 - [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
+- [Phase 33.1]: 33.1-01: owner answered the permanent-shapes checkpoint 'as listed' (D-43); positionWriteProblem is the one write rule for positions kinds, run by the fold and the hub
+- [Phase 33.1]: 33.1-17: a step-up binds one action only on its own nonce's return route; appendOwn refuses person-key-required and action-required before signing

@@ -27,7 +27,7 @@ import type { DeviceIdentity } from '../../team/identity';
 import { localKeyStatus } from '../../team/keyHistory';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../../domain/team/signedPayload';
-import { isPersonKeyKind } from '../../domain/replica/sessionKeys';
+import { SESSION_REFUSALS, isPersonKeyKind, requiresActionId } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
 import { buildGrantAsync, newEpochKey, openLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
@@ -75,7 +75,9 @@ export const PROJECT_REFUSALS_HOST = {
   'already-shared': 'This project folder already holds a shared staff project, so a second one was not made. Nothing was changed.',
   'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.',
   'needs-update': UPDATE_SENTENCE,
-  'signer-refused': 'Your key did not sign this change, so nothing was written.'
+  'signer-refused': 'Your key did not sign this change, so nothing was written.',
+  'person-key-required': SESSION_REFUSALS['person-key-required'],
+  'action-required': 'This change needs your own confirmation for this one action, so nothing was written.'
 } as const;
 export type ProjectRefusal = keyof typeof PROJECT_REFUSALS_HOST;
 /** A refusal; `store` names the store's own reason when the store refused. */
@@ -234,6 +236,8 @@ export interface AppendOwnOptions {
   at?: string;
   /** The signer, when not the one signerOf(kind) gives (Phase 33 D-60). */
   signer?: PayloadSigner | AsyncPayloadSigner;
+  /** The one person action this entry belongs to (33.1 D-09); passed to the signer, never written into the entry. */
+  action?: string;
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
 export interface OwnEntry { hash: string; stream: string; seq: number; data: unknown }
@@ -1155,7 +1159,13 @@ export class ReplicaProject {
     const epoch = epochAt(roster.cells, stream, position);
     const key = epoch === undefined ? undefined : this.keys.epochKey(stream, epoch);
     if (epoch === undefined || key === undefined) return refuse('no-key');
-    const signer = options.signer ?? this.signerOf(kind);
+    const chosen = options.signer ?? this.signerOf(kind);
+    // 33.1 D-09: in a hosted project only the person signer signs a person-key kind, and a kind outside Phase 33's list only under its action.
+    const person = this.deps.personSigner;
+    if ((person !== undefined || this.deps.sessionSigner !== undefined) && isPersonKeyKind(kind) && chosen !== person) return refuse('person-key-required');
+    if (person !== undefined && options.action === undefined && requiresActionId(kind)) return refuse('action-required');
+    const action = options.action;
+    const signer = action === undefined ? chosen : { fingerprint: chosen.fingerprint, publicKey: chosen.publicKey, sign: async (bytes: Buffer) => chosen.sign(bytes, { action }) };
     const head = this.store.head(stream, writerIdOf(signer.publicKey));
     const deps: Dep[] = (options.deps ?? []).map((hash) => {
       const entry = this.entryByHash(hash);

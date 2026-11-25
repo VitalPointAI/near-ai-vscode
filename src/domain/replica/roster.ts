@@ -24,9 +24,10 @@
 //
 // Module seams (plans 31-14 to 31-17 each extend one file): ROSTER_KIND_OWNER routes each kind to rosterMembers (member, device, hub and invite
 // kinds), rosterCells (cell kinds) or this file (genesis, lead.handover, deputy.name, roster.choose, roster.require), and rosterView builds every answer from query
-// functions those modules export.
+// functions those modules export. Phase 33.1 adds rosterPositions (positions and postings, routed 'positions'), whose write rule is
+// positionWriteProblem below, shared with your organization's server.
 import { GENESIS_PREV, parseHeaderShape, entryHash, writerIdOf } from './entry';
-import type { SealedBlob } from './entry';
+import type { Actor, SealedBlob } from './entry';
 import { readGrant } from './cellKeys';
 import type { CellGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
@@ -38,6 +39,8 @@ import { addGrant, applyCellEntry, applyGenesisCells, createCellsState, epochAt,
 import type { CellsState } from './rosterCells';
 import { applyGenesisLead, applyMemberEntry, chosenBranchOf, createMembersState, deviceAt, deviceKeyOf, devicesOfMemberAt, hubAt, hubReadmitPositions, hubSignerAt, memberAt, quarantinesOf, seatsAt, slotOwnerAt, x25519At } from './rosterMembers';
 import type { MembersState } from './rosterMembers';
+import { POSITION_REFUSALS, applyPositionEntry, createPostsState, positionAt, positionTakenAt, postingAt, postingReportedAt } from './rosterPositions';
+import type { PositionRefusal, PostsState } from './rosterPositions';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
 import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
 import type { SessionCertificate, SessionCertifyData } from './sessionKeys';
@@ -50,9 +53,9 @@ export const ORIGIN_ROSTER = GENESIS_PREV;
 // What a joining machine pins (D-07): the genesis hash, the project id, and the lead's member id and keys.
 export interface RosterAnchor { genesisHash: string; project: string; lead: { member: string; writer: string; publicKey: string; x25519: string } }
 
-export type RosterKindOwner = 'members' | 'cells' | 'roster';
+export type RosterKindOwner = 'members' | 'cells' | 'roster' | 'positions';
 
-// Every roster kind (20) and project.genesis, each routed to exactly one owner module.
+// Every roster kind (34) and project.genesis, each routed to exactly one owner module.
 export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Object.freeze({
   'project.genesis': 'roster',
   'member.invite': 'members',
@@ -74,7 +77,22 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'lead.handover': 'roster',
   'roster.choose': 'roster',
   'deputy.name': 'roster',
-  'roster.require': 'roster'
+  'roster.require': 'roster',
+  // Phase 33.1: positions and postings. Kinds without a reducer yet are refused roster-kind-pending by positionWriteProblem.
+  'position.create': 'positions',
+  'position.update': 'positions',
+  'position.disestablish': 'positions',
+  'authority.delegate': 'positions',
+  'authority.revoke': 'positions',
+  'posting.order': 'positions',
+  'posting.enrol': 'positions',
+  'posting.report': 'positions',
+  'posting.decide': 'positions',
+  'posting.return': 'positions',
+  'posting.end': 'positions',
+  'posting.cancel': 'positions',
+  'cell.rekey.staged': 'positions',
+  'project.mode': 'positions'
 });
 
 export const ROSTER_REFUSALS = {
@@ -91,7 +109,8 @@ export const ROSTER_REFUSALS = {
   'choose-not-allowed': 'Only the staff lead chooses a roster branch, or the deputy lead when the lead has no active device, so this choice is refused.',
   'choose-not-a-branch': 'This choice names an entry that is not one of the roster changes made at the roster it follows, so it is refused.',
   'choose-superseded': 'A later choice at the same roster split was applied instead, so this one changes nothing.',
-  'choose-branch-refused': 'The change this choice picked is itself refused, so the choice resolves nothing and the roster split stays open. Choose one of the other changes, or make the change again.'
+  'choose-branch-refused': 'The change this choice picked is itself refused, so the choice resolves nothing and the roster split stays open. Choose one of the other changes, or make the change again.',
+  ...POSITION_REFUSALS
 } as const;
 export type RosterRefusal = keyof typeof ROSTER_REFUSALS;
 
@@ -121,6 +140,8 @@ export interface RosterState {
   positionOf: Map<string, number>;
   members: MembersState;
   cells: CellsState;
+  // Positions and postings (Phase 33.1), each record at the roster position it took effect.
+  posts: PostsState;
   // Who holds staff_lead and deputy_lead from which position: the anchor's lead from the origin, then each lead.handover and deputy.name at the
   // position it takes. A deputy record without a member ends the deputy role (the deputy became the lead).
   leads: Array<{ member: string; from: number }>;
@@ -152,6 +173,7 @@ function createRosterState(anchor: RosterAnchor): RosterState {
     positionOf: new Map([[ORIGIN_ROSTER, 0]]),
     members: createMembersState(anchor),
     cells: createCellsState(anchor.project),
+    posts: createPostsState(),
     leads: [{ member: anchor.lead.member, from: 0 }],
     deputies: [],
     pending: [],
@@ -181,6 +203,59 @@ export function isRosterWriterAt(state: RosterState, writer: string, position: n
   const device = deviceAt(state.members, writer, position);
   if (device === undefined || memberAt(state.members, device.member, position) === undefined) return false;
   return device.member === leadAt(state, position) || device.member === deputyAt(state, position);
+}
+
+/** The parts of an entry the position write rule reads: the same from a verified entry (the fold) and an opened base-stream body (the hub). */
+export interface PositionWrite { writer: string; kind: string; data: unknown; actor: Actor; at: string }
+
+// The kinds whose reducers exist (33.1-01); every other positions kind is refused as not yet applied until its plan applies it.
+const APPLIED_POSITION_KINDS: ReadonlySet<string> = new Set(['position.create', 'posting.order', 'posting.report']);
+
+/**
+ * Why this position or posting write is refused at the roster position it cites, or undefined (D-01, D-02, D-09, D-12). The one rule the roster fold
+ * and your organization's server both run, so they cannot disagree:
+ * - only a person acts: an agent or hub actor is refused on every positions kind (DESIGN 3.4);
+ * - position.create: a device of the lead or the deputy (a roster writer), with a new position id;
+ * - posting.order: a device of the lead (delegates come in 33.1-04), naming a position that exists and is vacant (handover is 33.1-05), a new
+ *   posting id and an active member; a new person, a delegated grant, staged key changes and acting or temporary postings are not applied yet;
+ * - posting.report: a device of the posted member (the self-report rule, DESIGN 3.7), for an ordered posting not reported yet, signed on or after
+ *   its start by its signed time (D-12).
+ */
+/** The refusals positionWriteProblem can give, each one your organization's server also names (hub APPEND_REFUSALS). */
+export type PositionWriteRefusal = Extract<RosterRefusal, 'person-only' | 'roster-kind-pending' | 'not-a-roster-writer' | 'not-an-active-member'> | PositionRefusal;
+
+export function positionWriteProblem(state: RosterState, write: PositionWrite, cited: number): PositionWriteRefusal | undefined {
+  if (write.actor.kind !== 'person') return 'person-only';
+  if (!APPLIED_POSITION_KINDS.has(write.kind)) return 'roster-kind-pending';
+  const signer = deviceAt(state.members, write.writer, cited)?.member;
+  if (write.kind === 'position.create') {
+    if (!isRosterWriterAt(state, write.writer, cited)) return 'not-a-roster-writer';
+    const position = (write.data as { position: string }).position;
+    return positionAt(state.posts, position, cited) === undefined ? undefined : 'position-exists';
+  }
+  if (write.kind === 'posting.order') {
+    if (signer === undefined || signer !== leadAt(state, cited) || memberAt(state.members, signer, cited) === undefined) return 'order-not-allowed';
+    const order = write.data as { posting: string; position: string; person: { member?: string }; kind: string; grant?: string; stages: readonly string[] };
+    if (order.person.member === undefined || order.grant !== undefined || order.stages.length > 0 || order.kind !== 'substantive') return 'roster-kind-pending';
+    if (positionAt(state.posts, order.position, cited) === undefined) return 'unknown-position';
+    if (postingAt(state.posts, order.posting, cited) !== undefined) return 'posting-exists';
+    if (memberAt(state.members, order.person.member, cited) === undefined) return 'not-an-active-member';
+    return positionTakenAt(state.posts, order.position, cited) ? 'position-not-vacant' : undefined;
+  }
+  const posting = postingAt(state.posts, (write.data as { posting: string }).posting, cited);
+  if (posting === undefined) return 'unknown-posting';
+  if (signer === undefined || signer !== posting.member) return 'not-the-posted-member';
+  if (postingReportedAt(posting, cited)) return 'posting-not-open';
+  return Date.parse(write.at) < Date.parse(posting.start) ? 'report-before-start' : undefined;
+}
+
+const positionWriteOf = (entry: VerifiedEntry): PositionWrite => ({ writer: entry.header.writer, kind: entry.body.kind, data: entry.data, actor: entry.body.actor, at: entry.body.at });
+
+// Who may write this roster entry at the head: positionWriteProblem for a positions kind (the posted member reports for their own posting), a roster
+// writer for every other kind.
+function authorityProblem(state: RosterState, entry: VerifiedEntry, head: number): string | undefined {
+  if (ROSTER_KIND_OWNER[entry.body.kind] === 'positions') return positionWriteProblem(state, positionWriteOf(entry), head);
+  return isRosterWriterAt(state, entry.header.writer, head) ? undefined : 'not-a-roster-writer';
 }
 
 // The member whose device wrote the entry, at the roster the entry cites.
@@ -348,6 +423,13 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
   if (entry.body.kind === 'roster.require') return applyRequire(state, entry, position);
+  if (owner === 'positions') {
+    // Judged again at the roster it cites, because a chosen branch reaches here without the head's authority check.
+    const problem = positionWriteProblem(state, positionWriteOf(entry), position - 1);
+    if (problem !== undefined) return { status: 'refused', reason: problem };
+    applyPositionEntry(state.posts, entry.body.kind, entry.data, signerAt(state, entry, position - 1) as string, position);
+    return { status: 'applied' };
+  }
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
 }
@@ -420,12 +502,13 @@ export function foldRoster(input: RosterFoldInput): RosterState {
     const head = state.positions[headPosition];
     const citing = ready.filter((entry) => rosterPrevOf(entry) === head);
     if (citing.length === 0) break;
-    // Authority at the head: an entry by a device that may not write the roster there is refused, so it can neither apply nor split the roster.
+    // Authority at the head: an entry by a device that may not write it there is refused, so it can neither apply nor split the roster.
     const candidates: VerifiedEntry[] = [];
     for (const entry of citing) {
       ready.splice(ready.indexOf(entry), 1);
-      if (isRosterWriterAt(state, entry.header.writer, headPosition)) candidates.push(entry);
-      else refuse(entry.hash, entry.body.kind, 'not-a-roster-writer');
+      const problem = authorityProblem(state, entry, headPosition);
+      if (problem === undefined) candidates.push(entry);
+      else refuse(entry.hash, entry.body.kind, problem);
     }
     if (candidates.length === 0) continue;
     // A roster.choose citing the head is not a branch: it names one of the other candidates (the branches) and lets that one continue the line.
