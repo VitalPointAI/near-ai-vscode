@@ -5726,8 +5726,8 @@
       ],
       "id": "G430",
       "ownerRole": "maintainers",
-      "remediation": "A person who joins a shared project late pulls its whole history: the changes pulled from after the newest checkpoint of your organization's server stay held, because the project's fold on a computer is never given the checkpoints it stored, and the live engine never asks for a pull from a checkpoint base. Even when that is wired, a late joiner can start from a summary only in the cells your organization's server holds (the base cell and cells granted after the trade-off), because the server checkpoints no other cell. Decide and build the checkpoint-aware fold and the joining pull, then restore the held-back late joiner scenario. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
-      "title": "A late joiner cannot start from a checkpoint and a summary yet"
+      "remediation": "A person who joins a shared project late now starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server after the trade-off: the server checkpoints no other cell, so there the history is read in full (nothing is left out, and the person is told so). A summary of a product's text also counts only once the registrations of the editing sessions it holds have arrived, and those are written before the checkpoint, so the text is complete only when the earlier history has been served. Decide how a summary may name the sessions it holds without their registrations, then build serving the earlier history after the start. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
+      "title": "A late joiner starts from a checkpoint only in cells the server holds, and its text waits for the earlier history"
     }
   ]
 }
