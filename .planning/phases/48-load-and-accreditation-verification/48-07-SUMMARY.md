@@ -28,7 +28,7 @@ decisions:
   - The tracer control is ia-05, per-person secrets; Theia's key store holds extension secrets (tokens), which is authenticator protection
   - The image SBOM statement is on cm-08, not cm-02, so cm-02 keeps the installer-SBOM limitation the bundle test pins
   - The VSIX statements stay, because the release still builds the VSIX and the Sterling image bundles it (workflow-files test "the Sterling image bundles the verified VSIX and is smoke-tested before archiving")
-  - The compliance job's workbench-image sbom input was not added, because the compliance job does not need the workbench job (G481)
+  - The compliance job's workbench-image sbom input was not added, because the compliance job does not need the workbench job (G481, closed 2026-11-25 once the owner approved the compliance job waiting for it)
   - No crypto inventory row was needed, because no statement uses the crypto collector
 metrics:
   completed: 2026-11-25
@@ -63,7 +63,7 @@ Section 10 rows 38, 41 and 42 now name `workbench.sc-13.provider-record`, `workb
 
 - **UBI 9 base (row 40), Node major shared with the hub (P11), non-root user and run-time egress.** Only the container suite proves these, and it writes no report (G480; G342 for the base).
 - **FIPS provider per session.** It reads missing-result until the reference export lands (G482).
-- **Workbench report race.** The compliance job does not wait for the workbench job, so the image SBOM cannot be the `workbench-image` sbom subject, and the workbench report can be missed on a busy run (G481).
+- **Workbench report race: closed (owner 2026-11-25).** The compliance job now waits for the workbench job, reads its report after the upload finished, and passes the image SBOM as sbom subject `workbench-image` when the workbench job succeeded; rule `release.cm-08.workbench-image-sbom` reads missing-result when no image SBOM arrived.
 
 ## VSIX decision
 
@@ -92,7 +92,7 @@ Tests added: 2 in contentTracer: the rule targets with fixture rows, and Met, sk
 
 1. **[Rule 4-avoided] No ci.yml edit.** Task 2 asked the compliance job to read the workbench image SBOM as subject `workbench-image`. That job does not need the workbench job, and a workflow-files test requires it not to. Changing that is an owner decision about the required-check graph, so it is recorded as G481 instead. The plan's acceptance grep `grep -c "workbench-image" .github/workflows/ci.yml` stays at 0.
 2. **[Rule 1] The image SBOM statement is on cm-08.** On cm-02 it turned the release-pipeline row from `limitation` to `partly-statements` in bundle.test's fixture. The test was not changed.
-3. **Gaps G480 and G481 added** in the reserved block.
+3. **Gaps G480 and G481 added** in the reserved block. G481 was closed later the same day, after the owner approved the check order: the compliance job needs the workbench job and reads the image SBOM.
 4. **Branch and PR.** The plan names `feat/phase-48-statements-workbench`. As instructed, the work is on the shared branch, and no PR was opened.
 
 ## Owner checkpoint (Task 3, gate PR 2)
@@ -114,7 +114,6 @@ None.
 
 - The workbench container suite's results cannot be evidence: image base, user, Node major and run-time egress (G480).
 - The UBI 9 base statement waits on that report (G342).
-- The compliance job can miss the workbench report, and cannot read the image SBOM as a subject (G481).
 - The FIPS provider per session waits on the reference site export (G482).
 
 ## Self-Check: PASSED
