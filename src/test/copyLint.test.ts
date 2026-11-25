@@ -387,7 +387,7 @@ test('D-41: the repository passes against its baseline', () => {
   assert.deepEqual(increased, [], increaseMessage(increased));
 });
 
-test('D-41: the baseline file is sorted, uses only the seven rules and holds no zero count', () => {
+test('D-41: the baseline file is sorted, uses only the copy rules and holds no zero count', () => {
   const text = readFileSync(BASELINE_PATH, 'utf8');
   const baseline = readBaseline();
   assert.equal(text, baselineText(baseline), 'the file is exactly its sorted text');
@@ -397,8 +397,14 @@ test('D-41: the baseline file is sorted, uses only the seven rules and holds no 
       assert.ok(Number.isInteger(count) && (count ?? 0) > 0, `${file} ${rule}: ${String(count)}`);
     }
   }
-  for (const rule of ['glossary', 'brand', 'em-dash', 'bare-team', 'mode-word', 'compliance-claim']) {
+  for (const rule of ['glossary', 'em-dash', 'bare-team', 'mode-word', 'compliance-claim']) {
     assert.ok(Object.values(baseline).some((rules) => (rules as Record<string, number>)[rule] !== undefined), `today's copy has ${rule} hits`);
+  }
+  // Paid off: the SovAI rename removed the last brand hits (the old "Near AI: First Project" title and "Near AI for VSCode" copy), which are the
+  // old product names rule 8 now also counts. Both rules stay at zero, so re-recording the baseline can never let one back in.
+  for (const rule of ['brand', 'product-name']) {
+    const files = Object.entries(baseline).filter(([, rules]) => (rules as Record<string, number>)[rule] !== undefined).map(([file]) => file);
+    assert.deepEqual(files, [], `${rule} is paid off and stays at zero: fix the copy, never record a count`);
   }
 });
 

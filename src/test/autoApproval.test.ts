@@ -377,7 +377,7 @@ test('agent loop in auto: the managed Open-GSD runtime\'s gsd-tools runs without
     const ran = model.seen[2].at(-1);
     assert.match(ran?.role === 'tool' ? ran.content : '', /"phase":"query init\.plan-phase 3"[\s\S]*exit code 0/, 'gsd-tools ran without an approval');
     assert.equal(approvals.length, 1, 'only the look-alike path asked');
-    assert.match(approvals[0].title, /gsd-evil/);
+    assert.equal(approvals[0].callId, 'g3', 'the card is the look-alike gsd-evil call (its title is cut short, so a long temporary path hides the name)');
     assert.deepEqual(safety.asked.length, 1, 'only the look-alike went to the safety model');
   } finally {
     shell.dispose();

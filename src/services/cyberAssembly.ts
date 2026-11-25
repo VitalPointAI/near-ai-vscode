@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { cyberRunPrompt, startCyberRun, type CyberRunInput, type CyberRunResult } from './cyberRun';
 import { CyberEvidenceStore, CyberLedgerStore } from './cyberLedgerStore';
 import { RunGrants } from '../agent/permissions';
@@ -21,13 +23,41 @@ import type { GateHost } from '../gate/host';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 
+/** The longest sanitised workspace path used whole as a store key; every key that fits is the same as before the hash was added. */
+const STORE_KEY_WHOLE_MAX = 80;
+
 /**
  * The one rule for where a workspace's cyber store lives. The panel and the run stack both use it,
  * because when they drifted a run wrote its ledger under 'no-workspace' and export could not find it.
+ *
+ * A sanitised path of up to 80 characters is the key itself. A longer one used to be cut at 80, so two workspaces sharing their first 80 characters
+ * shared one store. It is now a readable 64-character prefix, a dash and 16 hex of the SHA-256 of the whole path: 81 characters, so a long key can
+ * never equal a short one. The first time a long workspace opens, the store it saw under the cut key is copied to its own key (see adoptCutStore).
  */
 export function cyberStorePath(globalStorage: string, workspaceRoot: string | undefined): string {
-  const key = (workspaceRoot ?? 'no-workspace').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'root';
-  return `${globalStorage}/cyber/${key}`;
+  const whole = (workspaceRoot ?? 'no-workspace').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'root';
+  if (whole.length <= STORE_KEY_WHOLE_MAX) return `${globalStorage}/cyber/${whole}`;
+  const hash = createHash('sha256').update(workspaceRoot ?? '').digest('hex').slice(0, 16);
+  const store = `${globalStorage}/cyber/${whole.slice(0, 64)}-${hash}`;
+  adoptCutStore(`${globalStorage}/cyber/${whole.slice(0, STORE_KEY_WHOLE_MAX)}`, store);
+  return store;
+}
+
+/**
+ * The one-time move off the cut key. The old folder may hold another workspace's records too (that was the bug), or be the live store of a workspace
+ * whose path is exactly those 80 characters (a parent folder), so it is copied, never moved or removed: each workspace keeps what it saw before the
+ * fix, and nothing is mixed from then on. The copy goes to a temporary sibling and is renamed into place, so a half copy is never taken for the store.
+ */
+function adoptCutStore(cut: string, store: string): void {
+  if (existsSync(store) || !existsSync(cut)) return;
+  const temporary = `${store}.adopting-${String(process.pid)}`;
+  try {
+    cpSync(cut, temporary, { recursive: true, errorOnExist: true, force: false });
+    renameSync(temporary, store);
+  } catch {
+    // Another window adopted it first, or the copy failed: the store starts from what is there, and this window's own partial copy is removed.
+    rmSync(temporary, { recursive: true, force: true });
+  }
 }
 
 /** A chat message as the driver sends it. */
