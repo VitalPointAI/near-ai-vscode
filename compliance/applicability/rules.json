@@ -1,0 +1,49 @@
+{
+  "kind": "rules",
+  "facets": {
+    "accounts": {
+      "words": "keeps accounts for people or services"
+    }
+  },
+  "components": {
+    "hsm": {
+      "role": "The site HSM that holds the OpenBao seal key (SoftHSM2 in test only).",
+      "facets": {}
+    },
+    "hub": {
+      "role": "Optional synchronization hub.",
+      "facets": {
+        "accounts": {
+          "class": "implements",
+          "basis": "hub/src/enrol.ts takes each project with its roster, hub/src/join.ts carries join requests for the lead's device to admit, and hub/src/store/schema.ts keeps each member's entries."
+        }
+      }
+    },
+    "keycloak": {
+      "role": "Keycloak for passkey sign-in, with its realm applier and its Postgres database.",
+      "facets": {
+        "accounts": {
+          "class": "implements",
+          "basis": "compliance/resources.json tool:postgresql: Keycloak's database holds the user records and passkey public credentials of the site."
+        }
+      }
+    },
+    "rke2": {
+      "role": "The Kubernetes distribution of a site: RKE2 in its FIPS build, CIS profile, Canal networking.",
+      "facets": {
+        "accounts": {
+          "class": "implements",
+          "basis": "compliance/resources.json tool:rke2: every site part runs on the cluster, whose service accounts and role bindings decide what each workload may do."
+        }
+      }
+    }
+  },
+  "controls": {
+    "ac-02": {
+      "facets": [
+        "accounts"
+      ]
+    }
+  },
+  "overrides": []
+}

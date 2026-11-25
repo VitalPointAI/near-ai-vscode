@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { run as runBundleCommand } from '../src/commands/bundle.ts';
+import { loadApplicability } from '../src/applicability.ts';
 import { loadComponents } from '../src/components.ts';
 import { validateOurs } from '../src/validate.ts';
 const levelsFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'levels.json');
@@ -91,9 +92,25 @@ test('each hosted level and the hosted overlay list exactly the hosted component
   assert.deepEqual(overlay.attachedTo, ['hosted-protected-a', 'hosted-protected-b']);
 });
 
-test('every hosted platform row of hosted Protected B ac-02 reads No statement yet', async () => {
+/**
+ * The reasons a silent component may read (44.1, D-11, D-13): No statement yet or your organization's, unless the committed applicability map says
+ * the component has no part, in which case it reads Not applicable to this component only while the map is signed for that level, and Not met with
+ * component-not-applicable-unreviewed otherwise. The map is read from compliance/applicability/, so the expectation follows the committed rules.
+ */
+const MAP = loadApplicability(path.join(ROOT, 'compliance', 'applicability'), readLevels().map((item) => item.id));
+function silentReasons(levelId: string, control: string, component: string): string[] {
+  const record = MAP?.for(levelId, control, component);
+  if (record?.class !== 'not-applicable') return ['no-statement', 'your-organization'];
+  return ['your-organization', record.reviewed ? 'component-not-applicable' : 'component-not-applicable-unreviewed'];
+}
+
+test('every hosted platform row of hosted Protected B ac-02 reads No statement yet, or the applicability map\'s reason where it gives the component no part', async () => {
   const row = (await dashboard()).rows.find((item: any) => item.level === 'hosted-protected-b' && item.control === 'ac-02');
-  for (const id of PLATFORM) assert.equal(row.components.find((item: any) => item.component === id)?.reason, 'no-statement', id);
+  for (const id of PLATFORM) {
+    const record = MAP?.for('hosted-protected-b', 'ac-02', id);
+    const expected = record?.class === 'not-applicable' ? (record.reviewed ? 'component-not-applicable' : 'component-not-applicable-unreviewed') : 'no-statement';
+    assert.equal(row.components.find((item: any) => item.component === id)?.reason, expected, id);
+  }
 });
 
 test('no hosted component without statements reads Met on any hosted row', async () => {
@@ -105,7 +122,7 @@ test('no hosted component without statements reads Met on any hosted row', async
   for (const row of rows) for (const component of row.components) if ([...PLATFORM, 'workbench'].includes(component.component)) {
     assert.notEqual(component.state, 'met', `${row.level}/${row.control}/${component.component}`);
     if (stated.has(`${component.component}/${row.control}`)) continue;
-    assert.ok(['no-statement', 'your-organization'].includes(component.reason), `${row.level}/${row.control}/${component.component}: ${component.reason}`);
+    assert.ok(silentReasons(row.level, row.control, component.component).includes(component.reason), `${row.level}/${row.control}/${component.component}: ${component.reason}`);
   }
 });
 
