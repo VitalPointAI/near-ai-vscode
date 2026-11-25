@@ -9,9 +9,13 @@
     {
       "phase": "45.1",
       "title": "Exports are refused until the label values are in the signed policy"
+    },
+    {
+      "phase": "45.2",
+      "title": "The target system's label-policy owner supplies the Canadian policy identifier's OID, the caveats, the releasability rules and a versioned policy information file through the DND project technical authority (owner action a); a gap-closure plan then replaces each assumed value and marks it verified"
     }
   ],
   "ownerRole": "owner",
-  "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
-  "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+  "remediation": "Exports in the Government of Canada scales are labelled from the Canadian DND/CAF label policy profile (resources/label-profiles/can-dnd.label-profile.json). Its values are assumed from how DND security orders write markings: the policy identifier CAN and the classifications PROTECTED A, PROTECTED B, PROTECTED C, CONFIDENTIAL, SECRET and TOP SECRET, in an assumed order. The identifier's OID, the caveats, the releasability rules and a versioned policy information file are not known, so the OID is a placeholder set per target system and no OID is invented. An operational export always refuses the placeholder, and refuses the assumed values unless your organization's security officer records an exception for them; a trial export may use them and says so. Your organization asks the DND project technical authority for the target system's label-policy owner, who supplies the verified values (owner action a); each value is then replaced and marked verified. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-21 and D-22.",
+  "title": "The Canadian DND/CAF label policy values are assumed, so operational exports that use them are refused"
 }

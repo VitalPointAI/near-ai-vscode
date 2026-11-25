@@ -1,0 +1,17 @@
+{
+  "format": "label-profile/1",
+  "id": "can-dnd-draft",
+  "title": "Canadian DND/CAF label policy (draft, assumed)",
+  "policyIdentifier": { "value": "CAN", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" },
+  "uri": { "placeholder": "The Canadian policy identifier's OID", "configurablePerTarget": true, "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" },
+  "classifications": [
+    { "rank": 1, "value": { "value": "PROTECTED A", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } },
+    { "rank": 2, "value": { "value": "PROTECTED B", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } },
+    { "rank": 3, "value": { "value": "PROTECTED C", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } },
+    { "rank": 4, "value": { "value": "CONFIDENTIAL", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } },
+    { "rank": 5, "value": { "value": "SECRET", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } },
+    { "rank": 6, "value": { "value": "TOP SECRET", "provenance": "assumed", "source": "Assumed from DND security orders (CAN SECRET, CAN PROTECTED B); OID, caveats, releasability and SPIF unknown", "date": "2026-11-24", "gap": "G355" } }
+  ],
+  "categories": [],
+  "note": "A draft of assumed values. The policy identifier and the classification words follow how DND security orders write markings; the order of the six classifications is also assumed. The identifier's OID, the caveats, the releasability rules and a versioned policy information file are not known, so the OID is a placeholder set per target system and no OID is written here. Every value is replaced by what the target system's label-policy owner supplies through the DND project technical authority (owner action a). Operational exports refuse the placeholder always, and refuse the assumed values unless your security officer records an exception."
+}

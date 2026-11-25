@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ac-16",
+    "ac-21",
+    "ca-03"
+  ],
+  "gap": "G511",
+  "id": "g511",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Virtru's systems-integrator team or XQ Message supplies sample containers paired with its own non-production key access server (owner action c); plan 45.2-12 then runs the acceptance trial with them"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "No vendor has supplied sample containers paired with a non-production key access server of its own, so the exchange cannot yet be checked against a second implementation; a sample paired with an unrelated key server does not count. Your organization asks Virtru's systems-integrator team or XQ Message for such samples (owner action c). The acceptance trial (plan 45.2-12) may use them in place of an allied test cell. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+  "title": "No vendor samples paired with a non-production key access server"
+}

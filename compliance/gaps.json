@@ -5243,7 +5243,7 @@
       ],
       "id": "G354",
       "ownerRole": "shared",
-      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor. Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
+      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor, and asks DND for ACP-240 Edition A with its ZTDF specification, which is still outstanding (owner action d). Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
       "title": "ZTDF conformance is not verified"
     },
     {
@@ -5256,8 +5256,8 @@
       "id": "G355",
       "ownerRole": "owner",
       "poam": "g355",
-      "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
-      "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+      "remediation": "Exports in the Government of Canada scales are labelled from the Canadian DND/CAF label policy profile (resources/label-profiles/can-dnd.label-profile.json). Its values are assumed from how DND security orders write markings: the policy identifier CAN and the classifications PROTECTED A, PROTECTED B, PROTECTED C, CONFIDENTIAL, SECRET and TOP SECRET, in an assumed order. The identifier's OID, the caveats, the releasability rules and a versioned policy information file are not known, so the OID is a placeholder set per target system and no OID is invented. An operational export always refuses the placeholder, and refuses the assumed values unless your organization's security officer records an exception for them; a trial export may use them and says so. Your organization asks the DND project technical authority for the target system's label-policy owner, who supplies the verified values (owner action a); each value is then replaced and marked verified. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-21 and D-22.",
+      "title": "The Canadian DND/CAF label policy values are assumed, so operational exports that use them are refused"
     },
     {
       "appliesAt": "coalition-exchange",
@@ -6778,6 +6778,48 @@
       "poam": "g455",
       "remediation": "The OpenTDF reference tools wrap a payload key for an RSA key with RSA-OAEP and SHA-1, while OpenBao Transit opens RSA only with OAEP and SHA-256. So an object a partner's stock OpenTDF tool addresses to your organization's receiving key exchange-receive-<site> cannot be opened, and an export to a partner's RSA key uses the hash the partner names, which for the OpenTDF reference server is SHA-1. Partners are asked for an EC key (ec:secp256r1) or SHA-256, and to address objects to their own key access server, which Phase 45.2 reaches through rewrap. Whether SHA-1 in OAEP padding is acceptable under ITSP.40.111 is not verified; your organization's security officer decides before any export uses it. Source: .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-RESEARCH.md sections 1 and 5.",
       "title": "RSA key access with partners' OpenTDF tools needs OAEP with SHA-1, which our receiving key cannot open"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G510",
+      "ownerRole": "owner",
+      "poam": "g510",
+      "remediation": "No allied test cell is arranged to check your organization's exports and partners' objects against an ally's own key access server and samples, so the exchange is checked only against the public OpenTDF quickstart, which proves wiring and never counts as acceptance. Your organization asks the DND project technical authority for an introduction to the Canadian Joint Warfare Centre (CJWC) experimentation and interoperability team, which runs the FMN trials and Project OLYMPUS (owner action a). The acceptance trial (plan 45.2-12) runs once the cell supplies a test key access server with its own samples. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No allied test cell is arranged for the acceptance trial"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "ca-03"
+      ],
+      "id": "G511",
+      "ownerRole": "owner",
+      "poam": "g511",
+      "remediation": "No vendor has supplied sample containers paired with a non-production key access server of its own, so the exchange cannot yet be checked against a second implementation; a sample paired with an unrelated key server does not count. Your organization asks Virtru's systems-integrator team or XQ Message for such samples (owner action c). The acceptance trial (plan 45.2-12) may use them in place of an allied test cell. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-23 and the owner actions; 45.2-RESEARCH.md section 10 (T5).",
+      "title": "No vendor samples paired with a non-production key access server"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16",
+        "sc-12",
+        "ia-05.02"
+      ],
+      "id": "G512",
+      "ownerRole": "owner",
+      "poam": "g512",
+      "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
+      "title": "Partners' signing certificates are checked without fetching revocation lists"
     }
   ]
 }
