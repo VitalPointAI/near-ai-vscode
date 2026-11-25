@@ -158,3 +158,110 @@ test('Keycloak renders from the locked official image, reaches Postgres with ver
   assert.doesNotMatch(yaml, /attestation-roots/, 'no attestation roots under passkeys');
   assert.throws(() => renderRelease(ROOT, keycloakx(), { site: HARDWARE, helm: HELM }), /sterling\.attestationRootsConfigMap .* is required/);
 });
+
+// Guest accounts (D-58 to D-60): the group guests carries nothing, Keycloak holds only the guest life cycle, and no token carries an attribute
+// or a group (zero trust: Keycloak authenticates and decides nothing).
+const profileOf = (copy) => {
+  const component = copy.components['org.keycloak.userprofile.UserProfileProvider'][0];
+  return { config: JSON.parse(component.config['kc.user.profile.config'][0]), save: (config) => { component.config['kc.user.profile.config'] = [JSON.stringify(config)]; } };
+};
+const changeProfile = (change) => (copy) => { const { config, save } = profileOf(copy); change(config); save(config); };
+const GUEST_ATTRIBUTE_NAMES = ['guestUntil', 'guestRequestedBy', 'guestApprovedBy', 'guestApprovalRef', 'guestEndedAt', 'guestEndedReason'];
+
+test('the group guests is top level and carries no role, subgroup or attribute; a missing or loaded guests group is refused', () => {
+  const { realm } = passkeys();
+  assert.deepEqual(realm.groups, [{ name: 'guests', path: '/guests', attributes: {}, realmRoles: [], clientRoles: {}, subGroups: [] }]);
+  assert.match(broken((copy) => { copy.groups = []; }).join('\n'), /group guests must exist/);
+  assert.match(broken((copy) => { copy.groups[0].realmRoles = ['offline_access']; }).join('\n'), /guests must carry no realm role/);
+  assert.match(broken((copy) => { copy.groups[0].clientRoles = { 'realm-management': ['view-users'] }; }).join('\n'), /guests must carry no client role/);
+  assert.match(broken((copy) => { copy.groups[0].subGroups = [{ name: 'vip', path: '/guests/vip' }]; }).join('\n'), /guests must have no subgroup/);
+  assert.match(broken((copy) => { copy.groups[0].attributes = { serves: ['industry'] }; }).join('\n'), /guests must carry no attribute/);
+});
+
+test('every guest attribute is in the user profile and only administrators view or edit it; the credential fields are not there', () => {
+  const { realm } = passkeys();
+  const { config } = profileOf(structuredClone(realm));
+  for (const name of GUEST_ATTRIBUTE_NAMES) {
+    const entry = config.attributes.find((attribute) => attribute.name === name);
+    assert.ok(entry, name);
+    assert.deepEqual(entry.permissions, { view: ['admin'], edit: ['admin'] }, name);
+    assert.equal(entry.group, 'guest', name);
+  }
+  assert.match(broken(changeProfile((profile) => { profile.attributes = profile.attributes.filter((attribute) => attribute.name !== 'guestUntil'); })).join('\n'), /guestUntil must be in the user profile/);
+  assert.match(broken(changeProfile((profile) => { profile.attributes.find((attribute) => attribute.name === 'guestApprovedBy').permissions.view = ['admin', 'user']; })).join('\n'), /guestApprovedBy.*only administrators/);
+  assert.match(broken(changeProfile((profile) => { profile.attributes.find((attribute) => attribute.name === 'guestEndedAt').permissions.edit = ['admin', 'user']; })).join('\n'), /guestEndedAt.*only administrators/);
+  for (const name of ['serves', 'nationality', 'organization']) {
+    assert.match(broken(changeProfile((profile) => { profile.attributes.push({ name, permissions: { view: ['admin'], edit: ['admin'] } }); })).join('\n'), new RegExp(`${name} is a credential`), name);
+  }
+});
+
+test('a security-contacts group is refused: who may approve guests is a SecurityContactCredential', () => {
+  assert.match(broken((copy) => { copy.groups.push({ name: 'security-contacts', path: '/security-contacts', attributes: {}, realmRoles: [], clientRoles: {}, subGroups: [] }); }).join('\n'), /security-contacts group/);
+  assert.match(broken((copy) => { copy.groups[0].subGroups = [{ name: 'security-contacts', path: '/guests/security-contacts' }]; }).join('\n'), /security-contacts group/);
+});
+
+test('no client or client scope puts a user attribute or a group into the access token', () => {
+  const attributeMapper = { name: 'serves', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-attribute-mapper', config: { 'user.attribute': 'serves', 'claim.name': 'serves', 'access.token.claim': 'true' } };
+  const groupMapper = { name: 'groups', protocol: 'openid-connect', protocolMapper: 'oidc-group-membership-mapper', config: { 'claim.name': 'groups' } };
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers.push(attributeMapper); }).join('\n'), /client sterling-sessions puts a user attribute or a group into the access token \(serves\)/);
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers.push(groupMapper); }).join('\n'), /puts a user attribute or a group into the access token \(groups\)/, 'access.token.claim defaults to true');
+  assert.match(broken((copy) => { copy.clientScopes = [{ name: 'guest-claims', protocol: 'openid-connect', protocolMappers: [groupMapper] }]; }).join('\n'), /client scope guest-claims puts a user attribute or a group/);
+  assert.deepEqual(broken((copy) => { copy.clients[0].protocolMappers.push({ ...attributeMapper, config: { ...attributeMapper.config, 'access.token.claim': 'false' } }); }), []);
+});
+
+// The system use notice (D-76, AC-8): every sign-in page shows your organization's notice, set per language in the realm site file.
+const withNotice = (systemUseNotice) => prepare(SITE, KEYCLOAKX_SITE, { ...REALM_SITE, systemUseNotice });
+
+test('prepareRealm writes the notice per language, turns internationalization on, supports the notice\'s languages and defaults to English', () => {
+  const { realm, problems } = passkeys();
+  assert.deepEqual(problems, []);
+  assert.equal(realm.loginTheme, 'sterling');
+  assert.equal(realm.internationalizationEnabled, true);
+  assert.deepEqual(realm.supportedLocales, ['en', 'fr']);
+  assert.equal(realm.defaultLocale, 'en');
+  // Keycloak formats messages with MessageFormat, so the site's apostrophes are doubled to be shown as typed (47-23 tracer).
+  assert.equal(realm.localizationTexts.en.sterlingSystemUseNotice, REALM_SITE.systemUseNotice.en.replaceAll("'", "''"));
+  assert.equal(realm.localizationTexts.fr.sterlingSystemUseNotice, REALM_SITE.systemUseNotice.fr.replaceAll("'", "''"));
+  assert.match(RAW, /"loginTheme": "sterling"/);
+});
+
+test('the realm apply refuses a missing notice, a blank English or French text, a language code that is not one, and another login theme', () => {
+  const { systemUseNotice: _omitted, ...withoutNotice } = REALM_SITE;
+  assert.match(prepare(SITE, KEYCLOAKX_SITE, withoutNotice).problems.join('\n'), /the realm site file needs systemUseNotice/);
+  assert.match(withNotice({ en: '   ', fr: 'Texte.' }).problems.join('\n'), /systemUseNotice\.en, the English notice, is required and must not be blank/);
+  assert.match(withNotice({ fr: 'Texte.' }).problems.join('\n'), /systemUseNotice\.en, the English notice, is required/);
+  assert.match(withNotice({ en: 'Text.', fr: '' }).problems.join('\n'), /systemUseNotice\.fr is blank/);
+  assert.match(withNotice({ en: 'Text.', english: 'Text.' }).problems.join('\n'), /"english" is not a language code such as en, fr or fr-CA/);
+  assert.match(withNotice('Text.').problems.join('\n'), /the realm site file needs systemUseNotice/);
+  assert.deepEqual(withNotice({ en: 'Text.', 'fr-CA': 'Texte.' }).problems, []);
+  assert.match(broken((copy) => { copy.loginTheme = 'keycloak.v2'; }).join('\n'), /the login theme must be sterling/);
+  assert.match(broken((copy) => { delete copy.localizationTexts.fr; }).join('\n'), /must carry the notice of every language/);
+});
+
+test('a notice with only English gives supportedLocales [en]', () => {
+  const { realm, problems } = withNotice({ en: 'Authorized use only.' });
+  assert.deepEqual(problems, []);
+  assert.deepEqual(realm.supportedLocales, ['en']);
+  assert.deepEqual(Object.keys(realm.localizationTexts), ['en']);
+});
+
+test('the login theme reaches Keycloak as ConfigMap sterling-login-theme, installed before Keycloak, mounted read-only and not optional (needs helm)', () => {
+  const releases = listReleases(ROOT);
+  const theme = releases.find((release) => release.name === 'sterling-keycloak-theme');
+  assert.ok(theme && theme.namespace === 'sterling-identity' && theme.order < keycloakx().order, 'the theme release is in sterling-identity, before keycloakx');
+  const configMap = renderRelease(ROOT, theme, { site: SITE, helm: HELM });
+  assert.match(configMap, /kind: ConfigMap\n[\s\S]*name: sterling-login-theme/);
+  assert.match(configMap, /\n {2}theme\.properties: \|\n[\s\S]*parent=keycloak\.v2/);
+  assert.match(configMap, /\n {2}footer\.ftl: \|\n[\s\S]*sterlingSystemUseNotice/);
+  assert.doesNotMatch(configMap, /no_esc/, 'HTML escaping stays on');
+  const statefulSet = renderRelease(ROOT, keycloakx(), { site: SITE, helm: HELM });
+  assert.match(statefulSet, /- name: login-theme\n\s+mountPath: \/opt\/keycloak\/themes\/sterling\/login\n\s+readOnly: true/);
+  assert.match(statefulSet, /- name: login-theme\n\s+configMap:\n\s+name: sterling-login-theme\n\s+optional: false/);
+});
+
+test('quotes, an apostrophe, braces and accented letters reach the realm message so the page shows them as typed', () => {
+  const text = '« Accès réservé » "quoted" l\'usage {0} ç.';
+  const { realm, problems } = withNotice({ en: 'Text.', fr: text });
+  assert.deepEqual(problems, []);
+  assert.equal(realm.localizationTexts.fr.sterlingSystemUseNotice, '« Accès réservé » "quoted" l\'\'usage \'{\'0\'}\' ç.');
+});

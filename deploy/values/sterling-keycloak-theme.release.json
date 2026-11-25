@@ -1,0 +1,7 @@
+{
+  "chart": "path:deploy/charts/sterling-keycloak-theme",
+  "namespace": "sterling-identity",
+  "order": 54,
+  "values": [],
+  "note": "The login theme that shows your organization's system use notice on every sign-in page (D-76); just before Keycloak (keycloakx, 55), which does not start without it."
+}

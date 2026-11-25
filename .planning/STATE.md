@@ -2,11 +2,11 @@
 gsd_state_version: "1.0"
 milestone: v0.5.0
 milestone_name: Governed agent platform
-current_plan: 21
+current_plan: 24
 status: executing
-stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
-last_updated: "2026-11-24T23:17:20.221Z"
-state_head: ba51cb06ad298cb8b868f13b51c77daf828ab364
+stopped_at: Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
+last_updated: "2026-11-25T12:34:16.032Z"
+state_head: 6c17e4d14812f20a4d762190d920924323e9158a
 progress:
   total_phases: 12
   completed_phases: 1
@@ -29,7 +29,7 @@ Phase 68 (Relay foundation): complete, verified and merged as PR #50 (052d5cf, 2
 0.4.x line: 0.4.29 published 2026-11-17 (release PR #77, tag v0.4.29: the enforced floor #74, Build a team's new start #75, the gate answers #76); 0.4.23 to 0.4.28 published before it (see CHANGELOG). Phase 27 shipped as 0.4.20; its record closed 2026-11-17 after the owner's host check passed (27-UAT test 8 with 0.4.29). Then 0.4.30 to 0.4.32 went out through release PRs #84, #88 and #93; 0.4.33 is in preparation on `release/0.4.33`.
 Phase 69 (Team Mode reconciliation): planned 2026-11-15, 15 plans in 15 waves over two PRs (69-01..08 port the Phase 60 core and the per-person identity, 69-09..15 add device.rotated, the payload signer, key history and the disposition of the former v0.6.0 Team Mode branch plan). Decisions D-01..D-29 were made on the owner's behalf and are recorded in 69-CONTEXT.md with their undo cost. All 15 plans are executed and both PRs are merged: PR 1 (#59, 1cbcb9b) and PR 2 (#61, plans 09-15, f2ca69e), so Phase 69 is complete.
 Phase 70 (Capability vocabulary, manifests and one gate with a floor): planned 2026-11-16 on `docs/phase-70-plan`, 32 plans in 32 waves (28 as first planned) for 18 requirements (GATE-01..07, OFFL-01..03, CLAS-01..08). After the planning PR: PR 1 plans 01-07 (`feat/gate-vocabulary`, pure domain, no behaviour change), PR 2 plans 08-15 (`feat/gate-shadow`, manifests, signed policy file, gate on every path in shadow; an invalid policy file fails closed), PR 3 plans 16-18 (`feat/gate-floor`, the floor with SECURITY.md and README), part 4 as five PRs after the 2026-11-17 replan (D-49; 32 plans in 32 waves): 4a plans 19 and 28a (`feat/gate-route-check`, route check and records), 4b plans 20, 21 and 28b (`feat/gate-labels`, labels and clearance checks), 4c plans 22, 23, 24 and 28c (`feat/gate-session-mark`, the chat's label routes its requests), 4d plans 25 and 28d (`feat/gate-attested-routing`, connection binding and the after-answer check), 4e plans 26, 27 and 28e (`feat/gate-trust-badge`, the trust badge and the phase close-out). The owner ratified CLAS-05 on 2026-11-16 with a pre-send check that the connection is bound to the enclave (else local-only) and added CLAS-08, the trust badge on every cloud answer. Decisions D-01..D-48 were made on the owner's behalf in 70-CONTEXT.md with their undo cost; D-48: no release carrying PR 2 is published before the owner's fresh code-server check. Plans 70-01 to 70-07 are executed on `feat/gate-vocabulary`: PR 1 (#66, nothing in the extension calls the new code yet) is merged on main (cbe4ef3). Plans 70-08 to 70-14 are executed on `feat/gate-shadow` (base cbe4ef3); plan 70-15 rebased onto main (9d7ea56) and opened PR 2 as #70. Done since: PR 2 merged as #70, PR 3 as #74 (floor enforced) with the owner's answers in #76; 0.4.28 and 0.4.29 shipped after the D-48 check passed. Part 4 was replanned on 2026-11-17 into five PRs (4a to 4e, D-49 to D-56; 32 plans in all, 70-28 split into 70-28a to 70-28e). Since then every part 4 PR is merged (4a #81, 4b #85, 4c #87, 4d #89, 4e #95, the last on 2026-11-18), so all 32 plans are executed; the verification record (70-VERIFICATION.md) is still to write.
-Current Plan: 21
+Current Plan: 24
 Total Plans in Phase: 32
 Plans 69-01 to 69-08 done on `feat/team-core-on-main` (the pure domain core, then the git transport, runner and identities, then the event log, team.json, audit mirror and Enable, all from ae5e9e1, byte-identical, 97, 96 and 82 tests green; then fix 3e11c0e on main's file lock under the team's own lock name, `team.json` refusing sync's branch names, and the team-versus-sync isolation test; then the VS Code adapters, `registerTeamMode` in activation with solo parity, and fix 9e49bc5; then the `nearAi.team.preview` setting with the Command Palette gating and the `nearAi.team.active` context key, the plain-words Phase 60 strings with the command titles kept, and the manifest and import boundary tests; then one Ed25519 identity per person per install, the D-22 rollback rule and the Team Mode e2e in a real window); plan 69-08 pushed the branch and opened PR #59 into main (all eight required checks and the agent review green; merged by the owner as 1cbcb9b); plans 69-09 to 69-15 (device.rotated, the payload signer and key status, the local signed key history, the identity writing its own history, rotation and revocation of the person's key, the disposition record of the former v0.6.0 Team Mode branch plan, then the rebase onto main, the gate and PR 2) are done on `feat/team-signed-payloads`.
 Identity design (owner, 2026-11-15; PROJECT.md Platform direction decisions 8-13): standard DIDs, verifiable credentials for authority, clearance, roles and compartments, classification labels with routing by label, delegation that narrows at every link, and roots-only anchoring. Folded into Phase 70 (CLAS-01..07), Phase 71 (now "Identities, credentials and delegation that only narrows": VCRD-01..07, DLGT-08, a research step first) and the L4 and L5 outlines. Phase 69 is unchanged.
@@ -162,6 +162,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
+- 47-20 blocked: its precondition needs 71-12 (the revocation card that reads the requests) on the base; 71-12 has no SUMMARY on main
+- 47-21 blocked: its base check needs 48-11's deployment collector reading schema 2 with facts.sterling.reads (main has SITE_EXPORT_SCHEMA 1) and 47-32's reads.users
 
 ### Quick Tasks Completed
 
@@ -176,8 +178,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-24T23:17:19.980Z
-**Stopped at:** Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
+**Last session:** 2026-11-25T12:34:15.827Z
+**Stopped at:** Completed 47-34-PLAN.md; 47-20 and 47-21 still blocked
 **Resume file:** None
 
 ## Performance Metrics
@@ -226,6 +228,10 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 71 P09 | ~3h (lock waits) | 2 of 3 tasks | 20 files |
 | Phase 71 P10 | ~40min | 1 of 3 tasks | 2 files |
 | Phase 71 P11 | ~1h | 3 tasks | 8 files |
+| Phase 47 P19 | 2h | 3 tasks | 15 files |
+| Phase 47 P23 | 45m | 3 tasks | 10 files |
+| Phase 47 P24 | 50m | 2 tasks | 10 files |
+| Phase 47 P34 | 1h30m | 3 tasks | 21 files |
 
 ## Decisions
 
@@ -330,3 +336,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-16: longhorn-crypto is a bootstrap secret made in memory before the first encrypted volume (OpenBao's own volume needs it); apply runs the secrets step after the unseal
 - [Phase 47]: 47-16: registry-images.tar is site-neutral in the bundle; install.mjs node-files names it for the site registry, checked against the signed manifest
 - [Phase 47]: 47-27: drill.mjs plan reads every schedule from the rendered releases; drill verify restores into scratch copies only, with --confirm <siteName>
+- [Phase 47]: 47-19: the guest approver's DID comes from the site's people directory; guests.mjs uses its own guest-operator policy; guest-removal has no KV path until the owner decides G447
+- [Phase 47]: 47-23: realm messages are MessageFormat patterns, so apply.mjs doubles apostrophes and quotes braces in the system use notice
+- [Phase 47]: 47-24: snapshot volumes are kept on uninstall; the raft-snapshot login uses a projected token for its own audience
+- [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
