@@ -7,6 +7,9 @@
  *   apply      the backend asks the tab to apply other people's changes at a version; the tab answers applied, true only at that exact version
  *   fullText   asked once when the backend's mirror no longer matches the hash; the binding core then resynchronizes the model
  *   undo, redo the binding's own history, so only this person's changes are undone (D-54)
+ *   selection  this person's selection in a bound model, as offsets; the backend turns it into Yjs relative positions for presence (33-29, D-18)
+ *   presence   other people's cursors in a bound model, as offsets the backend computed from their relative positions, with name and position
+ *   attribution  Show Who Wrote This: author rows labelled by the executed whoWroteThis.ts, each with its ranges in the model (D-18, D-56)
  *
  * Methods of the client whose names start with `on` are notifications (Theia's RPC sends them without waiting). A client is told its id first
  * (onHello), and passes it back with attach, so the backend knows which tab a document belongs to; a new id means the connection came back. Nothing
@@ -36,6 +39,28 @@ export type AttachAnswer =
   /** The model's text is not the shared text: the tab puts `text` in the model (no undo stop) and attaches again. */
   | { readonly kind: 'reset'; readonly text: string };
 
+/** Another person's cursor in a bound model: offsets into the model's text, the name and position word from this computer's roster. */
+export interface RemoteCursor {
+  readonly member: string;
+  readonly name: string;
+  readonly position?: string;
+  readonly anchor: number;
+  readonly head: number;
+}
+
+/** One author of a bound product: the label from whoWroteThis.ts, the share of the text, and the ranges (offsets into the model's text). */
+export interface AttributionRow {
+  readonly label: string;
+  readonly share: number;
+  readonly unverified: boolean;
+  readonly ranges: ReadonlyArray<{ readonly offset: number; readonly length: number }>;
+}
+
+/** The answer to attribution: the rows, or a sentence when there is nothing to show yet. */
+export type AttributionAnswer =
+  | { readonly kind: 'rows'; readonly rows: readonly AttributionRow[] }
+  | { readonly kind: 'none'; readonly message: string };
+
 /** What each connected tab answers (notifications only). */
 export interface StaffBindingClient {
   /** This tab's id on the channel; a second hello means the connection came back, so the tab attaches its models again. */
@@ -48,6 +73,8 @@ export interface StaffBindingClient {
   onReadOnly(doc: string, readOnly: boolean, message?: string): void;
   /** A sentence for the person (the header is kept, the editor stopped matching). */
   onNotice(doc: string, text: string): void;
+  /** Other people's cursors in this document now; an empty list removes every one (33-29). */
+  onPresence(doc: string, cursors: readonly RemoteCursor[]): void;
 }
 
 export interface StaffBindingServer {
@@ -61,6 +88,10 @@ export interface StaffBindingServer {
   redo(doc: string): Promise<boolean>;
   /** Writes the captured changes before a save (D-17). */
   flush(doc: string): Promise<void>;
+  /** This person's selection in the model (offsets); sent on as presence at most 10 times a second, never stored (D-18). */
+  selection(doc: string, anchor: number, head: number): Promise<void>;
+  /** Show Who Wrote This: who wrote each part of the product, from the shared record. */
+  attribution(doc: string): Promise<AttributionAnswer>;
   detach(doc: string): Promise<void>;
 }
 
@@ -75,7 +106,15 @@ export const STAFF_BINDING_TEXT = {
   take: 'Take This Change as My Edit',
   restore: 'Restore',
   unsent: 'Changes you made while the connection to your session was lost were not shared. Keep them as your edit, or put the shared text back?',
+  whoWroteThis: 'Show Who Wrote This',
+  whoWroteThisTitle: 'Who Wrote This',
+  attributionWait: 'Attribution is available when the editor matches the shared text.',
+  attributionEmpty: 'This product has no shared text yet.',
+  ofText: (percent: number): string => `${percent}% of text`,
 } as const;
+
+/** The command that toggles Show Who Wrote This in a bound editor. */
+export const WHO_WROTE_THIS_COMMAND = 'sterling.staff.showWhoWroteThis';
 
 /** The SHA-256 of a text as lowercase hex, the same in the browser and the backend (Web Crypto). */
 export async function textHash(text: string): Promise<string> {

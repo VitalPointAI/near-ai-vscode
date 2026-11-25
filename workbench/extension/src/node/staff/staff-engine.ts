@@ -96,6 +96,42 @@ export interface EngineReplicator {
   stop(): Promise<void>;
   syncNow(): void;
   localAppended(): void;
+  /** Presence through the replicator's one transport while live; nothing otherwise (33-12). */
+  postPresence?(cell: string, sealed: string): Promise<void>;
+  leavePresence?(cell: string): Promise<void>;
+}
+
+/** One person in a project's people list (src/staff/replica/livePresence.ts PresencePerson). */
+export interface EnginePresencePerson {
+  readonly member: string;
+  readonly name: string;
+  readonly position?: string;
+  readonly live: boolean;
+  readonly lastSeen: number;
+  readonly product?: string;
+  readonly runs?: number;
+  /** Their selection in that product, as Yjs relative positions. */
+  readonly cursor?: { readonly anchor: string; readonly head: string };
+}
+
+/** The timers presence runs on (livePresence.ts PresenceTimers). */
+export interface EnginePresenceTimers {
+  setTimeout(run: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+/** Live presence over one open project (src/staff/replica/projectPresence.ts ProjectPresence). */
+export interface EngineProjectPresence {
+  readonly presence: {
+    start(): void;
+    stop(): Promise<void>;
+    cursor(cell: string, product: string, anchor?: string, head?: string): void;
+    idle(): void;
+    people(): EnginePresencePerson[];
+    receive(frame: Record<string, unknown>): void;
+  };
+  refresh(): Promise<void>;
+  holds(cell: string): boolean;
 }
 
 /** One hub as the roster has it (src/staff/replica/hubMembership.ts HubStanding). */
@@ -125,6 +161,14 @@ export interface StaffLiveApi {
   isRosterWriterAt(state: never, writer: string, position: number): boolean;
   /** The cell order the fold checks writes against (D-25), as the extension's staff host builds it. */
   cellOrderHook(options: { readonly now?: () => Date }): unknown;
+  /** 33-29: presence over an open project (cursors and the people list). */
+  openProjectPresence(project: never, options: {
+    readonly send: Required<Pick<EngineReplicator, 'postPresence' | 'leavePresence'>>;
+    readonly writer: string;
+    readonly setPeople?: (people: EnginePresencePerson[]) => void;
+    readonly now?: () => number;
+    readonly timers?: EnginePresenceTimers;
+  }): Promise<EngineProjectPresence>;
 }
 
 /** One replacement in a bound document: `length` characters at `offset` become `text` (src/staff/replica/editorBinding.ts DocumentEdit). */
@@ -158,6 +202,9 @@ export interface EngineEditorBinding {
   flush(): Promise<{ appended: number; queued: number }>;
   refresh(): Promise<void>;
   close(): Promise<void>;
+  /** 33-29: an offset in the document as a Yjs relative position of the product, and back; undefined between two versions of the text. */
+  relativeAt(offset: number): string | undefined;
+  indexOf(relative: unknown): number | undefined;
 }
 
 /** A product as the projection states it, as far as the binding reads it: its section folder. */
@@ -176,6 +223,10 @@ export interface StaffBindingApi {
   projectProductStates(input: never): Map<string, EngineProductState>;
   projectProductFile(state: never, body: string): string;
   staffProductPath(section: never, product: string): string;
+  /** 33-29, Show Who Wrote This: the product's text with its author spans, and the executed attribution words (whoWroteThis.ts). */
+  productOutput(fold: never, stream: string, product: string): { readonly text: string; readonly incomplete?: boolean; readonly attribution: unknown[]; readonly registrations: unknown[] } | undefined;
+  namesAtRegistration(registrations: never, roster: never): unknown;
+  authorRows(spans: never, names: never): Array<{ readonly label: string; readonly share: number; readonly spans: ReadonlyArray<{ readonly start: number; readonly length: number; readonly unverified?: true }> }>;
 }
 
 /** The Staff Room's names (33-26): the live model, the version acts, the contested cards and version rows, and the roster split. */

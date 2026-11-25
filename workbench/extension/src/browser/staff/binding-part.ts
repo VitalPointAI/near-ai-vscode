@@ -10,6 +10,7 @@ import {
   StaffBindingContribution, StaffBindingEvents, StaffBoundUndoRedoHandler, StaffEditorSource, type SourceEditor, type SourceModel,
 } from './binding-contribution.js';
 import type { BoundTextModel } from './monaco-bound-document.js';
+import type { Decoration } from './remote-cursors.js';
 
 interface Disposable { dispose(): void }
 
@@ -25,7 +26,25 @@ interface MonacoEditorLike {
   isFocused(): boolean;
   readonly onFocusChanged: (listener: (focused: boolean) => void) => Disposable;
   readonly onDispose: (listener: () => void) => Disposable;
-  getControl(): { updateOptions(options: { readOnly: boolean; readOnlyMessage?: { value: string } }): void };
+  getControl(): {
+    updateOptions(options: { readOnly: boolean; readOnlyMessage?: { value: string } }): void;
+    /** ICodeEditor.deltaDecorations (33-29). */
+    deltaDecorations(oldIds: string[], next: Decoration[]): string[];
+    /** ICodeEditor.onDidChangeCursorSelection: the primary selection, from where it started to where the caret is. */
+    onDidChangeCursorSelection(listener: (event: { readonly selection: MonacoSelection }) => void): Disposable;
+  };
+}
+
+interface MonacoSelection {
+  readonly selectionStartLineNumber: number;
+  readonly selectionStartColumn: number;
+  readonly positionLineNumber: number;
+  readonly positionColumn: number;
+}
+
+/** ITextModel.getOffsetAt. */
+interface OffsetModel {
+  getOffsetAt(position: { lineNumber: number; column: number }): number;
 }
 
 const models = new WeakMap<object, SourceModel>();
@@ -58,6 +77,14 @@ function sourceEditor(widget: EditorWidget): SourceEditor | undefined {
     setReadOnly: (readOnly, message) => editor.getControl().updateOptions({ readOnly, ...(readOnly && message !== undefined ? { readOnlyMessage: { value: message } } : {}) }),
     onFocusChanged: (listener) => editor.onFocusChanged(listener),
     onDispose: (listener) => editor.onDispose(listener),
+    decorations: { deltaDecorations: (oldIds, next) => editor.getControl().deltaDecorations(oldIds, next) },
+    onSelection: (listener) => editor.getControl().onDidChangeCursorSelection(({ selection }) => {
+      const model = document.textEditorModel as unknown as OffsetModel;
+      listener(
+        model.getOffsetAt({ lineNumber: selection.selectionStartLineNumber, column: selection.selectionStartColumn }),
+        model.getOffsetAt({ lineNumber: selection.positionLineNumber, column: selection.positionColumn }),
+      );
+    }),
   };
 }
 
