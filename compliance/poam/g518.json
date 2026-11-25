@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "ia-02",
+    "ia-05",
+    "cp-07"
+  ],
+  "gap": "G518",
+  "id": "g518",
+  "milestones": [
+    {
+      "title": "Sign-on option for the npm registry reviewed",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Verdaccio serves public packages only, with per-reader accounts whose passwords OpenBao generates, `promotion` as the only publisher, builds that fail closed when it is down and storage that can be rebuilt from Harbor's approved npm sets. Review a sign-on plugin, after its own fit check, or a replacement registry.",
+  "title": "The npm registry signs readers in with its own accounts, not your organization's sign-on, and has no high availability"
+}
