@@ -9,10 +9,10 @@
   "milestones": [
     {
       "phase": "33",
-      "title": "Repeat the browser cursor action and finish the serial undo, status, invitation confirmation and payload checks"
+      "title": "Repeat the six locally passing two-browser cases in CI on the combined branch"
     }
   ],
   "ownerRole": "maintainers",
-  "remediation": "Verify the original named-hover assertion by moving the actual pointer over the selection geometry. Complete the following serial browser checks. Keep the separate native decision acceptance tracked in G542.",
-  "title": "Native staff browser checks stopped at cursor hover"
+  "remediation": "Use the focused container test that passed locally on 2026-11-25. Verify its six browser cases on the combined branch in CI before closing G544. The native decision acceptance remains tracked in G542.",
+  "title": "Native staff browser checks await combined CI verification"
 }

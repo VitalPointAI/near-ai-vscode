@@ -7172,8 +7172,8 @@
       "id": "G544",
       "ownerRole": "maintainers",
       "poam": "g544",
-      "remediation": "The built-image test passed sharing, admission and co-editing and captured the remote name in the editor. Its cursor case timed out before establishing the hover, so the serial undo, status, invitation confirmation and browser payload checks did not run. Rerun the corrected cursor interaction and complete the later checks. Source: Phase 33 plan 30 Tasks 2 and 3 and its summary.",
-      "title": "Native staff browser checks stopped at cursor hover"
+      "remediation": "The six implemented built-image browser cases passed locally on 2026-11-25, including named hover, own undo, offline and reconnect status, invitation confirmation and browser payload isolation. Repeat the cases in CI on the combined branch before closing the record. G542 tracks the separate native decision acceptance. Source: Phase 33 plan 30 Tasks 2 and 3 and its summary.",
+      "title": "Native staff browser checks await combined CI verification"
     },
     {
       "appliesAt": "now",

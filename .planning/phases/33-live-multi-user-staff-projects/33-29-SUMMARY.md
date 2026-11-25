@@ -104,7 +104,7 @@ The two-browser run found that two frontend parts could hold separate wrappers f
 
 The regression reproduced before the fix: the separate-wrapper test saw no cursor frame (`d070b66e`). After the fix (`3a61f45a`), the focused cursor, attribution and Staff Room service checks passed 20 of 20. Workbench lint passed. The workbench unit suite ran 339 tests with 338 passed and one existing skip for the locally unbuilt browser bundle. The recovery adds one regression test and updates the timing of one existing test.
 
-The follow-up on new workbench and hub images captured `Blake Rivers, j2-analyst` on the rendered Monaco line in Avery’s browser. The cursor test still reached its 120-second total timeout before establishing the hover. The snapshot showed the editor’s suggestion popover open. In the pinned Monaco source, selection styling is painted on a backdrop and the hover handler uses the editor’s text hit target. The fixture now closes the suggestion popover and moves the real pointer to the measured selection coordinates. Its hover assertion still requires the author’s name. This adjustment awaits a browser rerun (G544).
+The first built-image run captured `Blake Rivers, j2-analyst` on the rendered Monaco line in Avery’s browser. The cursor test reached its 120-second total timeout before establishing the hover. The snapshot showed the editor’s suggestion popover open. In the pinned Monaco source, selection styling is painted on a backdrop and the hover handler uses the editor’s text hit target. The fixture now closes the suggestion popover and moves the real pointer to the measured selection coordinates. The capped retry at `1707686e` passed the caret, label and named-hover case in 1.4 seconds.
 
 ## Threat model
 
@@ -132,5 +132,4 @@ None.
 ## Open conditions
 
 - **G435** (remediated, entry still open): the native live engine now runs presence and the Staff Room lists the people it hears; the register entry is left for the owner to close, because this session could not remove it.
-- **G544**: The browser snapshot proves the remote name was drawn. Run the corrected hover action in the two-browser fixture and verify the rest of the browser sequence.
 

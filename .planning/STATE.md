@@ -69,7 +69,7 @@ Next, in order (owner, 2026-11-18):
 
 ## Accumulated Context
 
-Phase 33 native staff collaboration (2026-11-25): 33-29 cursor and attribution unit checks passed on `feat/codex-phase-33-29-30`. The 33-30 built-image tracer passed and its cursor test timed out after the remote name was rendered. Named hover and the later serial tests await rerun (G544). Acceptance remains blocked on native submit and first-decision actions (G542) and needs separate test network isolation evidence (G543). 33-32 and 33.2-08 still depend on completed 33-30 acceptance.
+Phase 33 native staff collaboration (2026-11-25): 33-29 cursor and attribution unit checks passed on `feat/codex-phase-33-29-30`. The six implemented 33-30 browser cases passed locally, including named hover, own undo, offline/reconnect status, invitation confirmation and browser payload isolation. Repeat on the combined CI head (G544). Plan 33-30 still needs the native submit and first-decision actions and their browser checks (G542), plus separate test network isolation evidence (G543). 33-32 and 33.2-08 still depend on completed 33-30 acceptance.
 
 ### Roadmap Evolution
 

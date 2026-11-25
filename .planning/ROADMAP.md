@@ -321,7 +321,7 @@ Plans:
   - Share with people on the work-area page (33-27).
   - The Sterling status entry (33-28).
   - Native cursors and Show Who Wrote This (33-29).
-  - Two-browser acceptance against the built image (33-30). Decision confirmation and the two decision conflict paths need native decision entry points (G542). The test fixture's external routing remains to be checked (G543).
+  - Two-browser acceptance against the built image (33-30). Six implemented cases passed locally and await combined CI (G544). Decision confirmation and the two decision conflict paths need native decision entry points (G542). The test fixture's external routing remains to be checked (G543).
   - The late joiner's text at once, its history fetched and checked, and every obligation settled (33-32, D-70, wave 11 after 33-30).
   - The history check in the live replicator, its status sentences and the real-hub parity scenario (33-34, D-70, wave 12 after 33-32).
   - An editing session open at the checkpoint seen at once by a late joiner (33-33, D-71, wave 13 after 33-34, which shares the scenario file), closing G431.
