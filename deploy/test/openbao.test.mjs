@@ -336,3 +336,64 @@ test('apply.mjs plans the guest policies and the jwt role guest-expiry: its own 
     token_no_default_policy: true, token_policies: ['guest-expiry'], token_ttl: 300, token_max_ttl: 300, token_explicit_max_ttl: 300, token_period: 0
   });
 });
+
+// Raft snapshots (D-73, CP-9; 47-24): a scheduled job whose token can take a snapshot and do nothing else.
+test('raft-snapshot grants exactly one path, sys/storage/raft/snapshot, with exactly the read capability', () => {
+  assert.deepEqual(pathBlocks(policy('raft-snapshot')).map((block) => [block.path, capabilitiesOf(block), block.body.length]), [['sys/storage/raft/snapshot', ['read'], 1]]);
+});
+
+test('apply.mjs binds the kubernetes role raft-snapshot to ServiceAccount openbao-snapshot only, with the snapshot policy only and a short token', () => {
+  const run = spawnSync(process.execPath, [path.join(ROOT, 'deploy/openbao/apply.mjs'), '--site', SITE_FILE, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  const operations = JSON.parse(run.stdout);
+  assert.ok(operations.some((operation) => operation.what === 'policy raft-snapshot'));
+  const role = operations.find((operation) => operation.write === 'auth/kubernetes/role/raft-snapshot')?.body;
+  assert.ok(role, 'kubernetes role raft-snapshot');
+  assert.deepEqual(role.bound_service_account_names, ['openbao-snapshot']);
+  assert.deepEqual(role.bound_service_account_namespaces, ['sterling-openbao']);
+  assert.deepEqual(role.token_policies, ['raft-snapshot']);
+  assert.equal(role.token_no_default_policy, true);
+  assert.ok(role.token_ttl <= 600 && role.token_max_ttl <= 600, 'at most 10 minutes');
+  assert.equal(role.audience, 'sterling-openbao-snapshot', 'a token for this audience only, never the API server\'s');
+  const mount = operations.findIndex((operation) => operation.write === 'sys/auth/kubernetes');
+  assert.ok(operations.findIndex((operation) => operation.write === 'auth/kubernetes/role/raft-snapshot') > mount, 'after the kubernetes mount 47-13 enables');
+});
+
+test('the rendered openbao release has CronJob openbao-raft-snapshot, ServiceAccount openbao-snapshot and PVC openbao-snapshots on the site class', () => {
+  const site = loadSite(SITE_FILE);
+  const yaml = renderRelease(ROOT, openbao(), { site, helm: HELM });
+  const docs = yaml.split(/^---[ \t]*$/m);
+  const job = docs.find((doc) => /^kind: CronJob$/m.test(doc) && /name: openbao-raft-snapshot/.test(doc));
+  assert.ok(job, 'CronJob openbao-raft-snapshot');
+  assert.match(job, /concurrencyPolicy: Forbid/);
+  assert.match(job, /restartPolicy: OnFailure/);
+  const server = /image: "([^"]+)"/.exec(docs.find((doc) => /^kind: StatefulSet$/m.test(doc)))[1];
+  assert.match(server, /@sha256:[0-9a-f]{64}$/);
+  assert.ok(job.includes(`image: "${server}"`), 'the server image by digest');
+  assert.match(job, /imagePullPolicy: IfNotPresent/);
+  assert.match(job, /runAsNonRoot: true/);
+  assert.match(job, /seccompProfile:\n\s+type: RuntimeDefault/);
+  assert.match(job, /allowPrivilegeEscalation: false/);
+  assert.match(job, /readOnlyRootFilesystem: true/);
+  assert.match(job, /drop: \[ALL\]/);
+  assert.match(job, /serviceAccountName: openbao-snapshot/);
+  assert.match(job, /automountServiceAccountToken: false/, 'only the projected token for OpenBao\'s audience');
+  assert.match(job, /audience: sterling-openbao-snapshot/);
+  assert.match(job, /name: sterling-site-ca/);
+  assert.match(job, /value: https:\/\/openbao\.sterling-openbao\.svc:8200/);
+  assert.ok(docs.some((doc) => /^kind: ServiceAccount$/m.test(doc) && /name: openbao-snapshot$/m.test(doc)), 'ServiceAccount openbao-snapshot');
+  const claim = docs.find((doc) => /^kind: PersistentVolumeClaim$/m.test(doc) && /name: openbao-snapshots/.test(doc));
+  assert.ok(claim, 'PVC openbao-snapshots');
+  assert.match(claim, new RegExp(`storageClassName: "${site.storageClass}"`));
+});
+
+test('the snapshot script logs in with the ServiceAccount token, saves a UTC-timestamped file, keeps the newest, and never prints the token', () => {
+  const yaml = renderRelease(ROOT, openbao(), { site: loadSite(SITE_FILE), helm: HELM });
+  const job = yaml.split(/^---[ \t]*$/m).find((doc) => /name: openbao-raft-snapshot/.test(doc) && /^kind: CronJob$/m.test(doc));
+  assert.match(job, /bao write -field=token auth\/kubernetes\/login role=raft-snapshot jwt=@\/var\/run\/secrets\/openbao\/token/);
+  assert.match(job, /bao operator raft snapshot save "\/snapshots\/openbao-\$\(date -u \+%Y%m%dT%H%M%SZ\)\.snap"|bao operator raft snapshot save "\$file"/);
+  assert.match(job, /date -u \+%Y%m%dT%H%M%SZ/);
+  assert.match(job, /KEEP/);
+  assert.match(job, /value: "28"/, 'keep from the site file');
+  assert.doesNotMatch(job, /set -x|echo[^\n]*BAO_TOKEN|printenv|env\b[^:]/, 'the token is never printed');
+});

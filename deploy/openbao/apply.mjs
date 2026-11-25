@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // OpenBao as code (D-37 to D-41): mounts, the jwt auth bound to the site's Keycloak, the session and step-up roles, the policies, the PKI
-// intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
+// intermediate's mount and roles, the kubernetes auth that cert-manager signs through (D-16, 47-13), the Raft snapshot job's role on it (D-73,
+// 47-24) and the key custodians' group. The audit device is not here: OpenBao 2.7 refuses to enable audit devices
 // through the API ("use declarative, config-based audit device management", spike S5), so it is an audit stanza in the server configuration
 // (deploy/values/openbao.yaml). Run at install and again on every update; a second run
 // changes nothing (each write is compared with what OpenBao already holds and skipped when equal).
@@ -20,7 +21,7 @@ import { loadSite } from '../bundle/lib/render.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
 export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator', 'guest-expiry',
-  'guest-removal']);
+  'guest-removal', 'raft-snapshot']);
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
@@ -38,6 +39,11 @@ export const GUEST_EXPIRY = Object.freeze({ role: 'guest-expiry', client: 'sterl
  * service account token never leaves the cluster.
  */
 export const CERT_MANAGER = Object.freeze({ role: 'cert-manager', serviceAccount: 'openbao-issuer', namespace: 'cert-manager', audience: 'sterling-openbao-pki' });
+/**
+ * The scheduled Raft snapshot (D-73, 47-24): CronJob openbao-raft-snapshot logs in with a projected token of its own ServiceAccount for this
+ * audience (so the token is no use to the Kubernetes API) and gets a 5-minute token holding only policy raft-snapshot.
+ */
+export const RAFT_SNAPSHOT = Object.freeze({ role: 'raft-snapshot', serviceAccount: 'openbao-snapshot', namespace: 'sterling-openbao', audience: 'sterling-openbao-snapshot' });
 /**
  * The cluster service domains the ingress role may sign besides the site domain: the in-cluster names of the services that serve TLS from the
  * site PKI (OpenBao and its Raft peers, Keycloak and its Postgres, OpenSearch, the registry, Theia Cloud's CRD conversion webhook). Every
@@ -113,6 +119,9 @@ export function planApply(site, { jwtPubkey, caPem } = {}) {
     { what: `kubernetes role ${CERT_MANAGER.role}`, read: `auth/kubernetes/role/${CERT_MANAGER.role}`, write: `auth/kubernetes/role/${CERT_MANAGER.role}`, body: {
       bound_service_account_names: [CERT_MANAGER.serviceAccount], bound_service_account_namespaces: [CERT_MANAGER.namespace], audience: CERT_MANAGER.audience,
       token_policies: ['cert-manager'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 300 } },
+    { what: `kubernetes role ${RAFT_SNAPSHOT.role}`, read: `auth/kubernetes/role/${RAFT_SNAPSHOT.role}`, write: `auth/kubernetes/role/${RAFT_SNAPSHOT.role}`, body: {
+      bound_service_account_names: [RAFT_SNAPSHOT.serviceAccount], bound_service_account_namespaces: [RAFT_SNAPSHOT.namespace], audience: RAFT_SNAPSHOT.audience,
+      token_policies: ['raft-snapshot'], token_no_default_policy: true, token_ttl: 300, token_max_ttl: 600 } },
     // The approvers of key moves between sites (key-move.hcl); members are added at the key ceremony and never by this script.
     { what: 'identity group key-custodians', read: 'identity/group/name/key-custodians', write: 'identity/group/name/key-custodians', body: { type: 'internal', policies: [] },
       compare: (group) => group?.type === 'internal' }
