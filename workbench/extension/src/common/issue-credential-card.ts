@@ -4,7 +4,7 @@
  * while a revocation request is open. Every sentence about a credential comes from the backend (issueForm.ts through the issuer service); this
  * file adds only the card's own headings and buttons. State is never shown by colour alone: each row carries its state in words. No Theia here.
  */
-import type { IssuableType, IssuedCredentialView, RevocationRequestView } from './issuer-service.js';
+import type { IssuableType, IssuedCredentialView, RevocationComputerView, RevocationRequestView } from './issuer-service.js';
 
 export const CARD_TEXT = {
   title: 'Issue credential',
@@ -28,6 +28,8 @@ export const CARD_TEXT = {
   download: 'Save the file',
   refresh: 'Refresh',
   noneOfYours: 'You issued nothing to this person that is still active.',
+  computer: 'computer',
+  revokeComputer: 'Revoke this computer',
 } as const;
 
 export const STATE_TEXT: Readonly<Record<IssuedCredentialView['state'], string>> = {
@@ -38,7 +40,7 @@ export const STATE_ICON: Readonly<Record<IssuedCredentialView['state'], string>>
   active: 'pass', suspended: 'debug-pause', revoked: 'circle-slash', unknown: 'question',
 };
 
-export type CardAction = 'revoke' | 'suspend' | 'lift';
+export type CardAction = 'revoke' | 'suspend' | 'lift' | 'revoke-computer';
 
 export interface CredentialRow {
   readonly hash: string;
@@ -52,7 +54,7 @@ export interface CredentialRow {
 
 /** Which actions a credential's state allows: a revocation is final, a suspension can be lifted, an unknown state allows nothing yet. */
 export function rowFor(view: IssuedCredentialView): CredentialRow {
-  const action = (name: CardAction): { action: CardAction; label: string; review: string } => ({
+  const action = (name: 'revoke' | 'suspend' | 'lift'): { action: CardAction; label: string; review: string } => ({
     action: name, label: name === 'revoke' ? CARD_TEXT.revoke : name === 'suspend' ? CARD_TEXT.suspend : CARD_TEXT.lift, review: view.reviews[name],
   });
   const actions = view.state === 'active' ? [action('revoke'), action('suspend')] : view.state === 'suspended' ? [action('revoke'), action('lift')] : [];
@@ -69,12 +71,21 @@ export interface RequestSection {
   readonly empty?: string;
 }
 
+/** A computer a request names (D-25): Revoke only, which a named officer does; the binding's state in words. */
+export function computerRow(view: RevocationComputerView): CredentialRow {
+  const state = view.state === 'revoked' ? 'revoked' : view.state === 'unknown' ? 'unknown' : 'active';
+  return {
+    hash: `computer-${String(view.slot)}`, title: `${CARD_TEXT.computer} ${view.device.slice(4, 12)} (bound ${view.claimedAt.slice(0, 10)})`, state: STATE_TEXT[state], icon: STATE_ICON[state],
+    until: '', actions: view.state === 'active' ? [{ action: 'revoke-computer', label: CARD_TEXT.revokeComputer, review: view.review }] : [],
+  };
+}
+
 /** The "Credentials to revoke" section: undefined when no request is open, so the section disappears. */
 export function requestsSection(requests: readonly RevocationRequestView[]): readonly RequestSection[] | undefined {
   if (requests.length === 0) return undefined;
   return requests.map((request) => {
     if (!request.current) return { id: request.id, heading: request.message, detail: '', rows: [] };
-    const rows = request.credentials.filter((view) => view.state !== 'revoked').map(rowFor);
+    const rows = [...request.credentials.filter((view) => view.state !== 'revoked').map(rowFor), ...request.computers.filter((view) => view.state !== 'revoked').map(computerRow)];
     return {
       id: request.id, heading: request.personName, detail: request.reasonText, seenAt: request.seenAt, rows,
       ...(rows.length === 0 ? { empty: CARD_TEXT.noneOfYours } : {}),

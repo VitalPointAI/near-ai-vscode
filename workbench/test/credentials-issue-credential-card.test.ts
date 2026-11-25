@@ -33,17 +33,22 @@ test('the Credentials to revoke section disappears when no request is open, and 
   assert.equal(requestsSection([]), undefined);
   const requests: RevocationRequestView[] = [
     { id: 'guest-kc-alex-guest-ended', current: true, personName: 'Alex', reason: 'guest-ended', reasonText: 'guest access ended early', seenAt: '2026-11-24T10:00:00Z',
-      credentials: [view('active', 'b'.repeat(64)), view('revoked', 'c'.repeat(64))] },
-    { id: 'keycloak-kc-sam-removed', current: true, personName: 'Sam', reason: 'removed', reasonText: 'removed', seenAt: '2026-11-24T11:00:00Z', credentials: [] },
+      credentials: [view('active', 'b'.repeat(64)), view('revoked', 'c'.repeat(64))],
+      computers: [{ slot: 2, device: `dev-${'f'.repeat(32)}`, claimedAt: '2026-11-25T08:00:00Z', state: 'active', review: 'You are about to revoke Alex\'s computer binding. A revocation can never be undone.' },
+        { slot: 3, device: `dev-${'0'.repeat(32)}`, claimedAt: '2026-11-25T08:00:00Z', state: 'revoked', review: 'x' }] },
+    { id: 'keycloak-kc-sam-removed', current: true, personName: 'Sam', reason: 'removed', reasonText: 'removed', seenAt: '2026-11-24T11:00:00Z', credentials: [], computers: [] },
     { id: 'keycloak-kc-zed-removed', current: false, message: ISSUER_TEXT.newerRequest },
   ];
   const sections = requestsSection(requests);
   assert.ok(sections);
   assert.deepEqual(sections.map((section) => [section.heading, section.detail, section.rows.map((row) => row.hash)]), [
-    ['Alex', 'guest access ended early', ['b'.repeat(64)]], ['Sam', 'removed', []], [ISSUER_TEXT.newerRequest, '', []],
+    ['Alex', 'guest access ended early', ['b'.repeat(64), 'computer-2']], ['Sam', 'removed', []], [ISSUER_TEXT.newerRequest, '', []],
   ]);
   assert.deepEqual(sections[0]?.rows[0]?.actions.map((entry) => entry.label), [CARD_TEXT.revoke, CARD_TEXT.suspend]);
   assert.equal(sections[1]?.empty, CARD_TEXT.noneOfYours);
+  // A computer (D-25) offers Revoke only, with its own sentence; a revoked one is gone from the list.
+  assert.deepEqual(sections[0]?.rows[1]?.actions.map((entry) => [entry.action, entry.label]), [['revoke-computer', CARD_TEXT.revokeComputer]]);
+  assert.match(sections[0]?.rows[1]?.title ?? '', /^computer ffffffff \(bound 2026-11-25\)$/);
 });
 
 test('the issue steps: form, review with the sentence, signing, done; a refusal returns to the form with its sentence and step-up', () => {

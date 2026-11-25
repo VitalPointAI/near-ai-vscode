@@ -17,6 +17,7 @@ import {
   INBOX_FORMAT, ISSUED_FORMAT, REVOCATION_FORMAT, WALLET_ITEM_FORMAT, createIssuerService, inboxVerifier, walletFolder,
   type HubStatusSession, type IssuerCaller, type IssuerEngine, type IssuerLogin, type IssuerPolicy, type IssuerVault,
 } from '../extension/src/node/credentials/issuer-service.ts';
+import { DEVICE_INDEX_FROM } from '../extension/src/node/credentials/device-slots.ts';
 
 const engine = realEngine as unknown as IssuerEngine;
 const NOW = Date.parse('2026-11-24T12:00:00.000Z');
@@ -114,7 +115,7 @@ async function setup(options: { roleUpTo?: string; noRole?: boolean; roleUntil?:
     };
   }
 
-  function serviceFor(who: Officer, extra: { hub?: HubStatusSession | undefined; policy?: IssuerPolicy | undefined; login?: () => Promise<IssuerLogin> } = {}) {
+  function serviceFor(who: Officer, extra: { hub?: HubStatusSession | undefined; policy?: IssuerPolicy | undefined; login?: () => Promise<IssuerLogin>; randomIndex?: (size: number) => number } = {}) {
     const raw = decodePublicKeyMultibase(who.person.issuing.multikey).key;
     return createIssuerService({
       keys: {
@@ -132,7 +133,7 @@ async function setup(options: { roleUpTo?: string; noRole?: boolean; roleUntil?:
       hub: () => ('hub' in extra ? extra.hub : hub),
       login: extra.login ?? (async () => { if (!who.fresh) return 'step-up'; vaultEvents.logins += 1; return vault(who, statusKey); }),
       now: () => NOW,
-      randomIndex: (() => { let next = 4000; return () => next++; })(),
+      randomIndex: extra.randomIndex ?? (() => { let next = 4000; return () => next++; })(),
     });
   }
 
@@ -376,4 +377,49 @@ test('the card\'s form and review: the types the officer may issue, and the revi
     ok({ sentence: 'You are about to issue: Secret clearance on the Canadian classified scale to Alex, until 28 February 2027.' }));
   assert.deepEqual(await s.serviceFor(s.officer).review(s.request({ claims: { scale: 'ca-classified', atLeast: 'Top Secret' } }), PERSON), refused(ISSUE_FORM_TEXT.aboveCeiling));
   assert.equal(s.officer.signs + s.vaultEvents.logins, 0, 'reviewing signs nothing');
+});
+
+test('D-25: a reported lost computer reaches the officers; revoking it sets its device bit, and resolving frees the person\'s slot', async () => {
+  const s = await setup();
+  const slot = { format: 'sterling-device-slot/1', device: `dev-${'c'.repeat(32)}`, revocation: { list: REVOCATIONS, index: 120_000 }, suspension: { list: SUSPENSIONS, index: 120_001 }, claimedAt: '2026-11-25T08:00:00Z' };
+  s.site.create(`site/device-slots/${ALEX_ENTITY}/slot-2`, slot);
+  s.site.create(`site/device-slots/${ALEX_ENTITY}/slot-3`, { ...slot, device: `dev-${'d'.repeat(32)}`, revocation: { list: REVOCATIONS, index: 120_002 } });
+  const id = 'keycloak-kc-alex-computer-lost-2';
+  s.site.create(`site/revocation-requests/${id}`, { format: REVOCATION_FORMAT, entity: 'keycloak-kc-alex', keycloakId: 'kc-alex', reason: 'computer-lost', slot: 2, device: slot.device, seenAt: '2026-11-25T08:30:00Z', job: 'workbench: a lost computer' });
+  const listed = await s.serviceFor(s.officer).listRevocationRequests(PERSON);
+  const view = listed.kind === 'ok' ? listed.value.find((entry) => entry.id === id) : undefined;
+  assert.ok(view?.current);
+  if (!view?.current) return;
+  assert.equal(view.reasonText, 'reported a lost computer');
+  assert.deepEqual(view.computers.map((computer) => [computer.slot, computer.device, computer.state]), [[2, slot.device, 'active']], 'only the computer reported lost');
+  assert.deepEqual(view.credentials, [], 'a lost computer is not about the person\'s credentials');
+  assert.deepEqual(await s.serviceFor(s.officer).resolveRequest(id, PERSON), ok({ removed: false, remaining: 1 }));
+  assert.deepEqual(await s.serviceFor(s.officer).revokeComputer(id, 3, PERSON), refused(ISSUER_TEXT.noComputer), 'only the slot the request names');
+  const revoked = await s.serviceFor(s.officer).revokeComputer(id, 2, PERSON);
+  assert.equal(revoked.kind === 'ok' && revoked.value.state, 'revoked');
+  assert.equal(s.listBit(REVOCATIONS, 120_000, 'revocation'), true);
+  assert.equal(s.listBit(REVOCATIONS, 120_002, 'revocation'), false, 'the person\'s other computer still works');
+  assert.deepEqual(await s.serviceFor(s.officer).resolveRequest(id, PERSON), ok({ removed: true, remaining: 0 }));
+  assert.equal(s.site.read(`site/device-slots/${ALEX_ENTITY}/slot-2`), undefined, 'the slot is free for another computer');
+  assert.ok(s.site.read(`site/device-slots/${ALEX_ENTITY}/slot-3`));
+  assert.equal(s.site.read(`site/revocation-requests/${id}`), undefined);
+});
+
+test('D-25: when a person\'s access ends their computers are listed and must be revoked too; officers\' places stay below the device quarter', async () => {
+  const s = await setup();
+  s.site.create(`site/device-slots/${ALEX_ENTITY}/slot-1`, { format: 'sterling-device-slot/1', device: `dev-${'e'.repeat(32)}`, revocation: { list: REVOCATIONS, index: 130_000 }, suspension: { list: SUSPENSIONS, index: 130_001 }, claimedAt: '2026-11-25T08:00:00Z' });
+  const id = 'keycloak-kc-alex-disabled';
+  s.site.create(`site/revocation-requests/${id}`, { format: REVOCATION_FORMAT, entity: 'keycloak-kc-alex', keycloakId: 'kc-alex', reason: 'disabled', seenAt: '2026-11-25T08:30:00Z', job: 'users.mjs sync' });
+  const listed = await s.serviceFor(s.officer).listRevocationRequests(PERSON);
+  const view = listed.kind === 'ok' ? listed.value.find((entry) => entry.id === id) : undefined;
+  assert.deepEqual(view?.current && view.computers.map((computer) => computer.slot), [1]);
+  assert.deepEqual(await s.serviceFor(s.officer).resolveRequest(id, PERSON), ok({ removed: false, remaining: 1 }));
+  assert.equal((await s.serviceFor(s.officer).revokeComputer(id, 1, PERSON)).kind, 'ok');
+  assert.deepEqual(await s.serviceFor(s.officer).resolveRequest(id, PERSON), ok({ removed: true, remaining: 0 }));
+  assert.ok(s.site.read(`site/device-slots/${ALEX_ENTITY}/slot-1`), 'an ended person\'s slots are kept as the record');
+  // An officer's credential never draws from the device quarter.
+  const sizes: number[] = [];
+  const service = s.serviceFor(s.officer, { randomIndex: (size) => { sizes.push(size); return size - sizes.length; } });
+  assert.equal((await service.issue(s.request(), PERSON)).kind, 'ok');
+  assert.deepEqual(sizes, [DEVICE_INDEX_FROM, DEVICE_INDEX_FROM]);
 });

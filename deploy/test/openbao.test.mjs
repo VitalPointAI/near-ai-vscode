@@ -117,12 +117,13 @@ const escape = (text) => text.replace(/[.*?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Whether a token holding these policies, for the entity `entity`, may use `capability` on `apiPath`, by OpenBao's ACL path rules: the
- * entity template is filled in, a path matches exactly, a trailing "*" matches any rest, and "+" matches one segment. These policies have no
- * deny blocks, so any matching block that lists the capability allows it.
+ * entity templates are filled in (the id with `entity`, the name with `keycloak-<entity>` as enrol.mjs names staff entities), a path matches
+ * exactly, a trailing "*" matches any rest, and "+" matches one segment. These policies have no deny blocks, so any matching block that lists
+ * the capability allows it.
  */
 function allows(policies, entity, capability, apiPath) {
   return policies.flatMap((name) => pathBlocks(policy(name))).some((block) => {
-    const filled = block.path.replaceAll('{{identity.entity.id}}', entity);
+    const filled = block.path.replaceAll('{{identity.entity.id}}', entity).replaceAll('{{identity.entity.name}}', `keycloak-${entity}`);
     const glob = filled.endsWith('*');
     const pattern = (glob ? filled.slice(0, -1) : filled).split('+').map(escape).join('[^/]+');
     return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath) && capabilitiesOf(block).includes(capability);
@@ -144,6 +145,8 @@ test('a session token reads only its own signing key under transit/keys/, and si
   assert.deepEqual(sign.map((block) => block.path), ['transit/sign/person-{{identity.entity.id}}']);
   assert.deepEqual(base.map((block) => block.path).sort(), ['auth/token/lookup-self', 'auth/token/renew-self', 'auth/token/revoke-self',
     'kv/data/site/people/{{identity.entity.id}}',
+    ...[1, 2, 3, 4, 5].map((slot) => `kv/data/site/device-slots/{{identity.entity.id}}/slot-${slot}`),
+    'kv/data/site/status-index/device-*', 'kv/data/site/revocation-requests/{{identity.entity.name}}-computer-lost-*',
     'kv/data/users/{{identity.entity.id}}/*', 'kv/metadata/users/{{identity.entity.id}}/*', 'transit/datakey/wrapped/kek-{{identity.entity.id}}',
     'transit/decrypt/kek-{{identity.entity.id}}', 'transit/keys/person-{{identity.entity.id}}'].sort());
   // No glob anywhere under transit/ in a session policy.
@@ -399,4 +402,42 @@ test('71-12: a second run against the recorded state writes nothing', async () =
   assert.ok(first.some((item) => item.what === 'jwt role sterling-issuer-stepup'));
   const second = await applyPlan(request, planApply(ISSUERS_SITE()));
   assert.deepEqual(second.filter((item) => item.result !== 'unchanged'), []);
+});
+
+// Phase 71, D-25 (owner decision 2026-11-25, closing G466): a person claims their own computer's status list place through a narrow create-only
+// path, under their own entity only, at most 5 computers; they never claim another person's slot, change a claimed one or sign a status list.
+test('D-25: a person creates and reads only their own five computer slots, never a sixth, never another person\'s, and never changes one', () => {
+  for (let slot = 1; slot <= 5; slot += 1) {
+    const own = `kv/data/site/device-slots/${ADA}/slot-${slot}`;
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', own), true, own);
+    assert.equal(allows(SESSION_POLICIES, ADA, 'read', own), true, own);
+    for (const capability of ['update', 'delete', 'patch', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, own), false, `${capability} ${own}: a claimed slot is never changed`);
+    assert.equal(allows(SESSION_POLICIES, ADA, 'delete', `kv/metadata/site/device-slots/${ADA}/slot-${slot}`), false, 'nor removed by the person');
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/device-slots/${BEN}/slot-${slot}`), false, 'never under another entity');
+    assert.equal(allows(SESSION_POLICIES, ADA, 'read', `kv/data/site/device-slots/${BEN}/slot-${slot}`), false);
+  }
+  // The cap is the five names: a sixth slot, any other name or a deeper path has no create.
+  for (const other of ['slot-6', 'slot-0', 'slot-10', 'slot-1x', 'slot-1/x', 'slot', 'x']) {
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/device-slots/${ADA}/${other}`), false, other);
+  }
+  assert.equal(allows(SESSION_POLICIES, ADA, 'list', `kv/metadata/site/device-slots/${ADA}/`), false);
+});
+
+test('D-25: a person claims device places only, once each, never an officer\'s place, never a list signature, and reports only their own lost computer', () => {
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/device-revocation-revocation-1/120000'), true);
+  for (const capability of ['read', 'update', 'delete', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, 'kv/data/site/status-index/device-revocation-revocation-1/120000'), false, capability);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/revocation-revocation-1/4000'), false, 'officers\' places are theirs');
+  for (const key of ['transit/sign/status-list-ci', 'transit/sign/status-list-site']) assert.equal(allows(SESSION_POLICIES, ADA, 'update', key), false, key);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${ADA}-computer-lost-2`), true);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${BEN}-computer-lost-2`), false, 'never about another person');
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${ADA}-disabled`), false, 'only a lost computer');
+  for (const capability of ['read', 'update', 'delete', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, `kv/data/site/revocation-requests/keycloak-${ADA}-computer-lost-2`), false, capability);
+});
+
+test('D-25: officers read people\'s computer slots and free one by removing it; they never create or change one', () => {
+  const slot = `kv/data/site/device-slots/${ADA}/slot-3`;
+  assert.equal(issuerAllows('read', slot), true);
+  assert.equal(issuerAllows('delete', slot.replace('/data/', '/metadata/')), true);
+  assert.equal(issuerAllows('list', `kv/metadata/site/device-slots/${ADA}/`), true);
+  for (const capability of ['create', 'update', 'delete']) assert.equal(issuerAllows(capability, slot), false, capability);
 });

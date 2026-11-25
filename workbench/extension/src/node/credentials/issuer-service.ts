@@ -20,10 +20,11 @@
  * none of them reaches the browser. Nothing here imports Theia.
  */
 import { randomInt } from 'node:crypto';
-import { ISSUER_TEXT, REVOCATION_REASON_TEXT, type IssuableType, type IssueFormField, type IssueReview, type IssueRequest, type IssueResult, type IssuedCredentialView, type RevocationReason, type RevocationRequestView } from '../../common/issuer-service.js';
+import { ISSUER_TEXT, REVOCATION_REASON_TEXT, type IssuableType, type IssueFormField, type IssueReview, type IssueRequest, type IssueResult, type IssuedCredentialView, type RevocationComputerView, type RevocationReason, type RevocationRequestView } from '../../common/issuer-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { KeyService } from '../key-service.js';
 import type { EngineSigner } from './identity-service.js';
+import { COMPUTER_LOST_REASON, DEVICE_INDEX_FROM, MAX_COMPUTERS, slotPath, slotRecordOf, type DeviceSlotRecord } from './device-slots.js';
 
 /** The pure code the service runs, from engine/identity.cjs (tools/identity-entry.ts). Types are loose on purpose: the engine checks shapes. */
 export interface IssuerEngine {
@@ -150,7 +151,7 @@ const HASH = /^[0-9a-f]{64}$/;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const STATUS_SIZE = 131_072;
-const REASONS: readonly RevocationReason[] = ['disabled', 'removed', 'guest-ended'];
+const REASONS: readonly RevocationReason[] = ['disabled', 'removed', 'guest-ended', 'computer-lost'];
 
 interface Slot { readonly list: string; readonly index: number }
 interface Issued { readonly type: string; readonly issuer: string; readonly personName: string; readonly validUntil: string; readonly revocation: Slot; readonly suspension: Slot }
@@ -195,6 +196,7 @@ export interface IssuerService {
   clearSuspension(hash: string, caller: IssuerCaller): Promise<ServiceResult<IssuedCredentialView>>;
   listRevocationRequests(caller: IssuerCaller): Promise<ServiceResult<readonly RevocationRequestView[]>>;
   resolveRequest(id: string, caller: IssuerCaller): Promise<ServiceResult<{ readonly removed: boolean; readonly remaining: number }>>;
+  revokeComputer(id: string, slot: number, caller: IssuerCaller): Promise<ServiceResult<RevocationComputerView>>;
   /** The officer's current role credentials, verified (for the form: what they may issue). */
   roles(): Promise<ServiceResult<readonly ReadView[]>>;
 }
@@ -379,7 +381,8 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
   /** A status list place no other credential has: claimed once in kv/site/status-index/, with one more try on a clash. */
   async function claim(vault: IssuerVault, uri: string, purpose: Purpose, issuer: string): Promise<Slot> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const index = randomIndex(STATUS_SIZE);
+      // Officers' credentials take places below the device quarter of each list (D-25), so a person's computer never shares a bit with one.
+      const index = randomIndex(DEVICE_INDEX_FROM);
       if ((await vault.create(`site/status-index/${purpose}-${listName(uri)}/${String(index)}`, { issuer, claimedAt: iso(now()) })) === 'created') return { list: uri, index };
     }
     return stop(ISSUER_TEXT.noIndex);
@@ -543,13 +546,36 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
       && Date.parse(role.read.validFrom) <= at && at < Date.parse(role.read.validUntil));
   }
 
-  interface OpenRequest { readonly id: string; readonly entityName: string; readonly reason: string; readonly seenAt: string }
+  interface OpenRequest { readonly id: string; readonly entityName: string; readonly reason: string; readonly seenAt: string; readonly slot?: number }
   function requestOf(id: string, data: Record<string, unknown> | undefined): OpenRequest | 'newer' | undefined {
     if (data === undefined) return undefined;
     if (data.format !== REVOCATION_FORMAT) return 'newer';
-    const { entity, reason, seenAt } = data;
+    const { entity, reason, seenAt, slot } = data;
     if (typeof entity !== 'string' || typeof reason !== 'string' || typeof seenAt !== 'string') return 'newer';
-    return { id, entityName: entity, reason, seenAt };
+    if (reason === COMPUTER_LOST_REASON && !(Number.isSafeInteger(slot) && (slot as number) >= 1 && (slot as number) <= MAX_COMPUTERS)) return 'newer';
+    return { id, entityName: entity, reason, seenAt, ...(reason === COMPUTER_LOST_REASON ? { slot: slot as number } : {}) };
+  }
+
+  /** The computers a request is about: the one slot of a lost-computer report, or every computer of a person whose access ended. */
+  async function computersOf(vault: IssuerVault, entity: string | undefined, request: OpenRequest): Promise<Array<{ slot: number; record: DeviceSlotRecord }>> {
+    if (entity === undefined) return [];
+    const slots = request.slot === undefined ? Array.from({ length: MAX_COMPUTERS }, (_unused, index) => index + 1) : [request.slot];
+    const found: Array<{ slot: number; record: DeviceSlotRecord }> = [];
+    for (const slot of slots) {
+      const record = slotRecordOf(await vault.read(slotPath(entity, slot)));
+      if (record !== undefined) found.push({ slot, record });
+    }
+    return found;
+  }
+
+  async function computerView(context: Context, personName: string, slot: number, record: DeviceSlotRecord): Promise<RevocationComputerView> {
+    let state: RevocationComputerView['state'] = 'active';
+    try {
+      if (await bitSet(context, record.revocation, 'revocation')) state = 'revoked';
+    } catch {
+      state = 'unknown';
+    }
+    return { slot, device: record.device, claimedAt: record.claimedAt, state, review: context.engine.revokeSentence('DeviceBindingCredential', personName) };
   }
 
   async function listRevocationRequests(caller: IssuerCaller): Promise<ServiceResult<readonly RevocationRequestView[]>> {
@@ -567,15 +593,33 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
           }
           const entity = await vault.entityId(request.entityName);
           const entries = entity === undefined ? [] : await register(vault, entity);
-          const mine = entries.filter((entry) => entry.issued.issuer === context.did);
+          const personName = entries.find((entry) => entry.issued.personName !== '')?.issued.personName ?? 'A person';
+          // A lost computer is about that computer only; an ended access is about everything this officer issued to the person, and their computers.
+          const mine = request.slot === undefined ? entries.filter((entry) => entry.issued.issuer === context.did) : [];
           const credentials = await Promise.all(mine.map((entry) => viewOf(context, entry.hash, entry.issued)));
+          const computers = await Promise.all((await computersOf(vault, entity, request)).map(({ slot, record }) => computerView(context, personName, slot, record)));
           const reasonText = (REASONS as readonly string[]).includes(request.reason) ? REVOCATION_REASON_TEXT[request.reason as RevocationReason] : request.reason;
-          views.push({
-            id, current: true, personName: entries.find((entry) => entry.issued.personName !== '')?.issued.personName ?? 'A person',
-            reason: request.reason, reasonText, seenAt: request.seenAt, credentials,
-          });
+          views.push({ id, current: true, personName, reason: request.reason, reasonText, seenAt: request.seenAt, credentials, computers });
         }
         return ok(views);
+      });
+    });
+  }
+
+  /** Revokes a computer a request names (D-25): any named officer, after the step-up; a revocation is never undone. */
+  async function revokeComputer(id: string, slot: number, caller: IssuerCaller): Promise<ServiceResult<RevocationComputerView>> {
+    return run(caller, async () => {
+      if (typeof id !== 'string' || !REQUEST_ID.test(id) || !Number.isSafeInteger(slot)) return refused(ISSUER_TEXT.noRequest);
+      const context = await contextFor();
+      return withVault(async (vault) => {
+        const request = requestOf(id, await vault.read(`${REQUESTS_FOLDER}/${id}`));
+        if (request === undefined || request === 'newer') return refused(ISSUER_TEXT.noRequest);
+        const entity = await vault.entityId(request.entityName);
+        const found = (await computersOf(vault, entity, request)).find((entry) => entry.slot === slot);
+        if (found === undefined) return refused(ISSUER_TEXT.noComputer);
+        await changeBit(context, vault, found.record.revocation, 'revocation', true);
+        const entries = entity === undefined ? [] : await register(vault, entity);
+        return ok(await computerView(context, entries.find((entry) => entry.issued.personName !== '')?.issued.personName ?? 'A person', slot, found.record));
       });
     });
   }
@@ -589,13 +633,17 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
         if (request === undefined) return refused(ISSUER_TEXT.noRequest);
         if (request === 'newer') return refused(ISSUER_TEXT.newerRequest);
         const entity = await vault.entityId(request.entityName);
-        const entries = entity === undefined ? [] : await register(vault, entity);
+        const entries = entity === undefined || request.slot !== undefined ? [] : await register(vault, entity);
+        const computers = await computersOf(vault, entity, request);
         let remaining = 0;
         for (const entry of entries) {
           const ended = (await bitSet(context, entry.issued.revocation, 'revocation')) || (await bitSet(context, entry.issued.suspension, 'suspension'));
           if (!ended) remaining += 1;
         }
+        for (const computer of computers) if (!(await bitSet(context, computer.record.revocation, 'revocation'))) remaining += 1;
         if (remaining > 0) return ok({ removed: false, remaining });
+        // A lost computer's slot is freed once its binding is revoked, so the person can bind another (at most 5 at once).
+        if (request.slot !== undefined && entity !== undefined) await vault.remove(slotPath(entity, request.slot));
         await vault.remove(`${REQUESTS_FOLDER}/${id}`);
         return ok({ removed: true, remaining: 0 });
       });
@@ -610,7 +658,7 @@ export function createIssuerService(deps: IssuerServiceDeps): IssuerService {
   }
 
   return {
-    issuableTypes, review, issue, listIssued, listRevocationRequests, resolveRequest, roles,
+    issuableTypes, review, issue, listIssued, listRevocationRequests, resolveRequest, revokeComputer, roles,
     revoke: (hash, caller) => act(hash, caller, 'revoke'),
     suspend: (hash, caller) => act(hash, caller, 'suspend'),
     clearSuspension: (hash, caller) => act(hash, caller, 'clear'),

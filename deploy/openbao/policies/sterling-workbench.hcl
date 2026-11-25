@@ -19,6 +19,37 @@ path "kv/data/site/people/{{identity.entity.id}}" {
   capabilities = ["create", "read"]
 }
 
+# The person's own computer slots (Phase 71, D-25, owner decision 2026-11-25): binding one of their own computers claims a status list place
+# for it. Exactly five slots, each under the person's own entity, create and read only: nobody claims another person's slot, nobody changes or
+# removes a claimed one (an officer frees a slot once that computer is revoked), and a sixth computer has no slot to take.
+path "kv/data/site/device-slots/{{identity.entity.id}}/slot-1" {
+  capabilities = ["create", "read"]
+}
+path "kv/data/site/device-slots/{{identity.entity.id}}/slot-2" {
+  capabilities = ["create", "read"]
+}
+path "kv/data/site/device-slots/{{identity.entity.id}}/slot-3" {
+  capabilities = ["create", "read"]
+}
+path "kv/data/site/device-slots/{{identity.entity.id}}/slot-4" {
+  capabilities = ["create", "read"]
+}
+path "kv/data/site/device-slots/{{identity.entity.id}}/slot-5" {
+  capabilities = ["create", "read"]
+}
+
+# The places of computers only, each claimed once so no two computers share a status bit: create only, in the device part of the index space,
+# never the places officers give to credentials (kv/site/status-index/<purpose>-<list>/). A person never signs a status list.
+path "kv/data/site/status-index/device-*" {
+  capabilities = ["create"]
+}
+
+# Reporting one of the person's own computers lost: a revocation request under the person's own entity name only, created once, never read
+# or changed. An officer revokes that computer.
+path "kv/data/site/revocation-requests/{{identity.entity.name}}-computer-lost-*" {
+  capabilities = ["create"]
+}
+
 # The person's key-encryption key: wrap a new data key, and unwrap one.
 path "transit/datakey/wrapped/kek-{{identity.entity.id}}" {
   capabilities = ["update"]

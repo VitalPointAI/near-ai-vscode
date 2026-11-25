@@ -83,6 +83,7 @@ export const TYPE_LABEL_TEXT: Readonly<Record<string, string>> = Object.freeze({
   MembershipCredential: 'membership', ClearanceCredential: 'clearance', CompartmentCredential: 'compartment access', ServiceCredential: 'service',
   NationalityCredential: 'nationality', AffiliationCredential: 'affiliation', ExportEligibilityCredential: 'export eligibility',
   AccessAgreementCredential: 'access agreement', VisitClearanceCredential: 'visit clearance', ObserverAccessCredential: 'observer access',
+  DeviceBindingCredential: 'computer binding',
 });
 
 /** The scales as sentences name them; any other scale is "the <name> scale". */

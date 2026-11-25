@@ -73,9 +73,12 @@ export interface HubTrustSession {
   postLog(path: string, log: string): Promise<{ readonly status: number }>;
 }
 
-/** Status list indexes for a new credential, from your organization's issuance setup (71-12). */
+/**
+ * Status list places for a new device binding: the person's own computer slot (D-25, device-slots.ts). `full` when the person already has the
+ * most computers bound; undefined when your organization's status lists are not available here.
+ */
 export interface StatusAllocator {
-  allocate(): Promise<{ readonly revocation: StatusSlot; readonly suspension: StatusSlot } | undefined>;
+  allocate(device?: string): Promise<{ readonly revocation: StatusSlot; readonly suspension: StatusSlot; readonly slot?: number } | 'full' | undefined>;
 }
 export interface StatusSlot { readonly list: string; readonly index: number }
 
@@ -254,7 +257,13 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
       own = undefined;
     }
     if (own === undefined) return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
-    const slots = await deps.statusAllocator?.allocate();
+    let slots: Awaited<ReturnType<StatusAllocator['allocate']>>;
+    try {
+      slots = await deps.statusAllocator?.allocate(engine.deviceFingerprint(didKey));
+    } catch {
+      return refused(IDENTITY_TEXT.noStatusLists);
+    }
+    if (slots === 'full') return refused(IDENTITY_TEXT.tooManyComputers);
     if (slots === undefined) return refused(IDENTITY_TEXT.noStatusLists);
     const key = await deps.keys.personPublicKey();
     if (key.kind !== 'ok') return key as ServiceResult<never>;
@@ -350,7 +359,9 @@ export function openBaoKv(session: () => ActiveSession | undefined): IdentityKv 
         await s.client.request('POST', `${s.config.kvMount}/data/${path}`, { token: s.token, body: { options: { cas: 0 }, data } });
         return 'created';
       } catch (error) {
-        if ((error as { status?: number }).status === 400) return 'exists';
+        // 400: check-and-set found an entry; 403: a create-only path that already holds one (OpenBao counts the write as an update).
+        const status = (error as { status?: number }).status;
+        if (status === 400 || status === 403) return 'exists';
         throw error;
       }
     },

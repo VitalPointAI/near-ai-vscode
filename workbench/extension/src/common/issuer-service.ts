@@ -74,7 +74,17 @@ export interface IssuedCredentialView {
   readonly reviews: { readonly revoke: string; readonly suspend: string; readonly lift: string };
 }
 
-export type RevocationReason = 'disabled' | 'removed' | 'guest-ended';
+export type RevocationReason = 'disabled' | 'removed' | 'guest-ended' | 'computer-lost';
+
+/** A computer bound to the person a request is about (D-25): its slot, fingerprint and binding state. */
+export interface RevocationComputerView {
+  readonly slot: number;
+  readonly device: string;
+  readonly claimedAt: string;
+  readonly state: 'active' | 'revoked' | 'unknown';
+  /** The review sentence read before the step-up. */
+  readonly review: string;
+}
 
 /** One open revocation request (D-22), with only the credentials this officer issued to that person. */
 export type RevocationRequestView =
@@ -86,6 +96,8 @@ export type RevocationRequestView =
     readonly reasonText: string;
     readonly seenAt: string;
     readonly credentials: readonly IssuedCredentialView[];
+    /** The person's computers: the one reported lost, or all of them when their access ended. */
+    readonly computers: readonly RevocationComputerView[];
   }
   | { readonly id: string; readonly current: false; readonly message: string };
 
@@ -103,6 +115,8 @@ export interface IssuerServiceRpc {
   listRevocationRequests(): Promise<ServiceResult<readonly RevocationRequestView[]>>;
   /** Removes a request once every credential issued to that person, by any officer, is revoked or suspended. */
   resolveRequest(id: string): Promise<ServiceResult<{ readonly removed: boolean; readonly remaining: number }>>;
+  /** Revokes a computer's binding that a request names (D-25). */
+  revokeComputer(id: string, slot: number): Promise<ServiceResult<RevocationComputerView>>;
 }
 
 /** Every sentence the issuer service answers with (D-21): plain, "your organization", none quotes a DID, a key, an index or a token. */
@@ -130,6 +144,7 @@ export const ISSUER_TEXT = {
   issuedInbox: 'Issued. It reaches the person\'s wallet at their next sign-in.',
   issuedFile: 'Issued. Give the person the file for their computer.',
   noRequest: 'This revocation request is no longer open.',
+  noComputer: 'That computer is not bound to this person.',
 } as const;
 
 /** The reasons 47-20 and 47-31 write, in plain words. */
@@ -137,6 +152,7 @@ export const REVOCATION_REASON_TEXT: Readonly<Record<RevocationReason, string>> 
   disabled: 'disabled in sign-in',
   removed: 'removed',
   'guest-ended': 'guest access ended early',
+  'computer-lost': 'reported a lost computer',
 };
 
 /** The inbox pickup at session start (D-15): one sentence, or none when nothing arrived. */

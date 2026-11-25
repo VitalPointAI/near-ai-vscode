@@ -46,6 +46,15 @@ path "kv/metadata/site/issued/*" {
   capabilities = ["list"]
 }
 
+# People's computer slots (D-25), kv/site/device-slots/<entity>/slot-<n>: read to revoke a computer a request names; a lost computer's slot
+# is removed once its binding is revoked, which frees it for another computer.
+path "kv/data/site/device-slots/*" {
+  capabilities = ["read"]
+}
+path "kv/metadata/site/device-slots/*" {
+  capabilities = ["list", "delete"]
+}
+
 # Status list indexes, claimed once each (check-and-set 0), so two officers never give the same index to two credentials.
 path "kv/data/site/status-index/*" {
   capabilities = ["create"]

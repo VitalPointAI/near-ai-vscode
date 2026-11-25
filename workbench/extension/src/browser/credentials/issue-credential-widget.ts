@@ -270,7 +270,8 @@ export class IssueCredentialWidget extends BaseWidget {
       const item = element('li', 'sterling-issue-row');
       const state = element('span', 'sterling-issue-state');
       state.append(icon(row.icon), ` ${row.state}`);
-      item.append(element('strong', undefined, row.title), state, element('span', 'sterling-issue-muted', `Until ${row.until}`));
+      item.append(element('strong', undefined, row.title), state);
+      if (row.until !== '') item.append(element('span', 'sterling-issue-muted', `Until ${row.until}`));
       const actions = element('div', 'sterling-issue-actions');
       if (this.confirming?.hash === row.hash) {
         actions.append(element('p', 'sterling-issue-review', this.confirming.review),
@@ -278,7 +279,7 @@ export class IssueCredentialWidget extends BaseWidget {
           button(CARD_TEXT.cancel, 'close', () => { this.confirming = undefined; void this.load(); }));
       } else {
         for (const action of row.actions) {
-          actions.append(button(action.label, action.action === 'revoke' ? 'circle-slash' : action.action === 'suspend' ? 'debug-pause' : 'debug-start', () => {
+          actions.append(button(action.label, action.action === 'revoke' || action.action === 'revoke-computer' ? 'circle-slash' : action.action === 'suspend' ? 'debug-pause' : 'debug-start', () => {
             this.confirming = { hash: row.hash, action: action.action, review: action.review };
             void this.load();
           }));
@@ -294,7 +295,9 @@ export class IssueCredentialWidget extends BaseWidget {
     const confirming = this.confirming;
     if (confirming === undefined || confirming.hash !== hash) return;
     this.confirming = undefined;
-    const call = confirming.action === 'revoke' ? this.service.revoke(hash) : confirming.action === 'suspend' ? this.service.suspend(hash) : this.service.clearSuspension(hash);
+    const slot = Number(hash.replace(/^computer-/, ''));
+    const call = confirming.action === 'revoke-computer' && requestId !== undefined ? this.service.revokeComputer(requestId, slot)
+      : confirming.action === 'revoke' ? this.service.revoke(hash) : confirming.action === 'suspend' ? this.service.suspend(hash) : this.service.clearSuspension(hash);
     const answer = await call;
     if (answer.kind === 'refused') this.say(answer.fix === undefined ? answer.reason : `${answer.reason} ${answer.fix}.`);
     // After the last of that person's credentials ends, the request is removed (it stays while any other officer's remain).
