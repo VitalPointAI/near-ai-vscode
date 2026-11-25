@@ -172,7 +172,7 @@ None. Hosted joining (the X25519 binding signed by the person key, the hub addre
 
 ## Open conditions
 
-- G422 (filed as G416, renumbered because Phase 74.1 reserved G407 to G418): the workbench image's SBOM (syft) does not list the vendored Yjs 13.6.33 and lib0 0.2.119 the staff engine carries; add them to the image's supply-chain record from `scripts/crdt-vendor.json` before Phase 33 closes.
+- G422 (filed under an id in the range Phase 74.1 had reserved, then renumbered): the workbench image's SBOM (syft) does not list the vendored Yjs 13.6.33 and lib0 0.2.119 the staff engine carries; add them to the image's supply-chain record from `scripts/crdt-vendor.json` before Phase 33 closes.
 
 ## Self-Check: PASSED
 

@@ -220,19 +220,21 @@ None.
 ## Open conditions
 
 - G430 (closes in Phase 33): the late joiner's two remaining limits.
-  - It starts from a checkpoint only in the base cell and cells granted to the hub, and reads every other cell in full.
-  - Its product text counts the summary only once the earlier registrations arrive.
-  - Needs a decision on how a summary may name the sessions it holds without their registrations, then serving the earlier history after the start.
-- G422 (renumbered from G416, 33-24): the workbench image SBOM does not list the vendored Yjs build.
-- Two root tests fail in this worktree: `autoApproval` (Open-GSD runtime) and `cyberAssembly` (store path).
+  - G430, limit 1: it starts from a checkpoint only in the base cell and cells granted to the hub, and reads every other cell in full.
+  - G430, limit 2: its product text counts the summary only once the earlier registrations arrive.
+  - G430 needs a decision on how a summary may name the sessions it holds without their registrations, then serving the earlier history after the start.
+- G422 (renumbered, 33-24): the workbench image SBOM does not list the vendored Yjs build.
+
+## Hand-offs
+
+- Two root tests failed in this worktree: `autoApproval` (Open-GSD runtime) and `cyberAssembly` (store path).
   - Both compare paths derived from the very long scratch and worktree folder names, and both still fail with a short TMPDIR.
-  - No file they test is touched by this plan, but their pass on a short-path checkout was not shown here.
-  - 33-16's full run on CI is the check.
+  - No file they test is touched by this plan.
+  - Resolved in the gate integration (2026-11-25) by `fix/copylint-baseline-and-cyber-store`: the cyber store key stays unique for long paths, and the autoApproval test finds the card by its call id.
 - The lead's name reaches the roster only when the creating flow passes it: `MigrationOptions.leadName`, for 33-28's Share flow.
 - For 33-16, which assembles the Phase 33 integration branch: the coordinator asked that `fix/dev-site-key-pin-prompt` (`97e604dc`, gap G445) ride in the same PR, so the owner approves the gate files once.
   - It fixes the dev site-key script's PIN prompt, adds a real-SoftHSM2 test, and adds an `apt-get install softhsm2 opensc` step to ci.yml's deploy job.
-  - Merge it into the integration branch, keeping both sides' ci.yml changes: this plan changed the test and hub jobs, and that branch changes the deploy job.
-  - Include its tests in the capped runs. It is not merged here.
+  - Merged in the gate integration branch `feat/integration-gate-2026-11-25`, keeping both sides' ci.yml changes, and its tests ran in the capped runs.
 - `.planning/phases/33-live-multi-user-staff-projects/33-14-late-joiner-scenario.ts.txt` is the held-back copy, now restored into the test file. It can be deleted; I left it until someone confirms.
 
 ## Self-Check: PASSED
