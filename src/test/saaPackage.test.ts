@@ -313,6 +313,8 @@ test('in the Sterling workbench a ZIP saved on the workbench side is offered as 
   const available: string[] = [];
   Object.assign(vscode.commands, { getCommands: async () => available });
   const downloads: unknown[] = [];
+  // The command module captured the vscode stub of the test that loaded it first; load it again against this one.
+  delete require.cache[require.resolve('../services/saaExportCommand')];
   const { registerSaaExport, GENERATE_SAA_PACKAGE_COMMAND, DOWNLOAD_SAA_PACKAGE_COMMAND } =
     require('../services/saaExportCommand') as typeof import('../services/saaExportCommand');
   registerSaaExport({ extension: { packageJSON: { version: '0.4.36' } }, subscriptions: [], asAbsolutePath: () => formsDir } as unknown as import('vscode').ExtensionContext);
