@@ -3,7 +3,7 @@
 // stays small. No vscode import and no network call: everything here is read from memory.
 import { isNearCloudEndpoint } from '../domain/config';
 import { ConnectionNotBoundError, NEAR_TLS_FINGERPRINT_KIND, pinnedFetch } from './connectionBinding';
-import { TIER_ORDER } from '../domain/gate/routing';
+import { TIER_ORDER, decideRoute } from '../domain/gate/routing';
 import type { ConnectionBindingFact, RouteDecision, RouteFacts, RoutingTier } from '../domain/gate/routing';
 import { trustFactsFor } from '../domain/gate/trust';
 import type { TrustContext, TrustFacts } from '../domain/gate/trust';
@@ -11,8 +11,10 @@ import type { ModelInfo } from '../domain/provider/messages';
 import type { UseTier } from '../domain/gate/models';
 import { useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
-import { currentSessionRoute, defaultSessionRoute, passportTriggeredRecordFor, raiseSessionUse } from '../gate/sessionMark';
-import { resolvePassport } from '../domain/gate/models';
+import { currentSessionRoute, defaultSessionRoute, passportTriggeredRecordFor, raiseSessionUse, routingOf } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
+import { JOB_MINIMUM_TIER, resolvePassport } from '../domain/gate/models';
+import type { ModelJob } from '../domain/gate/models';
 import { SHIPPED_REPORT_MODELS } from '../domain/gate/passportStep';
 import { passportState } from '../domain/gate/passportState';
 import type { ObservedPlace } from '../domain/gate/passportState';
@@ -123,6 +125,44 @@ export function requestTrust(decision: RouteDecision, facts: RouteFacts, context
   } catch {
     return {};
   }
+}
+
+// ---- The gate's preview of a job's model (74.1 D-18, D-19) ----
+/** Where a run's requests go, for the preview: the run's route (its policy and mark), the client's kind and host, and the floor. */
+export interface GateAllowsInput {
+  readonly route: SessionRoute;
+  readonly catalog: ReadonlyArray<{ readonly id: string; readonly privacyBoundary?: string }>;
+  readonly clientRoute: 'near' | 'local' | undefined;
+  readonly host: string;
+  readonly floor?: RoutingTier;
+  readonly now?: number;
+}
+
+/**
+ * Whether the gate would let a model do a job now (74.1 D-18, D-19): decideRoute itself, at the job's minimum use (the safety job as a checking job), with
+ * the run's mark, routing and policy. A preview: it records nothing, raises no session's use and keeps no trigger. No proven connection is assumed, so a
+ * label that needs one previews as refused (the request itself still decides). Anything that cannot be read previews as refused.
+ */
+export function gateAllows(input: GateAllowsInput): (modelId: string, job: ModelJob) => boolean {
+  return (modelId, job) => {
+    try {
+      const now = input.now ?? Date.now();
+      const entry = input.catalog.find((candidate) => candidate.id === modelId);
+      if (entry === undefined) return false;
+      const { routing, defaultLabel } = routingOf(input.route);
+      const mark = input.route.markOf();
+      const own = input.route.useOf?.() ?? {};
+      const facts: RouteFacts = {
+        clientRoute: input.clientRoute, host: input.host, nearEndpoint: isNearCloudEndpoint(input.host),
+        model: { id: entry.id, ...(entry.privacyBoundary === undefined ? {} : { privacyBoundary: entry.privacyBoundary }) },
+        attestationFailed: input.route.attestation.failed, binding: { state: 'unknown', host: input.host }, now, localModelAvailable: input.clientRoute === 'local',
+        use: JOB_MINIMUM_TIER[job], useInput: { ...own, mark: [...(own.mark ?? []), ...mark.map((label) => ({ scale: label.scale, level: label.level }))], ...(job === 'safety' ? { checkingJob: true } : {}) }
+      };
+      return decideRoute(mark, routing, facts, defaultLabel, input.floor, input.route.routePolicy?.(now)).allowed;
+    } catch {
+      return false;
+    }
+  };
 }
 
 // ---- A connection held to your organization's pins (D-26) ----
