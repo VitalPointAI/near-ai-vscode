@@ -1053,6 +1053,7 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
   const { project } = shared;
   const rekeyed: string[] = [];
   const skipped: string[] = [];
+  let awaitingKeys = false;
   for (const plan of plans) {
     if (plan.recipients.length === 0) {
       skipped.push(plan.cell);
@@ -1069,7 +1070,10 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
     const key = newEpochKey();
     const grant = newEpochGrant(roster, { cell: plan.cell, info, epoch, key, recipients: plan.recipients, routing: shared.routing, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw) });
     if (grant === 'switch-first') return refused('switch-first', SWITCH_FIRST_TEXT);
-    if (grant === undefined) return refuse('rekey-awaiting-keys');
+    if (grant === undefined) {
+      awaitingKeys = true;
+      continue;
+    }
     const pages = await project.signGrantPages(grant), founding = pages[0]; // signed as the device the roster names (the person key when hosted)
     // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open. The key is
     // kept with its grant's hash: if the entry is not written, the next rekey of the cell makes another key for the same epoch, and the ring takes
@@ -1081,7 +1085,7 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
     if (isResult(written)) return written;
     rekeyed.push(plan.cell);
   }
-  return { rekeyed, skipped };
+  return awaitingKeys ? refuse('rekey-awaiting-keys') : { rekeyed, skipped };
 }
 
 function rekeyMessage(first: string, outcome: RekeyOutcome): string {

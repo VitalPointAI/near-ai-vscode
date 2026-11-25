@@ -103,7 +103,7 @@ test('removal with recipients awaiting hybrid keys keeps writes paused until rec
   const deputy = await bringIn(lead, 'removed-deputy', 'Quinn Planner', orgClearance('Internal'));
   ok(await nameDeputy(lead.host, deputy.member), 'name deputy');
   await syncTo(lead, deputy);
-  assert.ok('ok' in await switchToV2(deputy.host));
+  assert.ok('hash' in await switchToV2(deputy.host), 'the deputy switches the project');
   await syncTo(deputy, lead);
   const base = lead.p.projectId;
   const initial = (await lead.p.state()).roster;
