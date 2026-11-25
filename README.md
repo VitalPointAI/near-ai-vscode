@@ -1416,6 +1416,29 @@ the sidebar, or a status view never adds files. Open-GSD is installed only
 when you run a workflow and it's missing, and the extension never adds its own
 copy of Open-GSD to a project that doesn't already have one.
 
+## The Sterling workbench
+
+Each release also ships as the Sterling workbench, a container image you open in your
+browser. It carries Sterling Sovereign AI inside it, in the Canadian Defence Edition:
+
+- **A right-hand rail** with Get Started, Portfolio, Chat, Team Studio, Agent Activity,
+  Governance, Compliance and Documentation. Data Management and Model Factory are shown as
+  planned. The rail's Chat shortcut slides the chat drawer in and out; closing the last
+  conversation hides the drawer and keeps the conversation.
+- **Get Started** with **Set up Sterling**, **Open Chat** and **Explore a sample agent team**,
+  and four Defence work areas: Capability Development, Exercises & Training, Planning and
+  Resource Management. Each opens its own page, where **Create** makes a new work area in a new
+  folder and never overwrites one. Planning and Exercises & Training open the **Staff Room**.
+- **Portfolio Room** for a local DND and CAF portfolio snapshot, and **Resource Inventory** for
+  resources by source, which you can link to a work area.
+- **Compliance** shows control states only from an evidence bundle checked for the same
+  release, and **Documentation** shows these guides with their screenshots and diagrams,
+  rendered when the image was built.
+- After **SovAI: Generate SA&A Package…**, **Download ZIP** sends the package to your browser.
+
+The image runs as a non-root user, keeps telemetry off and contacts no outside server unless
+you configure one. It has no sign-in of its own, so run it on `127.0.0.1` only.
+
 ## Get started in two minutes
 
 1. Install **Sterling Sovereign AI** and open a project folder. From 0.4.38 each release also ships
