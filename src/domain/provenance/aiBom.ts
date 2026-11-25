@@ -5,6 +5,9 @@
 import { createHash } from 'node:crypto';
 import type { DecisionRecord } from '../gate/record';
 import type { Passport, ResolvedPassport } from '../gate/models';
+import { ROUTE_RULES } from '../gate/routing';
+
+const ROUTE_RULE_SET: ReadonlySet<string> = new Set<string>(ROUTE_RULES);
 
 export const AI_BOM_SPEC_VERSION = '1.6';
 /** The licence ids CycloneDX takes as SPDX ids; any other licence is named. Only ids the shipped approvals use and the SPDX list has. */
@@ -44,8 +47,9 @@ function seenModels(records: readonly DecisionRecord[]): Seen[] {
     const nearAi = record.unmapped.nearAi;
     const capability = nearAi.capability as { verb?: string; model?: string; provider?: string };
     if (capability.verb !== 'infer' || record.action_id !== 1) continue;
+    // A model request's own record (a route rule), not an event about a session's routing.
     const rule = record.authorizations[0]?.policy.name ?? '';
-    if (!rule.startsWith('route.') || rule.startsWith('route.attestation') || rule === 'route.passport-triggered' || rule === 'route.not-accredited') continue;
+    if (!ROUTE_RULE_SET.has(rule)) continue;
     const model = capability.model ?? '';
     if (model === '' || model === 'unknown-model') continue;
     const found = byModel.get(model) ?? { model, provider: capability.provider ?? 'unknown', uses: new Set<string>(), lane: false, first: record.time, last: record.time };

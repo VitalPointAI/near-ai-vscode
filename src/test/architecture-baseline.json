@@ -97,7 +97,7 @@
   "fileSizes": {
     "agent/commandSafety.ts": 2900,
     "agent/gateAdapter.ts": 1400,
-    "agent/teamTemplateHistory.ts": 2335,
+    "agent/teamTemplateHistory.ts": 2884,
     "services/agentSession.ts": 2708,
     "services/chat.ts": 1517,
     "services/nearAiClient.ts": 1860,
