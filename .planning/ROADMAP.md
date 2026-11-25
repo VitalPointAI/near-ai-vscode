@@ -313,10 +313,7 @@ Plans:
   - The Sterling status entry (33-28).
   - Native cursors and Show Who Wrote This (33-29).
   - Two-browser acceptance against the built image (33-30).
-  - The late joiner's text at once and its history checked in the background (33-32, D-70, wave 11 after 33-30).
-  - An editing session open at the checkpoint seen at once by a late joiner (33-33, D-71, wave 12 after 33-32), closing G431.
-  - G430 (cells the server does not hold) is POA&M item g430 for Phase 35 (2026-11-25).
-  - The close-out moves to wave 13 after 33-32 and 33-33 (33-16), and the release to wave 14 (33-17).
+  - The late joiner's text at once and its history checked in the background (33-32, D-70, wave 11 after 33-30); G430 narrowed to cells the server does not hold.
 - **Order:** native plans start after Phase 46-01, 46-02 and 46-07 are on `main`.
 - **Release:** criterion 4's release is the next Sterling container image by digest (33-17 replanned). There is no VSIX or Marketplace release.
 
