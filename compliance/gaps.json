@@ -6951,6 +6951,19 @@
       "poam": "g512",
       "remediation": "Partners' signing certificates on NATO bindings are checked against the trust anchors pinned for each partner in the signed policy, without fetching their certificate revocation lists, because the exchange never dereferences a URI from a partner's file. A partner's certificate is revoked here by your security officer removing that partner's anchor from the signed policy, which turns the partner's earlier arrivals back into not checked. The owner accepted this default on 2026-11-24. It is revisited if a partner or the authorizing official requires revocation lists to be fetched. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-08.",
       "title": "Partners' signing certificates are checked without fetching revocation lists"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "controls": [
+        "ia-03",
+        "sc-23"
+      ],
+      "id": "G541",
+      "ownerRole": "maintainers",
+      "poam": "g541",
+      "remediation": "Re-admitting your organization's server after a rollback or fork finding (hub.readmit, signed by the lead's or deputy's person key) is allowed only after the lead compares twelve words worked out from the certificate pin of the server SovAI now reaches (serverPinWords) with the server's operator. The hub has no command that prints those twelve words, and the operator guide gives no other way to work them out, so the operator has nothing to compare against and the check that the right server is trusted again rests on the lead alone. Until it is built the operator guide says so, and an operator can print only the raw pin (relay/README.md, Certificates and pins). This closes when the hub's command line prints the twelve words from its own certificate key with the same function members' computers use, a test shows the words equal the ones SovAI shows for that pin, and relay/README.md's re-admit and restore steps use the command. Source: .planning/phases/33-live-multi-user-staff-projects/33-15-SUMMARY.md.",
+      "title": "The hub cannot print the twelve words a lead compares when re-admitting it"
     }
   ]
 }
