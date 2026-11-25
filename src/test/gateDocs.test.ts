@@ -64,8 +64,8 @@ test('SECURITY.md has the policy section once, after "What the agent can do with
   assert.ok(here < SECURITY.indexOf('### Sub-agents nobody is watching'));
 });
 
-test('the policy section carries the code\'s clearance text word for word, and that text still begins "Without your organization\'s credential rules"', () => {
-  assert.ok(CLEARANCE_SELF_ASSERTED_TEXT.startsWith('Without your organization\'s credential rules'));
+test('the policy section carries the code\'s clearance text word for word, and that text still begins "Until verified credentials arrive"', () => {
+  assert.ok(CLEARANCE_SELF_ASSERTED_TEXT.startsWith('Until verified credentials arrive'));
   assert.ok(policySection.includes(CLEARANCE_SELF_ASSERTED_TEXT));
 });
 

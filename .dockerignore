@@ -32,6 +32,7 @@
 !src/domain/credentials/multibase.ts
 !src/domain/credentials/present.ts
 !src/domain/credentials/profile.ts
+!src/domain/credentials/statements.ts
 !src/domain/credentials/statusList.ts
 !src/domain/credentials/trustExport.ts
 !src/domain/credentials/types.ts
