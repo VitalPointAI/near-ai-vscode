@@ -863,7 +863,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The Theia application framework the workbench runs on: the browser shell, the backend, JSON-RPC between them, the connection token and the preferences and command services every Sterling page uses.",
       "role": "The application framework the Sterling workbench is built on. Every Sterling page (Get Started, the work-area pages, Documentation, Compliance, Portfolio, the Team preview) is a Theia widget, and every call from a page to the backend (session identity, saved secrets, signing, the team preview) goes through its JSON-RPC connection. Without it there is no workbench.",
@@ -900,7 +900,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The editor framework the workbench opens files in (text editors, editor navigation).",
       "role": "Opens files in editors inside the workbench, so a person can read and change the files of a work area. The Monaco editor plugs into it.",
@@ -928,7 +928,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The file tree service, file upload and download, and file dialogs over the workspace folder in the container.",
       "role": "Reads and writes the workspace folder for the workbench. The work-area pages list work areas and read their markers through its file service, and linking a resource writes through it. Without it no page could see the folder.",
@@ -959,7 +959,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The Monaco editor integration: syntax colouring, search and the editing widgets of the workbench.",
       "role": "The text editor of the workbench: syntax colouring, search and editing, the same editor VS Code uses. The Sterling extension (the VSIX) needs it for its editors and inputs.",
@@ -987,7 +987,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The file explorer view of the workspace folder.",
       "role": "The file explorer, so a person can see and open the files of the open work area.",
@@ -1015,7 +1015,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "Runs VS Code extensions in the workbench; the Sterling extension (the VSIX) runs through it in the release image.",
       "role": "Runs the Sterling VS Code extension (the VSIX bundled into the release image) inside the workbench: the SovAI chat, Team Studio, Agent Activity and the commands the Sterling pages call, such as creating a work area. Without it the release image would have the Sterling pages but none of the agent features.",
@@ -1050,7 +1050,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The settings service and settings editor; the workbench ships telemetry off as a default preference.",
       "role": "The settings service and editor. The workbench ships telemetry off as a default preference through it, so the image sends no usage data.",
@@ -1078,7 +1078,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The terminal view of the workbench (a shell inside the container).",
       "role": "The terminal view, a shell inside the person's own session container, for work the pages do not cover.",
@@ -1111,7 +1111,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "Opens the workspace folder (/home/sterling/workspace) and keeps the recent-workspace and trust state.",
       "role": "Opens the workspace folder and switches to a work area when a page opens one. The work-area pages read the open folders and its trust state through it, and refuse to link resources in a folder that is not trusted.",
@@ -1139,7 +1139,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "build",
       "purpose": "theia build: generates and bundles the workbench frontend and backend in the image build stage; never in the runtime image.",
       "role": "Runs theia build in the image build stage: it generates and bundles the workbench frontend and backend from workbench/package.json. Build only: nothing of it reaches the runtime image.",
@@ -1169,7 +1169,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "build",
       "purpose": "Draws the guides' Mermaid diagrams to static SVG in the workbench image build (workbench/tools/documentation-render.mjs), without a DOM or a browser, so the Documentation view shows each diagram instead of its source.",
       "role": "Draws the guides' Mermaid diagrams as static SVG while the image is built (workbench/tools/documentation-render.mjs), so the Documentation view shows the diagram and the image needs no diagram library or browser script at run time. Build only.",
@@ -1201,7 +1201,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "build",
       "purpose": "Turns the bundled guides into HTML in the workbench image build (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view never shows Markdown, MDX or HTML source as text. The same version @theia/core already ships for its own Markdown rendering.",
       "role": "Turns the bundled guides into HTML while the image is built (workbench/tools/documentation-render.mjs), with raw HTML off, so the Documentation view shows formatted pages and never Markdown source. Build only.",
@@ -1227,7 +1227,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "runtime",
       "purpose": "The Sterling pages of the workbench (Get Started, Documentation, Compliance, the Team preview) and its backend services, including the answer to Theia Cloud's activity tracker for idle stop (GET /monitor/activity/lastActivity and POST /monitor/activity/popup, only with the session secret, nothing about the person); this repository's own code in workbench/extension.",
       "role": "Our own code in workbench/extension: the Sterling pages, the session identity and key services that keep secrets in your organization's OpenBao or the keyring, the outbound address allow list, and the answer to Theia Cloud's activity tracker for idle stop. It is what makes the Theia application the Sterling workbench.",
@@ -1254,7 +1254,7 @@
       "where": [
         "workbench/package.json"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "test",
       "purpose": "Drives the built workbench image in Chromium for the browser tests (owner-approved at 1.65.0, 2026-11-24).",
       "role": "Drives the built workbench image in Chromium for the container tests (Get Started, Documentation, secrets, session and egress), so the image that ships is the one the browser tests ran against. Test only: nothing ships.",
@@ -1525,7 +1525,7 @@
       "where": [
         "workbench/Dockerfile"
       ],
-      "component": "extension",
+      "component": "workbench",
       "scope": "test",
       "purpose": "Dev-mode OpenBao 2.7.3 for the workbench container tests only (stage openbao-test, never built into the workbench image). Phase 47 owns production OpenBao (quay.io/openbao/openbao-ubi).",
       "role": "A development-mode OpenBao for the workbench container tests (the Dockerfile's openbao-test stage), so the per-person secret paths and the step-up signing are proven against a real OpenBao. Test only: never part of the workbench image; production OpenBao is the site's own (Phase 47).",

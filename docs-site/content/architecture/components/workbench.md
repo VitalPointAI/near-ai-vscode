@@ -311,7 +311,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `0.1.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | MIT (this repository) |
@@ -332,7 +332,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.65.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Test only: not shipped |
 | Licence | Apache-2.0 |
@@ -378,7 +378,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -404,7 +404,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -432,7 +432,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -453,7 +453,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -478,7 +478,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -499,7 +499,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -520,7 +520,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -546,7 +546,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -567,7 +567,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -592,7 +592,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.77.0` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Runtime: it runs in the product |
 | Licence | EPL-2.0 (elected; also offered under GPL-2.0 with the Classpath exception) |
@@ -613,7 +613,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `1.1.3` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | MIT (its tree: elkjs 0.11.1 EPL-2.0 and entities 7.0.1 BSD-2-Clause, build stage only; none of them reaches the runtime image) |
@@ -703,7 +703,7 @@ Conditions:
 | --- | --- |
 | Kind | npm package |
 | Pinned version or digest | `14.3.3` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/package.json` |
 | Scope | Build only: not shipped |
 | Licence | MIT |
@@ -814,7 +814,7 @@ Conditions:
 | --- | --- |
 | Kind | Container image |
 | Pinned version or digest | `2.7.3@sha256:ba4b133eb9586630024e71a617e66f37f29cc3534cdd46a6233e098ceded8dc9` |
-| Architecture component | `extension` |
+| Architecture component | `workbench` |
 | Used in | `workbench/Dockerfile` |
 | Scope | Test only: not shipped |
 | Licence | MPL-2.0 |
