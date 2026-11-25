@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { IMAGE_FILES, check, discover, knownIds, main } from '../resource-check.mjs';
+import { IMAGE_FILES, check, discover, inventory, knownIds, main } from '../resource-check.mjs';
 
 const SHA = 'a'.repeat(40);
 const DIGEST = `sha256:${'b'.repeat(64)}`;
@@ -88,6 +88,35 @@ test('an entry without a role or an architecture area fails closed, and an area 
   assert.match(run(REPO, [{ ...CLEAN[0], architectureArea: 'somewhere' }, ...CLEAN.slice(1)]).join('\n'), /architectureArea "somewhere" is not one of build-and-test, workbench/);
   assert.match(run(REPO, [{ ...CLEAN[0], roleNeedsReview: false }, ...CLEAN.slice(1)]).join('\n'), /roleNeedsReview is true when present/);
   assert.deepEqual(run(REPO, [{ ...CLEAN[0], roleNeedsReview: true }, ...CLEAN.slice(1)]), []);
+});
+
+test('48.4 D-08 supplier fields: supplier is text and supplierJurisdiction an ISO 3166-1 alpha-2 code or unknown, never a name or lower case', () => {
+  const withSupplier = (extra) => [{ ...CLEAN[0], ...extra }, ...CLEAN.slice(1)];
+  assert.deepEqual(run(REPO, withSupplier({ supplier: 'Eclipse Foundation AISBL', supplierJurisdiction: 'BE' })), []);
+  assert.deepEqual(run(REPO, withSupplier({ supplier: 'unknown', supplierJurisdiction: 'unknown' })), []);
+  for (const bad of ['Belgium', 'be', '', ['BE'], 'BEL']) {
+    assert.deepEqual(run(REPO, withSupplier({ supplier: 'Eclipse Foundation AISBL', supplierJurisdiction: bad })),
+      ['compliance/resources.json npm:typescript: supplierJurisdiction must be an ISO 3166-1 alpha-2 code in capitals (CA, US, BE) or unknown.'], JSON.stringify(bad));
+  }
+  for (const bad of ['', '  ', ['Microsoft'], 42]) {
+    assert.deepEqual(run(REPO, withSupplier({ supplier: bad, supplierJurisdiction: 'US' })),
+      ['compliance/resources.json npm:typescript: supplier must name the organization that publishes it, or say unknown.'], JSON.stringify(bad));
+  }
+});
+
+test('48.4 D-08 inventory: the --json inventory carries supplier and supplierJurisdiction per entry, unknown as written', () => {
+  const root = fixture(REPO);
+  const resources = [
+    { ...CLEAN[0], supplier: 'Microsoft Corporation', supplierJurisdiction: 'US' },
+    { ...CLEAN[1], supplier: 'unknown', supplierJurisdiction: 'unknown' },
+    CLEAN[2]
+  ];
+  const rows = Object.fromEntries(inventory({ resources }, discover(root)).map((row) => [row.id, row]));
+  assert.equal(rows['npm:typescript'].supplier, 'Microsoft Corporation');
+  assert.equal(rows['npm:typescript'].supplierJurisdiction, 'US');
+  assert.equal(rows['image:docker.io/library/node'].supplier, 'unknown');
+  assert.equal(rows['image:docker.io/library/node'].supplierJurisdiction, 'unknown');
+  assert.equal(rows['action:actions/checkout'].supplierJurisdiction, null, 'an entry without the field shows null, never a country');
 });
 
 test('the check fails when the architecture area list is missing', () => {

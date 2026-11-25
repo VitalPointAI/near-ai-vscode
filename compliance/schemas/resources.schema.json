@@ -34,7 +34,9 @@
         "fit": { "enum": ["pass", "pass-with-conditions", "fail"] },
         "conditions": { "type": "array", "items": { "$ref": "#/definitions/text" } },
         "reviewer": { "$ref": "#/definitions/text" },
-        "reviewedAt": { "type": "string", "format": "date" }
+        "reviewedAt": { "type": "string", "format": "date" },
+        "supplier": { "$ref": "#/definitions/text" },
+        "supplierJurisdiction": { "type": "string", "pattern": "^([A-Z]{2}|unknown)$" }
       },
       "if": { "properties": { "fit": { "const": "pass-with-conditions" } } },
       "then": { "properties": { "conditions": { "type": "array", "minItems": 1 } }, "required": ["conditions"] }
