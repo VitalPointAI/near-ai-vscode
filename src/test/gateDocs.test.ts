@@ -1069,3 +1069,103 @@ test('Phase 41 review: SECURITY.md says what the review fixes do (CR-01, WR-01, 
   assert.match(ENDPOINT_SCHEME_TEXT, /^Nothing was sent\. .*https connections only/);
   assert.equal(isNearCloudEndpoint('https://example.org'), false);
 });
+
+// Phase 74.1 (41 D-46, D-27; 74.1-16): "Which models may do what" says what the model approvals do, in the code's own sentences, right after the routing
+// section; it names no edition and offers no security officer's switch, which is not yet available (G418).
+const MODELS_HEADING = '### Which models may do what';
+const MODELS_PAGE = readFileSync(path.join(ROOT, 'docs-site', 'content', 'security', 'models.md'), 'utf8');
+
+test('74.1: SECURITY.md has "Which models may do what" once, right after the routing section and before the sub-agent section', () => {
+  assert.equal(SECURITY.split(`\n${MODELS_HEADING}\n`).length - 1, 1);
+  const here = SECURITY.indexOf(`\n${MODELS_HEADING}\n`);
+  const routing = SECURITY.indexOf(`\n${LABELS_HEADING}\n`);
+  assert.ok(routing >= 0 && routing < here, 'after the routing section');
+  assert.equal(routing + 1 + routingSection.length, here, 'right after it, with nothing between');
+  assert.ok(here < SECURITY.indexOf('\n### Sub-agents nobody is watching\n'));
+});
+
+test('74.1: the section carries the research workspace banner and its notice word for word', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  assert.equal(RESEARCH_TEXT.banner, 'Research workspace. Adversary models allowed. No project data.');
+  assert.equal(RESEARCH_TEXT.laneNotice, 'This is the research workspace. It cannot open project files, run commands or use tools.');
+  assert.ok(words.includes(`"${RESEARCH_TEXT.banner}"`), RESEARCH_TEXT.banner);
+  assert.ok(words.includes(`"${RESEARCH_TEXT.laneNotice}"`), RESEARCH_TEXT.laneNotice);
+});
+
+test('74.1: the section carries the line text copied out of the research workspace starts with, word for word', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  assert.equal(RESEARCH_TEXT.copyHeader, 'From the research workspace, model {model}, untrusted');
+  assert.ok(flat(sectionOf(SECURITY, MODELS_HEADING)).includes(`"${RESEARCH_TEXT.copyHeader}"`));
+});
+
+test('74.1: the section carries the different-family sentence as the code builds it', async () => {
+  const { sameFamilyText } = await import('../domain/gate/lineage');
+  const sentence = sameFamilyText('{model}', '{family}');
+  assert.equal(sentence, 'This check was not given to {model}, because it comes from the same family ({family}) as the model it checks, and no approved model of another family is available. A person decides instead.');
+  assert.ok(flat(sectionOf(SECURITY, MODELS_HEADING)).includes(`"${sentence}"`));
+});
+
+test('74.1: the section carries the report-only notice word for word, and says it cannot be dismissed', async () => {
+  const uninstall = installVscodeStub(createVscodeStub());
+  try {
+    const { REPORT_MODE_TEXT } = await import('../services/reportModeNotice');
+    assert.equal(REPORT_MODE_TEXT.noticeOrg, 'Agent work is running outside your organization\'s model policy (report only).');
+    const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+    assert.ok(words.includes(`"${REPORT_MODE_TEXT.noticeOrg}"`), REPORT_MODE_TEXT.noticeOrg);
+    assert.ok(words.includes(`"${REPORT_MODE_TEXT.noticeOwn}"`), REPORT_MODE_TEXT.noticeOwn);
+    assert.ok(words.includes('with no way to close it'));
+  } finally {
+    uninstall();
+  }
+});
+
+test('74.1: the section quotes a refusal in the refusal form as the code builds it: "Nothing was sent." first, "Who to ask:" last', async () => {
+  const { PASSPORT_GAP_TEXT, whoToAsk } = await import('../domain/gate/passportStep');
+  const refusal = PASSPORT_GAP_TEXT['not-evaluated']({ model: 'gpt-oss-120b', use: 'T2', whoToAsk: whoToAsk(undefined, true) } as never);
+  assert.match(refusal, /^Nothing was sent\. .* Who to ask: your organization's security contact\.$/);
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  assert.ok(words.includes(`"${refusal}"`), refusal);
+  for (const part of ['"Nothing was sent."', '"Who to ask:"']) assert.ok(words.includes(part), part);
+});
+
+test('74.1: exceptions, the commands and the bill of materials are named as the code names them', async () => {
+  const { EXCEPTION_TEXT } = await import('../domain/gate/riskAcceptance');
+  const words = flat(sectionOf(SECURITY, MODELS_HEADING));
+  for (const phrase of [
+    `**${commandName('nearAi.models.openResearchWorkspace')}**`, `**${commandName('nearAi.models.exportAiBom')}**`, `**${EXCEPTION_TEXT.ask}**`,
+    '"Allowed for chat you review by {name} until {date}"', 'at most 90 days', '`.near-ai/state/ai-bom.cdx.json`', 'CycloneDX 1.6'
+  ]) assert.ok(words.includes(phrase), phrase);
+  assert.doesNotMatch(words, /self-signed on this computer/, 'an exception has no self-signed form (D-20)');
+});
+
+test('74.1: the known limits name their gaps, and nothing in SECURITY.md, README or the docs page offers the switch that has not shipped', () => {
+  const section = flat(sectionOf(SECURITY, MODELS_HEADING));
+  for (const id of ['G408', 'G410', 'G411', 'G413', 'G414', 'G418', 'G537']) assert.ok(section.includes(id), id);
+  for (const [name, text] of [['SECURITY.md', SECURITY], ['README', README], ['models.md', MODELS_PAGE]] as const) {
+    const said = flat(text).match(/[^.]*Stop agent work now[^.]*\./g) ?? [];
+    assert.ok(said.every((sentence) => /not yet available/.test(sentence)), `${name}: ${said.join(' | ')}`);
+  }
+});
+
+test('74.1: the docs page says the same for people and assessors, names no edition, links the road to production, and sits after the trust model', async () => {
+  const { RESEARCH_TEXT } = await import('../domain/gate/researchLane');
+  const page = flat(MODELS_PAGE);
+  for (const phrase of [RESEARCH_TEXT.banner, RESEARCH_TEXT.laneNotice, '(./road-to-production.md)', '(./policy.synced.md#which-models-may-do-what)']) assert.ok(page.includes(phrase), phrase);
+  assert.doesNotMatch(MODELS_PAGE, /sterling|defence edition/i);
+  assert.ok(!MODELS_PAGE.includes(EM_DASH));
+  const sidebar = readFileSync(path.join(ROOT, 'docs-site', 'sidebars.js'), 'utf8');
+  assert.match(sidebar, /'security\/trust-model', 'security\/models'/);
+});
+
+test('74.1: README and CHANGELOG name what 74.1 ships in the glossary words, never bare private, and no edition', () => {
+  const unreleased = CHANGELOG.split(/\n(?=## )/).find((section) => section.startsWith('## Unreleased\n')) ?? '';
+  for (const [name, text] of [['README', README], ['CHANGELOG', unreleased]] as const) {
+    const words = flat(text);
+    for (const phrase of ['Approved for', 'Open Research Workspace', 'report only', 'Allowed for chat you review', 'Western defaults', 'Export AI Bill of Materials']) {
+      assert.ok(words.includes(phrase), `${name}: ${phrase}`);
+    }
+  }
+  for (const line of unreleased.split('\n').filter((text) => text.startsWith('- '))) assert.doesNotMatch(line, /\b[Pp]rivate\b(?! hardware)/, `no bare private: ${line.slice(0, 80)}`);
+  assert.doesNotMatch(unreleased, /Sterling|Defence Edition/);
+});

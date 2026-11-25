@@ -575,7 +575,7 @@ export type AllowingRecord =
     readonly selfSigned: boolean;
     /** The `scale/level` key the authorization was checked for; absent when it was checked for the whole mark (a residency exception). */
     readonly label?: string;
-    /** A t1-risk exception's assessment reference, which stands in for your organization's evaluation of the model it allowed (74.1 D-16). */
+    /** A t1-risk exception's evidence text, recorded where your organization's evaluation would be (74.1 D-16); today it holds the mission benefit, not an assessment reference (G537). */
     readonly evidence?: string;
   }
   | { readonly kind: 'model-approval'; readonly passport: string; readonly maxTier: UseTier; readonly expiresAt: string };
