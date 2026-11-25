@@ -16,7 +16,7 @@ export function buildAssessmentPlan(input: AssessmentScope & { readonly collecto
   }));
   return {
     'assessment-plan': {
-      uuid: uuid(`assessment-plan:${input.level}`), metadata: metadata(`NEAR AI ${input.title} assessment plan draft`, input.generatedAt),
+      uuid: uuid(`assessment-plan:${input.level}`), metadata: metadata(`Sterling Sovereign AI ${input.title} assessment plan draft`, input.generatedAt),
       'import-ssp': { href: `ssp/${input.level}.json` }, 'reviewed-controls': reviewed(controls(input.rows)),
       ...(tasks.length ? { tasks } : {})
     }
@@ -69,7 +69,7 @@ export function buildAssessmentResults(input: AssessmentScope & {
   });
   return {
     'assessment-results': {
-      uuid: uuid(`assessment-results:${input.level}`), metadata: metadata(`NEAR AI ${input.title} assessment results draft`, input.generatedAt),
+      uuid: uuid(`assessment-results:${input.level}`), metadata: metadata(`Sterling Sovereign AI ${input.title} assessment results draft`, input.generatedAt),
       'import-ap': { href: input.plan },
       results: [{
         uuid: uuid(`assessment-result:${input.level}`), title: 'Release evidence results',

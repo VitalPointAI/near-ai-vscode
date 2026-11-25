@@ -44,7 +44,7 @@ const coverTitle = 'SA&A submission cover and routing record';
 const reportTitle = 'Security Assessment Report';
 
 export function buildSaaSponsorReport(input: SaaSponsorReportInput): Buffer {
-  const baseline = `NEAR AI for VS Code v${input.version}`;
+  const baseline = `Sterling Sovereign AI v${input.version}`;
   const rowCount = input.profiles.reduce((total, profile) => total + profile.rows.length, 0);
   const transmittal = heading(2, 'Draft transmittal');
   const sponsorPlan = heading(1, 'Proposed sponsor scope and operating plan');
@@ -55,7 +55,7 @@ export function buildSaaSponsorReport(input: SaaSponsorReportInput): Buffer {
     field('Supplier-prepared draft for sponsor review', 'Revision 0.1'),
     heading(2, 'Submission details'),
     table(['Field', 'Entry'], [
-      ['Product and supplier', 'NEAR AI for VS Code, VitalPointAI'],
+      ['Product and supplier', 'Sterling Sovereign AI, VitalPointAI'],
       ['Release and source commit', `v${input.version}, ${input.commit}`],
       ['Request', 'Initial scope confirmation and Security Assessment and Authorization (SA&A) intake'],
       ['Sponsoring department, program and unit', sponsor],

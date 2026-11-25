@@ -514,7 +514,7 @@ Conditions:
 
 **What it provides.** Runs VS Code extensions in the workbench; the Sterling extension (the VSIX) runs through it in the release image.
 
-**Why it is needed.** Runs the Sterling VS Code extension (the VSIX bundled into the release image) inside the workbench: the NEAR AI chat, Team Studio, Agent Activity and the commands the Sterling pages call, such as creating a work area. Without it the release image would have the Sterling pages but none of the agent features. *This role is waiting for the owner to confirm it.*
+**Why it is needed.** Runs the Sterling VS Code extension (the VSIX bundled into the release image) inside the workbench: the SovAI chat, Team Studio, Agent Activity and the commands the Sterling pages call, such as creating a work area. Without it the release image would have the Sterling pages but none of the agent features. *This role is waiting for the owner to confirm it.*
 
 | | |
 | --- | --- |

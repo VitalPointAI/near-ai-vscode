@@ -484,7 +484,7 @@ These documents are drafts. The sponsor supplies the deployment, departmental te
 `);
   append('evidence/README.md', `# Product evidence and deployment assessment
 
-This export uses the product evidence published for NEAR AI for VS Code v${evidence.version} at ${evidence.commit}. The source archive was checked against its GitHub release asset SHA-256 and the release package's internal checksums.
+This export uses the product evidence published for Sterling Sovereign AI v${evidence.version} at ${evidence.commit}. The source archive was checked against its GitHub release asset SHA-256 and the release package's internal checksums.
 
 The actual deployment and its control conclusions remain open. Published product states describe the dated release snapshot. Per-rule results distinguish pass, failure, missing evidence, stale evidence, skipped tests and tests still to do. Recheck evidence freshness and applicability before use. Profiles marked reference only require separate scope and direction.
 
