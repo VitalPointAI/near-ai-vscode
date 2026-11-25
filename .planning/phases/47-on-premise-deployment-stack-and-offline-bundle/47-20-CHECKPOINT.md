@@ -1,5 +1,7 @@
 # 47-20 checkpoint: keycloak-config-cli 6.5.1 refuses the guests-only admin permission
 
+**Resolved 2026-11-25:** the coordinator chose option 1 (the admin REST step after keycloak-config-cli). The plan continued; see `47-20-SUMMARY.md`.
+
 **Type:** checkpoint:decision (blocking), Task 1 of 3. Reached 2026-11-25 on `feat/phase-47-20-21`. Nothing of 47-20 is committed: no runner, no image, no realm change. The plan says to stop here and leave the fallback to the coordinator.
 
 ## What was run

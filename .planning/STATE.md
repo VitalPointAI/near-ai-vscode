@@ -4,9 +4,9 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 24
 status: executing
-stopped_at: Completed 47-21-PLAN.md; 47-20 stopped at its Task 1 checkpoint (keycloak-config-cli refuses the admin permission; decision needed, 47-20-CHECKPOINT.md)
-last_updated: "2026-11-25T20:26:34.169Z"
-state_head: f58e66ccc31da780debd98b72e59c937ecc2e088
+stopped_at: Completed 47-20-PLAN.md and 47-21-PLAN.md on feat/phase-47-20-21 (no PR)
+last_updated: "2026-11-25T20:59:33.329Z"
+state_head: 15c551472808954671c73263c141310e133b72bf
 progress:
   total_phases: 12
   completed_phases: 1
@@ -166,8 +166,8 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
-- 47-21 done on `feat/phase-47-20-21` without 48-11 and 47-32: its target-site check is written against 48-11's planned schema 2 shape and refuses every real target until 48-11 and 47-32 land (the plan's safe side); check the shape again when 48-11 executes
-- 47-20: keycloak-config-cli 6.5.1 cannot apply the guests-only admin permission (FGAP v2 admin-permissions client, HTTP 403); decide between an admin REST step after the realm applier, owner item 17's operator-run expire, or FGAP v1 (47-20-CHECKPOINT.md)
+- 47-21 done on `feat/phase-47-20-21` without 48-11 and 47-32: its target-site check is written against 48-11's planned schema 2 shape and refuses every real target until 48-11 and 47-32 land (the plan's safe side, G446); check the shape again when 48-11 executes
+- 47-20 done on `feat/phase-47-20-21` (coordinator chose the admin REST step after keycloak-config-cli, 2026-11-25); the site's keycloak-realm-applier client must carry client scope kc-admin-api (G421)
 
 ### Quick Tasks Completed
 
@@ -182,9 +182,9 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 
 ## Session
 
-**Last session:** 2026-11-25T20:26:33.958Z
-**Stopped at:** Completed 47-21-PLAN.md; 47-20 stopped at its Task 1 checkpoint (keycloak-config-cli refuses the admin permission; decision needed, 47-20-CHECKPOINT.md)
-**Resume file:** .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-20-CHECKPOINT.md
+**Last session:** 2026-11-25T20:59:33.122Z
+**Stopped at:** Completed 47-20-PLAN.md and 47-21-PLAN.md on feat/phase-47-20-21 (no PR)
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -238,6 +238,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P24 | 50m | 2 tasks | 10 files |
 | Phase 47 P34 | 1h30m | 3 tasks | 21 files |
 | Phase 47 P21 | 1h30m | 2 tasks | 6 files |
+| Phase 47 P20 | 3h | 3 tasks | 21 files |
 
 ## Decisions
 
@@ -356,3 +357,5 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-34 (D-84, owner 2026-11-25): officer-run removal of ended guests' secrets after a step-up; read-only hourly check alerts by email and in the workbench; G447 closed
 - [Phase 47]: 47-21: a guest leaves a site only when named at both ends of a signed user export (guests@1), and only after the target site's newest signed evidence export shows its import reads guests@1; written against 48-11's planned schema 2 shape, so every real target refuses until 48-11 and 47-32 land
 - [Phase 47]: 47-20 stopped at its Task 1 checkpoint: the guests-only Keycloak permission probe passed every row with no realm-management role (client needs kc-admin-api and basic scopes), but keycloak-config-cli 6.5.1 refuses the admin-permissions client under fine-grained permissions v2; the fallback (admin REST step after the applier) is the coordinator's call (47-20-CHECKPOINT.md)
+- [Phase 47]: 47-20 (coordinator, 2026-11-25): the guest-expiry client's one fine-grained permission is written by an idempotent admin REST step in the realm applier Job after keycloak-config-cli (6.5.1 refuses the FGAP v2 admin-permissions client); the client takes scopes basic and kc-admin-api only, fullScopeAllowed false, no realm-management role
+- [Phase 47]: 47-20: the realm applier client (keycloak-realm-applier, G421) must carry client scope kc-admin-api on Keycloak 26.8, or its admin API calls answer 401

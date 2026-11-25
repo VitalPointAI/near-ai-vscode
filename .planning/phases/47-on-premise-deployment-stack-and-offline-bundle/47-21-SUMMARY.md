@@ -125,11 +125,10 @@ None. T-47-73, T-47-74 and T-47-125 are mitigated as planned; T-47-75 is in the 
 - 48-11: the guest export reads `payload.schema === 2` and `payload.facts.sterling.reads.users` only. Keep that shape, or align `newestSiteEvidence` in the same change.
 - 47-32: the site's release record must list `guests@1` under `reads.users` (this release's `USERS_FEATURES`).
 - 32.1-30: the sites file here is the shape that plan fixes; `parseSitesFile` should match its `parseSitesFile`.
-- 47-20: the runbook names `sterling-guest-expiry` in `sterling-identity` and tells the operator to check it is installed before creating guests; 47-20 is stopped at its checkpoint (keycloak-config-cli 6.5.1 refuses the admin permission), so the CronJob does not exist yet.
+- 47-20: the runbook names `sterling-guest-expiry` in `sterling-identity` and tells the operator to check it is installed before creating guests. 47-20 first stopped at its checkpoint (keycloak-config-cli 6.5.1 refuses the admin permission); after the coordinator's decision it landed on the same branch (47-20-SUMMARY.md).
 
 ## Open conditions
 
 - G449 and G465: guests stay off. `users.mjs import --include-guests` refuses every guest on this release, as `guests.mjs create` does, until the credential card is reachable.
-- 48-11 and 47-32 are not on main: until a site's export carries `facts.sterling.reads.users`, `export --include-guests` refuses every target (the safe side).
-- 47-20 is not done: the automatic end the runbook's section 6 describes does not exist yet; section 3 tells the operator to check for it before creating any guest.
+- G446: 48-11 and 47-32 are not on main: until a site's export carries `facts.sterling.reads.users`, `export --include-guests` refuses every target (the safe side). (Filed after this plan, with 47-20, on the same branch.)
 - G423: the CLI path against a real OpenBao (the guest's and the approver's DID), the hub's `--trust-import` at the destination and the walk-through of the runbook belong to the lab run with guests on (47-18).
