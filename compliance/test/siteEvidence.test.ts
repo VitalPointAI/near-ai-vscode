@@ -7,6 +7,7 @@ import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:cryp
 import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CHECKS, SITE_EXPORT_PURPOSE } from '../src/collectors/deployment.ts';
 import { WATCHED_ALERTS } from '../src/collectors/siteLive.ts';
 import { run } from '../src/commands/site-evidence.ts';
@@ -18,11 +19,13 @@ import {
   SITE_LIVE_PURPOSE, SITE_RESCAN_PURPOSE, TRUST_FORMAT, verifySiteEvidence, type SiteEvidenceFiles
 } from '../src/siteEvidence.ts';
 
+/** The repository root, whatever folder the suite runs from (the compliance package runs it from compliance/). */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOW = new Date('2026-11-25T12:00:00.000Z');
 const iso = (ms: number) => new Date(ms).toISOString();
 const ago = (minutes: number) => iso(NOW.getTime() - minutes * 60_000);
 const SITE = 'site-a';
-const EXCHANGES = (JSON.parse(readFileSync(path.join(process.cwd(), 'compliance/hosted/exchanges.json'), 'utf8')) as { exchanges: { id: string }[] }).exchanges.map(({ id }) => id);
+const EXCHANGES = (JSON.parse(readFileSync(path.join(REPO_ROOT, 'compliance/hosted/exchanges.json'), 'utf8')) as { exchanges: { id: string }[] }).exchanges.map(({ id }) => id);
 
 // Your organization's site key (cosign ECDSA P-256) and the Ed25519 signers it vouches for.
 const siteKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -142,7 +145,7 @@ test('live groups: prometheus, admission, nodes and release each give their obse
   const firing = verify({ trust: trustFiles(trustDocument()), live: liveFeed({ prometheus: { ...PROMETHEUS, firingAlerts: ['OpenBaoSealed', 'Watchdog'] }, admission: { ...ADMISSION, refusedImageResults: 1 }, release: { ...RELEASE, recordImage: `sha256:${'b'.repeat(64)}` } }) });
   assert.deepEqual(firing.observations.map(({ subject, passed }) => [subject, passed]), [['prometheus-rules-healthy', true], ['audit-alerts-quiet', false], ['image-admission-enforced', false], ['release-record', false]]);
   // The watched alerts are the audit and OpenBao alerts of the site's alert rules as code.
-  const values = JSON.parse(readFileSync(path.join(process.cwd(), 'deploy/values/prometheus-alerts.yaml'), 'utf8'));
+  const values = JSON.parse(readFileSync(path.join(REPO_ROOT, 'deploy/values/prometheus-alerts.yaml'), 'utf8'));
   const groups = values.serverFiles['alerting_rules.yml'].groups as { name: string; rules: { alert: string }[] }[];
   assert.deepEqual([...WATCHED_ALERTS].sort(), groups.filter(({ name }) => name === 'openbao' || name === 'audit-shipping').flatMap(({ rules }) => rules.map(({ alert }) => alert)).sort());
 });

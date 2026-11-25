@@ -7,12 +7,15 @@ import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { runBundle } from '../src/bundle.ts';
 import { main } from '../src/cli.ts';
 import { imageScanObservation } from '../src/collectors/imageScan.ts';
 import { checkEvidenceManifest, EVIDENCE_FORMAT, rejudge, type Judgement, type MeasuredEvidenceFile } from '../src/judgement.ts';
 import { writeReleaseEvidence } from '../src/releaseEvidence.ts';
 
+/** The repository root, whatever folder the suite runs from (the compliance package runs it from compliance/). */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const commit = 'a'.repeat(40);
 const IMAGE = `sha256:${'d'.repeat(64)}`;
 const DB_BUILT = '2026-11-20T06:22:21Z';
@@ -40,7 +43,7 @@ const dbStatusText = (built: string | undefined = DB_BUILT) => `${JSON.stringify
 async function bundle(): Promise<string> {
   const dir = path.join(folder('release-bundle'), 'bundle');
   await runBundle({
-    repository: 'owner/repo', commit, kind: 'release', repoRoot: process.cwd(), collectors: {},
+    repository: 'owner/repo', commit, kind: 'release', repoRoot: REPO_ROOT, collectors: {},
     dashboard: {
       levels: [{ id: 'unclassified', title: 'Unclassified', controls: ['ra-05'], components: ['release-pipeline'], claim: true }],
       components: [{ id: 'release-pipeline', implemented: [{ control: 'ra-05', responsibility: 'product', statements: [{ id: 'ra-05_smt', description: 'Every release image is scanned for known vulnerabilities.' }] }] }],
@@ -137,7 +140,7 @@ function releaseFiles() {
   writeFileSync(packageFile, 'stand-in for the compliance package tarball');
   writeFileSync(`${packageFile}.sha256`, `${sha256(readFileSync(packageFile))}  near-ai-saa-0.5.0.tar.gz\n`);
   writeFileSync(path.join(dir, 'road-to-production.md'), '# Road to production\n');
-  writeFileSync(path.join(dir, 'gaps.json'), readFileSync(path.join(process.cwd(), 'compliance/gaps.json')));
+  writeFileSync(path.join(dir, 'gaps.json'), readFileSync(path.join(REPO_ROOT, 'compliance/gaps.json')));
   return { packageFile, checksum: `${packageFile}.sha256`, road: path.join(dir, 'road-to-production.md'), gaps: path.join(dir, 'gaps.json') };
 }
 
