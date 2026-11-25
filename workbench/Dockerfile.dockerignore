@@ -21,9 +21,11 @@
 !README.md
 !SECURITY.md
 !CHANGELOG.md
+!CONTRIBUTING.md
 !docs/
 !docs/development-workflow.md
 !docs/testing.md
+!docs/staff-env-packs.md
 !docs/marketplace/
 !docs/marketplace/near-ai-approval.png
 !docs/marketplace/near-ai-chat.png
