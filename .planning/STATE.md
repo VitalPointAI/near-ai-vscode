@@ -4,7 +4,7 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 23
 status: executing
-stopped_at: 45.1-03 Task 2 done; Task 3 blocked on 33-18 (replica features, roster.require)
+stopped_at: 45.1-03 Task 2 done; Task 3 (vetted partners, D-12) ready; Task 4 blocked on 33-18 (replica features, roster.require)
 last_updated: "2026-11-25T12:15:45.472Z"
 state_head: c4a6826be58043ceeec44d5614902a6e84aac2cb
 progress:
@@ -162,7 +162,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - ~~The data platform and messaging relay milestones have no version yet; GSD tools read Phases 75-101 as part of v0.7.0's section.~~ Resolved 2026-11-18: the owner set the versions (v0.5.0 Governed agent platform, v0.6.0 Data platform, v0.7.0 Messaging relay), each roadmap heading carries its version, and GSD tools now place Phases 68-74, 85-101 and 75-84 in their own milestones.
 - `feat/team-fix-pass` is archived on GitHub at 4207080 (its five loose files were committed first); Phase 69 ports from it.
 - Signal sidecar pin: re-checked 2026-11-15 (0.101 is still the newest stable release; signal-cli 0.14.8 expires about 2026-12-10). Re-checked 2026-11-18 (still 0.101; signal-cli itself is at 0.14.10). Owner decision 2026-11-18: let the pin lapse and re-pin in Phase 82; no re-check on 2026-12-01.
-- 45.1-03 Task 3 needs the replica feature list and roster.require (33-18), not on main; 45.1-04 needs 33.1-21's release act and release.copy binding slot, not on main
+- 45.1-03 Task 4 needs the replica feature list and roster.require (33-18), not on main; 45.1-04 needs 33.1-21's release act and release.copy binding slot, and 71-13's trust source, not on main
 
 ### Quick Tasks Completed
 
@@ -178,7 +178,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 ## Session
 
 **Last session:** 2026-11-25T12:15:45.237Z
-**Stopped at:** 45.1-03 Task 2 done; Task 3 blocked on 33-18 (replica features, roster.require)
+**Stopped at:** 45.1-03 Task 2 done; Task 3 (vetted partners, D-12) ready; Task 4 blocked on 33-18 (replica features, roster.require)
 **Resume file:** .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-03-PLAN.md
 
 ## Performance Metrics
@@ -336,3 +336,4 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 45.1]: 45.1-01: a label with handling flags is refused for export; the bound label is our own Label, mapping 0 for release copies
 - [Phase 45.1]: 45.1-02: RSA exports name their OAEP hash (OpenTDF reference needs sha1); the receiving key uses SHA-256, the only hash Transit decrypts (G455)
 - [Phase 45.1]: 45.1-03 (owner, 2026-11-25, D-11): exchange.import gains arrived, stored and conversion?; every arrival quarantined; converting never raises trust; unknown format ids shown, never interpreted
+- [Phase 45.1]: 45.1-03 (owner, 2026-11-25, D-12): an agreement stands for a partner's people only when your organization has vetted the partner's clearance process (optional clearanceProcessVetted on agreements@1, organization layer only); otherwise the recipient's own verified credentials, or refused
