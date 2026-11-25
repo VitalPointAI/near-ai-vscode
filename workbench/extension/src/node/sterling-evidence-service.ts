@@ -46,7 +46,8 @@ interface ComplianceEngine {
   readonly EXCHANGE_IDS: readonly string[];
   checkEvidenceManifest(manifest: unknown, files: readonly Measured[]): ManifestCheck;
   rejudge(judgement: Judgement, options: { readonly now: Date; readonly builtAt?: string; readonly observations?: readonly unknown[]; readonly policy?: unknown }): { readonly rows: readonly JudgedRow[]; readonly clock?: 'clock-behind-build'; readonly policy: { readonly clamped: readonly string[]; readonly refused?: string } };
-  freshnessOf(result: unknown, options: ResultFreshnessOptions): 'current' | 'ageing' | 'out-of-date' | 'unknown';
+  freshnessOf(result: unknown, options: ResultFreshnessOptions & { readonly windows?: unknown; readonly ageing?: unknown; readonly clockUnknown?: boolean }): 'current' | 'ageing' | 'out-of-date' | 'unknown';
+  effectivePolicy(policy?: unknown): { readonly windows: Readonly<Record<string, number | 'head'>>; readonly ageing: unknown };
   verifySigstoreBundle(content: Uint8Array, bundle: unknown, publicKeyPem: string): SigstoreCheck;
   publicKeyFingerprint(pem: string): string | undefined;
   verifySiteEvidence(input: { readonly files: Record<string, unknown>; readonly organizationKey?: string; readonly now: Date; readonly exchangeIds?: readonly string[] }): SiteVerification;
@@ -169,7 +170,7 @@ async function readMount(dir: string): Promise<Map<string, Buffer>> {
 type ReleaseRead =
   | { readonly kind: 'none' }
   | { readonly kind: 'did-not-verify'; readonly reason: ReleaseDidNotVerifyReason; readonly file: string }
-  | { readonly kind: 'checked'; readonly manifestBytes: Buffer; readonly listed: ReadonlySet<string>; readonly manifest: Extract<ManifestCheck, { ok: true }>['manifest']; readonly judgement?: Judgement; readonly textIndex: ReadonlySet<string> };
+  | { readonly kind: 'checked'; readonly manifestBytes: Buffer; readonly listed: ReadonlySet<string>; readonly manifest: Extract<ManifestCheck, { ok: true }>['manifest']; readonly judgement?: Judgement; readonly textIndex: ReadonlySet<string>; readonly scanBuiltAt?: string };
 
 /** The outcome of the release trust check: which anchor vouches for the release, or why none does. */
 type TrustOutcome =
@@ -258,7 +259,16 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
         textIndex = new Set();
       }
     }
-    const base = { kind: 'checked' as const, manifestBytes, listed, manifest: checked.manifest, textIndex };
+    let scanBuiltAt: string | undefined;
+    if (listed.has('scan/db-status.json')) {
+      try {
+        const built = Date.parse((JSON.parse(await readFile(join(dir, 'scan/db-status.json'), 'utf8')) as { built?: string }).built ?? '');
+        if (!Number.isNaN(built)) scanBuiltAt = new Date(built).toISOString();
+      } catch {
+        scanBuiltAt = undefined;
+      }
+    }
+    const base = { kind: 'checked' as const, manifestBytes, listed, manifest: checked.manifest, textIndex, ...(scanBuiltAt ? { scanBuiltAt } : {}) };
     if (checked.manifest.bundle === 'none') return base;
     const judgementFile = compliance.EVIDENCE_JUDGEMENT_FILE;
     try {
@@ -338,8 +348,9 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
         };
       });
       const sources = [...new Set(components.filter(({ facts }) => facts !== 'not-applicable').flatMap(({ evidence }) => evidence.map(({ source }) => source)))];
+      const reason = (row as { reason?: unknown }).reason;
       return {
-        level: row.level, control: row.control, label: row.label, title: row.title, state: row.state, reasonText: row.reasonText,
+        level: row.level, control: row.control, label: row.label, title: row.title, state: row.state, ...(typeof reason === 'string' ? { reason } : {}), reasonText: row.reasonText,
         ...(row.gap ? { gap: row.gap } : {}), ...(row.textFile ? { textFile: row.textFile } : {}),
         components, source: 'release' as const, sources, ...(row.asOf ? { asOf: row.asOf } : {}), freshness: row.freshness, verification,
         displayState: verification === 'verified' ? row.state : 'not-verified' as const,
@@ -427,15 +438,48 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
     const compliance = loadEngine();
     const judgedAtText = now.toISOString();
     const noPolicy = { source: 'release-defaults' as const, reason: 'no-site-policy' as const, clamped: [] };
-    if (!compliance) return { judgedAt: judgedAtText, release: { verification: 'did-not-verify', reason: 'unreadable', file: 'engine/compliance.cjs' }, site: { verification: 'none', files: [], notes: [], policy: noPolicy } };
+    const files = mount ?? new Map<string, Buffer>();
+    const siteFileNames = [EVIDENCE_MOUNT_FILES.organizationKey, EVIDENCE_MOUNT_FILES.trust, EVIDENCE_MOUNT_FILES.live, EVIDENCE_MOUNT_FILES.export, EVIDENCE_MOUNT_FILES.rescan, EVIDENCE_MOUNT_FILES.agreements];
+    // A site, or a single computer (UI-SPEC P1): the view chooses its guidance by this.
+    const setting = settings.organizationPublicKey !== undefined || siteFileNames.some((name) => files.has(name)) ? 'site' as const : 'single-computer' as const;
+    if (!compliance) return { judgedAt: judgedAtText, setting, release: { verification: 'did-not-verify', reason: 'unreadable', file: 'engine/compliance.cjs' }, site: { verification: 'none', files: [], notes: [], policy: noPolicy } };
     release ??= readRelease(compliance);
     const read = await release;
-    const files = mount ?? new Map<string, Buffer>();
     const anchor = anchorOf(compliance, files);
     const site = siteLayer(compliance, files, anchor, now);
     const projected = projectionLayer(compliance, now);
+    const effective = compliance.effectivePolicy(site.policy);
+    const head = read.kind === 'checked' && read.judgement ? read.judgement.head : '';
+    const ageOf = (collectedAt: string, window: string, clockUnknown = false) =>
+      compliance.freshnessOf({ rule: 'view', passed: true, reason: 'met', collectedAt, window }, { head, now, windows: effective.windows, ageing: effective.ageing, clockUnknown });
+    const siteFacts = (): Partial<SiteLayer> => {
+      if (site.layer.verification !== 'verified') return {};
+      const windows: Readonly<Record<string, string>> = { 'site-live': 'live', deployment: 'settings', 'image-scan': 'vulnerability', 'site-agreements': 'document' };
+      const observations = site.observations as readonly { readonly collector: string; readonly collectedAt: string }[];
+      const items = { current: 0, ageing: 0, outOfDate: 0 };
+      for (const { collector, collectedAt } of observations) {
+        const freshness = ageOf(collectedAt, windows[collector] ?? 'head');
+        if (freshness === 'current') items.current += 1;
+        else if (freshness === 'ageing') items.ageing += 1;
+        else if (freshness === 'out-of-date') items.outOfDate += 1;
+      }
+      const live = observations.filter(({ collector }) => collector === 'site-live').map(({ collectedAt }) => collectedAt).sort();
+      const lastCollected = live[live.length - 1];
+      const exportFile = site.layer.files.find(({ file, verification }) => file === 'export' && verification === 'verified');
+      const rescan = observations.find(({ collector }) => collector === 'image-scan');
+      const reviews = observations.filter(({ collector }) => collector === 'site-agreements').map(({ collectedAt }) => Date.parse(collectedAt)).sort((a, b) => a - b);
+      const document = effective.windows.document;
+      const liveWindow = effective.windows.live;
+      return {
+        items, ...(lastCollected ? { lastCollected, outOfDate: ageOf(lastCollected, 'live') === 'out-of-date' } : {}),
+        ...(typeof liveWindow === 'number' ? { liveOutOfDateHours: Math.round(liveWindow / 3_600_000) } : {}),
+        ...(exportFile && exportFile.verification === 'verified' ? { exportSignedAt: exportFile.signedAt } : {}),
+        ...(rescan ? { rescanBuiltAt: rescan.collectedAt } : {}),
+        ...(reviews.length && typeof document === 'number' ? { agreementsNextReview: new Date(reviews[0]! + document).toISOString() } : {}),
+      };
+    };
     const withLayers = (releaseLayer: ReleaseEvidence, policy: SiteLayer['policy']): Omit<EvidenceSnapshot, 'revision'> =>
-      ({ judgedAt: judgedAtText, release: releaseLayer, site: { ...site.layer, policy }, ...(projected ? { projection: projected } : {}) });
+      ({ judgedAt: judgedAtText, setting, release: releaseLayer, site: { ...site.layer, ...siteFacts(), policy }, ...(projected ? { projection: projected } : {}) });
     const sitePolicy = site.policy !== undefined ? { source: 'site' as const, clamped: [] } : noPolicy;
     if (read.kind === 'none') return withLayers({ verification: 'none' }, sitePolicy);
     if (read.kind === 'did-not-verify') return withLayers({ verification: 'did-not-verify', reason: read.reason, file: read.file }, sitePolicy);
@@ -446,8 +490,10 @@ export function createEvidenceService(options: EvidenceServiceOptions = {}): Evi
     if (!trust || trust.key !== trustKey) trust = { key: trustKey, outcome: checkTrust(compliance, read, anchor, signatureText, signatureFile), checkedAt: judgedAtText };
     const { outcome, checkedAt } = trust;
     if (outcome.verification === 'did-not-verify') return withLayers({ verification: 'did-not-verify', reason: outcome.reason, file: outcome.file }, sitePolicy);
-    const layer = { ...outcome, version: read.manifest.release, commit: read.manifest.commit, asOf: read.manifest.builtAt, checkedAt, bundle: read.manifest.bundle, package: read.manifest.package };
-    if (!read.judgement) return withLayers({ ...layer, levels: [], rows: [] }, sitePolicy);
+    const clockBehind = Date.parse(read.manifest.builtAt) - now.getTime() > 5 * 60_000;
+    const scan = read.scanBuiltAt ? { scan: { builtAt: read.scanBuiltAt, freshness: ageOf(read.scanBuiltAt, 'vulnerability', clockBehind) } } : {};
+    const layer = { ...outcome, version: read.manifest.release, commit: read.manifest.commit, asOf: read.manifest.builtAt, checkedAt, ...scan, bundle: read.manifest.bundle, package: read.manifest.package };
+    if (!read.judgement) return withLayers({ ...layer, ...(clockBehind ? { clock: 'clock-behind-build' as const } : {}), levels: [], rows: [] }, sitePolicy);
     try {
       const judged = compliance.rejudge(read.judgement, { now, builtAt: read.manifest.builtAt, observations: site.observations, ...(site.policy !== undefined ? { policy: site.policy } : {}) });
       const policy = site.policy === undefined ? noPolicy

@@ -591,3 +591,22 @@ test('control text: only a listed, indexed text file from a source that did not 
   assert.deepEqual(await projectionOnly.getControlText('text/itsg-33/ac.json'), { kind: 'ready', source: 'projection', text: JSON.parse(text) });
   projectionOnly.dispose();
 });
+
+test('view facts (48.2-10): the setting, the release scan\'s database age, and your site\'s item counts and last collection', async () => {
+  const single = await service(releaseFolder(), { now: at(1) }).getEvidence();
+  assert.equal(single.setting, 'single-computer');
+  const scanBuilt = new Date(at(-72)).toISOString();
+  const withScan = releaseFolder({ 'scan/db-status.json': JSON.stringify({ schemaVersion: 'v6.1.10', built: scanBuilt, valid: true }) });
+  const scanned = await service(withScan, { now: at(1) }).getEvidence();
+  assert.ok(scanned.release.verification === 'not-verified');
+  assert.deepEqual(scanned.release.scan, { builtAt: scanBuilt, freshness: 'current' });
+  const { clock, trustDir, timers, reader } = siteSession();
+  const before = await reader.getEvidence();
+  assert.equal(before.setting, 'site');
+  const collected = clock.now - 5 * MINUTE;
+  writeSite(trustDir, { trust: trustDocument(clock.now), live: liveFeed(clock.now, { openbao: openbao(collected), nodes: nodes(collected) }) });
+  await timers.advance(30_000);
+  const site = (await reader.getEvidence()).site;
+  assert.deepEqual([site.items, site.lastCollected, site.outOfDate, site.liveOutOfDateHours, site.site], [{ current: 2, ageing: 0, outOfDate: 0 }, new Date(collected).toISOString(), false, 2, 'site-a']);
+  reader.dispose();
+});
