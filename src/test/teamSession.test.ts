@@ -367,7 +367,7 @@ test('an event of an unsupported type makes verifyLog tell the user to update th
     const report = await started.session.verifyLog();
     assert.equal(report?.unsupported, 1);
     assert.ok(started.lines.includes(UPDATE_EXTENSION_TEXT));
-    assert.equal(UPDATE_EXTENSION_TEXT, 'Some events need a newer version of NEAR AI. Update the extension to read them.');
+    assert.equal(UPDATE_EXTENSION_TEXT, 'Some events need a newer version of SovAI. Update the extension to read them.');
     const warning = stub.notifications.at(-1);
     assert.equal(warning?.level, 'warn');
     assert.ok(warning?.message.includes(UPDATE_EXTENSION_TEXT));

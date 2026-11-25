@@ -6,7 +6,7 @@ export type Visibility = 'public' | 'private';
 /** Shown next to the choice, every time. Neither is preselected (D-14). */
 export const VISIBILITY_NOTES: Readonly<Record<Visibility, string>> = {
   private: "Private: only you and people you invite can see it. GitHub's free plan limits some features for private repositories.",
-  public: "Public: anyone can see this project's code. Your NEAR AI chats, keys and other state stay encrypted and unreadable to others."
+  public: "Public: anyone can see this project's code. Your SovAI chats, keys and other state stay encrypted and unreadable to others."
 };
 
 const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/;

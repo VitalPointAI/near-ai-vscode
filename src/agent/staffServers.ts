@@ -4,7 +4,7 @@
 // whole server (`mcp:<id>`), a family pattern or one tool at a time (`mcp__<id>__<tool>`). staff-products and guard-scan are gated by role inside the
 // staff tools; every other server is gated on grants (staffGrantGate.ts), so the run's lead and an ungranted member are neither offered nor allowed it. The tool objects
 // the pages show are built by the same factories as a run's, without a project, so the lists cannot drift from what a run gets. None of them approves,
-// rejects, releases or supersedes: those are a person's decisions, made with the NEAR AI: Staff commands.
+// rejects, releases or supersedes: those are a person's decisions, made with the SovAI: Staff commands.
 import type { ObservationStore } from '../staff/observationStore';
 import type { StaffHost, StaffTeamInfo } from '../staff/staffHost';
 import { BATTLE_RHYTHM_SERVER, battleRhythmTools } from './battleRhythmTools';
@@ -100,7 +100,7 @@ export function builtInStaffServers(): BuiltInStaffServer[] {
   return [
     {
       id: STAFF_PRODUCTS_SERVER, grant: staffServerGrant(STAFF_PRODUCTS_SERVER), name: 'Staff products (built in)', tools: of(STAFF_PRODUCTS_SERVER),
-      description: 'A staff team\'s products and registers: propose a version, give a gate verdict, submit for a person\'s decision, the registers, the wargame ledger, the planning step and the tradecraft lint. A person approves, rejects and releases with the NEAR AI: Staff commands; no tool can.'
+      description: 'A staff team\'s products and registers: propose a version, give a gate verdict, submit for a person\'s decision, the registers, the wargame ledger, the planning step and the tradecraft lint. A person approves, rejects and releases with the SovAI: Staff commands; no tool can.'
     },
     {
       id: GUARD_SCAN_SERVER, grant: staffServerGrant(GUARD_SCAN_SERVER), name: 'Guard scan (built in)', tools: of(GUARD_SCAN_SERVER),

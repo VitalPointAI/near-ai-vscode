@@ -729,7 +729,7 @@ test('clampSyncInterval reads the setting the way package.json declares it', () 
   ];
   for (const [command, title] of wanted) {
     assert.equal(titles.get(command)?.title, title, command);
-    assert.equal(titles.get(command)?.category, 'NEAR AI');
+    assert.equal(titles.get(command)?.category, 'SovAI');
   }
   for (const text of [...titles.values()].filter((command) => command.command.startsWith('nearAi.sync.')).map((command) => command.title)) assert.ok(!/NEAR organization/.test(text));
 });

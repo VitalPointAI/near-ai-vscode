@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Getting started
 
-There are two ways to try the product: the **NEAR AI for VS Code** extension in your own VS Code,
+There are two ways to try the product: the **Sterling Sovereign AI** extension in your own VS Code,
 or the **Sterling workbench**, a browser-based editor that runs from a container image with the
 same extension inside it. Both come from the same release.
 
@@ -31,7 +31,7 @@ You need VS Code 1.101 or newer.
 1. Download `near-ai-vscode-X.Y.Z.vsix` and `near-ai-vscode-X.Y.Z.vsix.sha256` from the release.
 2. Check the download: `sha256sum --check near-ai-vscode-X.Y.Z.vsix.sha256` should print `OK`.
 3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette and choose the file.
-4. Open a project folder, open the **NEAR AI** chat and set up a profile: your NEAR AI key, a model
+4. Open a project folder, open the **SovAI** chat and set up a profile: your NEAR AI key, a model
    runtime on this computer, or both.
 5. Once it connects, the chat suggests what to do next, starting with a team for your project.
 
@@ -76,7 +76,7 @@ sidebar you can open:
 - **Compliance**, which shows control states only from an evidence bundle checked for the same
   release. The image starts without one, so the view says so until you give it one.
 
-The NEAR AI extension is also inside, so **NEAR AI: Set Up a New Profile** and the other NEAR AI
+The SovAI extension is also inside, so **SovAI: Set Up a New Profile** and the other SovAI
 commands are in the Command Palette.
 
 Keep in mind:

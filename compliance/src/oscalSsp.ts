@@ -91,10 +91,10 @@ export function buildSsp(input: SspInput): Record<string, unknown> {
   return {
     'system-security-plan': {
       uuid: uuid(`ssp:${input.level.id}`),
-      metadata: { title: `NEAR AI ${input.level.title} system security plan draft`, 'last-modified': generatedAt, version: '1.0.0', 'oscal-version': OSCAL_VERSION, ...parties, remarks: `Draft only. ${TO_BE_COMPLETED}.` },
+      metadata: { title: `Sterling Sovereign AI ${input.level.title} system security plan draft`, 'last-modified': generatedAt, version: '1.0.0', 'oscal-version': OSCAL_VERSION, ...parties, remarks: `Draft only. ${TO_BE_COMPLETED}.` },
       'import-profile': { href: input.level.profile },
       'system-characteristics': {
-        'system-ids': [{ 'identifier-type': 'https://near.ai', id: `near-ai-${input.level.id}` }], 'system-name': 'NEAR AI for VS Code',
+        'system-ids': [{ 'identifier-type': 'https://near.ai', id: `near-ai-${input.level.id}` }], 'system-name': 'Sterling Sovereign AI',
         description: `A draft for ${input.level.title}; ${TO_BE_COMPLETED}.`, 'system-information': { 'information-types': [{ uuid: uuid(`${input.level.id}:product-evidence`), title: 'Product evidence', description: 'Redacted evidence identifiers, counts, hashes, and timestamps.' }] },
         status: { state: 'operational' }, 'authorization-boundary': { description: TO_BE_COMPLETED }
       },

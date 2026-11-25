@@ -9,7 +9,7 @@ import { nanoToUsd } from './spendLedger';
 import { readDayBoundary } from './spendTracking';
 import { buildUsageReport, customRange, usageCsv, usageJson, usageOrganizations, UsageProject, usageRange, UsageRange } from './usageReport';
 
-// NEAR AI: Export Usage and Activity. Filters by organization, project, and dates, and saves a
+// SovAI: Export Usage and Activity. Filters by organization, project, and dates, and saves a
 // CSV or JSON of runs and models (no prompt content) where the user chooses, by default outside
 // every workspace, with a warning before saving into a git work tree.
 
@@ -40,7 +40,7 @@ async function workspaceProjects(): Promise<UsageProject[]> {
 export async function exportUsageAndActivity(): Promise<void> {
   const projects = await workspaceProjects();
   const account = shownSpendAccount();
-  if (!projects.length && !account) { void vscode.window.showInformationMessage('No NEAR AI usage or activity is recorded on this computer for this workspace yet.'); return; }
+  if (!projects.length && !account) { void vscode.window.showInformationMessage('No SovAI usage or activity is recorded on this computer for this workspace yet.'); return; }
   const organizations = usageOrganizations(projects);
   const organization = await vscode.window.showQuickPick([
     { label: 'All organizations', description: 'Everything this computer recorded', id: undefined as string | undefined },

@@ -22,6 +22,8 @@ import { verifyAuthorization } from '../domain/gate/authorizations';
 import type { BundleIssuer } from '../domain/gate/bundle';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyLayersView } from './organizationStore';
+import { clearancesInForce } from './clearances';
+import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
 
 /**
@@ -235,7 +237,9 @@ function verifiedAuthorizations(effective: PolicyDocument, organization: PolicyD
  * and this device's key is the personal layer's issuer, since only this device signs that layer. The project is left out: a route does not know its
  * project yet, so an authorization scoped to projects covers nothing (D-54, fail closed).
  */
-export function routePolicyFor(layers: PolicyLayersView, now: number, deviceFingerprint: string, policyVersion: PolicyRecordVersion): RoutePolicyNow | undefined {
+export function routePolicyFor(
+  layers: PolicyLayersView, now: number, deviceFingerprint: string, policyVersion: PolicyRecordVersion, wallet?: ClearanceWalletView
+): RoutePolicyNow | undefined {
   const effective = layers.effective;
   if (effective === undefined || layers.failedLayer !== undefined || layers.organization.state === 'failed') return undefined;
   const organization = layers.organization.state === 'valid' ? layers.organization.document : undefined;
@@ -246,7 +250,8 @@ export function routePolicyFor(layers: PolicyLayersView, now: number, deviceFing
     ...(effective.models === undefined ? {} : { models: effective.models }),
     scales: effective.labels.scales,
     mappings: effective.labels.mappings,
-    clearances: effective.people?.clearances ?? [],
+    // Phase 71 (D-19): from the verified wallet when your organization's policy carries credentials@1, else the declared ones (clearances.ts).
+    clearances: clearancesInForce(effective, organization, wallet).clearances,
     organization: organization !== undefined,
     requireAccreditedDevice: effective.agents.requireAccreditedDevice === true,
     deviceId: deviceFingerprint,

@@ -162,7 +162,7 @@ test('the session creates a token with no expiry, revokes the previous one, and 
   const created = await setUpReportingToken({ baseUrl: `${BASE}/`, session: SESSION, organizationId: ORG, name: reportingTokenName(new Date('2026-10-30T12:00:00Z')), previousTokenId: 'tok-old', fetch: near.fetch });
   assert.deepEqual(created, { id: 'tok-new', token: CREATED.body.token, organizationId: ORG, previousRevoked: true });
   assert.deepEqual(near.calls.map((call) => `${call.method} ${call.url.replace(BASE, '')}`), [CREATE, `DELETE /organizations/${ORG}/reporting-tokens/tok-old`, LOGOUT]);
-  assert.deepEqual(JSON.parse(near.calls[0].body!), { name: 'NEAR AI for VS Code (2026-10-30)' }, 'no expires_at: the token stays current until revoked');
+  assert.deepEqual(JSON.parse(near.calls[0].body!), { name: 'Sterling Sovereign AI (2026-10-30)' }, 'no expires_at: the token stays current until revoked');
   assert.equal(near.calls[0].headers.authorization, `Bearer ${SESSION.accessToken}`);
   assert.equal(near.calls[1].headers.authorization, `Bearer ${SESSION.accessToken}`);
   assert.equal(near.calls[2].headers.authorization, `Bearer ${SESSION.refreshToken}`, 'logout takes the refresh token, which revokes the whole session');

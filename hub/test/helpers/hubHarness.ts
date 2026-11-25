@@ -21,6 +21,7 @@ import { composeHub, sweepBlobsOnce } from '../../src/main';
 import { listen } from '../../src/http/server';
 import { openHubStore } from '../../src/store/hubStore';
 import type { HubStore } from '../../src/store/hubStore';
+import type { OrganizationSource, TrustStore } from '../../src/store/trustStore';
 import type { EquivocationProof } from '@ext/domain/replica/equivocation';
 import { HubConnection } from './hubClient';
 import type { HubResponse } from './hubClient';
@@ -51,6 +52,8 @@ export interface StartOptions {
   tls?: TlsFixture;
   /** The join post's signature and MAC checks (32-25), so a test can count them; the real ones when absent. */
   joinChecks?: JoinChecks;
+  /** Your organization's signed rules and key for the trust routes (71-09); none when absent. */
+  organization?: OrganizationSource;
 }
 
 export interface OpenedSession {
@@ -77,6 +80,8 @@ export interface Hub {
   checkpoints: Checkpointer | undefined;
   /** Invitations and join requests (32-25). */
   join: JoinDesk;
+  /** The trust host's store (71-09). */
+  trust: TrustStore;
   /** Every join desk log line (32-25). */
   joinLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
   /** Every checkpoint log line (32-22). */
@@ -134,6 +139,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     signCheckpoints: options.checkpoints !== false,
     onCheckpointLog: (level, event, fields) => checkpointLogs.push({ level, event, fields }),
     ...(options.joinChecks === undefined ? {} : { joinChecks: options.joinChecks }),
+    ...(options.organization === undefined ? {} : { organization: options.organization }),
     onJoinLog: (level, event, fields) => joinLogs.push({ level, event, fields }),
     onAccepted: (project, list, rosterChanged) => accepted.push({ project, accepted: list, rosterChanged }),
     onEquivocation: (project, proofs) => equivocations.push({ project, proofs }),
@@ -155,6 +161,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     checkpoints: composed.checkpoints,
     checkpointLogs,
     join: composed.join,
+    trust: composed.trust,
     joinLogs,
     keys,
     now: () => clock,

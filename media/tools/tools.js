@@ -1,4 +1,4 @@
-// NEAR AI Tools: a directory of what the agents can use. The host sends the whole directory; all of
+// SovAI Tools: a directory of what the agents can use. The host sends the whole directory; all of
 // it is rendered with textContent. Buttons only ask the host to prefill the chat, open a setting,
 // run an existing NEAR AI command, or switch an MCP server on for this project.
 (function () {
@@ -144,7 +144,7 @@
   // The built-in staff servers: only a staff team's run gets them, and a member only when its tools line names the server or the tool.
   function renderStaffServers(root, servers) {
     if (!servers.length) return;
-    root.append(el('h3', '', 'Built-in staff servers'), el('p', 'hint', 'Given only to a military staff team (a team file with a staff: block), to members whose tools line names the server, such as mcp:staff-products, or one of its tools. Agents recommend; a person approves, rejects and releases with the NEAR AI: Staff commands, and no tool can.'));
+    root.append(el('h3', '', 'Built-in staff servers'), el('p', 'hint', 'Given only to a military staff team (a team file with a staff: block), to members whose tools line names the server, such as mcp:staff-products, or one of its tools. Agents recommend; a person approves, rejects and releases with the SovAI: Staff commands, and no tool can.'));
     const list = el('ul', 'list'); list.setAttribute('aria-label', 'Built-in staff servers');
     for (const server of servers) {
       const item = row('li', [server.name, server.grant, server.description, ...server.tools.map((tool) => tool.name + ' ' + tool.description)]);
@@ -179,7 +179,7 @@
       if (server.enabledHere && server.state !== 'connected') head.append(button('Connect', () => vscode.postMessage({ type: 'mcp-connect', id: server.id }), { secondary: true, label: 'Connect to ' + server.name + ' to list its tools' }));
       item.append(head);
       if (server.host) item.append(el('p', 'hint', server.transport + ' · ' + server.host));
-      // What the server's manifest says it does, in the order the extension sends it; the last line says it is a declaration NEAR AI cannot check.
+      // What the server's manifest says it does, in the order the extension sends it; the last line says it is a declaration SovAI cannot check.
       (server.words || []).forEach((line) => item.append(el('p', 'hint', line)));
       if (server.error) item.append(el('p', 'error', server.error));
       if (!server.tools.length) item.append(el('p', 'hint', server.state === 'connected' ? 'This server lists no tools.' : 'Its tools are listed once it connects (when an agent first uses it, or with Connect).'));
@@ -251,7 +251,7 @@
       line.append(link);
       list.append(line);
     }
-    root.append(el('p', 'hint', 'Planning files and the chat’s task list are in the NEAR AI chat in the side bar.'), list);
+    root.append(el('p', 'hint', 'Planning files and the chat’s task list are in the SovAI chat in the side bar.'), list);
   }
 
   function applyFilter() {

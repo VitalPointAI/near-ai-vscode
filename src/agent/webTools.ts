@@ -152,7 +152,7 @@ export function webSearchTool(provider: SearchProvider | undefined): AgentTool<{
     title: (input) => `Search: ${input.query.slice(0, 80)}`,
     async preview(input) { return { kind: 'note', text: `Search ${provider?.label ?? 'the web'} for: ${input.query}\nThe query is sent to ${provider?.label ?? 'the search provider'}.` }; },
     async run(input, context) {
-      if (!provider) return 'Web search is not set up. Ask the user to run "NEAR AI: Set Up Web Search" (Brave Search, Tavily, or a SearXNG instance they run). Until then, fetch sources you already know with WebFetch, and say that you could not search.';
+      if (!provider) return 'Web search is not set up. Ask the user to run "SovAI: Set Up Web Search" (Brave Search, Tavily, or a SearXNG instance they run). Until then, fetch sources you already know with WebFetch, and say that you could not search.';
       const results = await provider.search(input.query, { count: input.count, freshness: input.freshness, signal: context.signal });
       if (!results.length) return `No results for "${input.query}".`;
       const listing = results.map((result, index) => `${index + 1}. ${result.title}\n   ${result.url}${result.published ? ` (${result.published})` : ''}\n   ${result.snippet.replace(/\s+/g, ' ').slice(0, 500)}`).join('\n');

@@ -32,7 +32,7 @@ export interface McpServerStatus {
   lastUsed?: number;
   /**
    * The server's manifest in plain sentences, in a fixed order: where it runs, what it can do, each declared tool by name in sorted order, whether it can run when
-   * nobody is watching, and last the sentence that this is a declaration NEAR AI cannot check (GATE-03, D-07). Never empty, and the last entry is always that sentence.
+   * nobody is watching, and last the sentence that this is a declaration SovAI cannot check (GATE-03, D-07). Never empty, and the last entry is always that sentence.
    */
   manifestWords: string[];
   /** What the person has declared for each tool the server lists right now: `unknown` for one with no declaration. */
@@ -49,7 +49,7 @@ export function toolChangesNotice(serverName: string, changes: McpToolChanges): 
     ...(changes.removed.length ? [`no longer listed: ${changes.removed.join(', ')}`] : [])
   ];
   const held = changes.added.length + changes.changed.length > 0 ? ' New and changed tools are not offered to agents until you approve them.' : '';
-  return `MCP server ${serverName} changed its tools since you approved them (${parts.join('; ')}).${held} Review them with NEAR AI: Manage MCP Connections and choose Approve tool changes.`;
+  return `MCP server ${serverName} changed its tools since you approved them (${parts.join('; ')}).${held} Review them with SovAI: Manage MCP Connections and choose Approve tool changes.`;
 }
 
 /** The notice for a tool whose description looks like it tries to instruct the assistant (WP-GATE): it is fenced as untrusted, and the person is told. */
@@ -77,7 +77,7 @@ export class McpApproveRefused extends Error {
   }
 }
 
-export const APPROVE_FAILED_TEXT = 'NEAR AI could not save your approval of these tools, so nothing was changed and they stay held. Try again, or reload the window.';
+export const APPROVE_FAILED_TEXT = 'SovAI could not save your approval of these tools, so nothing was changed and they stay held. Try again, or reload the window.';
 
 /** Runs an approval of tool changes for the MCP page and never rejects: our refusal is shown as it is, anything else as APPROVE_FAILED_TEXT. */
 export async function approveOrReport(run: () => Promise<void>, show: (text: string) => void): Promise<void> {
@@ -88,7 +88,7 @@ export async function approveOrReport(run: () => Promise<void>, show: (text: str
   }
 }
 
-export const DECLARE_FAILED_TEXT = 'NEAR AI could not save what that tool does, so nothing was changed. Try again, or reload the window.';
+export const DECLARE_FAILED_TEXT = 'SovAI could not save what that tool does, so nothing was changed. Try again, or reload the window.';
 
 /**
  * Runs one declaration for the MCP page and never rejects: a plain refusal of ours is shown as it is, and any other failure (a storage error, say, whose text

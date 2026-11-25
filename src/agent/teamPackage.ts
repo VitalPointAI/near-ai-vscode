@@ -166,7 +166,7 @@ export class TeamPackageError extends Error {
 
 type Plain = Record<string, unknown>;
 const isPlain = (value: unknown): value is Plain => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const NOT_A_TEAM = 'This file is not a NEAR AI team. Ask for the file again, or for the team\'s .md file.';
+const NOT_A_TEAM = 'This file is not a SovAI agent team. Ask for the file again, or for the team\'s .md file.';
 const DAMAGED = 'This team file was changed or damaged after it was shared, so it was not imported. Ask for the file again.';
 
 // The stored shape of a knowledge graph, checked all the way down (PR #67 review: only the top level was checked, so `nodes: [null]` passed and then failed
@@ -225,12 +225,12 @@ function knowledgeShape(value: unknown): value is TeamKnowledge {
  * team text agree, and any team text holding something that looks like a key. Never trusts the file: a package that reads cleanly is still untrusted.
  */
 export function readTeamPackage(text: string): ReadPackage {
-  if (Buffer.byteLength(text, 'utf8') > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a NEAR AI team, so it was not imported.');
+  if (Buffer.byteLength(text, 'utf8') > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a SovAI agent team, so it was not imported.');
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new TeamPackageError(NOT_A_TEAM); }
   if (!isPlain(value) || value.format !== TEAM_PACKAGE_FORMAT) throw new TeamPackageError(NOT_A_TEAM);
   if (typeof value.formatVersion !== 'number' || !Number.isInteger(value.formatVersion)) throw new TeamPackageError(NOT_A_TEAM);
-  if (value.formatVersion > TEAM_PACKAGE_ICON_VERSION) throw new TeamPackageError('This team was shared from a newer version of NEAR AI. Update the extension, then import it again.');
+  if (value.formatVersion > TEAM_PACKAGE_ICON_VERSION) throw new TeamPackageError('This team was shared from a newer version of SovAI. Update the extension, then import it again.');
   if (value.formatVersion !== TEAM_PACKAGE_VERSION && value.formatVersion !== TEAM_PACKAGE_ICON_VERSION) throw new TeamPackageError(NOT_A_TEAM);
   const withIcon = value.formatVersion === TEAM_PACKAGE_ICON_VERSION;
   // Version 2 always says whether it has an icon (the key is there, null for none); version 1 never has the key.
@@ -261,7 +261,7 @@ function sharedIcon(value: unknown): { icon?: Buffer; iconProblem?: string } {
 
 /** A plain team .md file brought in with Import team: the same checks a share file's team text gets. */
 export function readTeamMarkdown(text: string): ReadPackage {
-  if (Buffer.byteLength(text, 'utf8') > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a NEAR AI team, so it was not imported.');
+  if (Buffer.byteLength(text, 'utf8') > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a SovAI agent team, so it was not imported.');
   let parsed: TeamDefinition;
   try { parsed = parseTeam(text, 'imported.md'); } catch (error) { throw new TeamPackageError(`This team file can't be used: ${(error as Error).message}`); }
   if (findSecrets(text).length) throw new TeamPackageError('This team file holds something that looks like a key, token or password, so it was not imported. Remove it and import the file again.');

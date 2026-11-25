@@ -8,7 +8,7 @@
 //   - the file alone arms nothing: arming and retiring are a named person's decisions, signed with this device's key in the decision log, and a watch is
 //     read through that log (watchRun.ts trustWatch) before anything acts on it;
 //   - in a shared (multi-user) project every change is refused with the staff host's shared-project refusal before the file is touched (D-29).
-// Who does what: a named person creates, arms, rejects, pauses, resumes, acknowledges and retires (the NEAR AI: Staff watch commands); a member proposes,
+// Who does what: a named person creates, arms, rejects, pauses, resumes, acknowledges and retires (the SovAI: Staff watch commands); a member proposes,
 // drafts and reports its drafts ready (the observations server's watch tools); the runtime matches, pauses, resumes and expires, and only while a person
 // attends the project (watchAttendance.ts): nothing runs in the background without one. No step releases, approves or tasks anything.
 import { readFile } from 'node:fs/promises';
@@ -295,7 +295,7 @@ export class WatchHost {
       const event: WatchStateEvent = { type: 'staff.watch.state', run: caller.run, at: this.iso(), watch: built.watch.id, from: null, to: 'proposed', actor: `member:${caller.member}` };
       return {
         entries: [...watches, built.watch], events: [event],
-        text: `${built.watch.id} is proposed. ${built.watch.alert.name} (${built.watch.alert.role}) or another named person arms it with NEAR AI: Staff: Arm a Standing Watch; until then it watches nothing.`
+        text: `${built.watch.id} is proposed. ${built.watch.alert.name} (${built.watch.alert.role}) or another named person arms it with SovAI: Staff: Arm a Standing Watch; until then it watches nothing.`
       };
     });
   }

@@ -72,7 +72,7 @@ test('the genesis copy is canonical JSON and matches the harness bytes', async (
 test('invalid JSON, a newer version and extra keys are refused with plain messages', async () => {
   const file = await validFile();
   assert.throws(() => parseTeamFile('{not json'), (error: unknown) => error instanceof TeamFileError && /not valid JSON/.test(error.message));
-  assert.throws(() => parseTeamFile(edited(file, (c) => { c.version = 2; })), /newer version of NEAR AI.*Update the extension/);
+  assert.throws(() => parseTeamFile(edited(file, (c) => { c.version = 2; })), /newer version of SovAI.*Update the extension/);
   assert.throws(() => parseTeamFile(edited(file, (c) => { c.version = 2; c.extra = 1; })), /Update the extension/);
   assert.throws(() => parseTeamFile(edited(file, (c) => { delete c.version; })), TeamFileError);
   assert.throws(() => parseTeamFile(edited(file, (c) => { c.extra = 'x'; })), /unexpected extra field/);

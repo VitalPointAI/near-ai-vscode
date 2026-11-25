@@ -34,7 +34,7 @@ export interface ToolContext {
   onTodos?: (todos: Todo[]) => void;
   /** Directories Read, Glob, and Grep may also use (the Open-GSD runtime); never writable. */
   readOnlyRoots?: string[];
-  /** The Open-GSD runtime NEAR AI installed and verified, whose gsd-tools the auto mode may run (see CommandContext). */
+  /** The Open-GSD runtime SovAI installed and verified, whose gsd-tools the auto mode may run (see CommandContext). */
   trustedToolRoots?: string[];
   /** The managed Open-GSD runtime and the workflow preambles it ships, for the auto mode's gsd_run check. */
   gsdRuntime?: { home: string; preambles: string[] };

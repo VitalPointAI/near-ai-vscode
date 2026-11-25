@@ -16,6 +16,10 @@ const SCRIPT = path.join(ROOT, 'scripts', 'org-issuer.mjs');
 const require = createRequire(import.meta.url);
 const enrolment = require(path.join(ROOT, 'dist', 'domain', 'gate', 'enrolment.js'));
 const fixtures = require(path.join(ROOT, 'dist', 'test', 'helpers', 'enrolmentFixtures.js'));
+const webvh = require(path.join(ROOT, 'dist', 'domain', 'did', 'didWebvh.js'));
+const profile = require(path.join(ROOT, 'dist', 'domain', 'credentials', 'profile.js'));
+const multibase = require(path.join(ROOT, 'dist', 'domain', 'credentials', 'multibase.js'));
+const labels = require(path.join(ROOT, 'dist', 'domain', 'gate', 'labels.js'));
 const policyFixtures = require(path.join(ROOT, 'dist', 'test', 'helpers', 'policyFixtures.js'));
 
 const PASSPHRASE = randomBytes(12).toString('hex');
@@ -333,6 +337,142 @@ test('the key file is sealed with scrypt and AES-256-GCM, and anything else is r
   const signed = path.join(dir, 'proper.near-org-rules');
   assert.equal(run(['sign-layer', '--key', proper, '--rules', rules, '--out', signed]).status, 0);
   assert.equal(enrolment.verifyOrganizationLayer(readFileSync(signed, 'utf8'), { issuerPublicKey: publicKey, now: Date.now() }).ok, true);
+});
+
+// ---- Your organization's root identity (Phase 71, 71-10; D-07, D-13) --------------------------------------------------------------------------------
+
+const REVOCATION = 'https://hq.example.org/v1/trust/status/revocation-1';
+const SUSPENSION = 'https://hq.example.org/v1/trust/status/suspension-1';
+const ALEX = 'did:webvh:QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG:hq.example.org:people:x7k2p9';
+
+function rootIdentity(dir) {
+  const key = path.join(dir, 'root-key.json');
+  const next = path.join(dir, 'root-next-key.json');
+  const log = path.join(dir, 'organization.did.jsonl');
+  const made = run(['create-did', '--key', key, '--next-key', next, '--domain', 'hq.example.org', '--out', log]);
+  assert.equal(made.status, 0, made.stderr);
+  return { key, next, log };
+}
+
+const multikeyOf = (file) => multibase.encodePublicKeyMultibase('Ed25519', new Uint8Array(Buffer.from(JSON.parse(readFileSync(file, 'utf8')).publicKey, 'base64url')));
+
+test('create-did writes the root\'s genesis log with pre-rotation on: the next key\'s hash is committed, and both key files are sealed', () => {
+  const dir = folder();
+  const { key, next, log } = rootIdentity(dir);
+  const verified = webvh.verifyWebvhLog(readFileSync(log, 'utf8'), { now: Date.now() });
+  assert.equal(verified.ok, true, verified.message);
+  assert.match(verified.state.did, /^did:webvh:Qm[1-9A-HJ-NP-Za-km-z]{44}:hq\.example\.org:org$/);
+  assert.deepEqual(verified.state.parameters.updateKeys, [multikeyOf(key)]);
+  assert.deepEqual(verified.state.parameters.nextKeyHashes, [webvh.nextKeyHash(multikeyOf(next))]);
+  for (const file of [key, next]) {
+    const content = JSON.parse(readFileSync(file, 'utf8'));
+    assert.equal(content.kind, 'near-ai-org-did-key');
+    assert.equal(content.privateKey.N, 2 ** 17, 'sealed as create-key seals');
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+  }
+});
+
+test('create-did never overwrites a key file or a log, and refuses a malformed domain', () => {
+  const dir = folder();
+  const { key, next, log } = rootIdentity(dir);
+  const before = readFileSync(key, 'utf8');
+  const again = run(['create-did', '--key', key, '--next-key', path.join(dir, 'other-next.json'), '--domain', 'hq.example.org', '--out', path.join(dir, 'again.did.jsonl')]);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /already exists/);
+  assert.equal(readFileSync(key, 'utf8'), before);
+  assert.equal(existsSync(path.join(dir, 'again.did.jsonl')), false);
+  assert.equal(run(['create-did', '--key', path.join(dir, 'k2.json'), '--next-key', path.join(dir, 'n2.json'), '--domain', 'HQ Example', '--out', path.join(dir, 'x.did.jsonl')]).status, 2);
+  assert.ok(existsSync(next) && existsSync(log));
+});
+
+test('rotate-did with the pre-rotated key appends an update that verifies and commits to a new next key', () => {
+  const dir = folder();
+  const { next, log } = rootIdentity(dir);
+  const newNext = path.join(dir, 'root-next-2.json');
+  const out = path.join(dir, 'organization-2.did.jsonl');
+  const rotated = run(['rotate-did', '--log', log, '--key', next, '--next-key', newNext, '--out', out]);
+  assert.equal(rotated.status, 0, rotated.stderr);
+  const text = readFileSync(out, 'utf8');
+  assert.ok(text.startsWith(readFileSync(log, 'utf8')), 'the new log continues the old one');
+  const verified = webvh.verifyWebvhLog(text, { now: Date.now() + 5000 });
+  assert.equal(verified.ok, true, verified.message);
+  assert.equal(verified.state.versions.length, 2);
+  assert.deepEqual(verified.state.parameters.updateKeys, [multikeyOf(next)]);
+  assert.deepEqual(verified.state.parameters.nextKeyHashes, [webvh.nextKeyHash(multikeyOf(newNext))]);
+});
+
+test('rotate-did with any other key refuses in one sentence and writes nothing', () => {
+  const dir = folder();
+  const { key, log } = rootIdentity(dir);
+  const out = path.join(dir, 'organization-2.did.jsonl');
+  const spent = run(['rotate-did', '--log', log, '--key', key, '--next-key', path.join(dir, 'n.json'), '--out', out]);
+  assert.equal(spent.status, 1);
+  assert.match(spent.stderr, /not the key the root identity committed to/);
+  assert.equal(spent.stderr.trim().split('\n').length, 1);
+  assert.equal(existsSync(out), false);
+  assert.equal(existsSync(path.join(dir, 'n.json')), false, 'no new key file either');
+});
+
+test('the rules key and a root identity key are kept apart: neither signs as the other', () => {
+  const dir = folder();
+  const rulesKey = keyIn(dir);
+  const { key } = rootIdentity(dir);
+  const rules = json(dir, 'rules.json', fixtures.organizationSections());
+  const asRules = run(['sign-layer', '--key', key, '--rules', rules, '--out', path.join(dir, 'x.near-org-rules')]);
+  assert.equal(asRules.status, 1);
+  assert.match(asRules.stderr, /root identity key, not your organization's rules key/);
+  const claims = json(dir, 'claims.json', { scope: 'organization' });
+  const asRoot = run(['issue-role', '--key', rulesKey.file, '--log', path.join(dir, 'organization.did.jsonl'), '--type', 'SecurityContactCredential', '--subject', ALEX,
+    '--claims', claims, '--status', `${REVOCATION}#10`, '--suspension', `${SUSPENSION}#11`, '--out', path.join(dir, 'x.near-vc')]);
+  assert.equal(asRoot.status, 1);
+  assert.match(asRoot.stderr, /rules key, not a root identity key/);
+});
+
+test('issue-role signs a role credential for a person\'s did:webvh that verifies with the root key, with the status entries given', () => {
+  const dir = folder();
+  const { key, log } = rootIdentity(dir);
+  const claims = json(dir, 'claims.json', { credentialType: 'ClearanceCredential', scale: 'ca-classified', upTo: 'Secret' });
+  const out = path.join(dir, 'alex-issuer.near-vc');
+  const issued = run(['issue-role', '--key', key, '--log', log, '--type', 'IssuerRoleCredential', '--subject', ALEX, '--claims', claims,
+    '--status', `${REVOCATION}#4821`, '--suspension', `${SUSPENSION}#77`, '--out', out, '--days', '365']);
+  assert.equal(issued.status, 0, issued.stderr);
+  const credential = JSON.parse(readFileSync(out, 'utf8'));
+  const state = webvh.verifyWebvhLog(readFileSync(log, 'utf8'), { now: Date.now() }).state;
+  assert.equal(credential.issuer, state.did);
+  assert.equal(credential.credentialSubject.id, ALEX);
+  assert.deepEqual(credential.credentialStatus.map((entry) => [entry.statusPurpose, entry.statusListIndex, entry.statusListCredential]), [['revocation', '4821', REVOCATION], ['suspension', '77', SUSPENSION]]);
+  const verified = profile.verifyCredential(credential, { scales: labels.SCALE_PRESETS, publicKey: multibase.decodePublicKeyMultibase(multikeyOf(key)) });
+  assert.equal(verified.ok, true, verified.message);
+  assert.equal(verified.type, 'IssuerRoleCredential');
+});
+
+test('issue-role refuses a did:key subject, a type that is not a role, and malformed status entries, writing nothing', () => {
+  const dir = folder();
+  const { key, log } = rootIdentity(dir);
+  const claims = json(dir, 'claims.json', { scope: 'organization' });
+  const base = ['--key', key, '--log', log, '--claims', claims, '--status', `${REVOCATION}#1`, '--suspension', `${SUSPENSION}#2`];
+  const device = run(['issue-role', ...base, '--type', 'SecurityContactCredential', '--subject', 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK', '--out', path.join(dir, 'a.near-vc')]);
+  assert.equal(device.status, 1);
+  assert.match(device.stderr, /never issues/);
+  const notRole = run(['issue-role', ...base, '--type', 'ClearanceCredential', '--subject', ALEX, '--out', path.join(dir, 'b.near-vc')]);
+  assert.equal(notRole.status, 2);
+  const badStatus = run(['issue-role', '--key', key, '--log', log, '--claims', claims, '--status', 'revocation-1', '--suspension', `${SUSPENSION}#2`, '--type', 'SecurityContactCredential', '--subject', ALEX, '--out', path.join(dir, 'c.near-vc')]);
+  assert.equal(badStatus.status, 2);
+  for (const name of ['a', 'b', 'c']) assert.equal(existsSync(path.join(dir, `${name}.near-vc`)), false);
+});
+
+test('after a rotation, issue-role refuses the spent key and signs with the key in force', () => {
+  const dir = folder();
+  const { key, next, log } = rootIdentity(dir);
+  const rotatedLog = path.join(dir, 'organization-2.did.jsonl');
+  assert.equal(run(['rotate-did', '--log', log, '--key', next, '--next-key', path.join(dir, 'n2.json'), '--out', rotatedLog]).status, 0);
+  const claims = json(dir, 'claims.json', { scope: 'organization' });
+  const args = (keyFile, out) => ['issue-role', '--key', keyFile, '--log', rotatedLog, '--type', 'SecurityContactCredential', '--subject', ALEX, '--claims', claims,
+    '--status', `${REVOCATION}#3`, '--suspension', `${SUSPENSION}#4`, '--out', path.join(dir, out)];
+  const spent = run(args(key, 'spent.near-vc'));
+  assert.equal(spent.status, 1, spent.stdout);
+  assert.match(spent.stderr, /not the root identity's key in force/);
+  assert.equal(run(args(next, 'current.near-vc')).status, 0);
 });
 
 test('no secret reaches the screen', () => {

@@ -1,5 +1,5 @@
 // Where the user finds the usage reporting token. It used to be only a Command Palette command
-// (NEAR AI: Set Usage Reporting Token); now every place that shows spend links to it with the
+// (SovAI: Set Usage Reporting Token); now every place that shows spend links to it with the
 // same words: Settings, the chat's spend line, Spending Limits, Agent Activity, and the Tools
 // tab's Elsewhere row. A token pasted into a setting is moved to SecretStorage.
 import assert from 'node:assert/strict';

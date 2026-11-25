@@ -4,11 +4,11 @@ sidebar_label: Welcome
 sidebar_position: 1
 ---
 
-# NEAR AI for VS Code documentation
+# Sterling Sovereign AI documentation
 
-NEAR AI for VS Code puts an AI agent team inside your editor. This site has two kinds of pages:
+Sterling Sovereign AI puts an AI agent team inside your editor. This site has two kinds of pages:
 
-- **Using NEAR AI**: how to get started and how to do the work of your role, for people who use the
+- **Using SovAI**: how to get started and how to do the work of your role, for people who use the
   extension.
 - **Security, Architecture, Developing and Releases**: how it is built, what it trusts and why, and
   how changes reach a release, for people who build, review or approve it.

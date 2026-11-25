@@ -117,7 +117,7 @@ test('runtimes: declared and installed versions are checked for end of life and 
 test('a scan writes a CycloneDX SBOM with components, runtimes, and vulnerabilities, and leaves it alone when nothing changed', async () => {
   const root = await project({ 'package-lock.json': LOCKFILES['web/package-lock.json'], 'package.json': JSON.stringify({ engines: { node: '>=22' } }) });
   const fetchFn = (async (url: string, init?: RequestInit) => (url.includes('endoflife.date') ? fakeEol({ nodejs: NODE_RELEASES }) : fakeOsv(LODASH_VULNS, { 'pkg:npm/lodash@4.17.20': [{ id: 'GHSA-aaaa' }] }))(url, init)) as typeof fetch;
-  const options = { fetch: fetchFn, run: async () => 'v24.21.0', now: () => new Date('2026-10-27T12:00:00Z'), tool: { name: 'NEAR AI for VS Code', version: '0.4.0' } };
+  const options = { fetch: fetchFn, run: async () => 'v24.21.0', now: () => new Date('2026-10-27T12:00:00Z'), tool: { name: 'Sterling Sovereign AI', version: '0.4.0' } };
   const report = await scanProject(root, options);
   assert.equal(report.sbomWritten, true);
   const bom = JSON.parse(await readFile(path.join(root, SBOM_FILE), 'utf8'));

@@ -63,7 +63,7 @@ export class OutboundGuard {
 
   public check(request: OutboundRequest, spentTodayUsd: number): OutboundOutcome {
     const boundary: ProviderBoundary = request.modelInfo?.privacyBoundary === 'tee' ? 'tee' : request.modelInfo?.privacyBoundary === 'local' ? 'local' : 'cloud';
-    if (this.settings.actionPolicy.emergencyStop) return { outcome: 'block', boundary, reason: 'Emergency stop is on. Run "NEAR AI: Resume" to send again.' };
+    if (this.settings.actionPolicy.emergencyStop) return { outcome: 'block', boundary, reason: 'Emergency stop is on. Run "SovAI: Resume" to send again.' };
     const limit = this.settings.dailySpendLimitUsd;
     if (limit > 0 && spentTodayUsd >= limit) return { outcome: 'block', boundary, reason: `Today's NEAR AI spend ($${spentTodayUsd.toFixed(2)}) has reached your daily limit of $${limit.toFixed(2)}. Raise nearAi.dailySpendLimitUsd to continue.` };
     const providerRequest = { provider: `near-ai:${request.model}`, providerBoundary: boundary, capability: 'network' as const, context: request.text };

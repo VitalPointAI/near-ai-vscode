@@ -67,9 +67,9 @@ export interface CalcLedgerReplay {
 
 export const CALC_LEDGER_PROBLEMS = {
   unreadable: 'A calculator ledger line could not be read as a signed entry.',
-  signature: 'A calculator ledger entry is not signed by a key this computer trusts, so it was written outside NEAR AI or changed.',
-  chain: 'A calculator ledger entry does not follow the one before it, so an entry was removed, reordered or added outside NEAR AI.',
-  repeated: 'A calculator ledger entry names a record that already has one; records never change, so it was not written by NEAR AI.'
+  signature: 'A calculator ledger entry is not signed by a key this computer trusts, so it was written outside SovAI or changed.',
+  chain: 'A calculator ledger entry does not follow the one before it, so an entry was removed, reordered or added outside SovAI.',
+  repeated: 'A calculator ledger entry names a record that already has one; records never change, so it was not written by SovAI.'
 } as const;
 
 /** Replays the calculator ledger: the first line that fails a check breaks the chain, and nothing after it is trusted. */

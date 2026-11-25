@@ -63,9 +63,9 @@ test('Get Started, the Team preview and the bundled NEAR AI chat request only th
     await expect.poll(() => pluginsStarted, { message: `Theia reported starting the ${expectedPlugins} bundled plugin(s)`, timeout: 60_000 })
       .toMatch(new RegExp(`\\] Start of ${expectedPlugins} plugins?:`));
     // The chat is the part of the extension that talks to model servers: open it as a person would and wait for its own content.
-    await runCommand('NEAR AI: Open Chat');
+    await runCommand('SovAI: Open Chat');
     const chat = page.frameLocator('[id^="plugin-webview:"] iframe').frameLocator('#active-frame');
-    await expect(chat.getByRole('textbox', { name: 'Message NEAR AI' })).toBeVisible({ timeout: 60_000 });
+    await expect(chat.getByRole('textbox', { name: 'Chat message' })).toBeVisible({ timeout: 60_000 });
   }
   await page.waitForTimeout(OBSERVE_MS);
 

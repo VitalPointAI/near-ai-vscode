@@ -232,7 +232,7 @@ export function credentialReason(shown: string): string {
 
 /** The plain reason for `floor.identity-files`, naming the folder as the command reached it. */
 export function identityFilesReason(shown: string): string {
-  return `${shown} is where NEAR AI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
+  return `${shown} is where SovAI keeps this device's signing keys and its policy and decision records. Agents may not read, write, list or run anything there, in any approval mode.`;
 }
 
 /**
@@ -309,7 +309,7 @@ function protectedWriteMatch(input: FloorInput): string | undefined {
   for (const effect of input.effects) {
     if (effect.verb !== 'workspaceWrite' && effect.verb !== 'destroy') continue;
     for (const shown of effect.paths) {
-      if (isFloorProtectedWrite(shown)) return protectedWriteReason(shown) ?? `${shown} holds this project's NEAR AI settings or saved state, so changing the whole folder changes them. Approve this write only if you expect it.`;
+      if (isFloorProtectedWrite(shown)) return protectedWriteReason(shown) ?? `${shown} holds this project's SovAI settings or saved state, so changing the whole folder changes them. Approve this write only if you expect it.`;
     }
   }
   return undefined;

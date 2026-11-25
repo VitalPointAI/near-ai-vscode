@@ -31,9 +31,9 @@ export function securityTool(access: SecurityAccess): AgentTool<{ workflow: bool
     title: (input) => (input.workflow ? 'Get dependency scan workflow' : 'Scan dependencies for vulnerabilities'),
     async run(input) {
       if (input.workflow) return `Save this as .github/workflows/dependency-scan.yml:\n\n${CI_WORKFLOW}`;
-      if (!access.consented()) return 'Vulnerability checks are not enabled for this project. Ask the user to run "NEAR AI: Scan Dependencies for Vulnerabilities" once to allow them. Until then, say plainly that dependencies were not checked.';
+      if (!access.consented()) return 'Vulnerability checks are not enabled for this project. Ask the user to run "SovAI: Scan Dependencies for Vulnerabilities" once to allow them. Until then, say plainly that dependencies were not checked.';
       const report = await access.scan();
-      if (!report) return 'The dependency check could not run; see the NEAR AI Security output. Say that dependencies were not checked.';
+      if (!report) return 'The dependency check could not run; see the SovAI Security output. Say that dependencies were not checked.';
       return scanSummary(report);
     }
   };

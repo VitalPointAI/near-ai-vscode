@@ -90,7 +90,7 @@ export async function projectStaffTeams(root: string, libraryDir: string): Promi
 
 /**
  * projectStaffTeams for the chat's card, the /team menu and Link, which never fails silently: a reason the settings do not read, or an unexpected error,
- * goes to `log` (the NEAR AI output channel), and an error comes back as the card's reason rather than as "not a staff project", which used to put the
+ * goes to `log` (the SovAI output channel), and an error comes back as the card's reason rather than as "not a staff project", which used to put the
  * "no team yet" card in its place with nothing said. The library folder is worked out inside, so an error there is reported the same way.
  */
 export async function projectStaffTeamsReported(root: string, libraryDir: () => string, log: (line: string) => void): Promise<ProjectStaffTeams> {
@@ -101,7 +101,7 @@ export async function projectStaffTeamsReported(root: string, libraryDir: () => 
   } catch (error) {
     const reason = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
     log(`Staff teams could not be read: ${error instanceof Error && error.stack ? error.stack : reason}`);
-    return { staff: true, sections: [], problem: `${reason}. The NEAR AI output has the details.` };
+    return { staff: true, sections: [], problem: `${reason}. The SovAI output has the details.` };
   }
 }
 

@@ -8,7 +8,7 @@ Your organization's private overlay stays outside the repository and build: poin
 
 An owner can install the optional fifteen-minute refresh timer with `npm run refresh-timer:install` after reviewing its generated systemd user units.
 
-`docs-site/` is the documentation site for NEAR AI for VS Code: how to use the extension, and how
+`docs-site/` is the documentation site for Sterling Sovereign AI: how to use the extension, and how
 it is built, secured, tested and released. It is built with [Docusaurus 3](https://docusaurus.io/)
 and, for now, is read on this computer only.
 
@@ -62,8 +62,8 @@ At every build `scripts/sync-docs.mjs` renders these into the site:
 
 | Repository file | Site section |
 | --- | --- |
-| `README.md` | Using NEAR AI: Features and settings |
-| `docs/*.md` (other than those below) | Using NEAR AI: Reference |
+| `README.md` | Using SovAI: Features and settings |
+| `docs/*.md` (other than those below) | Using SovAI: Reference |
 | `SECURITY.md` | Security: Security policy |
 | `.planning/codebase/*.md`, `.planning/research/**/*.md` | Architecture |
 | `docs/decisions/*.md` (when there are any) | Architecture: Decision records |

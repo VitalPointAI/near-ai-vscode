@@ -47,6 +47,9 @@
       "backend": "lib/node/key-service-backend-module"
     },
     {
+      "backend": "lib/node/credentials/credentials-backend-module"
+    },
+    {
       "frontend": "lib/browser/session-activity-frontend-module",
       "backend": "lib/node/session-activity-backend-module"
     }

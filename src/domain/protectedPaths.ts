@@ -42,8 +42,8 @@ export function protectedWriteReason(relative: string, shown: string = relative)
   if (!PROTECTED_WRITE.test(normalized)) return undefined;
   const git = GIT_SEGMENT.exec(normalized);
   if (git) return `${shown} is inside ${git[1]}, where hooks and config run code on the next git command. Approve this write only if you expect it.`;
-  if (PLANNING_SETTINGS.test(normalized)) return `${shown} is inside .planning/.near-ai, which holds this project's NEAR AI settings. Approve this write only if you expect it.`;
-  return `${shown} is inside .near-ai, where NEAR AI keeps this project's saved state, keys and locks. Approve this write only if you expect it.`;
+  if (PLANNING_SETTINGS.test(normalized)) return `${shown} is inside .planning/.near-ai, which holds this project's SovAI settings. Approve this write only if you expect it.`;
+  return `${shown} is inside .near-ai, where SovAI keeps this project's saved state, keys and locks. Approve this write only if you expect it.`;
 }
 
 // 0.4.23: the key folder is off limits to agents altogether. Asking was not enough: in a real run an agent read keys/local.key with a Node script

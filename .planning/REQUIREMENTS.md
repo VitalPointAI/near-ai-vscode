@@ -60,7 +60,7 @@
 
 ### Delegation (Phase 71: DLGT-01; Phase 71.1: DLGT-02 to DLGT-08, split 2026-11-24)
 
-- [ ] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
+- [x] **DLGT-01**: Every agent, machine and device acts under its own `did:key` (Ed25519; Phase 69's device identity maps to it unchanged), and people and your organization's root use `did:webvh` (a hash-chained log with pre-rotation that verifies offline from a cached copy); DID documents stay minimal and conform to DID Core 1.0 (identifier, verification methods, controller, services) with no custom authority or sandbox members; `did:near` is not used; no agent uses another agent's key or a shared credential pool. *(Revised 2026-11-15, owner-confirmed; was: an Ed25519 key, the NEAR implicit account derived from it, and a DID document with an authority section and a reserved sandbox section.)*
 - [ ] **DLGT-02**: A child's capabilities are the intersection of the parent's grant, the member's declared tools and the task's request, enforced in the gate, never in the prompt, and a property test shows no delegation widens.
 - [ ] **DLGT-03**: Every grant is a delegation credential (the VCRD-02 profile) signed by its delegator, carrying an expiry, a budget, a level cap, roles, compartments and a depth limit, and recorded in the signed log; an expired, unsigned or tampered grant is refused. *(Revised 2026-11-15; was: a signed grant with an expiry and a budget.)*
 - [ ] **DLGT-04**: Delegation depth (default: the lead plus members; members spawn only when marked as orchestrators) and fan-out (per turn and per tree) are capped as data in the grant.
@@ -75,20 +75,20 @@
 - [ ] **VCRD-02**: Credentials follow one narrow profile: a fixed `@context` list (the VC 2.0 context plus one of our own; any other is refused and no JSON-LD processing runs), `DataIntegrityProof` with the `eddsa-jcs-2022` cryptosuite only, Ed25519 keys as Multikey, integers only. It is built on `node:crypto` Ed25519 and the existing canonical JSON with zero new runtime dependencies, signs through Phase 69's signer interface and honours its key status (a revoked key is refused for everything).
 - [x] **VCRD-03**: The W3C `eddsa-jcs-2022` test vectors are frozen tests, and Digital Bazaar's `@digitalbazaar/eddsa-jcs-2022-cryptosuite` and `@digitalbazaar/vc`, added as devDependencies only, verify our credentials and we verify theirs; the extension bundle gains no runtime dependency.
 - [ ] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
-- [ ] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
+- [x] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
 - [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
-- [ ] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). In your organization the issuer is your organization's DID or a person your organization's signed policy authorizes; agents and devices never issue. A person with no organization keeps their own declared clearances on their own computer, shown as "declared, not verified": they are never credentials, are never cited as evidence and count nowhere else (no shared project, hub, wrap or organization policy), so a fresh install keeps working with no HQ. *(Owner, 2026-11-24, owner item 1 of `71-CONTEXT.md` answered "defaults"; was: a person with no organization issues their own credentials from their device DID.)*
+- [x] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). In your organization the issuer is your organization's DID or a person your organization's signed policy authorizes; agents and devices never issue. A person with no organization keeps their own declared clearances on their own computer, shown as "declared, not verified": they are never credentials, are never cited as evidence and count nowhere else (no shared project, hub, wrap or organization policy), so a fresh install keeps working with no HQ. *(Owner, 2026-11-24, owner item 1 of `71-CONTEXT.md` answered "defaults"; was: a person with no organization issues their own credentials from their device DID.)*
 
 ### Data-centric access control (Phase 71, added 2026-11-24)
 
 From the owner's data-centric access direction (`.planning/research/data-centric-access/RESEARCH.md`, decisions O1 to O11 accepted 2026-11-24): verified credentials are the only source of access attributes, data decides access from its own label, zero trust throughout, Keycloak for authentication only.
 
-- [ ] **DCAC-01**: Trusted issuers are in the signed policy: `credentials@1` pins your organization's root DID and names, for each credential type, the role credential an issuer must hold and the ceiling it may issue, with the status lists, the status time to live, the maximum offline age per level and the credentials required by sensitivity (only ever tightened); `agreements@1` holds organization-to-organization agreements. Only people with a role credential from the root can issue; an agent or device key never can, whatever the policy says.
-- [ ] **DCAC-02**: An entry that relies on a person's attribute cites its evidence by hash (the credentials and the status lists checked); the fold checks only the cited evidence at the entry's signed time, so every replica gives the same answer whatever list it holds.
-- [ ] **DCAC-03**: One pure `mayRelease` decides every key wrap, release and serve from verified credential facts and the data's own label: level on the scale or an approved mapping, every compartment, releasability for every holder of a marked cell, export eligibility for CGP, ITAR and EAR, and the credentials required by sensitivity; a position's required clearance and ways of serving are checked the same way.
+- [x] **DCAC-01**: Trusted issuers are in the signed policy: `credentials@1` pins your organization's root DID and names, for each credential type, the role credential an issuer must hold and the ceiling it may issue, with the status lists, the status time to live, the maximum offline age per level and the credentials required by sensitivity (only ever tightened); `agreements@1` holds organization-to-organization agreements. Only people with a role credential from the root can issue; an agent or device key never can, whatever the policy says.
+- [x] **DCAC-02**: An entry that relies on a person's attribute cites its evidence by hash (the credentials and the status lists checked); the fold checks only the cited evidence at the entry's signed time, so every replica gives the same answer whatever list it holds.
+- [x] **DCAC-03**: One pure `mayRelease` decides every key wrap, release and serve from verified credential facts and the data's own label: level on the scale or an approved mapping, every compartment, releasability for every holder of a marked cell, export eligibility for CGP, ITAR and EAR, and the credentials required by sensitivity; a position's required clearance and ways of serving are checked the same way.
 - [ ] **DCAC-04**: The enforcement points check freshness at the moment of action: your organization's server refuses an append that cites a stale status list and stops serving a member whose credential is revoked, the wrap preparer and the session refuse stale evidence with a plain reason and Retry, an edge refuses past the level's maximum offline age, and a later revocation leads to a rekey.
 - [ ] **DCAC-05**: Credentials are issued, revoked and suspended only from an officer's own session, signed by their person key after a passkey step-up, under a role credential from your organization's root; status lists are signed by the HQ status-list key in OpenBao Transit, each signature authorized only by an officer's step-up (O4); no new runtime service.
-- [ ] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
+- [x] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
 
 ### AI classification (Phases 70.1 and 74.3, added 2026-11-24)
 
@@ -284,7 +284,7 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | CLAS-06 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-07 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
 | CLAS-08 | Phase 70: Capability vocabulary, manifests and one gate | Pending |
-| DLGT-01 | Phase 71: Identities and verified credentials (core) | Pending |
+| DLGT-01 | Phase 71: Identities and verified credentials (core) | Complete |
 | DLGT-02 | Phase 71.1: Agent delegation that only narrows | Pending |
 | DLGT-03 | Phase 71.1: Agent delegation that only narrows | Pending |
 | DLGT-04 | Phase 71.1: Agent delegation that only narrows | Pending |
@@ -296,15 +296,15 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | VCRD-02 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-03 | Phase 71: Identities and verified credentials (core) | Complete |
 | VCRD-04 | Phase 71: Identities and verified credentials (core) | Pending |
-| VCRD-05 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-05 | Phase 71: Identities and verified credentials (core) | Complete |
 | VCRD-06 | Phase 71: Identities and verified credentials (core) | Pending |
-| VCRD-07 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-01 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-02 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-03 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-07 | Phase 71: Identities and verified credentials (core) | Complete |
+| DCAC-01 | Phase 71: Identities and verified credentials (core) | Complete |
+| DCAC-02 | Phase 71: Identities and verified credentials (core) | Complete |
+| DCAC-03 | Phase 71: Identities and verified credentials (core) | Complete |
 | DCAC-04 | Phase 71: Identities and verified credentials (core) | Pending |
 | DCAC-05 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-06 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-06 | Phase 71: Identities and verified credentials (core) | Complete |
 | CLSF-01 | Phase 70.1: Classification engine | Pending |
 | CLSF-02 | Phase 70.1: Classification engine | Pending |
 | CLSF-03 | Phase 70.1: Classification engine | Pending |

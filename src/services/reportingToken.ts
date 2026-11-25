@@ -40,7 +40,7 @@ export function reportingTokenHint(state: ReportingTokenState, near: 'working' |
   if (state === 'set' && near === 'waiting') return { state, text: TOKEN_WAITING_TEXT, title: 'A usage reporting token is set. NEAR AI Cloud has not been asked for its total yet, so spend figures are this computer\'s ledger for now. Click to replace the token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
   if (state === 'set' && near === 'unavailable') return { state, text: TOKEN_UNAVAILABLE_TEXT, title: 'A usage reporting token is set, but NEAR AI Cloud does not offer its usage summary yet (it answers HTTP 404), so spend figures are this computer\'s ledger. The token is kept and NEAR is asked again every hour; nothing needs doing. Click to replace the token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
   if (state === 'set' && near === 'failing') return { state, text: TOKEN_FAILING_TEXT, title: 'A usage reporting token is set, but NEAR\'s usage summary failed, so spend figures are this computer\'s ledger. Agent Activity shows NEAR\'s answer. Click to sign in again and make a new token.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
-  if (state === 'set') return { state, text: TOKEN_SET_TEXT, title: 'Spend figures show NEAR AI Cloud\'s own total for this API key, the figure the console shows (a usage reporting token is set). Click to replace the token; NEAR AI: Clear Usage Reporting Token removes it.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
+  if (state === 'set') return { state, text: TOKEN_SET_TEXT, title: 'Spend figures show NEAR AI Cloud\'s own total for this API key, the figure the console shows (a usage reporting token is set). Click to replace the token; SovAI: Clear Usage Reporting Token removes it.', command: SET_REPORTING_TOKEN_COMMAND, args: [] };
   if (state === 'off') return { state, text: TOKEN_OFF_TEXT, title: `A usage reporting token is set, but ${USE_NEAR_TOTAL_SETTING} is off, so spend figures are this computer's ledger. Click to open the setting.`, command: 'workbench.action.openSettings', args: [USE_NEAR_TOTAL_SETTING] };
   return { state, text: TOKEN_MISSING_TEXT, title: `Spend figures are this computer's ledger, which can differ from the NEAR AI console. With a usage reporting token they show NEAR's own total for this API key. ${REPORTING_TOKEN_HOW_TO}`, command: SET_REPORTING_TOKEN_COMMAND, args: [] };
 }
@@ -130,6 +130,6 @@ export async function movePastedReportingTokens<T>(deps: PastedTokenDeps<T>): Pr
   }
   await deps.storeToken(found[0].token);
   const names = [...cleared];
-  deps.notify(`A usage reporting token was in the setting ${names.length ? names.join(', ') : 'for NEAR AI'}. Settings are stored as plain text, so it was moved to VS Code's encrypted secret storage and removed from settings. Spend figures now use NEAR's own total.`);
+  deps.notify(`A usage reporting token was in the setting ${names.length ? names.join(', ') : 'for SovAI'}. Settings are stored as plain text, so it was moved to VS Code's encrypted secret storage and removed from settings. Spend figures now use NEAR's own total.`);
   return names;
 }

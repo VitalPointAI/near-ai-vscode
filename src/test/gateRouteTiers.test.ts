@@ -193,7 +193,7 @@ test('a missing attestation state: any-cloud and local-only are unaffected, atte
 
 // ---- Plan 24 (PR 4c): every refusal at a strict label names the way out ----
 
-const LOWER = "NEAR AI: Lower This Chat's Label";
+const LOWER = "SovAI: Lower This Chat's Label";
 
 test('a chat raised to Restricted by a read, with no local model, is refused with a sentence that names Lower This Chat\'s Label and still says to add a local model', async () => {
   const root = labelledProject();

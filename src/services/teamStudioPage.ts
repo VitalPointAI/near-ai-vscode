@@ -36,7 +36,7 @@ function nodeDetails(graph: { nodes: Array<{ id: string; facts: Array<{ text: st
 import { isAbliteratedModel } from '../domain/cyberModel';
 import { buildToolsDirectory, firstSentence, PRIVACY_TEXT, privacyOf, resolveAgentModel, type DirectoryInput, type DirectoryTool, type DirectoryModel, type ToolStatus, type ToolsDirectory } from './toolsDirectory';
 
-// NEAR AI Team Studio: a guided, visual way to build and manage agent teams. The team Markdown
+// SovAI Team Studio: a guided, visual way to build and manage agent teams. The team Markdown
 // files stay the source of truth; the studio reads them, writes them through TeamLibrary (so
 // every save is a version and nothing is ever hard-deleted), and computes models and permissions
 // from the same sources the Tools page and a run use. No VS Code imports, so the tests run it
@@ -769,7 +769,7 @@ export interface TeamStudioDeps {
   openSetting(key: string): Promise<unknown>;
   /** Runs Update Team on a team file (preview, choices, and confirmation happen there). */
   updateTeam?(file: string): Promise<unknown>;
-  /** NEAR AI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
+  /** SovAI: Set Up a Staff Team (staffSetupCommand.ts): asks its questions in VS Code, writes the team, and the studio lists it after. */
   setUpStaffTeam?(): Promise<unknown>;
   /** Opens the Staff Room for this project's staff run. */
   openStaffRoom?(): Promise<unknown>;
@@ -1083,7 +1083,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    */
   const hostKnowledgeBase = () => deps.knowledgeBase().catch(() => true);
   const refinePlanFor = async (draft: TeamDraft): Promise<{ plan: RefinePlan; ai?: TeamAiDeps }> => {
-    if (!deps.teamAi) return { plan: { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' } };
+    if (!deps.teamAi) return { plan: { ok: false, reason: 'No model is available here. Set up an AI profile for this project first.' } };
     let ai: TeamAiDeps;
     try { ai = await deps.teamAi(); } catch (error) { return { plan: { ok: false, reason: (error as Error).message } }; }
     // Any team in a project with a knowledge base is private, as its members' models already must be (reviewDraft); decided here, never from the page.
@@ -1108,7 +1108,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
   };
   /** Whether Generate with AI can be offered for this saved team, with which model and at what cost, or the plain reason it cannot. */
   const iconAiFor = async (text: string, file: string): Promise<{ available: boolean; reason?: string; model?: string; private?: boolean; estimate?: string }> => {
-    if (!deps.teamAi) return { available: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' };
+    if (!deps.teamAi) return { available: false, reason: 'No model is available here. Set up an AI profile for this project first.' };
     let ai: TeamAiDeps;
     try { ai = await deps.teamAi(); } catch (error) { return { available: false, reason: (error as Error).message }; }
     let team: TeamDefinition;
@@ -1328,7 +1328,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
       case 'optimise-all': {
         // On demand, for every team at once (owner, 2026-11-08: "we can do a model optimization recommendation for all teams whenever the user wants").
         // The whole cost is worked out and asked about ONCE, before any run, and the notice after each team shows the work moving rather than a long silence.
-        if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up a NEAR AI profile first.' }); return; }
+        if (!deps.optimiseTeam) { post({ type: 'error', text: 'No model is available to test the teams. Set up an AI profile first.' }); return; }
         const all = await deps.library.list(deps.root());
         const teams = all.flatMap((entry) => entry.team ? [{ name: entry.team.name, file: entry.file, members: entry.team.members.map((member) => ({ name: member.name, ...(member.role ? { role: member.role } : {}), ...(member.model ? { model: member.model } : {}) })) }] : []);
         if (!teams.length) { post({ type: 'notice', text: 'There are no teams to test yet.' }); return; }
@@ -1374,7 +1374,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         // One model call drafts the team from the person's own words (owner, 2026-11-08). The result goes back as a proposal the person reads first, and
         // only becomes a team when they accept it, so nothing is saved on the strength of one answer. Like Improve with AI, it goes through teamModelCall
         // (the outbound check) and the host's own privacy decision (PR #69 review): private when the person asked, or when the project has a knowledge base.
-        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available to draft a team. Set up a NEAR AI profile, or fill the team in by hand.' }); return; }
+        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available to draft a team. Set up an AI profile, or fill the team in by hand.' }); return; }
         post({ type: 'notice', text: 'Drafting the team...' });
         try {
           const ai = await deps.teamAi();
@@ -1827,7 +1827,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         let read: ReadPackage;
         try {
           const size = (await stat(source)).size;
-          if (size > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a NEAR AI team, so it was not imported.');
+          if (size > MAX_TEAM_PACKAGE_BYTES) throw new TeamPackageError('This file is too large to be a SovAI agent team, so it was not imported.');
           const textIn = await readFile(source, 'utf8');
           read = source.toLowerCase().endsWith('.md') ? readTeamMarkdown(textIn) : readTeamPackage(textIn);
         } catch (error) {
@@ -1950,7 +1950,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
         const file = fileFor(message.id);
         if (!file) { post({ type: 'error', text: 'That team is no longer in your teams.' }); return; }
         if (iconWorking) { post({ type: 'error', text: 'Still working on an icon. Wait for it to finish.' }); return; }
-        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available here. Set up a NEAR AI profile for this project first.' }); return; }
+        if (!deps.teamAi) { post({ type: 'error', text: 'No model is available here. Set up an AI profile for this project first.' }); return; }
         iconWaiting = undefined;
         iconWorking = true;
         const stop = new AbortController();
@@ -2050,7 +2050,7 @@ export function attachTeamStudio(host: StudioHost, deps: TeamStudioDeps): { refr
    * the person agreed to is refused, not sent.
    */
   const iconImageCall = async (file: string, job: IconJob, signal: AbortSignal): Promise<TeamImageResult> => {
-    if (!deps.teamAi) return { ok: false, reason: 'No model is available here. Set up a NEAR AI profile for this project first.' };
+    if (!deps.teamAi) return { ok: false, reason: 'No model is available here. Set up an AI profile for this project first.' };
     let ai: TeamAiDeps;
     try { ai = await deps.teamAi(); } catch (error) { return { ok: false, reason: (error as Error).message }; }
     const team = parseTeam(await readFile(file, 'utf8'), file);
@@ -2225,7 +2225,7 @@ export type { TeamDefinition };
 export function teamStudioHtml(options: { cspSource: string; nonce: string; script: string; style: string; network: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}'; img-src data:;">
-<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><link rel="stylesheet" href="${options.network}"><title>NEAR AI Team Studio</title></head><body>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><link rel="stylesheet" href="${options.network}"><title>SovAI Team Studio</title></head><body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="title"><h1 id="title">Team Studio</h1><p id="subtitle" class="hint">Build and manage agent teams. Each team is a Markdown file; the studio reads and writes it for you.</p></div><nav id="crumbs" aria-label="Breadcrumb"></nav></header>
 <div id="announce" class="visually-hidden" aria-live="polite" role="status"></div>

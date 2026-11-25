@@ -1,4 +1,4 @@
-// NEAR AI: Staff Simulation commands (research note 11, 8; WP-SIM). Start replays Exercise IRON LANTERN as live feeds on loopback only (CoT, AIS, RSS
+// SovAI: Staff Simulation commands (research note 11, 8; WP-SIM). Start replays Exercise IRON LANTERN as live feeds on loopback only (CoT, AIS, RSS
 // and the mock partner server), Controls pauses, resumes, steps and sets the speed (0.5x, 1x, 2x, 4x), and Stop closes every server. A status bar item
 // shows the SIM badge, the speed and the scenario clock; the output channel lists the endpoints and the feed picture, every source badged SIM.
 import * as vscode from 'vscode';
@@ -37,7 +37,7 @@ export function currentFeedRuntime(): SimFeedRuntime | undefined {
 export function registerStaffSimulation(context: { subscriptions: Array<{ dispose(): unknown }>; globalState?: { get<T>(key: string): T | undefined } }): void {
   const run = (id: string, body: () => Promise<void>): void => {
     context.subscriptions.push(vscode.commands.registerCommand(id, async () => {
-      try { await body(); } catch (error) { void vscode.window.showErrorMessage(`NEAR AI could not finish that: ${error instanceof Error ? error.message : String(error)}`); }
+      try { await body(); } catch (error) { void vscode.window.showErrorMessage(`SovAI could not finish that: ${error instanceof Error ? error.message : String(error)}`); }
     }));
   };
   run(STAFF_SIM_COMMANDS.start, () => startSimulation(context));
@@ -60,7 +60,7 @@ async function startSimulation(context: { globalState?: { get<T>(key: string): T
   const store = root ? observationStoreFor(root) : undefined;
   runtime = store && scenario.region.frame ? new SimFeedRuntime(current, store, scenario.region.frame, person) : undefined;
   runtime?.attach();
-  output ??= vscode.window.createOutputChannel('NEAR AI Staff Simulation');
+  output ??= vscode.window.createOutputChannel('SovAI Staff Simulation');
   statusItem ??= vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusItem.command = STAFF_SIM_COMMANDS.controls;
   statusItem.tooltip = `${SIM_STATEMENT} Click for the simulation controls.`;

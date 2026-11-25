@@ -54,7 +54,7 @@ export async function scanProject(root: string, options: ScanOptions = {}): Prom
 }
 
 /** CycloneDX 1.6 JSON for the scan. Components are sorted so unchanged projects give unchanged files. */
-export function cycloneDx(report: ScanReport, project: string, tool: { name: string; version: string } = { name: 'NEAR AI for VS Code', version: '' }): Record<string, unknown> {
+export function cycloneDx(report: ScanReport, project: string, tool: { name: string; version: string } = { name: 'Sterling Sovereign AI', version: '' }): Record<string, unknown> {
   const status = report.errors.length && !report.packages.length ? 'incomplete' : report.packages.length || report.runtimeFindings.length ? 'vulnerabilities-found' : 'no-known-vulnerabilities';
   const runtimeRef = (entry: RuntimeVersion) => `runtime:${entry.runtime}@${entry.version}:${entry.kind}`;
   return {

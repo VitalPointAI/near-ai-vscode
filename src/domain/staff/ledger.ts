@@ -230,10 +230,10 @@ export interface LedgerReplay {
 
 export const LEDGER_PROBLEMS = {
   unreadable: 'A ledger line could not be read as a signed entry.',
-  signature: 'A ledger entry is not signed by a key this computer trusts, so it was written outside NEAR AI or changed.',
-  chain: 'A ledger entry does not follow the one before it, so an entry was removed, reordered or added outside NEAR AI.',
+  signature: 'A ledger entry is not signed by a key this computer trusts, so it was written outside SovAI or changed.',
+  chain: 'A ledger entry does not follow the one before it, so an entry was removed, reordered or added outside SovAI.',
   'person-key': 'A person\'s decision is signed by a key other than the one it names.',
-  impossible: 'A ledger entry records a step the state machine refuses, so it was not written by NEAR AI.',
+  impossible: 'A ledger entry records a step the state machine refuses, so it was not written by SovAI.',
   'after-break': 'An earlier ledger entry is broken, so nothing after it can be trusted.',
   'file-unreadable': 'The ledger file could not be read in full (it is larger than the limit, or the disk refused it), so none of its entries is trusted.',
   truncated: 'The ledger ends before the last entry this computer recorded, so entries were removed from its end, or the file was deleted or replaced by an older copy.',

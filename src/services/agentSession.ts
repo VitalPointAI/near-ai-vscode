@@ -283,11 +283,11 @@ export const UNREADABLE_CHAT_LABEL: Label = Object.freeze({ scale: 'org', level:
 
 /** Said when a lowering was overtaken by a sync that raised the chat's label on another copy meanwhile (PR #87 review). */
 export const LOWERING_OVERTAKEN_TEXT =
-  "This chat's label was raised on another copy while you lowered it here, so it keeps the higher label. Run NEAR AI: Lower This Chat's Label again if what it read now allows it.";
+  "This chat's label was raised on another copy while you lowered it here, so it keeps the higher label. Run SovAI: Lower This Chat's Label again if what it read now allows it.";
 
 /** Said when a chat's stored label cannot be read. */
 export const UNREADABLE_CHAT_LABEL_TEXT =
-  "This chat's saved label could not be read, so it opens at Organization: Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use NEAR AI: Lower This Chat's Label.";
+  "This chat's saved label could not be read, so it opens at Organization: Restricted and its content stays on this computer. If you know it holds nothing that sensitive, use SovAI: Lower This Chat's Label.";
 
 /** The chat panel's conversations still open, so the window's shutdown can close them (PR #95 review round 3). */
 const openConversations = new Set<AgentConversation>();

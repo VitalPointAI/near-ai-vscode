@@ -22,7 +22,7 @@ import { costOf, gradeTask, runMetrics, setUpTask, type BenchmarkTask } from './
 
 // Runs benchmark tasks with the extension's own agent loop, tools, system prompt, and permission
 // logic, each in a fresh temporary folder outside any workspace that is deleted afterwards. Shared
-// by the live eval and NEAR AI: Compare Models. No VS Code imports.
+// by the live eval and SovAI: Compare Models. No VS Code imports.
 
 export type BenchmarkClient = AgentRunOptions['client'] & { actualCostsUsd?(requestIds: string[]): Promise<number | undefined> };
 

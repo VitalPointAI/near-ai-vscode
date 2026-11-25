@@ -8,7 +8,7 @@ import type { Severity } from '../security/osv';
 import { CI_WORKFLOW, SBOM_FILE, scanProject, ScanReport, scanSummary, worstSeverity } from '../security/scan';
 
 // Dependency and runtime vulnerability checks in VS Code: an SBOM (sbom.cdx.json) per project,
-// findings in the Problems view and the status bar, a scan when a NEAR AI project opens and when
+// findings in the Problems view and the status bar, a scan when a SovAI project opens and when
 // its lockfiles change, and the agent's SecurityScan tool. Package names and versions go to
 // OSV.dev and runtime versions to endoflife.date, only after the user agrees once per project.
 
@@ -43,7 +43,7 @@ export function securityAccess(context: vscode.ExtensionContext, root: string): 
 export class SecurityScanner implements vscode.Disposable {
   private readonly diagnostics = vscode.languages.createDiagnosticCollection('nearAi.security');
   private readonly status = vscode.window.createStatusBarItem('nearAi.security', vscode.StatusBarAlignment.Right, 90);
-  private readonly output = vscode.window.createOutputChannel('NEAR AI Security');
+  private readonly output = vscode.window.createOutputChannel('SovAI Security');
   private readonly disposables: vscode.Disposable[] = [];
   private running: Promise<ScanReport | undefined> | undefined;
   private debounce: ReturnType<typeof setTimeout> | undefined;
@@ -51,7 +51,7 @@ export class SecurityScanner implements vscode.Disposable {
   public last: ScanReport | undefined;
 
   public constructor(private readonly context: vscode.ExtensionContext, private readonly root: string) {
-    this.status.name = 'NEAR AI dependency security';
+    this.status.name = 'SovAI dependency security';
     this.status.command = 'nearAi.securityScan';
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, LOCKFILES));
     const changed = (uri: vscode.Uri) => { if (!/[\\/](node_modules|\.git|vendor|\.venv)[\\/]/.test(uri.fsPath) && this.consented) this.schedule(); };
@@ -65,7 +65,7 @@ export class SecurityScanner implements vscode.Disposable {
   /** Asks once per project before anything is sent; a modal for explicit requests, a notification otherwise. */
   public async requestConsent(modal: boolean): Promise<boolean> {
     if (this.consented) return true;
-    const detail = `To check ${path.basename(this.root)} for known vulnerabilities, NEAR AI sends the names and versions of its dependencies to OSV.dev (Google's open vulnerability database) and its runtime versions to endoflife.date. No code or file contents are sent. Results and an SBOM (${SBOM_FILE}) stay in this project.`;
+    const detail = `To check ${path.basename(this.root)} for known vulnerabilities, SovAI sends the names and versions of its dependencies to OSV.dev (Google's open vulnerability database) and its runtime versions to endoflife.date. No code or file contents are sent. Results and an SBOM (${SBOM_FILE}) stay in this project.`;
     const allow = 'Check now and when the project opens';
     const never = 'Never for this project';
     const answer = modal ? await vscode.window.showInformationMessage('Check dependencies for known vulnerabilities?', { modal: true, detail }, allow, never) : await vscode.window.showInformationMessage(`Check this project's dependencies for known vulnerabilities? ${detail}`, allow, 'Not now', never);
@@ -94,7 +94,7 @@ export class SecurityScanner implements vscode.Disposable {
     this.status.show();
     this.running = (async () => {
       try {
-        const report = await scanProject(this.root, { write: trigger === 'command' || trigger === 'agent' ? 'always' : 'if-changed', tool: { name: 'NEAR AI for VS Code', version: String(this.context.extension.packageJSON.version ?? '') } });
+        const report = await scanProject(this.root, { write: trigger === 'command' || trigger === 'agent' ? 'always' : 'if-changed', tool: { name: 'Sterling Sovereign AI', version: String(this.context.extension.packageJSON.version ?? '') } });
         this.show(report, trigger);
         return report;
       } catch (error) {
@@ -116,7 +116,7 @@ export class SecurityScanner implements vscode.Disposable {
     const add = (file: string, line: number | undefined, diagnostic: vscode.Diagnostic) => {
       const range = new vscode.Range(Math.max(0, (line ?? 1) - 1), 0, Math.max(0, (line ?? 1) - 1), 1_000);
       diagnostic.range = range;
-      diagnostic.source = 'NEAR AI security';
+      diagnostic.source = 'SovAI security';
       byFile.set(file, [...(byFile.get(file) ?? []), diagnostic]);
     };
     for (const finding of report.packages) for (const vuln of finding.vulnerabilities) {

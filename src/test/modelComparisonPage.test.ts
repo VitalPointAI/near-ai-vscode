@@ -278,8 +278,8 @@ test('the command lists the settings in effect in a multi-select and clears the 
 
 test('package.json declares the clear command, and each of the nine model settings says a project choice is used instead and where to clear it', () => {
   const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }>; configuration: { properties: Record<string, { description?: string; markdownDescription?: string }> } } };
-  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.clearProjectModelChoices'), { command: 'nearAi.clearProjectModelChoices', title: "Clear This Project's Model Choices", category: 'NEAR AI' });
-  const sentence = "A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices.";
+  assert.deepEqual(manifest.contributes.commands.find((command) => command.command === 'nearAi.clearProjectModelChoices'), { command: 'nearAi.clearProjectModelChoices', title: "Clear This Project's Model Choices", category: 'SovAI' });
+  const sentence = "A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices.";
   for (const setting of PROJECT_CHOICE_SETTINGS) {
     const property = manifest.contributes.configuration.properties[setting];
     assert.ok(property, setting);

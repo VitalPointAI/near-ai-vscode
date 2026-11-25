@@ -27,7 +27,7 @@ interface ParticipantResult extends vscode.ChatResult {
 }
 
 export const OPEN_THREAD_COMMAND = 'nearAi.openThread';
-export const OPEN_THREAD_TITLE = 'Open this chat in the NEAR AI panel';
+export const OPEN_THREAD_TITLE = 'Open this chat in the SovAI panel';
 
 /**
  * `@nearAi` in VS Code's built-in Chat view. Plain prompts stream from NEAR AI Cloud;
@@ -47,13 +47,13 @@ export function registerChatParticipant(context: vscode.ExtensionContext, auth: 
     let outcome: ReplyOutcome = 'completed';
     const isCommand = Boolean(request.command && GSD_COMMANDS.some((definition) => definition.command === request.command));
     if (isCommand) {
-      // Workflows need approvals, questions, and diffs, which the NEAR AI view provides.
-      if (isEmergencyStopped()) response.markdown('Emergency stop is on. Run **NEAR AI: Resume** first.');
+      // Workflows need approvals, questions, and diffs, which the SovAI view provides.
+      if (isEmergencyStopped()) response.markdown('Emergency stop is on. Run **SovAI: Resume** first.');
       else if (!root) response.markdown('Open a folder first. Open-GSD workflows run inside a workspace.');
       else {
         await runInSidebar(`gsd-${request.command}`, request.prompt.trim());
-        response.markdown(`Started \`/gsd-${request.command}${request.prompt.trim() ? ` ${request.prompt.trim()}` : ''}\` in the **NEAR AI** view, where you can approve changes and answer its questions.`);
-        response.button({ command: 'nearAi.openChat', title: 'Show NEAR AI' });
+        response.markdown(`Started \`/gsd-${request.command}${request.prompt.trim() ? ` ${request.prompt.trim()}` : ''}\` in the **SovAI** view, where you can approve changes and answer its questions.`);
+        response.button({ command: 'nearAi.openChat', title: 'Show SovAI' });
       }
     } else {
       ({ model, outcome } = await answerWithNearAi(auth, root, request.prompt, historyFromChatContext(chatContext.history), response, token, gateHost));
@@ -105,8 +105,8 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
     return notSent;
   }
   if (!active) {
-    response.markdown('This project has no validated NEAR AI profile yet. Set one up to start chatting.');
-    response.button({ command: 'nearAi.setup', title: 'Set up NEAR AI' });
+    response.markdown('This project has no validated AI profile yet. Set one up to start chatting.');
+    response.button({ command: 'nearAi.setup', title: 'Set up AI' });
     return notSent;
   }
   const settings = readSettings();
@@ -121,7 +121,7 @@ async function answerWithNearAi(auth: AuthService, root: string | undefined, pro
   await account?.ledger.refresh();
   const verdict = new OutboundGuard(settings).check({ model, modelInfo, text: prompt }, account?.spentTodayUsd().usd ?? 0);
   if (verdict.outcome !== 'allow') {
-    response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the NEAR AI sidebar, which can send a flagged message once.' : ''}`);
+    response.markdown(`${verdict.reason}\n\nNothing was sent.${verdict.overrideToken ? ' To send it anyway, use the SovAI sidebar, which can send a flagged message once.' : ''}`);
     return notSent;
   }
   const session = await activity.start({ project: path.basename(root), attribution: hostAttribution(active.profiles.projectScopeId, path.basename(root), active.profile.profileId, active.profile.organization), model, summary: 'Chat view session started.' });

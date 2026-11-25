@@ -1,5 +1,7 @@
 # One hub per release (the descriptor's instances: hubs). Each site hub item arrives as `instance`: name, publicAddress (the host name, with an
-# optional :port, members' computers use), nodePort (the TCP port on every node) and storage (the state volume size).
+# optional :port, members' computers use), nodePort (the TCP port on every node) and storage (the state volume size). An item may also name
+# organizationPolicy ({ configMap: <name>, key: <key> } or { secret: <name>, key: <key> }: where the signed organization layer is) and
+# organizationKey (your organization's public key, base64url). They have no default: without both, the hub's trust routes stay off (71-11).
 instance: {}
 # The hub image, set by digest from deploy/bundle/images.lock.json (sterling/near-ai-hub, the unchanged hub/Dockerfile, D-45).
 image: ""

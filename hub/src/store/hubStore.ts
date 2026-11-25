@@ -1233,6 +1233,11 @@ export class HubStore {
     return { journalMode: journal.journal_mode, synchronous: Number(synchronous.synchronous), foreignKeys: Number(foreignKeys.foreign_keys) };
   }
 
+  /** Runs body inside BEGIN IMMEDIATE and COMMIT on the hub's database, for the trust tables (trustStore.ts, 71-09) and nothing else. */
+  trustTransaction<T>(body: (sql: (text: string) => Statement) => T): T {
+    return this.transaction(() => body((text) => this.sql(text)));
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

@@ -226,6 +226,49 @@ GROUP BY project, stream, writer;
 
 UPDATE hub_meta SET value = '3' WHERE key = 'schema_version';
 `,
+  // v4 (Phase 71, 71-09): what the hub hosts as your organization's trust host (trustStore.ts). One did:webvh log per path, which may only grow
+  // (the stored log is always a prefix of its replacement) and is never deleted. Every signed status list version, append-only: a version is
+  // stored only above the newest of its list and never twice; the hub's PUT also requires exactly one above, so two officers never overwrite each
+  // other (compare-and-swap, D-14), while an edge's import may skip versions (71-11). And the status
+  // entries of the credentials each member's entries cited (D-16), so a later revocation of one of them refuses that member's sessions.
+  `
+CREATE TABLE trust_logs (
+  path TEXT PRIMARY KEY CHECK (length(path) BETWEEN 1 AND 600),
+  scid TEXT NOT NULL CHECK (length(scid) BETWEEN 1 AND 100),
+  did TEXT NOT NULL CHECK (length(did) BETWEEN 1 AND 2048),
+  log TEXT NOT NULL CHECK (length(log) BETWEEN 1 AND 1048576),
+  witness TEXT CHECK (witness IS NULL OR length(witness) <= 262144),
+  updated_at INTEGER NOT NULL
+) STRICT;
+CREATE TRIGGER trust_logs_no_delete BEFORE DELETE ON trust_logs BEGIN SELECT RAISE(ABORT, 'trust_logs keeps every log'); END;
+CREATE TRIGGER trust_logs_grow_only BEFORE UPDATE ON trust_logs
+WHEN NEW.path <> OLD.path OR NEW.scid <> OLD.scid OR substr(NEW.log, 1, length(OLD.log)) <> OLD.log
+BEGIN SELECT RAISE(ABORT, 'a trust log may only grow'); END;
+
+CREATE TABLE trust_lists (
+  id TEXT NOT NULL CHECK (length(id) BETWEEN 1 AND 2048),
+  version INTEGER NOT NULL CHECK (version >= 1),
+  hash TEXT NOT NULL UNIQUE CHECK (length(hash) = 64),
+  valid_from TEXT NOT NULL,
+  body TEXT NOT NULL CHECK (length(body) <= 131072),
+  stored_at INTEGER NOT NULL,
+  PRIMARY KEY (id, version)
+) STRICT;
+CREATE TRIGGER trust_lists_newer_only BEFORE INSERT ON trust_lists
+WHEN NEW.version <= (SELECT coalesce(max(version), 0) FROM trust_lists WHERE id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'a status list version must be above the newest'); END;
+${APPEND_ONLY('trust_lists')}
+CREATE TABLE trust_cited (
+  project TEXT NOT NULL REFERENCES projects (project),
+  member TEXT NOT NULL CHECK (length(member) BETWEEN 1 AND 200),
+  list TEXT NOT NULL CHECK (length(list) BETWEEN 1 AND 2048),
+  idx INTEGER NOT NULL CHECK (idx >= 0),
+  purpose TEXT NOT NULL CHECK (purpose IN ('revocation', 'suspension')),
+  PRIMARY KEY (project, member, list, idx, purpose)
+) STRICT;
+${APPEND_ONLY('trust_cited')}
+UPDATE hub_meta SET value = '4' WHERE key = 'schema_version';
+`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

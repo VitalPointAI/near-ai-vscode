@@ -21,8 +21,15 @@ function refusedFor(env: NodeJS.ProcessEnv, variable: string): ConfigError {
 }
 
 test('the defaults: host 127.0.0.1, port 8443, the default state directory, no public address', () => {
-  assert.deepEqual(loadConfig({}, DEFAULTS), { host: '127.0.0.1', port: 8443, stateDir: DEFAULTS.stateDir, publicAddress: undefined });
-  assert.deepEqual([...HUB_SETTINGS], ['HUB_HOST', 'HUB_PORT', 'HUB_STATE_DIR', 'HUB_PUBLIC_ADDRESS']);
+  assert.deepEqual(loadConfig({}, DEFAULTS), {
+    host: '127.0.0.1',
+    port: 8443,
+    stateDir: DEFAULTS.stateDir,
+    publicAddress: undefined,
+    organizationPolicy: undefined,
+    organizationKey: undefined,
+  });
+  assert.deepEqual([...HUB_SETTINGS], ['HUB_HOST', 'HUB_PORT', 'HUB_STATE_DIR', 'HUB_PUBLIC_ADDRESS', 'HUB_ORGANIZATION_POLICY', 'HUB_ORGANIZATION_KEY']);
 });
 
 test('valid settings are read, an empty HUB_PUBLIC_ADDRESS means not set, and the NAME_FILE settings of the hub secrets are accepted', () => {
@@ -40,7 +47,14 @@ test('valid settings are read, an empty HUB_PUBLIC_ADDRESS means not set, and th
     },
     DEFAULTS,
   );
-  assert.deepEqual(config, { host: '0.0.0.0', port: 0, stateDir: '/srv/hub/state', publicAddress: 'hub.example.org:8443' });
+  assert.deepEqual(config, {
+    host: '0.0.0.0',
+    port: 0,
+    stateDir: '/srv/hub/state',
+    publicAddress: 'hub.example.org:8443',
+    organizationPolicy: undefined,
+    organizationKey: undefined,
+  });
   assert.equal(loadConfig({ HUB_PUBLIC_ADDRESS: '' }, DEFAULTS).publicAddress, undefined);
   // A plain secret is the secret loader's to refuse, with its own sentence, so the config reader leaves it alone.
   assert.doesNotThrow(() => loadConfig({ HUB_SIGNING_KEY: 'fake-plain-value-1234' }, DEFAULTS));
@@ -90,4 +104,16 @@ test('each refused setting stops the built hub with exit 1 and one hub.start_ref
       }
     }),
   );
+});
+
+test('71-09: your organization\'s rules file and key are read; a relative rules path and a malformed key are refused without their values', () => {
+  const key = 'A'.repeat(43);
+  const config = loadConfig({ HUB_ORGANIZATION_POLICY: '/srv/hub/organization.near-org-rules', HUB_ORGANIZATION_KEY: key }, DEFAULTS);
+  assert.equal(config.organizationPolicy, '/srv/hub/organization.near-org-rules');
+  assert.equal(config.organizationKey, key);
+  assert.equal(loadConfig({ HUB_ORGANIZATION_POLICY: '', HUB_ORGANIZATION_KEY: '' }, DEFAULTS).organizationPolicy, undefined);
+  const relative = refusedFor({ HUB_ORGANIZATION_POLICY: 'rules/fictional-secret-path' }, 'HUB_ORGANIZATION_POLICY');
+  assert.ok(!relative.message.includes('fictional-secret-path'));
+  const bad = refusedFor({ HUB_ORGANIZATION_KEY: 'not-a-key-fictional' }, 'HUB_ORGANIZATION_KEY');
+  assert.ok(!bad.message.includes('not-a-key-fictional'));
 });

@@ -83,13 +83,13 @@ test('a reply that is only an error is kept as notices and nothing of it reaches
   const store = storeFor(root);
   const { threadId } = await resolveParticipantThread([], store);
   const recorder = new ResponseRecorder(new FakeStream());
-  recorder.markdown('NEAR AI could not be reached. Check your connection.');
+  recorder.markdown('SovAI could not be reached. Check your connection.');
   const finished = recorder.finish('failed');
   assert.equal(finished.text, '');
   await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Hi', reply: finished.text, notes: finished.notes, model: 'm', stopped: true });
   const main = (await store.lines(threadId)).main;
   assert.deepEqual(main.map((entry) => entry.role), ['user', 'notice', 'notice'], 'no assistant entry');
-  assert.equal(textOf(main[1]), 'NEAR AI could not be reached. Check your connection.');
+  assert.equal(textOf(main[1]), 'SovAI could not be reached. Check your connection.');
   assert.equal(textOf(main[2]), PARTICIPANT_STOPPED_NOTICE);
   assert.deepEqual(entriesToMessages(main).map((message) => message.role), ['user']);
   assert.equal(JSON.stringify(entriesToMessages(main)).includes('reached'), false);
@@ -201,7 +201,7 @@ test('a session that began before turns were recorded is seeded once, from the f
 });
 
 test('seeding turns a command into a notice that does not feed the model', () => {
-  const seed = seedEntries([request('3', 'plan-phase'), reply('Started `/gsd-plan-phase 3` in the NEAR AI view.', { command: 'plan-phase' }), ...exchange('Hi', 'Hello')]);
+  const seed = seedEntries([request('3', 'plan-phase'), reply('Started `/gsd-plan-phase 3` in the SovAI view.', { command: 'plan-phase' }), ...exchange('Hi', 'Hello')]);
   assert.deepEqual(seed.map((item) => item.role), ['notice', 'user', 'assistant']);
   assert.equal((seed[0].body as { forContext: boolean }).forContext, false);
   assert.match((seed[0].body as { text: string }).text, /\/gsd-plan-phase 3/);
@@ -263,7 +263,7 @@ test('a /gsd command turn is one notice that does not feed the model', async () 
   const root = await tempProject();
   const store = storeFor(root);
   const { threadId } = await resolveParticipantThread([], store);
-  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '3', reply: 'Started `/gsd-plan-phase 3` in the **NEAR AI** view.', model: '', command: 'plan-phase' });
+  await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '3', reply: 'Started `/gsd-plan-phase 3` in the **SovAI** view.', model: '', command: 'plan-phase' });
   const main = (await store.lines(threadId)).main;
   assert.equal(main.length, 1);
   assert.equal(main[0].role, 'notice');
@@ -298,7 +298,7 @@ test('the participant records a /gsd command turn, returns its thread id and off
   assert.match(markdown, /Started `\/gsd-progress`/);
   const open = buttons.find((button) => button.command === 'nearAi.openThread');
   assert.deepEqual(open?.arguments, [result.metadata.threadId]);
-  assert.equal(open?.title, 'Open this chat in the NEAR AI panel');
+  assert.equal(open?.title, 'Open this chat in the SovAI panel');
   const store = storeFor(root, sharedSecrets.get(root));
   const main = (await store.lines(result.metadata.threadId!)).main;
   assert.deepEqual(main.map((entry) => entry.role), ['notice']);
@@ -380,7 +380,7 @@ test('a prompt that never reached the model is not stored, and the session still
   const root = await tempProject();
   provideStream(undefined);
   const { result, markdown } = await ask(root, { prompt: 'secret prompt text' });
-  assert.match(markdown, /no validated NEAR AI profile/);
+  assert.match(markdown, /no validated AI profile/);
   const threadId = result.metadata.threadId!;
   assert.match(threadId, /^conv-/);
   const store = storeFor(root, sharedSecrets.get(root));
@@ -394,14 +394,14 @@ test('a prompt that never reached the model is not stored, and the session still
   assert.deepEqual(seeded.map(textOf), ['Old question', 'Old answer']);
 });
 
-test('a Chat view thread reopens in the NEAR AI panel of another editor with its whole history, and the next message continues it', async () => {
+test('a Chat view thread reopens in the SovAI panel of another editor with its whole history, and the next message continues it', async () => {
   const root = await tempProject();
   try {
     const store = storeFor(root);
     const { threadId } = await resolveParticipantThread([], store);
     await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'First question', reply: 'First answer', model: 'm' });
     await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: 'Second question', reply: 'Half an ans', model: 'm', stopped: true });
-    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '', reply: 'Started `/gsd-progress` in the **NEAR AI** view.', model: 'm', command: 'progress' });
+    await recordParticipantTurn(store, { threadId, writer: 'edA.1', prompt: '', reply: 'Started `/gsd-progress` in the **SovAI** view.', model: 'm', command: 'progress' });
 
     // Another editor on the same host, with nothing of its own but the project folder.
     const seen: AgentMessage[][] = [];

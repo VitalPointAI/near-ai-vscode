@@ -1263,18 +1263,18 @@ Plans:
   7. Officers issue, revoke and suspend credentials from their own session with their person key after a passkey step-up; status lists are signed by the HQ status-list key in OpenBao, each signature authorized only by an officer's step-up; your organization's server serves the DID logs and status lists, and a trust export carries them to a disconnected edge. (DCAC-05, DCAC-06)
 **Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`. (2) Identity lifetime: persistent per person; rotation (`did:webvh` pre-rotation for the root, 71-02's verdict for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a device holding keys offline is trusted until its next contact, bounded by the per-level maximum offline age, now set in this phase (O6), and by rekeying. (7) Not post-quantum: every proof names its cryptosuite so a second suite can sit beside it. (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens. (9) On-chain keys come in L4: keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods. Flags 3 and 4 (spend in grants, nesting) moved to Phase 71.1.
 **Undo cost**: High. The DID methods, the credential profile, the status list format and the evidence citation shape are what edge devices hold offline and what shared logs cite; settle them before they ship.
-**Plans:** 2/14 plans executed in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
+**Plans:** 8/14 plans executed in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
 - [x] 71-01-PLAN.md: Wave 1. Tracer and research item (a): one clearance credential through our `eddsa-jcs-2022` profile, cross-verified with Digital Bazaar and the W3C vectors (package check first)
 - [x] 71-02-PLAN.md: Wave 1. Research items (b), (c) and O8: `did:webvh` hosting and caching, status list sizing and lifetimes, the FIPS posture with the fallback ready
-- [ ] 71-03-PLAN.md: Wave 2. The narrow VC 2.0 profile, every credential type, the second suite `ecdsa-jcs-2019`
-- [ ] 71-04-PLAN.md: Wave 2. `did:key` for devices from Phase 69 keys; `did:webvh` log verification from a cached copy
-- [ ] 71-05-PLAN.md: Wave 3. Bitstring Status List: build, sign, verify, staple, cite by hash
-- [ ] 71-06-PLAN.md: Wave 3. Trusted issuers in the signed policy (`credentials@1`, `agreements@1`), the issuer authority chain, agents and devices never issue
-- [ ] 71-07-PLAN.md: Wave 4. The credential checker: evidence cited by hash, `mayRelease`, freshness and offline age, the gate's clearance
-- [ ] 71-08-PLAN.md: Wave 5. The person's wallet, the gate's clearance from credentials in your organization, the command-line verifier
+- [x] 71-03-PLAN.md: Wave 2. The narrow VC 2.0 profile, every credential type, the second suite `ecdsa-jcs-2019`
+- [x] 71-04-PLAN.md: Wave 2. `did:key` for devices from Phase 69 keys; `did:webvh` log verification from a cached copy
+- [x] 71-05-PLAN.md: Wave 3. Bitstring Status List: build, sign, verify, staple, cite by hash
+- [x] 71-06-PLAN.md: Wave 3. Trusted issuers in the signed policy (`credentials@1`, `agreements@1`), the issuer authority chain, agents and devices never issue
+- [x] 71-07-PLAN.md: Wave 4. The credential checker: evidence cited by hash, `mayRelease`, freshness and offline age, the gate's clearance
+- [x] 71-08-PLAN.md: Wave 5. The person's wallet, the gate's clearance from credentials in your organization, the command-line verifier
 - [ ] 71-09-PLAN.md: Wave 5. Your organization's server serves logs and status lists, checks cited evidence on append and serve, and tells the lead when a holder is revoked
 - [ ] 71-10-PLAN.md: Wave 6. Identities in use: a person's `did:webvh` at first sign-in, your organization's root DID and role credentials offline, binding a computer
 - [ ] 71-11-PLAN.md: Wave 6. The trust export carries logs, status lists and the issuer section to edges
@@ -2195,7 +2195,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
 | 70.1. Classification engine | 0/5 | Planned 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
-| 71. Identities and verified credentials (core), pulled forward | 2/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
+| 71. Identities and verified credentials (core), pulled forward | 8/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |

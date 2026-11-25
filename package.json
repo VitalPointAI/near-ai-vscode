@@ -1,7 +1,7 @@
 {
   "name": "near-ai-vscode",
-  "displayName": "NEAR AI for VS Code",
-  "description": "Private AI agents for coding, research, presales, writing, and data work: TEE-backed NEAR AI models, Open-GSD project workflows, and the cost of every answer.",
+  "displayName": "Sterling Sovereign AI",
+  "description": "AI agents for coding, research, presales, writing, and data work with configurable model providers, Open-GSD workflows, and project controls.",
   "version": "0.4.38",
   "publisher": "VitalPoint",
   "icon": "media/near-ai-vscode-icon-128.png",
@@ -64,475 +64,480 @@
       {
         "command": "nearAi.newChat",
         "title": "New Chat",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(add)"
       },
       {
         "command": "nearAi.showHistory",
         "title": "Show Chat History",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(history)"
       },
       {
         "command": "nearAi.sync.turnOn",
         "title": "Turn On Project Sync",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.now",
         "title": "Sync Project Now",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.enterRecoveryCode",
         "title": "Enter Recovery Code",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.newRecoveryCode",
         "title": "Show a New Recovery Code",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.turnOff",
         "title": "Turn Off Project Sync",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.onlineHome",
         "title": "Give This Project an Online Home",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.sync.pushCode",
         "title": "Put This Project's Code Online",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.openTools",
         "title": "Open Tools",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(tools)"
       },
       {
         "command": "nearAi.openCyber",
         "title": "Cybersecurity",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.setup",
         "title": "Set Up",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(gear)"
       },
       {
         "command": "nearAi.selectProfile",
         "title": "Select Profile",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(account)"
       },
       {
         "command": "nearAi.status",
         "title": "Show Status",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.openChat",
         "title": "Open Chat",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.gsdCommand",
         "title": "Run Open-GSD Command…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.gsdProgress",
         "title": "Show Open-GSD Progress",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.saveCheckpoint",
         "title": "Save Continuity Checkpoint",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.setUpStaffTeam",
         "title": "Set Up a Staff Team",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.loadStaffScenario",
         "title": "Load Staff Exercise Scenario",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.removeProfile",
         "title": "Remove Profile…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.useSavedProfile",
         "title": "Use a Saved Profile",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.emergencyStop",
         "title": "Emergency Stop",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(debug-stop)"
       },
       {
         "command": "nearAi.resume",
         "title": "Resume After Emergency Stop",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.manageTeams",
         "title": "Team Studio",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(organization)"
       },
       {
         "command": "nearAi.setupProjectTeam",
         "title": "Set Up Project Team…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.updateTeam",
         "title": "Update Team…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.newProfile",
         "title": "Set Up a New Profile…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.projectSetup",
         "title": "Project Setup…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "sterling.workAreas.create",
         "title": "Create a Defence Work Area",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.manageMemory",
         "title": "Manage Project Memory…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.showRunReport",
         "title": "Show Run Performance Report",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.generateSaaPackage",
         "title": "Generate SA&A Package…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.setupResearchVerifiers",
         "title": "Set Up Research Verifiers",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.trustResearchVerifiers",
         "title": "Trust Research Verifiers",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.openAgentActivity",
         "title": "Open Agent Activity",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(pulse)"
       },
       {
         "command": "nearAi.openStaffRoom",
         "title": "Open Staff Room",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.openTeamLive",
         "title": "Watch the Team Live",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(organization)"
       },
       {
         "command": "nearAi.exportAnalytics",
         "title": "Export Usage and Activity…",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.securityScan",
         "title": "Scan Dependencies for Vulnerabilities",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.addScanWorkflow",
         "title": "Add Dependency Scan Workflow (GitHub Actions)",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.setUpWebSearch",
         "title": "Set Up Web Search",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(search)"
       },
       {
         "command": "nearAi.spendingLimits",
         "title": "Spending Limits",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(credit-card)"
       },
       {
         "command": "nearAi.setUsageReportingToken",
         "title": "Set Usage Reporting Token",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.clearUsageReportingToken",
         "title": "Clear Usage Reporting Token",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.manageMcp",
         "title": "Manage MCP Connections",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(plug)"
       },
       {
         "command": "nearAi.compareModels",
         "title": "Compare Models",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(beaker)"
       },
       {
         "command": "nearAi.clearProjectModelChoices",
         "title": "Clear This Project's Model Choices",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.team.enable",
         "title": "Enable Team Mode",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(organization)"
       },
       {
         "command": "nearAi.team.verifyLog",
         "title": "Verify Team Log",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(verified)"
       },
       {
         "command": "nearAi.policy.open",
         "title": "Policy",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.show",
         "title": "Show Policy",
-        "category": "NEAR AI",
+        "category": "SovAI",
         "icon": "$(shield)"
       },
       {
         "command": "nearAi.policy.showAsStored",
         "title": "Show Policy as Stored",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.policy.reset",
         "title": "Reset Policy to Defaults",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.organization.addRules",
         "title": "Add Your Organization's Rules",
-        "category": "NEAR AI"
+        "category": "SovAI"
+      },
+      {
+        "command": "nearAi.identity.showThisComputer",
+        "title": "Show This Computer's Identity",
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.approveProduct",
         "title": "Staff: Approve a Product",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.rejectProduct",
         "title": "Staff: Reject a Product",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.releaseProduct",
         "title": "Staff: Release a Product",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.withdrawProduct",
         "title": "Staff: Withdraw a Product",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.showProducts",
         "title": "Staff: Show Products",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.setAsideLedger",
         "title": "Staff: Set Aside the Product Ledger",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.useBranchLedger",
         "title": "Staff: Use This Branch's Ledger",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.decidePir",
         "title": "Staff: Decide a PIR",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.createWatch",
         "title": "Staff: Create a Standing Watch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.armWatch",
         "title": "Staff: Arm a Standing Watch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.pauseWatch",
         "title": "Staff: Pause a Standing Watch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.resumeWatch",
         "title": "Staff: Resume a Standing Watch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.acknowledgeWatch",
         "title": "Staff: Acknowledge a Standing Watch's Drafts",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.retireWatch",
         "title": "Staff: Reject or Retire a Standing Watch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.startSimulation",
         "title": "Staff: Start the Exercise Feed Simulation",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.simulationControls",
         "title": "Staff: Simulation Controls (pause, step, speed)",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.stopSimulation",
         "title": "Staff: Stop the Exercise Feed Simulation",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.importFeedFile",
         "title": "Staff: Import Feed File...",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.makeMultiUser",
         "title": "Staff: Make This Staff Project Multi-User",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.inviteToProject",
         "title": "Staff: Invite to Staff Project",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.joinProject",
         "title": "Staff: Join Staff Project",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.admitToProject",
         "title": "Staff: Admit to Staff Project",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.removeFromProject",
         "title": "Staff: Remove from Staff Project",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.addMyOtherMachine",
         "title": "Staff: Add My Other Machine",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.chooseRosterBranch",
         "title": "Staff: Choose Roster Branch",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.nameDeputyLead",
         "title": "Staff: Name Deputy Lead",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.handOverLead",
         "title": "Staff: Hand Over Staff Lead",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.updateMember",
         "title": "Staff: Change a Staff Project Member",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.makeSingleMachineCopy",
         "title": "Staff: Make a Single-Machine Copy",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.staff.startSharedHistoryAgain",
         "title": "Staff: Start This Computer's Shared History Again",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.label.set",
         "title": "Set Label",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.label.lowerChat",
         "title": "Lower This Chat's Label",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.policy.edit",
         "title": "Edit Policy",
-        "category": "NEAR AI"
+        "category": "SovAI"
       },
       {
         "command": "nearAi.policy.applyDraft",
         "title": "Apply Policy Draft",
-        "category": "NEAR AI"
+        "category": "SovAI"
       }
     ],
     "viewsContainers": {
       "secondarySidebar": [
         {
           "id": "nearAiSecondaryViewContainer",
-          "title": "NEAR AI",
-          "icon": "media/near-ai-vscode-icon.svg"
+          "title": "Chat",
+          "icon": "media/chat/chat-icon.svg"
         }
       ]
     },
@@ -550,7 +555,7 @@
       {
         "id": "nearAi",
         "name": "nearai",
-        "fullName": "NEAR AI",
+        "fullName": "SovAI",
         "description": "Chat with private NEAR AI models and run Open-GSD workflows.",
         "isSticky": true,
         "commands": [
@@ -622,7 +627,7 @@
       }
     ],
     "configuration": {
-      "title": "NEAR AI",
+      "title": "SovAI",
       "properties": {
         "nearAi.baseUrl": {
           "type": "string",
@@ -632,7 +637,7 @@
         "nearAi.defaultModel": {
           "type": "string",
           "default": "z-ai/glm-5.3",
-          "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model used for new chats. If NEAR AI doesn't offer it, the first available chat model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.actionPolicy": {
           "type": "string",
@@ -648,13 +653,13 @@
             "File edits and shell commands ask first; reads and searches run automatically.",
             "File edits run automatically; shell commands still ask unless allow-listed.",
             "Auto approve: file edits run, and shell commands run when they pass the safety check. Clear cases are decided by fixed rules (builds, tests, and read-only git run; pushes, deletes, publishing, and credential paths ask); only commands the rules cannot decide go to a private (TEE) model, and anything it cannot clear asks.",
-            "Everything runs without asking except deny-listed commands. Writes into .git/ and NEAR AI's state folders, publishing and destruction still ask, and key and credential folders are refused. Use only in throwaway workspaces."
+            "Everything runs without asking except deny-listed commands. Writes into .git/ and SovAI's state folders, publishing and destruction still ask, and key and credential folders are refused. Use only in throwaway workspaces."
           ]
         },
         "nearAi.autoInstallGsd": {
           "type": "boolean",
           "default": true,
-          "description": "Install Open-GSD into the extension's storage the first time you run a workflow, and keep it on the latest stable release in projects set up with NEAR AI. Your ~/.claude setup is never touched."
+          "description": "Install Open-GSD into the extension's storage the first time you run a workflow, and keep it on the latest stable release in projects set up with SovAI. Your ~/.claude setup is never touched."
         },
         "nearAi.privacyMode": {
           "type": "string",
@@ -747,22 +752,22 @@
         "nearAi.agent.deepModel": {
           "type": "string",
           "default": "moonshotai/kimi-k3",
-          "description": "Model for Open-GSD sub-agents in the deep tier (opus). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model for Open-GSD sub-agents in the deep tier (opus). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.standardModel": {
           "type": "string",
           "default": "z-ai/glm-5.3",
-          "description": "Model for Open-GSD sub-agents in the standard tier (sonnet). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model for Open-GSD sub-agents in the standard tier (sonnet). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.fastModel": {
           "type": "string",
           "default": "Qwen/Qwen3.6-35B-A3B-FP8",
-          "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model for Open-GSD sub-agents in the fast tier (haiku). If your provider does not offer it, the chat's model is used. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.safetyModel": {
           "type": "string",
           "default": "",
-          "description": "Model that checks shell commands the rules cannot decide when nearAi.actionPolicy is auto. Empty uses the fast tier (nearAi.agent.fastModel). It is used only when it runs privately (in NEAR's TEE or on a local runtime); otherwise those commands ask. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model that checks shell commands the rules cannot decide when nearAi.actionPolicy is auto. Empty uses the fast tier (nearAi.agent.fastModel). It is used only when it runs privately (in NEAR's TEE or on a local runtime); otherwise those commands ask. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.maxParallelAgents": {
           "type": "number",
@@ -786,7 +791,7 @@
         "nearAi.gsd.researchProfile": {
           "type": "boolean",
           "default": true,
-          "description": "Research and writing projects use NEAR AI's research profile for Open-GSD: coarse phases, quick mode for content edits, deterministic verifier scripts in scripts/verify/, and the plan-checker only for plans that change a gate or verifier (a content-only plan's check is skipped with a note). Off: every plan is checked."
+          "description": "Research and writing projects use SovAI's research profile for Open-GSD: coarse phases, quick mode for content edits, deterministic verifier scripts in scripts/verify/, and the plan-checker only for plans that change a gate or verifier (a content-only plan's check is skipped with a note). Off: every plan is checked."
         },
         "nearAi.agent.maxTurns": {
           "type": "number",
@@ -812,7 +817,7 @@
           "default": 10,
           "minimum": 0,
           "maximum": 1440,
-          "description": "How often, in minutes, this project syncs in the background while you are not running anything. 0 turns the background sync off. Project sync itself runs only after you turn it on (NEAR AI: Turn On Project Sync)."
+          "description": "How often, in minutes, this project syncs in the background while you are not running anything. 0 turns the background sync off. Project sync itself runs only after you turn it on (SovAI: Turn On Project Sync)."
         },
         "nearAi.sync.keepKeyInProject": {
           "type": "boolean",
@@ -823,17 +828,17 @@
         "nearAi.agent.visionModel": {
           "type": "string",
           "default": "z-ai/glm-5.3-flash",
-          "description": "Reads image attachments when the chat's model can't (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Reads image attachments when the chat's model can't (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.transcriptionModel": {
           "type": "string",
           "default": "openai/whisper-large-v3",
-          "description": "Transcribes audio attachments (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Transcribes audio attachments (private by default). A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.imageModel": {
           "type": "string",
           "default": "black-forest-labs/FLUX.2-klein-4B",
-          "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "description": "Model the agent's GenerateImage tool uses (private by default). The tool is offered only when your provider lists this model. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.agent.imageReview": {
           "type": "string",
@@ -871,11 +876,11 @@
           ],
           "enumDescriptions": [
             "Ask once per project before the first check.",
-            "Check every NEAR AI project when it opens and when its lockfiles change.",
+            "Check every SovAI project when it opens and when its lockfiles change.",
             "Never check automatically; the command still works after you agree."
           ],
           "default": "ask",
-          "description": "Check a NEAR AI project's dependencies and runtimes for known vulnerabilities (OSV.dev, endoflife.date) when it opens. Only package names and versions are sent."
+          "description": "Check a SovAI project's dependencies and runtimes for known vulnerabilities (OSV.dev, endoflife.date) when it opens. Only package names and versions are sent."
         },
         "nearAi.webSearch.provider": {
           "type": "string",
@@ -888,8 +893,8 @@
           "enumDescriptions": [
             "Agents cannot search; they can still fetch pages they know.",
             "A SearXNG instance you run (nearAi.webSearch.searxngUrl).",
-            "Brave Search API (key set with NEAR AI: Set Up Web Search).",
-            "Tavily (key set with NEAR AI: Set Up Web Search)."
+            "Brave Search API (key set with SovAI: Set Up Web Search).",
+            "Tavily (key set with SovAI: Set Up Web Search)."
           ],
           "default": "off",
           "description": "Which search provider the agents' WebSearch tool uses. Queries go to that provider."
@@ -992,7 +997,7 @@
             "*fetch*": "fast",
             "*extract*": "fast"
           },
-          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with NEAR AI: Clear This Project's Model Choices."
+          "markdownDescription": "Model for each agent role: a tier (`deep`, `standard`, `fast`) or a NEAR model ID, by agent name or a `*` pattern. Research and mapping roles read large inputs in parallel, so they default to the cheaper fast tier; bulk fetch and extract roles do too. Planner, plan-checker, verifier, analyst, editor and red-team roles default to the deep tier, because their judgement decides the outcome. A team member's own `model:` line wins, and an agent never uses a model less private than the chat's. A model chosen for this project in Compare Models is used instead of this setting until you clear it there or with SovAI: Clear This Project's Model Choices."
         },
         "nearAi.mcp.localServerEffects": {
           "type": "object",

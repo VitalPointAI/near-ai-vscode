@@ -1,8 +1,10 @@
-import { ContainerModule, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { ContainerModule, inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { CommandRegistry } from '@theia/core/lib/common/command.js';
 import { AbstractViewContribution, bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution.js';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager.js';
 import { BaseWidget } from '@theia/core/lib/browser/widgets/widget.js';
+import URI from '@theia/core/lib/common/uri.js';
+import { FileDownloadService } from '@theia/filesystem/lib/common/download/file-download.js';
 import { refreshRecordMatches } from '../common/sterling-evidence.js';
 import './sterling-compliance.css';
 
@@ -518,6 +520,9 @@ class SterlingComplianceWidget extends BaseWidget {
 
 @injectable()
 class SterlingComplianceContribution extends AbstractViewContribution<SterlingComplianceWidget> {
+  @inject(FileDownloadService)
+  protected readonly downloadService!: FileDownloadService;
+
   constructor() {
     super({ widgetId, widgetName: 'Compliance', defaultWidgetOptions: { area: 'main' } });
   }
@@ -525,6 +530,14 @@ class SterlingComplianceContribution extends AbstractViewContribution<SterlingCo
   override registerCommands(commands: CommandRegistry): void {
     commands.registerCommand(sterlingComplianceCommand, {
       execute: () => this.openView({ activate: true })
+    });
+    // SovAI: Generate SA&A Package… saves its ZIP where the workbench runs; this sends that one file to the person's browser (port of 4b96f4ad).
+    commands.registerCommand({ id: 'sterling.compliance.downloadPackage' }, {
+      execute: async (savedUri: string) => {
+        const uri = new URI(savedUri);
+        if (uri.scheme !== 'file' || uri.authority || !/\.zip$/i.test(uri.path.base)) throw new Error('Choose a saved SA&A ZIP file.');
+        await this.downloadService.download([uri]);
+      }
     });
   }
 }

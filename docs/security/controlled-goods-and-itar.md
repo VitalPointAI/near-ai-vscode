@@ -22,7 +22,7 @@ data to answer. That is why the product's starting rules keep such content on th
 
 - **Three markings.** Content can be marked Controlled goods (Canada), ITAR, or US
   export-controlled (EAR), shown after its level, for example "Organization: Internal · ITAR". In
-  policy files and records they are the compartments `CGP`, `ITAR` and `EAR`. **NEAR AI: Set
+  policy files and records they are the compartments `CGP`, `ITAR` and `EAR`. **SovAI: Set
   Label** marks a file, a folder or the project.
 - **Marked content stays on this computer under the starting rules.** The starting rules route
   all three markings to local-only, so content that carries one goes only to a model on this
@@ -73,7 +73,7 @@ Until enforcement arrives, these settings exist on `main` today. Each is an opti
 organization's officials may choose for their own system:
 
 1. **Mark controlled content.** Mark controlled files and folders with the compartments `CGP`,
-   `ITAR` or `EAR` through **NEAR AI: Set Label**.
+   `ITAR` or `EAR` through **SovAI: Set Label**.
 2. **Keep marked content on this computer.** In your organization's signed policy, keep
    `routing.compartments` for those three markings at `local-only` (the starting rules' value), and
    keep the list of places where AI may run (`endpoints`) empty or limited to servers your officials

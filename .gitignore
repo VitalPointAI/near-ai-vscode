@@ -50,3 +50,5 @@ docs/references/
 
 # Compliance package (compliance/): the generated bundle, dashboard and release package are build outputs, never committed (D-15).
 compliance/out/
+# Generated from src/domain/ by deploy/tools/build-credential-engine.mjs (and by the offline bundle build); never committed.
+deploy/tools/credential-checker.engine.mjs

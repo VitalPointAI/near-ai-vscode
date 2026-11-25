@@ -258,6 +258,7 @@ test('the panel has one CSP with a fresh nonce, base.css and the page script, an
   const spec = { viewType: 'example', folder: 'policy', script: 'policy.js', style: 'policy.css', body: '', probe: 'example' };
   assert.throws(() => h.panels.openPanel(context as never, { ...spec, title: 'NEAR AI: Rules' }), /prefix/);
   assert.throws(() => h.panels.openPanel(context as never, { ...spec, title: 'Near AI: Rules' }), /prefix/);
+  assert.throws(() => h.panels.openPanel(context as never, { ...spec, title: 'SovAI: Rules' }), /prefix/);
   assert.equal(h.created.length, 1, 'a refused title opens no panel');
   // A second panel gets its own nonce.
   const second = harness({ state: ownState() });

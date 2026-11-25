@@ -143,10 +143,24 @@ test('a session token reads only its own signing key under transit/keys/, and si
   assert.ok(!base.some((block) => block.path.startsWith('transit/sign/')), 'the base policy cannot sign');
   assert.deepEqual(sign.map((block) => block.path), ['transit/sign/person-{{identity.entity.id}}']);
   assert.deepEqual(base.map((block) => block.path).sort(), ['auth/token/lookup-self', 'auth/token/renew-self', 'auth/token/revoke-self',
+    'kv/data/site/people/{{identity.entity.id}}',
     'kv/data/users/{{identity.entity.id}}/*', 'kv/metadata/users/{{identity.entity.id}}/*', 'transit/datakey/wrapped/kek-{{identity.entity.id}}',
     'transit/decrypt/kek-{{identity.entity.id}}', 'transit/keys/person-{{identity.entity.id}}'].sort());
   // No glob anywhere under transit/ in a session policy.
   for (const block of [...base, ...sign].filter((item) => item.path.startsWith('transit/'))) assert.doesNotMatch(block.path, /[*+]/, `${block.path} is a glob`);
+});
+
+test('71-10: a session creates and reads only its own people directory entry: no other person\'s, no wildcard, no update, list or delete', () => {
+  const base = pathBlocks(policy('sterling-workbench'));
+  const people = base.filter((block) => block.path.includes('site/people'));
+  assert.deepEqual(people.map((block) => [block.path, capabilitiesOf(block)]), [['kv/data/site/people/{{identity.entity.id}}', ['create', 'read']]]);
+  for (const block of people) assert.doesNotMatch(block.path, /[*+]/, 'no wildcard under site/people');
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/people/${ADA}`), true);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'read', `kv/data/site/people/${ADA}`), true);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/people/${BEN}`), false, 'nobody claims another person\'s DID');
+  assert.equal(allows(SESSION_POLICIES, ADA, 'read', `kv/data/site/people/${BEN}`), false);
+  for (const capability of ['update', 'delete', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, `kv/data/site/people/${ADA}`), false, capability);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'list', 'kv/metadata/site/people/'), false);
 });
 
 test('the read reaches no other key: not another person\'s, not the KEK, not a longer name, and no list, export, rotate, config or change', () => {

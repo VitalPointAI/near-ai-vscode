@@ -3,7 +3,7 @@ import { redactSecrets } from '../domain/redaction';
 import { buildSetupMenu, collectSetupContext, projectHasTeam, registerSetupFacts, SETUP_STEPS, START_CHATTING } from './setupSteps';
 import { webSearchProvider } from './webSearchSetup';
 
-// The setup menu shown after NEAR AI is connected, and by "NEAR AI: Project Setup…" at any time.
+// The setup menu shown after a model provider is connected, and by "SovAI: Project Setup…" at any time.
 // The steps, their order and the facts they read live in setupSteps.ts; this file only asks VS Code.
 
 export const PROJECT_SETUP_COMMAND = 'nearAi.projectSetup';
@@ -12,7 +12,7 @@ export const MORE_SETUP_STEPS = 'More setup steps';
 
 export interface SetupMenuHost {
   secrets: Pick<vscode.SecretStorage, 'get'>;
-  /** Whether the NEAR AI chat is on screen now. */
+  /** Whether the SovAI chat is on screen now. */
   chatVisible?: () => boolean;
 }
 
@@ -22,16 +22,23 @@ export interface SetupMenuHost {
  * screen, so a menu replaced by another prompt (the Command Palette) never pulls focus away.
  */
 export async function showSetupMenu(host: SetupMenuHost, options: { title?: string } = {}): Promise<string | undefined> {
-  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return undefined; }
-  const ctx = await collectSetupContext({ root, setting: (key) => vscode.workspace.getConfiguration('nearAi').get(key) });
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!folder?.fsPath) { void vscode.window.showWarningMessage('Open a project folder first.'); return undefined; }
+  const projectStillSelected = () => {
+    if (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath === folder.fsPath) return true;
+    void vscode.window.showWarningMessage('The selected project changed. Open Project Setup again to continue.');
+    return false;
+  };
+  const configuration = vscode.workspace.getConfiguration('nearAi', folder);
+  const ctx = await collectSetupContext({ root: folder.fsPath, setting: (key) => configuration.get(key) });
   const items = await buildSetupMenu(SETUP_STEPS, ctx);
+  if (!projectStillSelected()) return undefined;
   const picked = await vscode.window.showQuickPick(items.map((item) => ({ label: item.label, detail: item.detail, command: item.command })), {
     title: options.title ?? 'Project Setup',
-    placeHolder: 'Pick a step. You can come back to these with NEAR AI: Project Setup.',
+    placeHolder: 'Pick a step. You can come back to these with SovAI: Project Setup.',
     ignoreFocusOut: true
   });
-  if (!picked && host.chatVisible?.()) return undefined;
+  if ((!picked && host.chatVisible?.()) || !projectStillSelected()) return undefined;
   const command = picked?.command ?? START_CHATTING.command;
   await vscode.commands.executeCommand(command);
   return command;
@@ -47,10 +54,10 @@ export async function showSetupMenu(host: SetupMenuHost, options: { title?: stri
 export async function offerNextStep(_host: SetupMenuHost, profileName: string): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (root && !await projectHasTeam(root)) {
-    void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Your next steps are in the NEAR AI chat.`);
+    void vscode.window.showInformationMessage(`Models are ready for “${profileName}”. Open Chat for your next steps.`);
     return;
   }
-  void vscode.window.showInformationMessage(`NEAR AI is ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
+  void vscode.window.showInformationMessage(`Models are ready for “${profileName}”. Pick a model and start chatting.`, REVIEW_PROJECT_TEAM, MORE_SETUP_STEPS).then(async (choice) => {
     if (choice === REVIEW_PROJECT_TEAM) await vscode.commands.executeCommand('nearAi.manageTeams');
     if (choice === MORE_SETUP_STEPS) await vscode.commands.executeCommand(PROJECT_SETUP_COMMAND);
   }).then(undefined, (error: unknown) => {
@@ -59,7 +66,7 @@ export async function offerNextStep(_host: SetupMenuHost, profileName: string): 
   });
 }
 
-/** Registers NEAR AI: Project Setup, and the web search fact its step reads. */
+/** Registers SovAI: Project Setup, and the web search fact its step reads. */
 export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'subscriptions'>, host: SetupMenuHost): void {
   context.subscriptions.push(
     registerSetupFacts('webSearchReady', async () => Boolean(await webSearchProvider(host.secrets as vscode.SecretStorage))),
@@ -69,7 +76,7 @@ export function registerProjectSetup(context: Pick<vscode.ExtensionContext, 'sub
 
 export const NEW_PROFILE_COMMAND = 'nearAi.newProfile';
 
-/** NEAR AI: Set Up a New Profile… (the chat welcome's button): straight to the key setup, without the welcome page. */
+/** SovAI: Set Up a New Profile… (the chat welcome's button): straight to the key setup, without the welcome page. */
 export function registerNewProfile(context: Pick<vscode.ExtensionContext, 'subscriptions'>, configure: () => Promise<void>): void {
   context.subscriptions.push(vscode.commands.registerCommand(NEW_PROFILE_COMMAND, () => configure()));
 }

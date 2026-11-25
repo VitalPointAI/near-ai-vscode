@@ -103,7 +103,7 @@ function vscodeSyncUi(): SyncUi {
       password: true,
       ignoreFocusOut: true
     })),
-    confirm: async (text) => await vscode.window.showInformationMessage('NEAR AI project sync', { modal: true, detail: text }, 'Continue') === 'Continue',
+    confirm: async (text) => await vscode.window.showInformationMessage('SovAI project sync', { modal: true, detail: text }, 'Continue') === 'Continue',
     pickRemote: (names) => Promise.resolve(vscode.window.showQuickPick(names, { title: 'Which remote should hold this project\'s state?', placeHolder: 'Choose one. You are asked only once.', ignoreFocusOut: true })),
     info: (text) => { void vscode.window.showInformationMessage(text); },
     warn: (text) => { void vscode.window.showWarningMessage(text); }

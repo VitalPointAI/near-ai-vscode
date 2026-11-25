@@ -27,12 +27,12 @@ const ROOT = path.resolve(__dirname, '..', '..');
 const manifest = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as Manifest;
 const EM_DASH = '—';
 
-test('package.json contributes Enable Team Mode and Verify Team Log under the NEAR AI category', () => {
+test('package.json contributes Enable Team Mode and Verify Team Log under the SovAI category', () => {
   const byId = new Map(manifest.contributes.commands.map((entry) => [entry.command, entry]));
   const enable = byId.get('nearAi.team.enable');
   const verify = byId.get('nearAi.team.verifyLog');
-  assert.deepEqual([enable?.title, enable?.category], ['Enable Team Mode', 'NEAR AI']);
-  assert.deepEqual([verify?.title, verify?.category], ['Verify Team Log', 'NEAR AI']);
+  assert.deepEqual([enable?.title, enable?.category], ['Enable Team Mode', 'SovAI']);
+  assert.deepEqual([verify?.title, verify?.category], ['Verify Team Log', 'SovAI']);
   assert.equal(commandsModule.ENABLE_COMMAND, 'nearAi.team.enable');
   assert.equal(commandsModule.VERIFY_LOG_COMMAND, 'nearAi.team.verifyLog');
   assert.equal(barModule.VERIFY_LOG_COMMAND, commandsModule.VERIFY_LOG_COMMAND, 'the status bar item points at the registered command');

@@ -49,7 +49,7 @@ function fakeInstaller(calls: string[][], options: { latest?: string; broken?: b
   };
 }
 
-test('in a workspace never set up with NEAR AI, runtime updates make no npm calls and start no timer', async () => {
+test('in a workspace never set up with SovAI, runtime updates make no npm calls and start no timer', async () => {
   const { GsdRuntime, startRuntimeUpdates } = await import('../gsd/runtime');
   const root = await mkdtemp(path.join(tmpdir(), 'near-ai-foreign-'));
   const calls: string[][] = [];

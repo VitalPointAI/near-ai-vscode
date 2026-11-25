@@ -43,6 +43,10 @@ import { localKeyStatus } from '../team/keyHistory';
 import { registerLabelLoweringJudge, registerLoweringOutcomes } from '../domain/gate/lowerings';
 import { chatLoweringKeys, judgeChatLowering, loweringRejectedText, signChatLowering } from './chatLabel';
 import type { ChatLowering } from './chatLabel';
+import { clearancesInForce } from './clearances';
+import type { ClearanceWalletView, ClearancesInForce } from './clearances';
+import { walletStateAt } from './wallet';
+import type { WalletView } from './wallet';
 
 const DEVICE_UNKNOWN = 'device-unknown';
 const POLICY_SESSION = 'policy';
@@ -83,6 +87,8 @@ export const RUNTIME_START_WAIT_MS = 5000;
 
 export interface GateHostOptions {
   readonly globalStorageDir: string;
+  /** Phase 71: the person's wallet, whose verified view gives the clearances under your organization's credentials@1. */
+  readonly wallet?: { verifiedView(): WalletView };
   readonly secrets: SecretStorageLike;
   readonly productVersion: string;
   /**
@@ -205,7 +211,7 @@ export class GateHost {
   }
 
   /**
-   * NEAR AI: Add Your Organization's Rules (FND-01, D-11 to D-14). Takes an enrolment file or a rules file from your organization; a first enrolment and a
+   * SovAI: Add Your Organization's Rules (FND-01, D-11 to D-14). Takes an enrolment file or a rules file from your organization; a first enrolment and a
    * key handover need `wordsConfirmed` (the twelve words were compared aloud). Every decision reads the composed policy from the next one on. A file that
    * is refused is recorded as policy.organization-refused, and the plain OrganizationStoreError is thrown with nothing changed.
    */
@@ -254,7 +260,7 @@ export class GateHost {
     } catch (error) {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
       usable = false;
-      try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
+      try { this.options.onProblem?.(error instanceof Error ? error.message : 'SovAI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
@@ -304,7 +310,7 @@ export class GateHost {
   /** What labels are judged by now: the valid policy's scales, mappings, clearances and default label, or a failed-closed policy's (no clearances). */
   public labelPolicy(): { readonly valid: boolean; readonly scales: ScaleTable; readonly mappings: readonly ScaleMapping[]; readonly clearances: readonly Clearance[]; readonly defaultLabel: Label } {
     const state = this.bundleState();
-    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: state.bundle.clearances, defaultLabel: state.bundle.defaultLabel };
+    if (state.state === 'valid') return { valid: true, scales: state.bundle.scales, mappings: state.bundle.mappings, clearances: this.clearancesNow().clearances, defaultLabel: state.bundle.defaultLabel };
     return { valid: false, scales: SCALE_PRESETS, mappings: [], clearances: [], defaultLabel: SHIPPED_DEFAULT_LABEL };
   }
 
@@ -503,7 +509,7 @@ export class GateHost {
       outcome: 'denied',
       path: relative,
       ...(labels.length === 0 ? {} : { mark: labels }),
-      reason: 'A raise this file needed could not be written (the label file did not verify) and was kept for Sign Again, but too many were kept, so it was dropped. Sign Again will not write it: set the label with NEAR AI: Set Label if it is still needed.'
+      reason: 'A raise this file needed could not be written (the label file did not verify) and was kept for Sign Again, but too many were kept, so it was dropped. Sign Again will not write it: set the label with SovAI: Set Label if it is still needed.'
     });
   }
 
@@ -626,7 +632,7 @@ export class GateHost {
     };
   }
 
-  /** NEAR AI: Reset Policy to Defaults. Signs a fresh default policy (the old file is kept beside it) and records policy.reset. Throws a plain BundleStoreError when nothing could be changed. */
+  /** SovAI: Reset Policy to Defaults. Signs a fresh default policy (the old file is kept beside it) and records policy.reset. Throws a plain BundleStoreError when nothing could be changed. */
   public async reset(): Promise<BundleResult> {
     await this.start();
     const result = await resetPolicyToDefaults(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
@@ -640,7 +646,7 @@ export class GateHost {
   }
 
   /**
-   * NEAR AI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
+   * SovAI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
    * and the status bar read the new policy from the next decision on, the listeners are told, and policy.edit is recorded with the old and new hashes. A
    * refused draft throws a plain BundleStoreError and changes nothing.
    */
@@ -745,7 +751,22 @@ export class GateHost {
    */
   private routePolicyNow(now: number): RoutePolicyNow | undefined {
     const layers = this.policyLayers();
-    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers));
+    return routePolicyFor(layers, now, this.deviceFingerprint(), policyVersionOf(layers), this.walletAt(now));
+  }
+
+  /**
+   * Phase 71 (D-08, D-19): where the clearances decisions use come from now, with the sentence to show: the verified wallet under your organization's
+   * policy with credentials@1, else the person's own declared clearances. The wallet's view is read from memory, so no decision waits on I/O.
+   */
+  public clearancesNow(): ClearancesInForce {
+    const layers = this.policyLayers();
+    const organization = layers.organization.state === 'valid' ? layers.organization.document : undefined;
+    return clearancesInForce(layers.effective, organization, this.walletAt(this.now()));
+  }
+
+  private walletAt(now: number): ClearanceWalletView | undefined {
+    const view = this.options.wallet?.verifiedView();
+    return view === undefined ? undefined : { state: walletStateAt(view, now), clearances: view.clearances };
   }
 
   /**

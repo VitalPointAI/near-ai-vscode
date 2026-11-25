@@ -211,7 +211,7 @@ test('a waiting approval badges the view, is re-sent to a reloaded view, and cle
     await waitUntil(() => sidebar.posted.some((message) => message.type === 'approval-request'), 'the approval-request is posted');
     const approval = sidebar.posted.find((message) => message.type === 'approval-request');
     assert.ok(approval, 'the write waits for approval');
-    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'SovAI is waiting for you' });
     await sidebar.send({ type: 'chat-ready' });
     const replays = sidebar.posted.filter((message) => message.type === 'approval-request');
     assert.equal(replays.length, 2);

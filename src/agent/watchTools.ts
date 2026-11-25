@@ -2,7 +2,7 @@
 // for a match and reports its drafts ready. Every rule is the watch host's (src/staff/watchHost.ts) and the domain's (src/domain/staff/obs/watchRun.ts);
 // this file reads the inputs and writes the answers.
 //
-// None of these tools arms, pauses, resumes, acknowledges, rejects or retires a watch: those are a named person's steps, through the NEAR AI: Staff
+// None of these tools arms, pauses, resumes, acknowledges, rejects or retires a watch: those are a named person's steps, through the SovAI: Staff
 // watch commands, and arming and retiring are signed. None releases, approves or tasks anything: a draft enters the release state machine as a draft.
 // Every tool is declared for interactive runs only (owner decision Q5: attended runs until Phase 74 run contracts), and the host refuses a draft step
 // when no person attends the project. watch_list's text comes back fenced as untrusted: watch titles and match notes were written by members and feeds.
@@ -88,7 +88,7 @@ export function watchTools(access: WatchToolsAccess): AgentTool<any>[] {
 
   const propose: AgentTool<Record<string, unknown>> = {
     name: name('watch.propose'), capability: 'workspaceWrite', manifest: manifest('watch.propose', READS, WRITES_REGISTER),
-    description: `[observations] ${summary('watch.propose')} A watch binds a PIR's indicator (PIR-n, IND-n) to a condition (a slice: area or NAI, time window, minimum grades, disciplines, feeds) until the PIR's latest time of value, and names the person it alerts. It starts proposed and watches nothing until a named person arms it with NEAR AI: Staff: Arm a Standing Watch. It may only draft (${WATCH_OUTPUTS.join(', ')}); it never releases, approves or tasks collection.`,
+    description: `[observations] ${summary('watch.propose')} A watch binds a PIR's indicator (PIR-n, IND-n) to a condition (a slice: area or NAI, time window, minimum grades, disciplines, feeds) until the PIR's latest time of value, and names the person it alerts. It starts proposed and watches nothing until a named person arms it with SovAI: Staff: Arm a Standing Watch. It may only draft (${WATCH_OUTPUTS.join(', ')}); it never releases, approves or tasks collection.`,
     parameters: {
       type: 'object',
       properties: {

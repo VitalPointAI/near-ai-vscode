@@ -1,5 +1,6 @@
 // Copied from relay/src/main.ts and adapted for the hub (D-28).
 import { createPrivateKey, X509Certificate } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,11 +14,14 @@ import { HealthRegistry } from './health';
 import { createRoutes, type RouteDeps } from './http/routes';
 import { createHubServer, endUploads, listen, TLS_VERSION, type HubTls, type RejectedRoute } from './http/server';
 import { SessionRegistry } from './http/session';
+import { createTrustRoutes } from './http/trustRoutes';
 import { JoinDesk, type JoinChecks, type JoinLog } from './join';
 import { EventHub, realScheduler, type Scheduler } from './live/events';
 import { PresenceHub } from './live/presence';
 import { RateLimits, type RateLimitOptions } from './limits';
 import { openHubStore, StoreError, type HubStore } from './store/hubStore';
+import { TrustStore, type OrganizationSource } from './store/trustStore';
+import { exportTrust, importTrust } from './trustTransfer';
 import { generateKeyFile, KEY_KINDS, KeyFileError, readEncryptionKey, readSigningKey, type HubEncryptionKey, type HubSigningKey } from './keys';
 import { Logger, printKeyFile, stdoutLine } from './log/logger';
 import { Redactor } from './log/redact';
@@ -161,6 +165,8 @@ export interface HubParts {
   joinChecks?: JoinChecks;
   /** The join desk's log lines (project id, invite id and a reason word). */
   onJoinLog?: JoinLog;
+  /** Your organization's signed rules and key (71-09); without them the trust routes answer 503 and the hub judges no evidence. */
+  organization?: OrganizationSource;
 }
 
 export interface ComposedHub {
@@ -174,6 +180,8 @@ export interface ComposedHub {
   checkpoints: Checkpointer | undefined;
   /** Invitations and join requests (32-25); its 7 day removal runs at start and every hour. */
   join: JoinDesk;
+  /** The DID logs, status lists and cited status entries the hub hosts (71-09). */
+  trust: TrustStore;
 }
 
 /** Wires the roster cache, sessions, rate limits and routes onto one TLS server, and gives the health check its store probe. */
@@ -182,11 +190,13 @@ export function composeHub(parts: HubParts): ComposedHub {
   const { store, identity } = parts;
   const cache = new RosterCache(store, identity, { now: () => new Date(now()) });
   const limits = new RateLimits(parts.rateLimits);
+  const trust = new TrustStore(store, parts.organization ?? { text: undefined, key: undefined });
   const sessions = new SessionRegistry({
     hub: identity.writer,
     store,
     cache,
     now,
+    underReview: (project, member) => trust.underReview(project, member, now()),
     ...(parts.deadlineMs === undefined ? {} : { deadlineMs: parts.deadlineMs }),
     ...(parts.readAnswer === undefined ? {} : { readAnswer: parts.readAnswer }),
   });
@@ -203,7 +213,16 @@ export function composeHub(parts: HubParts): ComposedHub {
     ...(parts.onJoinLog === undefined ? {} : { log: parts.onJoinLog }),
   });
   join.start(parts.scheduler ?? realScheduler);
+  // A newer list that sets a bit a member's entries cited ends that member's event streams at once; their next call is refused by the session.
+  const endRefused = (): void => {
+    events.end((owner) => {
+      const member = cache.peek(owner.project)?.view.deviceKey(owner.writer)?.member;
+      return member !== undefined && trust.underReview(owner.project, member, now());
+    });
+  };
   const routes = createRoutes({
+    trust: createTrustRoutes({ trust, cache, sessions, now, onListStored: endRefused }),
+    evidence: trust,
     store,
     cache,
     sessions,
@@ -241,12 +260,63 @@ export function composeHub(parts: HubParts): ComposedHub {
     onSecureConnection: (socket: TLSSocket) => sessions.authDeadline(socket),
     ...(parts.onRejected === undefined ? {} : { onRejected: parts.onRejected }),
   });
-  return { server, sessions, cache, limits, events, presence, checkpoints, join };
+  return { server, sessions, cache, limits, events, presence, checkpoints, join, trust };
 }
 
 /** One sweep of blobs no entry referenced within 24 hours of upload; the hub runs it every hour. Returns how many were removed. */
 export function sweepBlobsOnce(store: HubStore, now: number): Promise<number> {
   return store.sweepBlobs(now);
+}
+
+/** Reads your organization's rules file from the configuration; undefined when unset or unreadable. */
+async function organizationOf(config: HubConfig): Promise<OrganizationSource> {
+  let text: string | undefined;
+  if (config.organizationPolicy !== undefined) {
+    try {
+      text = await readFile(config.organizationPolicy, 'utf8');
+    } catch {
+      text = undefined;
+    }
+  }
+  return { text, key: config.organizationKey };
+}
+
+/** --trust-export or --trust-import against the store; returns the exit code. Every line is a plain sentence; nothing secret is printed. */
+async function transfer(flag: string, file: string, store: HubStore, config: HubConfig): Promise<number> {
+  const organization = await organizationOf(config);
+  const trust = new TrustStore(store, organization);
+  const name = path.basename(file);
+  if (flag === '--trust-export') {
+    const made = exportTrust(trust, organization, Date.now());
+    if (!made.ok) {
+      stdoutLine(made.message);
+      return 1;
+    }
+    try {
+      await writeFile(file, made.text, { flag: 'wx', mode: 0o600 });
+    } catch {
+      stdoutLine(`${name} could not be written, or already exists. Nothing was written: choose another name.`);
+      return 1;
+    }
+    stdoutLine(`Wrote ${name}: ${String(made.logs)} identity logs and ${String(made.lists)} status lists. Carry it to the edge with the user export.`);
+    return 0;
+  }
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    stdoutLine(`${name} could not be read. Nothing was imported.`);
+    return 1;
+  }
+  const imported = importTrust(trust, organization, text, Date.now());
+  if (!imported.ok) {
+    stdoutLine(imported.message);
+    return 1;
+  }
+  for (const line of imported.report.lines) stdoutLine(line);
+  const { logs, lists } = imported.report.taken;
+  stdoutLine(`Imported ${String(logs)} identity logs and ${String(lists)} status lists from ${name}.`);
+  return logs + lists > 0 ? 0 : 1;
 }
 
 /** The days of --hub-file: the default 7 when none is given, a whole number otherwise (issueHubFile checks the range). */
@@ -262,7 +332,9 @@ export async function main(argv: readonly string[]): Promise<void> {
   const redactor = new Redactor();
   // --hub-file prints the hub file alone: its logger passes warnings and errors only, so stdout holds one hub file or one refusal.
   const hubFileMode = argv[0] === '--hub-file';
-  const logger = hubFileMode
+  // --trust-export <file> at HQ and --trust-import <file> at an edge (71-11): one run against this hub's store, then exit; plain lines only.
+  const transferMode = argv[0] === '--trust-export' || argv[0] === '--trust-import';
+  const logger = hubFileMode || transferMode
     ? new Logger(redactor, (line) => {
         if (!line.includes('"level":"info"')) stdoutLine(line);
       })
@@ -297,8 +369,13 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  if (argv.length > 0 && !healthcheck && !hubFileMode) {
-    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck, --hub-file or --generate-key' });
+  if (transferMode && (argv.length !== 2 || (argv[1] as string).startsWith('--'))) {
+    logger.error('hub.start_refused', { reason: 'config', detail: 'usage: --trust-export <file>, or --trust-import <file>' });
+    process.exitCode = 1;
+    return;
+  }
+  if (argv.length > 0 && !healthcheck && !hubFileMode && !transferMode) {
+    logger.error('hub.start_refused', { reason: 'config', detail: 'unknown argument; the hub accepts only --healthcheck, --hub-file, --trust-export, --trust-import or --generate-key' });
     process.exitCode = 1;
     return;
   }
@@ -372,7 +449,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   // --hub-file opens the store without the blob folder sweep: a running hub may share the folder, and this process writes one enrolment row only.
   let store: HubStore;
   try {
-    store = await openHubStore(config.stateDir, { recoverBlobs: !hubFileMode });
+    store = await openHubStore(config.stateDir, { recoverBlobs: !hubFileMode && !transferMode });
   } catch (error) {
     logger.error('hub.start_refused', { reason: 'store', detail: error instanceof StoreError ? error.message : 'the hub store could not be opened' });
     process.exitCode = 1;
@@ -393,12 +470,24 @@ export async function main(argv: readonly string[]): Promise<void> {
     }
     return;
   }
+  if (transferMode) {
+    try {
+      process.exitCode = await transfer(argv[0] as string, argv[1] as string, store, config);
+    } finally {
+      store.close();
+    }
+    return;
+  }
   // Counts only, and only when the open found something: a clean start logs no line for the store.
   if (store.openReport.damaged !== undefined) logger.error('store.damaged', { missingBlobFiles: store.openReport.missingBlobFiles });
   if (store.openReport.orphanBlobsRemoved + store.openReport.temporaryFilesRemoved > 0) {
     logger.warn('store.recovered', { orphanBlobsRemoved: store.openReport.orphanBlobsRemoved, temporaryFilesRemoved: store.openReport.temporaryFilesRemoved });
   }
   const openStore = store;
+
+  // Your organization's rules for the trust routes (71-09). A file that cannot be read leaves the routes answering 503; the projects keep syncing.
+  const organization = await organizationOf(config);
+  if (config.organizationPolicy !== undefined && organization.text === undefined) logger.warn('trust.policy_unreadable', { setting: 'HUB_ORGANIZATION_POLICY' });
 
   const health = new HealthRegistry({ version: __HUB_VERSION__, startedAt: Date.now() });
   let composed: ComposedHub;
@@ -411,6 +500,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       onFailure: (route, error) => logger.error('http.failed', { route, name: error instanceof Error ? error.name : 'NonError' }),
       onCheckpointLog: (level, event, fields) => logger[level](event, fields),
       onJoinLog: (level, event, fields) => logger[level](event, fields),
+      organization,
       onRejected: (route, method, status) => {
         const fields = { route, method, status };
         if (status >= 500) logger.error('http.rejected', fields);

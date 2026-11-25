@@ -813,3 +813,60 @@ test('IN-01: a same-key enrolment update keeps the higher serial, so a handover 
     assert.equal(pinOf(world)?.['serial'], 4);
   });
 });
+
+// Phase 71 (D-12, 48.1 D-25): what sensitive data asks of a person is only ever tightened by your organization's updates.
+function credentialsSectionRequiring(required: Record<string, string[]>): Record<string, unknown> {
+  const scid = 'QmUy89VrfryQ254CeHZzQfmcKqByPoKNGqYykP3SeXuegQ';
+  return {
+    v: 1, root: { did: `did:webvh:${scid}:hq.example.org:org`, scid }, issuance: { ClearanceCredential: { role: 'IssuerRoleCredential' } },
+    suites: ['eddsa-jcs-2022'], didMethods: ['did:webvh'], statusLists: [], statusTtl: 900, maxOfflineAge: {}, requiredBySensitivity: required
+  };
+}
+
+test('D-12: an update that loosens the credentials required by sensitivity is refused with one sentence and the rules in force stay; one that adds is taken', async () => {
+  await withWorld(async (world) => {
+    const strict = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential'] }) });
+    const host = await enrolled(world, { sections: strict });
+    const bytes = await readFile(layerFile(world), 'utf8');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const looser = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential'] }) });
+    await assert.rejects(host.acceptOrganizationFile(rulesTextFor(issuerKey(), looser, { now: FIXED_NOW + DAY_MS }), {}), (error: unknown) => {
+      assert.ok(error instanceof OrganizationStoreError);
+      assert.equal(error.reason, 'credentials-loosened');
+      assert.match(error.message, /^Nothing was changed\. .*security officer/);
+      return true;
+    });
+    assert.equal(await readFile(layerFile(world), 'utf8'), bytes, 'the active layer stays');
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin);
+    const dropped = organizationSections();
+    await assert.rejects(host.acceptOrganizationFile(rulesTextFor(issuerKey(), dropped, { now: FIXED_NOW + DAY_MS }), {}), (error: unknown) => error instanceof OrganizationStoreError && error.reason === 'credentials-loosened');
+    const stricter = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] }) });
+    assert.equal((await host.acceptOrganizationFile(rulesTextFor(issuerKey(), stricter, { now: FIXED_NOW + DAY_MS }), {})).state, 'valid');
+  });
+});
+
+test('D-12: a newer signed layer put on disk that loosens the requirements fails the whole policy closed at the next start; one that adds is taken', async () => {
+  await withWorld(async (world) => {
+    const strict = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential'] }) });
+    await enrolled(world, { sections: strict });
+    assert.deepEqual(pinOf(world)?.['requirements'], { 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential'] }, 'the pin keeps the requirements in force');
+    const pin = world.secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+    world.clock.now = FIXED_NOW + DAY_MS;
+    const looser = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential'] }) });
+    await writeFile(layerFile(world), rulesTextFor(issuerKey(), looser, { now: FIXED_NOW + DAY_MS }));
+    const next = hostOf(world);
+    const failed = failedOf(await next.start());
+    assert.equal(failed.reason, 'replaced');
+    assert.match(failed.sentence, /security officer/);
+    assert.equal(next.policyLayers().failedLayer, 'organization');
+    assert.equal(world.secrets.values.get(ORGANIZATION_ISSUER_SECRET), pin, 'the pin did not move to the looser layer');
+
+    world.clock.now = FIXED_NOW + 2 * DAY_MS;
+    const stricter = organizationSections({ credentials: credentialsSectionRequiring({ 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] }) });
+    await writeFile(layerFile(world), rulesTextFor(issuerKey(), stricter, { now: FIXED_NOW + 2 * DAY_MS }));
+    const later = hostOf(world);
+    assert.equal((await later.start()).state, 'valid');
+    assert.deepEqual(pinOf(world)?.['requirements'], { 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] });
+  });
+});

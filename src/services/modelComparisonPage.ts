@@ -226,7 +226,7 @@ export async function clearOneProjectChoice(root: string | undefined, setting: s
 }
 
 /**
- * NEAR AI: Clear This Project's Model Choices. Lists the settings that come from the project's choice and clears the ones picked; `pick` is the multi-select
+ * SovAI: Clear This Project's Model Choices. Lists the settings that come from the project's choice and clears the ones picked; `pick` is the multi-select
  * (a QuickPick in the editor, a stand-in in tests). Returns the one sentence to tell the person.
  */
 export async function clearProjectModelChoices(options: { root: string | undefined; inspect: (setting: string) => InspectedSetting | undefined; writer: string; pick: (items: Array<{ label: string; description: string; setting: string }>) => Promise<Array<{ setting: string }> | undefined> }): Promise<string> {

@@ -156,6 +156,8 @@ export function run(root, args) {
 if (isMain(import.meta.url)) { const result = run(process.cwd(), process.argv.slice(2)); console.log(result.ok ? 'all research verifiers passed' : 'research verifiers found problems'); if (!result.ok) process.exitCode = 1; }
 `;
 
+// The scaffolded README keeps its first wording (NEAR AI, before the SovAI name of 2026-11-24): it is one of the hashed VERIFIER_FILES, so new words
+// would make every project scaffolded without a manifest report it as edited.
 const README = `# Research verifiers
 
 Deterministic checks for the report, scaffolded by NEAR AI (PERF-06). They read files only, never reach the network, and write nothing, so agents run
@@ -202,7 +204,7 @@ export async function changedVerifiers(root: string): Promise<string[]> {
 }
 
 /**
- * Records the current contents of the given scaffolded verifiers as trusted (review of PR 34). Only the command "NEAR AI: Trust Research Verifiers"
+ * Records the current contents of the given scaffolded verifiers as trusted (review of PR 34). Only the command "SovAI: Trust Research Verifiers"
  * calls it, after the person confirmed the list; an agent cannot, because the manifest sits where agent writes always ask. Returns what was recorded.
  */
 export async function trustVerifiers(root: string, files: string[]): Promise<string[]> {

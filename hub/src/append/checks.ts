@@ -18,6 +18,11 @@
 // would leave that writer's base-stream log at a seq gap for good, and a retry would wait forever on a hub that is never granted the epoch.
 // Entries of other cells are never opened here, so they already follow the rule; a missing blob refuses the batch so the client sends it again.
 //
+// Cited evidence (71-09, evidencePep.ts): a base-stream entry the hub opens whose data carries `evidence` is checked with the fold's checkEvidence
+// and then checkFreshness against the hub's newest lists, at the hub's clock; it is refused 'stale-evidence' when it cites a list replaced longer
+// ago than the grace, and 'evidence-refused' (with the checker's own reason) when the cited credentials do not hold. After COMMIT the hub keeps the
+// status entries of the credentials each member cited, so a later revocation refuses that member's sessions (session.ts).
+//
 // A batch is checked in order against an in-memory overlay (heads, places and a roster folded again after each roster entry), then written by
 // commitBatch in one store transaction. Only after COMMIT does the overlay replace the cached roster, so a failed write accepts nothing (D-26).
 // A roster entry the fold refuses is still stored, because it is the writer's log; the roster head simply does not move.
@@ -30,6 +35,8 @@ import { validateBody } from '@ext/domain/replica/kinds';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER } from '@ext/domain/replica/roster';
 import { canonicalize } from '@ext/domain/team/canonical';
 import { LIMITS } from '../limits';
+import type { CitedStatus, TrustStore } from '../store/trustStore';
+import { carriesEvidence, checkEntryEvidence } from './evidencePep';
 import type { RateLimits } from '../limits';
 import type { BlobRef, EntryRow, EquivocationRecord, GrantInput, HubStore, StoredEntry } from '../store/hubStore';
 import type { Place, ProjectRoster, RosterCache } from './rosterCache';
@@ -56,7 +63,10 @@ export const APPEND_REFUSALS = {
   equivocation: 'The writer already signed a different entry at this place. The hub keeps the first one and has recorded both as proof.',
   'not-a-roster-writer': 'Only a device of the staff lead or the deputy lead may change the roster, and the device that wrote this was not one at the roster it follows.',
   'roster-unreadable': 'This entry of the roster part of the project does not open with the key its part names, or what it holds is not an entry.',
-  'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.'
+  'grant-not-placed': 'This cell grant does not fit the roster, so the hub does not keep it.',
+  'stale-evidence': 'This entry relies on a status list that has since been replaced. Check again with the newest list, then send it again.',
+  'evidence-malformed': 'The credentials and status lists this entry cites are not listed in a shape the hub can read.',
+  'evidence-refused': 'The credentials this entry cites do not hold at the hub.'
 } as const;
 export type AppendRefusal = keyof typeof APPEND_REFUSALS;
 
@@ -78,6 +88,8 @@ export interface AppendContext {
   now: number;
   /** Signature check of one header with the writer's roster key; injectable so a test can count calls. */
   verify?: (header: EntryHeader, publicKey: string) => boolean;
+  /** Your organization's trust host (71-09): with it, entries that cite evidence are checked; without it they are stored as today. */
+  trust?: TrustStore;
 }
 
 export interface Refused {
@@ -85,6 +97,8 @@ export interface Refused {
   hash?: string;
   reason: AppendRefusal;
   message: string;
+  /** For evidence-refused: the checker's own reason id (evidence.ts EVIDENCE_REFUSALS). */
+  evidence?: string;
 }
 
 export interface CheckedEntry {
@@ -114,6 +128,8 @@ export interface CheckedBatch {
   base: ProjectRoster;
   roster: ProjectRoster;
   rosterChanged: boolean;
+  /** The status entries each member's stored entries cited, kept after COMMIT. */
+  cited: Array<{ member: string; cited: CitedStatus[] }>;
 }
 
 export type CheckOutcome = { ok: true; checked: CheckedBatch } | { ok: false; reason: AppendRefusal; message: string; retryAfterSeconds?: number };
@@ -157,6 +173,7 @@ function headerSize(header: unknown): number | undefined {
 interface OpenedBase {
   kind: string;
   roster: string;
+  at: string;
   data: unknown;
 }
 
@@ -179,7 +196,7 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   const checked = validateBody(parsed);
   if (!checked.ok) return { ok: false, why: 'unreadable' };
   const body = checked.body;
-  if (body.blob === undefined) return { ok: true, opened: { kind: body.kind, roster: body.roster, data: body.data } };
+  if (body.blob === undefined) return { ok: true, opened: { kind: body.kind, roster: body.roster, at: body.at, data: body.data } };
   let blob = batchBlobs.get(body.blob) ?? roster.blob(body.blob);
   if (blob === undefined) {
     const bytes = await store.readBlob(project, body.blob);
@@ -189,7 +206,7 @@ async function readBase(roster: ProjectRoster, store: HubStore, project: string,
   const opened = openBlob(key, header.stream, header.epoch, blob);
   if (opened === undefined) return { ok: false, why: 'unreadable' };
   try {
-    return { ok: true, opened: { kind: body.kind, roster: body.roster, data: JSON.parse(opened.toString('utf8')) as unknown }, blob };
+    return { ok: true, opened: { kind: body.kind, roster: body.roster, at: body.at, data: JSON.parse(opened.toString('utf8')) as unknown }, blob };
   } catch {
     return { ok: false, why: 'unreadable' };
   }
@@ -273,6 +290,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
   const refused: Refused[] = [];
   const equivocations: EquivocationRecord[] = [];
   const proofs: EquivocationProof[] = [];
+  const cited: Array<{ member: string; cited: CitedStatus[] }> = [];
 
   for (let index = 0; index < input.entries.length; index += 1) {
     const raw = input.entries[index];
@@ -372,6 +390,22 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
         refuse('roster-unreadable', hash);
         continue;
       }
+      if (read.ok && ctx.trust !== undefined && carriesEvidence(read.opened.data)) {
+        const key = roster.ring(header.stream, header.epoch) as Buffer;
+        const opened: Buffer[] = [];
+        for (const ref of refsIn) {
+          if (ref.entry !== hash) continue;
+          const bytes = await store.readBlob(project, ref.blob);
+          const plain = bytes === undefined ? undefined : openBlob(key, header.stream, header.epoch, { hash: ref.blob, bytes: bytes.toString('base64url') });
+          if (plain !== undefined) opened.push(plain);
+        }
+        const outcome = checkEntryEvidence({ data: read.opened.data, at: read.opened.at, devicePublicKey: device.publicKey, blobs: opened }, ctx.trust, now);
+        if (!outcome.ok) {
+          refused.push({ index, hash, reason: outcome.reason, message: outcome.message ?? APPEND_REFUSALS[outcome.reason], ...(outcome.evidence === undefined ? {} : { evidence: outcome.evidence }) });
+          continue;
+        }
+        if (outcome.checked && outcome.cited.length > 0) cited.push({ member: device.member, cited: outcome.cited });
+      }
       if (!read.ok) {
         // No key for its epoch yet: the writer's log, stored as ciphertext and folded when the grant arrives. With grants offered in this batch the
         // next entry is judged at a fold that may now open it.
@@ -429,7 +463,7 @@ export async function checkBatch(input: AppendInput, ctx: AppendContext): Promis
 
   return {
     ok: true,
-    checked: { project, entries, accepted, held, refused, grants, grantsRefused, equivocations, proofs, blobRefs, base, roster, rosterChanged: roster.head !== base.head }
+    checked: { project, entries, accepted, held, refused, grants, grantsRefused, equivocations, proofs, blobRefs, base, roster, rosterChanged: roster.head !== base.head, cited }
   };
 }
 
@@ -470,7 +504,9 @@ export async function appendBatch(input: AppendInput, ctx: AppendContext): Promi
   const run = before.then(async () => {
     const outcome = await checkBatch(input, ctx);
     if (!outcome.ok) return outcome;
-    return { ok: true as const, result: commitBatch(ctx.store, ctx.cache, outcome.checked, ctx.now) };
+    const result = commitBatch(ctx.store, ctx.cache, outcome.checked, ctx.now);
+    for (const item of outcome.checked.cited) ctx.trust?.recordCited(outcome.checked.project, item.member, item.cited);
+    return { ok: true as const, result };
   });
   const settled = run.catch(() => undefined);
   projectLocks.set(project, settled);

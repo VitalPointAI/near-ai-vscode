@@ -1,4 +1,4 @@
-# NEAR AI for VS Code: security and privacy
+# Sterling Sovereign AI: security and privacy
 
 This report describes what the current code does with your code, keys, and
 requests, and what it does not do yet. It is a repository-level report, not an
@@ -13,28 +13,28 @@ Last reviewed: 2026-11-15, against the code on `main` plus the messaging relay f
 | --- | --- | --- |
 | Chat messages (sidebar and `@nearai`) | The endpoint serving the model you picked: NEAR AI Cloud, or your local runtime | Each message passes the outbound check below first. |
 | What the sidebar agent reads or runs | The same model, as tool results: file contents it reads, search results, and command output | Files under the workspace only. Reading a likely credential file (`.env`, private keys, SSH, AWS, or NEAR credential files) asks first, in every mode except `fully-autonomous`. The project's key folder (`.near-ai/state/keys/`) is refused (see "What the agent can do without asking"). Pick a private or local model to keep this inside a TEE or on your machine. |
-| Open-GSD workflows | The NEAR AI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
+| Open-GSD workflows | The SovAI agent runner, on the model you picked; sub-agents use the model for their tier (`nearAi.agent.deepModel`, `standardModel`, `fastModel`) when your provider offers it | The same outbound check, approvals, revert, and cost tracking as any agent run. No Codex or Claude Code runtime is invoked. |
 | Your API key | VS Code SecretStorage, one key per project and profile | Never written to settings, project files, logs, activity, analytics, exports, or error messages. |
 | Saved conversations | The project's own state folder, `.near-ai/state/`, which the extension keeps out of git; with project sync on, also an encrypted copy on your git host (see Project state and sync) | Full transcripts, including file contents and command output the agent saw, so History can resume them in every editor, **encrypted with AES-256-GCM** under a per-project key. Every conversation is kept (the 5 most recent stay open, older ones are archived, none is deleted; `nearAi.history.liveConversations`). A single tool output over 2 MiB is stored shortened with a visible marker. Turn off with `nearAi.agent.saveTranscripts`. |
-| Project state sync (only after **NEAR AI: Turn On Project Sync**) | A branch named `near-ai/state` of your project's own git remote, never `main`. NEAR AI writes only that branch and, when you choose to put your code online, your own current branch; no other branch is ever created or pushed | Only ciphertext, with opaque file names and a constant commit message and author. Your git host can see that sync is used, roughly how much is stored, and when you save. See Project state and sync. |
+| Project state sync (only after **SovAI: Turn On Project Sync**) | A branch named `near-ai/state` of your project's own git remote, never `main`. SovAI writes only that branch and, when you choose to put your code online, your own current branch; no other branch is ever created or pushed | Only ciphertext, with opaque file names and a constant commit message and author. Your git host can see that sync is used, roughly how much is stored, and when you save. See Project state and sync. |
 | Agent Activity | Memory only, while VS Code runs | Prompts, replies, and tool calls for the live page; time- and size-limited; secrets masked. Never written to disk unless you export it. |
 | Team Live (**Watch the team**) | Memory only, while VS Code runs; read from Agent Activity's live data, or after a reload from the activity records below | The page gets each agent's name, state, model and privacy boundary, the tool it is running (the name only), counts and cost, and its task label: the short description the lead gave it, with secrets and private keys removed, cut to 80 characters. Never a prompt, a tool's input or output, or reply text, except the last 280 characters of the latest reply of the one agent whose card you have open, with secrets removed. A member's card shows its purpose and abilities from the team file, as Team Studio does. |
 | Your environment variables | Not passed to the agent's commands when they look like credentials (by name or value) | So `env` or a careless script cannot send them to the model. Pass specific ones with `nearAi.agent.shellEnvAllow`. Local MCP servers get only a minimal environment plus what you configure; the Open-GSD installer gets the environment without credential-like variables. |
-| Web searches | Only after **NEAR AI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
+| Web searches | Only after **SovAI: Set Up Web Search**: your SearXNG instance, Brave Search, or Tavily | The query text; Brave and Tavily also receive your API key, which links the searches to your account. A SearXNG instance you run keeps queries on your infrastructure. |
 | Web pages the agent fetches | The page's site | A plain GET with the extension's user agent and no cookies, login, or referrer. Asks first under `approve-risky`. |
-| Cybersecurity scans (**NEAR AI: Cybersecurity**) | The model you picked: step results, and response headers, bodies, and TLS certificate details from the target you nominated | Only the target you resolved to a scope is contacted. What comes back is treated as untrusted: fenced as data, invisible characters stripped, injection attempts flagged, and secrets redacted before it is stored or exported. Engagement records and evidence stay in VS Code's extension storage, never in the project. |
+| Cybersecurity scans (**SovAI: Cybersecurity**) | The model you picked: step results, and response headers, bodies, and TLS certificate details from the target you nominated | Only the target you resolved to a scope is contacted. What comes back is treated as untrusted: fenced as data, invisible characters stripped, injection attempts flagged, and secrets redacted before it is stored or exported. Engagement records and evidence stay in VS Code's extension storage, never in the project. |
 | MCP tool calls | Only servers you add and switch on for the project | The call's arguments, shown on the approval card; see MCP connections below. |
 | Dependency checks | OSV.dev (package names and versions) and endoflife.date (runtime versions), after you agree once per project | No code, file contents, or project names. See Checking your project's dependencies. |
 | A team's knowledge graph | One file per team on this computer, `~/.near-ai-teams/knowledge/<team>.json` (or `knowledge/` under `NEAR_AI_TEAMS_DIR`), never in the project and never synced | What the team's agents add with the Learn tool during runs with that team: actors, what they do, how they relate, and facts with their sources and Admiralty grades. Every member reads it with TeamKnowledge, and its contents go to the model as tool results. A team from your library has one graph for every project it works in; a project's own team (`team.md`) has a graph for that project only. Agents' grades are capped at C3, because a run that read a hostile page could be steered into claiming anything. Team Studio shows it. |
-| A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A PIR counts as approved or rejected only when a signed entry in `.planning/staff/ledger/decisions.jsonl` records it: one made by **NEAR AI: Staff: Decide a PIR**, signed with the deciding person's device key, on that exact wording. A decision written into the register by hand or by a member, naming anyone, reads as awaiting a decision. Only members whose tools line grants `mcp:intel-workbench` can call these tools; the run's lead cannot. |
-| A staff team's standing watches (`mcp__observations__watch_*` and the **NEAR AI: Staff** watch commands) | `.planning/staff/products/j2/standing-watches.json` in your project, and the watch decisions in `.planning/staff/ledger/decisions.jsonl` | Each watch's PIR and indicator, the slice it matches, its latest time of value, the person it alerts by name and role, what it may draft, its state, what it found while paused (observation ids), the subjects it matched in the last 30 minutes, its current match and drafts. Arming and retiring are signed decisions of the named person. Watch events (state, matches, pauses and alerts with the person's name and role) go into the staff event log. Nothing leaves this computer. |
+| A staff team's J2 registers (the intel workbench, `mcp:intel-workbench`) | `.planning/staff/products/j2/source-register.json`, `pir-register.json` and `collection-plan.json` in your project, so they go wherever the project's files go | What the J2 members record: source items with their two grades, origin and deception note; PIRs with their decision points, latest times of value, indicators and any person's decision; and collection recommendations. The tools run inside the extension, reach no network, and declare only these files and `.planning/.near-ai/project.json`, so the gate's label checks apply to them. Entries above org/Internal, NATO Unclassified or Protected A are refused: staff templates hold exercise and fictional data only, and labels are not accreditation. A PIR counts as approved or rejected only when a signed entry in `.planning/staff/ledger/decisions.jsonl` records it: one made by **SovAI: Staff: Decide a PIR**, signed with the deciding person's device key, on that exact wording. A decision written into the register by hand or by a member, naming anyone, reads as awaiting a decision. Only members whose tools line grants `mcp:intel-workbench` can call these tools; the run's lead cannot. |
+| A staff team's standing watches (`mcp__observations__watch_*` and the **SovAI: Staff** watch commands) | `.planning/staff/products/j2/standing-watches.json` in your project, and the watch decisions in `.planning/staff/ledger/decisions.jsonl` | Each watch's PIR and indicator, the slice it matches, its latest time of value, the person it alerts by name and role, what it may draft, its state, what it found while paused (observation ids), the subjects it matched in the last 30 minutes, its current match and drafts. Arming and retiring are signed decisions of the named person. Watch events (state, matches, pauses and alerts with the person's name and role) go into the staff event log. Nothing leaves this computer. |
 | A staff team's feed observations (the observation store, read through `mcp:observations`) | `.planning/staff/observations/` in your project, which ignores itself in git, so it is not committed or pushed | Feed reports, one append-only file per feed, channel and hour, each with its label and handling as the feed stamped them; the feed registry and an index of file sizes and hashes; and, for live streams only, the raw messages the reports came from, kept as a documented raw-copy exception (a stream cannot be read again from its source) for a retention period per feed class (72 hours for positions, 30 days for events, 90 days for reports, 7 days for gridded data), with any message over 64 KB kept as its hash and length only. The tools run inside the extension, reach no network, read only this folder and the loaded scenario, and show an agent only reports your clearances cover (none marked no-agent-tools); the chat's label rises to what they show. Labels above org/Internal, NATO Unclassified or Protected A are refused. |
 | A team sent for review (**Improve with AI** in Team Studio, and the description you give when the AI drafts a team) | One model on NEAR AI Cloud or your local runtime, only when you ask, after the outbound check | The team's name, description, and each member's name, role, reports-to line, tools and instructions, plus the local check's findings. Which model may see it follows the team's privacy: a private team (marked `privacy: private`, every member private, or any team, including one being drafted, in a project with a knowledge base, which Team Studio decides from the workspace rather than from what the page sends) goes only to a private model, a NEAR TEE model on NEAR AI Cloud's own endpoint whose attestation NEAR reports as supported or verified (one reported as failed or unverified, or not reported at all, does not count), or a model on this computer; a team with some private members goes to a private model, or, when there is none, without those members' text; any other team goes to a model your settings and TEE-only mode allow. Nothing is sent while the team holds something that looks like a key, token or password. The reply is read as data: the reviewer has no tools, its suggestions never change a model or privacy, and none is applied until you accept it and Save. |
 | A shared team file (**Share…** in Team Studio) | A `.near-team.json` file you save and choose where to send; the extension sends it nowhere | The team file as saved (names, roles, models, tools, instructions), a summary, a format version and a checksum. No file path, setting, key or token. A team holding something that looks like a key or password is refused; one naming a folder on this computer is shared only after you agree. The team's knowledge graph is included only when you choose it, after local paths, non-web sources and secret-looking values are removed. An imported team file is checked, shown and added only with your consent, and stays untrusted until you approve it the first time it would run; its checksum is not a signature. |
 | Team Studio's dashboard | Nothing new is sent anywhere. Your ratings, the last role test of each team, how you last sorted and filtered the dashboard, and a team the AI drafted that you have not yet used or discarded (its name, members, roles, models and instructions, as shown to you) are kept in this extension's own storage on this computer, never synced, and never written into a team file or the project, so a code push never carries them (see below for a line an old development build wrote) | The dashboard reads what is already kept: the project's activity history (each run's title, outcome, times and spend), the live agent activity, and the team files. Ratings and role tests are kept by the team's identity, `user:<name>` for a team in My teams (`archived:<name>` while it is archived) or `project:` and a hash of the project folder's real path, so no path is stored; a new team under an earlier team's name never takes that team's records. A rating is 1 to 5 stars (or cleared), with when it was set; at most 500 are kept. A role test record holds only when it ran, how many members were tested and passed, and the average score; at most 200 are kept. A `rating:` line a development build of this release wrote into a team file (a project team's `team.md` included, so a code push could carry it) is read once into this storage and stays in the file until the team is next saved in Team Studio, which leaves it out; the extension never writes one. The page is given figures and team ids, never a file path. **Share…** and **Import…** leave the rating out, so your opinion is not sent with a team and someone else's is not taken as yours. |
 | A team icon (**Upload icon…** or **Generate with AI…** in Team Studio) | A 128 x 128 PNG beside the team file: `<team>.icon.png` in your teams folder, or `.planning/.near-ai/team.icon.png` beside a project's team (so it goes wherever the project's files go); earlier icons in `.versions/.icons/` in your teams folder, on this computer only | **Upload icon…** sends nothing anywhere: VS Code's file picker chooses the picture, the extension checks it by its bytes (PNG, JPEG or WebP, at most 2 MB; SVG is refused because it can carry scripts) and gives the picture, never its path, to the Team Studio page, which crops it and makes it a PNG; the extension checks that PNG again (its signature, 128 x 128, at most 64 KB, intact, nothing but the picture) before writing it. **Generate with AI…** sends the team's name and its description (what it is for), plus a colour scheme and drawing style picked at random from a fixed list, and nothing else from the team, to one image model, only after it names the model and the cost and you agree, and only when the outbound check (Emergency stop, the daily spend limit, TEE-only mode, the privacy check) allows it. When the picture comes out the same as another team's icon and one more is made, that second call reads the current settings and today's spend again, goes through the same checks, and is refused if it would use another model than the one you agreed to. A private team (marked private, every member private, or any team in a project with a knowledge base, decided from the workspace rather than from the page) uses only a private image model: a NEAR TEE model whose attestation counts, as for Improve with AI, or one on this computer. The page shows icons only as data URIs; it may not load an image from a path or the web. A shared team file carries the icon, and an imported icon is checked the same way and left out if it is not a valid icon. |
 | Activity and cost records | `.planning/.near-ai/` in your project | Operational facts only (models, token counts, costs, outcomes, and which agent started which); no prompts or replies. The code push leaves these records out by default and names them in its summary; only the shared project files (`team.md`, `project.json`, `verifiers.json`) go up with your code. Add the folder to `.gitignore` if you do not want it committed. |
-| Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in NEAR AI projects, checked for updates at startup and daily, which contacts the npm registry (it sees your IP address and the package name). Turn both off with `nearAi.autoInstallGsd`. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
+| Open-GSD installation | `npx @opengsd/gsd-core@<exact version> --claude --global` into the extension's own storage, never `~/.claude` | Installed the first time you run a workflow; in SovAI projects, checked for updates at startup and daily, which contacts the npm registry (it sees your IP address and the package name). Turn both off with `nearAi.autoInstallGsd`. A new version must pass a compatibility check before it replaces the installed one, and the previous version is kept. |
 
 The extension sends **no telemetry** and loads no remote content into its
 pages (each has a content security policy that allows only its own scripts).
@@ -89,7 +89,7 @@ none.
   Cloud's attestation were checked, so a private model on NEAR AI Cloud sent it.
   The connection that carried your request was not proven to end inside the
   private enclave.
-- **Not verified**: NEAR AI could not show that a private model on NEAR AI Cloud
+- **Not verified**: SovAI could not show that a private model on NEAR AI Cloud
   sent this answer. The reasons below say why.
 
 The badge is chosen only from checks that ran, and it never says more than they
@@ -112,7 +112,7 @@ the best its answer shows is the same.
 
 **When it is checked.** Each cloud answer from a TEE model is checked once,
 automatically, in the background, after it arrives. That costs one signature
-request per answer; an attestation report NEAR AI has already verified for the
+request per answer; an attestation report SovAI has already verified for the
 same signing key is reused for up to ten minutes. While the check runs the badge
 shows **Not verified** with "Checking now." A check that has not finished after
 20 seconds shows **Not verified**, saying it could not be checked in time, so a
@@ -282,7 +282,7 @@ prints a token (such as `get-session-token`, `print-access-token` or
 makes the command refused as one: rename that word, or run that step yourself.
 
 A file tool's path outside the project and every folder that tool may use (a
-folder NEAR AI trusts for reading, such as the managed Open-GSD runtime, is for
+folder SovAI trusts for reading, such as the managed Open-GSD runtime, is for
 reading only) is refused at once, in every mode, with the tool's own "outside
 the workspace" message and no card, because the tool would refuse it anyway.
 
@@ -375,7 +375,7 @@ shell.
 
 ### Your policy file and decision records
 
-Before a tool runs, NEAR AI checks the call against a signed policy file. This
+Before a tool runs, SovAI checks the call against a signed policy file. This
 is what that file and the records beside it do in this version.
 
 - **Where it lives.** The policy file is kept in this extension's own storage
@@ -388,7 +388,7 @@ is what that file and the records beside it do in this version.
   device identity in every folder, not only for Team Mode, because it signs the
   first policy file with it.
 - **When it cannot be trusted.** If the file is missing, unsigned, changed or
-  expired, only reading and planning run until you open **NEAR AI: Policy** and
+  expired, only reading and planning run until you open **SovAI: Policy** and
   choose **Reset my rules**, and the project's key folder stays off limits in
   every case.
   A policy written for a newer version (one that names a feature in its
@@ -398,14 +398,14 @@ is what that file and the records beside it do in this version.
   because a reset would discard every rule the policy holds. A setting this
   version does not know is refused the same way, and the sentence names both
   ways on: update the extension if a newer version wrote it, or, only for a
-  policy signed by this computer's own key, **NEAR AI: Policy** offers
+  policy signed by this computer's own key, **SovAI: Policy** offers
   **Reset my rules**, saying it keeps the old file and discards every change
   made to the policy. A policy signed by any other key is never offered Reset.
   The status bar says "Policy: reading only" with one sentence naming the cause
   and the fix. Deleting the file does not reset a policy: a file that has gone
   missing counts as a changed one. A file signed by a key this computer does
   not know is never adopted, even one that carries the default policy, and a
-  valid file that is not the policy NEAR AI last used is refused too. NEAR AI
+  valid file that is not the policy SovAI last used is refused too. SovAI
   signs a policy by itself only on a true first install, when nothing shows an
   earlier one: no remembered policy in this computer's secret storage, no
   policy file, no record naming an earlier policy and no key history without
@@ -413,7 +413,7 @@ is what that file and the records beside it do in this version.
   resets your own rules only: your organization's rules and files stay as they
   are. It asks you to confirm, keeps the old file beside the new one, and
   records the reset.
-- **Reading it.** **NEAR AI: Policy** opens the policy page (see below).
+- **Reading it.** **SovAI: Policy** opens the policy page (see below).
   **Show as stored** on that page opens the policy in plain words and as
   stored. The view is read only, and editing it changes nothing.
 - **Changing it.** **Edit my rules** on the policy page opens an unsigned draft
@@ -432,7 +432,7 @@ is what that file and the records beside it do in this version.
   not valid JSON or do not fit the tool, or a tool's own check that failed) is
   recorded too, naming the tool and never its arguments. A record names what
   was asked for, what was decided and why, never file contents. A command is
-  named by its first line only, and before a record is written NEAR AI removes
+  named by its first line only, and before a record is written SovAI removes
   from every text in it: known token shapes (such as `sk-`, `ghp_`, AWS access
   keys and JSON web tokens), bearer tokens, a value given to a name such as
   `password`, `secret` or `api_key`, the user part of a URL
@@ -460,7 +460,7 @@ is what that file and the records beside it do in this version.
   open are written to that install log too.
 - **Model requests.** Before anything is sent to a model, whether from the
   chat, a helper agent, an attached file being read, the chat view in VS Code,
-  Team Studio, a cybersecurity scan or a model comparison, NEAR AI checks the
+  Team Studio, a cybersecurity scan or a model comparison, SovAI checks the
   request against the routing tiers in the policy file, using only what is on
   this computer. Each chat's label decides where its requests may go (see
   [Classification labels and routing](#classification-labels-and-routing)); a
@@ -482,26 +482,26 @@ is what that file and the records beside it do in this version.
   gets a second record holding `connectionFallback: "unpinned"`. A request whose route cannot be worked out is refused with
   a fixed reason and no label. A record of a model request names never the
   content, the endpoint's address or a file path.
-- **Labels and clearances in this version.** **NEAR AI: Set Label** labels a
+- **Labels and clearances in this version.** **SovAI: Set Label** labels a
   file, a folder or the project. Labels are kept in
   `.planning/.near-ai/labels.json`, signed with your device key, and travel
   with the project, so anyone who can read the project can read its labels,
   compartment names included: do not use a compartment name that is itself
-  secret. A label file NEAR AI cannot verify (changed by hand, merged, or signed
+  secret. A label file SovAI cannot verify (changed by hand, merged, or signed
   on another computer) only ever makes a label stricter, and it is signed
   again only after you confirm. A label file that cannot be read, or that was
   deleted, stops agents reading the project until you put it back (for example
   with git restore) or sign the labels this computer last checked again with
-  **NEAR AI: Set Label**. A signed label file that is older than, or different
+  **SovAI: Set Label**. A signed label file that is older than, or different
   from, the one this computer last checked (for example after switching
   branches) also stops agent reads, with one button, Use this branch's labels,
-  that makes its labels the current ones. NEAR AI remembers the label file it
+  that makes its labels the current ones. SovAI remembers the label file it
   last checked in this computer's secret storage, so deleting files does not
-  make it forget. Reading NEAR AI's own Open-GSD runtime files is judged at the
+  make it forget. Reading SovAI's own Open-GSD runtime files is judged at the
   default label; a link from there into the project keeps the project file's
   label. While a label file holds reads, only reads of the project are held:
   reads of those runtime files go on. You can set only a label your own clearance covers;
-  to add a clearance, open **NEAR AI: Policy** and use **Edit my rules**, then
+  to add a clearance, open **SovAI: Policy** and use **Edit my rules**, then
   **Apply my draft**. An agent cannot read a file whose label your clearances do not
   cover, through the file tools, searches or a command that names it; a read
   a command does not show (a path built in a variable) is not seen. A glob in a
@@ -521,14 +521,14 @@ Labels and routing are an organizational control that helps prevent mistakes. Th
 
 #### Your organization's rules on this computer
 
-Your organization can hand its rules to every computer that uses NEAR AI.
+Your organization can hand its rules to every computer that uses SovAI.
 Its security contact gives you a signed `.near-org-enrolment` file, and
-**NEAR AI: Add Your Organization's Rules** opens it. The file is read as
+**SovAI: Add Your Organization's Rules** opens it. The file is read as
 hostile input: a file larger than 64 KiB is refused before it is read, and
 nothing in it is used until its signature checks out against the key it
 names.
 
-Before that key is trusted, NEAR AI shows twelve words computed from it,
+Before that key is trusted, SovAI shows twelve words computed from it,
 under its own domain (`near-ai/org-issuer/v1`), so they cannot be mistaken
 for words made for anything else. The question reads "Use the rules from
 Example Organization on this computer?" with your organization's name, and
@@ -542,7 +542,7 @@ Closing the question, or any other answer, writes nothing.
 Once you confirm, the key and the date of the last rules you accepted are
 kept in VS Code's secret storage on this computer, not in a file on disk.
 If that record disappears from secret storage while your organization's
-rules are still on this computer, NEAR AI does not fall back to your own
+rules are still on this computer, SovAI does not fall back to your own
 rules: only reading and planning run until you open your organization's
 enrolment file again and compare the twelve words.
 From then on a newer version of your organization's rules is accepted only
@@ -583,7 +583,7 @@ organization's rules, your own rules are the policy, as before.
 rules for your own rules with this computer's key. Your organization's rules,
 and the files that hold them, stay as they are.
 
-**The policy page.** **NEAR AI: Policy** opens one page, titled "Your organization's rules"
+**The policy page.** **SovAI: Policy** opens one page, titled "Your organization's rules"
 when your organization's rules are on this computer and "Your rules" when
 they are not. It shows the rules in force, section by section, read only, and
 says who set them. A change to the rules, such as a draft of your own rules,
@@ -603,8 +603,8 @@ that signs them.
 is and never rewritten on its own; the first change you apply writes
 version 2. A fresh install and a reset still sign version 1 starting rules. A
 policy that lists in its `requires` a feature this version does not have, or
-names a newer version of NEAR AI, is never reset for you; the sentence says to
-update, for example: "Your policy file needs version 0.5.0 or later of NEAR AI. Update the NEAR AI extension to use it. Until then only reading and planning run, and your policy file is left as it is."
+names a newer version of SovAI, is never reset for you; the sentence says to
+update, for example: "Your policy file needs version 0.5.0 or later of SovAI. Update SovAI to use it. Until then only reading and planning run, and your policy file is left as it is."
 
 **Leaving.** There is no command to leave your organization. Removing its
 rules means removing everything this extension keeps on this computer, its
@@ -619,7 +619,7 @@ and shown by the scale's name with the level ("Organization: Internal",
 level is shown as "Sensitive" so it is never mistaken for the Canadian
 classified level of the same name; its id stays `org/Confidential`. Every check
 that ranks levels, the staff checks and a chat's label included, reads your
-policy's own scales. **NEAR AI: Set Label** labels a
+policy's own scales. **SovAI: Set Label** labels a
 file, a folder or the project; the labels are kept in
 `.planning/.near-ai/labels.json`, signed with your device key, and travel with
 the project, so anyone who can read the project can read its labels.
@@ -627,21 +627,21 @@ the project, so anyone who can read the project can read its labels.
 **Scales.** Four scales ship with the policy: `org` (Public, Internal,
 Confidential, Restricted), `ca-protected` (Protected A, B and C),
 `ca-classified` (Confidential, Secret, Top Secret) and `nato` (NATO
-Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how NEAR AI reads them. Your organization's security officer should confirm both before you rely on them.
+Unclassified to Cosmic Top Secret). The NATO levels come from secondary copies, and treating the Canadian Protected and Classified families as two scales is how SovAI reads them. Your organization's security officer should confirm both before you rely on them.
 
 **Clearances.** An agent reads a labelled file only when a clearance in your
-policy covers its label; add one in **NEAR AI: Policy** with **Edit my rules**,
+policy covers its label; add one in **SovAI: Policy** with **Edit my rules**,
 then **Apply my draft**. Until verified credentials arrive, your clearance comes from your own policy file, which your own device key signs, so it is self-declared. It is not an enforced clearance boundary.
 
 **The chat's label.** Each chat has a label that rises with what its agents,
 helpers included, read: reading a Confidential file makes the chat
 Confidential. It is kept with the chat and synced with it, encrypted like the
 rest of the chat. A sync never lowers a chat's label: two copies merge to the
-higher label. Only you lower it, with **NEAR AI: Lower This Chat's Label** and
+higher label. Only you lower it, with **SovAI: Lower This Chat's Label** and
 a reason that is recorded. You reach it from the Command Palette, by clicking
 the chat's label beside the model (or pressing Enter or Space on it), or with
 the button under any refusal that names it. Lowering a file's label with
-**NEAR AI: Set Label** does not lower a chat that read the file: the chat keeps
+**SovAI: Set Label** does not lower a chat that read the file: the chat keeps
 its label, says so, and offers the same button. A lowering reaches your other computers only as a
 declassification signed with your device key that they can check, and only
 when it undoes no raise made there. In this version your other computers
@@ -680,9 +680,9 @@ Content at a level that needs an attested cloud goes to NEAR AI Cloud only when 
 
 NEAR AI Cloud's attestation names the key of the certificate its endpoint
 serves, so from this release content at these levels can reach a private NEAR
-AI Cloud model again, whenever that check passes. NEAR AI makes the check in
+AI Cloud model again, whenever that check passes. SovAI makes the check in
 the background, never while a request waits, and repeats it every few minutes;
-a check older than ten minutes no longer counts. After each such answer, NEAR AI
+a check older than ten minutes no longer counts. After each such answer, SovAI
 also checks the answer's signature and NEAR AI Cloud's attestation (see
 [The trust badge on each answer](#the-trust-badge-on-each-answer)). If that
 check fails, nothing more at these levels is sent to NEAR AI Cloud from that
@@ -719,8 +719,8 @@ version; once your organization can issue accreditation records, it will be.
 **Calls that could send data off this computer.** While a chat's label is
 local-only or deny, a web fetch, a web search, an add-on server call or a
 command that could send data off this computer is refused, whatever the mode,
-and a refused request names **NEAR AI: Lower This Chat's Label** as the way out
-when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), NEAR AI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; a planned sandbox around the shell is the stronger fix. A chat reopened after a reload or a restart cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled: a call that would send text from any of them is refused, and the refusal says why.
+and a refused request names **SovAI: Lower This Chat's Label** as the way out
+when what the chat read allows it. While a chat holds content whose label may not go to any cloud (Internal, Confidential or higher by default), SovAI keeps fingerprints of the labelled text its agents read, never the text itself, only in memory and never in a record, and refuses a web fetch, a web search, an add-on server call or a command that could send data off this computer when what it would send carries some of that text. This catches labelled text copied or quoted into a request. It does not catch a paraphrase, an encoding such as base64, or a program the agent starts that reads the file and sends it itself; a planned sandbox around the shell is the stronger fix. A chat reopened after a reload or a restart cannot tell which of its earlier results came from labelled files, so it treats all of them as labelled: a call that would send text from any of them is refused, and the refusal says why.
 
 **A ceiling per add-on server.** Your policy can also set the highest label
 each MCP server may receive. A call to that server from a chat whose label is
@@ -833,7 +833,7 @@ access with them yet; a later release uses them. Until then the two
 authorization kinds for them and the rule `route.export-control` are shapes
 that are read and recorded only, and never decide a request. Meeting the
 Controlled Goods Program or the ITAR is your organization's obligation, and
-your officials decide. NEAR AI does not make your organization compliant
+your officials decide. SovAI does not make your organization compliant
 with either.
 
 ### Sub-agents nobody is watching
@@ -859,7 +859,7 @@ is usually there to answer one and runs used to wait hours on their own checks
   such a script is the project's own code, which the rules already trust the
   way they trust `npm test`. A script any agent writes or edits during the run
   asks, whatever its text says, because no reading of a script's text can be
-  complete. The one exception is a verifier NEAR AI scaffolded whose text still
+  complete. The one exception is a verifier SovAI scaffolded whose text still
   matches the hash it recorded (below).
 
   On top of that, the script's text is screened for obvious mistakes: a network
@@ -888,11 +888,11 @@ is usually there to answer one and runs used to wait hours on their own checks
   inside the project, a non-relative package, an `import()` or `require()`
   whose argument is not one string literal, a Python relative import or
   `importlib`, an invocation a shell line makes that cannot be followed, and an
-  import cycle. The verifier scripts NEAR AI scaffolds are also compared with
+  import cycle. The verifier scripts SovAI scaffolds are also compared with
   the SHA-256 recorded in `.planning/.near-ai/verifiers.json` when they were
   written (a file agents cannot change without asking); a scaffolded file that
   differs in any way asks. You may edit a scaffolded verifier, but it asks until
-  you run **NEAR AI: Trust Research Verifiers**, which lists the changed files
+  you run **SovAI: Trust Research Verifiers**, which lists the changed files
   and records their new hashes only after you confirm.
 
   "The current run" is one message's run with all its sub-agents. A script an
@@ -1045,7 +1045,7 @@ register outside its own files.
 Teams without a `staff:` block are unaffected.
 
 **Update Team** rewrites a team file (and, for a project, the extension's own
-block in `AGENTS.md`) only from the **NEAR AI: Update Team…** command or the
+block in `AGENTS.md`) only from the **SovAI: Update Team…** command or the
 Team Studio button, after a preview and a confirmation, never while a run is in
 progress, and never from an agent. It copies the file into the team's version
 history first and offers **Undo**.
@@ -1060,11 +1060,11 @@ device's key and chained to the one before it. This is what is detected, and
 what is not:
 
 - **Detected: a line changed, added, removed from the middle or reordered**
-  outside NEAR AI. It breaks the signature or the chain, and the products it
+  outside SovAI. It breaks the signature or the chain, and the products it
   touches read as tampered.
 - **Detected on this computer: the end of the ledger cut off, the file
   deleted, or the file replaced by an older or different copy.** After every
-  entry it writes or reads, NEAR AI keeps a signed record of the ledger head
+  entry it writes or reads, SovAI keeps a signed record of the ledger head
   (how many entries and the last one's hash) in VS Code's secret storage on
   this computer, outside the project, the way it keeps the label map's last
   checked copy. A ledger shorter than that record, or with another entry at
@@ -1076,7 +1076,7 @@ what is not:
   computer whose secret storage was cleared, or a ledger read by a build
   without the record. There only the chain is checked. Switching to a git
   branch whose ledger is older than the one this computer saw reads as
-  tampered too, by design. **NEAR AI: Staff: Use This Branch's Ledger** is
+  tampered too, by design. **SovAI: Staff: Use This Branch's Ledger** is
   the way back for that case only: it is offered when the ledger is shorter
   than, or different from, the recorded head and its own signatures and chain
   verify; a person names themselves and their role, confirms in a dialog that
@@ -1088,7 +1088,7 @@ what is not:
   register that cannot be read whole (over 2 MB, or refused by the disk) is
   reported as unreadable with the reason, nothing is written to it, and no
   write starts on top of it. The ledger's way out, and the way out of any
-  tampered ledger, is **NEAR AI: Staff: Set Aside the Product Ledger**: the old
+  tampered ledger, is **SovAI: Staff: Set Aside the Product Ledger**: the old
   file is kept beside itself under a new name, never deleted, and the record
   of the head starts again.
 
@@ -1097,7 +1097,7 @@ approved or released product whose text changed, also reads as tampered.
 
 **A decision counts only when a signed entry records it.** Products are
 decided only through the product ledger above. A PIR is approved or rejected
-only through **NEAR AI: Staff: Decide a PIR**, which asks the person's name and
+only through **SovAI: Staff: Decide a PIR**, which asks the person's name and
 role, confirms in a dialog, and appends an entry to
 `.planning/staff/ledger/decisions.jsonl`, signed with this device's key and
 chained like the ledger. The register is written only after that entry. A
@@ -1110,7 +1110,7 @@ never the record of any decision.
 **Standing watches run only when a person armed them, and only while a person
 attends.** The J2's standing watches live in
 `.planning/staff/products/j2/standing-watches.json`, a file members could also
-write. A watch is armed, rejected or retired only through the **NEAR AI:
+write. A watch is armed, rejected or retired only through the **SovAI:
 Staff** watch commands, which ask the person's name and role, confirm in a
 dialog and append an entry to `.planning/staff/ledger/decisions.jsonl` signed
 with this device's key, over a hash of the watch as the person saw it (what it
@@ -1141,8 +1141,8 @@ register is a compare-and-swap like the other staff files below, and a
 register with one watch that does not read refuses every change rather than
 dropping it. `watch_list` returns its text fenced as untrusted.
 
-**NEAR AI never overwrites bytes it did not read.** Members write project
-files with Write and Edit, which take no lock, so every write NEAR AI makes to
+**SovAI never overwrites bytes it did not read.** Members write project
+files with Write and Edit, which take no lock, so every write SovAI makes to
 a file a member can also write (product headers, register rewrites, the J2
 registers, gate reports, the generated PIR register product, the staff setup's
 project files and their rollback) is a compare-and-swap: it reads the file,
@@ -1274,7 +1274,7 @@ reaches the network, and neither has an approve, release, issue or send verb.
 
 ### Exercise scenarios for staff teams
 
-**NEAR AI: Load Staff Exercise Scenario** reads the starter scenario shipped
+**SovAI: Load Staff Exercise Scenario** reads the starter scenario shipped
 with the extension, or a scenario file you pick, and writes it into
 `.planning/staff/scenario/`. Before anything is written, the whole file is
 read strictly: it must be at most 512 KB of JSON in the staff scenario format,
@@ -1291,7 +1291,7 @@ a folder on the way is a symbolic link. These checks keep the inputs clean;
 they are not an accreditation, and real operational material belongs on
 accredited systems.
 
-**The exercise feed simulation** (**NEAR AI: Staff: Start the Exercise Feed
+**The exercise feed simulation** (**SovAI: Staff: Start the Exercise Feed
 Simulation**) opens two Cursor on Target streams and one AIS stream over TCP,
 and one HTTP server for the RSS outlets and the mock partner MCP server, all
 bound to 127.0.0.1 and nothing else. It opens no outbound connection and no
@@ -1312,7 +1312,7 @@ person who started the simulation is recorded as the person who approved its
 feeds. The partner feed is never taken in this way. Stopping the simulation
 pauses its feeds in the store.
 
-**Feed file import** (**NEAR AI: Staff: Import Feed File...**) is run by a
+**Feed file import** (**SovAI: Staff: Import Feed File...**) is run by a
 person only: no agent tool runs a VS Code command, and a new import feed must
 be approved by the named person who confirms the import. The chosen file is
 never parsed in the extension host. The extension starts a separate Node
@@ -1449,8 +1449,8 @@ in GDAL, outside the extension. No agent tool reads or writes packs.
 
 Every chat message passes one check before it leaves VS Code, in this order:
 
-1. **Emergency stop.** `NEAR AI: Emergency Stop` blocks all requests and stops
-   anything running until `NEAR AI: Resume`. The state survives reloads.
+1. **Emergency stop.** `SovAI: Emergency Stop` blocks all requests and stops
+   anything running until `SovAI: Resume`. The state survives reloads.
 2. **Daily spend limit.** With `nearAi.dailySpendLimitUsd` set, requests stop
    once today's recorded spend reaches the limit.
 3. **TEE-only mode.** The outbound check no longer decides where a request
@@ -1509,7 +1509,7 @@ encrypted, to a branch of the project's own git remote so another computer can o
   set-up. It is opened only in memory inside the editor, then stored in that editor's secret storage.
   It is never written in plain form to disk, logs, a webview, a model request or a bundle. It
   travels to another computer only inside the encrypted bundle.
-- **No escrow.** NEAR AI, the extension's authors, your git host and anyone with read access to the
+- **No escrow.** SovAI, its authors, NEAR AI, your git host and anyone with read access to the
   repository cannot decrypt the state, and nobody can recover a lost recovery code. A computer
   that is still unlocked can show a new one.
 - **Anonymous commits.** Sync writes its commits with git plumbing into a private mirror, with the
@@ -1559,7 +1559,7 @@ not bring back the harvest-now-decrypt-later weakness the symmetric design avoid
 
 | Leak | Who sees it | Limit |
 | --- | --- | --- |
-| That the project uses NEAR AI sync (the branch name and the manifest's shape) | Anyone who can read the repository | Accepted; they carry no project data |
+| That the project uses SovAI sync (the branch name and the manifest's shape) | Anyone who can read the repository | Accepted; they carry no project data |
 | Total size, to within about 12.5% | Same | Padding; objects over 8 MiB are split |
 | Number of objects | Same | Objects are consolidated so the count follows size, not the number of chats |
 | Push times and number of commits | Same, and your git host in any case | The commit date is constant, but the host sees the push. Pushes are batched and spaced apart, so the timing shows activity rather than single chats |
@@ -1599,19 +1599,19 @@ only in memory. Before your own code is pushed, the extension lists the files an
 secrets (`.env` files, private keys, credential files, and secret-looking contents). It scans the
 earlier commits that would be published as well: a secret committed once and deleted later still
 blocks the push, naming the file and the short commit id and never the value. For a public
-repository, a history that could not be checked completely is not pushed at all. NEAR AI does not
+repository, a history that could not be checked completely is not pushed at all. SovAI does not
 rewrite your history; that stays your decision.
 
-The code push is also available later, as **NEAR AI: Put This Project's Code Online**, and running
+The code push is also available later, as **SovAI: Put This Project's Code Online**, and running
 **Give This Project an Online Home** again offers it; both go through exactly the same checks and
-the same click on the summary. NEAR AI writes only the `near-ai/state` branch and, on your choice,
+the same click on the summary. SovAI writes only the `near-ai/state` branch and, on your choice,
 your own current branch, and never forces a push. The only setting of your repository it ever
 changes is the default branch: GitHub makes the first branch pushed the default, so while
-`near-ai/state` is the only branch it is shown first. After your code is online, NEAR AI makes
+`near-ai/state` is the only branch it is shown first. After your code is online, SovAI makes
 your branch the default branch through the GitHub API with your token, once, and only when the
 default is still `near-ai/state`; a default branch you chose is never changed. For a repository an
 earlier version set up, the same change is made only after you click to confirm it. On a pasted
-address no request is sent to GitHub and the text names the setting for you to change. NEAR AI's
+address no request is sent to GitHub and the text names the setting for you to change. SovAI's
 own account and run records in `.planning/.near-ai/` stay on this computer by default; the control
 in the chat bar shows a sync problem as a plain sentence under it and never includes a token or
 a password.
@@ -1923,7 +1923,7 @@ only by what the staff lead says about them.
 
 - **Declared, not checked.** The name, seat, roles and clearance of each person in a shared
   project are what the staff lead (or the deputy lead) declares when inviting or changing them.
-  NEAR AI does not check who a person is or what clearance they really hold. The six words check
+  SovAI does not check who a person is or what clearance they really hold. The six words check
   only that the device that joined is the one the person used.
 - **Every screen says so.** Every multi-user confirmation and result shows three notices: that a
   clearance is self-declared and not an enforced boundary, that labels and routing help prevent
@@ -2079,7 +2079,7 @@ no single one is relied on:
 Agent Activity counts, per agent, injections flagged, hidden content removed,
 and actions held and blocked, with an entry for each showing the source.
 
-Web search sends queries to the provider you choose with **NEAR AI: Set Up Web
+Web search sends queries to the provider you choose with **SovAI: Set Up Web
 Search**: a SearXNG instance you run (queries stay on your infrastructure),
 Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
 
@@ -2103,7 +2103,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   run with nobody present does not call it. Servers you added before this
   version behave as they did, with one exception: a tool that changes data on a
   local server (one started by a command, with no web address) now asks before
-  every call in every mode, even on a server marked trusted, because NEAR AI
+  every call in every mode, even on a server marked trusted, because SovAI
   cannot tell what it reaches, until you declare what it may do (below).
 - **Declaring what a local server may do.** In your user settings,
   `nearAi.mcp.localServerEffects` names, per server id, what the tools of a
@@ -2111,7 +2111,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   (writes inside the project on those paths) and `{ "network": [hosts] }`
   (reaches those hosts, named exactly). A declaration is your statement that you trust what that server's tools do: the gate does not check each call's arguments against it, so a declared tool runs without asking in Full auto. Only declare servers you trust like your own code. What a declared tool
   does with its arguments (which file it writes, what it reads, where it
-  sends) is the server's own business: NEAR AI sees only what you declared,
+  sends) is the server's own business: SovAI sees only what you declared,
   so a declared server could still write into `.git/` or read a credential
   store. A declaration only narrows which tools it covers: it decides the
   server's tools that themselves say they neither delete nor reach the open
@@ -2126,7 +2126,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
 - **Declaring what a tool does.** The MCP page has a "What it does" menu for
   each tool of a connected server: it only reads, it changes data on the server,
   or you do not know. That decides how the tool is treated from then on.
-  This is what you or the server declared it does. NEAR AI cannot check what a server does inside itself.
+  This is what you or the server declared it does. SovAI cannot check what a server does inside itself.
 - **Local servers** run only after you confirm the exact command, with a
   minimal environment (PATH, HOME, and the like) plus the variables you set,
   never the editor's own environment. Runs on this machine with your permissions:
@@ -2160,7 +2160,7 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
   MCP page before you switch a server on for a project.
 - **A label ceiling per server.** Your policy can name, per server id, the
   highest label the server may ever receive, in `ceiling.mcpLabelCeilings`
-  (through **Edit my rules** in **NEAR AI: Policy**; for example
+  (through **Edit my rules** in **SovAI: Policy**; for example
   `{ "partner": { "scale": "org", "level": "Internal", "compartments": [], "releasability": [] } }`).
   A ceiling has a clearance's shape: a level on one of the policy's scales,
   compartments, releasability and an optional `expiresAt`. Every call to a
@@ -2186,8 +2186,8 @@ Brave Search, or Tavily (keys in SecretStorage). It is off until you choose.
 
 ## Checking your project's dependencies
 
-**NEAR AI: Scan Dependencies for Vulnerabilities** (and, once you agree, every
-time a NEAR AI project opens or a lockfile changes) writes `sbom.cdx.json` for
+**SovAI: Scan Dependencies for Vulnerabilities** (and, once you agree, every
+time a SovAI project opens or a lockfile changes) writes `sbom.cdx.json` for
 the project and checks it:
 
 - **What is sent, and to whom:** the names and versions of dependencies from
@@ -2200,14 +2200,14 @@ the project and checks it:
   `nearAi.security.scanOnOpen` (`ask`, `always`, `never`) controls automatic
   checks.
 - **Results:** Problems entries on the lockfile line of each affected package
-  (linking to the advisory), a status-bar shield, the **NEAR AI Security**
+  (linking to the advisory), a status-bar shield, the **SovAI Security**
   output, and the SBOM's `vulnerabilities` with ratings, CVE aliases, and
   fixed versions. If a service can't be reached, the SBOM says the check was
   incomplete rather than clean.
 - **Agents** run the `SecurityScan` tool after changing dependencies and are
   told to fix high and critical findings or say why they remain, and never to
   claim no known vulnerabilities without a fresh scan.
-- **CI:** **NEAR AI: Add Dependency Scan Workflow** writes a GitHub Actions
+- **CI:** **SovAI: Add Dependency Scan Workflow** writes a GitHub Actions
   workflow running OSV-Scanner (pinned by commit) on pushes, pull requests,
   and weekly.
 
@@ -2231,7 +2231,7 @@ messaging relay (`relay/`, `.dockerignore`).
 
 ## Messaging relay (foundation)
 
-`relay/` holds the start of a separate service that will carry NEAR AI chats from Microsoft Teams
+`relay/` holds the start of a separate service that will carry SovAI chats from Microsoft Teams
 and Signal for your organization. It is not part of the extension and is never in the VSIX.
 
 - It handles no Teams or Signal message yet. Its only network endpoint is `GET /healthz`, which
@@ -2459,8 +2459,8 @@ health check connects only to itself; and no hub source file names a client netw
 | The check that a connection ends inside the enclave relies on NEAR AI Cloud's attestation and Intel's root of trust. Like the answer check, it does not check the platform's TCB status, certificate revocation or which code the enclave runs. | Use cloud.near.ai/verify or NEAR's verifier for a full check |
 | Spend limits use NEAR's published prices for estimates; the actual charge arrives from billing after the run | Each run, with all its sub-agents, stops before a model turn once its estimate reaches `nearAi.agent.maxRunCostUsd` (default $5), what is left of `nearAi.dailySpendLimitUsd`, or `nearAi.agent.maxRunTokens`; an agent repeating the same action is nudged and then stopped |
 | The twelve words protect your organization's key only when its security contact reads them to you over a channel you trust | Compare them in person or on a call you placed to a number you already know; never over the channel the file came through |
-| Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and NEAR AI does not make your organization compliant with the Controlled Goods Program or the ITAR | Your organization's officials decide; a later release uses these decisions to allow access |
-| Your organization's server does not load your organization's rules yet | Its rules reach this computer as a signed file you add with **NEAR AI: Add Your Organization's Rules** |
+| Your organization's rules can carry export-control decisions, but nothing grants access with them yet, and SovAI does not make your organization compliant with the Controlled Goods Program or the ITAR | Your organization's officials decide; a later release uses these decisions to allow access |
+| Your organization's server does not load your organization's rules yet | Its rules reach this computer as a signed file you add with **SovAI: Add Your Organization's Rules** |
 | Model approvals, and the rule for work that may run only on an approved computer, record what they would refuse and do not refuse it | Your organization's rules can turn on `requireAccreditedDevice` to refuse the second; model approvals refuse in a later release |
 | Authorizations are self-signed on this computer until your organization's issuer can sign them | Under your organization's rules only authorizations signed by a key it lists count |
 | There is no command to leave your organization | Ask your organization's security contact |

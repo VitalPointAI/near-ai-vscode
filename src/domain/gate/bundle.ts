@@ -603,12 +603,12 @@ export function parseBundle(value: unknown, path = ''): Parsed<PolicyBundle> {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
 // Failing closed (OFFL-02, D-13)
 
-const RESET_FIX = 'Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
+const RESET_FIX = 'Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.';
 /**
  * The fix for a policy written for a newer version (coherence review S6): update. Never Reset, which would sign a fresh default policy and discard every rule
  * your organization or you set.
  */
-const UPDATE_FIX = 'Update the NEAR AI extension to use it. Until then only reading and planning run, and your policy file is left as it is.';
+const UPDATE_FIX = 'Update SovAI to use it. Until then only reading and planning run, and your policy file is left as it is.';
 
 /**
  * Every reason a bundle is not usable, each with one plain sentence that names the cause and the fix. The first group is the verifier's own closed list
@@ -616,37 +616,37 @@ const UPDATE_FIX = 'Update the NEAR AI extension to use it. Until then only read
  * call site. No sentence uses an em-dash.
  */
 export const BUNDLE_FAILURES = {
-  missing: `NEAR AI has no policy file to read. ${RESET_FIX}`,
+  missing: `SovAI has no policy file to read. ${RESET_FIX}`,
   unparseable: `Your policy file could not be read as a policy. ${RESET_FIX}`,
   malformed: `Your policy file is not a signed policy this version can read. ${RESET_FIX}`,
-  'unsupported-version': `Your policy file was made by a newer version of NEAR AI. ${UPDATE_FIX}`,
+  'unsupported-version': `Your policy file was made by a newer version of SovAI. ${UPDATE_FIX}`,
   'unknown-purpose': `Your policy file is a signed item made for something this version does not know, not a policy. ${RESET_FIX}`,
   'wrong-purpose': `Your policy file is a signed item made for a different use, not a policy. ${RESET_FIX}`,
   'too-large': `Your policy file is larger than the allowed size. ${RESET_FIX}`,
   'key-mismatch': `The key named in your policy file does not match its fingerprint. ${RESET_FIX}`,
-  'bad-signature': `Your policy file was changed outside NEAR AI. ${RESET_FIX}`,
-  replaced: `Your policy file is not the one NEAR AI last used, so it was replaced outside NEAR AI. ${RESET_FIX}`,
+  'bad-signature': `Your policy file was changed outside SovAI. ${RESET_FIX}`,
+  replaced: `Your policy file is not the one SovAI last used, so it was replaced outside SovAI. ${RESET_FIX}`,
   'unknown-key': `Your policy file was signed by a key this computer does not know. ${RESET_FIX}`,
   'key-revoked': `The key that signed your policy file was revoked, so nothing it signed is accepted. ${RESET_FIX}`,
   'key-rotated': `The key that signed your policy file was replaced by a newer one, and the file was signed at or after the replacement. ${RESET_FIX}`,
   expired: `Your policy file has expired. ${RESET_FIX}`,
   'vocabulary-unknown': `Your policy file uses a list of actions this version does not know. ${UPDATE_FIX}`,
-  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of NEAR AI wrote it, update the extension. If you changed your own policy by hand, open NEAR AI: Policy and choose Show as stored to see how to go back.',
-  'needs-update': `Your policy file needs a feature this version of NEAR AI does not have. ${UPDATE_FIX}`,
+  'unknown-field': 'Your policy file has a setting this version does not know, so only reading and planning run. If a newer version of SovAI wrote it, update the extension. If you changed your own policy by hand, open SovAI: Policy and choose Show as stored to see how to go back.',
+  'needs-update': `Your policy file needs a feature this version of SovAI does not have. ${UPDATE_FIX}`,
   'wrong-type': `Your policy file has a setting that is missing or is not the right kind of value. ${RESET_FIX}`,
   'signer-mismatch': `Your policy file names a different signer than the one that signed it. ${RESET_FIX}`,
   'clock-behind': 'This computer\'s clock is earlier than the time your policy file was signed. Set the clock to the right time, then reload the window.',
-  'no-identity': `NEAR AI has no signing key on this computer yet, so there is no policy to check. ${RESET_FIX}`,
-  'identity-unavailable': 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.',
-  'not-loaded': 'NEAR AI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.',
-  unavailable: 'NEAR AI has no policy to check this run against, so only reading and planning are allowed for it. Reload the window to try again.'
+  'no-identity': `SovAI has no signing key on this computer yet, so there is no policy to check. ${RESET_FIX}`,
+  'identity-unavailable': 'SovAI could not save its signing key on this computer, so only reading and planning are allowed until it can.',
+  'not-loaded': 'SovAI had not finished loading your policy when this run started, so only reading and planning are allowed for it. Start the run again in a moment, or reload the window.',
+  unavailable: 'SovAI has no policy to check this run against, so only reading and planning are allowed for it. Reload the window to try again.'
 } as const;
 export type BundleFailureReason = keyof typeof BUNDLE_FAILURES;
 
 /** The update sentence, naming the version a policy's `minClient` asks for when it gives one (Phase 41 D-07); never Reset. */
 export function needsUpdateSentence(minClient?: string): string {
   if (minClient === undefined) return BUNDLE_FAILURES['needs-update'];
-  return `Your policy file needs version ${minClient} or later of NEAR AI. ${UPDATE_FIX}`;
+  return `Your policy file needs version ${minClient} or later of SovAI. ${UPDATE_FIX}`;
 }
 
 /** The reasons whose fix is updating the extension (coherence review S6): no surface offers Reset Policy to Defaults as their fix. */

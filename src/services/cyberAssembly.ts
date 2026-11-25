@@ -221,7 +221,7 @@ export function cyberAssembly(context: {
   // A run without a chosen model used to fall back to a hardcoded id, which fails as "the model did
   // not follow the protocol" rather than naming the real problem. The caller must pick one.
   const model = options.model?.trim();
-  if (!model) throw new Error('No model was chosen for this scan. Pick one in the panel\'s model list before running (the list is empty when no NEAR AI profile is set up).');
+  if (!model) throw new Error('No model was chosen for this scan. Pick one in the panel\'s model list before running (the list is empty when no AI profile is set up).');
   const complete = async (requested: string, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, signal?: AbortSignal): Promise<string> => {
     if (!options.client) return '';
     // Every role call is bounded. Without a deadline a stalled request hung the whole run with no
@@ -239,7 +239,7 @@ export function cyberAssembly(context: {
     stopped: options.stopped ?? (() => false),
     storeDirectory,
     driver: new CyberProtocolDriver({ model, complete }),
-    title: 'NEAR AI: Cybersecurity',
+    title: 'Cybersecurity',
     toolContext: options.toolContext,
     // Derived from the engagement being run. The text version comes from the catalogue rather than
     // the stored acceptance, or a bumped statement version could never force re-acceptance (D-18).
@@ -355,7 +355,7 @@ export function panelCyberRunStarter(
     if (!client) {
       // Without a client the driver's replies are empty, which the protocol reports as a model that
       // cannot follow it. Say the real reason instead: nothing is configured to ask.
-      throw new Error('No NEAR AI model is reachable: set up a profile (NEAR AI: Set Up) and choose a model in this panel before running a scan.');
+      throw new Error('No model is reachable: set up a profile (SovAI: Set Up) and choose a model in this panel before running a scan.');
     }
     // The tier comes from the engagement. A `disabled` engagement used to fall through to the temp
     // tier and run payloads on the host; "auto" is the only value that needs detection.

@@ -3,7 +3,7 @@
 # It serves the last build (docs-site/build) on 127.0.0.1 only; scripts/serve.mjs refuses any other
 # address.
 [Unit]
-Description=NEAR AI for VS Code documentation site (127.0.0.1:@PORT@)
+Description=Sterling Sovereign AI documentation site (127.0.0.1:@PORT@)
 Documentation=file://@SITE_DIR@/README.md
 
 [Service]

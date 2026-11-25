@@ -55,7 +55,7 @@ A PR can merge only when all of these hold:
 | --- | --- |
 | `lint` | CI: `npm run lint` (TypeScript type check), then `node scripts/resource-check.mjs` (every npm package, image, action and vendored library has a reviewed compliance fit entry in `compliance/resources.json`) |
 | `test` | CI: `npm test` (unit tests, including the workflow scripts' tests) |
-| `e2e` | CI: the extension in a real VS Code under xvfb, in a NEAR AI project and in a plain folder |
+| `e2e` | CI: the extension in a real VS Code under xvfb, in a SovAI project and in a plain folder |
 | `release-content` | CI: `npm run verify:release` (package the VSIX, build the SBOM, check its contents); the VSIX is kept as a build artifact for 7 days |
 | `audit` | CI: `npm audit --omit=dev --audit-level=high` |
 | `secret-scan` | CI: `scripts/secret-scan.mjs` over all tracked files and every line the PR's commits add |
@@ -676,7 +676,7 @@ gh api -X POST "repos/$repo/rulesets" --input - <<'JSON'
 JSON
 ```
 
-The `container-release` environment (the `marketplace` environment and its `VSCE_PAT` secret stay in place, unused by this workflow, for a possible future NEAR AI extension on the Marketplace):
+The `container-release` environment (the `marketplace` environment and its `VSCE_PAT` secret stay in place, unused by this workflow, for a possible future Marketplace listing):
 
 ```bash
 repo=VitalPointAI/near-ai-vscode

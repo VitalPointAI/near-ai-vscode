@@ -183,6 +183,7 @@ class Memento {
 const warnings: string[] = [];
 const windowListeners: Array<(state: { focused: boolean }) => void> = [];
 let confirmClose: string | undefined;
+let collapseChatDrawer: (() => boolean) | undefined;
 /**
  * PERF-05: whether nearAi.agent.autoResumeAfterReload is on in these tests. Off by default here, so the tests of the Resume and Dismiss buttons keep
  * testing what a person does with the setting off; the auto-resume test turns it on.
@@ -191,7 +192,7 @@ const autoResume = { on: false };
 const vscodeStub = {
   workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }>, name: 'demo', getConfiguration: () => ({ get: (key: string, fallback?: unknown) => (key === 'agent.autoResumeAfterReload' ? autoResume.on : fallback), inspect: () => undefined }), onDidChangeConfiguration: () => ({ dispose() {} }) },
   window: { showInformationMessage: () => undefined, showWarningMessage: async (text: string) => { warnings.push(text); return /Stop it and close/.test(text) ? confirmClose : undefined; }, activeTextEditor: undefined, state: { focused: true }, onDidChangeWindowState: (listener: (state: { focused: boolean }) => void) => { windowListeners.push(listener); return { dispose() {} }; } },
-  commands: { executeCommand: async () => undefined },
+  commands: { executeCommand: async (id: string) => id === 'sterling.chat.closeDrawer' ? collapseChatDrawer?.() : undefined },
   Uri: { joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: path.join(base.fsPath, ...parts) }), file: (fsPath: string) => ({ fsPath }) }
 };
 
@@ -363,14 +364,14 @@ test('sidebar: a background conversation\'s approval keeps it waiting, counts in
     const a = sidebar.summary()!.activeId;
     const runA = sidebar.send({ type: 'send', text: 'edit in A', model: MODEL, conversationId: a });
     await until(() => sidebar.item(a)?.status === 'waiting');
-    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'SovAI is waiting for you' });
 
     await sidebar.send({ type: 'new-chat' });
     const b = sidebar.summary()!.activeId;
     const runB = sidebar.send({ type: 'send', text: 'edit in B', model: MODEL, conversationId: b });
     await until(() => sidebar.item(b)?.status === 'waiting');
     assert.equal(sidebar.summary()!.waiting, 2);
-    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'NEAR AI is waiting for you in 2 conversations' });
+    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'SovAI is waiting for you in 2 conversations' });
     assert.equal(sidebar.item(a)?.status, 'waiting', 'still waiting in the background');
 
     // Both runs asked under the same call id; the reply goes to the conversation it names.
@@ -378,7 +379,7 @@ test('sidebar: a background conversation\'s approval keeps it waiting, counts in
     await runB;
     assert.equal(sidebar.item(b)?.status, 'done');
     assert.equal(sidebar.item(a)?.status, 'waiting', 'A\'s prompt was not answered by B\'s reply');
-    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'NEAR AI is waiting for you' });
+    assert.deepEqual(sidebar.view.badge, { value: 1, tooltip: 'SovAI is waiting for you' });
 
     // Switching pins A's prompt again; answering it there lets A finish.
     const before = sidebar.posted.length;
@@ -478,6 +479,26 @@ test('sidebar: Stop stops only the conversation on screen; the emergency stop st
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(near.requests.length, 3, 'nothing more was sent');
   });
+});
+
+test('sidebar: the last tab can dismiss the native drawer and preserve the conversation', async () => {
+  const { root, auth, shared } = await projectWithProfile();
+  let dismissals = 0;
+  collapseChatDrawer = () => { dismissals += 1; return true; };
+  try {
+    const sidebar = await openSidebar(root, auth, shared);
+    const id = sidebar.summary()!.activeId;
+    await sidebar.send({ type: 'close-conversation', id });
+    assert.equal(dismissals, 1);
+    await sidebar.send({ type: 'chat-ready' });
+    assert.equal(sidebar.summary()!.activeId, id, 'reopening the drawer keeps the same conversation');
+
+    collapseChatDrawer = undefined;
+    await sidebar.send({ type: 'close-conversation', id });
+    assert.notEqual(sidebar.summary()!.activeId, id, 'a host without a drawer command still closes the tab');
+  } finally {
+    collapseChatDrawer = undefined;
+  }
 });
 
 test('sidebar: closing a running conversation asks, stops it, and keeps its transcript in history', async () => {
@@ -830,7 +851,7 @@ test('sidebar: a waiting approval is announced when the window is not focused, a
     assert.match(warnings.at(-1)!, /"edit while here" is waiting for your approval/);
     for (const listener of windowListeners) listener({ focused: true });
     assert.equal(announced(), start + 2, 'once per prompt');
-    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'NEAR AI is waiting for you in 2 conversations' }, 'the badge stays');
+    assert.deepEqual(sidebar.view.badge, { value: 2, tooltip: 'SovAI is waiting for you in 2 conversations' }, 'the badge stays');
 
     await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: a });
     await sidebar.send({ type: 'approval-reply', callId: 'call_edit', decision: 'deny', conversationId: b });

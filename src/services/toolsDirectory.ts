@@ -13,7 +13,7 @@ import type { ModelInfo, NearAiClient } from './nearAiClient';
 import { POLICY_OPTIONS } from './approvalPolicy';
 import { ReportingTokenHint, SET_REPORTING_TOKEN_COMMAND } from './reportingToken';
 
-// The NEAR AI Tools page: a read-mostly directory of what the agents can use. Everything here is
+// The SovAI Tools page: a read-mostly directory of what the agents can use. Everything here is
 // computed from the same sources a run uses (the installed Open-GSD library, team files, the
 // built-in tool objects, the permission logic, the MCP registry, and the model catalog), so the
 // page cannot drift from what actually happens. No VS Code imports, so the tests run it directly.
@@ -287,8 +287,8 @@ export function parseToolsPageMessage(value: unknown): ToolsPageMessage | undefi
 export function toolsPageHtml(options: { cspSource: string; nonce: string; script: string; style: string; base: string; probe?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>NEAR AI Tools</title></head><body>
-<header><h1>NEAR AI Tools</h1><p class="hint">What the agents can use in this project: workflows, agents and teams, tools, MCP servers, and models. To run something, choose <strong>Use in chat</strong> and finish the message in the NEAR AI chat.</p>
+<link rel="stylesheet" href="${options.base}"><link rel="stylesheet" href="${options.style}"><title>SovAI Tools</title></head><body>
+<header><h1>SovAI Tools</h1><p class="hint">What the agents can use in this project: workflows, agents and teams, tools, MCP servers, and models. To run something, choose <strong>Use in chat</strong> and finish the message in the SovAI chat.</p>
 <p id="policy" class="policy" aria-live="polite"></p>
 <div class="search"><label for="filter" class="visually-hidden">Search the directory</label><input id="filter" type="search" placeholder="Search workflows, agents, tools, servers, models" aria-label="Search workflows, agents, tools, MCP servers, and models" aria-controls="directory"><button id="refresh" type="button" class="secondary">Refresh</button></div>
 <nav aria-label="Sections"><ul class="toc"><li><a href="#skills-title">Skills &amp; workflows</a></li><li><a href="#agents-title">Agents &amp; teams</a></li><li><a href="#tools-title">Tools</a></li><li><a href="#mcp-title">MCP servers</a></li><li><a href="#models-title">Models</a></li></ul></nav></header>

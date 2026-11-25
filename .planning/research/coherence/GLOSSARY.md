@@ -50,6 +50,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | A workspace folder | **Project** | workspace (except in VS Code's own sense) | no |
 | Projects rolled up | **Portfolio**, opened in the **Portfolio Room** | Project Room as a separate page (it is a tab) | no |
 | A unit reporting upward | **Unit** | publication envelope, intake key | names follow the mode |
+| A staff team's shared room (planning cycle, products, who is working) | **Staff Room** (owner, 2026-11-24; the Planning page's button is "Open Staff Room") | Staff Center, war room | no |
 | Always-on organization machine | **Your organization's server** (status page lists what it does: sync, data, messaging) | hub, host, relay, appliance, L1a | no |
 | An AI service | **AI service**: NEAR AI Cloud, this computer, your organization's server, Cohere vault | provider, endpoint | no |
 | Saved key and address for an AI service | **Connection** | profile | no |
@@ -87,5 +88,6 @@ One test, `src/test/copyLint.test.ts` (new, in the F1 foundation phase), reads e
 4. An em-dash appears in user copy.
 5. The provider's name is put in front of "organization" (the user word is always "your organization"; NEAR AI is only the provider).
 6. A compliance claim about the product appears: "compliant", "accredited", "certified", and the export-control phrases "ITAR compliant", "CGP compliant", "export compliant" (`.planning/research/compliance-dashboard/CGP-ITAR.md`, section 10.3).
+7. The product is called by an old name (owner, 2026-11-24: the product is **Sterling Sovereign AI**, short name **SovAI**, and NEAR AI is only the provider): "NEAR AI for VS Code", "the NEAR AI extension", or a "NEAR AI:" command prefix anywhere in a sentence. Commands are "SovAI: ..." in the Command Palette. The same names are refused in README.md, SECURITY.md, CONTRIBUTING.md, `docs/` and `docs-site/content/` (`CHANGELOG.md` is history and is not read). Internal ids (`nearAi.*` settings and commands, `near-ai-vscode`, `.near-ai` folders) do not change.
 
 It starts with a checked-in baseline of today's hits, so it passes on day one and fails on any new hit; each copy fix deletes baseline lines (the same ratchet as the architecture test in `DEVELOPER-STRUCTURE.md`).

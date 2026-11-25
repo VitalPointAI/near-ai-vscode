@@ -315,7 +315,7 @@ test('a hand-edited header that claims approved reads as draft (tampered), and t
   assert.equal(await stateOf(world, 'concept-of-operations'), 'draft');
 });
 
-test('a ledger line added, changed or removed outside NEAR AI breaks the chain: the products it touches read as tampered', async () => {
+test('a ledger line added, changed or removed outside SovAI breaks the chain: the products it touches read as tampered', async () => {
   // A forged approval signed by a key this computer does not trust.
   const forged = await staffWorld();
   const hash = await awaiting(forged);

@@ -197,14 +197,14 @@ test('Set Label refuses a label the person\'s own clearance does not cover and n
   const s = await started();
   assert.equal(await setLabelVia(s.root, 'secret/plan.md', { scale: 'ca-protected', level: 'Protected B' }), false);
   const warned = stub.notifications.find((entry) => entry.level === 'warn');
-  assert.match(warned?.message ?? '', /open NEAR AI: Policy and choose Edit my rules/);
+  assert.match(warned?.message ?? '', /open SovAI: Policy and choose Edit my rules/);
   assert.equal(existsSync(path.join(s.root, LABEL_MAP_FILE)), false);
 });
 
-test('the Set Label command is contributed with an Explorer menu entry, in the NEAR AI category', () => {
+test('the Set Label command is contributed with an Explorer menu entry, in the SovAI category', () => {
   const manifest = JSON.parse(readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }>; menus: Record<string, Array<{ command: string }>> } };
   const command = manifest.contributes.commands.find((entry) => entry.command === 'nearAi.label.set');
-  assert.deepEqual(command, { command: 'nearAi.label.set', title: 'Set Label', category: 'NEAR AI' });
+  assert.deepEqual(command, { command: 'nearAi.label.set', title: 'Set Label', category: 'SovAI' });
   assert.ok(manifest.contributes.menus['explorer/context']?.some((entry) => entry.command === 'nearAi.label.set'));
 });
 

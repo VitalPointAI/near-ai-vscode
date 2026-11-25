@@ -52,7 +52,7 @@ export function registerStaffCommands(context: StaffCommandContext): void {
   context.subscriptions.push({ dispose: () => { configureStaffHosts(undefined); configureObservationStores(undefined); } });
   const register = (id: string, run: (args?: StaffCommandArgs) => Promise<void>): void => {
     context.subscriptions.push(vscode.commands.registerCommand(id, async (args?: unknown) => {
-      try { await run(isArgs(args) ? args : undefined); } catch (error) { void vscode.window.showErrorMessage(`NEAR AI could not finish that: ${error instanceof Error ? error.message : String(error)}`); }
+      try { await run(isArgs(args) ? args : undefined); } catch (error) { void vscode.window.showErrorMessage(`SovAI could not finish that: ${error instanceof Error ? error.message : String(error)}`); }
     }));
   };
   register(STAFF_COMMANDS.approve, (args) => decideCommand(context, identity, 'approve', args));
@@ -123,7 +123,7 @@ async function decideCommand(context: StaffCommandContext, identity: () => Promi
   const choices = snapshot.registry.filter((view) => eligible(action, view));
   let view = args?.product ? choices.find((candidate) => candidate.product === args.product) : undefined;
   if (args?.product && !view) {
-    void vscode.window.showWarningMessage(`${args.product} cannot be ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'release' ? 'released' : 'withdrawn'} now. Check its state with NEAR AI: Staff: Show Products.`);
+    void vscode.window.showWarningMessage(`${args.product} cannot be ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : action === 'release' ? 'released' : 'withdrawn'} now. Check its state with SovAI: Staff: Show Products.`);
     return;
   }
   if (!view) {
@@ -200,7 +200,7 @@ async function useBranchLedgerCommand(context: StaffCommandContext, identity: ()
 export function branchLedgerDetail(check: { readonly reason: 'truncated' | 'replaced'; readonly recorded: number; readonly entries: number; readonly products: number }): string {
   return [
     `This computer last recorded a staff ledger of ${check.recorded} entries. The ledger on this branch has ${check.entries} entries for ${check.products} products${check.reason === 'truncated' ? ', fewer than that' : ', with a different history'}, and its own signatures and chain verify.`,
-    'Using it makes this ledger the one NEAR AI checks this project against: products read as this ledger records them, and steps and decisions that only the other copy holds (for example on the branch you came from) are not in it.',
+    'Using it makes this ledger the one SovAI checks this project against: products read as this ledger records them, and steps and decisions that only the other copy holds (for example on the branch you came from) are not in it.',
     'Who did this is recorded in .planning/staff/ledger/decisions.jsonl, signed with this device\'s key. Switching back to the other branch needs the same step there.'
   ].join('\n\n');
 }

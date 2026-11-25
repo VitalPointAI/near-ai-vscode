@@ -8,11 +8,11 @@ stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 4
 last_updated: "2026-11-24T23:17:20.221Z"
 state_head: ba51cb06ad298cb8b868f13b51c77daf828ab364
 progress:
-  total_phases: 10
+  total_phases: 12
   completed_phases: 1
-  total_plans: 69
+  total_plans: 109
   completed_plans: 67
-  percent: 10
+  percent: 8
 last_activity: 2026-11-19
 current_phase: 70
 current_phase_name: Capability vocabulary, manifests and one gate with a floor
@@ -217,6 +217,15 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 | Phase 47 P15 | ~3h | 3 tasks | 21 files |
 | Phase 71 P01 | 46min | 3 tasks | 10 files |
 | Phase 71 P02 | 46min | 3 tasks | 7 files |
+| Phase 71 P03 | ~70min | 3 tasks | 9 files |
+| Phase 71 P04 | ~70min | 2 tasks | 5 files |
+| Phase 71 P05 | ~25min | 2 tasks | 2 files |
+| Phase 71 P06 | ~60min | 3 tasks | 12 files |
+| Phase 71 P07 | ~60min | 3 tasks | 9 files |
+| Phase 71 P08 | ~75min | 3 tasks | 14 files |
+| Phase 71 P09 | ~3h (lock waits) | 2 of 3 tasks | 20 files |
+| Phase 71 P10 | ~40min | 1 of 3 tasks | 2 files |
+| Phase 71 P11 | ~1h | 3 tasks | 8 files |
 
 ## Decisions
 
@@ -310,6 +319,12 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-15: forged X-Forwarded-Uri bypass closed: trusted_proxy_ips per site (fails closed), HAProxy overwrites forwarded headers, session NetworkPolicy (HAProxy and operator only)
 - [Phase 71]: 71-01: owner approved the three Digital Bazaar packages as exact-pinned test-only devDependencies (pass-with-conditions: no provenance, two-year-old cryptosuite, static loader); JCS verdict PASS
 - [Phase 71]: 71-02: did:webvh FULL, status lists FULL, O8 posture accepted with the ecdsa-jcs-2019 P-256 fallback (gap G350); owner items 1 and 2 answered defaults (solo installs declared, not verified; devices never issue; fallback issuers are policy-named officers)
+- [Phase 71]: 71-03: one credential format (two fixed contexts, one of 17 types with exact claims, required dates and status entries, the proof by the issuer's own method); scales come from the caller; ecdsa-jcs-2019 on P-256 (IEEE P1363 only) is the ready second suite
+- [Phase 71]: 71-04: did:key from Phase 69 keys unchanged; did:webvh v1.0 verified on our own code from any copy (82/82 DIF logs, every negative vector refused); WebvhState resumes from verified bytes; methodsAt answers the key in force at a time
+- [Phase 71]: 71-05: status lists of 131,072 random never-reused indexes, signed by the site's status-list key and checked only against the key the policy names; a signed version orders copies; revocation never clears
+- [Phase 71]: 71-06: credentials@1 and agreements@1 appended to the policy features; the root issues roles only, people with a root role issue within the ceiling, devices and agents never (2,000-case property test); requirements by sensitivity only tighten (store, layers, wideningOf)
+- [Phase 71]: 71-07: checkEvidence decides from cited credentials and lists only (1,000-replica property test); mayRelease on whyNotDominated for every holder; checkFreshness at the enforcement points; facts only from factsFrom
+- [Phase 71]: 71-08: wallet under near-ai.credentials checked with the fold's checker; the gate's clearances come only from the fresh wallet under credentials@1 (clearancesInForce); credential-check.mjs ships with its generated engine in the offline bundle
 - [Phase 47]: 47-22: chrony NTS trust reads /etc/chrony-site-ca.crt (0644), written by install-node.sh before the clock check; the node clock check runs before any RKE2 change
 - [Phase 47]: 47-25: longhorn-crypto escrow currency is the in-cluster CronJob sterling-escrow-currency; RKE2 token and encryption-config currency is escrow-node.sh check after each rotate-keys and monthly
 - [Phase 47]: 47-16: longhorn-crypto is a bootstrap secret made in memory before the first encrypted volume (OpenBao's own volume needs it); apply runs the secrets step after the unseal

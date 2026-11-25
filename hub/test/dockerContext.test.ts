@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { hubSideClosure } from './helpers/closure';
+import { hubSideClosure, replicaSideClosure } from './helpers/closure';
 import { hubRoot } from './helpers/hubProcess';
 
 // Phase 32, plan 17 (D-26, D-33): the root .dockerignore is the build context allow-list for both images. After '*' it lets in the relay's six
@@ -55,9 +55,13 @@ test('the hub-side closure the image needs is at least the 40 files the plan was
   console.log(`hub-side closure: ${closure.length} files`);
   assert.ok(closure.length >= 40, `the closure has ${closure.length} files; it was not read correctly`);
   for (const file of closure) assert.ok(file.startsWith('domain/'), `${file} is outside src/domain`);
-  for (const folder of ['domain/gate/', 'staff/', 'services/', 'agent/']) {
+  for (const folder of ['staff/', 'services/', 'agent/']) {
     assert.ok(!closure.some((file) => file.startsWith(folder)), `the closure reaches src/${folder}, which the hub must never bundle`);
   }
+  // Phase 71 (71-09): the hub checks credentials against your organization's signed rules, so the credential code (HUB_TRUST_SIDE) reaches the
+  // pure policy readers under src/domain/gate/. The replica side still never does.
+  const replica = replicaSideClosure(REPO_ROOT);
+  assert.ok(!replica.some((file) => file.startsWith('domain/gate/')), 'the replica hub-side closure reaches src/domain/gate/, which it must never bundle');
 });
 
 test('.dockerignore is exactly *, the relay lines, the hub lines and one sorted src line per closure file', () => {

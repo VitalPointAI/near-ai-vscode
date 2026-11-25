@@ -21,7 +21,7 @@ export const POLICY_OPTIONS: ReadonlyArray<{ mode: ActionPolicyMode; label: stri
   { mode: 'approve-risky', label: 'Ask before edits', summary: 'Reads run; edits and commands ask first.', description: 'File edits and shell commands ask first; reads and searches run automatically.', risky: false },
   { mode: 'mostly-autonomous', label: 'Edits auto', summary: 'Edits run; commands ask unless on your allow list.', description: 'File edits run automatically; shell commands still ask unless allow-listed.', risky: false },
   { mode: 'auto', label: 'Auto', summary: 'Edits and ordinary commands run; risky or unclear ones ask, with the reason.', description: 'Auto approve: file edits run, and shell commands run when they pass the safety check. Clear cases are decided by fixed rules (builds, tests, and read-only git run; pushes, deletes, publishing, and credential paths ask); only commands the rules cannot decide go to a private (TEE) model, and anything it cannot clear asks.', risky: false },
-  { mode: 'fully-autonomous', label: 'Full auto', summary: 'Runs without asking; publishing, deleting and .git writes still ask. Throwaway only.', description: 'Everything runs without asking except deny-listed commands. Writes into .git/ and NEAR AI\'s state folders, publishing and destruction still ask, and key and credential folders are refused. Use only in throwaway workspaces.', risky: true }
+  { mode: 'fully-autonomous', label: 'Full auto', summary: 'Runs without asking; publishing, deleting and .git writes still ask. Throwaway only.', description: 'Everything runs without asking except deny-listed commands. Writes into .git/ and SovAI\'s state folders, publishing and destruction still ask, and key and credential folders are refused. Use only in throwaway workspaces.', risky: true }
 ];
 
 /** The scope the effective value comes from. */
@@ -87,7 +87,7 @@ export interface PolicyChoiceResult {
 export async function applyPolicyChoice(mode: unknown, configuration: PolicyConfiguration, targets: PolicyTargets, confirm: (message: string) => Promise<boolean>): Promise<PolicyChoiceResult> {
   if (!isPolicyMode(mode)) return { written: false, text: 'That approval policy is not recognised.' };
   const option = POLICY_OPTIONS.find((candidate) => candidate.mode === mode)!;
-  if (mode === 'fully-autonomous' && !(await confirm('Switch NEAR AI to Full auto? File edits and shell commands will run without asking, except deny-listed commands. Writes into .git/ and NEAR AI\'s state folders, publishing and destruction still ask. Use this only in a throwaway workspace.'))) {
+  if (mode === 'fully-autonomous' && !(await confirm('Switch SovAI to Full auto? File edits and shell commands will run without asking, except deny-listed commands. Writes into .git/ and SovAI\'s state folders, publishing and destruction still ask. Use this only in a throwaway workspace.'))) {
     return { written: false, text: 'Approval policy unchanged.' };
   }
   const found = effectivePolicyScope(configuration.inspect('actionPolicy'));

@@ -609,6 +609,12 @@ jobs:
         if: steps.has_deploy.outputs.present == 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      # The root's locked packages, no install scripts: deploy/tools/build-credential-engine.mjs bundles the credential check engine with
+      # esbuild from src/domain/ (Phase 71 plan 08), exactly as deploy/bundle/build.mjs does before it packs deploy/.
+      - name: Install the root's locked packages
+        if: steps.has_deploy.outputs.present == 'true'
+        run: npm ci --ignore-scripts
       - name: Install pinned helm and cosign
         if: steps.has_deploy.outputs.present == 'true'
         run: |

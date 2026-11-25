@@ -138,7 +138,7 @@ test('no agent tool reaches it: not a staff tool, not in the catalog, not a Staf
     }
   }
   const manifest = JSON.parse(await readFile(path.join(sources, '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category: string }> } };
-  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === STAFF_COMMANDS.useBranchLedger), { command: STAFF_COMMANDS.useBranchLedger, title: "Staff: Use This Branch's Ledger", category: 'NEAR AI' });
+  assert.deepEqual(manifest.contributes.commands.find((entry) => entry.command === STAFF_COMMANDS.useBranchLedger), { command: STAFF_COMMANDS.useBranchLedger, title: "Staff: Use This Branch's Ledger", category: 'SovAI' });
 });
 
 test('the command: offered from the tampered message, refused without the person\'s confirmation, refused for a broken chain, and works after it', async () => {

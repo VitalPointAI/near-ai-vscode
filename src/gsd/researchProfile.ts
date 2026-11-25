@@ -20,7 +20,7 @@ export function usesResearchProfile(typeId: string | undefined): boolean {
 
 export const RESEARCH_PROFILE_GUIDANCE = `## Open-GSD research profile
 
-This project uses NEAR AI's research profile for Open-GSD, so runs finish in hours rather than days:
+This project uses SovAI's research profile for Open-GSD, so runs finish in hours rather than days:
 - **Bigger phases.** Plan coarse phases (granularity: coarse): one phase per deliverable section or research question, not one per sub-topic.
 - **Quick mode for content edits.** Wording, structure, citations, figures and style fixes go through /gsd-quick, not a new phase.
 - **The plan-checker only for gates.** A plan whose files_modified list touches no gate or verifier (scripts/verify/, scripts/gates/, tests, CI) is not sent to the plan-checker; one that does is checked as usual.
@@ -175,7 +175,7 @@ export async function planCheckSkip(prompt: string, root: string, writtenByRun: 
   return `${PLAN_CHECK_MARKER}
 ${PLAN_CHECK_SKIPPED}
 
-The marker above only lets Open-GSD's workflow carry on without stopping to ask; it is not a verification. NEAR AI's research profile (PERF-06) skips the plan checker only for plans that change content, not gates or verifiers. Continue the workflow, and run \`node scripts/verify/verify-all.mjs\` after executing.
+The marker above only lets Open-GSD's workflow carry on without stopping to ask; it is not a verification. SovAI's research profile (PERF-06) skips the plan checker only for plans that change content, not gates or verifiers. Continue the workflow, and run \`node scripts/verify/verify-all.mjs\` after executing.
 
 Evidence for the skip:
 - Plans: ${list(named)}.

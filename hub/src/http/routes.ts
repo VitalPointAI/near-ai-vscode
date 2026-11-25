@@ -41,7 +41,11 @@ import { LIMITS } from '../limits';
 import type { RateLimits } from '../limits';
 import { StoreError } from '../store/hubStore';
 import type { HubStore } from '../store/hubStore';
-import { BASE_HEADERS, sendJson } from './server';
+import type { TrustStore } from '../store/trustStore';
+import { ROUTE_ERRORS, isRecord, readBody, readJson, sendBytes, sendError } from './body';
+import { sendJson } from './server';
+import { TRUST_PREFIX } from './trustRoutes';
+import type { TrustHandler } from './trustRoutes';
 import type { HubHandler } from './server';
 import { SESSION_REFUSALS } from './session';
 import type { Session, SessionRegistry } from './session';
@@ -66,6 +70,10 @@ export interface RouteDeps {
   onEquivocation?: (project: string, proofs: readonly EquivocationProof[]) => void;
   /** A route that failed with 500, by route id and error name only. */
   onFailure?: (route: RouteId, error: unknown) => void;
+  /** The /v1/trust routes (71-09, trustRoutes.ts); absent, those addresses answer 404 like any other. */
+  trust?: TrustHandler;
+  /** The trust store appends check cited evidence against (71-09); absent, such entries are stored as before. */
+  evidence?: TrustStore;
 }
 
 export type RouteId =
@@ -81,92 +89,11 @@ export type RouteId =
   | 'checkpoint'
   | 'invites'
   | 'join'
-  | 'join-requests';
+  | 'join-requests'
+  | 'trust';
 
-export const ROUTE_ERRORS = {
-  'not-found': 'There is nothing at this address on the hub.',
-  'method-not-allowed': 'This address does not answer that method.',
-  'too-large': 'The request body is larger than this call accepts.',
-  malformed: 'The request is not in a shape the hub can read.',
-  'rate-limited': 'Too many calls came from this address. Wait the time the hub gives, then try again.',
-  'blob-mismatch': 'The uploaded bytes do not have the hash the address names. Upload the blob again.',
-  'pending-quota': 'This device has uploaded too many blobs that no entry uses yet. Send the entries that use them first.',
-  'too-many-streams': 'This device or address already has as many event streams open as the hub allows. Close one, or wait the time the hub gives.',
-  forbidden: 'This device is not on the access list of that part of the project.',
-  'checkpoint-refused': 'A checkpoint handed back is not one this hub signed for this project, so none of them was kept.',
-  internal: 'The hub could not answer this request. Try again later.',
-} as const;
-export type RouteError = keyof typeof ROUTE_ERRORS;
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-function sendError(res: http.ServerResponse, status: number, error: RouteError, extra: Record<string, string> = {}): void {
-  sendJson(res, status, JSON.stringify({ error, message: ROUTE_ERRORS[error] }), extra);
-}
-
-/** Bytes as the answer, with the project named in a header. */
-function sendBytes(res: http.ServerResponse, bytes: Buffer, project: string): void {
-  res.writeHead(200, { ...BASE_HEADERS, 'content-type': 'application/octet-stream', 'content-length': bytes.length, 'x-near-ai-project': project });
-  res.end(bytes);
-}
-
-/** Refuses a body larger than cap: 413, and the connection is closed after the answer so the rest of the body is never parsed. */
-function refuseTooLarge(req: http.IncomingMessage, res: http.ServerResponse): void {
-  if (!res.headersSent) sendError(res, 413, 'too-large', { connection: 'close' });
-  req.resume();
-}
-
-/** Reads the body with a byte cap. A declared length past the cap is refused before any byte is read; a body that grows past it is cut off. */
-function readBody(req: http.IncomingMessage, res: http.ServerResponse, cap: number): Promise<Buffer | undefined> {
-  const declared = req.headers['content-length'];
-  if (declared !== undefined && (!/^\d{1,12}$/.test(declared) || Number(declared) > cap)) {
-    refuseTooLarge(req, res);
-    return Promise.resolve(undefined);
-  }
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let done = false;
-    const finish = (value: Buffer | undefined): void => {
-      if (done) return;
-      done = true;
-      req.off('data', onData);
-      req.off('end', onEnd);
-      req.off('error', onError);
-      resolve(value);
-    };
-    const onData = (chunk: Buffer): void => {
-      size += chunk.length;
-      if (size > cap) {
-        chunks.length = 0;
-        refuseTooLarge(req, res);
-        finish(undefined);
-        return;
-      }
-      chunks.push(chunk);
-    };
-    const onEnd = (): void => finish(Buffer.concat(chunks, size));
-    const onError = (): void => finish(undefined);
-    req.on('data', onData);
-    req.on('end', onEnd);
-    req.on('error', onError);
-  });
-}
-
-/** The body as JSON, or undefined after answering 413 or 400. */
-async function readJson(req: http.IncomingMessage, res: http.ServerResponse, cap: number): Promise<{ value: unknown } | undefined> {
-  const bytes = await readBody(req, res, cap);
-  if (bytes === undefined) {
-    if (!res.headersSent) sendError(res, 400, 'malformed');
-    return undefined;
-  }
-  try {
-    return { value: JSON.parse(bytes.toString('utf8')) as unknown };
-  } catch {
-    sendError(res, 400, 'malformed');
-    return undefined;
-  }
-}
+export { ROUTE_ERRORS } from './body';
+export type { RouteError } from './body';
 
 /** One presented checkpoint: at most the checkpoint size limit plus room for its envelope (version, purpose, signer, time and signature). */
 const CHECKPOINT_ENVELOPE_BYTES = 4 * 1024;
@@ -306,7 +233,7 @@ export function createRoutes(deps: RouteDeps): HubHandler {
         ...(value.grants === undefined ? {} : { grants: value.grants as unknown[] }),
         ...(value.blobRefs === undefined ? {} : { blobRefs: value.blobRefs as Array<{ entry: string; blob: string }> }),
       },
-      { store, cache, limits, now: deps.now() },
+      { store, cache, limits, now: deps.now(), ...(deps.evidence === undefined ? {} : { trust: deps.evidence }) },
     );
     if (!outcome.ok) {
       const extra: Record<string, string> = outcome.retryAfterSeconds === undefined ? {} : { 'retry-after': String(outcome.retryAfterSeconds) };
@@ -679,10 +606,25 @@ export function createRoutes(deps: RouteDeps): HubHandler {
     return undefined;
   };
 
+  const failed = (id: RouteId, error: unknown, res?: http.ServerResponse): void => {
+    try {
+      deps.onFailure?.(id, error);
+    } catch {
+      // A failing hook never changes the answer.
+    }
+    if (res === undefined) return;
+    if (!res.headersSent) sendError(res, 500, 'internal');
+    else res.destroy();
+  };
+
   return (req, res) => {
     const target = req.url ?? '/';
     const queryAt = target.indexOf('?');
     const pathname = queryAt < 0 ? target : target.slice(0, queryAt);
+    if (deps.trust !== undefined && pathname.startsWith(TRUST_PREFIX)) {
+      deps.trust(req, res, pathname).catch((error: unknown) => failed('trust', error, res));
+      return;
+    }
     const found = match(pathname);
     if (found === undefined) {
       req.resume();
@@ -696,14 +638,6 @@ export function createRoutes(deps: RouteDeps): HubHandler {
       sendError(res, 405, 'method-not-allowed', { allow: Object.keys(found.entry.methods).join(', ') });
       return;
     }
-    route.handler(req, res, found.params).catch((error: unknown) => {
-      try {
-        deps.onFailure?.(route.id, error);
-      } catch {
-        // A failing hook never changes the answer.
-      }
-      if (!res.headersSent) sendError(res, 500, 'internal');
-      else res.destroy();
-    });
+    route.handler(req, res, found.params).catch((error: unknown) => failed(route.id, error, res));
   };
 }

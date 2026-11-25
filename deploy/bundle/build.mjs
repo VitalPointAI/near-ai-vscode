@@ -14,7 +14,8 @@
 //   - every vendored chart of deploy/charts/charts.lock.json, after the same hash check as vendor.mjs --check;
 //   - the rke2 pin with its assets, and helm, cosign and hauler, downloaded from their pinned addresses and checked against the pinned SHA-256;
 //   - deploy-tree.tar: deploy/ without deploy/test/, deploy/lab/ and deploy/charts/vendored/ (realm, policies, values, local charts, node
-//     files and scripts);
+//     files and scripts). Before it is packed, deploy/tools/credential-checker.engine.mjs is generated from src/domain/
+//     (build-credential-engine.mjs), so the credential check tool works on an air-gapped operator machine (Phase 71 plan 08);
 //   - registry-images.tar: the registry's own images (Zot, and the Harbor set) as a site-neutral OCI layout, named for the site's registry
 //     by install.mjs node-files before it goes to the nodes (Pitfall 8). Tool items carry their pin's version.
 //
@@ -31,6 +32,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { checkVendored } from '../charts/vendor.mjs';
+import { buildCredentialEngine } from '../tools/build-credential-engine.mjs';
 import { runCosign, signImage, verifyImage } from './lib/cosign.mjs';
 import { runHauler } from './lib/hauler.mjs';
 import { imageName, readChartsLock, readImagesLock, readToolPins, sitePath, splitRef } from './lib/locks.mjs';
@@ -130,6 +132,12 @@ function deployTree(root, dir) {
     '--exclude=deploy/test', '--exclude=deploy/lab', '--exclude=deploy/charts/vendored', '-C', root, 'deploy'], { encoding: 'utf8' });
   if (run.status !== 0) throw new Error(`tar of deploy/ failed: ${run.stderr || run.error?.message}`);
   return file;
+}
+
+/** deploy-tree.tar with the credential check engine generated first, so the tool and its engine travel together (Phase 71 plan 08). */
+export async function deployTreeWithEngine(root, dir) {
+  await buildCredentialEngine(root);
+  return deployTree(root, dir);
 }
 
 /** registry-images.tar: the registry's own images as a site-neutral OCI layout for the nodes (lib/registry-images.mjs, Pitfall 8). */
@@ -247,7 +255,7 @@ export async function buildWholeBundle(root, { out, key, staging, version, ciReg
     const tools = [];
     for (const download of downloads) tools.push({ kind: 'tool', path: await fetchPinned(download, scratch), version: download.version });
     const built = toBuild.length ? buildLocal(root, toBuild, { staging, plainHttp, scratch }) : [];
-    const files = [...charts, ...tools, { kind: 'file', path: deployTree(root, scratch) }, { kind: 'file', path: registryArchive(root, scratch) }];
+    const files = [...charts, ...tools, { kind: 'file', path: await deployTreeWithEngine(root, scratch) }, { kind: 'file', path: registryArchive(root, scratch) }];
     return await buildBundle({ out, key, staging, images: [...images, ...built], files, version, omitted, plainHttp, publicKey });
   } finally {
     rmSync(scratch, { recursive: true, force: true });

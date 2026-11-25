@@ -89,7 +89,7 @@ export interface DecisionReplay {
 export const DECISION_LOG_PROBLEMS = {
   unreadable: 'A decision log line is not a signed decision.',
   signature: 'A decision is not signed by a key this computer trusts.',
-  chain: 'A decision does not follow the one before it, so the log was changed outside NEAR AI.',
+  chain: 'A decision does not follow the one before it, so the log was changed outside SovAI.',
   'person-key': 'A decision is signed by a key other than the one of the person it names.'
 } as const;
 

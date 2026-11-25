@@ -92,7 +92,7 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
   initProfileIndex(context.globalState);
   initEmergencyStop(context);
   // NEAR AI errors and rate-limit headers (status, model, request ID, Retry-After, NEAR's message), never keys or prompts.
-  const nearLog = vscode.window.createOutputChannel('NEAR AI');
+  const nearLog = vscode.window.createOutputChannel('SovAI');
   setNearAiDiagnostics((line) => nearLog.appendLine(`[${new Date().toISOString()}] ${line}`));
   context.subscriptions.push(nearLog, { dispose: () => setNearAiDiagnostics(undefined) });
   // A second editor on this computer uses this project's NEAR AI key from its sealed copy in the project's state home, with no prompt (D-15). Nothing
@@ -166,11 +166,11 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     vscode.commands.registerCommand('nearAi.useSavedProfile', () => useSavedProfile(context, auth, sidebar)),
     vscode.commands.registerCommand('nearAi.emergencyStop', async () => {
       await setEmergencyStop(true);
-      void vscode.window.showWarningMessage('NEAR AI emergency stop is on. Running requests and workflows were stopped (in other open windows within a few seconds), and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
+      void vscode.window.showWarningMessage('SovAI emergency stop is on. Running requests and workflows were stopped (in other open windows within a few seconds), and nothing more will be sent until you resume.', 'Resume').then((choice) => { if (choice) void vscode.commands.executeCommand('nearAi.resume'); });
     }),
     vscode.commands.registerCommand('nearAi.resume', async () => {
       await setEmergencyStop(false);
-      void vscode.window.showInformationMessage('NEAR AI resumed.');
+      void vscode.window.showInformationMessage('SovAI resumed.');
     }),
     vscode.commands.registerCommand('nearAi.openChat', () => vscode.commands.executeCommand(`${NearAiPanelViewProvider.viewId}.focus`)),
     vscode.commands.registerCommand('nearAi.newChat', () => sidebar.newChat()),
@@ -258,15 +258,15 @@ async function suggestProxySupportOff(context: vscode.ExtensionContext): Promise
 
 async function showHistory(context: vscode.ExtensionContext, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showInformationMessage('Open a folder to see NEAR AI conversations.'); return; }
+  if (!root) { void vscode.window.showInformationMessage('Open a folder to see SovAI conversations.'); return; }
   // A person asked for the list: conversations from before 0.4.20 that this editor kept in its own storage are merged in first.
   await ensureMigrated(root);
   // D-08: the list is the thread index (the threads' small meta files); no log is opened for any item. Every thread is listed: live, archived, from the
   // Chat view, or locked on this device.
   const saved = await threadStoreFor(root, context.secrets, editorWriter(context.globalState), () => vscode.workspace.getConfiguration('nearAi').get<boolean>('sync.keepKeyInProject', true)).index();
-  if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved NEAR AI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
+  if (!saved.length) { void vscode.window.showInformationMessage(readAgentLimits().saveTranscripts ? 'No saved SovAI conversations in this project yet.' : 'Saving conversations is off (nearAi.agent.saveTranscripts).'); return; }
   // Typing filters by title (the label); the description and detail are searched too, so "Archived" or a model name also finds them.
-  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a NEAR AI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
+  const picked = await vscode.window.showQuickPick(historyItems(saved), { placeHolder: 'Open a SovAI conversation as a tab, with its full context. Type to filter by title.', matchOnDescription: true, matchOnDetail: true });
   if (!picked) return;
   // A locked conversation is listed so it never seems to have vanished, but it cannot be opened on this device.
   if (picked.locked) { void vscode.window.showInformationMessage(LOCKED_DETAIL); return; }
@@ -289,21 +289,21 @@ async function saveCheckpoint(): Promise<void> {
   void vscode.window.showInformationMessage(`Continuity checkpoint saved: ${path}`);
 }
 
-/** NEAR AI: Set Up. Exported for the host tests of what follows a successful setup. */
+/** SovAI: Set Up. Exported for the host tests of what follows a successful setup. */
 export async function configureApiKey(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider, options: { offerNextStep?: boolean } = {}): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI keys and profiles are scoped to a project.'); return; }
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. AI provider profiles are scoped to a project.'); return; }
   const kind = await vscode.window.showQuickPick([
     { label: 'NEAR AI Cloud', description: 'Private TEE models and others NEAR forwards; needs an API key', provider: 'near-ai' as const },
     { label: 'Local runtime', description: 'Ollama, LM Studio, vLLM, or any OpenAI-compatible server on this machine', provider: 'local' as const },
     { label: 'NEAR AI Cloud + local runtime', description: 'Both: pick a local or a cloud model for each chat', provider: 'hybrid' as const }
-  ], { title: 'NEAR AI Set Up', placeHolder: 'Where should models run?', ignoreFocusOut: true });
+  ], { title: 'AI Provider Setup', placeHolder: 'Where should models run?', ignoreFocusOut: true });
   if (!kind) return;
   const usesLocal = kind.provider !== 'near-ai';
   const usesCloud = kind.provider !== 'local';
   const steps = 2 + (usesLocal ? 2 : 0) + (usesCloud ? 1 : 0);
   let step = 0;
-  const title = () => `NEAR AI Set Up (${++step}/${steps})`;
+  const title = () => `AI Provider Setup (${++step}/${steps})`;
   const displayName = (await vscode.window.showInputBox({
     title: title(), prompt: 'Project name', value: vscode.workspace.name ?? 'My project', ignoreFocusOut: true,
     validateInput: (value) => value.trim() ? undefined : 'Enter a name for this project.'
@@ -346,7 +346,7 @@ export async function configureApiKey(context: vscode.ExtensionContext, auth: Au
       await sidebar.refresh();
       // A caller with its own next steps (turning on Team Mode) gets only the ready message.
       if (options.offerNextStep === false) {
-        void vscode.window.showInformationMessage(`NEAR AI is ready for “${profile.displayName}”. Pick a model and start chatting.`);
+        void vscode.window.showInformationMessage(`Models are ready for “${profile.displayName}”. Pick a model and start chatting.`);
         return;
       }
       await offerNextStep({ secrets: context.secrets, chatVisible: () => sidebar.visible }, profile.displayName);
@@ -366,8 +366,8 @@ async function removeProfile(auth: AuthService, sidebar: NearAiPanelViewProvider
   if (!root) { void vscode.window.showWarningMessage('Open a project folder first.'); return; }
   const profiles = new ProfileStore(root, auth);
   const metadata = await profiles.exportMetadata();
-  if (!metadata.profiles.length) { void vscode.window.showInformationMessage('This project has no NEAR AI profiles.'); return; }
-  const picked = await vscode.window.showQuickPick(metadata.profiles.map((profile) => ({ label: profile.displayName, description: profile.profileId === metadata.activeProfileId ? 'active' : undefined, profileId: profile.profileId })), { title: 'Remove a NEAR AI profile', placeHolder: 'Its API key is deleted from VS Code SecretStorage' });
+  if (!metadata.profiles.length) { void vscode.window.showInformationMessage('This project has no AI profiles.'); return; }
+  const picked = await vscode.window.showQuickPick(metadata.profiles.map((profile) => ({ label: profile.displayName, description: profile.profileId === metadata.activeProfileId ? 'active' : undefined, profileId: profile.profileId })), { title: 'Remove an AI profile', placeHolder: 'Its API key is deleted from VS Code SecretStorage' });
   if (!picked) return;
   const confirm = await vscode.window.showWarningMessage(`Remove "${picked.label}" and delete its API key from this machine?`, { modal: true }, 'Remove');
   if (confirm !== 'Remove') return;
@@ -398,7 +398,7 @@ async function selectProfile(context: vscode.ExtensionContext, auth: AuthService
     })),
     ...saved,
     setUp
-  ], { title: 'NEAR AI profile for this project', placeHolder: metadata.profiles.length ? 'Choose the profile to use' : 'No profiles yet' });
+  ], { title: 'AI profile for this project', placeHolder: metadata.profiles.length ? 'Choose the profile to use' : 'No profiles yet' });
   if (!picked) return;
   if (picked.action === 'saved') { await useSavedProfile(context, auth, sidebar); return; }
   if (!picked.profileId) { await configureApiKey(context, auth, sidebar); return; }
@@ -416,10 +416,10 @@ async function selectProfile(context: vscode.ExtensionContext, auth: AuthService
   await sidebar.refresh();
 }
 
-/** Uses a NEAR AI profile set up in another project, by reference to the key stored there; the key is never read out or shown. */
+/** Uses an AI profile set up in another project, by reference to the key stored there; the key is never read out or shown. */
 async function useSavedProfile(context: vscode.ExtensionContext, auth: AuthService, sidebar: NearAiPanelViewProvider): Promise<void> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. NEAR AI profiles are kept per project.'); return; }
+  if (!root) { void vscode.window.showWarningMessage('Open a project folder first. AI profiles are kept per project.'); return; }
   const profiles = new ProfileStore(root, auth);
   await profiles.list();
   await runUseSavedProfile({
@@ -437,7 +437,7 @@ async function useSavedProfile(context: vscode.ExtensionContext, auth: AuthServi
 
 async function openApiKeyPortal(): Promise<void> {
   await vscode.env.openExternal(vscode.Uri.parse('https://cloud.near.ai/'));
-  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run NEAR AI: Set Up again and choose “I already have a key”.');
+  void vscode.window.showInformationMessage('Create a NEAR AI Cloud API key, then run SovAI: Set Up again and choose “I already have a key”.');
 }
 
 async function showStatus(auth: AuthService): Promise<void> {
