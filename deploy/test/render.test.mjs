@@ -10,41 +10,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { checkVendored, vendor } from '../charts/vendor.mjs';
-import { DIGEST, UNPUBLISHED_DIGEST, allImages, readImagesLock, splitRef } from '../bundle/lib/locks.mjs';
+import { allImages, readImagesLock } from '../bundle/lib/locks.mjs';
+import { checkRendered } from '../bundle/lib/invariants.mjs';
 import { OPTIONAL_EMPTY, REQUIRED_SITE_SETTINGS, listReleases, loadSite, renderRelease, renderSite, splitDocs, substituteSite } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
 const HELM = process.env.HELM || 'helm';
-const IMAGE_LINE = /^[ \t]*(?:-[ \t]+)?image:[ \t]*["']?([^\s"'#]+)/gm;
 
 function helmFound() {
   const run = spawnSync(HELM, ['version', '--short'], { encoding: 'utf8' });
   return !run.error && run.status === 0;
-}
-
-/** A rendered document with the values of a Secret's top-level `data:` and `stringData:` maps removed (keys kept). Other documents are unchanged. */
-function withoutSecretValues(doc) {
-  if (!/^kind:[ \t]*Secret[ \t]*$/m.test(doc)) return doc;
-  let inValues = false;
-  return doc.split('\n').map((line) => {
-    if (/^(data|stringData):[ \t]*$/.test(line)) { inValues = true; return line; }
-    if (!/^[ \t]/.test(line)) inValues = false;
-    return inValues ? line.replace(/:[ \t].*$/, ':') : line;
-  }).join('\n');
-}
-
-/** The `metadata.name` of a rendered document: the first indented `name:` line under a top-level `metadata:` line (line by line, no backtracking). */
-function metadataName(doc) {
-  const lines = doc.split('\n');
-  const start = lines.findIndex((line) => /^metadata:[ \t]*$/.test(line));
-  if (start < 0) return '';
-  for (const line of lines.slice(start + 1)) {
-    if (!/^[ \t]/.test(line)) break;
-    const match = /^[ \t]+name:[ \t]*(\S+)/.exec(line);
-    if (match) return match[1];
-  }
-  return '';
 }
 
 test('helm is available for the render tests', () => {
@@ -57,37 +33,41 @@ test('every vendored chart matches charts.lock.json and no unlisted tarball is p
 
 test('every rendered release meets the global invariants', (t) => {
   assert.ok(helmFound(), `helm was not found (${HELM}).`);
-  const lock = readImagesLock(ROOT);
-  const allowed = new Map(allImages(lock, SITE.registry).map((image) => [image.ref, image]));
   const rendered = renderSite(ROOT, { site: SITE, helm: HELM, all: true });
   assert.ok(rendered.length > 0, 'no release rendered');
-  let checked = 0;
-  for (const { name, yaml } of rendered) {
-    for (const doc of splitDocs(yaml)) {
-      const kind = /^kind:[ \t]*(\S+)/m.exec(doc)?.[1] ?? '(no kind)';
-      const where = `${name}: ${kind} ${metadataName(doc)}`;
-      for (const [, ref] of doc.matchAll(IMAGE_LINE)) {
-        checked += 1;
-        const { name: imageName, digest } = splitRef(ref);
-        assert.match(digest ?? '', DIGEST, `${where}: the image ${ref} is not pinned by a sha256 digest`);
-        const image = allowed.get(`${imageName}@${digest}`);
-        assert.ok(image, `${where}: the image ${ref} is not ${SITE.registry}/<sitePath>@<digest> of any entry in deploy/bundle/images.lock.json`);
-        if (digest === UNPUBLISHED_DIGEST) {
-          assert.ok(image.unpublished, `${where}: ${ref} uses the unpublished placeholder digest for an image that is published`);
-          t.diagnostic(`${where}: ${image.name} is not published yet (placeholder digest)`);
-        }
-      }
-      assert.doesNotMatch(doc, /imagePullPolicy:[ \t]*["']?Always/, `${where}: imagePullPolicy Always (D-20)`);
-      if (/^(Cluster)?Issuer$/.test(kind)) assert.doesNotMatch(doc, /^[ \t]*acme:/m, `${where}: an ACME issuer (D-16)`);
-      assert.doesNotMatch(doc, /ingress-nginx|nginx\.ingress\.kubernetes\.io/, `${where}: ingress-nginx (D-07)`);
-      assert.doesNotMatch(doc, /ingressClassName:[ \t]*["']?nginx["']?[ \t]*$|kubernetes\.io\/ingress\.class:[ \t]*["']?nginx["']?[ \t]*$/m, `${where}: the nginx ingress class (D-07)`);
-      // A Secret's data values are generated at random by some charts (harbor-core), so any three letters can appear in them by chance;
-      // the k3s check reads everything except those values. A real k3s dependency shows up in names, images or labels, not in random data.
-      assert.doesNotMatch(withoutSecretValues(doc), /k3s/i, `${where}: k3s (D-14)`);
-      assert.doesNotMatch(doc, /grafana\/loki/, `${where}: the Loki log store (D-19)`);
-    }
+  const { problems, imagesChecked, unpublished } = checkRendered(rendered, { lock: readImagesLock(ROOT), registry: SITE.registry });
+  assert.deepEqual(problems, []);
+  for (const line of unpublished) t.diagnostic(line);
+  assert.ok(imagesChecked > 0, 'no image: line was found in the rendered output');
+});
+
+test('the shared invariants catch each ruled-out pattern (the same code the site preflight runs)', () => {
+  const lock = readImagesLock(ROOT);
+  const registry = SITE.registry;
+  const good = allImages(lock, registry).find((image) => !image.unpublished).ref;
+  const placeholder = allImages(lock, registry).find((image) => image.unpublished);
+  const doc = (kind, body) => `apiVersion: v1\nkind: ${kind}\nmetadata:\n  name: x\n${body}\n`;
+  const cases = [
+    [doc('Pod', `spec:\n  containers:\n    - image: ${good.split('@')[0]}:latest`), /not pinned by a sha256 digest/],
+    [doc('Pod', `spec:\n  containers:\n    - image: elsewhere.example/app@sha256:${'a'.repeat(64)}`), /is not registry\.site\.example\/<sitePath>@<digest>/],
+    [doc('Pod', `spec:\n  containers:\n    - image: ${good}\n      imagePullPolicy: Always`), /imagePullPolicy Always/],
+    [doc('ClusterIssuer', 'spec:\n  acme:\n    server: https://acme.example'), /an ACME issuer/],
+    [doc('Ingress', 'spec:\n  ingressClassName: nginx'), /the nginx ingress class/],
+    [doc('Deployment', 'metadata2: ingress-nginx'), /ingress-nginx/],
+    [doc('ConfigMap', 'data:\n  runtime: k3s'), /k3s \(D-14\)/],
+    [doc('Pod', 'spec:\n  containers:\n    - name: grafana/loki'), /Loki/],
+  ];
+  for (const [yaml, expected] of cases) {
+    const { problems } = checkRendered([{ name: 'case', yaml }], { lock, registry });
+    assert.ok(problems.some((problem) => expected.test(problem)), `${expected} in ${JSON.stringify(problems)}`);
   }
-  assert.ok(checked > 0, 'no image: line was found in the rendered output');
+  // Secret values may hold any letters by chance (harbor-core's random keys); keys and names may not.
+  assert.deepEqual(checkRendered([{ name: 'case', yaml: doc('Secret', 'data:\n  key: azk3sQ==') }], { lock, registry }).problems, []);
+  if (placeholder) {
+    const result = checkRendered([{ name: 'case', yaml: doc('Pod', `spec:\n  containers:\n    - image: ${placeholder.ref}`) }], { lock, registry });
+    assert.deepEqual(result.problems, []);
+    assert.equal(result.unpublished.length, 1);
+  }
 });
 
 function fixture(files) {
