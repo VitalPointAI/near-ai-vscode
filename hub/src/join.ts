@@ -160,7 +160,7 @@ export class JoinDesk {
    */
   async register(project: string, writer: string, body: unknown): Promise<RegisterOutcome> {
     const roster = await this.cache.get(project);
-    if (!roster.isRosterWriter(writer)) return fail('forbidden');
+    if (!roster.actsForRosterWriter(writer)) return fail('forbidden');
     if (!isRecord(body) || !exactKeys(body, ['invite', 'expiresAt', 'checkKey'])) return fail('malformed');
     const invite = own(body, 'invite');
     const expiresAt = own(body, 'expiresAt');
@@ -231,7 +231,7 @@ export class JoinDesk {
     if (stored === 'stored') {
       this.log('info', 'join.accepted', { project, invite, reason: 'stored' });
       const current = await this.cache.get(project);
-      this.events.publish(project, (device) => current.isRosterWriter(device), 'join-request', { project, invite });
+      this.events.publish(project, (device) => current.actsForRosterWriter(device), 'join-request', { project, invite });
     }
     return { ok: true, status: 202, project, invite, held: stored === 'held' };
   }
@@ -253,7 +253,7 @@ export class JoinDesk {
   /** GET /v1/projects/:p/join-requests: the requests accepted in the last 7 days, for a device of the lead or the deputy only. */
   async list(project: string, writer: string): Promise<ListOutcome> {
     const roster = await this.cache.get(project);
-    if (!roster.isRosterWriter(writer)) return fail('forbidden');
+    if (!roster.actsForRosterWriter(writer)) return fail('forbidden');
     const cutoff = this.now() - JOIN_REQUEST_KEEP_MS;
     const requests = this.store
       .joinRequests(project)
