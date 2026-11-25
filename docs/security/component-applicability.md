@@ -13,8 +13,8 @@ The families that are wholly your organization's (AT, CA, MA, MP, PE, PM, PS, PT
 | Level | Stage | Components | Cells with a part | Cells not applicable to their component | Rows no component has a part in |
 |---|---|---|---|---|---|
 | Unclassified (`unclassified`) | 1 | 5 | 35 | 25 | 0 |
-| Protected A (`protected-a`) | 1 | 5 | 611 | 909 | 66 |
-| Protected B (`protected-b`) | 2 | 5 | 611 | 909 | 66 |
+| Protected A (`protected-a`) | 1 | 5 | 614 | 906 | 66 |
+| Protected B (`protected-b`) | 2 | 5 | 614 | 906 | 66 |
 | Hosted deployment: Protected A (`hosted-protected-a`) | 1 | 15 | 1694 | 2866 | 42 |
 | Hosted deployment: Protected B (`hosted-protected-b`) | 2 | 15 | 1694 | 2866 | 42 |
 
@@ -1292,4 +1292,6 @@ These rows read "Your organization's responsibility" once the level's map is sig
 
 A component that has a statement for a control has a part in it, whatever the rules say. These statements sit on pairs the rules give no part; each is for review.
 
-None.
+- model-endpoints, cm-10: cm-10_smt.licence-use
+- model-endpoints, sa-04: sa-04_smt.model-licences
+- model-endpoints, sa-11: sa-11_smt.evaluation-before-role, sa-11_smt.other-family-checks
