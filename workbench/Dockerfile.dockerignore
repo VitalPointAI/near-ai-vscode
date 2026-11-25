@@ -1,6 +1,9 @@
 **
 !src/
 !src/**
+!compliance/
+!compliance/src/
+!compliance/src/**
 !workbench/
 !workbench/package.json
 !workbench/package-lock.json

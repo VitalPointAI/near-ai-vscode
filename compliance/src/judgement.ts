@@ -13,6 +13,8 @@ export const JUDGEMENT_FORMAT = 'sterling-judgement/1' as const;
 export type JudgementComponent = Omit<StatusInput, 'now' | 'head'> & {
   /** Presentation: the provider an inherited control comes from, filled into the reason text. */
   readonly inheritedFrom?: string;
+  /** Presentation: the rule ids in the order the component's evidence is listed, which JSON key order may not keep. */
+  readonly evidenceOrder?: readonly string[];
 };
 
 /** A row's engine inputs. `responsibility` is the configured responsibility the row rule uses when no component is in scope. */
@@ -67,9 +69,12 @@ export function fillReason(reason: keyof typeof REASONS, detail?: Readonly<Recor
   return REASONS[reason].replace(/\{(date|reason|text|question|provider)\}/g, (_match, key: string) => detail?.[key] ?? '');
 }
 
+const ruleOrder = (component: Pick<JudgementComponent, 'rulesByStatement'>): string[] => Object.values(component.rulesByStatement).flat().map((rule) => rule.id);
+
 /** The results a component's rules name, in rule order: the component's evidence. */
 function evidenceOf(component: JudgementComponent): RuleResult[] {
-  return Object.values(component.rulesByStatement).flat().map((rule) => component.results[rule.id]).filter((result): result is RuleResult => result !== undefined);
+  return (component.evidenceOrder ?? ruleOrder(component)).map((id) => Object.hasOwn(component.results, id) ? component.results[id] : undefined)
+    .filter((result): result is RuleResult => result !== undefined);
 }
 
 /** One component's engine inputs, carrying only the results its own rules name, and never a clock, a commit to judge or a state. */
@@ -88,6 +93,7 @@ function judgementComponent(component: JudgementComponent): JudgementComponent {
     ...(component.limitation ? { limitation: component.limitation } : {}),
     ...(component.riskAcceptance ? { riskAcceptance: component.riskAcceptance } : {}),
     ...(component.inheritedFrom ? { inheritedFrom: component.inheritedFrom } : {}),
+    evidenceOrder: component.evidenceOrder ?? ruleOrder(component),
   };
 }
 
@@ -104,7 +110,7 @@ export function judgementRow(input: JudgementRowInput, presentation: JudgementRo
 
 /** Judges one component now: computeStatus and the reason text, with its evidence and its first statement's presentation. */
 export function judgeComponent(component: JudgementComponent, head: string, now: Date): JudgedComponent {
-  const { inheritedFrom, ...input } = component;
+  const { inheritedFrom, evidenceOrder: _order, ...input } = component;
   const outcome = computeStatus({ ...input, head, now });
   const statement = component.statements[0];
   return {

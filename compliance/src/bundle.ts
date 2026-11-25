@@ -16,7 +16,7 @@ import { reviewsCollector } from './collectors/reviews.ts';
 import { codeScanningCollector } from './collectors/codeScanning.ts';
 import { deploymentCollector } from './collectors/deployment.ts';
 import type { Collector, CollectorContext, FetchJson } from './collectors/types.ts';
-import { buildDashboard, type DashboardBuildInput } from './dashboard.ts';
+import { buildJudgement, type DashboardBuildInput } from './dashboard.ts';
 import type { Observation, TestReportRow } from './model.ts';
 import { verifyManifest, writeManifest, type BundleManifest } from './manifest.ts';
 import { assertNoSecrets, redactObservation, redactTestRow } from './redact.ts';
@@ -39,7 +39,7 @@ export interface BundleInputs {
 }
 interface ScheduledEvidence { readonly directory: string; readonly runUrl: string }
 export interface BundleContext { readonly now?: Date; readonly fetchJson?: FetchJson; readonly readFile?: (file: string) => Promise<string>; readonly previous?: string; readonly controlTextSource?: string; readonly scheduled?: ScheduledEvidence; }
-export interface BundleResult { readonly observations: readonly Observation[]; readonly testRows: readonly TestReportRow[]; readonly collectors: readonly { readonly id: string; readonly ran: boolean; readonly ok: boolean; readonly error?: string; readonly lastCollectedAt?: string }[]; readonly dashboard: ReturnType<typeof buildDashboard>; }
+export interface BundleResult { readonly observations: readonly Observation[]; readonly testRows: readonly TestReportRow[]; readonly collectors: readonly { readonly id: string; readonly ran: boolean; readonly ok: boolean; readonly error?: string; readonly lastCollectedAt?: string }[]; readonly dashboard: ReturnType<typeof buildJudgement>['dashboard']; }
 
 const stable = (value: unknown): string => `${JSON.stringify(value, (_key, child) => child && typeof child === 'object' && !Array.isArray(child) ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b))) : child, 2)}\n`;
 const codeOf = (error: unknown) => typeof error === 'object' && error !== null && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'collector-error';
@@ -189,13 +189,16 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
     ...(testRows.length && testEvidence ? { testEvidence: { collectedAt: testEvidence.collectedAt, runUrl: testEvidence.runUrl } } : {}),
     testRows: testRows.map(redactTestRow), source: { kind: inputs.kind === 'pr' ? 'local' : inputs.kind, ref: inputs.commit }, ...(inputs.runUrl ? { runUrl: inputs.runUrl } : {}), ...inputs.dashboard
   };
-  const dashboard = buildDashboard(dashboardInput);
+  // The judgement holds the engine inputs the rows were judged from, so a session can judge them again at any time (48.2, D-11).
+  const { dashboard, judgement } = buildJudgement(dashboardInput);
   // These fields are presentation data, never source inputs. Their values stay schema-safe.
   const official = supplied.controlTextSource && writeControlText(path.join(output, 'dashboard'), supplied.controlTextSource);
-  const rows = official ? dashboard.rows.map((row) => {
-    const control = official.byLevel.get(row.level)?.get(row.control);
+  const withText = <T extends { readonly level: string; readonly control: string }>(row: T): T => {
+    const control = official && official.byLevel.get(row.level)?.get(row.control);
     return control ? { ...row, ...control } : row;
-  }) : dashboard.rows;
+  };
+  const rows = official ? dashboard.rows.map(withText) : dashboard.rows;
+  const judgementRows = official ? judgement.rows.map(withText) : judgement.rows;
   const enriched = { ...dashboard, rows, ...(official ? { textIndex: official.index } : {}), collectors: collectorRows.map((row) => ({ id: row.id, window: COLLECTORS.find((item) => item.id === row.id)!.window, ...(row.lastCollectedAt ? { lastCollectedAt: row.lastCollectedAt } : {}), ...(row.ran ? { passed: row.ok } : {}) })) };
   const copyFindings = lintDashboard(enriched);
   if (copyFindings.length) {
@@ -207,6 +210,7 @@ export async function runBundle(inputs: BundleInputs, out: string, supplied: Bun
   writeFileSync(path.join(output, 'test-rows.json'), stable(testRows.map(redactTestRow)));
   writeFileSync(path.join(output, 'collectors.json'), stable(collectorRows));
   writeFileSync(path.join(output, 'dashboard', 'dashboard.json'), stable(enriched));
+  writeFileSync(path.join(output, 'dashboard', 'judgement.json'), stable({ ...judgement, rows: judgementRows }));
   assertNoSecrets(output);
   writeManifest(output, { createdAt: now.toISOString(), commit: inputs.commit });
   return { observations, testRows, collectors: collectorRows, dashboard: enriched };
