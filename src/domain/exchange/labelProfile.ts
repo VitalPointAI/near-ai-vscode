@@ -342,3 +342,95 @@ export function valuesFor(profile: LabelProfile, request: LabelRequest): LabelVa
   };
   return { ok: true, value: Object.freeze(value) };
 }
+
+// The operational rule (D-22): an operational export refuses a placeholder always, and an assumed value unless your security officer has recorded an
+// exception for that profile and those values that has not ended; public, not yet verified values pass and are shown. Trial exports may use both.
+export const EXPORT_PURPOSES = Object.freeze(['trial', 'operational'] as const);
+export type ExportPurpose = (typeof EXPORT_PURPOSES)[number];
+
+export const ASSUMED_VALUES_TEXT = (profiles: string): string =>
+  `This export would use assumed label values (${profiles}). Your security officer can record an exception, or the values must be verified first.`;
+export const placeholderText = (what: string): string => `${what} is not known for this target system.`;
+
+/** An exception your security officer records in the signed policy (`labelXml.assumedExceptions`): these assumed values of this profile, until a day. */
+export interface AssumedException { readonly profile: string; readonly values: readonly string[]; readonly reason: string; readonly until: string }
+
+export interface ProvenanceShown { readonly profile: string; readonly title: string; readonly provenance: Provenance }
+
+export type ProvenanceVerdict =
+  | { readonly ok: true; readonly lowestProvenance: Provenance; readonly shown: readonly ProvenanceShown[]; readonly exceptionsUsed: readonly AssumedException[] }
+  | { readonly ok: false; readonly reason: 'placeholder' | 'assumed-values'; readonly message: string };
+
+export interface ProvenanceOptions {
+  readonly purpose: ExportPurpose;
+  readonly exceptions: readonly AssumedException[];
+  /** Today, `YYYY-MM-DD`, from the caller's clock. An exception counts through its `until` day. */
+  readonly today: string;
+}
+
+/** Whether an exception covers every assumed value a profile contributes, today. Anything malformed covers nothing. */
+function covers(exception: AssumedException, profile: string, assumed: readonly ProfileValue[], today: string): boolean {
+  if (exception.profile !== profile || !Array.isArray(exception.values) || !isDay(exception.until) || !isDay(today) || today > exception.until) return false;
+  const named = new Set(exception.values.filter((value): value is string => typeof value === 'string').map((value) => value.toUpperCase()));
+  return assumed.every((leaf) => named.has(leaf.value.toUpperCase()));
+}
+
+/** Checks the values an export would write against the rule of D-22, and reports the provenance to show and the lowest provenance used. */
+export function provenanceCheck(used: readonly UsedValue[], options: ProvenanceOptions): ProvenanceVerdict {
+  const groups = new Map<string, { title: string; leaves: ProfileLeaf[] }>();
+  for (const entry of used) {
+    const group = groups.get(entry.profile) ?? { title: entry.title, leaves: [] };
+    group.leaves.push(entry.leaf);
+    groups.set(entry.profile, group);
+  }
+  const shown = [...groups].map(([profile, group]) => Object.freeze({ profile, title: group.title, provenance: lowestProvenance(group.leaves) }));
+  const exceptionsUsed: AssumedException[] = [];
+  // Anything but a trial is held to the operational rule, so a purpose this version does not know fails closed.
+  if (options.purpose !== 'trial') {
+    const placeholder = used.find((entry) => isPlaceholder(entry.leaf));
+    if (placeholder !== undefined) return { ok: false, reason: 'placeholder', message: placeholderText((placeholder.leaf as ProfilePlaceholder).placeholder) };
+    const uncovered: string[] = [];
+    for (const [profile, group] of groups) {
+      const assumed = group.leaves.filter((leaf): leaf is ProfileValue => !isPlaceholder(leaf) && leaf.provenance === 'assumed');
+      if (assumed.length === 0) continue;
+      const exception = options.exceptions.find((candidate) => covers(candidate, profile, assumed, options.today));
+      if (exception === undefined) uncovered.push(group.title);
+      else exceptionsUsed.push(exception);
+    }
+    if (uncovered.length > 0) return { ok: false, reason: 'assumed-values', message: ASSUMED_VALUES_TEXT(uncovered.join(', ')) };
+  }
+  return { ok: true, lowestProvenance: lowestProvenance(used.map((entry) => entry.leaf)), shown: Object.freeze(shown), exceptionsUsed: Object.freeze(exceptionsUsed) };
+}
+
+/** The same profile with each leaf passed through `replace`, keeping its shape. */
+function mapLeaves(profile: LabelProfile, replace: (path: string, leaf: ProfileLeaf) => ProfileLeaf): LabelProfile {
+  const classifications = profile.classifications.map((entry, index) => {
+    const value = replace(`classifications[${index}].value`, entry.value);
+    return Object.freeze(entry.marking === undefined ? { value, rank: entry.rank } : { value, rank: entry.rank, marking: replace(`classifications[${index}].marking`, entry.marking) });
+  });
+  const categories = profile.categories.map((category, index) => {
+    const mapped = { type: category.type, tagName: replace(`categories[${index}].tagName`, category.tagName), values: Object.freeze(category.values.map((leaf, valueIndex) => replace(`categories[${index}].values[${valueIndex}]`, leaf))) };
+    return Object.freeze(category.uri === undefined ? mapped : { ...mapped, uri: replace(`categories[${index}].uri`, category.uri) });
+  });
+  const base = { format: profile.format, id: profile.id, title: profile.title, policyIdentifier: replace('policyIdentifier', profile.policyIdentifier), classifications: Object.freeze(classifications), categories: Object.freeze(categories), note: profile.note };
+  return Object.freeze(profile.uri === undefined ? base : { ...base, uri: replace('uri', profile.uri) });
+}
+
+/**
+ * The profile as it applies to one target system (D-12 `profileOverrides`): each override names the path of a placeholder and gives its value with its
+ * provenance, under the same value rules. Only placeholders can be set this way; the profile itself is not changed.
+ */
+export function withTargetOverrides(profile: LabelProfile, overrides: unknown): Parsed<LabelProfile> {
+  if (!isRecord(overrides)) return refused('wrong-type', '');
+  const leaves = new Map(profileLeaves(profile).map((entry) => [entry.path, entry.leaf]));
+  const replacements = new Map<string, ProfileLeaf>();
+  for (const path of Object.keys(overrides)) {
+    const current = leaves.get(path);
+    if (current === undefined) return refused('unknown-field', path);
+    if (!isPlaceholder(current)) return refused('not-allowed-here', path);
+    const leaf = parseLeaf(ownValue(overrides, path), path, path === 'uri' || path.endsWith('.uri') ? 'uri' : 'text');
+    if (!leaf.ok) return leaf;
+    replacements.set(path, leaf.value);
+  }
+  return { ok: true, value: mapLeaves(profile, (path, leaf) => replacements.get(path) ?? leaf) };
+}
