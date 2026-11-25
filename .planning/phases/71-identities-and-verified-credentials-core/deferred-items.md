@@ -11,3 +11,8 @@
   - `dist/test/autoApproval.test.js`, "the managed Open-GSD runtime's gsd-tools runs without an approval":
     - **Cause:** the approval prompt shortens the command it shows, and a long temporary path pushes the `gsd-evil` marker past the cut.
     - It passes under `/tmp` and under a mid-length path. Local only, no product issue.
+
+- **2026-11-24, 71-12, full root run.** `dist/test/staffReplicaHubMembership.test.js`, "not-a-roster-writer: a member's device cannot admit the hub; nothing is written", failed once with `PayloadError: Nothing was signed: the payload has a secret-like value at $.nonce.`
+  - **Cause:** `buildJoinRequest` (`src/domain/replica/invite.ts`) signs a random nonce, and `signPayload`'s secret-like value check (`src/domain/team/signedPayload.ts`) sometimes matches a random value. The test flakes at random.
+  - **Not 71's code;** a rerun of the file passed 48 of 48.
+  - **Proper fix (owner of the replica code):** exempt the nonce field by its known shape, or draw nonces in a form the check never matches. Do not loosen the test.

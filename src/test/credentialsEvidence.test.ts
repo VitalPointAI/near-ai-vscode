@@ -5,7 +5,7 @@ import test from 'node:test';
 import { credentialClock } from '../domain/credentials/clock';
 import { EVIDENCE_REFUSALS, checkEvidence } from '../domain/credentials/evidence';
 import type { EvidenceCitation, EvidenceContext } from '../domain/credentials/evidence';
-import { REVOCATIONS, SUSPENSIONS, issue, list, makeWorld, newKey } from './helpers/credentialWorld';
+import { REVOCATIONS, SUSPENSIONS, bindingWithPlaces, issue, list, makeWorld, newKey, withComputers } from './helpers/credentialWorld';
 import type { Issued, SignedList, World } from './helpers/credentialWorld';
 import { mulberry32 } from './helpers/teamEvents';
 
@@ -110,9 +110,14 @@ test('the entry must be signed with a key that was the member\'s then: a DID key
   assert.equal(reason(checkEvidence(s.citation, { ...s.context, memberKey: s.w.member.issuing.multikey })), 'ok');
   const laptop = newKey();
   assert.equal(reason(checkEvidence(s.citation, { ...s.context, memberKey: laptop.multikey })), 'member-key');
-  const binding = await issue(s.w.member.signer, s.w.member.did, 'DeviceBindingCredential', { id: laptop.did, device: `dev-${'b2'.repeat(16)}`, class: 'managed' });
+  // The member lists the laptop in one of their computer slots (D-25), so its binding counts.
+  const member = await withComputers(s.w.member, [{ slot: 1, device: laptop.did, revocation: 100_001, suspension: 100_002 }]);
+  const binding = await bindingWithPlaces(member, laptop.did, 100_001, 100_002);
   const citation = { ...s.citation, evidence: [...s.citation.evidence, binding.hash] };
-  const context = { ...s.context, credentials: { ...s.context.credentials, [binding.hash]: binding.credential }, memberKey: laptop.multikey };
+  const context = {
+    ...s.context, credentials: { ...s.context.credentials, [binding.hash]: binding.credential }, memberKey: laptop.multikey,
+    didState: { ...s.context.didState, states: { ...s.context.didState.states, [member.did]: member.state } }
+  };
   assert.equal(reason(checkEvidence(citation, context)), 'ok');
 });
 
@@ -193,4 +198,47 @@ test('credentialClock: the entry\'s time, never later than the hub saw it; offli
   assert.deepEqual(credentialClock(1000, undefined, 1500, 7), { at: 1500, source: 'bundle', counter: 7 });
   assert.deepEqual(credentialClock(2000, undefined, 1500), { at: 2000, source: 'entry' });
   assert.ok(Number.isNaN(credentialClock(Number.NaN, 900).at));
+});
+
+// D-25 and G467: a computer binding counts only when its places are in the computer part of the lists and the person's own DID document lists it in
+// one of at most five computer slots, so every verifier enforces the cap and an officer can always see, and revoke, every bound computer.
+async function laptopSetup(slots: (laptop: string) => Array<{ slot: number; device: string; revocation: number; suspension: number }>, places = { revocation: 100_001, suspension: 100_002 }) {
+  const s = await setup();
+  const laptop = newKey();
+  const member = await withComputers(s.w.member, slots(laptop.did));
+  const binding = await bindingWithPlaces(member, laptop.did, places.revocation, places.suspension);
+  const citation = { ...s.citation, evidence: [...s.citation.evidence, binding.hash] };
+  const context: EvidenceContext = {
+    ...s.context, credentials: { ...s.context.credentials, [binding.hash]: binding.credential }, memberKey: laptop.multikey,
+    didState: { ...s.context.didState, states: { ...s.context.didState.states, [member.did]: member.state } }
+  };
+  return { s, laptop, binding, citation, context };
+}
+
+test('G467: a computer binding the person signed with no computer slot in their DID document is refused', async () => {
+  const listed = await laptopSetup((laptop) => [{ slot: 1, device: laptop, revocation: 100_001, suspension: 100_002 }]);
+  assert.equal(reason(checkEvidence(listed.citation, listed.context)), 'ok', 'listed in slot 1: it counts');
+  const unlisted = await laptopSetup(() => []);
+  assert.equal(reason(checkEvidence(unlisted.citation, unlisted.context)), 'binding-not-in-slots');
+  // Listed with other places, or for another computer, is not this binding.
+  const otherPlaces = await laptopSetup((laptop) => [{ slot: 1, device: laptop, revocation: 100_005, suspension: 100_002 }]);
+  assert.equal(reason(checkEvidence(otherPlaces.citation, otherPlaces.context)), 'binding-not-in-slots');
+  const otherComputer = await laptopSetup(() => [{ slot: 1, device: newKey().did, revocation: 100_001, suspension: 100_002 }]);
+  assert.equal(reason(checkEvidence(otherComputer.citation, otherComputer.context)), 'binding-not-in-slots');
+});
+
+test('G467: a computer binding whose places are below 98,304 is refused, even when the person\'s DID document lists them', async () => {
+  const low = await laptopSetup((laptop) => [{ slot: 1, device: laptop, revocation: 4_000, suspension: 100_002 }], { revocation: 4_000, suspension: 100_002 });
+  assert.equal(reason(checkEvidence(low.citation, low.context)), 'binding-outside-computer-range');
+  const edge = await laptopSetup((laptop) => [{ slot: 1, device: laptop, revocation: 98_303, suspension: 98_304 }], { revocation: 98_303, suspension: 98_304 });
+  assert.equal(reason(checkEvidence(edge.citation, edge.context)), 'binding-outside-computer-range');
+});
+
+test('G467: a DID document with more than five computer slots counts none of them', async () => {
+  const many = await laptopSetup((laptop) => [1, 2, 3, 4, 5, 6].map((slot) => ({ slot, device: slot === 1 ? laptop : newKey().did, revocation: 100_000 + slot * 2 - 1, suspension: 100_000 + slot * 2 })));
+  assert.equal(reason(checkEvidence(many.citation, many.context)), 'binding-not-in-slots');
+  // A known binding (not cited) never makes a key the member's without a slot either.
+  const known = await laptopSetup(() => []);
+  const read = { ...known.context, credentials: known.s.context.credentials, didState: { ...known.context.didState, deviceBindings: [] } };
+  assert.equal(reason(checkEvidence(known.s.citation, read)), 'member-key');
 });

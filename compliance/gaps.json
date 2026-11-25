@@ -6053,7 +6053,7 @@
       ],
       "id": "G427",
       "ownerRole": "maintainers",
-      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer needs status list indexes from your organization's issuance setup (71-12); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
+      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer takes its status list places from the person's own computer slots (D-25, at most 5), which needs your organization's status lists in the session (G465); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
       "title": "People's identities are made but not yet published, and computers cannot be bound yet"
     },
     {
@@ -6259,6 +6259,33 @@
       "poam": "g464",
       "remediation": "assess() reads the visible text and the hidden parts it is given; white-on-white text, tiny fonts, PDF layers and office document metadata reach it only if the caller extracts them. Phase 74.3-03 extracts plain text, Markdown (HTML comments, zero-width text, image alt text, front matter) and staff product documents with their comments; ingested files of other formats are Phase 93's. Source: 70.1-CONTEXT.md D-19; research 3.6.",
       "title": "The classification engine sees only the hidden parts its caller extracts"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ia-05",
+        "sc-12",
+        "sc-17"
+      ],
+      "id": "G465",
+      "ownerRole": "maintainers",
+      "remediation": "Issuing, revoking and suspending credentials from an officer's own session are built and tested against fakes (Phase 71, 71-12), but a hosted session cannot use them yet, for four reasons. First, the session has no copy of your organization's credential rules: the issuer service and the inbox pickup read them from the hosted trust source of 71-13, which is not on main, so issuing refuses with a plain sentence and inbox items wait. Second, status lists are read from and put on your organization's server only through the officer's hub session, which needs Phase 33's hosted session keys (33-21 to 33-23). Third, the site does not set STERLING_STATUS_LIST_KEY (status-list-<siteName>) or STERLING_OPENBAO_ISSUER_ROLE for the workbench yet, and no site file names its credentialIssuers; Phase 47's site values must render both and the key ceremony runbook must name the officers. Fourth, the person's backend moves checked credentials into their own wallet folder in OpenBao (kv/users/<entity>/credentials-wallet/), which the extension's Wallet does not read yet; 71-13 joins the two. Close each when its dependency lands, and test issuance end to end against a real OpenBao and hub then.",
+      "title": "Credential issuance is built but not yet reachable in a hosted session"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "closesInPhase": "71",
+      "controls": [
+        "sc-05",
+        "si-04"
+      ],
+      "id": "G467",
+      "ownerRole": "maintainers",
+      "remediation": "Computer bindings are now checked by every verifier (D-26): a binding counts only when its status places are in the computer part of the lists and the person's own DID document lists it in one of at most five slots, and the HQ hub refuses a DID log whose computer uses another person's place. What is left is the limit on claiming computer places in OpenBao (kv/data/site/status-index/device-), which only keeps one person from using up the places others need: deploy/openbao/apply.mjs sets the rate limit quota computer-places (12 claims an hour per client address, then blocked for an hour, violations audited), and the alert ComputerPlaceClaimsLimited reads vault_quota_rate_limit_violation. That the quota matches the path prefix and counts each session pod's address separately comes from OpenBao's documentation and is not yet checked against a running OpenBao 2.7. Check it in the lab install (Phase 47): claim 13 places from one session, see the 13th refused, the counter rise and the alert fire; then close this gap.",
+      "title": "The limit on computer place claims is not yet checked against a running OpenBao"
     },
     {
       "appliesAt": "protected-a",

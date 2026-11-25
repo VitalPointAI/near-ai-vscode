@@ -35,6 +35,16 @@
               }
             },
             {
+              "alert": "ComputerPlaceClaimsLimited",
+              "expr": "sum by (pod) (increase(vault_quota_rate_limit_violation{job=\"openbao\", name=\"computer-places\"}[15m])) > 0",
+              "labels": { "severity": "warning", "source": "openbao" },
+              "annotations": {
+                "summary": "A session claimed more computer status places than the limit allows",
+                "description": "One session tried to claim more than 12 computer places in an hour (binding a computer claims two), so OpenBao blocked it for an hour (D-26, G467). Find the entity in the OpenBao audit log (rate limit quota computer-places, paths under kv/data/site/status-index/device-) and ask the person; a burst of claims may be someone using up the places other computers need.",
+                "runbook": "docs/security/hosted-audit.md#alerts"
+              }
+            },
+            {
               "alert": "OpenBaoMetricsTargetDown",
               "expr": "up{job=\"openbao\"} == 0",
               "for": "10m",

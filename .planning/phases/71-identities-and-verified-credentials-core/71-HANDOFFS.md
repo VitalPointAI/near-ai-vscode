@@ -15,7 +15,7 @@
   - (a) Put the tests at the flat level with a `credentials-` prefix, for example `workbench/test/credentials-identity-service.test.ts`, and update the plan's verify command and `71-VALIDATION.md`.
   - (b) Widen the runner to `dist/test/**/*.test.js` while keeping `dist/test/container/` out. This changes the workbench `test` script for every phase, so coordinate it first.
 - **Check after either fix:** the run's `ℹ tests` count includes the new file's tests. A test file that compiles but never runs would let a plan's verify step pass with nothing checked.
-- **Status:** 71-10 took option (a): `workbench/test/credentials-identity-service.test.ts`. Open for 71-12 and 71-13, which add their own flat `credentials-` files.
+- **Status:** 71-10 and 71-12 took option (a): `workbench/test/credentials-identity-service.test.ts`, `credentials-issuer-service.test.ts` and `credentials-issue-credential-card.test.ts`. Open for 71-13, which adds its own flat `credentials-` files.
 
 ## H-71-02: the command-line credential check lives at `deploy/tools/credential-check.mjs`, not `scripts/`
 
@@ -31,3 +31,13 @@
 - **Routes:** `GET|POST /v1/trust/did/<path>/did.jsonl`, `GET|PUT /v1/trust/did/<path>/did-witness.json`, `GET|PUT /v1/trust/status/<name>`, where a list's id in `credentials@1.statusLists` is `https://<host>/v1/trust/status/<name>`. Every route needs a hub session of a device whose member holds the `member` role at the hub's roster head; observers and guests get 403 `not-staff`.
 - **Settings:** `HUB_ORGANIZATION_POLICY` (absolute path of your organization's signed rules) and `HUB_ORGANIZATION_KEY` (its issuer key, 43 base64url characters). Without both, or when the rules do not verify or hold no `credentials` section, the trust routes answer 503 `no-policy` and the hub judges no evidence.
 - **For 33-23:** a person's backend has no hub session of its own; decision D-24 posts the person's first log through their first hub session. 33-23's hosted hub session calls `IdentityService.publishToHub` (`workbench/extension/src/node/credentials/identity-service.ts`) once it is open (G427).
+
+## H-71-04: what 71-13 plugs into the issuer service and the inbox pickup (71-12)
+
+- **Written by:** the 71-12 executor, 2026-11-24.
+- **The ports:** `createIssuerService` and `inboxVerifier` (`workbench/extension/src/node/credentials/issuer-service.ts`) take `policy()` (your organization's credentials@1 section and scales, verified) and `hub()` (the person's hub session: `getLog(path)`, `getList(name)`, `putList(name, text)`). The backend module binds both to `undefined` under the symbol `IssuerTrustId` (`credentials-backend-module.ts`). 71-13's hosted trust source rebinds `IssuerTrustId`; 33-23's hub session provides `hub()`. Nothing else changes.
+- **The hosted wallet folder:** the inbox pickup moves each checked credential to `kv/users/<entity>/credentials-wallet/<credential hash>` = `{ format: 'sterling-wallet-item/1', credential }`, written with the person's own session token. The issuer service reads an officer's role credentials from the same folder. The extension's `Wallet` (`src/gate/wallet.ts`) reads SecretStorage `near-ai.credentials` and does not read this folder yet: 71-13's hosted `TrustSource` and wallet must join the two (G465).
+- **Settings the site must render (Phase 47):** `STERLING_STATUS_LIST_KEY` (`status-list-<siteName>`, made by `deploy/openbao/apply.mjs`) and optionally `STERLING_OPENBAO_ISSUER_ROLE` (default `sterling-issuer-stepup`); the site file's `credentialIssuers` names the officers' Keycloak subjects (G465).
+- **Device bindings (D-25, owner 2026-11-25):** `bindComputer` takes its places from the person's own computer slots (`device-slots.ts`, at most 5) once `policy()` gives the status lists; officers' places stay below index 98,304. Residual risk G467.
+- **Status:** open, for 71-13 and Phase 47.
+- **For 71-13 (D-26):** the session's credential check must go through `checkEvidence` (or call `checkComputerBinding`), so a computer binding counts only when the person's DID document lists it. The person's backend publishes the longer log at the next hub session (`publishToHub`; `published` is set to false after a computer is listed).

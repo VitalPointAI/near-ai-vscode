@@ -27,10 +27,23 @@ export interface BoundComputerFile {
   readonly text: string;
 }
 
+/** A computer bound to the person (D-25): its slot (1 to 5), its fingerprint (dev-…), and when its slot was claimed. */
+export interface BoundComputer {
+  readonly slot: number;
+  readonly device: string;
+  readonly claimedAt: string;
+}
+
 export interface IdentityServiceRpc {
   status(): Promise<IdentityStatus>;
   retry(): Promise<IdentityStatus>;
   bindComputer(didKey: string, words: string, deviceClass: DeviceClass): Promise<ServiceResult<BoundComputerFile>>;
+  /** What arrived in the person's wallet at this session's start (71-12): sentences to show once; empty when nothing did. */
+  inboxNews(): Promise<readonly string[]>;
+  /** The person's bound computers (D-25): each slot with the computer's fingerprint and when it was bound. */
+  computers(): Promise<ServiceResult<readonly BoundComputer[]>>;
+  /** Files a lost-computer request in your organization's revocation inbox; an officer revokes that binding. */
+  reportLostComputer(slot: number): Promise<ServiceResult<{ readonly filed: boolean }>>;
 }
 
 /** Every sentence the identity service shows (D-21): plain, "your organization", nothing that asks for a credential. */
@@ -40,5 +53,9 @@ export const IDENTITY_TEXT = {
   wordsDiffer: 'The six words do not match the ones the computer shows. Check that you are binding the right computer.',
   notADevice: 'This is not a computer\'s identity. Copy it again from the Show This Computer\'s Identity command.',
   noStatusLists: 'Binding a computer needs your organization\'s status lists, which are not set up yet. Ask your organization\'s security officer.',
+  tooManyComputers: 'You already have 5 computers bound. Report one as lost, and once your organization\'s security officer revokes it you can bind another.',
+  noComputer: 'There is no computer bound in that place.',
+  lostFiled: 'Reported. Your organization\'s security officer revokes that computer\'s binding; until then it can still open what it holds offline.',
+  lostAlready: 'That computer is already reported as lost.',
   notPublished: 'Your organization\'s server did not take your identity. It is sent again at your next session.',
 } as const;

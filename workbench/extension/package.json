@@ -47,6 +47,7 @@
       "backend": "lib/node/key-service-backend-module"
     },
     {
+      "frontend": "lib/browser/credentials/credentials-frontend-module",
       "backend": "lib/node/credentials/credentials-backend-module"
     },
     {
