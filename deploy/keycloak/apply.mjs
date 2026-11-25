@@ -14,6 +14,9 @@
 // HQ brokering (D-36): identity provider hq is in every realm and off unless the per-site realm file turns hqBroker on (an edge site linked
 // to HQ). It is never the default: HQ is used only when a person picks it or a link names it (kc_idp_hint), and its first sign-in only links
 // the local person with the same email, never creates one. Local people keep signing in with their keys when the link is down.
+// Guests (D-58 to D-60): the top-level group guests carries no role, subgroup or attribute; the six guest life-cycle attributes are in the
+// user profile for administrators only; serves, nationality, organization and a security-contacts group are refused (they are credentials,
+// Phase 71); and no client or client scope puts a user attribute or a group into the access token (zero trust: Keycloak decides nothing).
 // --dry-run prints the checked realm's summary and installs nothing. Node built-ins only; helm from $HELM or PATH.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,6 +41,12 @@ export const HQ_SECRET_ENV = 'STERLING_HQ_BROKER_CLIENT_SECRET';
 export const HQ_PLACEHOLDER_ISSUER = 'https://hq.invalid/realms/sterling';
 const HQ_FIRST_LOGIN_STEPS = JSON.stringify([['idp-detect-existing-broker-user', 'REQUIRED'], ['idp-auto-link', 'REQUIRED']]);
 const ENV_SECRET = /^\$\(env:[A-Z0-9_]+\)$/;
+/** The group that makes an account a guest, and the guest life-cycle attributes (deploy/keycloak/guests.mjs; D-59). */
+export const GUESTS_GROUP = 'guests';
+export const GUEST_ATTRIBUTES = Object.freeze(['guestUntil', 'guestRequestedBy', 'guestApprovedBy', 'guestApprovalRef', 'guestEndedAt', 'guestEndedReason']);
+/** Protocol mappers that put a user attribute or a group into a token (access.token.claim defaults to true when absent). */
+export const CLAIM_MAPPERS = Object.freeze(['oidc-usermodel-attribute-mapper', 'oidc-group-membership-mapper', 'oidc-usermodel-aggregated-attribute-mapper',
+  'oidc-script-based-protocol-mapper']);
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
@@ -153,6 +162,36 @@ export function checkRealm(realm, settings) {
   let email;
   try { email = JSON.parse(profile?.config?.['kc.user.profile.config']?.[0] ?? '{}').attributes?.find((attribute) => attribute.name === 'email'); } catch { email = undefined; }
   need(JSON.stringify(email?.permissions?.edit) === JSON.stringify(['admin']), 'the user profile must let only administrators edit email');
+  // Guest accounts (D-58 to D-60): membership of guests makes a guest and grants nothing; Keycloak keeps only the guest life cycle, which
+  // only administrators see; how a guest serves, their nationality and organization are credentials (Phase 71), never Keycloak data.
+  let profileAttributes = [];
+  try { profileAttributes = JSON.parse(profile?.config?.['kc.user.profile.config']?.[0] ?? '{}').attributes ?? []; } catch { profileAttributes = []; }
+  const groups = realm.groups ?? [];
+  const guests = groups.find((group) => group.name === GUESTS_GROUP);
+  need(Boolean(guests) && (guests.path ?? `/${GUESTS_GROUP}`) === `/${GUESTS_GROUP}`, `the top-level group ${GUESTS_GROUP} must exist (it makes an account a guest)`);
+  if (guests) {
+    need((guests.realmRoles ?? []).length === 0, `${GUESTS_GROUP} must carry no realm role`);
+    need(Object.values(guests.clientRoles ?? {}).every((roles) => (roles ?? []).length === 0), `${GUESTS_GROUP} must carry no client role`);
+    need((guests.subGroups ?? []).length === 0, `${GUESTS_GROUP} must have no subgroup`);
+    need(Object.keys(guests.attributes ?? {}).length === 0, `${GUESTS_GROUP} must carry no attribute`);
+  }
+  const allGroups = (list) => list.flatMap((group) => [group, ...allGroups(group.subGroups ?? [])]);
+  need(!allGroups(groups).some((group) => group.name === 'security-contacts'), 'there must be no security-contacts group: who may approve guests is a SecurityContactCredential (Phase 71)');
+  for (const name of GUEST_ATTRIBUTES) {
+    const entry = profileAttributes.find((attribute) => attribute.name === name);
+    need(Boolean(entry), `${name} must be in the user profile (guest accounts)`);
+    if (entry) need(JSON.stringify(entry.permissions?.view) === '["admin"]' && JSON.stringify(entry.permissions?.edit) === '["admin"]', `${name}: only administrators may view or edit a guest attribute`);
+  }
+  for (const name of ['serves', 'nationality', 'organization']) need(!profileAttributes.some((attribute) => attribute.name === name), `${name} is a credential the security contact issues (Phase 71), not a Keycloak attribute`);
+  // Zero trust: no token carries an attribute or a group, so nothing can decide access from one.
+  const claimMappers = (owner, mappers) => {
+    for (const mapper of mappers ?? []) {
+      if (!CLAIM_MAPPERS.includes(mapper.protocolMapper)) continue;
+      need(mapper.config?.['access.token.claim'] === 'false', `${owner} puts a user attribute or a group into the access token (${mapper.name}); Keycloak decides nothing`);
+    }
+  };
+  for (const client of realm.clients ?? []) claimMappers(`client ${client.clientId}`, client.protocolMappers);
+  for (const scope of realm.clientScopes ?? []) claimMappers(`client scope ${scope.name}`, scope.protocolMappers);
   // Step-up levels (D-34): two levels, the step-up acr at level 2, its max age the site window.
   let loa = {};
   try { loa = JSON.parse(realm.attributes?.['acr.loa.map'] ?? '{}'); } catch { loa = {}; }

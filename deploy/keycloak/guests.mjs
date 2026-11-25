@@ -11,10 +11,16 @@
 //           status lists) for the approver's DID from the site's people directory. Every refusal comes before any Keycloak write. Then
 //           Keycloak mails the passwordless registration link (24 hours), unless --no-link.
 //   link    --user <name>                       sends the registration link again (not to an ended guest, one past its end, or one with two keys)
+//   extend  --user <name> --until <UTC time> --requested-by --approved-by --approver-credential --trust --approval-ref
+//           The same rules and approval as create; moves the end and shows the latest approval. An ended guest is enabled again, with its
+//           OpenBao entity if it has one. Refused for a guest holding a role, another group or an OpenBao policy.
 //   end     --user <name> --reason <text> [--no-sessions]
 //           Ends the guest now: Keycloak account disabled and its sessions ended, the end recorded, the OpenBao entity guest-<id> disabled
 //           (every token it holds stops at once) and the guest's Theia sessions stopped. An early end also files one revocation request in
 //           the site's revocation inbox, so the officers who issued the guest credentials revoke them in their own session. Nothing is deleted.
+//   list    one line per guest: username, end, status (pending-keys, active, overdue, ended), lead and approver
+//   expire  [--no-sessions] ends every guest past their end date, and fails closed on any guest holding a realm-management role, another
+//           group or an OpenBao policy or group (the automatic end runs the same function in the cluster, 47-20)
 //
 //   connection flags: --keycloak <https://keycloak.<domain>> --keycloak-token-file <file> [--realm sterling] --bao <https://openbao:8200>
 //                     --ca-file <site CA pem> --bao-token-file <file> (a token with policy guest-operator) --realm-site <realm site file>
@@ -271,6 +277,115 @@ export async function endGuest({ userId, reason, early = false, job = 'guests.mj
   return { steps, failures, request };
 }
 
+/** A guest's state (deploy/runbooks/guest-accounts.md): ended, overdue (past the end but still enabled), pending-keys (fewer than two keys) or active. */
+export function guestStatus(user, keyCount, now = Date.now()) {
+  if (user.enabled === false || attribute(user, 'guestEndedAt')) return 'ended';
+  const until = attribute(user, 'guestUntil');
+  if (!until || !(Date.parse(until) > now)) return 'overdue';
+  return keyCount < 2 ? 'pending-keys' : 'active';
+}
+
+/**
+ * What a guest must never hold (D-60, fail closed): a realm-management role, a group besides guests, or an OpenBao policy or group on its
+ * entity. Returns { reasons, entity } (entity null when the guest has none); a read that fails is thrown, so it is reported, never ignored.
+ */
+async function forbiddenHoldings({ keycloak, bao, userId, reasons = [] }) {
+  const mappings = answer(await keycloak('GET', `users/${enc(userId)}/role-mappings`), 'read role mappings') ?? {};
+  for (const role of mappings.clientMappings?.['realm-management']?.mappings ?? []) reasons.push(`holds the realm-management role ${role.name}`);
+  for (const group of await groupsOf(keycloak, userId)) if (group.path !== GUESTS_GROUP) reasons.push(`member of ${group.path}`);
+  const found = await bao('GET', `identity/entity/name/guest-${userId}`);
+  const entity = found.status === 404 ? null : ok(found, `read guest-${userId}`);
+  for (const policy of entity?.policies ?? []) reasons.push(`OpenBao entity holds the policy ${policy}`);
+  for (const group of entity?.direct_group_ids ?? entity?.group_ids ?? []) reasons.push(`OpenBao entity is in the group ${group}`);
+  return { reasons, entity };
+}
+
+/**
+ * Extends a guest under the create rules (D-63): a new end, the latest lead, approver and approval reference. An ended guest is enabled
+ * again with the ended attributes cleared, and its entity, if it has one, enabled again (read first; extend never creates an entity, enrol.mjs
+ * does). Refuses a guest who holds a role, another group or an OpenBao policy. Returns { user, entity: 'enabled again' | 'none' | 'unchanged' }.
+ */
+export async function extendGuest({ request, settings, keycloak, bao, checkCredential = credentialCheck, now = Date.now() }) {
+  const { problems, until } = checkGuestRequest(request, settings, now);
+  if (!request.user) problems.push('Name the guest\'s username with --user.');
+  if (problems.length) throw new GuestRefusal(problems.join('\n'));
+  const user = await findUser(keycloak, request.user);
+  if (!user?.id) throw new GuestRefusal(`There is no account named ${request.user}.`);
+  if (!isGuestGroups(await groupsOf(keycloak, user.id))) throw new GuestRefusal(`${request.user} is not a guest.`);
+  const { reasons, entity } = await forbiddenHoldings({ keycloak, bao, userId: user.id });
+  if (reasons.length) throw new GuestRefusal(`${request.user} cannot be extended: the account ${reasons.join('; ')}. Remove it first; a guest holds nothing but the group guests.`);
+  await checkApproval({ request, keycloak, bao, checkCredential, now });
+  const ended = user.enabled === false || Boolean(attribute(user, 'guestEndedAt'));
+  const { guestEndedAt, guestEndedReason, ...kept } = user.attributes ?? {};
+  answer(await keycloak('PUT', `users/${enc(user.id)}`, { ...user, enabled: ended ? true : user.enabled,
+    attributes: { ...kept, guestUntil: [until], guestRequestedBy: [request.requestedBy], guestApprovedBy: [request.approvedBy], guestApprovalRef: [request.approvalRef] } }), `extend ${request.user}`);
+  let entityResult = entity ? 'unchanged' : 'none';
+  if (ended && entity?.disabled) {
+    ok(await bao('POST', `identity/entity/name/guest-${user.id}`, { disabled: false }), `enable guest-${user.id}`);
+    entityResult = 'enabled again';
+  }
+  return { user: await findUser(keycloak, request.user), entity: entityResult };
+}
+
+/** The members of guests, with their attributes, page by page. */
+async function guestMembers(keycloak) {
+  const group = answer(await keycloak('GET', `group-by-path/${GUESTS_GROUP.slice(1)}`), 'find the group guests');
+  const members = [];
+  for (let first = 0; ; first += 100) {
+    const page = answer(await keycloak('GET', `groups/${enc(group.id)}/members?briefRepresentation=false&first=${first}&max=100`), 'list the guests') ?? [];
+    members.push(...page);
+    if (page.length < 100) return members;
+  }
+}
+
+/** One row per guest: { username, until, status, requestedBy, approvedBy }. Reads only. */
+export async function listGuests({ keycloak, now = Date.now() }) {
+  const rows = [];
+  for (const user of await guestMembers(keycloak)) {
+    const keys = countPasswordlessKeys(answer(await keycloak('GET', `users/${enc(user.id)}/credentials`), 'read credentials'));
+    rows.push({ username: user.username, until: attribute(user, 'guestUntil') ?? '', status: guestStatus(user, keys, now), requestedBy: attribute(user, 'guestRequestedBy') ?? '', approvedBy: attribute(user, 'guestApprovedBy') ?? '' });
+  }
+  return rows;
+}
+
+/**
+ * The end at the end date, and the fail-closed end (D-63): every enabled member of guests past guestUntil (or without one), and every one
+ * found with a realm-management role, another group or an OpenBao policy or group, is ended through endGuest. Each account is read again
+ * just before acting, and one whose end moved into the future (with nothing forbidden) is skipped. A fail-closed end before the end date is
+ * early, so it files a revocation request. Every guest is tried; failures are returned, not thrown. Returns { ended, skipped, failures }.
+ */
+export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), job = 'guests.mjs expire' }) {
+  const ended = [];
+  const skipped = [];
+  const failures = [];
+  for (const member of await guestMembers(keycloak)) {
+    if (member.enabled === false) continue;
+    const reasons = [];
+    try {
+      await forbiddenHoldings({ keycloak, bao, userId: member.id, reasons });
+    } catch (error) {
+      failures.push(`${member.username}: ${/OpenBao/.test(error.message) ? 'OpenBao' : 'Keycloak'}: ${error.message}`);
+    }
+    try {
+      const fresh = answer(await keycloak('GET', `users/${enc(member.id)}`), `read ${member.username} again`);
+      if (fresh.enabled === false) continue;
+      const until = attribute(fresh, 'guestUntil');
+      const due = !until || !(Date.parse(until) > now);
+      if (!due && !reasons.length) {
+        if (!attribute(member, 'guestUntil') || !(Date.parse(attribute(member, 'guestUntil')) > now)) skipped.push({ username: member.username, until });
+        continue;
+      }
+      const reason = due ? (until ? `end date ${until} passed` : 'no end date') : reasons.join('; ');
+      const result = await endGuest({ userId: member.id, reason: due && reasons.length ? `${reason}; ${reasons.join('; ')}` : reason, early: !due, job, keycloak, bao, sessions, now });
+      ended.push({ username: member.username, reason: due && reasons.length ? `${reason}; ${reasons.join('; ')}` : reason, steps: result.steps });
+      failures.push(...result.failures.map((failure) => `${member.username}: ${failure}`));
+    } catch (error) {
+      failures.push(`${member.username}: Keycloak: ${error.message}`);
+    }
+  }
+  return { ended, skipped, failures };
+}
+
 /** The CLI's sessions client: kubectl lists the Theia Cloud Session records of one namespace and deletes the guest's by name. */
 export function kubectlSessions(namespace, kubectl = process.env.KUBECTL || 'kubectl') {
   const run = (args) => {
@@ -288,12 +403,16 @@ export function kubectlSessions(namespace, kubectl = process.env.KUBECTL || 'kub
   };
 }
 
-export const SUBCOMMANDS = Object.freeze(['create', 'link', 'end']);
+export const SUBCOMMANDS = Object.freeze(['create', 'link', 'extend', 'end', 'list', 'expire']);
 const USAGE = `usage: guests.mjs <command> [flags] <connection flags>
   create --user <name> --email <address> --first <name> --last <name> --until <UTC time> --requested-by <lead>
          --approved-by <security contact> --approver-credential <file> --trust <folder> --approval-ref <reference> [--no-link]
   link   --user <name>
+  extend --user <name> --until <UTC time> --requested-by <lead> --approved-by <security contact> --approver-credential <file>
+         --trust <folder> --approval-ref <reference>
   end    --user <name> --reason <text> [--no-sessions]
+  list
+  expire [--no-sessions]
   connection flags: --keycloak <url> --keycloak-token-file <file> [--realm sterling] --bao <url> --ca-file <pem> --bao-token-file <file>
                     --realm-site <realm site file>`;
 
@@ -303,7 +422,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (!command || command === '--help' || argv.includes('--help')) { console.log(USAGE); process.exit(command ? 0 : 2); }
   try {
     if (!SUBCOMMANDS.includes(command)) throw new Error(USAGE);
-    const needed = ['--keycloak', '--keycloak-token-file', '--bao', '--ca-file', '--bao-token-file', '--user', ...(command === 'end' ? ['--reason'] : []), ...(command === 'create' ? ['--realm-site'] : [])];
+    const needed = ['--keycloak', '--keycloak-token-file', '--bao', '--ca-file', '--bao-token-file', ...(['list', 'expire'].includes(command) ? [] : ['--user']),
+      ...(command === 'end' ? ['--reason'] : []), ...(['create', 'extend'].includes(command) ? ['--realm-site'] : [])];
     const missing = needed.filter((flag) => !option(flag));
     if (missing.length) throw new Error(`${USAGE}\nmissing: ${missing.join(' ')}`);
     const caPem = readFileSync(option('--ca-file'), 'utf8');
@@ -313,15 +433,32 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const settings = guestSettings(realmSite);
     const username = option('--user');
     let exit = 0;
-    if (command === 'create') {
-      const request = { user: username, email: option('--email'), first: option('--first'), last: option('--last'), until: option('--until'),
+    const requestFlags = () => ({ user: username, email: option('--email'), first: option('--first'), last: option('--last'), until: option('--until'),
         requestedBy: option('--requested-by'), approvedBy: option('--approved-by'), approverCredential: option('--approver-credential'), trust: option('--trust'),
-        approvalRef: option('--approval-ref'), ...Object.fromEntries(CREDENTIAL_FIELDS.filter((field) => argv.includes(`--${field}`)).map((field) => [field, option(`--${field}`) ?? ''])) };
+        approvalRef: option('--approval-ref'), ...Object.fromEntries(CREDENTIAL_FIELDS.filter((field) => argv.includes(`--${field}`)).map((field) => [field, option(`--${field}`) ?? ''])) });
+    const sessionsClient = () => (argv.includes('--no-sessions') ? null : kubectlSessions(settings.sessionsNamespace));
+    if (command === 'create') {
+      const request = requestFlags();
       const { user, link } = await createGuest({ request, settings, keycloak, bao, noLink: argv.includes('--no-link') });
       console.log(`created guest ${user.username} (Keycloak id ${user.id}) until ${attribute(user, 'guestUntil')}, requested by ${request.requestedBy}, approved by ${request.approvedBy} (${request.approvalRef}).`);
       if (!link) console.log(`The account is ready. Send the registration link with ${NEXT_LINK(user.username)} when the guest is at the enrolment desk.`);
       else if (link.sent) console.log(link.message);
       else { console.error(link.message); exit = 1; }
+    } else if (command === 'extend') {
+      const request = requestFlags();
+      const { user, entity } = await extendGuest({ request, settings, keycloak, bao });
+      console.log(`extended ${user.username} until ${attribute(user, 'guestUntil')}, requested by ${request.requestedBy}, approved by ${request.approvedBy} (${request.approvalRef}); account enabled ${user.enabled}; OpenBao entity ${entity}.`);
+    } else if (command === 'list') {
+      const rows = await listGuests({ keycloak });
+      if (!rows.length) console.log('No guests at this site.');
+      for (const row of rows) console.log(`${row.username}\t${row.until || 'no end date'}\t${row.status}\trequested by ${row.requestedBy || '?'}\tapproved by ${row.approvedBy || '?'}`);
+    } else if (command === 'expire') {
+      const result = await expireGuests({ keycloak, bao, sessions: sessionsClient() });
+      for (const entry of result.ended) console.log(`ended ${entry.username}: ${entry.reason}`);
+      for (const entry of result.skipped) console.log(`skipped ${entry.username}: the end moved to ${entry.until}`);
+      for (const failure of result.failures) console.error(`failed: ${failure}`);
+      if (!result.ended.length && !result.failures.length) console.log('No guest is due to end.');
+      if (result.failures.length) exit = 1;
     } else if (command === 'link') {
       const { link } = await linkGuest({ username, keycloak });
       if (link.sent) console.log(link.message); else { console.error(link.message); exit = 1; }
@@ -329,7 +466,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const user = await findUser(keycloak, username);
       if (!user?.id) throw new GuestRefusal(`There is no account named ${username}.`);
       if (!isGuestGroups(await groupsOf(keycloak, user.id))) throw new GuestRefusal(`${username} is not a guest; this command ends guest accounts only.`);
-      const sessions = argv.includes('--no-sessions') ? null : kubectlSessions(settings.sessionsNamespace);
+      const sessions = sessionsClient();
       // Before the end date this is an early end; after it, the guest's credentials have ended on their own (validUntil is guestUntil).
       const early = Date.parse(attribute(user, 'guestUntil') ?? '') > Date.now();
       const result = await endGuest({ userId: user.id, reason: option('--reason'), early, job: 'guests.mjs end', keycloak, bao, sessions });

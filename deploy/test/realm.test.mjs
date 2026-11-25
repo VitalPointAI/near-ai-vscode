@@ -158,3 +158,53 @@ test('Keycloak renders from the locked official image, reaches Postgres with ver
   assert.doesNotMatch(yaml, /attestation-roots/, 'no attestation roots under passkeys');
   assert.throws(() => renderRelease(ROOT, keycloakx(), { site: HARDWARE, helm: HELM }), /sterling\.attestationRootsConfigMap .* is required/);
 });
+
+// Guest accounts (D-58 to D-60): the group guests carries nothing, Keycloak holds only the guest life cycle, and no token carries an attribute
+// or a group (zero trust: Keycloak authenticates and decides nothing).
+const profileOf = (copy) => {
+  const component = copy.components['org.keycloak.userprofile.UserProfileProvider'][0];
+  return { config: JSON.parse(component.config['kc.user.profile.config'][0]), save: (config) => { component.config['kc.user.profile.config'] = [JSON.stringify(config)]; } };
+};
+const changeProfile = (change) => (copy) => { const { config, save } = profileOf(copy); change(config); save(config); };
+const GUEST_ATTRIBUTE_NAMES = ['guestUntil', 'guestRequestedBy', 'guestApprovedBy', 'guestApprovalRef', 'guestEndedAt', 'guestEndedReason'];
+
+test('the group guests is top level and carries no role, subgroup or attribute; a missing or loaded guests group is refused', () => {
+  const { realm } = passkeys();
+  assert.deepEqual(realm.groups, [{ name: 'guests', path: '/guests', attributes: {}, realmRoles: [], clientRoles: {}, subGroups: [] }]);
+  assert.match(broken((copy) => { copy.groups = []; }).join('\n'), /group guests must exist/);
+  assert.match(broken((copy) => { copy.groups[0].realmRoles = ['offline_access']; }).join('\n'), /guests must carry no realm role/);
+  assert.match(broken((copy) => { copy.groups[0].clientRoles = { 'realm-management': ['view-users'] }; }).join('\n'), /guests must carry no client role/);
+  assert.match(broken((copy) => { copy.groups[0].subGroups = [{ name: 'vip', path: '/guests/vip' }]; }).join('\n'), /guests must have no subgroup/);
+  assert.match(broken((copy) => { copy.groups[0].attributes = { serves: ['industry'] }; }).join('\n'), /guests must carry no attribute/);
+});
+
+test('every guest attribute is in the user profile and only administrators view or edit it; the credential fields are not there', () => {
+  const { realm } = passkeys();
+  const { config } = profileOf(structuredClone(realm));
+  for (const name of GUEST_ATTRIBUTE_NAMES) {
+    const entry = config.attributes.find((attribute) => attribute.name === name);
+    assert.ok(entry, name);
+    assert.deepEqual(entry.permissions, { view: ['admin'], edit: ['admin'] }, name);
+    assert.equal(entry.group, 'guest', name);
+  }
+  assert.match(broken(changeProfile((profile) => { profile.attributes = profile.attributes.filter((attribute) => attribute.name !== 'guestUntil'); })).join('\n'), /guestUntil must be in the user profile/);
+  assert.match(broken(changeProfile((profile) => { profile.attributes.find((attribute) => attribute.name === 'guestApprovedBy').permissions.view = ['admin', 'user']; })).join('\n'), /guestApprovedBy.*only administrators/);
+  assert.match(broken(changeProfile((profile) => { profile.attributes.find((attribute) => attribute.name === 'guestEndedAt').permissions.edit = ['admin', 'user']; })).join('\n'), /guestEndedAt.*only administrators/);
+  for (const name of ['serves', 'nationality', 'organization']) {
+    assert.match(broken(changeProfile((profile) => { profile.attributes.push({ name, permissions: { view: ['admin'], edit: ['admin'] } }); })).join('\n'), new RegExp(`${name} is a credential`), name);
+  }
+});
+
+test('a security-contacts group is refused: who may approve guests is a SecurityContactCredential', () => {
+  assert.match(broken((copy) => { copy.groups.push({ name: 'security-contacts', path: '/security-contacts', attributes: {}, realmRoles: [], clientRoles: {}, subGroups: [] }); }).join('\n'), /security-contacts group/);
+  assert.match(broken((copy) => { copy.groups[0].subGroups = [{ name: 'security-contacts', path: '/guests/security-contacts' }]; }).join('\n'), /security-contacts group/);
+});
+
+test('no client or client scope puts a user attribute or a group into the access token', () => {
+  const attributeMapper = { name: 'serves', protocol: 'openid-connect', protocolMapper: 'oidc-usermodel-attribute-mapper', config: { 'user.attribute': 'serves', 'claim.name': 'serves', 'access.token.claim': 'true' } };
+  const groupMapper = { name: 'groups', protocol: 'openid-connect', protocolMapper: 'oidc-group-membership-mapper', config: { 'claim.name': 'groups' } };
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers.push(attributeMapper); }).join('\n'), /client sterling-sessions puts a user attribute or a group into the access token \(serves\)/);
+  assert.match(broken((copy) => { copy.clients[0].protocolMappers.push(groupMapper); }).join('\n'), /puts a user attribute or a group into the access token \(groups\)/, 'access.token.claim defaults to true');
+  assert.match(broken((copy) => { copy.clientScopes = [{ name: 'guest-claims', protocol: 'openid-connect', protocolMappers: [groupMapper] }]; }).join('\n'), /client scope guest-claims puts a user attribute or a group/);
+  assert.deepEqual(broken((copy) => { copy.clients[0].protocolMappers.push({ ...attributeMapper, config: { ...attributeMapper.config, 'access.token.claim': 'false' } }); }), []);
+});

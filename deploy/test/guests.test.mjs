@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { createGuest, endGuest, linkGuest, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
+import { checkGuestRequest, createGuest, endGuest, expireGuests, extendGuest, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
 import { enrolPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -48,6 +48,13 @@ function fakeKeycloak({ smtpHost = 'mail.site.example', emailStatus = 204 } = {}
       if (params.has('email')) return reply(200, all.filter((user) => user.email === params.get('email')).map((user) => structuredClone(user)));
       return reply(200, all.map((user) => structuredClone(user)));
     }
+    if (method === 'GET' && route === 'group-by-path/guests') return reply(200, { id: 'group-guests', path: '/guests', name: 'guests' });
+    if (method === 'GET' && route === 'groups/group-guests/members') {
+      const members = [...users.values()].filter((user) => groups.get(user.id).some((group) => group.path === '/guests'));
+      const first = Number(params.get('first') ?? 0);
+      const max = Number(params.get('max') ?? 100);
+      return reply(200, members.slice(first, first + max).map((user) => structuredClone(user)));
+    }
     if (method === 'POST' && route === 'users') {
       next += 1;
       const { groups: paths = [], ...rest } = body;
@@ -59,7 +66,8 @@ function fakeKeycloak({ smtpHost = 'mail.site.example', emailStatus = 204 } = {}
     const id = decodeURIComponent(match[1]);
     if (!users.has(id)) return reply(404, { error: 'User not found' });
     const sub = match[2];
-    if (!sub && method === 'GET') return reply(200, structuredClone(users.get(id)));
+    if (!sub && method === 'GET') { fake.beforeRead?.[id]?.(users.get(id)); return reply(200, structuredClone(users.get(id))); }
+    if (sub === 'role-mappings' && method === 'GET') return reply(200, structuredClone(fake.roles?.[id] ?? { realmMappings: [{ name: 'default-roles-sterling' }] }));
     if (!sub && method === 'PUT') { users.set(id, { ...structuredClone(body), id }); return reply(204); }
     if (sub === 'groups' && method === 'GET') return reply(200, structuredClone(groups.get(id)));
     if (sub === 'credentials' && method === 'GET') return reply(200, structuredClone(credentials.get(id)));
@@ -68,7 +76,8 @@ function fakeKeycloak({ smtpHost = 'mail.site.example', emailStatus = 204 } = {}
     return reply(404, { error: `unexpected ${method} ${apiPath}` });
   };
   const writes = () => calls.filter((call) => call.method !== 'GET');
-  return { keycloak, calls, users, groups, credentials, add, writes };
+  const fake = { keycloak, calls, users, groups, credentials, add, writes, roles: undefined, beforeRead: undefined };
+  return fake;
 }
 
 /** A fake OpenBao: entities by name, KV v2 with create-only writers (a second write is a 403, as OpenBao answers), the people directory. */
@@ -304,4 +313,153 @@ test('the link command exits 1, naming the mail settings and the next step, when
       close();
     }
   }
+});
+
+// ---- The guest rules locked (47-19 Task 2) ----
+
+const refusal = (change) => checkGuestRequest({ ...REQUEST, ...change }, SETTINGS, NOW).problems.join('\n');
+
+test('checkGuestRequest refuses each broken rule and accepts a good request', () => {
+  assert.deepEqual(checkGuestRequest(REQUEST, SETTINGS, NOW), { problems: [], until: UNTIL });
+  assert.match(refusal({ until: undefined }), /The end date is missing/);
+  assert.match(refusal({ until: '2026-12-20T17:00:00' }), /has no time zone/);
+  assert.match(refusal({ until: '2026-11-01T00:00:00Z' }), /is in the past/);
+  assert.match(refusal({ until: '2027-03-01T00:00:00Z' }), /The end date is more than 90 days away\. This site allows guests for at most 90 days \(guests\.maxDays\)\./);
+  assert.match(checkGuestRequest(REQUEST, { ...SETTINGS, maxDays: 0 }, NOW).problems.join('\n'), /Guests are off at this site\. Set guests\.maxDays in the realm site file\./);
+  assert.match(checkGuestRequest(REQUEST, {}, NOW).problems.join('\n'), /Guests are off at this site/);
+  assert.match(refusal({ approvedBy: undefined }), /security contact's approval/);
+  assert.match(refusal({ approverCredential: undefined }), /--approver-credential/);
+  assert.match(refusal({ approvalRef: undefined }), /--approval-ref/);
+  assert.match(refusal({ requestedBy: undefined }), /at a lead's request/);
+  for (const field of ['serves', 'nationality', 'organization']) assert.match(refusal({ [field]: 'industry' }), new RegExp(`--${field} is not kept in Keycloak any more: .* are credentials`), field);
+  assert.match(refusal({ approvedBy: 'lead.one' }), /someone other than the lead/);
+  assert.match(refusal({ approvedBy: 'ada.observer' }), /cannot approve their own account/);
+});
+
+test('create refuses, before any write, a failed SecurityContactCredential check, a disabled approver and a lead who is a guest', async () => {
+  for (const message of ['Whoever signed a cited credential did not have the authority to issue it.', 'This credential is about someone else.',
+    'A cited credential was not valid at the time of the entry.', 'A cited credential is revoked.']) {
+    const kc = fakeKeycloak();
+    const bao = fakeBao();
+    await assert.rejects(createGuest({ request: REQUEST, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: async () => ({ ok: false, message }), now: NOW }),
+      (error) => error instanceof GuestRefusal && error.message.includes(message));
+    assert.equal(kc.writes().length, 0, message);
+    assert.equal(bao.writes().length, 0, message);
+  }
+  const disabled = fakeKeycloak();
+  disabled.users.get(SEC).enabled = false;
+  const untouched = fakeBao();
+  await assert.rejects(createGuest({ request: REQUEST, settings: SETTINGS, keycloak: disabled.keycloak, bao: untouched.request, checkCredential: holds(), now: NOW }), /approver sec\.one's account is disabled/);
+  const guestLead = fakeKeycloak();
+  guestLead.groups.set(LEAD, [{ path: '/guests', name: 'guests' }]);
+  await assert.rejects(createGuest({ request: REQUEST, settings: SETTINGS, keycloak: guestLead.keycloak, bao: untouched.request, checkCredential: holds(), now: NOW }), /lead\.one is a guest/);
+  assert.equal(disabled.writes().length + guestLead.writes().length, 0);
+  assert.equal(untouched.calls.length, 0, 'no OpenBao call before the Keycloak checks pass');
+  // A rule refusal makes no call at all.
+  const quiet = fakeKeycloak();
+  const quietBao = fakeBao();
+  await assert.rejects(createGuest({ request: { ...REQUEST, until: '2027-06-01T00:00:00Z' }, settings: SETTINGS, keycloak: quiet.keycloak, bao: quietBao.request, checkCredential: holds(), now: NOW }), /more than 90 days/);
+  assert.equal(quiet.calls.length + quietBao.calls.length, 0);
+});
+
+const extendRequest = { ...REQUEST, until: '2027-01-15T17:00:00Z', approvalRef: 'VR-002' };
+
+test('extend follows the create rules, moves the end, and brings an ended guest and its entity back; it never creates an entity', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  enrolledGuest(kc, bao);
+  await endGuest({ userId: 'kc-ada', reason: 'paused', keycloak: kc.keycloak, bao: bao.request, sessions: null, now: NOW });
+  await assert.rejects(extendGuest({ request: { ...extendRequest, until: '2027-06-01T00:00:00Z' }, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /more than 90 days/);
+  await assert.rejects(extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: async () => ({ ok: false, message: 'A cited credential is revoked.' }), now: NOW }), /revoked/);
+  assert.equal(kc.users.get('kc-ada').enabled, false, 'refusals change nothing');
+  const result = await extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW });
+  const user = kc.users.get('kc-ada');
+  assert.equal(user.enabled, true);
+  assert.deepEqual(user.attributes, { guestUntil: ['2027-01-15T17:00:00Z'], guestRequestedBy: ['lead.one'], guestApprovedBy: ['sec.one'], guestApprovalRef: ['VR-002'] }, 'the ended attributes are cleared, the latest approval shown');
+  assert.equal(bao.entities.get('guest-kc-ada').disabled, false);
+  assert.equal(result.entity, 'enabled again');
+  // A guest without an entity: extend reads and leaves OpenBao alone.
+  kc.add({ id: 'kc-new', username: 'new.guest', email: 'guest-09@site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'] });
+  const before = bao.writes().length;
+  await extendGuest({ request: { ...extendRequest, user: 'new.guest' }, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW });
+  assert.equal(bao.writes().length, before);
+  assert.ok(!bao.entities.has('guest-kc-new'));
+});
+
+test('extend refuses a guest who holds a realm-management role, another group, or an OpenBao policy', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  enrolledGuest(kc, bao);
+  kc.groups.set('kc-ada', [{ path: '/guests', name: 'guests' }, { path: '/staff', name: 'staff' }]);
+  await assert.rejects(extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /member of \/staff/);
+  kc.groups.set('kc-ada', [{ path: '/guests', name: 'guests' }]);
+  kc.roles = { 'kc-ada': { clientMappings: { 'realm-management': { mappings: [{ name: 'manage-users' }] } } } };
+  await assert.rejects(extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /realm-management role manage-users/);
+  kc.roles = undefined;
+  bao.entities.get('guest-kc-ada').policies = ['sterling-admin'];
+  await assert.rejects(extendGuest({ request: extendRequest, settings: SETTINGS, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /policy sterling-admin/);
+  assert.equal(kc.writes().length, 0);
+});
+
+test('guestStatus: pending-keys, active, overdue and ended', () => {
+  const user = (attributes, enabled = true) => ({ enabled, attributes });
+  assert.equal(guestStatus(user({ guestUntil: [UNTIL] }), 1, NOW), 'pending-keys');
+  assert.equal(guestStatus(user({ guestUntil: [UNTIL] }), 2, NOW), 'active');
+  assert.equal(guestStatus(user({ guestUntil: ['2026-11-01T00:00:00Z'] }), 2, NOW), 'overdue');
+  assert.equal(guestStatus(user({}), 2, NOW), 'overdue', 'no end date counts as overdue');
+  assert.equal(guestStatus(user({ guestUntil: [UNTIL] }, false), 2, NOW), 'ended');
+  assert.equal(guestStatus(user({ guestUntil: [UNTIL], guestEndedAt: ['2026-11-20T00:00:00Z'] }), 2, NOW), 'ended');
+});
+
+test('list gives each guest with the end, status, lead and approver, and writes nothing', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  enrolledGuest(kc, bao);
+  kc.add({ id: 'kc-new', username: 'new.guest', email: 'guest-09@site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'], keys: ['k1'] });
+  const rows = await listGuests({ keycloak: kc.keycloak, now: NOW });
+  assert.deepEqual(rows.map((row) => [row.username, row.until, row.status, row.requestedBy, row.approvedBy]),
+    [['ada.observer', UNTIL, 'active', 'lead.one', 'sec.one'], ['new.guest', UNTIL, 'pending-keys', 'lead.one', 'sec.one']]);
+  assert.equal(kc.writes().length, 0);
+});
+
+test('expireGuests ends the overdue, fails closed on a role, a group or an OpenBao policy, and skips an end moved into the future', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  const sessions = fakeSessions();
+  const guest = (id, attributes, extra = {}) => {
+    kc.add({ id, username: id.replace('kc-', ''), email: `${id}@guests.site.example`, attributes: { ...structuredClone(GUEST_ATTRS), ...attributes } }, { groupPaths: ['/guests'], keys: ['k1', 'k2'], ...extra });
+    return bao.addEntity(`guest-${id}`, { metadata: { keycloak_user_id: id, account: 'guest' } });
+  };
+  guest('kc-late', { guestUntil: ['2026-11-24T11:00:00Z'] });
+  guest('kc-fine', {});
+  guest('kc-admin', {});
+  kc.roles = { 'kc-admin': { clientMappings: { 'realm-management': { mappings: [{ name: 'view-users' }] } } } };
+  guest('kc-grouped', {}, { groupPaths: ['/guests', '/staff'] });
+  guest('kc-policy', {}).policies = ['sterling-admin'];
+  guest('kc-moved', { guestUntil: ['2026-11-24T11:00:00Z'] });
+  kc.beforeRead = { 'kc-moved': (user) => { user.attributes.guestUntil = ['2026-12-31T00:00:00Z']; } };
+  const result = await expireGuests({ keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW, job: 'sterling-guest-expiry' });
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.ended.map((entry) => [entry.username, entry.reason]).sort(), [
+    ['admin', 'holds the realm-management role view-users'], ['grouped', 'member of /staff'], ['late', 'end date 2026-11-24T11:00:00Z passed'], ['policy', 'OpenBao entity holds the policy sterling-admin']].sort());
+  assert.deepEqual(result.skipped.map((entry) => entry.username), ['moved']);
+  for (const id of ['kc-late', 'kc-admin', 'kc-grouped', 'kc-policy']) assert.equal(kc.users.get(id).enabled, false, id);
+  for (const id of ['kc-fine', 'kc-moved']) assert.equal(kc.users.get(id).enabled, true, id);
+  assert.equal(sessions.stopped.length, 4);
+  // Fail-closed ends before the end date are early, so they file a revocation request; the date end does not.
+  const requests = [...bao.kv.keys()].filter((key) => key.includes('revocation-requests')).sort();
+  assert.deepEqual(requests, ['kv/data/site/revocation-requests/guest-kc-admin-guest-ended', 'kv/data/site/revocation-requests/guest-kc-grouped-guest-ended', 'kv/data/site/revocation-requests/guest-kc-policy-guest-ended']);
+  assert.equal(bao.kv.get(requests[0]).job, 'sterling-guest-expiry');
+});
+
+test('expireGuests still ends on the Keycloak side when OpenBao fails, reports the failure, and goes on to the next guest', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  for (const id of ['kc-one', 'kc-two']) kc.add({ id, username: id.slice(3), email: `${id}@guests.site.example`, attributes: { ...structuredClone(GUEST_ATTRS), guestUntil: ['2026-11-01T00:00:00Z'] } }, { groupPaths: ['/guests'] });
+  const sealed = async (method, apiPath, body) => (apiPath.startsWith('identity/') ? { status: 503, data: { errors: ['sealed'] } } : bao.request(method, apiPath, body));
+  const result = await expireGuests({ keycloak: kc.keycloak, bao: sealed, sessions: null, now: NOW });
+  assert.deepEqual(result.ended.map((entry) => entry.username).sort(), ['one', 'two']);
+  assert.equal(kc.users.get('kc-one').enabled, false);
+  assert.equal(kc.users.get('kc-two').enabled, false);
+  assert.ok(result.failures.length >= 2 && result.failures.every((failure) => /OpenBao/.test(failure)), JSON.stringify(result.failures));
 });
