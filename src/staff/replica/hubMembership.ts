@@ -67,7 +67,7 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'trade-off-not-confirmed': `Nothing was given to the hub, because the trade-off was not confirmed. Give the hub this part of the project only after reading and confirming this: ${HUB_GRANT_TRADE_OFF}`,
   'legacy-cell': 'This part of the project holds its history from before it was shared. It stays with the staff lead and the deputy lead only, so it is never given to the hub. Nothing was changed.',
   'above-hub-ceiling': 'This part of the project is labelled above the highest clearance you set for the hub, so it was not given to the hub. Nothing was changed.',
-  'hub-needs-post-quantum-keys': 'The hub needs post-quantum keys to read this part of the project. Ask the hub operator to publish the keys and try again.',
+  'hub-needs-post-quantum-keys': 'Your organization\'s server needs post-quantum keys to read this part of the project. Ask your administrator to publish them and try again.',
   'hub-holds-cell': 'The hub already holds this part of the project, so nothing was changed.',
   'cell-unknown': 'That part of the project is not in the roster, so nothing was given to the hub. Nothing was changed.',
   'no-hub': 'This project has no hub admitted, so nothing was changed. Admit your organization\'s hub first.',
