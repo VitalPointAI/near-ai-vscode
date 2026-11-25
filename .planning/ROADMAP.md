@@ -730,7 +730,7 @@ Plans:
 - [x] 44.1-05-PLAN.md: Tracer: one component's "Not applicable to this component" with its reason, from a signed rule to the real hosted level.
 - [ ] 44.1-06-PLAN.md: The full applicability rules from the catalogue, the generated map and its drift check, and your organization's stage 1 review.
 - [ ] 44.1-07-PLAN.md: The coverage measure and ratchet in the required docs job, the stage 1 sign-off, and the machinery gate.
-- [ ] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
+- [x] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
 - [ ] 44.1-09-PLAN.md: Supply-chain and inventory statements for every component, generated from the inventory with each component's evidence.
 - [ ] 44.1-10-PLAN.md: Extension statements and evidence.
 - [ ] 44.1-11-PLAN.md: Hub statements and evidence.
