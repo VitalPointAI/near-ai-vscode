@@ -7,6 +7,7 @@ import { whyNotDominated } from '../gate/dominance';
 import type { DominanceReason } from '../gate/dominance';
 import { LABEL_TOKEN_PATTERN, RELEASABILITY_NONE, RESERVED_EXPORT_COMPARTMENTS, labelKey, levelIndex, splitLabelKey } from '../gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../gate/labels';
+import type { Agreement } from '../gate/agreementsSection';
 import type { CredentialsSection } from '../gate/credentialsSection';
 import type { VerifiedCredential } from './profile';
 import { credentialTimeMs } from './types';
@@ -86,7 +87,26 @@ export function factsFrom(checked: readonly CheckedCredential[]): CredentialFact
   return facts;
 }
 
-/** Whether these facts were made by factsFrom (forged or hand-built facts are not). */
+/**
+ * A partner organization's facts from one agreement of your organization's signed policy (Phase 45.1, D-05): its level ceiling as the one threshold,
+ * its compartments and its releasability tokens, until it ends. An agreement is a policy record, never a credential; it is the holder an export is
+ * released to, so the export goes through the same mayRelease as every release. It names no person and no credential type, and covers no
+ * export-controlled kind (`regimes` is empty).
+ */
+export function factsFromAgreement(agreement: Agreement): CredentialFacts {
+  const ceiling = splitLabelKey(agreement.levelCeiling);
+  const until = Date.parse(agreement.until);
+  const facts: CredentialFacts = Object.freeze({
+    thresholds: Object.freeze(ceiling === undefined ? [] : [Object.freeze({ scale: ceiling.scale, level: ceiling.level })]),
+    compartments: sortedDistinct(agreement.compartments), tokens: sortedDistinct(agreement.tokens.filter((token) => token !== RELEASABILITY_NONE)),
+    regimes: Object.freeze([]), agreements: Object.freeze([agreement.id]), serves: Object.freeze([]), types: Object.freeze([]),
+    until: Number.isNaN(until) ? 0 : until
+  });
+  MADE.add(facts);
+  return facts;
+}
+
+/** Whether these facts were made by factsFrom or factsFromAgreement (forged or hand-built facts are not). */
 export function isCheckedFacts(facts: unknown): facts is CredentialFacts {
   return typeof facts === 'object' && facts !== null && MADE.has(facts);
 }
