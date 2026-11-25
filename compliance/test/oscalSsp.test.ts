@@ -70,3 +70,25 @@ test('every level SSP carrying the register inventory validates against OSCAL, w
   }
   assert.ok(items >= entries.length, 'every register entry appears in at least one level');
 });
+
+test('an excluded component gives its own reason as description, implementation status not-applicable and no export responsibilities (44.1-08, D-20)', () => {
+  const reasonText = 'Not applicable to this component: this control needs a component that keeps accounts for people or services (facet accounts); hub, keycloak and rke2 carry that here, and this component does not.';
+  const level = { id: 'hosted-protected-a', title: 'Hosted deployment: Protected A', profile: 'profiles/protected-a.json', components: ['hsm', 'keycloak'] };
+  const rows = [{ level: level.id, control: 'ac-02', state: 'not-met', reasonText: 'No statement yet.', components: [
+    { component: 'hsm', responsibility: 'not-applicable' as const, state: 'not-applicable', reason: 'component-not-applicable', reasonText, applicability: 'not-applicable' },
+    { component: 'keycloak', responsibility: 'shared' as const, state: 'not-met', reason: 'no-statement', reasonText: 'No statement yet.', applicability: 'implements' }
+  ] }];
+  const document: any = buildSsp({ level, rows, components: [] });
+  const [hsm, keycloak] = document['system-security-plan']['control-implementation']['implemented-requirements'][0]['by-components'];
+  assert.equal(hsm.description, reasonText);
+  assert.deepEqual(hsm['implementation-status'], { state: 'not-applicable' });
+  assert.equal(hsm.export, undefined);
+  assert.equal(keycloak.description, 'No product statement is available yet.');
+  assert.ok(keycloak.export, 'an applicable component keeps its export block');
+  assert.deepEqual(validateOscal(document, 'system-security-plan', { ours: true }), { ok: true, errors: [] });
+  // Unsigned, the same cell is Not met: it keeps the export block and never reads not-applicable.
+  const unsigned: any = buildSsp({ level, rows: [{ ...rows[0], components: [{ ...rows[0].components[0], state: 'not-met', reason: 'component-not-applicable-unreviewed', responsibility: 'shared' as const }, rows[0].components[1]] }], components: [] });
+  const unsignedHsm = unsigned['system-security-plan']['control-implementation']['implemented-requirements'][0]['by-components'][0];
+  assert.equal(unsignedHsm['implementation-status'].state, 'planned');
+  assert.ok(unsignedHsm.export);
+});
