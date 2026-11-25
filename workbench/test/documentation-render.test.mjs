@@ -78,7 +78,7 @@ test('a mermaid diagram is drawn to an inline SVG that follows the theme and loa
     '  Proxy --> Workbench["Workbench"]',
     '```',
   ].join('\n'));
-  assert.match(html, /<figure class="sterling-doc-diagram"><svg [^>]*role="img" aria-label="Diagram: How a request flows"/);
+  assert.match(html, /<figure class="sterling-doc-diagram" style="--sterling-diagram-width:\d+px"><svg [^>]*role="img" aria-label="Diagram: How a request flows"/);
   assert.match(html, /--bg:var\(--sterling-diagram-bg\);--fg:var\(--sterling-diagram-fg\)/);
   assert.match(html, /--_line:/, 'the derived colour variables move onto the SVG');
   assert.doesNotMatch(html, /fonts\.googleapis|@import|<style/);
@@ -142,7 +142,14 @@ test('the bundled guides with figures render them: three diagrams in the archite
   const renderer = createDocumentationRenderer({ root: repositoryRoot });
   const { readFile } = await import('node:fs/promises');
   const overview = renderer.render('docs-site/content/architecture/overview.md', await readFile(path.join(repositoryRoot, 'docs-site/content/architecture/overview.md'), 'utf8'));
-  assert.equal(overview.html.match(/<figure class="sterling-doc-diagram"><svg /g)?.length, 3);
+  // Each diagram carries its drawn width, so the view can shrink it only as far as its labels stay readable and scroll the rest
+  // (sterling-documentation.css); the SVG keeps its viewBox, so it scales with its aspect ratio.
+  const diagrams = [...overview.html.matchAll(/<figure class="sterling-doc-diagram" style="--sterling-diagram-width:(\d+)px"><svg [^>]*?viewBox="0 0 ([\d.]+) [\d.]+" width="([\d.]+)"/g)];
+  assert.equal(diagrams.length, 3, 'three diagrams, each with its drawn width and a viewBox');
+  for (const [, box, viewBox, drawn] of diagrams) {
+    assert.equal(Number(box), Math.ceil(Number(drawn)));
+    assert.equal(Number(viewBox), Number(drawn));
+  }
   assertNoRawSyntax(overview.html);
   const readme = renderer.render('README.md', await readFile(path.join(repositoryRoot, 'README.md'), 'utf8'));
   assert.equal(readme.html.match(/<img src="sterling-documentation\/[0-9a-f]{16}\.png"/g)?.length, 4);
