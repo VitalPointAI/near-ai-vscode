@@ -82,7 +82,13 @@ if (args[1] === 'list') {
 // D-07: the workbench user (uid 10001) reads the projection through a read-only bind mount,
 // so every file the refresh writes is 0644 and every folder it creates is 0755, whatever the umask.
 function refreshUnderUmask(from, to) {
-  return spawnSync('sh', ['-c', 'umask 077; exec "$0" "$@"', process.execPath, script.pathname, '--from-dir', from, '--site-dir', to], { encoding: 'utf8' });
+  // The child inherits this process's umask, so set 077 around the spawn instead of going through a shell.
+  const previous = process.umask(0o077);
+  try {
+    return spawnSync(process.execPath, [script.pathname, '--from-dir', from, '--site-dir', to], { encoding: 'utf8' });
+  } finally {
+    process.umask(previous);
+  }
 }
 const mode = (path) => (statSync(path).mode & 0o777).toString(8);
 function tree(path, files = [], folders = []) {

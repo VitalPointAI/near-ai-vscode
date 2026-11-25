@@ -151,7 +151,8 @@ export function registerStaffEditorBindings(
       view.picker = picker;
       picker.title = 'Who Wrote This';
       picker.items = rows.map(({ label, share }) => ({
-        label: label.replaceAll('$(', '\$('),
+        // Escape icon syntax so a person's label never renders as a codicon: '$(' becomes '\$('.
+        label: label.replaceAll('$(', '\\$('),
         description: `${Number((share * 100).toFixed(1))}% of text`
       }));
       picker.onDidAccept(() => picker.hide());
