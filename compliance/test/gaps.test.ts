@@ -227,11 +227,24 @@ test('a current verified acceptance makes its gap risk accepted until its expiry
   assert.deepEqual({ state: accepted.state, acceptedUntil: accepted.acceptedUntil }, { state: 'risk-accepted', acceptedUntil: '2026-12-01T00:00:00.000Z' });
 });
 test('an expired acceptance does not change the planned state', () => assert.equal(stateFor('G13', [], [{ id: 'ra', gap: 'G13', controls: ['sc-08', 'sr-11'], reason: 'Accepted.', namedPerson: { name: 'Owner', role: 'Owner' }, issuedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-11-20T00:00:00.000Z' }]).state, 'planned'));
-test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation path', () => {
+test('CPCSC evidence cannot close the same-identifier ITSP.10.171 remediation path, and neither ITSP.10.171 scope closes the other\'s action', () => {
   const control = 'itsp171-03.14.01';
   const cpcsc = { level: 'cpcsc-level-1', control, state: 'met' } as const;
-  assert.equal(stateFor('G305', [cpcsc]).state, 'planned');
-  assert.equal(stateFor('G305', [cpcsc, { level: 'itsp-10-171', control, state: 'met' }]).state, 'closed');
+  const row = (level: string, state: 'met' | 'not-met') => ({ level, control, state }) as const;
+  assert.equal(stateFor('G305', [cpcsc, row('itsp-10-171', 'not-met'), row('hosted-itsp-10-171', 'not-met')]).state, 'planned');
+  // The product and hosted overlays share one path per objective (44.1-03): with both overlays' rows present, as the dashboard has them, it
+  // closes only when both deployments' rows are met.
+  assert.equal(stateFor('G305', [cpcsc, row('itsp-10-171', 'met'), row('hosted-itsp-10-171', 'not-met')]).state, 'in-progress');
+  assert.equal(stateFor('G305', [cpcsc, row('itsp-10-171', 'not-met'), row('hosted-itsp-10-171', 'met')]).state, 'in-progress');
+  assert.equal(stateFor('G305', [cpcsc, row('itsp-10-171', 'met'), row('hosted-itsp-10-171', 'met')]).state, 'closed');
+});
+
+test('every ITSP.10.171 objective path is scoped either to CPCSC Level 1 alone or to the product and hosted ITSP.10.171 overlays together', () => {
+  const objective = gaps.filter((gap) => gap.controls.some((control) => control.startsWith('itsp171-')));
+  const scopes = new Map<string, string[]>();
+  for (const gap of objective) scopes.set(JSON.stringify(gap.profiles), [...(scopes.get(JSON.stringify(gap.profiles)) ?? []), gap.id]);
+  assert.deepEqual([...scopes.keys()].sort(), [JSON.stringify(['cpcsc-level-1']), JSON.stringify(['itsp-10-171', 'hosted-itsp-10-171'])].sort());
+  assert.equal(scopes.get(JSON.stringify(['itsp-10-171', 'hosted-itsp-10-171']))?.length, 89);
 });
 
 // Hosted verification records (48-05, VER-08, VER-09, D-24): every register row and section 10 row names a reference that
