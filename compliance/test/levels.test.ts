@@ -4,8 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkS
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { run as runBundleCommand } from '../src/commands/bundle.ts';
-import { loadApplicability } from '../src/applicability.ts';
+import { loadDashboardSources, run as runBundleCommand } from '../src/commands/bundle.ts';
 import { loadComponents } from '../src/components.ts';
 import { validateOurs } from '../src/validate.ts';
 const levelsFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'levels.json');
@@ -95,9 +94,9 @@ test('each hosted level and the hosted overlay list exactly the hosted component
 /**
  * The reasons a silent component may read (44.1, D-11, D-13): No statement yet or your organization's, unless the committed applicability map says
  * the component has no part, in which case it reads Not applicable to this component only while the map is signed for that level, and Not met with
- * component-not-applicable-unreviewed otherwise. The map is read from compliance/applicability/, so the expectation follows the committed rules.
+ * component-not-applicable-unreviewed otherwise. The map is loaded as the bundle loads it, so the expectation follows the committed rules and reviews.
  */
-const MAP = loadApplicability(path.join(ROOT, 'compliance', 'applicability'), readLevels().map((item) => item.id));
+const MAP = loadDashboardSources(path.join(ROOT, 'compliance')).applicability;
 function silentReasons(levelId: string, control: string, component: string): string[] {
   const record = MAP?.for(levelId, control, component);
   if (record?.class !== 'not-applicable') return ['no-statement', 'your-organization'];

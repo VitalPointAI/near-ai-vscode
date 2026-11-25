@@ -16,6 +16,7 @@ const COMMANDS = Object.freeze([
   'resolve-check',
   'site-export',
   'hosted-docs',
+  'applicability',
 ] as const);
 const commandName = /^[a-z][a-z0-9-]*$/;
 

@@ -3,19 +3,21 @@
 // section hash; unsigned or changed, it reads Not met. A row no component has a part in reads your organization's responsibility, never Not applicable.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildApplicabilityIndex, classify, componentSection, loadApplicability, type ApplicabilityReviews, type ApplicabilityRules } from '../src/applicability.ts';
+import { buildApplicabilityIndex, buildLock, classify, componentSection, loadApplicability, mapControls, mapProblems, renderPage, type ApplicabilityReviews, type ApplicabilityRules, type ComponentFacets, type MapSources } from '../src/applicability.ts';
+import { loadMapSources, run as runApplicability } from '../src/commands/applicability.ts';
 import { loadComponents } from '../src/components.ts';
 import { buildDashboard, type DashboardBuildInput, type DashboardComponentRow } from '../src/dashboard.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { selectedIds } from '../src/profiles.ts';
-import { loadResponsibilityTable } from '../src/responsibility.ts';
+import { loadResponsibilityTable, type ResponsibilityTable } from '../src/responsibility.ts';
 import { computeStatus } from '../src/status.ts';
 import { loadJson, validateOurs } from '../src/validate.ts';
 import type { StatusInput } from '../src/model.ts';
+import { lintText } from '../src/wordLint.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HEAD = 'a'.repeat(40);
@@ -206,4 +208,108 @@ test('a dashboard built with applicability passes the dashboard schema, with the
   const tampered = structuredClone(signed);
   tampered.rows[0].components[0].applicability = 'excluded';
   assert.equal(validateOurs(tampered, 'dashboard').ok, false);
+});
+
+// ---- 44.1-06: the generated map (lock, readable page, completeness and drift) ------------------------------------------------------------------
+
+const FAMILIES: ResponsibilityTable = {
+  families: { ac: { responsibility: 'shared', reason: 'r' }, at: { responsibility: 'your-organization', reason: 'r' }, sc: { responsibility: 'shared', reason: 'r' } },
+  exceptions: []
+};
+const mapSources = (overrides: Partial<MapSources> = {}): MapSources => ({
+  levels: [
+    { id: 'level-a', title: 'Level A', kind: 'level', claim: true, profile: 'profiles/a.json', components: ['hub', 'hsm', 'keycloak'], controls: ['ac-02', 'ac-02.01', 'ac-18', 'at-02', 'sc-13'] },
+    { id: 'level-b', title: 'Level B', kind: 'level', claim: true, profile: 'profiles/b.json', components: ['hub', 'relay'], controls: ['ac-02', 'sc-13'] },
+    { id: 'overlay', title: 'Overlay', kind: 'overlay', claim: true, profile: 'profiles/o.json', components: ['hub'], controls: ['3.1.1'] },
+    { id: 'appliance', title: 'Appliance', kind: 'level', claim: false, profile: 'profiles/c.json', components: ['appliance'], controls: ['ac-03'] }
+  ],
+  responsibilityTable: FAMILIES,
+  components: [{ id: 'hub', implemented: [] }, { id: 'hsm', implemented: [] }],
+  rules: rules({
+    facets: { cryptography: { words: 'uses or manages cryptographic keys' } },
+    components: {
+      relay: { role: 'The relay.', facets: { accounts: { class: 'supports', basis: 'relay basis.' } } },
+      hsm: { role: 'The HSM.', facets: { cryptography: { class: 'implements', basis: 'components/hsm.json: holds the seal key.' } } }
+    },
+    controls: { 'sc-13': { facets: ['cryptography'] } }
+  }),
+  ...overrides
+});
+
+test('buildLock: one sorted line per facet and in-scope control of each component, a section hash that ignores statements and moves with one facet', () => {
+  const sources = mapSources();
+  const lock = buildLock(sources);
+  assert.equal(lock.kind, 'lock');
+  assert.deepEqual(Object.keys(lock.components), ['hsm', 'hub', 'keycloak', 'relay'], 'overlay and claim-false components are not in the map');
+  assert.deepEqual(lock.components.hsm.lines, [
+    'facet cryptography implements: components/hsm.json: holds the seal key.',
+    'ac-02 not-applicable: this control needs a component that keeps accounts for people or services (facet accounts); hub, keycloak, relay and rke2 carry that here, and this component does not.',
+    'ac-02.01 not-applicable: this control needs a component that keeps accounts for people or services (facet accounts); hub, keycloak, relay and rke2 carry that here, and this component does not.',
+    'ac-18 not-applicable: this control needs a component that runs a wireless network (facet wireless); no component carries that here, and this component does not.',
+    'sc-13 implements'
+  ], 'your-organization families (at-02) are left out');
+  assert.deepEqual(lock.components.relay.lines, ['facet accounts supports: relay basis.', 'ac-02 supports', 'sc-13 not-applicable: this control needs a component that uses or manages cryptographic keys (facet cryptography); hsm carries that here, and this component does not.']);
+  for (const [component, entry] of Object.entries(lock.components)) assert.match(entry.sha256, /^[0-9a-f]{64}$/, component);
+  const withStatement = buildLock(mapSources({ components: [{ id: 'hsm', implemented: [{ control: 'ac-02', responsibility: 'shared', statements: [{ id: 'ac-02_smt', description: 'x' }] }] }] }));
+  assert.deepEqual(withStatement, lock, 'a statement never changes the lock');
+  const changed = mapSources();
+  const moved = buildLock({ ...changed, rules: { ...changed.rules, components: { ...changed.rules.components, relay: { role: 'The relay.', facets: { accounts: { class: 'implements', basis: 'relay basis.' } } } } } });
+  for (const component of Object.keys(lock.components)) {
+    if (component === 'relay') assert.notEqual(moved.components[component].sha256, lock.components[component].sha256);
+    else assert.equal(moved.components[component].sha256, lock.components[component].sha256, component);
+  }
+  assert.equal(lock.components.hsm.sha256, buildApplicabilityIndex(sources.rules, { kind: 'reviews', stages: [] }, mapControls(sources.levels, FAMILIES)).sectionHash('hsm'), 'the lock hash is the hash the dashboard checks');
+});
+
+test('the generator refuses a shared-family control no rule covers, naming the control and its profile, and a component with no rule entry', () => {
+  const sources = mapSources();
+  const uncovered = { ...sources, levels: [{ ...sources.levels[0], controls: [...sources.levels[0].controls, 'sc-28'] }] };
+  assert.throws(() => buildLock(uncovered), /sc-28, selected by profiles\/a\.json/);
+  const missing = { ...sources, levels: [{ ...sources.levels[0], components: [...sources.levels[0].components, 'ingress'] }] };
+  assert.throws(() => buildLock(missing), /component ingress has no entry/);
+  assert.deepEqual(mapProblems(sources), []);
+});
+
+test('the page lists each component\'s classes with reasons, the rows no component has a part in, and the statements outside the map', () => {
+  const sources = mapSources({ components: [{ id: 'hsm', implemented: [{ control: 'ac-02', responsibility: 'shared', statements: [{ id: 'ac-02_smt.hsm', description: 'x' }] }] }] });
+  const page = renderPage(buildLock(sources), sources);
+  assert.match(page, /^# Component applicability map/);
+  assert.match(page, /### hsm[\s\S]*\*\*Implements\*\* \(1\): sc-13[\s\S]*\*\*Not applicable to this component\*\* \(3\):\n\n- ac-02, ac-02\.01: this control needs a component that keeps accounts/);
+  assert.match(page, /### relay[\s\S]*\*\*Supports\*\* \(1\): ac-02/);
+  assert.match(page, /### Level A \(`level-a`\)\n\n1 control: ac-18\./);
+  assert.match(page, /### Level B \(`level-b`\)\n\n1 control: sc-13\./);
+  assert.match(page, /## Statements outside the map[\s\S]*- hsm, ac-02: ac-02_smt\.hsm/);
+  assert.deepEqual(lintText(page), [], 'the page passes the word lint');
+  assert.doesNotMatch(page, /Overlay|Appliance/);
+});
+
+test('applicability --check exits 1 on a stale lock or page and prints the first differing line, and 0 once written', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'applicability-root-'));
+  const real = path.join(ROOT);
+  mkdirSync(path.join(root, 'compliance'), { recursive: true });
+  mkdirSync(path.join(root, 'docs', 'security'), { recursive: true });
+  for (const entry of ['levels.json', 'profiles', 'components', 'responsibility', 'catalogs']) symlinkSync(path.join(real, entry), path.join(root, 'compliance', entry));
+  // Rules that cover every in-scope control of the real levels: every base control needs `accounts`, every listed component has an entry.
+  const sources = loadMapSources(path.resolve(ROOT, '..'));
+  const controls = mapControls(sources.levels, sources.responsibilityTable);
+  const components = [...new Set(sources.levels.filter((entry) => entry.claim !== false && entry.kind !== 'overlay').flatMap((entry) => entry.components))];
+  const full: ApplicabilityRules = { kind: 'rules', facets: { accounts: { words: 'keeps accounts for people or services' } },
+    components: Object.fromEntries(components.map((component): [string, ComponentFacets] => [component, { role: component, facets: component === 'hub' ? { accounts: { class: 'implements', basis: 'hub basis.' } } : {} }])),
+    controls: Object.fromEntries([...new Set(controls.map((control) => control.replace(/\.\d+$/, '')))].map((control) => [control, { facets: ['accounts'] }])), overrides: [] };
+  mkdirSync(path.join(root, 'compliance', 'applicability'));
+  writeFileSync(path.join(root, 'compliance', 'applicability', 'rules.json'), `${JSON.stringify(full, null, 2)}\n`);
+  writeFileSync(path.join(root, 'compliance', 'applicability', 'reviews.json'), '{ "kind": "reviews", "stages": [] }\n');
+  const io = () => { const lines: string[] = []; return { lines, stdout: (text: string) => { lines.push(text); }, stderr: (text: string) => { lines.push(text); } }; };
+  const missing = io();
+  assert.equal(await runApplicability(['--check', '--root', root], missing), 1);
+  assert.match(missing.lines.join(''), /map\.lock\.json: missing/);
+  assert.equal(await runApplicability(['--write', '--root', root], io()), 0);
+  const current = io();
+  assert.equal(await runApplicability(['--check', '--root', root], current), 0, current.lines.join(''));
+  const lockFile = path.join(root, 'compliance', 'applicability', 'map.lock.json');
+  writeFileSync(lockFile, readFileSync(lockFile, 'utf8').replace('facet accounts implements: hub basis.', 'facet accounts implements: edited by hand.'));
+  const stale = io();
+  assert.equal(await runApplicability(['--check', '--root', root], stale), 1);
+  assert.match(stale.lines.join(''), /map\.lock\.json:\d+: expected .*hub basis/);
+  assert.equal(await runApplicability(['--root', root], io()), 2, 'a mode is required');
 });

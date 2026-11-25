@@ -6,7 +6,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import type { ApplicabilityClass, ApplicabilityRecord } from './model.ts';
+import type { ApplicabilityClass, ApplicabilityRecord, ComponentInput } from './model.ts';
+import type { ResponsibilityTable } from './responsibility.ts';
 import { loadJson, validateOurs } from './validate.ts';
 
 export type FacetClass = Exclude<ApplicabilityClass, 'not-applicable'>;
@@ -118,17 +119,18 @@ export function canonicalJson(value: unknown): string {
 }
 
 /**
- * One component's section: its facets with their basis, and its class and reason in every control the rules or its overrides name, sorted. The
- * SHA-256 is over the canonical JSON. Adding a statement never changes it; changing a facet, a rule, an override or a reason does (D-11).
+ * One component's section: its facets with their basis, and its class and reason in every control the rules, its overrides or the map's in-scope
+ * controls (`controls`, from `mapControls`) name, sorted. The SHA-256 is over the canonical JSON. Adding a statement never changes it; changing a
+ * facet, a rule, an override or a reason does, and so does a profile change that brings a new control into scope (D-11).
  */
-export function componentSection(rules: ApplicabilityRules, component: string): { readonly section: ComponentSection; readonly sha256: string } {
-  const named = new Set([...Object.keys(rules.controls), ...rules.overrides.filter((entry) => entry.component === component).map((entry) => entry.control)]);
-  const controls = [...named].sort().flatMap((control) => {
+export function componentSection(rules: ApplicabilityRules, component: string, controls: readonly string[] = []): { readonly section: ComponentSection; readonly sha256: string } {
+  const named = new Set([...Object.keys(rules.controls), ...rules.overrides.filter((entry) => entry.component === component).map((entry) => entry.control), ...controls]);
+  const classified = [...named].sort().flatMap((control) => {
     const decision = classify(rules, component, control);
     return decision ? [[control, decision.class, decision.reason] as const] : [];
   });
   const facets = Object.hasOwn(rules.components, component) ? rules.components[component].facets : {};
-  const section: ComponentSection = { component, facets, controls };
+  const section: ComponentSection = { component, facets, controls: classified };
   return { section, sha256: createHash('sha256').update(canonicalJson(section)).digest('hex') };
 }
 
@@ -147,11 +149,11 @@ export function isReviewed(reviews: ApplicabilityReviews, level: string, compone
   return reviews.stages.some((stage) => stage.levels.includes(level) && Object.hasOwn(stage.components, component) && stage.components[component] === currentHash);
 }
 
-export function buildApplicabilityIndex(rules: ApplicabilityRules, reviews: ApplicabilityReviews): ApplicabilityIndex {
+export function buildApplicabilityIndex(rules: ApplicabilityRules, reviews: ApplicabilityReviews, controls: readonly string[] = []): ApplicabilityIndex {
   const hashes = new Map<string, string>();
   const sectionHash = (component: string): string => {
     let hash = hashes.get(component);
-    if (hash === undefined) { hash = componentSection(rules, component).sha256; hashes.set(component, hash); }
+    if (hash === undefined) { hash = componentSection(rules, component, controls).sha256; hashes.set(component, hash); }
     return hash;
   };
   return {
@@ -199,7 +201,7 @@ function checkReferences(rules: ApplicabilityRules, reviews: ApplicabilityReview
  * Loads compliance/applicability/ into an index, or returns undefined when the folder does not exist (the dashboard is then built as before). Every
  * file is validated against applicability.schema.json; a file that fails, a missing rules file or a reference problem throws.
  */
-export function loadApplicability(dir: string, levelIds: readonly string[]): ApplicabilityIndex | undefined {
+export function loadApplicability(dir: string, levelIds: readonly string[], controls: readonly string[] = []): ApplicabilityIndex | undefined {
   if (!existsSync(dir) || !statSync(dir).isDirectory()) return undefined;
   const documents = new Map<string, unknown>();
   for (const name of readdirSync(dir).filter((file) => file.endsWith('.json')).sort()) {
@@ -216,5 +218,194 @@ export function loadApplicability(dir: string, levelIds: readonly string[]): App
   if (reviews.kind !== 'reviews') throw new Error(`${path.join(dir, APPLICABILITY_FILES.reviews)}: not kind reviews`);
   const problems = checkReferences(rules, reviews, levelIds);
   if (problems.length) throw new Error(`${dir}: ${problems.join('; ')}`);
-  return buildApplicabilityIndex(rules, reviews);
+  return buildApplicabilityIndex(rules, reviews, controls);
 }
+
+// ---- The generated map (44.1-06, D-08 to D-10) ----------------------------------------------------------------------------------------------
+
+/** A level as the map reads it: its selected controls and the components it assesses. */
+export interface MapLevel {
+  readonly id: string;
+  readonly title: string;
+  readonly kind?: 'level' | 'overlay';
+  readonly claim?: boolean;
+  readonly profile: string;
+  readonly components: readonly string[];
+  readonly controls: readonly string[];
+}
+
+/** Everything the generator reads. */
+export interface MapSources {
+  readonly levels: readonly MapLevel[];
+  readonly responsibilityTable: ResponsibilityTable;
+  readonly components: readonly ComponentInput[];
+  readonly rules: ApplicabilityRules;
+}
+
+/** compliance/applicability/map.lock.json: per component, the section hash and one line per facet and per in-scope control. */
+export interface ApplicabilityLock {
+  readonly kind: 'lock';
+  readonly components: Readonly<Record<string, { readonly sha256: string; readonly lines: readonly string[] }>>;
+}
+
+/** The stages your organization signs, in order (D-12). Stage 3 (the appliance and the overlays) is 44.1-24's. */
+export const STAGE_LEVELS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  'stage-1': ['unclassified', 'protected-a', 'hosted-protected-a'],
+  'stage-2': ['protected-b', 'hosted-protected-b']
+});
+
+/** The levels the map covers: claim-true levels, not overlays (the appliance and the overlays are stage 3, 44.1-24). */
+export function mapLevels(levels: readonly MapLevel[]): MapLevel[] {
+  return levels.filter((level) => level.claim !== false && level.kind !== 'overlay');
+}
+
+/** A control is in the map's scope when its family (or a whole-control exception) is the product's or shared; your organization's families stay as they are. */
+function inScope(control: string, table: ResponsibilityTable): boolean {
+  const exception = table.exceptions.find((entry) => entry.control === control && entry.component === undefined);
+  const family = Object.hasOwn(table.families, control.split('-')[0]) ? table.families[control.split('-')[0]] : undefined;
+  const responsibility = exception?.responsibility ?? family?.responsibility ?? 'product';
+  return responsibility === 'product' || responsibility === 'shared';
+}
+
+/** The in-scope controls of one level, sorted. */
+export function levelMapControls(level: MapLevel, table: ResponsibilityTable): string[] {
+  return [...new Set(level.controls)].filter((control) => inScope(control, table)).sort();
+}
+
+/** Every in-scope control of every level the map covers, sorted: the controls each component's section is computed over. */
+export function mapControls(levels: readonly MapLevel[], table: ResponsibilityTable): string[] {
+  return [...new Set(mapLevels(levels).flatMap((level) => levelMapControls(level, table)))].sort();
+}
+
+/** What keeps the map from being complete (D-08, D-09): a component with no entry in the rules, and a control no rule covers, named with its profile. */
+export function mapProblems(sources: MapSources): string[] {
+  const problems: string[] = [];
+  const levels = mapLevels(sources.levels);
+  for (const component of [...new Set(levels.flatMap((level) => level.components))].sort()) {
+    if (!Object.hasOwn(sources.rules.components, component)) problems.push(`component ${component} has no entry in the applicability rules`);
+  }
+  const reported = new Set<string>();
+  for (const level of levels) for (const control of levelMapControls(level, sources.responsibilityTable)) {
+    if (controlRule(sources.rules, control)) continue;
+    const key = `${control} ${level.profile}`;
+    if (reported.has(key)) continue;
+    reported.add(key);
+    problems.push(`control ${control}, selected by ${level.profile}, is covered by no applicability rule`);
+  }
+  return problems;
+}
+
+const lockLine = (control: string, decision: ApplicabilityDecision): string => `${control} ${decision.class}${decision.reason ? `: ${decision.reason}` : ''}`;
+
+/**
+ * Builds the lock: for each component of the covered levels, its section hash (the hash a review signs) and one line per facet, then one line per
+ * in-scope control of its levels with its class and reason. Throws on any map problem, so a new control cannot arrive unclassified (D-09).
+ */
+export function buildLock(sources: MapSources): ApplicabilityLock {
+  const problems = mapProblems(sources);
+  if (problems.length) throw new Error(`the applicability map is incomplete: ${problems.join('; ')}`);
+  const levels = mapLevels(sources.levels);
+  const controls = mapControls(sources.levels, sources.responsibilityTable);
+  const components: Record<string, { sha256: string; lines: string[] }> = {};
+  for (const component of [...new Set(levels.flatMap((level) => level.components))].sort()) {
+    const own = [...new Set(levels.filter((level) => level.components.includes(component)).flatMap((level) => levelMapControls(level, sources.responsibilityTable)))].sort();
+    const facets = Object.entries(sources.rules.components[component].facets).sort(([a], [b]) => a.localeCompare(b)).map(([facet, entry]) => `facet ${facet} ${entry.class}: ${entry.basis}`);
+    const lines = own.map((control) => lockLine(control, classify(sources.rules, component, control)!));
+    components[component] = { sha256: componentSection(sources.rules, component, controls).sha256, lines: [...facets, ...lines] };
+  }
+  return { kind: 'lock', components };
+}
+
+/** True when a component has a statement for the control: it then has a part whatever the rules say (D-08). */
+function stated(sources: MapSources, component: string, control: string): boolean {
+  return sources.components.find((entry) => entry.id === component)?.implemented.some((requirement) => requirement.control === control && requirement.statements.length > 0) ?? false;
+}
+
+/** Statements on pairs the rules give no part: the generator lists them for review (D-08). */
+export function statementsOutsideMap(sources: MapSources): { readonly component: string; readonly control: string; readonly statements: readonly string[] }[] {
+  const found: { component: string; control: string; statements: string[] }[] = [];
+  const covered = new Set(mapLevels(sources.levels).flatMap((level) => level.components));
+  for (const component of sources.components) {
+    if (!covered.has(component.id)) continue;
+    for (const requirement of component.implemented) {
+      if (requirement.statements.length === 0 || classify(sources.rules, component.id, requirement.control)?.class !== 'not-applicable') continue;
+      found.push({ component: component.id, control: requirement.control, statements: requirement.statements.map((statement) => statement.id) });
+    }
+  }
+  return found.sort((a, b) => a.component.localeCompare(b.component) || a.control.localeCompare(b.control));
+}
+
+/** Per covered level: its cells with a part, its cells not applicable to their component, and the in-scope controls no component has a part in. */
+export function levelSummaries(sources: MapSources): { readonly level: MapLevel; readonly applicable: number; readonly notApplicable: number; readonly noPart: readonly string[] }[] {
+  return mapLevels(sources.levels).map((level) => {
+    let applicable = 0;
+    let notApplicable = 0;
+    const noPart: string[] = [];
+    for (const control of levelMapControls(level, sources.responsibilityTable)) {
+      let parts = 0;
+      for (const component of level.components) {
+        if (stated(sources, component, control) || classify(sources.rules, component, control)?.class !== 'not-applicable') { applicable++; parts++; } else notApplicable++;
+      }
+      if (parts === 0) noPart.push(control);
+    }
+    return { level, applicable, notApplicable, noPart };
+  });
+}
+
+const PAGE_HEAD = [
+  '# Component applicability map',
+  '',
+  '<!-- Generated by `node compliance/src/cli.ts applicability --write` from compliance/applicability/rules.json. Do not edit by hand; `applicability --check` fails on any difference. -->',
+  '',
+  'This page says, for each component the product and hosted levels assess, which controls it implements, supports or has no part in, and why. It is derived by rules from the component catalogue (`compliance/applicability/rules.json`): each component carries facets, short facts about what it is, each with the catalogue entry or code it rests on, and each control names the facets that give a component a part in it.',
+  '',
+  'Your organization reviews this map. A component\'s cell reads "Not applicable to this component" with its reason only at a level whose review in `compliance/applicability/reviews.json` lists the component with the section SHA-256 shown below. When a section changes, its cells read Not met until your organization signs it again. A row no component has a part in reads "Your organization\'s responsibility", never Not applicable. The map says what each component is; it does not say that any control is met, and the decision to authorize a deployment remains your organization\'s.',
+  '',
+  'The families that are wholly your organization\'s (AT, CA, MA, MP, PE, PM, PS, PT), the Classified appliance and the overlays are not part of this map.'
+];
+
+const controlList = (controls: readonly string[]): string => controls.length ? controls.join(', ') : 'none';
+const stageOf = (id: string): string => Object.entries(STAGE_LEVELS).find(([, levels]) => levels.includes(id))?.[0].replace('stage-', '') ?? '-';
+
+/** The readable map for your organization's review and the assessor package (D-10). */
+export function renderPage(lock: ApplicabilityLock, sources: MapSources): string {
+  const out: string[] = [...PAGE_HEAD, '', '## Levels', '', '| Level | Stage | Components | Cells with a part | Cells not applicable to their component | Rows no component has a part in |', '|---|---|---|---|---|---|'];
+  const summaries = levelSummaries(sources);
+  for (const { level, applicable, notApplicable, noPart } of summaries) out.push(`| ${level.title} (\`${level.id}\`) | ${stageOf(level.id)} | ${level.components.length} | ${applicable} | ${notApplicable} | ${noPart.length} |`);
+  out.push('', '## Facets', '', '| Facet | A component that... |', '|---|---|');
+  for (const [facet, entry] of Object.entries(sources.rules.facets).sort(([a], [b]) => a.localeCompare(b))) out.push(`| \`${facet}\` | ${entry.words} |`);
+  out.push('', '## Components');
+  for (const [component, entry] of Object.entries(lock.components)) {
+    const rule = sources.rules.components[component];
+    const implementsList: string[] = [];
+    const supportsList: string[] = [];
+    const excluded = new Map<string, string[]>();
+    for (const text of entry.lines) {
+      const match = /^(\S+) (implements|supports|not-applicable)(?:: (.*))?$/.exec(text);
+      if (!match || text.startsWith('facet ')) continue;
+      const [, control, cls, reason = ''] = match;
+      if (cls === 'not-applicable') excluded.set(reason, [...(excluded.get(reason) ?? []), control]);
+      else (cls === 'implements' ? implementsList : supportsList).push(control);
+    }
+    const levels = mapLevels(sources.levels).filter((level) => level.components.includes(component)).map((level) => level.id);
+    out.push('', `### ${component}`, '', rule.role, '', `Levels: ${levels.join(', ')}. Section SHA-256: \`${entry.sha256}\`.`, '');
+    const facets = Object.entries(rule.facets).sort(([a], [b]) => a.localeCompare(b));
+    if (facets.length === 0) out.push('Facets: none.');
+    else { out.push('Facets:', ''); for (const [facet, carried] of facets) out.push(`- \`${facet}\` (${carried.class}): ${carried.basis}`); }
+    out.push('', `**Implements** (${implementsList.length}): ${controlList(implementsList)}`, '', `**Supports** (${supportsList.length}): ${controlList(supportsList)}`, '');
+    const count = [...excluded.values()].reduce((sum, list) => sum + list.length, 0);
+    out.push(`**Not applicable to this component** (${count}):`, '');
+    if (count === 0) out.push('None.');
+    else for (const [reason, controls] of excluded) out.push(`- ${controlList(controls)}: ${reason}`);
+  }
+  out.push('', '## Rows no component has a part in', '', 'These rows read "Your organization\'s responsibility" once the level\'s map is signed; each component keeps its own reason.');
+  for (const { level, noPart } of summaries) out.push('', `### ${level.title} (\`${level.id}\`)`, '', `${noPart.length} ${noPart.length === 1 ? 'control' : 'controls'}: ${controlList(noPart)}.`);
+  out.push('', '## Statements outside the map', '', 'A component that has a statement for a control has a part in it, whatever the rules say. These statements sit on pairs the rules give no part; each is for review.', '');
+  const outside = statementsOutsideMap(sources);
+  if (outside.length === 0) out.push('None.');
+  else for (const entry of outside) out.push(`- ${entry.component}, ${entry.control}: ${entry.statements.join(', ')}`);
+  return `${out.join('\n')}\n`;
+}
+
+/** The lock as committed: two-space JSON, so a review diff reads line by line. */
+export function lockText(lock: ApplicabilityLock): string { return `${JSON.stringify(lock, null, 2)}\n`; }

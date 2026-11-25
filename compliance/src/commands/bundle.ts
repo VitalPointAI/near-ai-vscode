@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { runBundle, type BundleInputs } from '../bundle.ts';
 import type { FetchJson } from '../collectors/types.ts';
-import { loadApplicability } from '../applicability.ts';
+import { loadApplicability, mapControls } from '../applicability.ts';
 import { loadComponents } from '../components.ts';
 import type { DashboardBuildInput } from '../dashboard.ts';
 import { loadEvidenceRules } from '../evidenceRuleFiles.ts';
@@ -33,19 +33,22 @@ export function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'l
   if (errors.length) throw new Error(errors.join('; '));
   const report = loadJson(path.join(root, 'import-reports', 'itsp-10-033-01.json')) as ImportReport;
   const profileDifferences = report.differences.map(({ control, en, fr }) => `${control.toUpperCase()}: English selection: ${en} / French selection: ${fr}`);
-  // The component applicability map (44.1); a missing folder leaves every cell as it was.
-  const applicability = loadApplicability(path.join(root, 'applicability'), levels.map((level) => level.id));
+  const built = levels.map((level) => {
+    const controls = selectedIds(path.join(root, level.profile));
+    if (controls.length === 0) throw new Error(`compliance level ${level.id} selects no controls`);
+    const overlays = levels.filter((other) => other.attachedTo?.includes(level.id)).map((other) => other.id);
+    return { id: level.id, title: level.title, kind: level.kind, profile: level.profile, claim: level.claim, components: level.components, controls, overlays,
+      ...(level.id === 'protected-b' && profileDifferences.length ? { notes: { profileDifferences } } : {}) };
+  });
+  const responsibilityTable = loadResponsibilityTable(path.join(root, 'responsibility', 'families.json'));
+  // The component applicability map (44.1); a missing folder leaves every cell as it was. Section hashes cover the map's in-scope controls, as the
+  // lock that a review signs does (44.1-06).
+  const applicability = loadApplicability(path.join(root, 'applicability'), levels.map((level) => level.id), mapControls(built, responsibilityTable));
   return {
-    levels: levels.map((level) => {
-      const controls = selectedIds(path.join(root, level.profile));
-      if (controls.length === 0) throw new Error(`compliance level ${level.id} selects no controls`);
-      const overlays = levels.filter((other) => other.attachedTo?.includes(level.id)).map((other) => other.id);
-      return { id: level.id, title: level.title, kind: level.kind, profile: level.profile, claim: level.claim, components: level.components, controls, overlays,
-        ...(level.id === 'protected-b' && profileDifferences.length ? { notes: { profileDifferences } } : {}) };
-    }),
+    levels: built,
     components,
     rules: loadEvidenceRules(path.join(root, 'evidence-rules')),
-    responsibilityTable: loadResponsibilityTable(path.join(root, 'responsibility', 'families.json')),
+    responsibilityTable,
     tailoring: loadTailoring(path.join(root, 'tailoring')),
     ...(applicability ? { applicability } : {}),
     gapRegister: {
