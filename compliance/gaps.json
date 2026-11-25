@@ -6168,8 +6168,21 @@
       "id": "G417",
       "ownerRole": "shared",
       "poam": "g417",
-      "remediation": "A hosted session applies the security officer's switch within a minute; a desktop or edge install applies it at its next policy fetch or rules import. A disconnected edge keeps working under its last rules until then. Your organization's operating procedure says how often edges import rules and who carries the switch to them. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-28.",
-      "title": "An offline edge applies Stop agent work now only at its next rules import"
+      "remediation": "Stop agent work now is not yet available (G418). Once it ships, a hosted session is to apply a security officer's switch within a minute, while a desktop or edge install applies it only at its next policy fetch or rules import, and a disconnected edge keeps working under its last rules until then. Your organization's operating procedure says how often edges import rules and who carries the switch to them. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-28.",
+      "title": "An offline edge will apply Stop agent work now only at its next rules import"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "74.1",
+      "controls": [
+        "cm-06",
+        "ir-04"
+      ],
+      "id": "G418",
+      "ownerRole": "maintainers",
+      "remediation": "Stop agent work now is not yet available; report mode runs without a fast stop. Report mode keeps the product working, but no security officer can yet switch your organization to enforce at once. Until the switch lands (it needs Phase 71's credential checker and hub, Phase 46's step-up and 47-32's live site record), enforce comes only from a new signed organization policy. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-02 and D-28.",
+      "title": "Stop agent work now is not yet available; report mode runs without a fast stop"
     },
     {
       "appliesAt": "now",
@@ -6489,6 +6502,19 @@
       "poam": "g504",
       "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
       "title": "Some OpenTDF forms are refused as not supported yet"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "ra-03",
+        "sa-11"
+      ],
+      "id": "G537",
+      "ownerRole": "maintainers",
+      "poam": "g537",
+      "remediation": "An exception for chat you review has one evidence text, and the request form puts the mission benefit there. The design expects the evidence to hold the benefit and a reference to your organization's assessment of the model, and under enforce the exception stands in for that evaluation, but no assessment reference is recorded. Until the record gains a second field (a new signed shape, so a later phase), your organization records its assessment reference in the change note of the rules update that carries the exception, and whoever reviews the request checks it. Source: .planning/phases/74.1-model-passports-use-tiers-and-western-defaults/74.1-CONTEXT.md D-16 and D-20; 74.1-11-SUMMARY.md.",
+      "title": "A model exception records its mission benefit, not a reference to your organization's assessment"
     }
   ]
 }
