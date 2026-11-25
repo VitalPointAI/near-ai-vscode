@@ -41,3 +41,13 @@ export { memberAt } from '../../src/domain/replica/rosterMembers';
 export { serverPinWords } from '../../src/domain/replica/serverWords';
 export { conversionNoticeLines } from '../../src/domain/staff/conversionNotice';
 export { SCALE_PRESETS, labelKey } from '../../src/domain/gate/labels';
+// 33-25: the editor binding core (33-04) runs unchanged in the backend over the document channel, and the product files a bound editor opens are
+// found by the projection's own paths and headers.
+export { EditorBinding, HEADER_KEPT_TEXT, RESYNC_LOG_LINE } from '../../src/staff/replica/editorBinding';
+export { projectProductFile, projectProductStates } from '../../src/staff/replica/projection';
+export { staffProductPath } from '../../src/domain/staff/writeLimits';
+// 33-26: the native Staff Room. The live model, the version acts with their decision stamp, the contested cards and version rows, and the roster split.
+export { memberNameAt, staffRoomLive, whoCanSee } from '../../src/domain/staff/staffRoomLive';
+export { CHANGED_WHILE_DECIDING_TEXT, VersionActs } from '../../src/staff/replica/versionActs';
+export { changesSinceRows, contestedCards, pendingConfirmation } from '../../src/staff/replica/contested';
+export { chooseRosterBranch, describeRosterBranches } from '../../src/staff/replica/membership';

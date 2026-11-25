@@ -6,7 +6,7 @@
 // purpose, so it can never pass silently), review the diff of src/test/copy-lint-baseline.json, and run it again without the flag. A new hit is fixed in the
 // copy with the glossary's user word, never by raising the baseline; re-record only to move a count with code that moved, or to drop counts a fix removed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -421,4 +421,20 @@ test('D-45 pattern: the tightness check fails on a stale count only when the bas
 test('D-45 pattern: the baseline is tight (enforced at the close of a phase with NEAR_AI_BASELINE_TIGHT=1)', (t) => {
   const { stale } = compareWithBaseline(scanRepository(), readBaseline());
   checkTightness(stale, process.env.NEAR_AI_BASELINE_TIGHT === '1', (note) => { t.diagnostic(note); });
+});
+
+// Phase 33 D-69 (33-26): the native staff widgets draw the sentences of the live model (src/domain/staff, src/staff) and of the channel constants in
+// workbench/extension/src/common, so a later check of those constants covers everything a person reads there. A widget file holds no sentence of its
+// own: no string literal of two or more words that ends like a sentence.
+test('D-69: the native staff widgets hold no sentence of their own, only the constants they render', () => {
+  const dir = path.join(REPO_ROOT, 'workbench', 'extension', 'src', 'browser', 'staff');
+  const sentences: string[] = [];
+  for (const name of readdirSync(dir).filter((file) => file.endsWith('.ts')).sort()) {
+    const source = readFileSync(path.join(dir, name), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const match of source.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
+      const literal = match[1] ?? match[2] ?? match[3] ?? '';
+      if (/[A-Za-z]+\s+[A-Za-z]+/.test(literal) && /[.?!]$/.test(literal.trim())) sentences.push(`${name}: ${literal}`);
+    }
+  }
+  assert.deepEqual(sentences, []);
 });
