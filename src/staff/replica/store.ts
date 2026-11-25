@@ -1010,7 +1010,7 @@ export class ReplicaStore {
    * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
    * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
    */
-  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck): Promise<IngestResult | StoreRefused> {
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
     const seen = new Set<string>();
@@ -1048,6 +1048,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
+        if (expectedSnapshot !== undefined && this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];

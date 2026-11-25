@@ -382,6 +382,23 @@ test('guarded append detects another window recording a roster head even when wr
   assert.deepEqual(await first.appendOwn([candidate]), { ok: true, written: 1 }, 'ordinary appends need no snapshot');
 });
 
+test('a guarded locally signed entry refuses a changed store before persisting any entry or blob', async () => {
+  const { root, lead, secrets } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const other = fixedSigner('guard-other-signer');
+  const second = await opened(root, depsFor(other, secrets));
+  const expected = first.appendSnapshot();
+  const signer = fixedSigner('guarded-person-signer');
+  const [candidate] = chain(signer, 1, { big: true });
+  assert.equal(candidate.blobs.length, 1);
+
+  assert.deepEqual(await second.appendOwn(chain(other, 1)), { ok: true, written: 1 });
+  assert.deepEqual(await first.ingestForeign([candidate.entry], candidate.blobs, async () => ({ kind: 'pass' }), expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.equal(first.has(candidate.hash), false);
+  assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
+});
+
 test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));

@@ -103,6 +103,7 @@ export const MEMBERSHIP_REFUSALS = {
   'not-admitted-yet': 'Nobody was admitted with this join request yet, so there is no welcome file to make again. Nothing was changed. Admit the person with Staff: Admit to Staff Project.',
   'no-invitation-opened': 'This computer has not opened an invitation for this project, so the welcome file was not used and nothing was changed. Open the staff lead\'s invitation with Staff: Join Staff Project first, then open the welcome file.',
   'welcome-not-for-invitation': 'This welcome file does not admit this computer through an invitation it opened, so the project was not joined and nothing was kept. Check that you chose the right file, or ask the staff lead for a new welcome file.',
+  'rekey-awaiting-keys': 'Part of the project still needs a new key. A computer that still has access must publish compatible encryption keys before the change can finish.',
   'nothing-to-finish': 'No removal or clearance change was left unfinished, so no part of the project needed a new key. Nothing was changed.',
   'roster-split': `${ROSTER_SPLIT_TEXT} Nothing else can change the roster until a branch is chosen, so nothing was changed.`,
   'no-split': 'The roster is not split, so there is nothing to choose. Nothing was changed.',
@@ -1068,7 +1069,7 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
     const key = newEpochKey();
     const grant = newEpochGrant(roster, { cell: plan.cell, info, epoch, key, recipients: plan.recipients, routing: shared.routing, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw) });
     if (grant === 'switch-first') return refused('switch-first', SWITCH_FIRST_TEXT);
-    if (grant === undefined) { skipped.push(plan.cell); continue; } // nobody has keys of the new epoch's format yet
+    if (grant === undefined) return refuse('rekey-awaiting-keys');
     const pages = await project.signGrantPages(grant), founding = pages[0]; // signed as the device the roster names (the person key when hosted)
     // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open. The key is
     // kept with its grant's hash: if the entry is not written, the next rekey of the cell makes another key for the same epoch, and the ring takes

@@ -40,8 +40,8 @@ import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
-import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
-import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
+import { epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
+import { deviceAt, deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
 import { checkpointHash } from '../../domain/replica/checkpoint';
 import type { SignedCheckpoint } from '../../domain/replica/checkpoint';
@@ -70,6 +70,7 @@ export const PROJECT_REFUSALS_HOST = {
   'not-shared': 'This project folder holds a shared staff project that this computer has not joined, so it was not opened. Nothing was changed. To work in it, ask your staff lead for an invitation.',
   'store-refused': 'The shared history in this project folder could not be opened, so nothing was changed.',
   'no-key': 'This computer does not hold the key for this part of the shared project, so nothing was written. Ask your staff lead to give this device access.',
+  'rekey-pending': 'This part needs a current key before you can write to it. Sync the project or ask your staff lead to finish the key change.',
   'pin-damaged': 'The record of which shared project this folder belongs to cannot be read, so the project was not opened. Nothing was changed. Ask your staff lead for help.',
   'already-shared': 'This project folder already holds a shared staff project, so a second one was not made. Nothing was changed.',
   'welcome-refused': 'The welcome file could not be used, so nothing was changed. Ask your staff lead for a new one.',
@@ -462,9 +463,9 @@ export class ReplicaProject {
     return this.exclusive(async () => {
       let race: StoreRefused | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        const expected = checked ? this.store.appendSnapshot() : undefined;
+        const expected = this.store.appendSnapshot();
         const state = await this.foldNow();
-        if (checked && expected !== this.store.appendSnapshot()) continue;
+        if (expected !== this.store.appendSnapshot()) continue;
         const write = prepare(state);
         if ('ok' in write) return write;
         const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
@@ -477,7 +478,7 @@ export class ReplicaProject {
           if (refused !== undefined) return refused;
         }
         // Another key's entry (a session or person key, D-60) is stored as received; it is this device's own only when this device signed it.
-        const result = built.entry.header.writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected) : await this.storeSigned(built);
+        const result = built.entry.header.writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected) : await this.storeSigned(built, expected);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
@@ -1093,8 +1094,8 @@ export class ReplicaProject {
     return body.lamport as number;
   }
 
-  private async storeSigned(built: BuiltEntry): Promise<IngestResult | StoreRefused> {
-    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs));
+  private async storeSigned(built: BuiltEntry, expected: string): Promise<IngestResult | StoreRefused> {
+    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected);
     // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
     if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
     return result;
@@ -1109,6 +1110,17 @@ export class ReplicaProject {
     const epoch = epochAt(roster.cells, stream, position);
     const key = epoch === undefined ? undefined : this.keys.epochKey(stream, epoch);
     if (epoch === undefined || key === undefined) return refuse('no-key');
+    // Recovery instructions must still reach the roster while the base cell is awaiting rotation.
+    const rosterControl = stream === this.anchor.project &&
+      (Object.hasOwn(ROSTER_KIND_OWNER, kind) || kind === 'device.kem' || kind === 'session.certify');
+    if (!rosterControl) {
+      const latest = roster.positions.length - 1;
+      const holders = granteesAt(roster.cells, stream, latest, () => true);
+      if (epoch !== epochAt(roster.cells, stream, latest) ||
+          holders === undefined || holders.some((writer) => deviceAt(roster.members, writer, latest) === undefined)) {
+        return refuse('rekey-pending');
+      }
+    }
     const chosen = options.signer ?? this.signerOf(kind);
     // 33.1 D-09: in a hosted project only the person signer signs a person-key kind, and a kind outside Phase 33's list only under its action.
     const person = this.deps.personSigner;

@@ -5,12 +5,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readGrant } from '../domain/replica/cellKeys';
 import { wrapFormatOf } from '../domain/replica/cellWrapV2';
+import { clientIdOf } from '../domain/replica/clientIds';
+import { deviceAt } from '../domain/replica/rosterMembers';
 import { WRAP_V2_FEATURE, knownReplicaFeatures } from '../domain/replica/features';
 import { ensureLabelCell } from '../staff/replica/labelCells';
-import { admitJoinRequest, inviteToProject, joinFromInvite, removeFromProject, updateMember } from '../staff/replica/membership';
+import { admitJoinRequest, finishRekeys, inviteToProject, joinFromInvite, nameDeputy, removeFromProject, updateMember } from '../staff/replica/membership';
+import { ensureDeviceKem } from '../staff/replica/kemPublish';
+import { loadOrCreateKemKeys } from '../staff/replica/keyring';
+import { switchToV2 } from '../staff/replica/wrapUpgrade';
+import { identityDir } from '../team/identity';
 import { ReplicaProject } from '../staff/replica/replicaProject';
 import { SWITCH_FIRST_TEXT } from '../staff/replica/wrapPlan';
-import { LEAD_MEMBER, bringIn, grantsOn, hostOf, install, leadWith, ok, orgClearance, orgLabel, project } from './helpers/labelCellWorld';
+import { LEAD_MEMBER, bringIn, grantsOn, hostOf, install, leadWith, ok, orgClearance, orgLabel, project, syncTo } from './helpers/labelCellWorld';
 import type { Install, Seat } from './helpers/labelCellWorld';
 
 const PROTECTED_B = { scale: 'ca-protected', level: 'Protected B', compartments: [], releasability: [], handling: [] };
@@ -90,6 +96,36 @@ test('member removal: the rekey of every cell the member held is v2 only, and th
     assert.deepEqual([...new Set(rekeyed.map((item) => item.format))], [2]);
     assert.equal(rekeyed.some((item) => item.writer === pat.writer), false);
   }
+});
+
+test('removal with recipients awaiting hybrid keys keeps writes paused until recovery', async () => {
+  const lead = await unswitchedLead();
+  const deputy = await bringIn(lead, 'removed-deputy', 'Quinn Planner', orgClearance('Internal'));
+  ok(await nameDeputy(lead.host, deputy.member), 'name deputy');
+  await syncTo(lead, deputy);
+  assert.ok('ok' in await switchToV2(deputy.host));
+  await syncTo(deputy, lead);
+  const base = lead.p.projectId;
+  const initial = (await lead.p.state()).roster;
+  const slot = deviceAt(initial.members, lead.writer, initial.positions.length - 1)?.slot;
+  assert.ok(slot !== undefined, 'the lead has a device slot');
+  const data = { product: 'estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const removed = await removeFromProject(lead.host, { member: deputy.member });
+  assert.equal(removed.ok, false);
+  assert.equal(removed.reason, 'rekey-awaiting-keys');
+  assert.equal((await finishRekeys(lead.host)).reason, 'rekey-awaiting-keys');
+  const refused = await lead.p.appendOwn('doc.client', data);
+  assert.equal('refused' in refused && refused.refused, 'rekey-pending');
+  assert.deepEqual(formatsOf(lead.at, base, 2), []);
+
+  assert.equal(await ensureDeviceKem(lead.p, {
+    loadKeys: () => loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) })
+  }), 'published');
+  ok(await finishRekeys(lead.host), 'finish after the lead publishes hybrid keys');
+  const written = await lead.p.appendOwn('doc.client', data);
+  assert.ok('ok' in written);
+  assert.equal(written.built.entry.header.epoch, 2);
+  assert.deepEqual(formatsOf(lead.at, base, 2), [2]);
 });
 
 test('device revocation: the rekey without the revoked device is v2 only', async () => {
