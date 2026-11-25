@@ -287,3 +287,33 @@ test('D-12, D-21: a per-target override with a verified URI replaces the placeho
   const badUri = withTargetOverrides(profile, { uri: { value: 'urn:x:1', provenance: 'verified', source: 'EXAMPLE-ORG', date: '2026-11-25' } });
   assert.equal(badUri.ok ? '' : `${badUri.reason} ${badUri.path}`, 'wrong-type uri.value');
 });
+
+/** The gap ids named by the values of a profile that are not verified, with any id the register does not hold listed as missing. */
+function gapCitations(profile: LabelProfile, register: ReadonlySet<string>): { cited: Set<string>; missing: string[] } {
+  const cited = new Set<string>();
+  const missing: string[] = [];
+  for (const { path: where, leaf } of profileLeaves(profile)) {
+    if (leaf.provenance === 'verified') continue;
+    if (leaf.gap === undefined || !register.has(leaf.gap)) missing.push(`${profile.id} ${where}: ${leaf.gap ?? 'no gap'}`);
+    else cited.add(leaf.gap);
+  }
+  return { cited, missing };
+}
+
+test('D-20: every value of the shipped profiles that is not verified names a gap id that exists in compliance/gaps.json', () => {
+  const register = JSON.parse(readFileSync(path.join(REPO_ROOT, 'compliance', 'gaps.json'), 'utf8')) as { gaps: Array<{ id: string; appliesAt?: string; blocksProduction?: boolean }> };
+  const rows = new Map(register.gaps.map((gap) => [gap.id, gap]));
+  const ids = new Set(rows.keys());
+  const files = readdirSync(PROFILES).filter((file) => file.endsWith('.label-profile.json')).sort();
+  assert.deepEqual(files, ['can-dnd.label-profile.json', 'nato.label-profile.json'], 'every shipped profile is checked');
+  for (const file of files) {
+    const { cited, missing } = gapCitations(parsed(rawProfile(file)), ids);
+    assert.deepEqual(missing, [], `${file}: every value that is not verified names a gap id in the register`);
+    for (const id of cited) assert.equal(rows.get(id)?.appliesAt, 'coalition-exchange', `${file}: ${id} applies to coalition exchange`);
+  }
+  assert.equal(rows.get('G355')?.blocksProduction, true, 'the Canadian umbrella row blocks production');
+  // Teeth: a value naming an id the register does not hold is reported.
+  const planted = example();
+  (planted.policyIdentifier as Record<string, unknown>).gap = 'G99999';
+  assert.deepEqual(gapCitations(parsed(planted), ids).missing, ['example-org policyIdentifier: G99999']);
+});

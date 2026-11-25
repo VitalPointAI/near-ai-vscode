@@ -5178,7 +5178,7 @@
       ],
       "id": "G354",
       "ownerRole": "shared",
-      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor. Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
+      "remediation": "The exchange follows the public OpenTDF specification in a ZTDF-compatible profile. Checking it against ZTDF needs ACP-240 Edition A with its ZTDF specification, or sample objects from allies, and a test key access server (plan 45.2-10). Your organization requests them through its sponsor, and asks DND for ACP-240 Edition A with its ZTDF specification, which is still outstanding (owner action d). Until then exports are ZTDF-compatible, never called conformant. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-01.",
       "title": "ZTDF conformance is not verified"
     },
     {
@@ -5191,8 +5191,8 @@
       "id": "G355",
       "ownerRole": "owner",
       "poam": "g355",
-      "remediation": "Every export carries an originator label in your organization's own national policy, with its policy identifier and values, and an alternative label in the common partner policy. The national policy identifier and values come from your national security authority, and your organization's security officer sets and signs them in the signed policy. Until they are set, every export is refused. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-03 and D-04.",
-      "title": "Your organization's national label policy and NATO label values are not set, so exports are refused"
+      "remediation": "Exports in the Government of Canada scales are labelled from the Canadian DND/CAF label policy profile (resources/label-profiles/can-dnd.label-profile.json). Its values are assumed from how DND security orders write markings: the policy identifier CAN and the classifications PROTECTED A, PROTECTED B, PROTECTED C, CONFIDENTIAL, SECRET and TOP SECRET, in an assumed order. The identifier's OID, the caveats, the releasability rules and a versioned policy information file are not known, so the OID is a placeholder set per target system and no OID is invented. An operational export always refuses the placeholder, and refuses the assumed values unless your organization's security officer records an exception for them; a trial export may use them and says so. Your organization asks the DND project technical authority for the target system's label-policy owner, who supplies the verified values (owner action a); each value is then replaced and marked verified. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-21 and D-22.",
+      "title": "The Canadian DND/CAF label policy values are assumed, so operational exports that use them are refused"
     },
     {
       "appliesAt": "coalition-exchange",
