@@ -42,6 +42,7 @@
 !src/domain/gate/agreementsSection.ts
 !src/domain/gate/authorizations.ts
 !src/domain/gate/bundle.ts
+!src/domain/gate/classificationSection.ts
 !src/domain/gate/credentialsSection.ts
 !src/domain/gate/dominance.ts
 !src/domain/gate/endpoints.ts
