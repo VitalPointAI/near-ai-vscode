@@ -71,6 +71,13 @@ Not in this phase:
   - **Retrying:** a binding that stopped at the step-up uses the same slot again.
   - **Residual risk:** a binding signed outside the workbench path is not counted or revocable through the slots (G467).
 
+- **D-26 (coordinator, 2026-11-25, G467): verifiers count a computer binding only from the person's own DID log.** A DeviceBindingCredential counts only when both its status places are 98,304 or higher, and the person's DID document in force at the time of the check lists that computer with exactly those places. The listing is one service entry `{ id: <did>#computer-<slot>, type: SterlingComputerSlot, serviceEndpoint: urn:sterling:computer:<revocation>:<suspension>:<did:key> }`, in one of at most five slots (`src/domain/credentials/computerSlots.ts`).
+  - **Who checks:** `checkEvidence`, so the hub's append check, the wallet, the command-line check and 71-13's session all apply it. A known binding that is not cited only makes a key the member's under the same rule.
+  - **Who writes the listing:** the person's backend, in their own log, signed with their person key after the step-up, before it signs the binding.
+  - **No shared places:** the HQ hub refuses a log that lists more than five computers or uses a place another person's document lists.
+  - **Rejected: a slot list signed by the status-list key.** An officer would have to step up for every new computer, and a computer would not count until the next list was signed. The DID log is already held and verified by every verifier, hosted by the hub and carried by the trust export, and every slot ever used stays visible in it.
+  - **Rate limit:** the OpenBao rate limit quota `computer-places` allows 12 claims an hour per session and audits violations. The alert `ComputerPlaceClaimsLimited` reads OpenBao's own violation counter.
+
 ### Rules for every plan
 
 - **D-20 (no new runtime dependency):** Only `node:crypto`, `node:zlib` and existing code. Test-only devDependencies, exact pins: `@digitalbazaar/vc`, `@digitalbazaar/eddsa-jcs-2022-cryptosuite`, `@digitalbazaar/vc-bitstring-status-list`, each with a compliance fit entry (`scope: test`, `role`, `architectureArea: build-and-test`) before use. W3C and DIF test vectors are copied into `src/test/fixtures/` with their licence files. The research has no package legitimacy audit table, so every package is treated as `[ASSUMED]` and 71-01 opens with a blocking human check.

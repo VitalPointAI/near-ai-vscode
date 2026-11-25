@@ -231,10 +231,34 @@ The owner chose option (a), and it is built on this branch.
     - an ended person's computers, and officers' places below the device quarter.
   - The card test gains the computer row.
 
+## D-26: verifiers enforce the computer slots (coordinator, 2026-11-25; G467 narrowed)
+
+- **The verifiable form is the person's own did:webvh log.** Each computer slot is a service entry in the person's DID document, written by their backend and signed with their person key, before the binding (`listComputer` in `identity-service.ts`). The longer log is kept with `published: false`, so the next hub session posts it.
+- **Why not a slot list signed by the status-list key:** an officer would have to step up for every new computer, and computers would wait for the next list. Every verifier already holds the person's log for the issuer key check, the hub hosts it and the trust export carries it.
+- **`checkComputerBinding`** (`src/domain/credentials/computerSlots.ts`), called by `checkEvidence` for every cited binding:
+  - places below 98,304 are refused `binding-outside-computer-range`;
+  - a binding not listed with exactly its places, or listed in a document with more than five slots, is refused `binding-not-in-slots`.
+
+  Known, uncited bindings make a key the member's only under the same rule. The hub's append check, the wallet and the command-line check all go through `checkEvidence`; 71-13's session will too.
+- **The hub** (`hub/src/store/trustStore.ts` `putLog`) refuses a DID log whose newest document breaks the slot rules (`computer-slots`) or lists a place another person's document lists (`computer-place-taken`). So two computers never share a bit at a hub.
+- **Rate limit:** `deploy/openbao/apply.mjs` adds the rate limit quota `computer-places` (path `kv/data/site/status-index/device-`, 12 an hour, block an hour) and turns on rate limit audit logging. The alert `ComputerPlaceClaimsLimited` in `deploy/values/prometheus-alerts.yaml` fires on `vault_quota_rate_limit_violation{name="computer-places"}`.
+- **Tests that failed on the unchanged code first** (3 in `src/test/credentialsEvidence.test.ts`, each answered `ok` before):
+  - a binding with no slot in the person's DID document is refused;
+  - a binding whose places are below 98,304 is refused, even when listed;
+  - a document with six slots counts none, and a known binding without a slot gives no member key.
+- **Tests also added:**
+  - hub `evidencePep` 2: an unlisted binding and one with low places are refused at append; the hub refuses a log with a taken place or six computers;
+  - device slots 1: binding writes the slot into the DID document, and the result counts;
+  - `openbao.test.mjs` 1: the quota;
+  - `alerting.test.mjs` 1: the alert.
+
+  Existing fixtures that cited bindings with no slot now list them: `credentialsEvidence` "a device the member bound", and the `evidencePep` site. `credentialWorld` gains `withComputers` and `bindingWithPlaces`.
+- **Fix found by the full hub suite:** `.dockerignore` gains `computerSlots.ts` and `issueForm.ts`, which the hub image's allow-list test asks for. `issueForm.ts` was missed in 71-12, whose hub suite had not been run.
+
 ## Open conditions
 
 - **G465:** issuance is built but not reachable in a hosted session. It needs 71-13's trust source (your organization's rules in the session, and the hosted wallet joined to the extension's), 33-23's hub session, and Phase 47 to render `STERLING_STATUS_LIST_KEY` and `STERLING_OPENBAO_ISSUER_ROLE` and name `credentialIssuers` at the key ceremony.
-- **G467:** a computer binding signed outside the workbench path is not counted or revocable through the slots, and device places are not limited per person in OpenBao (D-25's residual risk).
+- **G467 (narrowed by D-26):** verifiers now enforce the slots. Left: the OpenBao rate limit quota on computer place claims and its alert are not yet checked against a running OpenBao 2.7 (lab install, Phase 47).
 - **G427** (71-10) stays open. Its third part now needs only the status lists in the session (G465); binding itself is built (D-25).
 
 ## Known Stubs

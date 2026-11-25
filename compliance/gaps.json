@@ -6201,17 +6201,16 @@
     },
     {
       "appliesAt": "protected-b",
-      "blocksProduction": true,
+      "blocksProduction": false,
       "closesInPhase": "71",
       "controls": [
-        "ia-03",
-        "ia-05",
-        "ac-02"
+        "sc-05",
+        "si-04"
       ],
       "id": "G467",
       "ownerRole": "maintainers",
-      "remediation": "A person binds their own computer by claiming its status list places in their own session (D-25): OpenBao lets them create only their own five computer slots and places in the device part of the index space, and never change one. Two things hold only on the workbench's own path. First, a person signs a DeviceBindingCredential with their own Transit person key, so someone who calls OpenBao directly after a step-up could sign a binding whose places no slot records; officers would then have no slot to revoke through the revocation inbox, and the cap of 5 would not count it. Second, the device places (kv/site/status-index/device-*) are claimed once each but are not limited per person in OpenBao, so a person calling OpenBao directly could claim many of them and leave too few for others. Close it by having every verifier (the hub's evidence check, the wallet, the edge) accept a device binding only when its places are in the device part of the lists and recorded in the person's slots (published with the trust data), and by an audit alert on many device place claims by one entity.",
-      "title": "A computer binding signed outside the workbench is not counted or revocable through the slots"
+      "remediation": "Computer bindings are now checked by every verifier (D-26): a binding counts only when its status places are in the computer part of the lists and the person's own DID document lists it in one of at most five slots, and the HQ hub refuses a DID log whose computer uses another person's place. What is left is the limit on claiming computer places in OpenBao (kv/data/site/status-index/device-), which only keeps one person from using up the places others need: deploy/openbao/apply.mjs sets the rate limit quota computer-places (12 claims an hour per client address, then blocked for an hour, violations audited), and the alert ComputerPlaceClaimsLimited reads vault_quota_rate_limit_violation. That the quota matches the path prefix and counts each session pod's address separately comes from OpenBao's documentation and is not yet checked against a running OpenBao 2.7. Check it in the lab install (Phase 47): claim 13 places from one session, see the 13th refused, the counter rise and the alert fire; then close this gap.",
+      "title": "The limit on computer place claims is not yet checked against a running OpenBao"
     }
   ]
 }

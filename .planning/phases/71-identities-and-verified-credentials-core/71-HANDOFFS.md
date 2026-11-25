@@ -40,3 +40,4 @@
 - **Settings the site must render (Phase 47):** `STERLING_STATUS_LIST_KEY` (`status-list-<siteName>`, made by `deploy/openbao/apply.mjs`) and optionally `STERLING_OPENBAO_ISSUER_ROLE` (default `sterling-issuer-stepup`); the site file's `credentialIssuers` names the officers' Keycloak subjects (G465).
 - **Device bindings (D-25, owner 2026-11-25):** `bindComputer` takes its places from the person's own computer slots (`device-slots.ts`, at most 5) once `policy()` gives the status lists; officers' places stay below index 98,304. Residual risk G467.
 - **Status:** open, for 71-13 and Phase 47.
+- **For 71-13 (D-26):** the session's credential check must go through `checkEvidence` (or call `checkComputerBinding`), so a computer binding counts only when the person's DID document lists it. The person's backend publishes the longer log at the next hub session (`publishToHub`; `published` is set to false after a computer is listed).
