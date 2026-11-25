@@ -68,7 +68,9 @@ test('every workbench test rule names a Phase 46 test that exists literally in i
   assert.equal(tracer?.test?.file, 'workbench/test/key-store.test.ts');
   const workbench = rules.filter((item) => item.component === 'workbench' && item.kind === 'test');
   assert.deepEqual([...checkRuleTargets(workbench, ROOT).entries()].filter(([, state]) => state !== 'ok'), []);
-  for (const item of workbench) {
+  // The generated supply-chain rules (44.1-09, ids ending .inventory) cite the register check in the root report; supplyChainStatements.test.ts
+  // checks those. Every other workbench test rule is a Phase 46 test of the workbench report.
+  for (const item of workbench.filter((rule) => !rule.id.endsWith('.inventory'))) {
     const compiled = item.test!.file.replace(/^workbench\/test\/(.+)\.ts$/, 'dist/test/$1.js');
     assert.ok(workbenchRows().some((row) => row.file === compiled && row.name === item.test!.name && row.status === 'passed'), `${item.id}: no passing fixture row`);
   }

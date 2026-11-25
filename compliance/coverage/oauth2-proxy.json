@@ -1,5 +1,5 @@
 {
   "component": "oauth2-proxy",
-  "applicableWithoutStatement": 164,
+  "applicableWithoutStatement": 160,
   "notApplicableAwaitingSignOff": 218
 }

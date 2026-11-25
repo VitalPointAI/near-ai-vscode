@@ -1,5 +1,5 @@
 {
   "component": "image-registry",
-  "applicableWithoutStatement": 228,
+  "applicableWithoutStatement": 224,
   "notApplicableAwaitingSignOff": 187
 }

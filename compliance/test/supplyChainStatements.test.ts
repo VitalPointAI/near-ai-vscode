@@ -101,6 +101,17 @@ test('a component with an image lock entry gets a cm-08 statement naming its own
   }
 });
 
+test('a register entry for this repository\'s own code is named as such, never as a third-party resource', () => {
+  const own: InventoryEntry = { ...entry('cert-manager', 'npm', '@near-ai/own-extension', '0.1.0', 'workbench/package.json'), licence: 'MIT (this repository)' };
+  const output = generate(sources({ inventory: { areas: [], entries: [...INVENTORY.entries, own] } }));
+  const certManager = loaded(output.files).find((component) => component.id === 'cert-manager')!;
+  for (const control of ['cm-08', 'sr-03']) {
+    const statement = certManager.implemented.find((requirement) => requirement.control === control)!.statements[0];
+    assert.match(statement.description, /npm package @near-ai\/own-extension 0\.1\.0 \(this repository's own code\)/);
+    assert.doesNotMatch(statement.description, /third-party/, `${control} names the repository's own code among its resources`);
+  }
+});
+
 test('a hand-written statement is left alone, a reserved pair gets no statement, and a pair the map excludes gets none', () => {
   const before = FILES();
   const output = generate(sources({ applicable: (component, control) => !(component === 'openbao' && control === 'sr-11') }));

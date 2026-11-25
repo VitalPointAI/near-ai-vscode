@@ -62,13 +62,13 @@ const CHECK = 'The compliance fit check over the whole repository, run as a CI t
 /** The evidence of the generated statements. The first entry for a control whose scope covers a component backs its statement. */
 export const EVIDENCE: readonly SupplyChainEvidence[] = Object.freeze([
   {
-    control: 'cm-08', scope: 'inventory', rule: { kind: 'test', test: REGISTER_TEST }, summary: 'the component inventory lists its third-party resources',
-    description: (title, items) => `The component inventory (compliance/resources.json) lists these third-party resources for ${title}, each with the pin the repository uses: ${items}. ${CHECK} fails when a resource the repository uses has no reviewed entry, or an entry lists a file that no longer uses it.`,
+    control: 'cm-08', scope: 'inventory', rule: { kind: 'test', test: REGISTER_TEST }, summary: 'the component inventory lists its resources',
+    description: (title, items) => `The component inventory (compliance/resources.json) lists these resources for ${title}, each with the pin the repository uses: ${items}. ${CHECK} fails when a resource the repository uses has no reviewed entry, or an entry lists a file that no longer uses it.`,
     remarks: 'Your organization keeps the inventory of what it installs at its site, with its owners, and reconciles it with this list.'
   },
   {
-    control: 'sr-03', scope: 'inventory', rule: { kind: 'test', test: REGISTER_TEST }, summary: 'its third-party resources are reviewed and pinned before use',
-    description: (title, items) => `These third-party resources of ${title} each have a reviewed register entry with their licence, compliance fit and conditions, and are pinned as the component inventory lists them: ${items}. ${CHECK} fails when one of them has no reviewed entry, is marked as not fitting, or is an image without a sha256 digest or an action without a full commit SHA.`,
+    control: 'sr-03', scope: 'inventory', rule: { kind: 'test', test: REGISTER_TEST }, summary: 'its resources are reviewed and pinned before use',
+    description: (title, items) => `These resources of ${title} each have a reviewed register entry with their licence, compliance fit and conditions, and are pinned as the component inventory lists them: ${items}. ${CHECK} fails when one of them has no reviewed entry, is marked as not fitting, or is an image without a sha256 digest or an action without a full commit SHA.`,
     remarks: 'Your organization selects and accepts its suppliers and runs its own supply-chain risk management plan.'
   },
   {
@@ -124,8 +124,11 @@ function pinWords(entry: InventoryEntry, from?: readonly string[]): string {
   return pins.length === 1 ? pins[0].pin : pins.map(({ pin, where }) => `${pin} (${where.join(', ')})`).join(', ');
 }
 
+/** A register entry whose licence names this repository is its own code, not a supplier's (compliance/resources.json). */
+const ownCode = (entry: InventoryEntry): boolean => /\(this repository\)/.test(entry.licence);
+
 function itemWords(entry: InventoryEntry, from?: readonly string[]): string {
-  return `${KIND_WORDS[entry.kind] ?? entry.kind} ${entry.name} ${pinWords(entry, from)}${entry.scope === 'runtime' ? '' : ` (${entry.scope} only)`}`;
+  return `${KIND_WORDS[entry.kind] ?? entry.kind} ${entry.name} ${pinWords(entry, from)}${entry.scope === 'runtime' ? '' : ` (${entry.scope} only)`}${ownCode(entry) ? " (this repository's own code)" : ''}`;
 }
 
 /** The files the offline bundle carries an entry from: the image lock, the chart lock, or the tool pins for a tool the bundle downloads. */

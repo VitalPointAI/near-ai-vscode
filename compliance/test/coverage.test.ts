@@ -129,6 +129,8 @@ test('coverage --write then --check passes on the real sources, and a raised bas
   cpSync(path.join(ROOT, 'compliance', 'applicability'), path.join(root, 'compliance', 'applicability'), { recursive: true });
   mkdirSync(path.join(root, 'docs', 'security'), { recursive: true });
   cpSync(path.join(ROOT, 'docs', 'security', 'component-applicability.md'), path.join(root, 'docs', 'security', 'component-applicability.md'));
+  // The generated supply-chain statements' drift check reads the inventory's pins across the repository and the offline bundle's tool list.
+  for (const entry of readdirSync(ROOT)) if (!['compliance', 'docs', 'node_modules', '.git'].includes(entry)) symlinkSync(path.join(ROOT, entry), path.join(root, entry));
   const io = () => { const lines: string[] = []; return { lines, stdout: (text: string) => { lines.push(text); }, stderr: (text: string) => { lines.push(text); } }; };
   const write = io();
   assert.equal(await runCoverage(['--write', '--root', root], write), 0, write.lines.join(''));
