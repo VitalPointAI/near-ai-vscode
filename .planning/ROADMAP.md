@@ -931,6 +931,38 @@ Plans:
 - [ ] 48.1-21-PLAN.md: Wave 6. Key separation in the inventory, key plan, playbooks and fit register text
 - [ ] 48.1-19-PLAN.md: Wave 7. Observer statements for the hub and the workbench once Phase 71 (core)'s credential release check and 33.1's observer waves are on main: access and visit-clearance credentials, the agreements record and the clearance level for marked material (48.1-HANDOFFS.md H-18)
 
+### Phase 48.2: Live compliance evidence in the workbench (INSERTED)
+**Goal**: A Sterling Sovereign AI workbench, fresh from install or from a plain `docker run`, opens the Compliance view on its release's own evidence, verified against keys from your organization's configuration, with every state and freshness judged against the current time; at a site, the site's own evidence arrives live on top; nothing that cannot be verified is shown as passing.
+**Inserted**: 2026-11-25 from the owner's direction of 2026-11-24 and 2026-11-25 ("yes, plan that as long as the compliance evidence is always a real-time understanding of the product's compliance status"): the image shipped with no evidence and the view told people to mount the public projection.
+**Depends on**: Phases 44 and 48 (the status engine, evidence bundle, signed site evidence export); 46-09 for 48.2-07 (the release workflow); 47-32 (the live mount pattern), 48.1-15 (Kubernetes auth), 48.1-17 (site-key signing), 47-29 (offline rescan), 48-07 and 48-08 (statements) for the later waves. Waves 1 to 5 need nothing else in flight.
+**Requirements**: LCE-01, LCE-02, LCE-03, LCE-04, LCE-05, LCE-06, LCE-07, LCE-08, LCE-09, LCE-10
+**Success Criteria** (what must be TRUE):
+  1. Every release image carries its SBOM, vulnerability scan, evidence bundle with the engine's inputs, OSCAL package, gap register and road-to-production page in one data-only layer under a manifest the release key signs, and the view shows them as of the release build. (LCE-01)
+  2. Every cell shows its source, as-of time, freshness (Current, Ageing, Out of date) and verification, re-judged by the one status engine every 60 seconds and on every change; a vulnerability scan ages from its database's build date and goes out of date past the policy threshold, and a site rescan with a newer signed database brings it back. (LCE-02, LCE-03, LCE-06)
+  3. Evidence is verified before display against your organization's site key (or a release key a person configured on a single computer); a tampered source shows nothing but its reason, and an unverifiable one shows Not verified and never passes. (LCE-04)
+  4. A site collector's in-cluster facts and the operator's signed export, rescan and agreements reach every session within the collect interval plus about two minutes through a read-only mount, each with its own time, never cached as if current; air-gapped and disconnected edges work from local signed sources only. (LCE-05, LCE-06, LCE-09)
+  5. The view layers release then site evidence, keeps "Authorization is your organization's decision", and in Restricted Mode with no site evidence shows the release evidence clearly labelled, in the original theme with lifted cards. (LCE-07)
+  6. `compliance:refresh` writes the public projection 0644 so the README's read-only mount works for the workbench user; the phase's statements, evidence rules, documents and gap rows G475 to G479 exist. (LCE-08, LCE-10)
+**Plans:** 15 plans in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`; decisions D-01 to D-30, six owner questions with defaults, hand-offs H-1 to H-8 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
+**UI hint**: yes (`48.2-UI-SPEC.md` from `/gsd-ui-phase 48.2` before 48.2-10)
+
+Plans:
+- [ ] 48.2-01-PLAN.md: Wave 1. Tracer: one release's evidence from the bundle's judgement to a Compliance view line, verified and judged now through the backend; the release-evidence command
+- [ ] 48.2-02-PLAN.md: Wave 1. compliance:refresh writes the public projection 0644 and 0755 with a umask test; gap rows G475 to G479
+- [ ] 48.2-03-PLAN.md: Wave 2. Freshness in the engine: Current, Ageing, Out of date; the default table with the vulnerability and live kinds; tighten-only policy; the honest clock; site observations replace release ones
+- [ ] 48.2-04-PLAN.md: Wave 2. A Node verifier for cosign key-mode bundles held equal to the pinned cosign; trust anchors only from configuration; Verified, Not verified, Did not verify
+- [ ] 48.2-05-PLAN.md: Wave 3. The release evidence content: SBOM, the scan dated by its database, the compliance package, the gap register and road-to-production
+- [ ] 48.2-06-PLAN.md: Wave 3. Site evidence formats: the trust document your site key signs, the live feed, the operator's export, rescan and agreements, verification to observations
+- [ ] 48.2-07-PLAN.md: Wave 4 (after 46-09). The image build order: the software image, its SBOM and scan, then one data-only evidence layer; the manifest signed in key mode and published with the release key
+- [ ] 48.2-08-PLAN.md: Wave 4. The live site layer in the session: the read-only mount watched, verified, layered and re-judged; the long poll; the projection as a Not verified source
+- [ ] 48.2-09-PLAN.md: Wave 5. The site collector program: in-cluster facts with their own times, signed through OpenBao Transit, written to the live ConfigMap
+- [ ] 48.2-10-PLAN.md: Wave 5 (after the UI-SPEC). The Compliance view: release then site cards, the four facts per cell, Restricted Mode, live updates, the focused browser check
+- [ ] 48.2-11-PLAN.md: Wave 6 (after 47-32). The collector CronJob, least-rights RBAC, data-less ConfigMaps, the projected session mount, network reach, the interval setting
+- [ ] 48.2-12-PLAN.md: Wave 7 (after 48.1-15 and 48.1-17). The collector's Transit key and sign-only role; the site trust document signed with your site key and installed
+- [ ] 48.2-13-PLAN.md: Wave 8. Release evidence re-signed with the site key at bundle build and installed; one command to publish operator evidence; the site evidence runbook
+- [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
+- [ ] 48.2-15-PLAN.md: Wave 10 (after 48-07 and 48-08). Statements and evidence rules, the documents with the real-time table, the full suites once, the release-preview check and the owner gate
+
 ## Milestone v0.5.0: Governed agent platform
 
 **Milestone goal:** Every agent the extension runs works under a governance layer a person can see and check (one policy gate with a floor nothing overrides, delegation that only narrows, run contracts, a sandbox where protected folders are absent, credentials the agent never holds), deciding offline from a signed local policy.
@@ -2191,6 +2223,7 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 47. On-premise deployment stack and offline bundle | 21/33 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
+| 48.2. Live compliance evidence in the workbench | 0/15 | Planned 2026-11-25 (waves 1 to 5 can start now, 48.2-07 after 46-09; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
