@@ -1,5 +1,6 @@
-// The classification engine's floor path (Phase 70.1 plan 01 Task 1; D-05, D-06, D-09, D-15, D-16): a marking banner found in a text raises the label
-// through the signed classification@1 section, the pure engine and a label.auto-raised decision record. Fictional content only (Exercise NORTHERN EXAMPLE).
+// The classification engine's decide() (Phase 70.1 plans 01 and 02; D-04 to D-16): a marking banner found in a text raises the label through the signed
+// classification@1 section, the pure engine and a label.auto-raised decision record; judgements, shadow, review, stale results and the possible spill.
+// Fictional content only (Exercise NORTHERN EXAMPLE). Probabilities are whole basis points (owner, 2026-11-25).
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { shapeReason } from '../domain/gate/bundle';
@@ -11,8 +12,10 @@ import type { Label } from '../domain/gate/labels';
 import { parsePolicyDocument } from '../domain/gate/policyDocument';
 import type { PolicyDocument } from '../domain/gate/policyDocument';
 import { buildDecisionRecord, validateDecisionRecord } from '../domain/gate/record';
-import { DECIDE_REFUSALS, decide } from '../domain/classify/decide';
-import type { DecideInput } from '../domain/classify/decide';
+import { parseClassificationSection } from '../domain/gate/classificationSection';
+import type { ClassificationSection } from '../domain/gate/classificationSection';
+import { DECIDE_REFUSALS, FIELD_DIRECTIONS, decide, withinSystemHigh } from '../domain/classify/decide';
+import type { DecideInput, Decision, Judgement } from '../domain/classify/decide';
 import { markingFloors } from '../domain/classify/markings';
 import { deviceKey, policyDocumentFor } from './helpers/policyFixtures';
 
@@ -131,8 +134,8 @@ test('decide refuses an empty start with no-start rather than assuming the lowes
   assert.equal(unknown.ok ? '' : unknown.refusal, 'unknown-label');
 });
 
-test('a banner on another scale is kept beside the start, never merged into it', () => {
-  const doc = parsed(documentWith());
+test('a banner on another scale is kept beside the start, never merged into it (with no system-high; 70.1-02 makes a scale the system-high lacks a possible spill)', () => {
+  const doc = parsed(documentWith((value) => { delete value.classification.systemHigh; }));
   const result = decide(inputFor(doc, [CONFIDENTIAL], 'PROTÉGÉ B'));
   assert.ok(result.ok);
   assert.equal(result.outcome, 'auto-raised');
@@ -160,4 +163,190 @@ test('the event goes through buildDecisionRecord, and validateDecisionRecord acc
   assert.equal(shaped.api.operation, 'label.auto-raised');
   assert.equal(shaped.authorizations[0]?.policy.name, 'label.auto-raised');
   assert.ok(!JSON.stringify(shaped).includes('NORTHERN'), 'no content in the record');
+});
+
+// ---- 70.1-02: judgements, shadow, review, stale results and the possible spill ----
+
+const PB = label('ca-protected', 'Protected B', { releasability: ['CAN', 'GBR'] });
+
+function sectionWith(extra: Loose = {}): ClassificationSection {
+  const parsed = parseClassificationSection({
+    v: 1,
+    thresholds: {
+      'ca-protected/Protected A': { costRatio: 4, recallTarget: 9000, secondFamily: false },
+      'ca-protected/Protected B': { costRatio: 9, recallTarget: 9500, secondFamily: false },
+      'ca-protected/Protected C': { costRatio: 19, recallTarget: 9800, secondFamily: true },
+      'ca-classified/Confidential': { costRatio: 9, recallTarget: 9500, secondFamily: false },
+      'ca-classified/Secret': { costRatio: 19, recallTarget: 9800, secondFamily: true },
+      'ca-classified/Top Secret': { costRatio: 49, recallTarget: 9900, secondFamily: true }
+    },
+    shadow: { defaultMode: 'enforce' },
+    ...extra
+  }, SCALE_PRESETS);
+  assert.ok(parsed.ok, parsed.ok ? '' : parsed.message);
+  if (!parsed.ok) throw new Error('unreachable');
+  return parsed.value;
+}
+
+function judgement(proposal: Label[], probabilities: Record<string, number>, contentHash = H): Judgement {
+  return {
+    contentHash, proposal, probabilities, calibration: 'cal-example-1', sampleAgreement: 10000, facts: [], rationaleHash: 'f'.repeat(64),
+    model: { servedModel: 'gpt-oss-20b', endpoint: 'example-org-classifier', passport: 'openai/gpt-oss', passportHash: 'b'.repeat(64), artifactHash: 'c'.repeat(64), endpointClass: 'local', useTier: 'T3' }
+  };
+}
+
+function run(input: Partial<DecideInput> & Pick<DecideInput, 'start'>): Decision {
+  const result = decide({ current: CURRENT, floors: [], section: sectionWith(), scales: SCALE_PRESETS, ...input });
+  assert.ok(result.ok, result.ok ? '' : result.message);
+  if (!result.ok) throw new Error('unreachable');
+  return result;
+}
+
+function guideFloor(target: Label, ref = 'scg-4.2'): { label: Label; basis: { kind: 'guide'; ref: string } } {
+  return { label: target, basis: { kind: 'guide', ref } };
+}
+
+const reasons = (result: Decision): string[] => result.suggestions.map((entry) => `${entry.reason}${entry.decidedBy === undefined ? '' : `:${entry.decidedBy}`}`);
+
+test('FIELD_DIRECTIONS names each field\'s directions (D-04)', () => {
+  assert.deepEqual(FIELD_DIRECTIONS.level, ['up', 'same', 'down']);
+  assert.deepEqual(FIELD_DIRECTIONS.releasability, ['narrowed', 'widened', 'both', 'same']);
+});
+
+test('a judgement above tau raises the level only, keeping the start\'s releasability, and asks the caller to notify', () => {
+  const result = run({ start: [PB], judgement: judgement([label('ca-protected', 'Protected C', { releasability: ['CAN', 'GBR'] })], { 'ca-protected/Protected C': 1000 }) });
+  assert.equal(result.outcome, 'auto-raised');
+  assert.deepEqual(result.applied, [label('ca-protected', 'Protected C', { releasability: ['CAN', 'GBR'] })]);
+  assert.equal(result.notify, true);
+  assert.deepEqual(result.bases, [{ kind: 'judgement', ref: 'f'.repeat(64) }]);
+  // Protected C is the top of its scale, so the raise also goes to review (D-11).
+  assert.deepEqual(result.events.map((event) => event.event), ['label.auto-raised', 'label.exception-queued']);
+  assert.equal(result.confidence?.calibration, 'cal-example-1');
+});
+
+test('in shadow mode the same judgement is a suggestion with reason shadow, and applied equals start (D-10)', () => {
+  const answer = judgement([label('ca-protected', 'Protected C', { releasability: ['CAN', 'GBR'] })], { 'ca-protected/Protected C': 1000 });
+  const shadow = run({ start: [PB], judgement: answer, section: sectionWith({ shadow: { defaultMode: 'shadow' } }) });
+  assert.equal(shadow.outcome, 'suggested');
+  assert.deepEqual(shadow.applied, [PB]);
+  assert.deepEqual(reasons(shadow), ['shadow']);
+  assert.deepEqual(shadow.events, []);
+  const held = run({ start: [PB], judgement: answer, modes: { 'ca-protected/Protected C': 'shadow' } });
+  assert.equal(held.outcome, 'suggested', 'the caller may hold a level in shadow');
+  const listed = run({ start: [PB], judgement: answer, section: sectionWith({ shadow: { defaultMode: 'shadow', levels: ['ca-protected/Protected C'] } }), modes: { 'ca-protected/Protected C': 'enforce' } });
+  assert.equal(listed.outcome, 'auto-raised', 'a level your organization moved to enforce raises');
+  const notListed = run({ start: [PB], judgement: answer, section: sectionWith({ shadow: { defaultMode: 'shadow' } }), modes: { 'ca-protected/Protected C': 'enforce' } });
+  assert.equal(notListed.outcome, 'suggested', 'the caller cannot enforce a level the signed section keeps in shadow');
+});
+
+test('a judgement of a lower level keeps the label and gives a could-be-lower suggestion for a classification authority', () => {
+  const result = run({ start: [PB], judgement: judgement([label('ca-protected', 'Protected A', { releasability: ['CAN', 'GBR'] })], { 'ca-protected/Protected A': 9000 }) });
+  assert.equal(result.outcome, 'kept');
+  assert.deepEqual(result.applied, [PB]);
+  assert.deepEqual(reasons(result), ['could-be-lower:classification-authority']);
+  assert.equal(result.suggestions[0]?.label.level, 'Protected A');
+  assert.deepEqual(result.events.map((event) => event.event), ['label.could-be-lower']);
+});
+
+test('releasability narrowed by a guide floor applies; narrowed by a judgement alone is a suggestion; widened is a release decision (D-09)', () => {
+  const floor = run({ start: [PB], floors: [guideFloor(label('ca-protected', 'Protected B', { releasability: ['CAN'] }))] });
+  assert.deepEqual(floor.applied[0]?.releasability, ['CAN']);
+  const narrowed = run({ start: [PB], judgement: judgement([label('ca-protected', 'Protected B', { releasability: ['CAN'] })], {}) });
+  assert.deepEqual(narrowed.applied, [PB]);
+  assert.deepEqual(reasons(narrowed), ['judgement-only']);
+  assert.deepEqual(narrowed.suggestions[0]?.label.releasability, ['CAN']);
+  const widened = run({ start: [PB], judgement: judgement([label('ca-protected', 'Protected B', { releasability: ['CAN', 'GBR', 'USA'] })], {}) });
+  assert.deepEqual(widened.applied, [PB]);
+  assert.deepEqual(reasons(widened), ['wider-release:release-authority']);
+  assert.equal(widened.outcome, 'kept');
+});
+
+test('a guide floor adding ITAR applies; a judgement removing a compartment is could-be-lower for the compartment owner', () => {
+  const added = run({ start: [PB], floors: [guideFloor(label('ca-protected', 'Protected B', { compartments: ['ITAR'] }))] });
+  assert.deepEqual(added.applied[0]?.compartments, ['ITAR']);
+  assert.equal(added.outcome, 'auto-raised');
+  const start = label('ca-protected', 'Protected B', { compartments: ['ITAR'], releasability: ['CAN', 'GBR'] });
+  const removed = run({ start: [start], judgement: judgement([PB], {}) });
+  assert.deepEqual(removed.applied, [start]);
+  assert.deepEqual(reasons(removed), ['could-be-lower:compartment-owner']);
+  const judged = run({ start: [PB], judgement: judgement([label('ca-protected', 'Protected B', { compartments: ['EAR'], releasability: ['CAN', 'GBR'] })], {}) });
+  assert.deepEqual(reasons(judged), ['judgement-only'], 'a compartment from a judgement alone is only suggested');
+});
+
+test('a floor adding no-agent-tools applies; a judgement removing local-only is could-be-lower for the steward', () => {
+  const added = run({ start: [PB], floors: [guideFloor(label('ca-protected', 'Protected B', { handling: ['no-agent-tools'] }))] });
+  assert.deepEqual(added.applied[0]?.handling, ['no-agent-tools']);
+  const start = label('ca-protected', 'Protected B', { releasability: ['CAN', 'GBR'], handling: ['local-only'] });
+  const removed = run({ start: [start], judgement: judgement([PB], {}) });
+  assert.deepEqual(removed.applied, [start]);
+  assert.deepEqual(reasons(removed), ['could-be-lower:steward']);
+});
+
+test('D-11: Confidential to Top Secret queues large-raise; Confidential to Secret does not; Secret to Top Secret queues as the top level', () => {
+  const twoLevels = run({ start: [CONFIDENTIAL], floors: [guideFloor(label('ca-classified', 'Top Secret'))] });
+  assert.equal(twoLevels.outcome, 'auto-raised');
+  assert.deepEqual(twoLevels.exceptions, [{ kind: 'large-raise' }]);
+  assert.deepEqual(twoLevels.events.map((event) => event.event), ['label.auto-raised', 'label.exception-queued']);
+  assert.equal(twoLevels.events[1]?.exception, 'large-raise');
+  const oneLevel = run({ start: [CONFIDENTIAL], floors: [guideFloor(SECRET)] });
+  assert.deepEqual(oneLevel.exceptions, []);
+  const toTop = run({ start: [SECRET], floors: [guideFloor(label('ca-classified', 'Top Secret'))] });
+  assert.deepEqual(toTop.exceptions, [{ kind: 'large-raise' }]);
+  const noTop = run({ start: [SECRET], floors: [guideFloor(label('ca-classified', 'Top Secret'))], section: sectionWith({ review: { topLevel: false } }) });
+  assert.deepEqual(noTop.exceptions, []);
+});
+
+test('D-14: a judgement for another content hash is stale: nothing applies, not even floors, and no event', () => {
+  const result = run({ start: [CONFIDENTIAL], floors: [guideFloor(SECRET)], judgement: judgement([SECRET], { 'ca-classified/Secret': 9000 }, 'e'.repeat(64)) });
+  assert.equal(result.outcome, 'stale');
+  assert.deepEqual(result.applied, [CONFIDENTIAL]);
+  assert.deepEqual(result.events, []);
+  assert.equal(result.notify, false);
+});
+
+test('a level with no threshold is at most a no-threshold suggestion; a mid-band probability suggests', () => {
+  const noEntry = sectionWith({ thresholds: { 'ca-classified/Confidential': { costRatio: 9, recallTarget: 9500, secondFamily: false } } });
+  const result = run({ start: [CONFIDENTIAL], section: noEntry, judgement: judgement([label('ca-classified', 'Top Secret')], { 'ca-classified/Top Secret': 9900 }) });
+  assert.deepEqual(result.applied, [CONFIDENTIAL]);
+  assert.equal(result.outcome, 'suggested');
+  assert.deepEqual(reasons(result), ['no-threshold']);
+  const band = run({ start: [CONFIDENTIAL], judgement: judgement([SECRET], { 'ca-classified/Secret': 300 }) });
+  assert.equal(band.outcome, 'suggested');
+  assert.deepEqual(reasons(band), ['band']);
+});
+
+test('a probability that is not whole basis points is refused, never clamped', () => {
+  const result = decide({ start: [CONFIDENTIAL], current: CURRENT, floors: [], section: sectionWith(), scales: SCALE_PRESETS, judgement: judgement([SECRET], { 'ca-classified/Secret': 0.4 }) });
+  assert.equal(result.ok ? '' : result.refusal, 'bad-probability');
+});
+
+test('D-13: a marking floor above the system-high is a possible spill: raised to the system-high with both flags, frozen and queued', () => {
+  const section = sectionWith({ systemHigh: [label('ca-protected', 'Protected B')] });
+  const result = run({ start: [label('ca-protected', 'Protected A')], section, floors: [{ label: SECRET, basis: { kind: 'marking', ref: 'banner-secret' } }] });
+  assert.equal(result.outcome, 'possible-spill');
+  assert.deepEqual(result.applied, [label('ca-protected', 'Protected B', { handling: ['local-only', 'no-agent-tools'] })]);
+  assert.equal(result.freeze, true);
+  assert.deepEqual(result.exceptions.map((entry) => entry.kind), ['possible-spill']);
+  assert.ok(result.proposal.some((part) => part.label.level === 'Secret'), 'the predicted label is kept in the record');
+  assert.ok(result.events.some((event) => event.event === 'label.exception-queued' && event.exception === 'possible-spill'));
+});
+
+test('D-13: a judgement above tau for Protected C on a Protected B system is a possible spill, even in shadow mode', () => {
+  const section = sectionWith({ systemHigh: [label('ca-protected', 'Protected B')], shadow: { defaultMode: 'shadow' } });
+  const result = run({ start: [PB], section, judgement: judgement([label('ca-protected', 'Protected C', { releasability: ['CAN', 'GBR'] })], { 'ca-protected/Protected C': 2000 }) });
+  assert.equal(result.outcome, 'possible-spill');
+  assert.equal(result.freeze, true);
+  assert.deepEqual(result.applied[0]?.handling, ['local-only', 'no-agent-tools']);
+  assert.equal(result.applied[0]?.level, 'Protected B');
+});
+
+test('no systemHigh, no spill; an approved mapping covers a label on another scale', () => {
+  const none = run({ start: [CONFIDENTIAL], floors: [guideFloor(label('ca-classified', 'Top Secret'))] });
+  assert.equal(none.outcome, 'auto-raised');
+  const section = sectionWith({ systemHigh: [label('ca-classified', 'Secret')] });
+  const mappings = [{ from: { scale: 'ca-classified', level: 'Confidential' }, covers: { scale: 'ca-protected', level: 'Protected C' } }];
+  assert.equal(withinSystemHigh(label('ca-protected', 'Protected B'), section, SCALE_PRESETS, mappings), true);
+  assert.equal(withinSystemHigh(label('ca-protected', 'Protected B'), section, SCALE_PRESETS, []), false);
+  const mapped = run({ start: [CONFIDENTIAL], section, mappings, floors: [guideFloor(label('ca-protected', 'Protected B'))] });
+  assert.equal(mapped.outcome, 'auto-raised');
 });
