@@ -1061,10 +1061,10 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-25 from the owner's request and decisions ("accept sovereignty defaults (and let's look to become fully sovereign compliant)"). Decisions, the dimension map and the path to Met per dimension: `.planning/phases/48.4-sovereignty-status/48.4-CONTEXT.md`; research: `.planning/research/sovereignty-status/RESEARCH.md`.
 **Core value:** On every page, an honest, evidence-backed account of how far the system meets Canada's own sovereignty criteria, and a planned path for each dimension to reach them.
-**Status:** planned, 16 plans in 7 waves.
+**Status:** planned, 17 plans in 7 waves (revised 2026-11-25 after the plan check).
 
 - [ ] **SVS-01**: The coherence review amends the glossary and experience map before any sovereignty screen ships; "Sovereignty" is used only as the badge and card name; the copy lint refuses overclaims such as "fully sovereign" and "100% Canadian" in user copy and documentation. [PL-4]
-- [ ] **SVS-02**: One pure lens over the 48.2 engine judges 14 dimensions in four groups, each strictly against its Canadian criterion with its source and time; the badge shows the worst state and counts, never a score; Unknown and Not verified never read as Met; declared facts are shown as declared; an allowed but unmet row says both. [CA-7, SA-400]
+- [ ] **SVS-02**: One pure lens over the 48.2 engine judges 14 dimensions in four groups, each strictly against its Canadian criterion with its source and time; the badge shows the worst state and counts, never a score; Unknown and Not verified never read as Met; declared facts are shown as declared; an allowed but unmet row says both; a row or control reads Met only when every input it depends on is positively evidenced, never from a missing, unrestrictive or self-reported-only input. [CA-7, SA-400]
 - [ ] **SVS-03**: Every resource records its supplier and supplier jurisdiction and every exchange its operator jurisdiction and location (`unknown` allowed and shown); the dimension map is one reviewed source; sovereignty gaps are tagged by dimension and kept equal to the map by a test. [CM-8, SR-4, SA-9, SA-400(2)]
 - [ ] **SVS-04**: A site's operator signs a site sovereignty declaration (facility, operator, screening reference, hardware and review references, HSM and CMVP certificate, backups and off-site copy, model servers, operating level) through the 48.2 operator path; it ages after 90 days and is out of date after 180; it is cross-checked with live facts. [SA-9(8), SA-400(4), SA-400(7), SA-400(8), SC-12, MA-5]
 - [ ] **SVS-05**: The site collector reports the egress destinations the sessions namespace may reach as a live fact with its own time, with least rights, and every session knows the site's sign-in setting. [SC-7, IA-2, CA-7]
@@ -1081,7 +1081,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 | SVS-03 | 48.4-02, 48.4-03, 48.4-05 |
 | SVS-04 | 48.4-06 |
 | SVS-05 | 48.4-07 |
-| SVS-06 | 48.4-11, 48.4-12, 48.4-13, 48.4-14 |
+| SVS-06 | 48.4-11, 48.4-12, 48.4-13, 48.4-14, 48.4-17 |
 | SVS-07 | 48.4-05, 48.4-06, 48.4-07, 48.4-09, 48.4-11, 48.4-13, 48.4-14 |
 | SVS-08 | 48.4-04, 48.4-05, 48.4-10, 48.4-15, 48.4-16 |
 | SVS-09 | 48.4-08 |
