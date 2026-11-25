@@ -502,6 +502,26 @@ async function flood(hub: Hub, project: string, options: { bytes: number; yieldE
   return { count, frameBytes, peak };
 }
 
+/**
+ * Fills the kernel's socket buffers of a paused reader until they stop growing: frames are published while the hub holds less than half its
+ * budget, and the fill ends once the unsent bytes have not moved for 300 ms (the send and receive buffers are full and no longer grow; TCP
+ * autotuning can keep growing them for a while on some hosts, as on CI). Stays under the budget, so nothing overflows here. Gives up after 20 s.
+ */
+async function fillSocketBuffers(hub: Hub, project: string): Promise<void> {
+  const data = FLOOD_DATA(project);
+  const started = Date.now();
+  let still = 0;
+  let last = -1;
+  while (still < 10 && Date.now() - started < 20_000) {
+    while (hub.events.unsentBytes() < EVENT_BUDGET_BYTES / 2) hub.events.publish(project, () => true, 'heads', data);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const now = hub.events.unsentBytes();
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
+  assert.equal(hub.events.stats()[0]?.overflowed, false, 'the fill stays under the budget');
+}
+
 test('resync: a paused reader sent 2 MiB gets at most the 1 MiB budget plus one frame of queued data, then resync, then the end of the stream', () =>
   withLive({}, async (hub) => {
     const { world } = await team(hub);
@@ -538,7 +558,8 @@ test('resync: a reader that never reads again after its budget ran out is cut of
     const stream = await client.events();
     await stream.until((item) => item.retries.length === 1, 'the retry line');
     stream.pause();
-    // The kernel's buffers fill first, so the queue the budget ran out on stays with the hub.
+    // The kernel's buffers fill first, to where they stop growing, so the queue the budget ran out on stays with the hub.
+    await fillSocketBuffers(hub, world.project);
     const published = await flood(hub, world.project, { bytes: 256 * 1024 * 1024, yieldEvery: 32, untilOverflow: true });
     assert.equal(hub.events.stats()[0]?.overflowed, true);
     assert.ok(hub.events.peakUnsentBytes() <= EVENT_BUDGET_BYTES + published.frameBytes);
