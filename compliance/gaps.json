@@ -4736,8 +4736,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add evidence rules on the realm as code that prove each signInKeys level: passkeys accepts synced and device-bound passkeys; hardware-only requires attestation, a non-empty AAGUID allowlist and device-bound keys and is the recommended production setting. State that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped.",
-      "title": "The signInKeys levels have no evidence rule yet"
+      "remediation": "The realm-test rule keycloak.ia-05.sign-in-keys proves each signInKeys level of the realm as code: passkeys asks for no attestation and keeps no allowlist; hardware-only asks for direct or enterprise attestation and accepts only the authenticator models on the site allowlist. The statement says that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped. This gap closes when ia-02 and ia-05 read Met from evidence on the hosted levels.",
+      "title": "The signInKeys levels have their rule; the site evidence is still to come"
     },
     {
       "appliesAt": "protected-a",
@@ -4754,7 +4754,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add the evidence rule that proves each site's relying-party ID is the shared parent domain of its DNS layout (O3).",
+      "remediation": "The realm check proves only that the relying-party ID is the one bare domain name the site file names. Add the check and its evidence rule that the relying-party ID is the shared parent domain of every host name in the site's DNS layout (O3).",
       "title": "The shared relying-party ID has no evidence rule yet"
     },
     {
@@ -4815,9 +4815,7 @@
       "controls": [
         "sc-13",
         "sc-12",
-        "cm-06",
-        "au-02",
-        "au-12"
+        "cm-06"
       ],
       "id": "G334",
       "ownerRole": "maintainers",
@@ -4826,8 +4824,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy and hosts in FIPS mode: test rules on the Phase 47 rendered configuration, and observations from the deployment evidence export.",
-      "title": "RKE2 has no statements for four of its section 10 conditions"
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components (the running version and a dated record) and the STIG profile (the rendered configuration names the CIS profile today). The audit policy and the hosts in FIPS mode have their rules (rke2.au-02.audit-policy, rke2.sc-13.fips-hosts).",
+      "title": "RKE2 has no statements for its FIPS build or the STIG profile"
     },
     {
       "appliesAt": "protected-a",
@@ -4836,11 +4834,7 @@
       "controls": [
         "si-02",
         "ia-02",
-        "ia-05",
-        "au-02",
-        "au-12",
-        "sc-08",
-        "sc-28"
+        "au-12"
       ],
       "id": "G335",
       "ownerRole": "maintainers",
@@ -4849,8 +4843,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add keycloak statements with evidence rules for a version at or above the recorded minimum for CVE-2026-6856, password and OTP authenticators disabled, events shipped to the audit store, and its Postgres with TLS and encryption at rest: test rules on the realm as code and Phase 47 manifests, and observations from the deployment evidence export.",
-      "title": "Keycloak has no statements for its section 10 conditions"
+      "remediation": "Keycloak's statements and rules are in place for section 10 rows 6, 7, 8 and 47. The version, the live authenticators and the shipped events are deployment observations, which read as missing results until the reference site's signed export is committed (48-09). This gap closes when si-02, ia-02 and au-12 read Met from that evidence.",
+      "title": "Keycloak statements wait on the site evidence export"
     },
     {
       "appliesAt": "protected-a",
@@ -4859,14 +4853,6 @@
       "controls": [
         "sc-13",
         "sa-10",
-        "sr-03",
-        "sr-11",
-        "si-07",
-        "sc-08",
-        "sc-23",
-        "au-02",
-        "au-12",
-        "cm-02",
         "cm-07"
       ],
       "id": "G336",
@@ -4876,19 +4862,15 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add theia-cloud statements with evidence rules for the rebuild on a FIPS-capable UBI 9 JRE, signature, SBOM and provenance per image digest, the fixed oauth2-proxy defaults in the chart, the audit policy on Session and Workspace records, the pin to the assessed commit and no Debian or Alpine bases at Protected B.",
-      "title": "Theia Cloud has no statements for its section 10 conditions"
+      "remediation": "Add theia-cloud statements with evidence rules for the rebuild from source on a FIPS-capable UBI 9 JRE (a test on the image build and the running image digest) and for no Debian or Alpine base at Protected B. The signature, SBOM and provenance per image, the chart's sidecar defaults, the audit of Session and Workspace records and the pinned images have their rules.",
+      "title": "Theia Cloud has no statements for its FIPS rebuild or its image bases"
     },
     {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "sc-13",
-        "sc-08",
-        "sc-23",
-        "ia-05",
-        "ia-02"
+        "sc-13"
       ],
       "id": "G337",
       "ownerRole": "maintainers",
@@ -4897,8 +4879,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add oauth2-proxy statements with evidence rules for the rebuild with the pinned Go FIPS module version, TLS verify on, secure cookies, a real client secret and token forwarding, as test rules on the Phase 47 build job and rendered manifests.",
-      "title": "oauth2-proxy has no statements for its section 10 conditions"
+      "remediation": "Add the oauth2-proxy statement with an evidence rule on the image build with the pinned Go FIPS module version. TLS verification, secure cookies, the real client secret and the forwarded identity have their rules.",
+      "title": "oauth2-proxy has no statement for its Go FIPS module build"
     },
     {
       "appliesAt": "protected-a",
@@ -4957,11 +4939,9 @@
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "si-07",
         "ra-05",
         "cm-08",
-        "ia-02",
-        "au-12"
+        "ia-02"
       ],
       "id": "G341",
       "ownerRole": "maintainers",
@@ -4970,8 +4950,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add image-registry statements with evidence rules for signature-enforced import and admission, scanning, SBOM storage, OIDC to Keycloak and the audit log at Harbor sites, and the same import rules at Zot sites: observations from the deployment evidence export and test rules on the Phase 47 configuration.",
-      "title": "The image registry has no statements for its section 10 conditions"
+      "remediation": "Add image-registry statements with evidence rules for scanning (Harbor renders no Trivy scanner today), SBOM storage and OIDC sign-in to Keycloak. Signature-enforced admission at Harbor and Zot sites and the registry audit events have their rules.",
+      "title": "The image registry has no statements for scanning, SBOM storage or OIDC"
     },
     {
       "appliesAt": "protected-a",
@@ -5007,16 +4987,14 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests for a CA issuer chained to the OpenBao PKI. The statement that no rendered issuer uses ACME already has its rule (cert-manager.sc-17.no-acme).",
-      "title": "cert-manager is not assessed and has no CA issuer statement"
+      "remediation": "The rules cert-manager.sc-12.issuers, cert-manager.sc-12.certificates and cert-manager.sc-17.no-acme prove from the rendered manifests that every certificate comes from the OpenBao-backed issuers and none from ACME. This gap closes when sc-12 and sc-23 read Met from evidence on the hosted levels.",
+      "title": "cert-manager statements wait on evidence"
     },
     {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "cm-06",
-        "ac-03",
         "ia-05.02"
       ],
       "id": "G344",
@@ -5026,8 +5004,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add hub statements with evidence rules for its Kubernetes deployment, several hubs per site each serving a set of projects, and session keys with a site-issued certificate: test rules on the hub and Phase 47 manifest tests and an observation of the hub workload settings.",
-      "title": "The sync hub is not re-assessed for the hosted deployment"
+      "remediation": "Add the hub statement with an evidence rule on the hub tests for session keys with a site-issued certificate. The Kubernetes hardening and several hubs per site have their rules (hub.cm-06.kubernetes, hub.sc-07.separate-hubs).",
+      "title": "The sync hub has no statement for session keys with a site-issued certificate"
     },
     {
       "appliesAt": "protected-a",
@@ -5043,8 +5021,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the storage class fit check, then add its statement for declared encryption at rest with a test rule on the install check.",
-      "title": "The site storage class is not assessed"
+      "remediation": "The rules site-storage.sc-28.encrypted-class and its install rules prove from the rendered manifests and the install that every storage class is encrypted. This gap closes when sc-28 reads Met from evidence on the hosted levels.",
+      "title": "The site storage class statements wait on evidence"
     },
     {
       "appliesAt": "protected-a",
@@ -5060,8 +5038,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the fit check for the log and metrics stores, a log store that is not AGPL (Loki is not chosen), then add their statements with test rules and deployment observations.",
-      "title": "The site log and metrics stores are not assessed"
+      "remediation": "The rules site-logging.au-09.store and site-logging.au-09.shipping prove from the rendered manifests that audit and container logs go only to the site OpenSearch, which runs with its security plugin; OpenSearch is Apache-2.0 licensed, recorded in the register. This gap closes when au-09 reads Met from evidence on the hosted levels.",
+      "title": "The site log store statements wait on evidence"
     },
     {
       "appliesAt": "protected-b",
