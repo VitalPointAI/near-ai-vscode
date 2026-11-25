@@ -18,15 +18,34 @@ import type { ReadTdfOptions, TdfObject, TdfReadResult, TdfRecipient } from './t
  * Arrival format ids this version reads (the open set of D-11: `tdf`, and later `ztdf-profile/1`, `bdo-4778`, `marked-file`, `unlabelled` and more).
  */
 export const KNOWN_ARRIVAL_FORMATS = Object.freeze([TDF_FORMAT] as const);
-/** What this version keeps of an arrival: your organization's own protected cell. A ZTDF-compatible copy beside it is Phase 45.2's (`cell+ztdf`). */
+/**
+ * What this version keeps of an arrival: your organization's own protected cell. A record's `stored` is a list (`['cell']`, and from Phase 45.2
+ * `['cell', 'ztdf-profile/1']` where a ZTDF-compatible copy is kept beside it). These two lists are the one authoritative id sets; 45.2 imports them.
+ */
 export const KNOWN_STORED_FORMS = Object.freeze(['cell'] as const);
 
 /** The sentence a client shows, and all it does, for a record whose arrived or stored id it does not know (D-11). */
 export const UNKNOWN_FORMAT_TEXT = 'Received in a format this version can\'t read; ask your administrator.';
 
-/** Whether this version may interpret a record with these ids; otherwise it shows UNKNOWN_FORMAT_TEXT and leaves the content alone. */
+/** Shown beside a readable record that also lists a stored form this version does not know (that form is never read). */
+export const ALSO_KEPT_TEXT = 'Also kept in a form this version can\'t read.';
+
+function storedList(stored: unknown): readonly string[] | undefined {
+  return Array.isArray(stored) && stored.every((form) => typeof form === 'string') ? (stored as string[]) : undefined;
+}
+
+/**
+ * Whether this version may interpret a record: its `arrived` id is one this version knows and its `stored` list holds `'cell'`. Other stored forms are
+ * ignored for reading (see unknownStoredForms). Otherwise the client shows UNKNOWN_FORMAT_TEXT and leaves the content alone.
+ */
 export function readableArrival(arrived: unknown, stored: unknown): boolean {
-  return (KNOWN_ARRIVAL_FORMATS as readonly unknown[]).includes(arrived) && (KNOWN_STORED_FORMS as readonly unknown[]).includes(stored);
+  const forms = storedList(stored);
+  return (KNOWN_ARRIVAL_FORMATS as readonly unknown[]).includes(arrived) && forms !== undefined && forms.includes('cell');
+}
+
+/** The stored forms of a record that this version does not know, for ALSO_KEPT_TEXT; never read. */
+export function unknownStoredForms(stored: unknown): readonly string[] {
+  return Object.freeze((storedList(stored) ?? []).filter((form) => !(KNOWN_STORED_FORMS as readonly string[]).includes(form)));
 }
 
 /** How an arrival became what we keep: the converter and its version, and what was lost or assumed on the way, in plain words. */
@@ -45,8 +64,10 @@ export interface ImportedObject {
   readonly binding: LabelBinding;
   readonly mimeType: string;
   readonly arrived: string;
-  readonly stored: string;
-  readonly conversion: ImportConversion;
+  /** What we keep, `'cell'` always among them. */
+  readonly stored: readonly string[];
+  /** How it was converted; absent when an arrival is kept as received (a `ztdf-profile/1` arrival, Phase 45.2). */
+  readonly conversion?: ImportConversion;
   readonly state: 'quarantined';
 }
 
@@ -95,7 +116,7 @@ export const tdfAdapter: ExchangeAdapter = Object.freeze({
       ok: true,
       value: Object.freeze({
         content: read.content, label: read.label, external: read.external, binding: read.binding, mimeType: read.mimeType,
-        arrived: TDF_FORMAT, stored: 'cell', conversion: TDF_CONVERSION, state: 'quarantined' as const
+        arrived: TDF_FORMAT, stored: Object.freeze(['cell']), conversion: TDF_CONVERSION, state: 'quarantined' as const
       })
     };
   }

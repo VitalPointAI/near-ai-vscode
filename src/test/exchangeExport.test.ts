@@ -7,7 +7,7 @@ import { EDDSA_JCS_2022 } from '../domain/credentials/dataIntegrity';
 import { factsFrom, factsFromAgreement, isCheckedFacts } from '../domain/credentials/mayRelease';
 import type { CheckedCredential, CredentialFacts } from '../domain/credentials/mayRelease';
 import type { VerifiedCredential } from '../domain/credentials/profile';
-import { KNOWN_ARRIVAL_FORMATS, UNKNOWN_FORMAT_TEXT, readableArrival, tdfAdapter } from '../domain/exchange/adapter';
+import { ALSO_KEPT_TEXT, KNOWN_ARRIVAL_FORMATS, KNOWN_STORED_FORMS, UNKNOWN_FORMAT_TEXT, readableArrival, tdfAdapter, unknownStoredForms } from '../domain/exchange/adapter';
 import { EXPORT_REFUSALS, canExport, isExportDecision } from '../domain/exchange/exportCheck';
 import type { ExportContext, ExportDecision } from '../domain/exchange/exportCheck';
 import { bindLabel, contentHashOf } from '../domain/exchange/labelBinding';
@@ -179,8 +179,8 @@ test('import: every arrival is quarantined with what arrived, what is kept and h
   if (!imported.ok) return;
   assert.equal(imported.value.state, 'quarantined');
   assert.equal(imported.value.arrived, 'tdf');
-  assert.equal(imported.value.stored, 'cell');
-  assert.equal(imported.value.conversion.converter, 'tdf');
+  assert.deepEqual([...imported.value.stored], ['cell']);
+  assert.equal(imported.value.conversion?.converter, 'tdf');
   assert.ok(readableArrival(imported.value.arrived, imported.value.stored));
   const broken = JSON.parse(JSON.stringify(object.manifest)) as Record<string, any>;
   const statement = JSON.parse(broken.assertions[0].statement.value as string) as Record<string, any>;
@@ -196,10 +196,19 @@ test('import: every arrival is quarantined with what arrived, what is kept and h
   assert.equal(unsigned.ok ? 'ok' : `${unsigned.reason}/${String(unsigned.bindingReason)}`, 'label-binding/signature');
 });
 
-test('version safety: an arrived or stored id this version does not know is never interpreted', () => {
+test('version safety: an unknown arrival or a stored list without cell is never interpreted; an unknown extra stored form is ignored for reading', () => {
   assert.deepEqual([...KNOWN_ARRIVAL_FORMATS], ['tdf']);
-  for (const [arrived, stored] of [['ztdf-profile/1', 'cell'], ['bdo-4778', 'cell'], ['marked-file', 'cell'], ['unlabelled', 'cell'], ['tdf', 'cell+ztdf'], [undefined, 'cell']]) {
-    assert.equal(readableArrival(arrived, stored), false, `${String(arrived)} ${String(stored)}`);
-  }
+  assert.deepEqual([...KNOWN_STORED_FORMS], ['cell']);
+  assert.equal(readableArrival('tdf', ['cell']), true);
+  // A newer client also kept a ZTDF-compatible copy: still readable here through the cell, and the extra form is named for ALSO_KEPT_TEXT.
+  assert.equal(readableArrival('tdf', ['cell', 'ztdf-profile/1']), true);
+  assert.deepEqual([...unknownStoredForms(['cell', 'ztdf-profile/1'])], ['ztdf-profile/1']);
+  assert.deepEqual([...unknownStoredForms(['cell'])], []);
+  const unreadable: Array<[unknown, unknown]> = [
+    ['ztdf-profile/1', ['cell']], ['bdo-4778', ['cell']], ['marked-file', ['cell']], ['unlabelled', ['cell']], [undefined, ['cell']],
+    ['tdf', ['ztdf-profile/1']], ['tdf', []], ['tdf', 'cell'], ['tdf', [1, 'cell']], ['tdf', undefined]
+  ];
+  for (const [arrived, stored] of unreadable) assert.equal(readableArrival(arrived, stored), false, `${String(arrived)} ${JSON.stringify(stored)}`);
   assert.equal(UNKNOWN_FORMAT_TEXT, 'Received in a format this version can\'t read; ask your administrator.');
+  assert.equal(ALSO_KEPT_TEXT, 'Also kept in a form this version can\'t read.');
 });
