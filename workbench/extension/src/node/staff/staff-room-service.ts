@@ -34,7 +34,7 @@ export const DECISION_WINDOW_MS = 15 * 60_000;
 
 /** What the Staff Room reads of the session's live engine. */
 export type RoomLiveSource = Pick<StaffLiveEngine, 'projects' | 'shared' | 'projectionInput' | 'onStatus' | 'onJoinRequest' | 'localAppended'
-  | 'wrapCards' | 'switchToV2' | 'moveCellsToV2' | 'giveKeys'>;
+  | 'wrapCards' | 'switchToV2' | 'moveCellsToV2' | 'giveKeys'> & Partial<Pick<StaffLiveEngine, 'people' | 'onPeople'>>;
 
 /** A person in the people list (livePresence.ts PresencePerson). */
 export interface RoomPerson {
@@ -62,7 +62,7 @@ export interface StaffRoomServiceOptions {
     | 'chooseRosterBranch' | 'describeRosterBranches' | 'isRosterWriterAt' | 'syncStatusFor' | 'projectProductStates'>;
   /** The acr of your organization's step-up sign-in, when it has one (STERLING_STEPUP_ACR). */
   readonly stepUpAcr?: () => string | undefined;
-  /** The people list of a shared work (33-12's LivePresence), when the engine runs it. */
+  /** The other people of a shared work (33-12's LivePresence); by default the live engine's presence (33-29). */
   readonly people?: (project: string) => readonly RoomPerson[] | undefined;
   /** The acts of one shared work; by default the engine's VersionActs as a person. */
   readonly actsFor?: (shared: { project: EngineProject; deps: object }) => RoomActs;
@@ -241,6 +241,7 @@ export class StaffRoomService implements StaffRoomServer {
     if (this.watched.has(live)) return;
     this.watched.add(live);
     live.onStatus((row) => { void this.push(row.project); });
+    live.onPeople?.((project) => { void this.push(project); });
     live.onJoinRequest((request) => {
       if (request.invite === undefined) return;
       const joins = this.joins.get(request.project) ?? new Map<string, { invite: string }>();
@@ -287,9 +288,11 @@ export class StaffRoomService implements StaffRoomServer {
       ?? { state: row.state, findings: [], ...(row.lastSyncedAt === undefined ? {} : { lastSyncedAt: row.lastSyncedAt }) };
     const isLeadDevice = engine.isRosterWriterAt(roster as never, project.deviceWriter, head);
     const splits = roster.pending.length === 0 || !isLeadDevice ? [] : await this.splits(shared, roster);
-    const people = this.options.people?.(row.project) ?? (myRecord === undefined ? [] : [{
+    // This person, then the others presence has heard (33-29 runs it; LivePresence never lists this computer's own heartbeat).
+    const others = this.options.people?.(row.project) ?? live.people?.(row.project) ?? [];
+    const people = [...(myRecord === undefined ? [] : [{
       member: myRecord.member, name: myRecord.name, ...(myRecord.seat === undefined ? {} : { position: myRecord.seat }), live: true, lastSeen: this.now(),
-    }]);
+    }]), ...others.filter((person) => person.member !== myRecord?.member)];
     const view = engine.staffRoomLive({
       status,
       isLeadDevice,
