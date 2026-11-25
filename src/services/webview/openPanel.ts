@@ -24,6 +24,8 @@ export interface PanelSpec {
   readonly probe: string;
   /** Keep the page alive while its tab is hidden. */
   readonly retain?: boolean;
+  /** Scripts of another page's folder this page reuses, as `folder/file` under media/ (the research workspace loads the chat's Markdown renderer). */
+  readonly shared?: readonly string[];
 }
 
 /** A tab title with a brand prefix ("NEAR AI:", "Near AI:", "SovAI:"): the title says what the page is, never whose it is. */
@@ -57,8 +59,10 @@ export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: 
   if (BRANDED_TITLE.test(spec.title)) throw new Error(`The panel title "${spec.title}" has a brand prefix; say what the page is.`);
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', spec.folder);
   const shared = sharedMedia(context.extensionUri);
+  const reused = (spec.shared ?? []).map((file) => vscode.Uri.joinPath(context.extensionUri, 'media', ...file.split('/')));
+  const reusedRoots = [...new Set((spec.shared ?? []).map((file) => file.split('/')[0] as string))].map((folder) => vscode.Uri.joinPath(context.extensionUri, 'media', folder));
   const view = vscode.window.createWebviewPanel(spec.viewType, spec.title, vscode.ViewColumn.Active, {
-    enableScripts: true, localResourceRoots: [media, shared], retainContextWhenHidden: spec.retain === true
+    enableScripts: true, localResourceRoots: [media, shared, ...reusedRoots], retainContextWhenHidden: spec.retain === true
   });
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const nonce = randomBytes(16).toString('base64');
@@ -68,7 +72,7 @@ export function openPanel(context: { readonly extensionUri: vscode.Uri }, spec: 
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${view.webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${base}"><link rel="stylesheet" href="${asset(spec.style)}"><title>${escapeHtml(spec.title)}</title></head><body>
 ${spec.body}
-${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}<script nonce="${nonce}" src="${asset(spec.script)}"></script></body></html>`;
+${layoutProbeTag(nonce, layoutProbeAsset(view.webview, shared))}${reused.map((uri) => `<script nonce="${nonce}" src="${view.webview.asWebviewUri(uri).toString()}"></script>`).join('')}<script nonce="${nonce}" src="${asset(spec.script)}"></script></body></html>`;
   registerLayoutProbe(spec.probe, view.webview);
   return view;
 }

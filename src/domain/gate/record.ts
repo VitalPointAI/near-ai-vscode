@@ -130,6 +130,16 @@ export interface DecisionRecordInput {
   readonly passport?: { readonly id: string; readonly hash: string };
   /** Why the passport did not cover the request (D-11), written to `unmapped.nearAi.passportGap`. Optional: record version 1. */
   readonly passportGap?: PassportGapId;
+  /** A checking route's families (74.1 D-19, D-23), written to `unmapped.nearAi.checkFamilies`. Optional: record version 1. */
+  readonly checkFamilies?: CheckRecordFamilies;
+  /** `t0` for a request from the research workspace (74.1 D-17), written to `unmapped.nearAi.lane`; no other value exists. Optional: record version 1. */
+  readonly lane?: 't0';
+}
+
+/** The families of a check: the writers' (sorted) and the checker's, which is never one of them (74.1 D-19). */
+export interface CheckRecordFamilies {
+  readonly author: readonly string[];
+  readonly checker: string;
 }
 
 /**
@@ -211,6 +221,8 @@ export interface DecisionRecord {
       readonly passport?: string;
       readonly passportHash?: string;
       readonly passportGap?: PassportGapId;
+      readonly checkFamilies?: CheckRecordFamilies;
+      readonly lane?: 't0';
     };
   };
 }
@@ -342,7 +354,9 @@ export function buildDecisionRecord(input: DecisionRecordInput): DecisionRecord 
         ...(input.wouldRefuse === undefined ? {} : { wouldRefuse: [...input.wouldRefuse].sort() }),
         ...(input.useTier === undefined ? {} : { useTier: input.useTier }),
         ...(input.passport === undefined ? {} : { passport: input.passport.id, passportHash: input.passport.hash }),
-        ...(input.passportGap === undefined ? {} : { passportGap: input.passportGap })
+        ...(input.passportGap === undefined ? {} : { passportGap: input.passportGap }),
+        ...(input.checkFamilies === undefined ? {} : { checkFamilies: { author: [...input.checkFamilies.author].sort(), checker: input.checkFamilies.checker } }),
+        ...(input.lane === undefined ? {} : { lane: input.lane })
       }
     }
   };
@@ -408,6 +422,8 @@ const USE_TIER_SET: ReadonlySet<string> = new Set<string>(USE_TIERS);
 const PASSPORT_GAP_SET: ReadonlySet<string> = new Set<string>(PASSPORT_GAPS);
 const PASSPORT_ID = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
+const FAMILY_TOKEN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const CHECK_FAMILIES_FIELD = ['unmapped', 'nearAi', 'checkFamilies'].join('.');
 
 /** The passport fields of a model request's record (74.1 D-23): each optional, each from its own closed list or shape. */
 function passportFieldsKnown(value: Record<string, unknown>): Refusal | undefined {
@@ -415,12 +431,22 @@ function passportFieldsKnown(value: Record<string, unknown>): Refusal | undefine
     ['useTier', (found) => typeof found === 'string' && USE_TIER_SET.has(found)],
     ['passport', (found) => typeof found === 'string' && PASSPORT_ID.test(found)],
     ['passportHash', (found) => typeof found === 'string' && HEX_64.test(found)],
-    ['passportGap', (found) => typeof found === 'string' && PASSPORT_GAP_SET.has(found)]
+    ['passportGap', (found) => typeof found === 'string' && PASSPORT_GAP_SET.has(found)],
+    // The research workspace's lane (74.1 D-17): t0 is the only lane; any other value is refused.
+    ['lane', (found) => found === 't0']
   ];
   for (const [key, ok] of checks) {
     const field = ['unmapped', 'nearAi', key].join('.');
     const found = readPath(value, field);
     if (found !== undefined && !ok(found)) return refused('not-allowed-here', field);
+  }
+  // A check's families (74.1 D-23): family tokens, and a checker never of a writer's family, so a forged same-family check is caught.
+  const families = readPath(value, CHECK_FAMILIES_FIELD);
+  if (families !== undefined) {
+    const author = readPath(families, 'author');
+    const checker = readPath(families, 'checker');
+    const token = (found: unknown): found is string => typeof found === 'string' && FAMILY_TOKEN.test(found);
+    if (!Array.isArray(author) || !author.every(token) || !token(checker) || author.includes(checker)) return refused('not-allowed-here', CHECK_FAMILIES_FIELD);
   }
   return undefined;
 }

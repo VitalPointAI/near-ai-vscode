@@ -349,7 +349,9 @@
       const wrapper = el('div', 'code-block');
       const header = el('header');
       header.append(el('span', '', block.lang || 'text'));
-      header.append(iconButton('insert', 'Insert at cursor', () => post({ type: 'insert-code', text: block.code })));
+      // 74.1-12 (S6): an answer whose model may not write to a file keeps Insert focusable but aria-disabled, with the reason under the answer.
+      const insert = iconButton('insert', 'Insert at cursor', () => { if (insert.getAttribute('aria-disabled') !== 'true') post({ type: 'insert-code', text: block.code }); });
+      header.append(insert);
       const copy = iconButton('copy', 'Copy', () => {
         navigator.clipboard.writeText(block.code).then(() => {
           copy.innerHTML = ICONS.check;
@@ -408,6 +410,124 @@
     if (namesLower(text)) node.append(lowerButton());
     append(node);
     announce(text);
+  }
+
+  // ---- 74.1-13: the empty-state card and the report-only notice (74.1-UI-SPEC S8, S9). Words come from the host; the page renders and posts. ----
+  const POLICY_ICONS = {
+    slash: 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1m4.3 3.4-7.9 7.9A6 6 0 0 0 12.3 4.4M8 2a6 6 0 0 0-4.3 10.2l7.9-7.9A6 6 0 0 0 8 2',
+    warning: 'M7.6 1.5h.8l6.5 12-.4.7H1.5l-.4-.7zM8 3 2.4 13.5h11.2zm-.5 3h1v4h-1zm0 5h1v1h-1z',
+    server: 'M2 2h12v5H2zm1 1v3h10V3zm-1 6h12v5H2zm1 1v3h10v-3zm1-6h2v1H4zm0 7h2v1H4z',
+    cloud: 'M4.5 13a3.5 3.5 0 0 1-.6-6.9A4.5 4.5 0 0 1 12.6 6 3.5 3.5 0 0 1 12 13zm0-1H12a2.5 2.5 0 0 0 .2-5H11.6l-.1-.5a3.5 3.5 0 0 0-6.8.6l-.1.4-.4.1A2.5 2.5 0 0 0 4.5 12',
+    clock: 'M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1m0 1a6 6 0 1 0 0 12A6 6 0 0 0 8 2m-.5 2h1v3.8l2.6 2.6-.7.7-2.9-2.9z',
+    beaker: 'M10 1v1h-.5v4.3l4.3 6.5A1.5 1.5 0 0 1 12.6 15H3.4a1.5 1.5 0 0 1-1.2-2.2L6.5 6.3V2H6V1zM7.5 2v4.6l-1.6 2.4h4.2L8.5 6.6V2zM5.2 10l-2.1 3.3a.5.5 0 0 0 .4.7h9.1a.5.5 0 0 0 .4-.7L10.8 10z'
+  };
+  function policyIcon(name) {
+    const span = el('span', 'policy-icon');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    shape.setAttribute('d', POLICY_ICONS[name]);
+    svg.append(shape);
+    span.append(svg);
+    return span;
+  }
+  let policyUid = 0;
+  const OPTION_ICONS = { service: 'server', closed: 'cloud', near: 'clock', research: 'beaker' };
+
+  // The card in place of the reply: title, facts, the ways forward that hold, who to ask last. Only one button is primary, and only when it is alone.
+  function emptyStateCard(card) {
+    const node = el('div', 'turn lifted bar-info empty-state');
+    node.setAttribute('role', 'group');
+    const titleId = 'empty-state-' + String(++policyUid);
+    const title = el('h2', 'empty-state-title');
+    title.id = titleId;
+    title.append(policyIcon('slash'), el('span', '', card.title));
+    node.setAttribute('aria-labelledby', titleId);
+    node.append(title, el('p', '', card.facts), el('p', 'strong', card.waysTitle));
+    const list = el('ol', 'ways');
+    const buttons = card.options.filter((option) => option.kind !== 'near');
+    for (const option of card.options) {
+      const item = el('li', 'way');
+      const sentence = el('p', '', option.text);
+      item.append(policyIcon(OPTION_ICONS[option.kind] || 'beaker'), sentence);
+      if (option.kind === 'near') {
+        const detail = el('p', 'muted way-detail', option.detail);
+        detail.id = 'near-detail-' + String(++policyUid);
+        detail.hidden = true;
+        const more = textButton(option.button, () => {
+          detail.hidden = !detail.hidden;
+          more.setAttribute('aria-expanded', detail.hidden ? 'false' : 'true');
+        });
+        more.classList.add('link-button');
+        more.setAttribute('aria-expanded', 'false');
+        more.setAttribute('aria-controls', detail.id);
+        item.append(more, detail);
+      } else {
+        const primary = buttons.length === 1;
+        item.append(textButton(option.button, () => {
+          if (option.kind === 'research') post({ type: 'model-policy-action', action: 'open-research-workspace' });
+          else if (option.kind === 'service') post({ type: 'model-policy-action', action: 'add-service' });
+          else if (option.kind === 'closed') useForThisChat(node, option);
+        }, primary));
+      }
+      list.append(item);
+    }
+    node.append(list, el('p', 'muted who', card.who));
+    append(node);
+    announce(card.title);
+    scrollToEnd();
+  }
+
+  // "Use {model} for this chat": the chat's own model list chooses it, as a person would (one press, Q7); the card's buttons go and the card says so.
+  function useForThisChat(card, option) {
+    const select = $('model');
+    if (!select || ![...select.options].some((entry) => entry.value === option.model)) return;
+    select.value = option.model;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    card.querySelectorAll('button').forEach((button) => button.remove());
+    if (option.after) { card.append(el('p', 'after-use', option.after)); announce(option.after); }
+    input.focus();
+  }
+
+  // Insert at cursor on one answer (74.1-12, S6): the reason once under the answer; Insert stays focusable and is not activated when not allowed.
+  function applyRule(node, apply) {
+    if (!apply || typeof apply.reason !== 'string' || node.querySelector('.apply-reason')) return;
+    const line = el('p', 'apply-reason', apply.reason);
+    line.id = 'apply-reason-' + String(++policyUid);
+    const badge = node.querySelector('.trust-badge');
+    if (badge && badge.parentNode === node) node.insertBefore(line, badge); else node.append(line);
+    if (apply.allowed === false) {
+      node.querySelectorAll('button[aria-label="Insert at cursor"]').forEach((button) => { button.setAttribute('aria-disabled', 'true'); button.setAttribute('aria-describedby', line.id); });
+    }
+  }
+
+  // The report-only notice: no close or dismiss control; it goes only when the host says the rules turned to enforce.
+  function renderPolicyNotice(notice) {
+    const box = $('model-policy-notice');
+    if (!box) return;
+    if (!notice) { box.hidden = true; box.replaceChildren(); return; }
+    if (box.dataset.shown === JSON.stringify(notice)) { box.hidden = false; return; }
+    box.dataset.shown = JSON.stringify(notice);
+    box.replaceChildren();
+    const line = el('p', 'notice-line');
+    const words = el('span', '');
+    words.append(el('strong', '', notice.lead), document.createTextNode(notice.tail));
+    line.append(policyIcon('warning'), words);
+    const detail = el('p', 'muted notice-detail', notice.detail);
+    detail.id = 'model-policy-detail';
+    detail.hidden = true;
+    const more = textButton(notice.more, () => {
+      detail.hidden = !detail.hidden;
+      more.setAttribute('aria-expanded', detail.hidden ? 'false' : 'true');
+    });
+    more.classList.add('link-button');
+    more.setAttribute('aria-expanded', 'false');
+    more.setAttribute('aria-controls', detail.id);
+    line.append(more);
+    if (notice.adopt) line.append(textButton(notice.adopt, () => post({ type: 'model-policy-action', action: 'adopt' }), true));
+    box.append(line, detail);
+    box.hidden = false;
   }
 
   // The reply footer: model, privacy, tokens, and cost. The estimate (~$) is replaced by the
@@ -1446,20 +1566,24 @@
           model.title = '';
           break;
         }
-        const groups = [['local', 'Local · runs on this machine'], ['tee', 'Private · NEAR AI private hardware, checked each time it is used'], ['forwarded', 'Not private · NEAR forwards to another provider'], ['unknown', 'Privacy unknown']];
-        model.replaceChildren(...groups.map(([kind, label]) => {
-          const group = el('optgroup');
-          group.label = label;
-          group.append(...models.filter((item) => item.privacy === kind).map((item) => {
-            const option = el('option', '', item.id.split('/').pop() + (kind === 'tee' ? ' 🔒' : ''));
-            option.value = item.id;
-            option.title = item.label;
-            return option;
-          }));
-          return group;
-        }).filter((group) => group.children.length));
+        // 74.1-12 (S4): groups by Runs on in the host's order; each row its words; a model this chat's use forbids is disabled with the reason as text.
+        const groups = [];
+        for (const item of models) {
+          let group = groups.find((entry) => entry.label === item.group);
+          if (!group) { group = el('optgroup'); group.label = item.group || ''; groups.push(group); }
+          const option = el('option', '', item.text || item.id);
+          option.value = item.id;
+          option.title = item.label;
+          option.disabled = item.disabled === true;
+          group.append(option);
+        }
+        model.replaceChildren(...groups);
         modelInfo = new Map(models.map((item) => [item.id, item]));
-        if (saved.model && modelInfo.has(saved.model)) model.value = saved.model;
+        const savedItem = saved.model ? modelInfo.get(saved.model) : undefined;
+        // A saved choice that is now forbidden is not restored: the default stays, and the status line says so.
+        if (savedItem && savedItem.disabled) { if (savedItem.savedForbidden) { status.textContent = savedItem.savedForbidden; announce(savedItem.savedForbidden); } }
+        else if (savedItem) model.value = saved.model;
+        if (model.selectedOptions[0] && model.selectedOptions[0].disabled) { const first = [...model.options].find((option) => !option.disabled); if (first) model.value = first.value; }
         model.title = (modelInfo.get(model.value) || {}).label || '';
         break;
       }
@@ -1548,6 +1672,7 @@
         // Drawn only under its own run's answer: a run id with no answer on the page, or a state that is not one of the three, draws nothing.
         const reply = typeof m.runId === 'string' ? replies.get(m.runId) : undefined;
         if (reply) trustKit.renderTrustBadge(document, reply.node, m.badge, postFor, m.runId);
+        if (reply && m.badge && m.badge.apply) applyRule(reply.node, m.badge.apply);
         break;
       }
       case 'assistant-cost': {
@@ -1584,8 +1709,11 @@
         settleSentNewFiles(m);
         closeAllPending('cancelled');
         finishAssistant();
-        notice(m.text || 'The request failed.', [], true);
+        // 74.1-13: a route.passport refusal that no model would pass shows the empty-state card in place of the reply.
+        if (m.card && typeof m.card === 'object' && Array.isArray(m.card.options)) emptyStateCard(m.card);
+        else notice(m.text || 'The request failed.', [], true);
         break;
+      case 'model-policy-notice': renderPolicyNotice(m.notice && typeof m.notice === 'object' ? m.notice : undefined); break;
       case 'command-progress': onCommandProgress(m); break;
       case 'structured-prompt': onPrompt(m.prompt); break;
       case 'prompt-error': notice(m.text || 'That answer could not be sent.', [], true); break;

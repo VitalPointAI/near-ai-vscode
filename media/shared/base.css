@@ -52,3 +52,25 @@ body { margin: 0; font-family: var(--vscode-font-family); font-size: var(--vscod
   table.stack-medium > tbody > tr > td, table.stack-medium > tbody > tr > th { min-width: 0; max-width: none; padding: 2px 8px; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
   table.stack-medium > tbody > tr > [data-label]:not([data-label=""])::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.85em; }
 }
+
+/* Lifted cards (74.1-UI-SPEC "Elevation", owner direction 2026-11-24): the original rounded-card theme. Elevation is decoration only; every card keeps its
+   1px border and every state is carried by words and icons. 12px cards, 8px notices; no shadow in high contrast or forced colours. */
+:root {
+  --sovai-card-surface: var(--vscode-editor-background);
+  --sovai-card-highlight: inset 0 0 0 transparent;
+  --sovai-elevation-1: 0 1px 2px var(--vscode-widget-shadow, transparent), 0 4px 12px color-mix(in srgb, var(--vscode-widget-shadow, transparent) 50%, transparent);
+  --sovai-elevation-2: 0 2px 4px var(--vscode-widget-shadow, transparent), 0 8px 24px color-mix(in srgb, var(--vscode-widget-shadow, transparent) 60%, transparent);
+}
+body.vscode-dark {
+  --sovai-card-surface: color-mix(in srgb, var(--vscode-editorWidget-background) 94%, var(--vscode-foreground) 6%);
+  --sovai-card-highlight: inset 0 1px 0 color-mix(in srgb, var(--vscode-foreground) 10%, transparent);
+}
+.lifted { background: var(--sovai-card-surface); border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border)); border-radius: 12px; box-shadow: var(--sovai-card-highlight), var(--sovai-elevation-1); overflow-wrap: anywhere; }
+.lifted.notice { border-radius: 8px; }
+.lifted.raised { box-shadow: var(--sovai-card-highlight), var(--sovai-elevation-2); }
+body:is(.vscode-high-contrast, .vscode-high-contrast-light) .lifted { box-shadow: none; border-color: var(--vscode-contrastBorder); }
+@media (forced-colors: active) { .lifted { box-shadow: none; border: 1px solid currentColor; } }
+/* A 3px bar on the inline start of a warning or info card (the research banner, the report-only notice, the empty-state card). */
+.lifted.bar-warning { border-inline-start: 3px solid var(--vscode-editorWarning-foreground); }
+.lifted.bar-info { border-inline-start: 3px solid var(--vscode-editorInfo-foreground); }
+.codicon-svg { flex: none; width: 16px; height: 16px; fill: currentColor; }

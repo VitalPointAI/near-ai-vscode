@@ -136,3 +136,6 @@ button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-v
   .role { max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* 74.1-UI-SPEC S3: the lane line card above the results (a lifted notice from base.css), and the reason line under a model's job control. */
+.lane-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; padding: 8px 16px; border-inline-start: 3px solid var(--vscode-editorInfo-foreground); }
+.lane-line p { margin: 0; flex: 1 1 320px; overflow-wrap: anywhere; }

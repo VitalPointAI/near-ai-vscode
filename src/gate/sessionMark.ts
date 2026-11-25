@@ -14,7 +14,7 @@ import type { Mark } from '../domain/gate/dominance';
 import { labelKey } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import { buildDecisionRecord } from '../domain/gate/record';
-import type { DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
+import type { CheckRecordFamilies, DecisionRecord, PolicyRecordVersion } from '../domain/gate/record';
 import { ROUTE_REFUSALS, notAccreditedText, routingWhileFailedClosed, thisComputerOnlyLabelOf, tierForLabel } from '../domain/gate/routing';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import type { RouteDecision, RouteEventId, RouteFacts, RoutePolicy, RoutingTable, VerifiedAuthorization } from '../domain/gate/routing';
@@ -25,9 +25,11 @@ import type { PolicyLayersView } from './organizationStore';
 import { clearancesInForce } from './clearances';
 import type { ClearanceWalletView } from './clearances';
 import type { InferTier } from '../domain/gate/vocabulary';
-import type { UseTier } from '../domain/gate/models';
+import type { ReevaluationTrigger, UseTier } from '../domain/gate/models';
+import { passportTriggeredText } from '../domain/gate/passportStep';
 import { raiseUseTier, useTierFor } from '../domain/gate/useTier';
 import type { UseInput } from '../domain/gate/useTier';
+import { recordLaneOf } from '../domain/gate/researchLane';
 
 /**
  * Shared by a chat and every route it builds, so a failed answer check stops attested-cloud for the chat and its helpers alike (D-55). `closed` is set when
@@ -90,6 +92,8 @@ export interface SessionRoute {
    * is added by the client. Absent: chat you review, raised only by the mark.
    */
   readonly useOf?: () => UseInput;
+  /** A checking route's families (74.1 D-19, D-23): the writers' and the checker's, which every record of the route names. */
+  readonly checkFamilies?: CheckRecordFamilies;
 }
 
 /** The empty mark: the session has read nothing above the policy's default label. */
@@ -101,7 +105,7 @@ const EMPTY_MARK: Mark = Object.freeze([]);
  */
 export function sessionRouteFrom(
   runtime: GateRuntime,
-  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute } = {}
+  options: { markOf?: () => Mark; attestation?: RouteAttestation; onAnswerChecked?: AnswerCheckListener; onNotice?: (text: string) => void; use?: UseInput | (() => UseInput); parent?: SessionRoute; checkFamilies?: CheckRecordFamilies } = {}
 ): SessionRoute {
   // 74.1 D-13: the runtime's context and the project's facts, then the caller's own facts, which can only add to them (useTierFor takes the highest row).
   const own = options.use;
@@ -118,7 +122,8 @@ export function sessionRouteFrom(
     attestation: options.attestation ?? { failed: false },
     ...(options.onAnswerChecked === undefined ? {} : { onAnswerChecked: options.onAnswerChecked }),
     ...(options.onNotice === undefined ? {} : { onNotice: options.onNotice }),
-    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) })
+    useOf: () => ({ context: runtime.context, ...project, ...(typeof own === 'function' ? own() : own ?? {}) }),
+    ...(options.checkFamilies === undefined ? {} : { checkFamilies: options.checkFamilies })
   };
   // A sub-agent's route starts at the use its parent is at now: the highest it has asked for, or what its own facts give.
   if (options.parent !== undefined) raiseSessionUse(route, parentUse(options.parent));
@@ -184,6 +189,19 @@ export function withSessionRoute<T>(route: SessionRoute, work: () => T): T {
 /** The route of the work running now, or undefined outside every route. */
 export function currentSessionRoute(): SessionRoute | undefined {
   return routes.getStore();
+}
+
+/**
+ * Runs `work` as a checking job (74.1 D-16, D-19): in a route that is the current one (or the default one outside every route) with `checkingJob: true`
+ * added to its use facts, starting at the use the current route is at. A checker's requests are then checked as agent work and, under enforce, need your
+ * organization's evaluation of the checking model.
+ */
+export function withCheckingJob<T>(work: () => T): T {
+  const parent = currentSessionRoute() ?? defaultSessionRoute();
+  const route: SessionRoute = { ...parent, useOf: () => ({ ...(parent.useOf?.() ?? {}), checkingJob: true }) };
+  const held = useHighWater.get(parent);
+  if (held !== undefined) raiseSessionUse(route, held);
+  return withSessionRoute(route, work);
 }
 
 // ---- The private floor (coherence review S4) ----
@@ -315,6 +333,17 @@ function securityContactOf(effective: PolicyDocument): { readonly contact?: { re
   return contact === undefined ? {} : { contact: Object.freeze({ name: contact.name, how: contact.how }) };
 }
 
+// ---- The report-only notice (74.1 D-22) ----
+
+/** Told once per would-refuse of route.passport (report mode): the notice service listens. A listener that throws never changes a request. */
+export const passportReportListeners = new Set<() => void>();
+
+function notePassportReport(): void {
+  for (const listener of [...passportReportListeners]) {
+    try { listener(); } catch { /* a notice never changes a request */ }
+  }
+}
+
 // ---- The record of a model request (GATE-07, D-20, D-52) ----
 
 /** The rules of a routine allowed request, whose record is the short one: no reason, no tier beside the capability's, and no label at the default mark. */
@@ -383,6 +412,8 @@ export interface RouteRecordContext {
  * the default label, no label. The connection state is kept only when the tier read it (attested-cloud). Never a host, a URL, a path or a fingerprint: the facts' host and binding fingerprint are not read here.
  */
 export function routeRecordFor(route: SessionRoute, decision: RouteDecision, facts: RouteFacts, request: RouteRequest, context: RouteRecordContext): DecisionRecord {
+  // 74.1 D-22: every model request's decision passes here once; one route.passport would-refuse raises the report-only notice for the session.
+  if (decision.allowed && decision.wouldRefuse?.includes('route.passport') === true) notePassportReport();
   const recordId = (route.newRecordId ?? randomUUID)();
   const provider = facts.clientRoute === 'local' ? 'local' : facts.clientRoute === 'near' ? 'near-ai' : 'unknown';
   const model = recordedModelName(request.model);
@@ -421,8 +452,21 @@ export function routeRecordFor(route: SessionRoute, decision: RouteDecision, fac
     // The use, the passport by id and hash, and the gap the passport step found (74.1 D-23).
     ...(decision.useTier === undefined ? {} : { useTier: decision.useTier }),
     ...(decision.passport === undefined ? {} : { passport: decision.passport }),
-    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap })
+    ...(decision.passportGap === undefined ? {} : { passportGap: decision.passportGap }),
+    // The families of a check (74.1 D-23): the writers' and the checker's, so the record shows no work was checked by its own family.
+    ...(route.checkFamilies === undefined ? {} : { checkFamilies: route.checkFamilies }),
+    // The research workspace's requests say so in every record (74.1 D-17).
+    ...(laneOf(route) === undefined ? {} : { lane: 't0' as const })
   });
+}
+
+/** The record lane of a route: `t0` when its use facts say the research lane; none when they cannot be read. */
+function laneOf(route: SessionRoute): 't0' | undefined {
+  try {
+    return recordLaneOf(route.useOf?.());
+  } catch {
+    return undefined;
+  }
 }
 
 /** Why an answer sent at attested-cloud could not be checked at all (PR #89 review): recorded as unavailable, so no such answer goes unrecorded. */
@@ -466,6 +510,39 @@ export function routeEventRecordFor(route: SessionRoute, event: RouteEventId, re
     bundleHash,
     ...(mark.length === 0 ? {} : { mark }),
     attestation: request.attestation
+  });
+}
+
+/**
+ * The record that a re-evaluation trigger ended a model's approval (`route.passport-triggered`, 74.1 D-15): written once per passport hash and trigger,
+ * beside the request's own record. It refuses nothing itself; the passport step does. The capability's tier is the one the model's place serves (this
+ * computer, private hardware, or the cloud). Names the passport by id and hash, never a host or a path.
+ */
+export function passportTriggeredRecordFor(
+  route: SessionRoute,
+  request: { readonly model: string; readonly provider: 'near-ai' | 'local' | 'unknown'; readonly privacyBoundary?: string; readonly passport: { readonly id: string; readonly hash: string }; readonly trigger: ReevaluationTrigger }
+): DecisionRecord {
+  const recordId = (route.newRecordId ?? randomUUID)();
+  const model = recordedModelName(request.model);
+  const tier: InferTier = request.privacyBoundary === 'local' ? 'local-only' : request.privacyBoundary === 'tee' ? 'attested-cloud' : 'any-cloud';
+  let bundleHash = '';
+  try { bundleHash = routingOf(route).bundleHash; } catch { /* no policy hash then */ }
+  return buildDecisionRecord({
+    recordId,
+    sequence: 0,
+    time: clockOf(route),
+    productVersion: route.productVersion ?? UNKNOWN_PRODUCT_VERSION,
+    actor: route.actor,
+    model: { name: model, provider: request.provider },
+    callId: `route.passport-triggered-${recordId}`,
+    capability: { verb: 'infer', tier, provider: request.provider, model },
+    resource: { name: model, type: 'model' },
+    outcome: 'allowed',
+    rule: 'route.passport-triggered',
+    reason: passportTriggeredText(model, request.trigger),
+    bundleHash,
+    passport: request.passport,
+    passportGap: 'expired'
   });
 }
 

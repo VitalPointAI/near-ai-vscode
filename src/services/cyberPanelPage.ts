@@ -9,7 +9,9 @@ import type { AcceptanceSnapshot } from '../domain/cyberLegal';
 import type { CyberRunEvent } from './cyberRun';
 import { defaultVehicle, type RunVehicle } from '../domain/cyberLimits';
 import type { InstallAdvice } from './cyberInstallAdvice';
-import { CHOOSE_ABLITERATED_TEXT, NO_ABLITERATED_TEXT, chooseCyberModel } from '../domain/cyberModel';
+import { CHOOSE_ABLITERATED_TEXT, chooseCyberModel } from '../domain/cyberModel';
+import { RESEARCH_TEXT, fillText, projectFolderOf } from '../domain/gate/researchLane';
+import { realpathSync } from 'node:fs';
 
 // The Cybersecurity panel's page: the HTML shell, the message handling, and the payloads the client
 // renders. No client logic lives in the HTML string (the CONCERNS.md debt this page must not
@@ -108,6 +110,8 @@ export interface CyberPanelDeps {
   sandboxTier(): SandboxTier;
   /** Resolves a target; injected so tests need no DNS. */
   resolve(kind: string, value: string): Promise<ResolvedScope>;
+  /** The open project folders: a folder target inside one is refused (74.1 Q3, so the research workspace banner stays true). */
+  projectFolders?(): readonly string[];
   /** The engagement store: create, get, list runs. */
   engagements: {
     create(engagement: Engagement): Promise<Engagement>;
@@ -152,11 +156,21 @@ export interface CyberPageHost {
   reveal?(): void;
 }
 
-export function cyberPanelHtml(options: { cspSource: string; nonce: string; script: string; style: string }): string {
+const escapeHtml = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const BEAKER_ICON = '<svg class="codicon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 1v1h-.5v4.3l4.3 6.5A1.5 1.5 0 0 1 12.6 15H3.4a1.5 1.5 0 0 1-1.2-2.2L6.5 6.3V2H6V1zM7.5 2v4.6l-1.6 2.4h4.2L8.5 6.6V2zM5.2 10l-2.1 3.3a.5.5 0 0 0 .4.7h9.1a.5.5 0 0 0 .4-.7L10.8 10z"/></svg>';
+const INFO_ICON = '<svg class="codicon-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1m0 1a6 6 0 1 0 0 12A6 6 0 0 0 8 2m.5 5v5h-1V7zM8 4.5a.75.75 0 1 1 0 1.5.75.75 0 0 1 0-1.5"/></svg>';
+
+/** The research workspace banner at the top of the cyber panel (74.1-UI-SPEC S2): the same first line as the workspace, and the isolation sentence. */
+export function cyberResearchBanner(): string {
+  return `<div class="lifted bar-warning research-banner" role="note"><span class="banner-icon">${BEAKER_ICON}</span><div><p class="banner-title">${escapeHtml(RESEARCH_TEXT.banner)}</p>`
+    + `<p class="banner-detail"><span class="info-icon">${INFO_ICON}</span><span>${escapeHtml(RESEARCH_TEXT.cyberIsolation)}</span></p></div></div>`;
+}
+
+export function cyberPanelHtml(options: { cspSource: string; nonce: string; script: string; style: string; base?: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.style}"><title>SovAI Cybersecurity</title></head><body>
-<header><h1>SovAI Cybersecurity</h1><p class="hint">Pick a target, resolve its scope, accept the regional disclaimer once per engagement, then run a defensive, offensive, or full scan. Nothing is sent to a model until you press Run.</p>
+${options.base === undefined ? '' : `<link rel="stylesheet" href="${options.base}">`}<link rel="stylesheet" href="${options.style}"><title>SovAI Cybersecurity</title></head><body>
+<header>${cyberResearchBanner()}<h1>SovAI Cybersecurity</h1><p class="hint">Pick a target, resolve its scope, accept the regional disclaimer once per engagement, then run a defensive, offensive, or full scan. Nothing is sent to a model until you press Run.</p>
 <p id="status" class="status" role="status" aria-live="polite"></p>
 </header>
 <main>
@@ -251,13 +265,15 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
    * offered, else a question when several are offered, else the default with a plain note. A person's answer is remembered for the
    * engagement, so the question is asked once. Resolves to the model and an optional sentence for the panel.
    */
-  const modelFor = async (engagementId: string): Promise<{ model: string; note?: string }> => {
+  // 74.1-10 (MPRV-07): no fixed or chat-tier fallback. With no engagement model and no abliterated pick, no model is set: the person chooses in
+  // the panel, and Run stays disabled until they do.
+  const modelFor = async (engagementId: string): Promise<{ model?: string; note?: string }> => {
     const available = await deps.models.available().catch(() => [] as string[]);
-    const choice = chooseCyberModel(available, deps.models.read(engagementId), deps.models.defaultModel());
+    const choice = chooseCyberModel(available, deps.models.read(engagementId), '');
     if (choice.kind === 'use') return { model: choice.model };
-    if (choice.kind === 'none') return { model: choice.fallback, note: NO_ABLITERATED_TEXT };
+    if (choice.kind === 'none') return { note: RESEARCH_TEXT.cyberChooseModel };
     const picked = await deps.models.choose?.(choice.models);
-    if (!picked) return { model: deps.models.defaultModel(), note: CHOOSE_ABLITERATED_TEXT };
+    if (!picked) return { note: CHOOSE_ABLITERATED_TEXT };
     await deps.models.write(engagementId, picked);
     return { model: picked };
   };
@@ -271,13 +287,23 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
           const detected = disclaimerPrompt(undefined, timeZone());
           await post({ type: 'regions', detectedRegion: detected.detectedRegion, regions: detected.regions });
           const models = await deps.models.available();
-          await post({ type: 'models', models, defaultModel: deps.models.defaultModel() });
+          await post({ type: 'models', models, chooseText: RESEARCH_TEXT.cyberChooseModel });
           const tools = await deps.tools();
           await post({ type: 'tools', ...tools });
           break;
         }
         case 'resolve-target': {
           const scope = await deps.resolve(message.kind, message.value);
+          // Q3: a workspace or git folder inside an open project would send project content to an adversary model; refused at Resolve scope.
+          if (message.kind === 'workspace' || message.kind === 'git') {
+            const folders = deps.projectFolders?.() ?? [];
+            const inside = scope.paths.find((found) => projectFolderOf(found, folders, realpathSync) !== undefined);
+            if (inside !== undefined) {
+              state.scope = undefined;
+              await post({ type: 'error', text: fillText(RESEARCH_TEXT.cyberProjectTarget, { folder: inside }) });
+              break;
+            }
+          }
           state.scope = scope;
           await post({ type: 'scope', preview: scopePreview(message.kind, message.value, scope, deps.sandboxTier()) });
           break;
@@ -342,6 +368,7 @@ export function attachCyberPanel(host: CyberPageHost, deps: CyberPanelDeps): { d
           // The run's model is the one the page names, or the engagement's own choice by this rule: a scan never falls back to a
           // safety-tuned chat model just because the page did not send one.
           const runModel = message.model ?? (await modelFor(engagement.id)).model;
+          if (runModel === undefined) { await post({ type: 'error', text: RESEARCH_TEXT.cyberChooseModel }); break; }
           // The chat vehicle hands the run to a conversation, so it outlives this panel and can be
           // steered by typing; the panel vehicle keeps the tighter timeline but dies with the panel.
           if (vehicle === 'chat') {

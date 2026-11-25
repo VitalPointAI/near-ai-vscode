@@ -791,8 +791,8 @@ until it runs out aren't shown.
   for its tier, and if there is none the member does not run and the lead is
   told why, so its work is never sent to a forwarded model. To choose that
   model, set `nearAi.agent.deepModel` (or the standard or fast tier the
-  member names) to a model whose picker label reads "Private · NEAR AI
-  private hardware, checked each time it is used", or to a local model; if the configured tier model is forwarded, the
+  member names) to a model whose picker group reads "Runs on NEAR AI
+  private hardware (checked each time it is used)", or to a local model; if the configured tier model is forwarded, the
   next private tier model is used (deep, then standard, then fast for a deep
   member), then the most capable other private model. `privacy: any`, or no
   line, lets the member use any model the run may use. The picker's word only

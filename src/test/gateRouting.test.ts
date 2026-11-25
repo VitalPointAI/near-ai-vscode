@@ -367,7 +367,7 @@ test('an allowed request decided outside any session is route.default-session; a
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...LOCAL_OK, sessionless: true }).rule, 'route.default-session');
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, sessionless: true }).rule, 'route.no-local-model');
   assert.equal(decideRoute(markOf(org('Restricted')), DEFAULT_ROUTING, { ...NEAR_TEE, clientRoute: undefined, sessionless: true }).rule, 'route.no-session');
-  assert.deepEqual([...ROUTE_EVENT_IDS], ['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited']);
+  assert.deepEqual([...ROUTE_EVENT_IDS], ['route.attestation-checked', 'route.attestation-cleared', 'route.not-accredited', 'route.passport-triggered']);
   for (const event of ROUTE_EVENT_IDS) assert.ok(!(ROUTE_RULES as readonly string[]).includes(event), `${event} is an event, not a rule`);
 });
 

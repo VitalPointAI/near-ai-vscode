@@ -151,7 +151,7 @@ export function parseTeamPrivacy(value: unknown): 'private' | undefined {
   const privacy = String(value).trim().toLowerCase();
   if (!privacy || privacy === 'any' || privacy === 'default' || privacy === 'cloud') return undefined;
   if (privacy === 'private' || privacy === 'tee' || privacy === 'local') return 'private';
-  throw new Error(`The team has "privacy: ${String(value)}" in its frontmatter; use privacy: private (every member on a NEAR TEE or local model only) or privacy: any.`);
+  throw new Error(`The agent team has "privacy: ${String(value)}"; use privacy: private (private models only: verified private hardware or this computer) or privacy: any.`);
 }
 
 /** Whether a team counts as private: marked private, or every member is private (owner, 2026-11-16). */
@@ -164,11 +164,11 @@ export function parsePrivacy(value: string | undefined, member: string): 'privat
   const privacy = (value ?? '').trim().toLowerCase();
   if (!privacy || privacy === 'any' || privacy === 'default' || privacy === 'cloud') return undefined;
   if (privacy === 'private' || privacy === 'tee' || privacy === 'local') return 'private';
-  throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (a NEAR TEE or local model only) or privacy: any.`);
+  throw new Error(`Member ${member} has "privacy: ${value}"; use privacy: private (verified private hardware or this computer) or privacy: any.`);
 }
 
 export function renderTeam(name: string, description: string, members: Array<Omit<TeamMember, 'tools'> & { tools?: string[] }>, options: { private?: boolean; staff?: StaffTeamBlock } = {}): string {
-  const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), ...(options.staff ? renderStaffTeamBlock(options.staff) : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: a NEAR TEE or local model only; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
+  const lines = ['---', `name: ${name}`, `description: ${description}`, ...(options.private ? ['privacy: private'] : []), ...(options.staff ? renderStaffTeamBlock(options.staff) : []), '---', '', '<!-- Each "## name" section is a team member. Optional lines: role, model (a NEAR model ID or deep/standard/fast), tools (comma-separated), reports-to (another member), and last, privacy (private: private models only, which means verified private hardware or this computer; any: whatever the run may use). Then the member\'s instructions. Save to create a new version. -->', ''];
   for (const listed of members) {
     // A team marked private writes privacy: private on every member too (0.4.27), so a build that reads only member lines keeps each one private.
     const member = options.private ? { ...listed, privacy: 'private' as const } : listed;

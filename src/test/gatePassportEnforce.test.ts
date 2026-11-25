@@ -20,6 +20,7 @@ import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient, RouteRefusedError } from '../services/nearAiClient';
 import { routeFactsFor } from '../services/privateRoute';
 import { testBundleState, testGateRuntime } from './helpers/gatedRuns';
+import { evaluatedModels } from './helpers/policyFixtures';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const PRC_MODEL = 'z-ai/glm-5.3';
@@ -62,6 +63,9 @@ function modelsSection(mode: 'enforce' | 'report'): ModelsSection {
   return parsed.ok ? parsed.value : (undefined as never);
 }
 
+/** 74.1-06 (D-16): under enforce a model takes a role above research only with your organization's evaluation, which its own passport carries. */
+const evaluatedEnforce = (): ModelsSection => evaluatedModels('enforce', ['openai/gpt-oss']);
+
 function routePolicy(models: ModelsSection | undefined): () => RoutePolicy & { readonly policyVersion: PolicyRecordVersion } {
   return () => ({
     endpoints: [], authorizations: [], scales: SCALE_PRESETS, mappings: [], clearances: [], organization: true, requireAccreditedDevice: false,
@@ -101,7 +105,7 @@ test('tracer: under enforce, agent work for a PRC-origin model is refused before
 
 test('tracer: under enforce, the same agent work for a model whose passport covers it is sent', async () => {
   const near = await nearClient();
-  const answer = await withSessionRoute(routeWith(modelsSection('enforce'), () => ({ tools: true })), () => ask(near.client, WESTERN_MODEL));
+  const answer = await withSessionRoute(routeWith(evaluatedEnforce(), () => ({ tools: true })), () => ask(near.client, WESTERN_MODEL));
   assert.equal(answer.text, 'ok');
   assert.deepEqual(near.content, ['POST /v1/chat/completions']);
 });
@@ -145,7 +149,7 @@ test('D-13: the use comes from the current session route; outside every route it
 test('D-13: a session\'s use only rises: after agent work, a later chat request in the same route is still checked as agent work', async () => {
   const near = await nearClient();
   let use: UseInput = { tools: true };
-  const route = routeWith(modelsSection('enforce'), () => use);
+  const route = routeWith(evaluatedEnforce(), () => use);
   assert.equal((await withSessionRoute(route, () => ask(near.client, WESTERN_MODEL))).text, 'ok');
   use = {};
   await assert.rejects(
@@ -219,9 +223,10 @@ test('D-23: the refused PRC request writes one record with route.passport, the u
 test('D-23: the allowed gpt-oss request names its passport and no gap; an unlisted model refused names no passport and the gap unknown', async () => {
   const near = await nearClient();
   const records: DecisionRecord[] = [];
-  await withSessionRoute(routeWith(modelsSection('enforce'), () => ({ tools: true }), records), () => ask(near.client, WESTERN_MODEL));
+  const evaluated = evaluatedEnforce();
+  await withSessionRoute(routeWith(evaluated, () => ({ tools: true }), records), () => ask(near.client, WESTERN_MODEL));
   const allowed = nearAiOf(records[0]);
-  const resolved = resolvePassport(undefined, WESTERN_MODEL, Date.now());
+  const resolved = resolvePassport(evaluated, WESTERN_MODEL, Date.now());
   assert.deepEqual({ useTier: allowed['useTier'], passport: allowed['passport'], passportHash: allowed['passportHash'] },
     { useTier: 'T2', passport: 'openai/gpt-oss', passportHash: resolved === undefined ? undefined : passportHash(resolved.passport) });
   assert.equal(Object.prototype.hasOwnProperty.call(allowed, 'passportGap'), false);

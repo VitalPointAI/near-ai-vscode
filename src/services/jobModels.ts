@@ -3,7 +3,12 @@
 import { resolveJobModel } from '../domain/gate/jobModel';
 import type { JobModel } from '../domain/gate/jobModel';
 import type { ModelJob, ModelsSection } from '../domain/gate/models';
-import { readJobSettings } from './settings';
+import { readJobSettings, readModelTiers } from './settings';
+import type { ModelInfo } from '../domain/provider/messages';
+import { defaultSessionRoute } from '../gate/sessionMark';
+import type { SessionRoute } from '../gate/sessionMark';
+import { safetyCheckersFor } from './chatBridge';
+import { gateAllows } from './privateRoute';
 import type { SettableJob } from './settings';
 
 /** The jobs a run starts with. */
@@ -23,4 +28,40 @@ export function jobModelsFor(catalog: ReadonlyArray<{ readonly id: string }>, al
   const own = (options.read ?? readJobSettings)();
   const now = options.now ?? Date.now();
   return Object.freeze(Object.fromEntries(RUN_JOBS.map((job) => [job, resolveJobModel(job, { setByPerson: own[job], catalog, allows, models: options.models, now })])) as Record<RunJob, JobModel>);
+}
+
+/** What a run starts with (74.1 D-18, D-19): its model tiers by job and, in auto mode, its safety checkers of another family. */
+export interface RunModels {
+  readonly tiers: { readonly deep: string; readonly standard: string; readonly fast: string };
+  readonly safetyModel?: string;
+  readonly safetyFallbackModel?: string;
+  /** Said once when auto mode has no checker: why a person decides. */
+  readonly safetyNotice?: string;
+}
+
+/**
+ * The models a run starts on: each tier by jobModelsFor with the gate's preview for the run's route (the default route, which carries this host's
+ * policy), a tier with no model keeping today's setting so the request's own refusal names the way forward; the safety checkers by safetyCheckersFor.
+ */
+export function runModelsFor(input: {
+  readonly models: ModelInfo[]; readonly chosen: ModelInfo | undefined; readonly author: string; readonly local: boolean; readonly host: string; readonly auto: boolean;
+  readonly route?: SessionRoute; readonly read?: () => Readonly<Record<SettableJob, string>>; readonly now?: number;
+}): RunModels {
+  const now = input.now ?? Date.now();
+  const route = input.route ?? defaultSessionRoute();
+  let policyModels: ModelsSection | undefined;
+  try { policyModels = route.routePolicy?.(now)?.models; } catch { policyModels = undefined; }
+  const allows = gateAllows({ route, catalog: input.models, clientRoute: input.local ? 'local' : 'near', host: input.host, now });
+  const read = input.read ?? readJobSettings;
+  const jobs = jobModelsFor(input.models, allows, { read, ...(policyModels === undefined ? {} : { models: policyModels }), now });
+  const today = readModelTiers();
+  const tiers = { deep: jobs.deep.model ?? today.deep, standard: jobs.standard.model ?? today.standard, fast: jobs.fast.model ?? today.fast };
+  if (!input.auto) return { tiers };
+  const checkers = safetyCheckersFor({ models: input.models, chosen: input.chosen, author: input.author, configured: read().safety, allows, ...(policyModels === undefined ? {} : { policyModels }), now });
+  return {
+    tiers,
+    ...(checkers.safetyModel === undefined ? {} : { safetyModel: checkers.safetyModel }),
+    ...(checkers.safetyFallbackModel === undefined ? {} : { safetyFallbackModel: checkers.safetyFallbackModel }),
+    ...(checkers.person === undefined ? {} : { safetyNotice: `Auto approve: ${checkers.person.reason} Commands the rules cannot decide will ask you.` })
+  };
 }

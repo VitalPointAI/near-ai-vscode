@@ -18,6 +18,8 @@ import {
 import { isEmergencyStopped } from './emergencyStop';
 import type { GateRuntime } from '../domain/gate/decide';
 import { defaultSessionRoute, sessionRouteFrom, withSessionRoute } from '../gate/sessionMark';
+import { CYBER_USE, cyberLaneRoute } from './cyberAssembly';
+import { RESEARCH_TEXT } from '../domain/gate/researchLane';
 
 // The panel's host-side wiring: the install executor, the extension-side assembly (the real client
 // and the global emergency stop), and the Run starter. Everything that can run without VS Code lives
@@ -70,12 +72,15 @@ export function cyberAssembly(context: {
   tools(engagement: CyberRunInput['engagement']): CyberRunInput['tools'];
 }): CyberRunAssembly {
   const storeDirectory = cyberStorePath(context.globalStorageUri.fsPath, options.workspaceRoot);
-  const model = options.model ?? 'z-ai/glm-5.3';
+  // No fixed fallback model (74.1-10, MPRV-07): the engagement's choice or the abliterated pick, else the person chooses in the panel.
+  const model = options.model?.trim();
+  if (!model) throw new Error(RESEARCH_TEXT.cyberChooseModel);
   const complete = async (requested: string, messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>, signal?: AbortSignal): Promise<string> => {
     const client = options.client;
     if (!client) return '';
     const send = () => client.completeOnce(requested, messages as never, { maxTokens: 4_000, ...(signal ? { signal } : {}) });
-    const reply = await withSessionRoute(options.gate ? sessionRouteFrom(options.gate) : defaultSessionRoute(), send);
+    // Research only, in the research workspace's lane (74.1 D-17, design decision 4): every record of it says lane t0.
+    const reply = await withSessionRoute(options.gate ? sessionRouteFrom(options.gate, { use: CYBER_USE }) : cyberLaneRoute(defaultSessionRoute()), send);
     return reply.text;
   };
   const version = String(context.extension?.packageJSON?.version ?? '0.0.0');

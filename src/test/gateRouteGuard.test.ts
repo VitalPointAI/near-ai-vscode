@@ -235,6 +235,8 @@ const REQUEST_SITES: Readonly<Record<string, Placement>> = {
   'src/services/chatParticipant.ts': { self: true },
   'src/services/cyberAssembly.ts': { self: true },
   'src/services/cyberHandoff.ts': { self: true },
+  // 74.1-07: the research workspace sends each message inside its research-lane route.
+  'src/services/researchWorkspace.ts': { self: true },
   'src/services/teamStudioPanel.ts': { self: true },
   'src/services/generationService.ts': { dormant: true }
 };

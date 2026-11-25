@@ -17,6 +17,7 @@ import { withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient } from '../services/nearAiClient';
 import { newTestRun, testBundleState } from './helpers/gatedRuns';
+import { evaluatedModels } from './helpers/policyFixtures';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const PRC = 'z-ai/glm-5.3';
@@ -49,6 +50,8 @@ async function nearClient(stalls?: string): Promise<{ client: NearAiClient; sent
   return { client, sent };
 }
 
+const EVALUATED = evaluatedModels('enforce', ['nvidia/nemotron-3-super', 'openai/gpt-oss']);
+
 /** An agent run's route under your organization's enforcing model policy, recording every model request. */
 function enforcingRoute(records: DecisionRecord[]): SessionRoute {
   const state = testBundleState();
@@ -57,7 +60,8 @@ function enforcingRoute(records: DecisionRecord[]): SessionRoute {
     clock: () => Date.now(), sink: { record: (record) => { records.push(record); } }, useOf: () => ({ tools: true }),
     routePolicy: () => ({
       endpoints: [], authorizations: [], scales: SCALE_PRESETS, mappings: [], clearances: [], organization: true, requireAccreditedDevice: false, now: Date.now(),
-      policyVersion: 'bundle-2', models: { v: 1, mode: 'enforce', unknownMaxTier: 'T0', passports: [] }
+      // 74.1-06 (D-16): your organization has evaluated gpt-oss and Nemotron 3 Super, so the gate allows them for agent work.
+      policyVersion: 'bundle-2', models: EVALUATED
     })
   };
 }

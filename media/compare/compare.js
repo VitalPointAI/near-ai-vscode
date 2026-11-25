@@ -14,7 +14,8 @@
     return node;
   };
   const badge = (text, kind, title) => { const node = el('span', 'badge' + (kind ? ' ' + kind : ''), text); if (title) node.title = title; return node; };
-  const PRIVACY_LABEL = { tee: 'TEE', local: 'Local', forwarded: 'Forwarded', unknown: 'Unknown' };
+  // Runs on words (74.1-10, P6): no glossary word on the page.
+  const PRIVACY_LABEL = { tee: 'NEAR AI private hardware', local: 'This computer', forwarded: 'Outside provider', unknown: 'A place your rules do not name' };
   const KINDS = [['coding', 'Coding'], ['research', 'Research'], ['planning', 'Planning'], ['execution', 'Execution']];
   const OUTCOME_TEXT = { completed: 'finished', 'max-turns': 'ran out of steps', 'timed-out': 'hit the time limit', stalled: 'stopped responding', 'over-budget': 'hit the cost limit', failed: 'failed' };
   const money = (value) => value === undefined || value === null ? '—' : '$' + (value > 0 && value < 0.01 ? value.toFixed(4) : value.toFixed(2));
@@ -64,14 +65,27 @@
     select.setAttribute('aria-label', 'Role to give ' + model);
     select.append(new Option('Use as…', ''));
     const groups = {};
+    // 74.1-10: jobs the model is not approved for are disabled options with the reason in their text, and one reason line under the control.
+    const approval = (state.approvals || {})[model] || { blocked: {} };
+    let offered = 0;
     for (const role of state.roles) {
       if (!groups[role.group]) { groups[role.group] = document.createElement('optgroup'); groups[role.group].label = role.group; select.append(groups[role.group]); }
-      const option = new Option(role.label + (role.current === model ? ' (already)' : ''), role.id);
-      option.disabled = role.current === model;
+      const blocked = approval.blocked[role.id];
+      const option = new Option(blocked || (role.label + (role.current === model ? ' (already)' : '')), role.id);
+      option.disabled = Boolean(blocked) || role.current === model;
+      if (!blocked) offered += 1;
       groups[role.group].append(option);
     }
-    const apply = button('Apply', () => { if (select.value) vscode.postMessage({ type: 'apply-role', model, role: select.value }); }, { secondary: true, label: 'Put ' + model + ' into the chosen role' });
+    const apply = button('Apply', () => { if (select.value && apply.getAttribute('aria-disabled') !== 'true') vscode.postMessage({ type: 'apply-role', model, role: select.value }); }, { secondary: true, label: 'Put ' + model + ' into the chosen role' });
     apply.disabled = true;
+    const reason = el('p', 'hint reason-line', approval.reason || '');
+    reason.hidden = !approval.reason;
+    if (approval.reason) {
+      reason.id = 'reason-' + Math.random().toString(36).slice(2);
+      select.setAttribute('aria-describedby', reason.id);
+      apply.setAttribute('aria-describedby', reason.id);
+    }
+    if (offered === 0) { select.setAttribute('aria-disabled', 'true'); apply.setAttribute('aria-disabled', 'true'); }
     const warning = el('p', 'warning'); warning.hidden = true; warning.setAttribute('aria-live', 'polite');
     select.addEventListener('change', () => {
       apply.disabled = !select.value;
@@ -79,14 +93,14 @@
       const text = role ? privacyWarning(privacy, role) : '';
       warning.textContent = text; warning.hidden = !text;
     });
-    box.append(select, apply, warning);
+    box.append(select, apply, warning, reason);
     return box;
   }
   // Same rule as the host (modelRoles.privacyWarning): moving a role off a private model.
   function privacyWarning(privacy, role) {
     if (privacy !== 'forwarded' && privacy !== 'unknown') return '';
     if (role.currentPrivacy !== 'tee' && role.currentPrivacy !== 'local') return '';
-    return 'Not private: ' + role.label + ' now uses a private model (' + role.current + '). This model ' + (privacy === 'forwarded' ? 'is forwarded outside NEAR’s TEE.' : 'has unknown privacy.');
+    return role.label + ' now uses ' + role.current + ', which runs on NEAR AI private hardware or this computer. This model runs on ' + (privacy === 'forwarded' ? 'an outside provider, so what that role sees leaves private hardware.' : 'a place your rules do not name.');
   }
 
   function modelCell(row, entry, extras) {
@@ -478,7 +492,10 @@
     const recommended = state.recommended || { tiers: [], roles: [] };
     // The count is what APPLY will really write. The cyber row is skipped by the host (a scan picks its own model when it starts), so counting it here made
     // the button promise one change more than it made (0.4.19 review).
-    const changes = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes && !(entry.tier === 'cyber'));
+    // 74.1-10: only approved changes are counted; the ones left out are said under the button.
+    const leftOut = state.leftOut || { count: 0, text: '', keys: [] };
+    const keyOf = (entry) => ('tier' in entry ? 'tier:' + entry.tier : 'role:' + entry.role);
+    const changes = [...recommended.tiers, ...recommended.roles].filter((entry) => entry.changes && !(entry.tier === 'cyber') && !leftOut.keys.includes(keyOf(entry)));
     if (!recommended.tiers.length && !recommended.roles.length) { root.hidden = true; return; }
     root.hidden = false;
     const LABELS = { deep: 'Deep tier', standard: 'Standard tier', fast: 'Fast tier', cyber: 'Cybersecurity scans' };
@@ -496,12 +513,22 @@
     root.append(el('strong', '', 'The setup these results point to'), list);
     const actions = el('div', 'retest-actions');
     if (changes.length) actions.append(button('Apply all ' + changes.length + ' change' + (changes.length === 1 ? '' : 's'), () => vscode.postMessage({ type: 'apply-recommended' })));
-    else actions.append(el('span', 'hint', 'Every tier and role already uses the recommended model.'));
+    else if (!leftOut.count) actions.append(el('span', 'hint', 'Every tier and role already uses the recommended model.'));
     root.append(actions);
+    if (leftOut.count) root.append(el('p', 'hint', leftOut.text));
+  }
+
+  function renderLaneLine() {
+    const box = $('lane-line');
+    const words = state.laneText;
+    if (!box || !words) return;
+    box.replaceChildren(el('p', '', words.line), button(words.open, () => vscode.postMessage({ type: 'open-research-workspace' }), { link: true }));
+    box.hidden = false;
   }
 
   function renderAll() {
     $('problem').hidden = true;
+    renderLaneLine();
     renderBoard();
     renderTrend();
     renderProjectChoices();

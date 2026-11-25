@@ -13,7 +13,7 @@ import { PASSPORT_GAPS, PASSPORT_GAP_TEXT } from '../domain/gate/passportStep';
 import type { PassportGapDetails } from '../domain/gate/passportStep';
 import { DEFAULT_ROUTING, decideRoute } from '../domain/gate/routing';
 import type { RouteDecision, RouteFacts, RoutePolicy, VerifiedAuthorization } from '../domain/gate/routing';
-import { DAY_MS, FIXED_NOW, authorizationFor } from './helpers/policyFixtures';
+import { DAY_MS, FIXED_NOW, FIXTURE_EVALUATION, authorizationFor } from './helpers/policyFixtures';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const PUBLIC: Label = { scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] };
@@ -123,7 +123,8 @@ test('hosting-mismatch: the approved places and this one, in the Runs on words',
 
 test('artifact-mismatch: an observed hash that differs from the approved files refuses; the same hash goes', () => {
   const approved = digest('approved-weights');
-  const models = enforceWith(passport({ hosting: ['local'], artifact: { format: 'gguf', sha256: approved, quantization: 'q4_k_m', remoteCode: false } }));
+  // 74.1-06 (D-16): your organization evaluated these exact files, so only the observed hash decides here.
+  const models = enforceWith(passport({ hosting: ['local'], artifact: { format: 'gguf', sha256: approved, quantization: 'q4_k_m', remoteCode: false }, evaluation: { ...FIXTURE_EVALUATION } }));
   const local: RouteFacts = { ...GLM, host: 'http://127.0.0.1:11434', nearEndpoint: false, clientRoute: 'local', model: { id: 'example/Western-Chat-8B', privacyBoundary: 'local' }, use: 'T2' };
   assert.equal(decide({ ...local, observedArtifact: digest('other-weights') }, { models }).passportGap, 'artifact-mismatch');
   assert.equal(decide({ ...local, observedArtifact: approved }, { models }).allowed, true);

@@ -13,11 +13,13 @@ import { withSessionRoute } from '../gate/sessionMark';
 import type { SessionRoute } from '../gate/sessionMark';
 import { NearAiClient, RouteRefusedError } from '../services/nearAiClient';
 import { testBundleState } from './helpers/gatedRuns';
-import { FIXED_NOW } from './helpers/policyFixtures';
+import { FIXED_NOW, FIXTURE_EVALUATION, evaluatedModels } from './helpers/policyFixtures';
 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const PUBLIC: Label = { scale: 'org', level: 'Public', compartments: [], releasability: [], handling: [] };
-const ENFORCE: ModelsSection = { v: 1, mode: 'enforce', unknownMaxTier: 'T0', passports: [] };
+// 74.1-06 (D-16): under enforce a model takes a role above research only with your organization's evaluation; gpt-oss and Command A+ carry one here, so
+// each is refused only for what the test names.
+const ENFORCE: ModelsSection = evaluatedModels('enforce', ['cohere/command-a-plus', 'openai/gpt-oss']);
 const CATALOGUE = ['z-ai/glm-5.3', 'openai/gpt-oss-120b', 'CohereLabs/command-a-plus-05-2026-w4a4', 'Qwen/Qwen3.6-35B-A3B-FP8'].map((id) => ({ id, privacyBoundary: 'tee' }));
 
 function policy(models: ModelsSection = ENFORCE): RoutePolicy {
@@ -40,7 +42,8 @@ test('no listed model is one decideRoute refuses, at most five are listed, sorte
   const passports = ids.map((id, index) => ({
     id: `example/western-${String(index)}`, match: [id], developer: 'Example Labs', origin: 'CA',
     lineage: { family: 'example', base: 'Western', teachers: [], method: 'pretrain' }, licence: { id: 'Apache-2.0', obligations: [], inherited: [] },
-    legal: { coveredByUsLaw: false, entityList: false, removalOrders: [] }, hosting: ['nearai-tee'], maxTier: 'T2', issuedAt: '2026-11-20T00:00:00.000Z', expiresAt: '2027-06-01T00:00:00.000Z', reevaluateOn: []
+    legal: { coveredByUsLaw: false, entityList: false, removalOrders: [] }, hosting: ['nearai-tee'], maxTier: 'T2', issuedAt: '2026-11-20T00:00:00.000Z', expiresAt: '2027-06-01T00:00:00.000Z', reevaluateOn: [],
+    evaluation: { ...FIXTURE_EVALUATION }
   }));
   const parsed = parseModelsSection({ v: 1, mode: 'enforce', unknownMaxTier: 'T0', passports, order: ['example/western-6', 'example/western-5'] }, SCALE_PRESETS);
   assert.ok(parsed.ok, parsed.ok ? '' : `${parsed.reason} ${parsed.path}`);

@@ -17,7 +17,7 @@ import { PASSPORT_GAP_TEXT, whoToAsk } from '../domain/gate/passportStep';
 import type { RouteDecision, RouteFacts, RoutePolicy, RoutingTable } from '../domain/gate/routing';
 import type { AuthorizationBody } from '../domain/gate/authorizations';
 import type { VerifiedAuthorization } from '../domain/gate/routing';
-import { DAY_MS, FIXED_NOW, authorizationFor } from './helpers/policyFixtures';
+import { DAY_MS, FIXED_NOW, authorizationFor, evaluatedModels } from './helpers/policyFixtures';
 
 /** Every rule a decision in this file returned, with or without a policy: the last test checks none is route.export-control (D-63). */
 const RULES_SEEN = new Set<string>();
@@ -371,7 +371,8 @@ test('D-42: a t1-risk authorization covering the model clears the report and is 
   assert.deepEqual(decision.allowedBy, [
     { kind: 'routing', label: 'org/Internal' },
     { kind: 'model-approval', passport: 'deepseek-ai/deepseek', maxTier: 'T0', expiresAt: SHIPPED_EXPIRY },
-    { kind: 'authorization', authorizationKind: 't1-risk', id: 't1-risk-4', name: 'Alex Example', expiresAt: risk.body.expiresAt, selfSigned: false }
+    // 74.1-06 (D-16): its assessment reference stands in for your organization's evaluation, so it is recorded with it.
+    { kind: 'authorization', authorizationKind: 't1-risk', id: 't1-risk-4', name: 'Alex Example', expiresAt: risk.body.expiresAt, selfSigned: false, evidence: risk.body.evidence }
   ]);
   // One for another model, or for another label, does not: under enforce the request is refused with acceptance-missing.
   const other = verified(authorizationFor({ kind: 't1-risk', subject: { model: 'moonshotai/kimi' } }));
@@ -387,7 +388,10 @@ test('D-42, 74.1 D-11: a passport below the use or not listing the place\'s clas
   assert.deepEqual({ allowed: above.allowed, rule: above.rule, passportGap: above.passportGap }, { allowed: false, rule: 'route.passport', passportGap: 'tier-exceeded' });
   const aboveReported = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T3' }, undefined, undefined, policyWith({ models: { ...ENFORCE, mode: 'report' } }));
   assert.deepEqual({ allowed: aboveReported.allowed, wouldRefuse: aboveReported.wouldRefuse }, { allowed: true, wouldRefuse: ['route.passport'] });
-  const covered = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: ENFORCE }));
+  // 74.1-06 (D-16): under enforce agent work also needs your organization's evaluation, which the shipped row lacks and its own passport carries.
+  assert.equal(decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: ENFORCE })).passportGap, 'not-evaluated');
+  const covered = decideRoute(markOf(org('Internal')), DEFAULT_ROUTING, { ...gptOss, use: 'T2' }, undefined, undefined, policyWith({ models: evaluatedModels('enforce', ['openai/gpt-oss']) }));
+  assert.equal(covered.allowed, true);
   assert.equal(covered.wouldRefuse, undefined);
   assert.deepEqual(covered.allowedBy?.[1], { kind: 'model-approval', passport: 'openai/gpt-oss', maxTier: 'T2', expiresAt: SHIPPED_EXPIRY });
   // A closed model NEAR AI forwards: its passport lists only closed APIs, so a forwarded place is refused (hosting-mismatch).

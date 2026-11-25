@@ -57,8 +57,9 @@ test('the applied message says where the model was put: for this project, or in 
 test('a forwarded model taking over a role that uses a private model is warned about; other moves are not', () => {
   const roles = roleOptions(settings, catalog);
   const role = (id: string) => roles.find((candidate) => candidate.id === id)!;
-  assert.match(privacyWarning('forwarded', role('tier:deep'))!, /Deep tier now uses a private model \(moonshotai\/kimi-k3\).*forwarded outside NEAR’s TEE/);
-  assert.match(privacyWarning('unknown', role('main'))!, /unknown privacy/);
+  // 74.1-10 (P6): Runs on words, no glossary word.
+  assert.equal(privacyWarning('forwarded', role('tier:deep')), 'Deep tier now uses moonshotai/kimi-k3, which runs on NEAR AI private hardware or this computer. This model runs on an outside provider, so what that role sees leaves private hardware.');
+  assert.match(privacyWarning('unknown', role('main'))!, /runs on a place your rules do not name\.$/);
   assert.equal(privacyWarning('tee', role('tier:deep')), undefined);
   assert.equal(privacyWarning('forwarded', role('role:gsd-planner')), undefined, 'already forwarded');
   assert.equal(privacyWarning('forwarded', role('role:gsd-executor')), undefined, 'current model unknown');
