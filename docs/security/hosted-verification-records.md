@@ -32,7 +32,7 @@ listed too: it stays in scope and reads No statement yet until it has statements
 | 4 | rke2 | k3s is lab and demo only: no k3s in production | test rule (rendered production profile) | cm-07, sc-13 | rule rke2.cm-07.no-k3s |
 | 5 | keycloak | FIPS strict mode with BC-FIPS on a FIPS host, OpenJDK 21 | deployment observation (strict mode, host FIPS mode), document record (BC-FIPS certificate) | sc-13 | gap G332 |
 | 6 | keycloak | A version with CVE-2026-6856 fixed | deployment observation (version at or above the recorded minimum), document record | si-02 | gap G335 |
-| 7 | keycloak | Password and OTP authenticators disabled | test rule (realm as code), deployment observation (live realm) | ia-02, ia-05 | gap G335 |
+| 7 | keycloak | Password and OTP authenticators disabled | test rule (realm as code), deployment observation (live realm) | ia-02, ia-05 | rule keycloak.ia-02.realm-flows |
 | 8 | keycloak | Events shipped to the audit store | deployment observation (listener enabled, events counted) | au-02, au-12 | gap G335 |
 | 9 | theia-cloud | Rebuilt from source by us on a FIPS-capable JRE (UBI 9) | test rule (build job), deployment observation (image digest) | sc-13, sa-10 | gap G336 |
 | 10 | theia-cloud | Signed, with SBOM and provenance | deployment observation (signature, SBOM and provenance per image digest) | sr-03, sr-11, si-07 | gap G336 |
