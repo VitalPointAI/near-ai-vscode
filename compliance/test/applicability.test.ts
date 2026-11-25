@@ -3,16 +3,18 @@
 // section hash; unsigned or changed, it reads Not met. A row no component has a part in reads your organization's responsibility, never Not applicable.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildApplicabilityIndex, classify, componentSection, type ApplicabilityReviews, type ApplicabilityRules } from '../src/applicability.ts';
+import { buildApplicabilityIndex, classify, componentSection, loadApplicability, type ApplicabilityReviews, type ApplicabilityRules } from '../src/applicability.ts';
 import { loadComponents } from '../src/components.ts';
 import { buildDashboard, type DashboardBuildInput, type DashboardComponentRow } from '../src/dashboard.ts';
 import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { selectedIds } from '../src/profiles.ts';
 import { loadResponsibilityTable } from '../src/responsibility.ts';
 import { computeStatus } from '../src/status.ts';
-import { loadJson } from '../src/validate.ts';
+import { loadJson, validateOurs } from '../src/validate.ts';
 import type { StatusInput } from '../src/model.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,6 +52,8 @@ const rules = (extra: Partial<ApplicabilityRules> = {}): ApplicabilityRules => (
 });
 
 const HOSTED = level('hosted-protected-a');
+/** The tracer rules with an entry for every hosted component, so the ac-18 rule (a facet nobody carries) covers each of them. */
+const everyHosted = () => rules({ components: Object.fromEntries(HOSTED.components.filter((component) => !['keycloak', 'hub', 'rke2'].includes(component)).map((component) => [component, { role: component, facets: {} }])) });
 const signedFor = (source: ApplicabilityRules, components: readonly string[], change: (component: string, hash: string) => string = (_c, hash) => hash): ApplicabilityReviews => ({
   kind: 'reviews',
   stages: [{ id: 'stage-1', levels: ['unclassified', 'protected-a', 'hosted-protected-a'], reviewer: { role: 'Owner', name: 'Reviewer' }, reviewedAt: '2026-11-25', components: Object.fromEntries(components.map((component) => [component, change(component, componentSection(source, component).sha256)])) }]
@@ -105,8 +109,7 @@ test('with no review, or a review whose hsm hash is one character off, the hsm c
 });
 
 test('a row no hosted component has a part in reads your organization\'s responsibility with no-component-applies, never Not applicable', () => {
-  // Every hosted component has an entry, so the ac-18 rule (a facet nobody carries) covers each of them.
-  const source = rules({ components: Object.fromEntries(HOSTED.components.filter((component) => !['keycloak', 'hub', 'rke2'].includes(component)).map((component) => [component, { role: component, facets: {} }])) });
+  const source = everyHosted();
   const dashboard = build(buildApplicabilityIndex(source, signedFor(source, HOSTED.components)));
   const row = rowOf(dashboard, 'hosted-protected-a', 'ac-18');
   assert.equal(row.state, 'your-organizations-responsibility');
@@ -167,3 +170,40 @@ test('classify and the section hash: supports beats nothing, implements beats su
   assert.notEqual(componentSection(overridden, 'hsm').sha256, componentSection(rules(), 'hsm').sha256, 'an override changes the section');
 });
 
+const writeFolder = (files: Record<string, unknown>) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'applicability-'));
+  for (const [name, doc] of Object.entries(files)) writeFileSync(path.join(dir, name), `${JSON.stringify(doc, null, 2)}\n`);
+  return dir;
+};
+const LEVEL_IDS = LEVELS.map((entry) => entry.id);
+
+test('the loader accepts a valid rules and reviews pair and refuses unknown keys, bad facet classes, overrides without a reviewer and unknown levels', () => {
+  const source = rules();
+  const good = { 'rules.json': source, 'reviews.json': signedFor(source, ['hsm']) };
+  const index = loadApplicability(writeFolder(good), LEVEL_IDS);
+  assert.ok(index);
+  assert.equal(index.for('hosted-protected-a', 'ac-02', 'hsm')?.reviewed, true);
+  assert.equal(loadApplicability(path.join(tmpdir(), 'no-such-applicability-folder'), LEVEL_IDS), undefined, 'a missing folder leaves the dashboard as today');
+  const bad: [string, Record<string, unknown>, RegExp][] = [
+    ['an unknown key', { ...good, 'rules.json': { ...source, extra: true } }, /rules\.json/],
+    ['a facet class other than implements or supports', { ...good, 'rules.json': { ...source, components: { ...source.components, hsm: { role: 'x', facets: { accounts: { class: 'not-applicable', basis: 'x' } } } } } }, /rules\.json/],
+    ['an override without a reviewer', { ...good, 'rules.json': { ...source, overrides: [{ component: 'hsm', control: 'ac-02', class: 'supports', reason: 'x', reviewedAt: '2026-11-25' }] } }, /rules\.json/],
+    ['a review stage naming a level that does not exist', { ...good, 'reviews.json': { kind: 'reviews', stages: [{ ...signedFor(source, ['hsm']).stages[0], levels: ['protected-z'] }] } }, /protected-z/],
+    ['a control rule naming an undefined facet', { ...good, 'rules.json': { ...source, controls: { 'ac-02': { facets: ['nobody-defined-this'] } } } }, /nobody-defined-this/],
+    ['a status key', { ...good, 'rules.json': { ...source, status: 'met' } }, /rules\.json/]
+  ];
+  for (const [name, files, message] of bad) assert.throws(() => loadApplicability(writeFolder(files), LEVEL_IDS), message, name);
+});
+
+test('a dashboard built with applicability passes the dashboard schema, with the new reasons and the applicability field', () => {
+  const source = everyHosted();
+  const signed = JSON.parse(JSON.stringify(build(buildApplicabilityIndex(source, signedFor(source, HOSTED.components)))));
+  assert.deepEqual(validateOurs(signed, 'dashboard'), { ok: true, errors: [] });
+  const unsigned = JSON.parse(JSON.stringify(build(buildApplicabilityIndex(source, { kind: 'reviews', stages: [] }))));
+  assert.deepEqual(validateOurs(unsigned, 'dashboard'), { ok: true, errors: [] });
+  const reasons = new Set([...signed.rows, ...unsigned.rows].flatMap((row: any) => [row.reason, ...row.components.map((cell: any) => cell.reason)]));
+  for (const reason of ['component-not-applicable', 'component-not-applicable-unreviewed', 'no-component-applies']) assert.ok(reasons.has(reason), reason);
+  const tampered = structuredClone(signed);
+  tampered.rows[0].components[0].applicability = 'excluded';
+  assert.equal(validateOurs(tampered, 'dashboard').ok, false);
+});

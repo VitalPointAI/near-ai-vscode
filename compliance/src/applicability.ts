@@ -4,7 +4,10 @@
 // stage covering that level lists the component with the SHA-256 of its current section. Applicability is never tailoring: it cannot remove a row,
 // mark a row Not applicable or change any other responsibility. The source keys avoid `status`, `state` and `met` (test/noStatus.test.ts).
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
 import type { ApplicabilityClass, ApplicabilityRecord } from './model.ts';
+import { loadJson, validateOurs } from './validate.ts';
 
 export type FacetClass = Exclude<ApplicabilityClass, 'not-applicable'>;
 
@@ -166,4 +169,52 @@ export function buildApplicabilityIndex(rules: ApplicabilityRules, reviews: Appl
 /** The pair's applicability at a level from an index, or undefined when there is no index or no rule. */
 export function applicabilityFor(index: ApplicabilityIndex | undefined, level: string, control: string, component: string): ApplicabilityRecord | undefined {
   return index?.for(level, control, component);
+}
+
+/** The files of compliance/applicability/: the rules, the stage reviews and the generated lock (44.1-06). */
+export const APPLICABILITY_FILES = Object.freeze({ rules: 'rules.json', reviews: 'reviews.json', lock: 'map.lock.json' } as const);
+
+/** Checks what the schema cannot: every facet a component or control names is defined, a pair has at most one override, and every stage names real levels. */
+function checkReferences(rules: ApplicabilityRules, reviews: ApplicabilityReviews, levelIds: readonly string[]): string[] {
+  const problems: string[] = [];
+  const defined = (facet: string) => Object.hasOwn(rules.facets, facet);
+  for (const [component, entry] of Object.entries(rules.components)) for (const facet of Object.keys(entry.facets)) if (!defined(facet)) problems.push(`${APPLICABILITY_FILES.rules}: component ${component} carries undefined facet ${facet}`);
+  for (const [control, rule] of Object.entries(rules.controls)) for (const facet of rule.facets) if (!defined(facet)) problems.push(`${APPLICABILITY_FILES.rules}: control ${control} names undefined facet ${facet}`);
+  const pairs = new Set<string>();
+  for (const entry of rules.overrides) {
+    const key = `${entry.component}\u0000${entry.control}`;
+    if (pairs.has(key)) problems.push(`${APPLICABILITY_FILES.rules}: more than one override for ${entry.component}, ${entry.control}`);
+    pairs.add(key);
+  }
+  const stages = new Set<string>();
+  for (const stage of reviews.stages) {
+    if (stages.has(stage.id)) problems.push(`${APPLICABILITY_FILES.reviews}: stage ${stage.id} appears twice`);
+    stages.add(stage.id);
+    for (const level of stage.levels) if (!levelIds.includes(level)) problems.push(`${APPLICABILITY_FILES.reviews}: stage ${stage.id} names level ${level}, which does not exist`);
+  }
+  return problems;
+}
+
+/**
+ * Loads compliance/applicability/ into an index, or returns undefined when the folder does not exist (the dashboard is then built as before). Every
+ * file is validated against applicability.schema.json; a file that fails, a missing rules file or a reference problem throws.
+ */
+export function loadApplicability(dir: string, levelIds: readonly string[]): ApplicabilityIndex | undefined {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) return undefined;
+  const documents = new Map<string, unknown>();
+  for (const name of readdirSync(dir).filter((file) => file.endsWith('.json')).sort()) {
+    const file = path.join(dir, name);
+    if (!statSync(file).isFile()) continue;
+    const doc = loadJson(file);
+    const valid = validateOurs(doc, 'applicability');
+    if (!valid.ok) throw new Error(`${file}: invalid applicability file: ${valid.errors.join('; ')}`);
+    documents.set(name, doc);
+  }
+  const rules = documents.get(APPLICABILITY_FILES.rules) as ApplicabilityRules | undefined;
+  if (!rules || rules.kind !== 'rules') throw new Error(`${path.join(dir, APPLICABILITY_FILES.rules)}: missing or not kind rules`);
+  const reviews = (documents.get(APPLICABILITY_FILES.reviews) ?? { kind: 'reviews', stages: [] }) as ApplicabilityReviews;
+  if (reviews.kind !== 'reviews') throw new Error(`${path.join(dir, APPLICABILITY_FILES.reviews)}: not kind reviews`);
+  const problems = checkReferences(rules, reviews, levelIds);
+  if (problems.length) throw new Error(`${dir}: ${problems.join('; ')}`);
+  return buildApplicabilityIndex(rules, reviews);
 }

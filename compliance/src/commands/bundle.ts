@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { runBundle, type BundleInputs } from '../bundle.ts';
 import type { FetchJson } from '../collectors/types.ts';
+import { loadApplicability } from '../applicability.ts';
 import { loadComponents } from '../components.ts';
 import type { DashboardBuildInput } from '../dashboard.ts';
 import { loadEvidenceRules } from '../evidenceRuleFiles.ts';
@@ -25,13 +26,15 @@ type LevelConfig = Omit<DashboardBuildInput['levels'][number], 'controls' | 'ove
   readonly attachedTo?: readonly string[];
 };
 
-function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'levels' | 'components' | 'rules' | 'gapRegister' | 'responsibilityTable' | 'tailoring'> {
+export function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'levels' | 'components' | 'rules' | 'gapRegister' | 'responsibilityTable' | 'tailoring' | 'applicability'> {
   const { levels } = loadJson(path.join(root, 'levels.json')) as { levels: readonly LevelConfig[] };
   if (levels.length === 0) throw new Error('compliance levels are empty');
   const { components, errors } = loadComponents(path.join(root, 'components'));
   if (errors.length) throw new Error(errors.join('; '));
   const report = loadJson(path.join(root, 'import-reports', 'itsp-10-033-01.json')) as ImportReport;
   const profileDifferences = report.differences.map(({ control, en, fr }) => `${control.toUpperCase()}: English selection: ${en} / French selection: ${fr}`);
+  // The component applicability map (44.1); a missing folder leaves every cell as it was.
+  const applicability = loadApplicability(path.join(root, 'applicability'), levels.map((level) => level.id));
   return {
     levels: levels.map((level) => {
       const controls = selectedIds(path.join(root, level.profile));
@@ -44,6 +47,7 @@ function loadDashboardSources(root: string): Pick<DashboardBuildInput, 'levels' 
     rules: loadEvidenceRules(path.join(root, 'evidence-rules')),
     responsibilityTable: loadResponsibilityTable(path.join(root, 'responsibility', 'families.json')),
     tailoring: loadTailoring(path.join(root, 'tailoring')),
+    ...(applicability ? { applicability } : {}),
     gapRegister: {
       gaps: loadGaps(path.join(root, 'gaps.json')),
       poam: loadPoam(path.join(root, 'poam')),
