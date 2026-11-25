@@ -42,6 +42,8 @@ export interface TrustFacts {
   readonly use?: UseTier;
   /** The report-only rules that would have refused, sorted. */
   readonly wouldRefuse: readonly ReportedRouteRule[];
+  /** The SHA-256 of the passport that decided the request, beside its model-approval record (74.1 D-23). */
+  readonly passportHash?: string;
 }
 
 export interface TrustContext {
@@ -89,7 +91,9 @@ export function trustFactsFor(decision: RouteDecision, facts: RouteFacts, contex
     wouldRefuse: Object.freeze([...(decision.wouldRefuse ?? [])])
   };
   if (label !== undefined) trust.label = label;
-  if (facts.use !== undefined) trust.use = facts.use;
+  const use = decision.useTier ?? facts.use;
+  if (use !== undefined) trust.use = use;
+  if (decision.passport !== undefined) trust.passportHash = decision.passport.hash;
   return Object.freeze(trust);
 }
 
