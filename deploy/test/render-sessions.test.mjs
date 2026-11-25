@@ -34,7 +34,15 @@ test('the AppDefinition: no prewarm pool, the site capacity and idle values, IfN
   // The ingress named is the one the theia-cloud chart creates for session hosts.
   const theia = splitDocs(renderRelease(ROOT, release('theia-cloud'), { site: SITE, helm: HELM, all: true }));
   const ingressName = /^ {2}ingressname: "([^"]+)"$/m.exec(app)[1];
-  assert.ok(theia.some((doc) => kindOf(doc) === 'Ingress' && new RegExp(`^ {2}name: ${ingressName}$`, 'm').test(doc)), `theia-cloud renders no Ingress ${ingressName}`);
+  const ingress = theia.find((doc) => kindOf(doc) === 'Ingress' && new RegExp(`^ {2}name: ${ingressName}$`, 'm').test(doc));
+  assert.ok(ingress, `theia-cloud renders no Ingress ${ingressName}`);
+  // The workbench's webviews come from Theia's default <uuid>.webview.<session host>: the operator adds each session's path under that
+  // prefix too, and the instances Ingress has the wildcard host as a rule and as a name on its site-pki certificate.
+  assert.match(app, /^ {2}ingressHostnamePrefixes:\n {4}- "\*\.webview\."$/m);
+  const webviews = `*.webview.${/^ {4}- host: ([^\s"]+)$/m.exec(ingress)[1]}`;
+  assert.equal(webviews, `*.webview.ws.${SITE.domain}`);
+  assert.ok(ingress.includes(`\n    - host: "${webviews}"\n`), `the instances Ingress has a rule for ${webviews}`);
+  assert.ok(/^ {2}tls:\n {2}- hosts:\n(?: {4}- .+\n)+/m.exec(ingress)[0].includes(`    - "${webviews}"\n`), `the certificate names ${webviews}`);
 });
 
 test('the lab placeholder replaces the image only when the site asks for it', () => {

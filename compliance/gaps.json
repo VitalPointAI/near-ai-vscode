@@ -6184,6 +6184,45 @@
       "ownerRole": "owner",
       "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that use the old product name (the VS Code extension's former name); the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
       "title": "SA&A drafts made before the rename call the system by its old name"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "sc-08",
+        "sc-23",
+        "sc-39",
+        "cm-06"
+      ],
+      "id": "G470",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The workbench shows the bundled extension's Chat, Team Studio, Agent Activity and Governance pages in webviews, each from its own origin <uuid>.webview.<instance>.<domain> (Theia's default pattern). The sterling-sessions AppDefinition lists the prefix *.webview. (ingressHostnamePrefixes) and the theia-cloud release gives the instances Ingress that wildcard host as a rule and as a name on its site-pki certificate (hosts.allWildcardInstances); deploy/test/render-sessions.test.mjs checks the three agree. On a real site, prove the rest and record it: the wildcard DNS record from deploy/runbooks/site-install.md resolves to HAProxy; cert-manager's ws-cert-secret carries the wildcard name from OpenBao's ingress role (allow_subdomains, with OpenBao's default that allows wildcard names); HAProxy routes the wildcard host and strips each session's path; the operator adds each session's path under the wildcard host; oauth2-proxy's cookie (domain <instance>.<domain>) reaches the webview host, so no sign-in redirect starts inside a frame; and Chat and Team Studio load in a signed-in session. Also check whether a bundle update (helm upgrade) adds the wildcard host on a site installed before it, as upstream says a change to allWildcardInstances needs the chart reinstalled; if not, add the reinstall to deploy/runbooks/bundle-update.md.",
+      "title": "Webview pages on a hosted site are unproven: wildcard DNS, certificate, ingress routing and sign-in cookie"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-17",
+        "sc-12",
+        "sc-23"
+      ],
+      "id": "G471",
+      "ownerRole": "owner",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The sessions certificate (theia-cloud ws-cert-secret, issued by site-pki) now names the wildcard *.webview.<instance>.<domain> beside <instance>.<domain>, so the workbench's webviews keep one origin each. Wildcard certificates are discouraged when their scope is wide (a stolen key covers every name under it); this one covers only the webview names, which HAProxy routes to the same session backends as the session host, behind the same sign-in. Describe the scope in the hosted system description (SC-17) and get your organization's PKI authority and the assessor to accept it. If policy refuses wildcard names, the alternatives are a single fixed webview host through THEIA_WEBVIEW_EXTERNAL_ENDPOINT (one name, no wildcard, but the webviews then share one origin and Theia warns about the changed pattern at every start) or per-session certificates, which Theia Cloud 1.2.0's shared instances Ingress does not support.",
+      "title": "The sessions certificate carries a wildcard name for the webview hosts, which needs accepting"
     }
   ]
 }

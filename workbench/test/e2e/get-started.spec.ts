@@ -1,7 +1,8 @@
 // The Get Started page and the right-hand rail as the owner reviewed them in the Defence preview: every rail shortcut is there, the native
-// ones open their page, each work-area card opens that work area's own page, and on the release image a work-area page's Create button
-// creates a work area and opens its page. Run by test/container/get-started.test.ts against the image.
-import { expect, test, type Page } from '@playwright/test';
+// ones open their page, each work-area card opens that work area's own page, and on the release image the Team Studio and Chat shortcuts
+// show the bundled extension's pages in their webviews and a work-area page's Create button creates a work area and opens its page. Run
+// by test/container/get-started.test.ts against the image, opened at 127.0.0.1 as the owner opens it.
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const railLabels = ['Get Started', 'Portfolio', 'Chat', 'Team Studio', 'Agent Activity', 'Governance', 'Data Management', 'Model Factory',
   'Compliance', 'Documentation'];
@@ -52,6 +53,51 @@ test('Get Started shows the setup actions, and each work-area card opens its own
     await expect(currentTab(page)).toHaveText(card);
     await expect(page.locator(`#sterling-area-${kind} h1`)).toHaveText(card);
   }
+});
+
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+
+/** The URL the webview's outer frame actually shows: about:blank#blocked when the browser refused its address. */
+async function frameUrl(iframe: Locator): Promise<string> {
+  const handle = await iframe.elementHandle({ timeout: 1_000 }).catch(() => null);
+  return (await handle?.contentFrame())?.url() ?? '';
+}
+
+/** A webview's outer frame has loaded Theia's webview page from a webview origin, and its content frame shows `content`. */
+async function expectWebviewPage(iframe: Locator, origin: RegExp, pageOrigin: string, content: (frame: Locator) => Locator): Promise<void> {
+  await expect.poll(() => frameUrl(iframe), { message: 'the webview frame loaded Theia\'s webview page', timeout: 60_000 })
+    .toMatch(/^https?:\/\/[^/]+\/webview\/index\.html\?/);
+  const loaded = new URL(await frameUrl(iframe));
+  expect(loaded.origin, 'the webview is served from a webview origin of the page').toMatch(origin);
+  expect(loaded.origin, 'the webview origin is not the page\'s own origin').not.toBe(pageOrigin);
+  await expect(content(iframe.contentFrame().locator('#active-frame'))).toBeVisible({ timeout: 60_000 });
+}
+
+// The extension's pages (Chat, Team Studio, Agent Activity, Governance) are webviews, each served by Theia from its own origin,
+// `<uuid>.webview.<page host>`. At 127.0.0.1 that name is no valid host (its last label is a number), so the browser refused the frame and
+// the page stayed blank (the 0.4.39 candidate); for a page at 127.0.0.1 or [::1] the workbench uses `<uuid>.webview.localhost` on the
+// same port, which browsers serve from loopback.
+test('on the release image, the Team Studio and Chat shortcuts show their pages in their own webview origins', async ({ page, baseURL }) => {
+  test.skip(process.env.STERLING_BUNDLED_EXTENSION !== '1', 'needs the release image, which bundles the NEAR AI extension');
+  let pluginsStarted = false;
+  page.on('console', (message) => {
+    if (/\] Start of \d+ plugins?:/.test(message.text())) pluginsStarted = true;
+  });
+  await openGetStarted(page);
+  // The shortcuts run the extension's commands, which exist once Theia has started its plugins.
+  await expect.poll(() => pluginsStarted, { message: 'Theia reported starting the bundled plugin', timeout: 90_000 }).toBe(true);
+  const base = new URL(baseURL ?? '');
+  const parent = base.hostname === '127.0.0.1' || base.hostname === '[::1]' ? 'localhost' : base.hostname;
+  const origin = new RegExp(`^${base.protocol}//${UUID}\\.webview\\.${parent.replaceAll('.', '\\.')}${base.port ? `:${base.port}` : ''}$`);
+
+  await rail(page).getByRole('button', { name: 'Team Studio', exact: true }).click();
+  await expect(currentTab(page)).toHaveText('SovAI Team Studio', { timeout: 60_000 });
+  await expectWebviewPage(page.locator('#theia-main-content-panel [id^="plugin-webview:"]').filter({ visible: true }).locator('iframe'),
+    origin, base.origin, (frame) => frame.contentFrame().getByRole('heading', { name: 'Team Studio', level: 1 }));
+
+  await rail(page).getByRole('button', { name: 'Chat', exact: true }).click();
+  await expectWebviewPage(page.locator('#theia-right-content-panel [id^="plugin-webview:"]').filter({ visible: true }).locator('iframe'),
+    origin, base.origin, (frame) => frame.contentFrame().getByRole('textbox', { name: 'Chat message' }));
 });
 
 // The work-area pages' Create button runs sterling.workAreas.create, which only the bundled NEAR AI extension (the VSIX in the release
