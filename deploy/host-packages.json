@@ -16,6 +16,14 @@
       "licence": "LGPL-2.1-or-later",
       "source": "https://github.com/OpenSC/OpenSC",
       "usedBy": ["deploy/keys/new-dev-site-key.sh", "48.1-17 site signing"]
+    },
+    {
+      "name": "util-linux script",
+      "purpose": "script(1), which runs pkcs11-tool on a terminal of its own so OpenSC's PIN prompt works while new-dev-site-key.sh reads the new key's Access line from its output; in the base install of Ubuntu (bsdutils, essential) and RHEL (util-linux)",
+      "packageNames": { "apt": "bsdutils", "dnf": "util-linux" },
+      "licence": "BSD-4-Clause-UC (script); util-linux as a whole GPL-2.0-or-later",
+      "source": "https://github.com/util-linux/util-linux",
+      "usedBy": ["deploy/keys/new-dev-site-key.sh"]
     }
   ]
 }
