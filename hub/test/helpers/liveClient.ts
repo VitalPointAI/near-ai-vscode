@@ -17,8 +17,8 @@ export interface LiveClient {
   log: string[];
 }
 
-export function liveClient(hub: Hub, world: HubWorld, device: WorldDevice, extra: Partial<LiveReplicatorOptions> = {}): LiveClient {
-  const replica = memoryReplica(world, device);
+/** A device's live client; the replica is the device's memory replica of the whole world unless one is given (33-14: a person's own view). */
+export function liveClient(hub: Hub, world: HubWorld, device: WorldDevice, extra: Partial<LiveReplicatorOptions> = {}, replica: MemoryReplica = memoryReplica(world, device)): LiveClient {
   const log: string[] = [];
   const replicator = new LiveReplicator({
     local: replica,
