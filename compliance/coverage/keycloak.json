@@ -1,5 +1,5 @@
 {
   "component": "keycloak",
-  "applicableWithoutStatement": 336,
+  "applicableWithoutStatement": 320,
   "notApplicableAwaitingSignOff": 136
 }

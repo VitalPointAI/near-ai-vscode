@@ -1,5 +1,5 @@
 {
   "component": "ingress",
-  "applicableWithoutStatement": 130,
+  "applicableWithoutStatement": 128,
   "notApplicableAwaitingSignOff": 238
 }

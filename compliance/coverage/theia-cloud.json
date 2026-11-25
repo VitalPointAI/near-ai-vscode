@@ -1,5 +1,5 @@
 {
   "component": "theia-cloud",
-  "applicableWithoutStatement": 204,
+  "applicableWithoutStatement": 192,
   "notApplicableAwaitingSignOff": 202
 }
