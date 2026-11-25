@@ -173,10 +173,11 @@ export class ShareWithPeopleSection {
     if (result === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
     if (result.kind === 'refused') { this.say(result.fix === undefined ? result.reason : `${result.reason} ${result.fix}.`); return; }
     const { message, notices, file, safetyWords, withheld } = result.value;
-    this.say([message, ...(safetyWords === undefined ? [] : [`Six words: ${safetyWords.join(' ')}`]), ...(withheld ?? []), ...notices].join(' '));
     if (file !== undefined) save(file);
     after?.();
     await this.refresh();
+    // After the refresh, which says the view's own state: the answer (with the six words a joiner compares) stays on screen (33-30).
+    this.say([message, ...(safetyWords === undefined ? [] : [`Six words: ${safetyWords.join(' ')}`]), ...(withheld ?? []), ...notices].join(' '));
   }
 
   private turnOnCard(): HTMLElement {
