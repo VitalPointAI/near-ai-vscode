@@ -14,6 +14,9 @@ export const SITE_LIVE_COLLECTOR = 'site-live';
 export const WATCHED_ALERTS: readonly string[] = Object.freeze([
   'OpenBaoSealed', 'OpenBaoAuditDeviceFailing', 'OpenBaoMetricsTargetDown', 'OpenBaoMetricsMissing', 'OpenBaoSealSeriesMissing',
   'FluentBitOutputFailing', 'AuditRecordsNotReachingStore', 'FluentBitMetricsTargetDown', 'FluentBitMetricsMissing',
+  // 71-12 (D-26, G467): OpenBao's rate limit on computer place claims fired. Watched so the audit observation reads not quiet while a burst of
+  // claims is under way, failing closed like every other alert of the openbao group.
+  'ComputerPlaceClaimsLimited',
 ]);
 
 type Leaf = 'time' | 'count' | 'boolean' | 'seal' | 'digest' | 'alerts';
