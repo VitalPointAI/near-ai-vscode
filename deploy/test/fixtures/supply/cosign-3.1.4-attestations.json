@@ -1,0 +1,78 @@
+{
+  "cosign": "3.1.4",
+  "comment": "cosign 3.1.4 download attestation output (one Sigstore bundle v0.3 per line, each the layer of an OCI 1.1 referrer) for a throwaway FROM-scratch image on a local Zot 2.1.23, attested in key mode with a throwaway file key whose public key is below; captured by spike S-A (48.3-02). The vuln predicate uses cosign vuln schema with the Grype JSON in scanner.result.",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEohHuOOm6LlB/vZUA03Ewj5dIJXfO\nwFquPomSOL5/5Qp2WyILfhUqTsDDkiS9mnTBwRJCMdSbgbwSiRBts9nxpA==\n-----END PUBLIC KEY-----\n",
+  "publicKeyHint": "gQYEQZ3qoUYGBVraNkeH+hZI5VQ0rwt9fHlOx4sDO8E=",
+  "digest": "sha256:041d005f36da7ff1a8dfedd2540bda2a0c3fa52d96078117dbd1beb13730eab7",
+  "subjectName": "127.0.0.1:18895/spike/hello",
+  "attestations": [
+    {
+      "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+      "verificationMaterial": {
+        "publicKey": {
+          "hint": "gQYEQZ3qoUYGBVraNkeH+hZI5VQ0rwt9fHlOx4sDO8E="
+        }
+      },
+      "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsICJzdWJqZWN0IjpbeyJuYW1lIjoiMTI3LjAuMC4xOjE4ODk1L3NwaWtlL2hlbGxvIiwgImRpZ2VzdCI6eyJzaGEyNTYiOiIwNDFkMDA1ZjM2ZGE3ZmYxYThkZmVkZDI1NDBiZGEyYTBjM2ZhNTJkOTYwNzgxMTdkYmQxYmViMTM3MzBlYWI3In19XSwgInByZWRpY2F0ZVR5cGUiOiJodHRwczovL2N5Y2xvbmVkeC5vcmcvYm9tIiwgInByZWRpY2F0ZSI6eyJib21Gb3JtYXQiOiJDeWNsb25lRFgiLCAiY29tcG9uZW50cyI6W3sibmFtZSI6ImhlbGxvLnR4dCIsICJ0eXBlIjoiZmlsZSJ9XSwgIm1ldGFkYXRhIjp7ImNvbXBvbmVudCI6eyJuYW1lIjoic3Bpa2UvaGVsbG8iLCAidHlwZSI6ImNvbnRhaW5lciJ9fSwgInNwZWNWZXJzaW9uIjoiMS42IiwgInZlcnNpb24iOjF9fQ==",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+          {
+            "sig": "MEUCIFvWlOI/5kH39U47y+v/xs5b7nUsCJ31S0zAe9tHJFJuAiEA1ABluNSD/7t20EXLZi9x0QDy7tvLty6dpwobs5EuUfs="
+          }
+        ]
+      }
+    },
+    {
+      "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+      "verificationMaterial": {
+        "publicKey": {
+          "hint": "gQYEQZ3qoUYGBVraNkeH+hZI5VQ0rwt9fHlOx4sDO8E="
+        }
+      },
+      "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsICJzdWJqZWN0IjpbeyJuYW1lIjoiMTI3LjAuMC4xOjE4ODk1L3NwaWtlL2hlbGxvIiwgImRpZ2VzdCI6eyJzaGEyNTYiOiIwNDFkMDA1ZjM2ZGE3ZmYxYThkZmVkZDI1NDBiZGEyYTBjM2ZhNTJkOTYwNzgxMTdkYmQxYmViMTM3MzBlYWI3In19XSwgInByZWRpY2F0ZVR5cGUiOiJodHRwczovL2Nvc2lnbi5zaWdzdG9yZS5kZXYvYXR0ZXN0YXRpb24vdnVsbi92MSIsICJwcmVkaWNhdGUiOnsiaW52b2NhdGlvbiI6eyJidWlsZGVyLmlkIjoiIiwgImV2ZW50X2lkIjoiIiwgInBhcmFtZXRlcnMiOm51bGwsICJ1cmkiOiIifSwgIm1ldGFkYXRhIjp7InNjYW5GaW5pc2hlZE9uIjoiMjAyNi0xMS0yNVQwMDowMDowMFoiLCAic2NhblN0YXJ0ZWRPbiI6IjIwMjYtMTEtMjVUMDA6MDA6MDBaIn0sICJzY2FubmVyIjp7ImRiIjp7InVyaSI6InN1cHBseS9ncnlwZS1kYjoyMDI2LTExLTI1VDAwOjAwOjAwWiIsICJ2ZXJzaW9uIjoidjYuMS40In0sICJyZXN1bHQiOnsiZGVzY3JpcHRvciI6eyJkYiI6eyJzdGF0dXMiOnsiYnVpbHQiOiIyMDI2LTExLTI1VDAwOjAwOjAwWiIsICJzY2hlbWFWZXJzaW9uIjoidjYuMS40In19LCAibmFtZSI6ImdyeXBlIiwgInZlcnNpb24iOiIwLjEyMi4xIn0sICJtYXRjaGVzIjpbXSwgInNvdXJjZSI6eyJ0YXJnZXQiOnsidXNlcklucHV0Ijoic3Bpa2UvaGVsbG8ifSwgInR5cGUiOiJpbWFnZSJ9fSwgInVyaSI6InBrZzpnaXRodWIvYW5jaG9yZS9ncnlwZUB2MC4xMjIuMSIsICJ2ZXJzaW9uIjoiMC4xMjIuMSJ9fX0=",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+          {
+            "sig": "MEUCIQDxLWGOwEdy01P32w4sXv78YiHK/7Ap14ov73RRUiNa/AIgDf+DgNQ9EaKK7dOEdJpgejYJNtgQg9HrV9XH97DWJGI="
+          }
+        ]
+      }
+    },
+    {
+      "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+      "verificationMaterial": {
+        "publicKey": {
+          "hint": "gQYEQZ3qoUYGBVraNkeH+hZI5VQ0rwt9fHlOx4sDO8E="
+        }
+      },
+      "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsICJzdWJqZWN0IjpbeyJuYW1lIjoiMTI3LjAuMC4xOjE4ODk1L3NwaWtlL2hlbGxvIiwgImRpZ2VzdCI6eyJzaGEyNTYiOiIwNDFkMDA1ZjM2ZGE3ZmYxYThkZmVkZDI1NDBiZGEyYTBjM2ZhNTJkOTYwNzgxMTdkYmQxYmViMTM3MzBlYWI3In19XSwgInByZWRpY2F0ZVR5cGUiOiJodHRwczovL29wZW52ZXguZGV2L25zIiwgInByZWRpY2F0ZSI6eyJAY29udGV4dCI6Imh0dHBzOi8vb3BlbnZleC5kZXYvbnMvdjAuMi4wIiwgIkBpZCI6InVybjpuZWFyLWFpLXZzY29kZTp2ZXg6c3Bpa2Utc2EtMSIsICJhdXRob3IiOiJzcGlrZSBTLUEiLCAic3RhdGVtZW50cyI6W3sianVzdGlmaWNhdGlvbiI6InZ1bG5lcmFibGVfY29kZV9ub3RfcHJlc2VudCIsICJwcm9kdWN0cyI6W3siQGlkIjoicGtnOm9jaS9oZWxsb0BzaGEyNTY6MDQxZDAwNWYzNmRhN2ZmMWE4ZGZlZGQyNTQwYmRhMmEwYzNmYTUyZDk2MDc4MTE3ZGJkMWJlYjEzNzMwZWFiNyJ9XSwgInN0YXR1cyI6Im5vdF9hZmZlY3RlZCIsICJ2dWxuZXJhYmlsaXR5Ijp7Im5hbWUiOiJDVkUtMjAyNi0wMDAwIn19XSwgInRpbWVzdGFtcCI6IjIwMjYtMTEtMjVUMDA6MDA6MDBaIiwgInZlcnNpb24iOjF9fQ==",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+          {
+            "sig": "MEYCIQDOoOLbYcOXhAqlBz78tik52AGCTTHvKmkwMBzLU0cRawIhAMWKIkGY1mwU2Ck3z9iJ4HIclO7SRRBW7t7SpgFJ0408"
+          }
+        ]
+      }
+    },
+    {
+      "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+      "verificationMaterial": {
+        "publicKey": {
+          "hint": "gQYEQZ3qoUYGBVraNkeH+hZI5VQ0rwt9fHlOx4sDO8E="
+        }
+      },
+      "dsseEnvelope": {
+        "payload": "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjAuMSIsICJzdWJqZWN0IjpbeyJuYW1lIjoiMTI3LjAuMC4xOjE4ODk1L3NwaWtlL2hlbGxvIiwgImRpZ2VzdCI6eyJzaGEyNTYiOiIwNDFkMDA1ZjM2ZGE3ZmYxYThkZmVkZDI1NDBiZGEyYTBjM2ZhNTJkOTYwNzgxMTdkYmQxYmViMTM3MzBlYWI3In19XSwgInByZWRpY2F0ZVR5cGUiOiJ1cm46bmVhci1haS12c2NvZGU6c3VwcGx5LXJlY29yZDoxIiwgInByZWRpY2F0ZSI6eyJhcHByb3ZhbHMiOltdLCAiZm9ybWF0Ijoic3Rlcmxpbmctc3VwcGx5LXJlY29yZC8xIiwgImdhdGVzIjpbXSwgIm9yaWdpbiI6eyJjb3VudHJ5IjoidW5rbm93biIsICJob3N0Ijoic3Bpa2UuaW52YWxpZCJ9LCAicG9saWN5U2hhMjU2IjoiMDAwMCIsICJyZWNvcmRlZEF0IjoiMjAyNi0xMS0yNVQwMDowMDowMFoiLCAic3RhdGUiOiJhcHByb3ZlZCIsICJzdWJqZWN0Ijp7ImRpZ2VzdCI6InNoYTI1NjowNDFkMDA1ZjM2ZGE3ZmYxYThkZmVkZDI1NDBiZGEyYTBjM2ZhNTJkOTYwNzgxMTdkYmQxYmViMTM3MzBlYWI3In19fQ==",
+        "payloadType": "application/vnd.in-toto+json",
+        "signatures": [
+          {
+            "sig": "MEQCIDQlrxaTvythBV0rNyNVexT0RkvzkNzw52lwbiO2D23SAiALhgYvHKo4NMPJ9ItaxZqgGW55emeq6EIB+UVemTbo5g=="
+          }
+        ]
+      }
+    }
+  ]
+}
