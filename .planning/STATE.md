@@ -4,8 +4,8 @@ milestone: v0.5.0
 milestone_name: Governed agent platform
 current_plan: 23
 status: executing
-stopped_at: 45.1-03 Task 2 done; Task 3 (vetted partners, D-12) ready; Task 4 blocked on 33-18 (replica features, roster.require)
-last_updated: "2026-11-25T12:15:45.472Z"
+stopped_at: 45.1-03 Tasks 1 to 3 done (Task 3, vetted partners D-12, on feat/phase-45.1); Task 4 blocked on 33-18 (replica features, roster.require)
+last_updated: "2026-11-25T14:00:00.000Z"
 state_head: c4a6826be58043ceeec44d5614902a6e84aac2cb
 progress:
   total_phases: 12
@@ -178,7 +178,7 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 ## Session
 
 **Last session:** 2026-11-25T12:15:45.237Z
-**Stopped at:** 45.1-03 Task 2 done; Task 3 (vetted partners, D-12) ready; Task 4 blocked on 33-18 (replica features, roster.require)
+**Stopped at:** 45.1-03 Tasks 1 to 3 done (Task 3, vetted partners D-12, on feat/phase-45.1; 45.1-03-SUMMARY.md written, status partial); Task 4 blocked on 33-18 (replica features, roster.require)
 **Resume file:** .planning/phases/45.1-nato-and-five-eyes-exchange-labels-and-adapter/45.1-03-PLAN.md
 
 ## Performance Metrics
