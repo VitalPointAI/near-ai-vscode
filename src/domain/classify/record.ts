@@ -11,11 +11,12 @@
 //   - Why: `bases` (kind and ref; the ref looks up the marking, guide entry, detector or source), with `facts` (types only) for the compilation and
 //     judgement rows;
 //   - Suggestions: `suggestions` (label, reason, and who may decide a lowering);
-//   - the trust line: `model` (passport id, endpoint class, use tier) and, under Show trust details, `confidence.calibration`,
-//     `confidence.secondFamilyAgreement` and `prompt.templateHash`;
+//   - the trust line: `model.servedModel` and `model.endpointClass` ("Proposed with {model} · Runs on {place}"), or `model.none`'s cause ("Rules only:
+//     {cause}"); under Show trust details `model.passport`, `model.endpoint`, `confidence.calibration`, `confidence.secondFamilyAgreement` and
+//     `prompt.templateHash`;
 //   - notices: `outcome` and `exceptions` (large raise, possible spill, hidden text, full fact set).
 // Numbers are whole numbers (canonical JSON refuses a fraction): probabilities and agreements are basis points, 10000 being 1.
-import { ENDPOINT_CLASSES } from '../gate/endpoints';
+import { ENDPOINT_CLASSES, ENDPOINT_ID_PATTERN } from '../gate/endpoints';
 import type { EndpointClass } from '../gate/endpoints';
 import type { Mark } from '../gate/dominance';
 import { labelKey, parseLabel, splitLabelKey } from '../gate/labels';
@@ -103,7 +104,19 @@ export interface Confidence {
   readonly secondFamilyAgreement?: number;
 }
 
+/** Why no model took part (owner, 2026-11-25): rules only by design, or the 74.3 runner's reason it gave `unassessed`. */
+export const NO_MODEL_CAUSES = Object.freeze(['rules-only', 'no-endpoint', 'timeout', 'unreadable', 'refused', 'not-approved', 'no-role'] as const);
+export type NoModelCause = (typeof NO_MODEL_CAUSES)[number];
+
+export interface NoModel {
+  readonly none: NoModelCause;
+}
+
 export interface ModelRef {
+  /** The served model's short name, for example `gpt-oss-20b` (one passport may cover several served sizes). */
+  readonly servedModel: string;
+  /** The policy endpoint id the request went to. */
+  readonly endpoint: string;
   readonly passport: string;
   readonly passportHash: string;
   readonly artifactHash: string;
@@ -134,8 +147,8 @@ export interface ProposalRecord extends ItemRef {
   readonly facts: readonly Fact[];
   /** Null for rules only. */
   readonly confidence: Confidence | null;
-  /** `none` for rules only. */
-  readonly model: ModelRef | 'none';
+  /** `{ none: cause }` when no model took part. */
+  readonly model: ModelRef | NoModel;
   readonly prompt: PromptRef;
   /** The model's short reason, labelled at the item's label; null for rules only. */
   readonly rationale: { readonly label: Label; readonly text: string } | null;
@@ -163,6 +176,7 @@ const ITEM_ID = /^[A-Za-z0-9._:/-]{1,128}$/;
 const FACT_TYPE = /^[a-z][a-z0-9-]{0,47}$/;
 const SUBJECT_KEY = /^[A-Za-z0-9._:-]{1,128}$/;
 const CALIBRATION_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const SERVED_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const DID_KEY = /^did:key:z[1-9A-HJ-NP-Za-km-z]{1,120}$/;
 const MAX_LIST = 256;
 const MAX_FACTS = 4096;
@@ -293,11 +307,25 @@ function parseConfidence(value: unknown, path: string): Parsed<Confidence | null
   return { ok: true, value: Object.freeze({ ...base, secondFamilyAgreement: second.value }) };
 }
 
-function parseModel(value: unknown, path: string): Parsed<ModelRef | 'none'> {
-  if (value === 'none') return { ok: true, value: 'none' };
+/** Whether a record's model block says no model took part. */
+export function isNoModel(model: ModelRef | NoModel): model is NoModel {
+  return Object.prototype.hasOwnProperty.call(model, 'none');
+}
+
+function parseModel(value: unknown, path: string): Parsed<ModelRef | NoModel> {
   if (!isRecord(value)) return refused('wrong-type', path);
-  const keys = closed(value, path, ['passport', 'passportHash', 'artifactHash', 'endpointClass', 'useTier']);
+  if (Object.prototype.hasOwnProperty.call(value, 'none')) {
+    const keys = closed(value, path, ['none']);
+    if (keys !== undefined) return keys;
+    const cause = choice(ownValue(value, 'none'), childPath(path, 'none'), NO_MODEL_CAUSES);
+    return cause.ok ? { ok: true, value: Object.freeze({ none: cause.value }) } : cause;
+  }
+  const keys = closed(value, path, ['servedModel', 'endpoint', 'passport', 'passportHash', 'artifactHash', 'endpointClass', 'useTier']);
   if (keys !== undefined) return keys;
+  const servedModel = text(ownValue(value, 'servedModel'), childPath(path, 'servedModel'), SERVED_MODEL);
+  if (!servedModel.ok) return servedModel;
+  const endpoint = text(ownValue(value, 'endpoint'), childPath(path, 'endpoint'), ENDPOINT_ID_PATTERN);
+  if (!endpoint.ok) return endpoint;
   const passport = text(ownValue(value, 'passport'), childPath(path, 'passport'), PASSPORT_ID_PATTERN);
   if (!passport.ok) return passport;
   const passportHash = text(ownValue(value, 'passportHash'), childPath(path, 'passportHash'), HEX_64);
@@ -308,7 +336,7 @@ function parseModel(value: unknown, path: string): Parsed<ModelRef | 'none'> {
   if (!endpointClass.ok) return endpointClass;
   const useTier = choice(ownValue(value, 'useTier'), childPath(path, 'useTier'), USE_TIERS);
   if (!useTier.ok) return useTier;
-  return { ok: true, value: Object.freeze({ passport: passport.value, passportHash: passportHash.value, artifactHash: artifactHash.value, endpointClass: endpointClass.value, useTier: useTier.value }) };
+  return { ok: true, value: Object.freeze({ servedModel: servedModel.value, endpoint: endpoint.value, passport: passport.value, passportHash: passportHash.value, artifactHash: artifactHash.value, endpointClass: endpointClass.value, useTier: useTier.value }) };
 }
 
 function parsePrompt(value: unknown, withModel: boolean, path: string): Parsed<PromptRef> {
@@ -389,7 +417,7 @@ function parseShared(value: Fields, scales: ScaleTable, path: string, log: boole
   if (!facts.ok) return facts;
   const model = parseModel(ownValue(value, 'model'), childPath(path, 'model'));
   if (!model.ok) return model;
-  const withModel = model.value !== 'none';
+  const withModel = !isNoModel(model.value);
   const confidence = parseConfidence(ownValue(value, 'confidence'), childPath(path, 'confidence'));
   if (!confidence.ok) return confidence;
   // A model answer carries its confidence; rules alone carry none, and only a model gives a judgement.

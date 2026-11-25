@@ -5,7 +5,7 @@ import test from 'node:test';
 import { SCALE_PRESETS } from '../domain/gate/labels';
 import type { Label } from '../domain/gate/labels';
 import {
-  BASIS_KINDS, PERSON_ATTRIBUTE_KEYS, PROPOSAL_LOG_COPY_KEYS, PROPOSAL_RECORD_KEYS, parseProposalLogCopy, parseProposalRecord, proposalRecordHash, recordForLog
+  BASIS_KINDS, NO_MODEL_CAUSES, PERSON_ATTRIBUTE_KEYS, isNoModel, PROPOSAL_LOG_COPY_KEYS, PROPOSAL_RECORD_KEYS, parseProposalLogCopy, parseProposalRecord, proposalRecordHash, recordForLog
 } from '../domain/classify/record';
 import type { ProposalRecord } from '../domain/classify/record';
 import { canonicalize } from '../domain/team/canonical';
@@ -30,7 +30,7 @@ function modelRecord(): Loose {
     bases: [{ kind: 'marking', ref: 'banner-secret' }, { kind: 'judgement', ref: sha256(RATIONALE) }],
     facts: [{ type: 'unit', subject: 'subj-7f3a' }, { type: 'location', subject: 'subj-91c2' }, { type: 'future-date' }],
     confidence: { levels: { 'ca-classified/Secret': 4000, 'ca-classified/Top Secret': 120 }, calibration: 'cal-gpt-oss-20b-2026-11', sampleAgreement: 10000, secondFamilyAgreement: 9000 },
-    model: { passport: 'openai/gpt-oss', passportHash: 'b'.repeat(64), artifactHash: 'c'.repeat(64), endpointClass: 'local', useTier: 'T3' },
+    model: { servedModel: 'gpt-oss-20b', endpoint: 'example-org-classifier', passport: 'openai/gpt-oss', passportHash: 'b'.repeat(64), artifactHash: 'c'.repeat(64), endpointClass: 'local', useTier: 'T3' },
     prompt: { bundleHash: 'd'.repeat(64), templateHash: 'e'.repeat(64), decodingHash: 'f'.repeat(64) },
     rationale: { label: secret, text: RATIONALE },
     outcome: 'auto-raised',
@@ -51,7 +51,7 @@ function rulesRecord(): Loose {
     v: 1, item: 'item-northern-example-notes', contentHash: 'a'.repeat(64), revision: 3,
     start: [label('ca-classified', 'Confidential')],
     proposal: [{ label: secret, level: 'up', compartments: 'same', releasability: 'same', handling: 'same' }],
-    bases: [{ kind: 'marking', ref: 'banner-secret' }], facts: [], confidence: null, model: 'none', prompt: { bundleHash: 'd'.repeat(64) }, rationale: null,
+    bases: [{ kind: 'marking', ref: 'banner-secret' }], facts: [], confidence: null, model: { none: 'rules-only' }, prompt: { bundleHash: 'd'.repeat(64) }, rationale: null,
     outcome: 'auto-raised', applied: [secret], suggestions: [], exceptions: [], actor: 'rules'
   };
 }
@@ -162,6 +162,21 @@ test('recordForLog keeps ids, hashes, kinds, labels and the outcome, and replace
   const rules = parseProposalRecord(rulesRecord(), SCALE_PRESETS);
   assert.ok(rules.ok);
   if (rules.ok) assert.equal(parseProposalLogCopy(JSON.parse(JSON.stringify(recordForLog(rules.value, sha256))), SCALE_PRESETS).ok, true);
+});
+
+test('owner 2026-11-25: the model block names the served model and the policy endpoint, and no model is { none: cause } with a known cause', () => {
+  assert.deepEqual([...NO_MODEL_CAUSES], ['rules-only', 'no-endpoint', 'timeout', 'unreadable', 'refused', 'not-approved', 'no-role']);
+  for (const cause of NO_MODEL_CAUSES) assert.equal(reasonOf(edited((r) => { r.model = { none: cause }; }, rulesRecord)), 'ok', cause);
+  assert.equal(reasonOf(edited((r) => { r.model = 'none'; }, rulesRecord)), 'wrong-type model', 'the bare string is not v1');
+  assert.equal(reasonOf(edited((r) => { r.model = { none: 'offline' }; }, rulesRecord)), 'not-allowed-here model.none');
+  assert.equal(reasonOf(edited((r) => { r.model = { none: 'timeout', passport: 'openai/gpt-oss' }; }, rulesRecord)), 'unknown-field model.passport');
+  assert.equal(reasonOf(edited((r) => { delete r.model.servedModel; })), 'missing-field model.servedModel');
+  assert.equal(reasonOf(edited((r) => { delete r.model.endpoint; })), 'missing-field model.endpoint');
+  assert.equal(reasonOf(edited((r) => { r.model.endpoint = 'Example Org Server'; })), 'wrong-type model.endpoint');
+  assert.equal(reasonOf(edited((r) => { r.model.servedModel = 'gpt oss'; })), 'wrong-type model.servedModel');
+  const parsed = parseProposalRecord(modelRecord(), SCALE_PRESETS);
+  assert.ok(parsed.ok);
+  if (parsed.ok) assert.equal(isNoModel(parsed.value.model), false);
 });
 
 test('the record hash changes with any field, so a cell entry\'s basis ref names exactly one record', () => {
