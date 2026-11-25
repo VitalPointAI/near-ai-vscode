@@ -450,6 +450,7 @@ export const GLOSSARY_WORDS: readonly GlossaryWord[] = Object.freeze([
   glossary('multi-user', 'multi-user', false, '"Share with people"'),
   glossary('replica', 'replicas?', false, '"Share with people"'),
   glossary('GSD', 'GSD', true, '"Workflows" (GSD is for the Tools page detail only)'),
+  glossary('Staff Center', 'staff\\s+cent(?:er|re)s?', false, '"Staff Room" (owner, 2026-11-24: the one name for a staff team\'s shared room)'),
   glossary('T0 lane', 'T0\\s+lane', false, '"Research workspace"')
 ]);
 

@@ -61,7 +61,7 @@ const pages: Record<WorkAreaKind, AreaPage> = {
     image: 'sterling-area-planning.webp',
     create: 'Create planning work area',
     shortcuts: [
-      { label: 'Open Staff Center', command: 'nearAi.openStaffRoom', args: ['war-room'], currentProject: true },
+      { label: 'Open Staff Room', command: 'nearAi.openStaffRoom', args: ['war-room'], currentProject: true },
       { label: 'Open Agent Activity', command: 'nearAi.openAgentActivity', currentProject: true }
     ]
   },

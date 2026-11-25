@@ -164,6 +164,14 @@ test('D-41 rule 1: glossary words never on main screens are counted once each', 
   for (const word of ['tee-only', 'GitHub', 'tiered', 'your organization\'s server']) assert.deepEqual(one(`This mentions ${word} here.`), {}, word);
 });
 
+test('rule 1 (owner, 2026-11-24): the staff team\'s shared room is the Staff Room, never the Staff Center, and the Planning page says so', () => {
+  const pageFile = 'workbench/extension/src/browser/sterling-work-areas-module.ts';
+  for (const text of ['Open Staff Center', 'Open the staff centre']) assert.deepEqual(one(text, pageFile), { glossary: 1 }, text);
+  assert.deepEqual(one('Open Staff Room', pageFile), {});
+  const page = readFileSync(path.join(REPO_ROOT, pageFile), 'utf8');
+  assert.match(page, /label: 'Open Staff Room', command: 'nearAi\.openStaffRoom'/);
+});
+
 test('D-41 rule 1: allowed contexts: GSD on the Tools page and attestation in the trust details pane are not counted', () => {
   assert.deepEqual(one('Run a GSD workflow', 'src/services/toolsPage.ts'), {});
   assert.deepEqual(one('Run a GSD workflow', 'media/tools/tools.js'), {});

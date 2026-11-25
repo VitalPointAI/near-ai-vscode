@@ -50,6 +50,7 @@ Rule: every concept has **one user word**. Words in the "never on main screens" 
 | A workspace folder | **Project** | workspace (except in VS Code's own sense) | no |
 | Projects rolled up | **Portfolio**, opened in the **Portfolio Room** | Project Room as a separate page (it is a tab) | no |
 | A unit reporting upward | **Unit** | publication envelope, intake key | names follow the mode |
+| A staff team's shared room (planning cycle, products, who is working) | **Staff Room** (owner, 2026-11-24; the Planning page's button is "Open Staff Room") | Staff Center, war room | no |
 | Always-on organization machine | **Your organization's server** (status page lists what it does: sync, data, messaging) | hub, host, relay, appliance, L1a | no |
 | An AI service | **AI service**: NEAR AI Cloud, this computer, your organization's server, Cohere vault | provider, endpoint | no |
 | Saved key and address for an AI service | **Connection** | profile | no |
