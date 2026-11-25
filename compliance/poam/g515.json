@@ -1,0 +1,23 @@
+{
+  "gap": "G515",
+  "id": "g515",
+  "controls": [
+    "cp-06",
+    "cp-06.01",
+    "cp-09",
+    "cp-09.03"
+  ],
+  "ownerRole": "shared",
+  "title": "The daily off-site copy has no tooling yet",
+  "remediation": "Owner decision d (D-81) requires a daily copy of the Longhorn backup target and the write-once audit archive to a write-once store at your organization's second site, and the backup runbook describes a sterling-offsite CronJob and offsite.mjs pack and verify for it. Neither exists yet; plan 47-33 builds them. Until then a site has no automated off-site copy: your organization makes the copy by its own means and records each one. This closes when 47-33 lands the CronJob, offsite.mjs pack and verify, and their tests, and a lab run copies and verifies one day's set.",
+  "milestones": [
+    {
+      "phase": "47",
+      "title": "Build the sterling-offsite CronJob and offsite.mjs pack and verify (47-33), with their tests"
+    },
+    {
+      "phase": "47",
+      "title": "Copy and verify one day's set to a write-once store at a second site on the lab, and record it"
+    }
+  ]
+}

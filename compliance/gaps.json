@@ -6254,6 +6254,21 @@
       "ownerRole": "maintainers",
       "remediation": "Only the test, relay, hub, workbench and deploy jobs write the per-test reports the evidence bundle reads. A rule on a compliance or docs-site test never gets a result, and a statement with no rule at all is allowed in the sources; both read Not met on the dashboard, but nothing refuses them when they are written. Plan 44.1-08 refuses both at source time, through 44.1-07's required check; the appliance's reference statement stays exempt while its level makes no claim. How fresh each kind of evidence must be stays with Phase 48.2 (Live compliance evidence).",
       "title": "A statement can cite a test that no CI job reports"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "cp-06",
+        "cp-06.01",
+        "cp-09",
+        "cp-09.03"
+      ],
+      "id": "G515",
+      "ownerRole": "shared",
+      "poam": "g515",
+      "remediation": "Owner decision d (D-81) requires a daily copy of the Longhorn backup target and the write-once audit archive to a write-once store at your organization's second site, and the backup runbook describes a sterling-offsite CronJob and offsite.mjs pack and verify for it. Neither exists yet; plan 47-33 builds them. Until then a site has no automated off-site copy: your organization makes the copy by its own means and records each one. This closes when 47-33 lands the CronJob, offsite.mjs pack and verify, and their tests, and a lab run copies and verifies one day's set.",
+      "title": "The daily off-site copy has no tooling yet"
     }
   ]
 }

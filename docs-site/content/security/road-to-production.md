@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 425 items, 400 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 426 items, 401 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -24,7 +24,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 | Level | Blocks production | Does not block production |
 | --- | --- | --- |
 | [Now, at every level](#now) | 82 | 14 |
-| [From Protected A](#protected-a) | 302 | 2 |
+| [From Protected A](#protected-a) | 303 | 2 |
 | [From Protected B](#protected-b) | 12 | 3 |
 | [From Protected C](#protected-c) | 0 | 1 |
 | [From Confidential](#confidential) | 0 | 1 |
@@ -446,6 +446,7 @@ These matter once your organization holds Protected A information.
 - **G402. Hosted suppliers are not assessed.** Generate the supplier register from the fit register, one supplier per publisher, with an assessment and notification terms for each, checked both ways (48.1-09). Controls: SR-6, SR-8. Owner role: maintainers. Planned in Phase 48.1.
 - **G403. Hosted sites have no continuous monitoring strategy.** Write the continuous monitoring strategy for sites: what is monitored, cadences, owners, how a disconnected edge reports to HQ by signed file, and the triggers for reassessment (48.1-04). Controls: CA-7. Owner role: maintainers. Planned in Phase 48.1.
 - **G427. People's identities are made but not yet published, and computers cannot be bound yet.** People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING\_DID\_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer needs status list indexes from your organization's issuance setup (71-12); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then. Controls: IA-2, IA-4, IA-5. Owner role: maintainers. Planned in Phase 71.
+- **G515. The daily off-site copy has no tooling yet.** Owner decision d (D-81) requires a daily copy of the Longhorn backup target and the write-once audit archive to a write-once store at your organization's second site, and the backup runbook describes a sterling-offsite CronJob and offsite.mjs pack and verify for it. Neither exists yet; plan 47-33 builds them. Until then a site has no automated off-site copy: your organization makes the copy by its own means and records each one. This closes when 47-33 lands the CronJob, offsite.mjs pack and verify, and their tests, and a lab run copies and verifies one day's set. Controls: CP-6, CP-6(1), CP-9, CP-9(3). Owner role: shared. Tracked as POA&M item g515; first milestone: Build the sterling-offsite CronJob and offsite.mjs pack and verify (47-33), with their tests (Phase 47).
 
 ### Does not block production {#protected-a-does-not-block}
 
