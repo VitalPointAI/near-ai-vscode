@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ac-16"
+  ],
+  "gap": "G501",
+  "id": "g501",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "A label profile for each partner's own markings is asked for at the acceptance trial (45.2-12, owner actions a and c)"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Markings on plain files are read only when they are the marking words of a label profile your organization adopted (the NATO and Canadian drafts, or one your security officer adds). Partners' national marking systems that no adopted profile drafts are not read, so such files arrive unlabelled and an exchange officer labels them, and words in a marking after the classification (caveats, release lists) are shown but not read. Each partner's label-policy owner can supply a profile for its markings, which your security officer adopts in the signed policy. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-30.",
+  "title": "Partners' own national markings are not read yet"
+}

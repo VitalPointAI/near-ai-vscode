@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "ac-16",
+    "sc-13"
+  ],
+  "gap": "G504",
+  "id": "g504",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Revisited when the development round trip or a partner sample uses one of these forms (45.2-10, 45.2-12)"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
+  "title": "Some OpenTDF forms are refused as not supported yet"
+}

@@ -5704,6 +5704,71 @@
       "title": "Phase 31's typed-in clearance stays readable for replay"
     },
     {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "sc-16"
+      ],
+      "id": "G500",
+      "ownerRole": "owner",
+      "poam": "g500",
+      "remediation": "Partners whose systems are not like ours can send files whose label cannot be checked: a binding with no signature, a signature by an anchor your organization has not pinned for that partner, a form this version cannot check yet, a marking read from the file's text, or no label at all. Such files are held in quarantine in a protected cell at a provisional label, and an exchange officer confirms, raises or sets the label; a label lower than the sender's is refused. A person's confirmation is recorded as that person's act, never as a check of the file, so a mistaken confirmation is the risk that remains. Your organization's security officer accepts this condition; pinning each partner's signing anchors in exchangePartners turns claimed labels into checked ones. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-25, D-28 and D-29.",
+      "title": "Labels on partner files that cannot be checked are confirmed by an exchange officer"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G501",
+      "ownerRole": "shared",
+      "poam": "g501",
+      "remediation": "Markings on plain files are read only when they are the marking words of a label profile your organization adopted (the NATO and Canadian drafts, or one your security officer adds). Partners' national marking systems that no adopted profile drafts are not read, so such files arrive unlabelled and an exchange officer labels them, and words in a marking after the classification (caveats, release lists) are shown but not read. Each partner's label-policy owner can supply a profile for its markings, which your security officer adopts in the signed policy. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-30.",
+      "title": "Partners' own national markings are not read yet"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G502",
+      "ownerRole": "shared",
+      "poam": "g502",
+      "remediation": "ITSP.40.111 version 5 (section 5.1) asks for RSA keys of at least 3072 bits by the end of 2030. Partner key servers may use 2048-bit RSA keys today, because the public OpenTDF key access types name them, so from 2031-01-01 every export wrapped to a 2048-bit partner key is refused. Your organization's own receiving key is RSA-3072. Partners are asked for an EC key (ec:secp256r1) or a longer RSA key before then. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-32.",
+      "title": "Partner key servers with 2048-bit RSA keys can be used only until the end of 2030"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "sc-16"
+      ],
+      "id": "G503",
+      "ownerRole": "shared",
+      "poam": "g503",
+      "remediation": "NATO profiles labelled mail (ADatP-4778.2 chapter 3, a binding object in a mail header beside the RFC 7444 security label header) and labelled chat (chapter 4, XMPP), and military mail gateways support them with S/MIME security labels. Your organization's exchange is a file handover at the release boundary, not a mail or chat gateway, so these labels are not read: a saved message arrives as a plain file and is held as unlabelled unless a banner line is recognised. A mail adapter is planned when a partner or the allied test cell shows it hands over labelled messages as files. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-33 and 45.2-RESEARCH.md section 12.3.",
+      "title": "Labelled mail and chat from partners are not read"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "sc-13"
+      ],
+      "id": "G504",
+      "ownerRole": "maintainers",
+      "poam": "g504",
+      "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
+      "title": "Some OpenTDF forms are refused as not supported yet"
+    },
+    {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48.1",
