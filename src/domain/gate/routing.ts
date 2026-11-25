@@ -583,6 +583,17 @@ export type AllowingRecord =
 /** The rules report mode records instead of refusing (D-34, D-42). */
 export type ReportedRouteRule = 'route.accredited-device' | 'route.passport';
 
+/** What a route.passport refusal tells the chat (74.1 D-22): the use, the label keys and place in words, the ways forward the gate found. */
+export interface PassportRefusal {
+  readonly model: string;
+  readonly use: UseTier;
+  readonly labels: readonly string[];
+  readonly place?: string;
+  readonly alternatives?: readonly string[];
+  readonly whoToAsk: string;
+  readonly organization: boolean;
+}
+
 export interface RouteDecision {
   readonly allowed: boolean;
   /** The tier the mark needs. */
@@ -602,6 +613,8 @@ export interface RouteDecision {
   readonly pinTo?: readonly string[];
   /** With a policy: the use the passport step checked (74.1 D-13, D-23). */
   readonly useTier?: UseTier;
+  /** On a route.passport refusal (74.1 D-22): the facts the chat's empty-state card reads. Undefined alternatives: not worked out. */
+  readonly passportRefusal?: PassportRefusal;
   /** With a policy: the passport that decided the request, by id and hash, when the model has one (D-23). */
   readonly passport?: { readonly id: string; readonly hash: string };
   /** Why the passport did not cover the request: the refusal's reason under enforce, the report's under report (D-11, D-12). */
@@ -860,7 +873,11 @@ function decidePolicySteps(decision: RouteDecision, mark: Mark, routing: Routing
       const alternatives = candidates === undefined ? undefined : alternativesFor(candidates, facts.model?.id ?? '', (model) => decideRoute(mark, routing, { ...facts, model, candidates: undefined, observed: firedOnly(facts.observed) }, defaultLabel, floor, policy), models.order);
       const details = passport.details === undefined ? undefined : { ...passport.details, ...(alternatives === undefined ? {} : { alternatives }) };
       const reason = passport.gap === undefined || details === undefined ? ROUTE_REFUSALS['route.passport'] : PASSPORT_GAP_TEXT[passport.gap](details);
-      return { allowed: false, tier: decision.tier, rule: 'route.passport', reason, ...(endpoint === undefined ? {} : { endpoint }), ...passportFacts };
+      const refusal: PassportRefusal = {
+        model: facts.model?.id ?? '', use: checked ?? 'T1', labels: keysOf(labels).filter((key): key is string => key !== undefined), whoToAsk: whoToAsk(policy.contact, policy.organization),
+        organization: policy.organization, ...(details?.place === undefined ? {} : { place: details.place }), ...(alternatives === undefined ? {} : { alternatives })
+      };
+      return { allowed: false, tier: decision.tier, rule: 'route.passport', reason, ...(endpoint === undefined ? {} : { endpoint }), ...passportFacts, passportRefusal: Object.freeze(refusal) };
     }
     wouldRefuse.add('route.passport');
   }
