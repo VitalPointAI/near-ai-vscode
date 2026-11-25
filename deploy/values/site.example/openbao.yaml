@@ -34,3 +34,10 @@ sterling:
     keyLabel: bao-root-key
     # AES_GCM with an AES-256 key in the token (OpenBao creates no key material); RSA_PKCS_OAEP with an RSA 4096 key pair is the alternative.
     mechanism: AES_GCM
+  # Raft snapshots (D-73): every 6 hours in UTC, the newest `keep` files kept on a volume of the encrypted class (size). Provisional until
+  # Phase 48. A snapshot is useless without the HSM (pkcs11) or the Shamir unseal shares, so keep those as the key ceremony runbook says. The
+  # recovery point setting (47-27) is checked against this schedule.
+  snapshots:
+    cron: "15 */6 * * *"
+    keep: 28
+    size: 5Gi

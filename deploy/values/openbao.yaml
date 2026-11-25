@@ -119,6 +119,235 @@ server:
           }
         }
 
+# Scheduled Raft snapshots (D-73, CP-9; 47-24) onto PVC openbao-snapshots on the site's encrypted class, so the Longhorn recurring backups
+# carry them off the node, encrypted. The job logs in at auth/kubernetes role raft-snapshot (deploy/openbao/apply.mjs) with a projected token
+# of ServiceAccount openbao-snapshot for its own audience, and its OpenBao token can only read sys/storage/raft/snapshot. It prints the file
+# name and size only, never the token. The chart's own snapshotAgent is not used: it needs a separate S3 image and S3 storage.
+extraObjects:
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: openbao-snapshot
+    automountServiceAccountToken: false
+  - |
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: openbao-snapshots
+      annotations:
+        helm.sh/resource-policy: keep
+    spec:
+      accessModes: [ReadWriteOnce]
+      storageClassName: "${site.storageClass}"
+      resources:
+        requests:
+          storage: {{ .Values.sterling.snapshots.size }}
+  - |
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: openbao-raft-snapshot
+    spec:
+      schedule: "{{ .Values.sterling.snapshots.cron }}"
+      timeZone: Etc/UTC
+      concurrencyPolicy: Forbid
+      successfulJobsHistoryLimit: 1
+      failedJobsHistoryLimit: 3
+      jobTemplate:
+        spec:
+          backoffLimit: 2
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: openbao-raft-snapshot
+            spec:
+              restartPolicy: OnFailure
+              serviceAccountName: openbao-snapshot
+              automountServiceAccountToken: false
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                fsGroup: 1000
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+                - name: snapshot
+                  image: "{{ .Values.server.image.registry }}/{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -eu
+                      BAO_TOKEN=$(bao write -field=token auth/kubernetes/login role=raft-snapshot jwt=@/var/run/secrets/openbao/token)
+                      export BAO_TOKEN
+                      file="/snapshots/openbao-$(date -u +%Y%m%dT%H%M%SZ).snap"
+                      bao operator raft snapshot save "$file"
+                      unset BAO_TOKEN
+                      ls -1 /snapshots/openbao-*.snap | sort -r | tail -n +$((KEEP + 1)) | while read -r old; do rm -f "$old"; done
+                      echo "saved $(basename "$file"), $(wc -c < "$file") bytes"
+                  env:
+                    - name: BAO_ADDR
+                      value: https://openbao.sterling-openbao.svc:8200
+                    - name: BAO_CACERT
+                      value: /etc/ssl/site-ca/ca.crt
+                    - name: HOME
+                      value: /tmp
+                    - name: KEEP
+                      value: "{{ int .Values.sterling.snapshots.keep }}"
+                  resources:
+                    requests:
+                      cpu: 50m
+                      memory: 64Mi
+                    limits:
+                      memory: 256Mi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities:
+                      drop: [ALL]
+                  volumeMounts:
+                    - name: snapshots
+                      mountPath: /snapshots
+                    - name: site-ca
+                      mountPath: /etc/ssl/site-ca
+                      readOnly: true
+                    - name: token
+                      mountPath: /var/run/secrets/openbao
+                      readOnly: true
+                    - name: tmp
+                      mountPath: /tmp
+              volumes:
+                - name: snapshots
+                  persistentVolumeClaim:
+                    claimName: openbao-snapshots
+                - name: site-ca
+                  configMap:
+                    name: sterling-site-ca
+                - name: token
+                  projected:
+                    sources:
+                      - serviceAccountToken:
+                          audience: sterling-openbao-snapshot
+                          expirationSeconds: 600
+                          path: token
+                - name: tmp
+                  emptyDir:
+                    sizeLimit: 16Mi
+
+  # Guests past retention whose secrets a security officer has not removed yet (D-84, 47-34). Read-only but for the officers' notice: it lists
+  # and reads the end records (deploy/keycloak/guests.mjs), skips a guest whose entity is enabled again and one with a removal record, writes
+  # the count to kv/data/site/notices/guest-secrets-removal (shown to security officers in the workbench) and posts the alert
+  # GuestSecretsAwaitRemoval to the site's Alertmanager, which emails through its one route (48.1-02). The alert lasts three hours and the job
+  # runs hourly, so it repeats until the officer acts; at a count of 0 it is resolved. It prints the count only, never who and never a token.
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: guest-retention-check
+    automountServiceAccountToken: false
+  - |
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: guest-retention-check
+    spec:
+      schedule: "40 * * * *"
+      timeZone: Etc/UTC
+      concurrencyPolicy: Forbid
+      successfulJobsHistoryLimit: 1
+      failedJobsHistoryLimit: 3
+      jobTemplate:
+        spec:
+          backoffLimit: 1
+          template:
+            metadata:
+              labels:
+                app.kubernetes.io/name: guest-retention-check
+            spec:
+              restartPolicy: Never
+              serviceAccountName: guest-retention-check
+              automountServiceAccountToken: false
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                seccompProfile:
+                  type: RuntimeDefault
+              containers:
+                - name: check
+                  image: "{{ .Values.server.image.registry }}/{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+                  imagePullPolicy: IfNotPresent
+                  command: ["/bin/sh", "-c"]
+                  args:
+                    - |
+                      set -eu
+                      BAO_TOKEN=$(bao write -field=token auth/kubernetes/login role=guest-retention-check jwt=@/var/run/secrets/openbao/token)
+                      export BAO_TOKEN
+                      now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                      keys() { bao list -format=json "$1" 2>/dev/null | tr -d '[]", \t' | grep . || true; }
+                      field() { sed -n "s/.*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -n 1; }
+                      removed=" $(keys kv/metadata/site/guest-secrets-removed | tr '\n' ' ') "
+                      seen=" "
+                      count=0
+                      for key in $(keys kv/metadata/site/guest-ended | sort -r); do
+                        entity=${key%-*}
+                        case "$seen" in *" $entity "*) continue ;; esac
+                        seen="$seen$entity "
+                        case "$removed" in *" $key "*) continue ;; esac
+                        after=$(bao read -format=json "kv/data/site/guest-ended/$key" | field removeAfter)
+                        if [ -z "$after" ] || [ "$(printf '%s\n%s\n' "$after" "$now" | sort | head -n 1)" != "$after" ]; then continue; fi
+                        disabled=$(bao read -field=disabled "identity/entity/name/$entity" 2>/dev/null || echo missing)
+                        if [ "$disabled" = true ]; then count=$((count + 1)); fi
+                      done
+                      printf '{"data":{"format":"sterling-notice/1","count":%d,"checkedAt":"%s"}}' "$count" "$now" | bao write kv/data/site/notices/guest-secrets-removal - >/dev/null
+                      if [ "$count" -gt 0 ]; then ends=$(date -u -d '+3 hours' +%Y-%m-%dT%H:%M:%SZ); else ends=$now; fi
+                      printf '[{"labels":{"alertname":"GuestSecretsAwaitRemoval","severity":"warning","source":"guest-retention"},"annotations":{"summary":"Ended guest accounts with secrets past the retention period: %d","description":"A security officer removes them in the workbench with Remove ended guests secrets, after a passkey step-up. This notice names no one.","runbook":"deploy/runbooks/guest-accounts.md"},"startsAt":"%s","endsAt":"%s"}]' "$count" "$now" "$ends" \
+                        | curl -sS --fail -o /dev/null -X POST -H 'Content-Type: application/json' --data-binary @- "$ALERTMANAGER_URL/api/v2/alerts"
+                      echo "guests past retention with secrets not yet removed: $count"
+                  env:
+                    - name: BAO_ADDR
+                      value: https://openbao.sterling-openbao.svc:8200
+                    - name: BAO_CACERT
+                      value: /etc/ssl/site-ca/ca.crt
+                    - name: HOME
+                      value: /tmp
+                    - name: ALERTMANAGER_URL
+                      value: http://prometheus-alertmanager.sterling-monitoring.svc:9093
+                  resources:
+                    requests:
+                      cpu: 20m
+                      memory: 32Mi
+                    limits:
+                      memory: 128Mi
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
+                    capabilities:
+                      drop: [ALL]
+                  volumeMounts:
+                    - name: site-ca
+                      mountPath: /etc/ssl/site-ca
+                      readOnly: true
+                    - name: token
+                      mountPath: /var/run/secrets/openbao
+                      readOnly: true
+                    - name: tmp
+                      mountPath: /tmp
+              volumes:
+                - name: site-ca
+                  configMap:
+                    name: sterling-site-ca
+                - name: token
+                  projected:
+                    sources:
+                      - serviceAccountToken:
+                          audience: sterling-openbao-guest-retention
+                          expirationSeconds: 600
+                          path: token
+                - name: tmp
+                  emptyDir:
+                    sizeLimit: 4Mi
+
 # Per-site settings (deploy/values/site.example/openbao.yaml). The seal has no default: a site chooses pkcs11 or shamir, and the render
 # stops otherwise.
 sterling:
@@ -128,3 +357,8 @@ sterling:
     tokenLabel: ""
     keyLabel: ""
     mechanism: ""
+  # Snapshot defaults; a site sets its own in its site file.
+  snapshots:
+    cron: "15 */6 * * *"
+    keep: 28
+    size: 5Gi

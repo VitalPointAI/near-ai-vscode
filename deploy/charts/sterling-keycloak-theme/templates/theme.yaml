@@ -1,0 +1,13 @@
+# The login theme sterling (D-76): keycloak.v2 with footer.ftl overridden to show the realm message sterlingSystemUseNotice. Keycloak mounts
+# this ConfigMap at /opt/keycloak/themes/sterling/login (deploy/values/keycloakx.yaml) and does not start without it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sterling-login-theme
+  labels:
+    app.kubernetes.io/name: sterling-keycloak-theme
+data:
+  theme.properties: |
+{{ .Files.Get "files/theme.properties" | indent 4 }}
+  footer.ftl: |
+{{ .Files.Get "files/footer.ftl" | indent 4 }}

@@ -6227,6 +6227,32 @@
       "title": "Restore drivers and maintenance checks for OpenSearch, Longhorn and an OpenBao cluster have not run live"
     },
     {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cp-09",
+        "cp-10"
+      ],
+      "id": "G448",
+      "ownerRole": "maintainers",
+      "remediation": "A site with more than one OpenSearch node puts its audit and log snapshots on one ReadWriteMany volume (PVC opensearch-snapshots, deploy/values/opensearch.yaml, 47-24), which Longhorn serves through its share manager. Whether a ReadWriteMany volume works on the encrypted storage class, and survives a node loss with its recurring backups, has not been checked: the 47-24 proof ran one OpenSearch node in a container. Check it on Phase 48's multi-node lab-full rig (three OpenSearch nodes writing one repository, a restore from it, and the Longhorn backup of the share), and record the result on the register entry.",
+      "title": "Multi-node audit snapshots need a shared volume on the encrypted class, not yet shown"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ac-02",
+        "ia-08"
+      ],
+      "id": "G449",
+      "ownerRole": "maintainers",
+      "remediation": "Guest accounts (deploy/keycloak/guests.mjs, 47-19) hold lifecycle attributes only: how a guest serves, their organization, access agreement and visit clearance are credentials the security contact issues to the guest in their own session, and an early end files a revocation request that only 71-12's revocation card shows to the issuing officers. 71-12 is not on main, so a site must keep guests off (guests.maxDays 0 or absent in the realm site file) until it runs a release that includes 71-12: the example ships maxDays 0, and guests.mjs create and extend refuse a nonzero maxDays while the release has no credential-issuers policy (71-12's); 47-20, the automatic end, waits on it too. Close this when 71-12 is merged and the lab run shows a guest's credentials issued and an early end's request revoked.",
+      "title": "Guest accounts stay off until a release includes the credential issuing and revocation card (71-12)"
+    },
+    {
       "appliesAt": "now",
       "blocksProduction": false,
       "closesInPhase": "33",

@@ -1,7 +1,7 @@
 /**
  * The one OpenBao client every workbench call goes through (D-19, D-22; T-46-06, T-46-08): plain node:https (node:http only for the
  * loopback address hosting-config allows), the site's CA bundle read once from caFile, a timeout on every call, JSON in and out, the token
- * only in X-Vault-Token, and a 1 MiB cap on an answer. It never logs. Its errors carry the method, the path with any users/<id> part and
+ * only in X-Vault-Token, and a 1 MiB cap on an answer. It never logs. Its errors carry the method, the path with any users/<id> or guests/<id> part and
  * any entity id hidden, and the status, never a header or a body, so no token or secret can reach an error text. Nothing here imports Theia.
  */
 import { readFileSync } from 'node:fs';
@@ -51,9 +51,9 @@ export const DEFAULT_OPENBAO_TIMEOUT_MS = 5000;
 const MAX_ANSWER_BYTES = 1024 * 1024;
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
-/** The path as error texts show it: no query, users/<id> as users/…, and no entity id anywhere (person-<id>, kek-<id>). */
+/** The path as error texts show it: no query, users/<id> and guests/<id> as users/… and guests/…, and no entity id anywhere (person-<id>, kek-<id>). */
 export function describePath(path: string): string {
-  return path.split('?')[0].replace(/^\/+/, '').replace(/(^|\/)users\/[^/]+/g, '$1users/…').replace(UUID, '…');
+  return path.split('?')[0].replace(/^\/+/, '').replace(/(^|\/)(users|guests)\/[^/]+/g, '$1$2/…').replace(UUID, '…');
 }
 
 export function createOpenBaoClient(options: OpenBaoClientOptions): OpenBaoClient {

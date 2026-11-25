@@ -4,6 +4,10 @@
  * extension chooses, are each encoded as "u" plus base64url. An encoded segment is never empty, never "." or "..", and holds no "/", so no
  * string can leave the person's prefix; the encoding is reversible, so keys() and findCredentials() can give the names back.
  *
+ * A guest's secrets live under `guests/<entity id>/...` instead (D-84): every guest entity carries OpenBao policy guest-account, which
+ * denies it `users/` and gives it `guests/<own entity>/`, so a security officer's removal reaches guests' secrets and never staff's.
+ * The session learns which from that policy (session-identity.ts).
+ *
  * This layout is part of the Phase 47 contract: once a site stores secrets under it, changing it needs a per-site KV path migration.
  * Nothing here imports Theia.
  */
@@ -30,13 +34,24 @@ export function decodeSegment(segment: string): string {
   return value;
 }
 
-/** The person's folder for one service, `users/<entity id>/<encoded service>`. */
-export function serviceFolder(entityId: string, service: string): string {
+/** Where a person's own KV folder is: `users/` for staff, `guests/` for a guest (OpenBao policy guest-account on their entity). */
+export type KvSpace = 'users' | 'guests';
+/** The OpenBao entity policy that makes a session a guest's (deploy/openbao/policies/guest-account.hcl). */
+export const GUEST_ACCOUNT_POLICY = 'guest-account';
+
+/** The person's own folder, `<space>/<entity id>`. */
+export function ownFolder(entityId: string, space: KvSpace = 'users'): string {
   if (!ENTITY_ID.test(entityId)) throw new Error('The session has no valid entity id.');
-  return `users/${entityId}/${encodeSegment(service)}`;
+  if (space !== 'users' && space !== 'guests') throw new Error('The session has no valid secret space.');
+  return `${space}/${entityId}`;
 }
 
-/** The secret's path inside the KV mount, `users/<entity id>/<encoded service>/<encoded account>`. */
-export function secretPath(entityId: string, service: string, account: string): string {
-  return `${serviceFolder(entityId, service)}/${encodeSegment(account)}`;
+/** The person's folder for one service, `<space>/<entity id>/<encoded service>`. */
+export function serviceFolder(entityId: string, service: string, space: KvSpace = 'users'): string {
+  return `${ownFolder(entityId, space)}/${encodeSegment(service)}`;
+}
+
+/** The secret's path inside the KV mount, `<space>/<entity id>/<encoded service>/<encoded account>`. */
+export function secretPath(entityId: string, service: string, account: string, space: KvSpace = 'users'): string {
+  return `${serviceFolder(entityId, service, space)}/${encodeSegment(account)}`;
 }

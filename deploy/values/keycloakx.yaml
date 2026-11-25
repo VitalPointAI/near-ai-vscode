@@ -3,7 +3,9 @@
 # (D-20). It runs against the site Postgres (47-11) over verified TLS, serves HTTPS itself with a certificate from the site PKI (47-13), sits
 # behind HAProxy, and writes JSON logs (events included) for the site log store (D-35). The realm itself is code (deploy/keycloak, 47-08).
 # FIPS strict mode with BC-FIPS is not configured in Phase 47 (owner item E6, a condition on the register entry). Per-site settings are in
-# deploy/values/site.example/keycloakx.yaml.
+# deploy/values/site.example/keycloakx.yaml. The login theme sterling (ConfigMap sterling-login-theme from deploy/charts/sterling-keycloak-theme,
+# installed just before) is mounted at /opt/keycloak/themes/sterling/login and shows your organization's system use notice on every sign-in
+# page (D-76); the volume is not optional, so Keycloak does not start without the notice.
 image:
   # Only the app.kubernetes.io/version label reads the tag; the image itself is pinned by digest.
   tag: "26.8.2"
@@ -91,6 +93,10 @@ extraVolumes: |
     secret:
       secretName: keycloak-tls
       defaultMode: 0400
+  - name: login-theme
+    configMap:
+      name: sterling-login-theme
+      optional: false
   {{- if eq .Values.sterling.signInKeys "hardware-only" }}
   - name: attestation-roots
     configMap:
@@ -103,6 +109,9 @@ extraVolumeMounts: |
     readOnly: true
   - name: tls
     mountPath: /opt/keycloak/tls
+    readOnly: true
+  - name: login-theme
+    mountPath: /opt/keycloak/themes/sterling/login
     readOnly: true
   {{- if eq .Values.sterling.signInKeys "hardware-only" }}
   - name: attestation-roots

@@ -100,6 +100,7 @@ export default new ContainerModule(bind => {
       keys: context.container.get<KeyService>(KeyService),
       kv,
       entityId,
+      space: () => identity.session()?.space,
       engine: loadEngine,
       domain: domain === undefined || domain === '' ? undefined : domain,
       // The person's own computer slots (D-25, owner 2026-11-25): create only, under their own entity, at most 5.

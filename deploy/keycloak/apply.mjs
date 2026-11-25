@@ -14,6 +14,11 @@
 // HQ brokering (D-36): identity provider hq is in every realm and off unless the per-site realm file turns hqBroker on (an edge site linked
 // to HQ). It is never the default: HQ is used only when a person picks it or a link names it (kc_idp_hint), and its first sign-in only links
 // the local person with the same email, never creates one. Local people keep signing in with their keys when the link is down.
+// Guests (D-58 to D-60): the top-level group guests carries no role, subgroup or attribute; the six guest life-cycle attributes are in the
+// user profile for administrators only; serves, nationality, organization and a security-contacts group are refused (they are credentials,
+// Phase 71); and no client or client scope puts a user attribute or a group into the access token (zero trust: Keycloak decides nothing).
+// The system use notice (D-76, AC-8): the realm site file's systemUseNotice (language to text, en required) becomes the realm message
+// sterlingSystemUseNotice, which the login theme sterling (deploy/charts/sterling-keycloak-theme) shows on every sign-in page.
 // --dry-run prints the checked realm's summary and installs nothing. Node built-ins only; helm from $HELM or PATH.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,6 +43,16 @@ export const HQ_SECRET_ENV = 'STERLING_HQ_BROKER_CLIENT_SECRET';
 export const HQ_PLACEHOLDER_ISSUER = 'https://hq.invalid/realms/sterling';
 const HQ_FIRST_LOGIN_STEPS = JSON.stringify([['idp-detect-existing-broker-user', 'REQUIRED'], ['idp-auto-link', 'REQUIRED']]);
 const ENV_SECRET = /^\$\(env:[A-Z0-9_]+\)$/;
+/** The system use notice (D-76): the realm message the login theme sterling renders in footer.ftl, and the language codes it accepts. */
+export const NOTICE_MESSAGE = 'sterlingSystemUseNotice';
+export const LOGIN_THEME = 'sterling';
+const NOTICE_LANGUAGE = /^[a-z]{2}(-[A-Z]{2})?$/;
+/** The group that makes an account a guest, and the guest life-cycle attributes (deploy/keycloak/guests.mjs; D-59). */
+export const GUESTS_GROUP = 'guests';
+export const GUEST_ATTRIBUTES = Object.freeze(['guestUntil', 'guestRequestedBy', 'guestApprovedBy', 'guestApprovalRef', 'guestEndedAt', 'guestEndedReason']);
+/** Protocol mappers that put a user attribute or a group into a token (access.token.claim defaults to true when absent). */
+export const CLAIM_MAPPERS = Object.freeze(['oidc-usermodel-attribute-mapper', 'oidc-group-membership-mapper', 'oidc-usermodel-aggregated-attribute-mapper',
+  'oidc-script-based-protocol-mapper']);
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
@@ -71,8 +86,41 @@ export function realmSettings(site, realmSite, keycloakxSite = {}) {
         crlPath: orNotSet(x509.crlPath)
       },
       hq: { enabled: brokered, issuer, clientId: brokered ? orNotSet(realmSite.hqBroker.clientId) : 'not-set', clientSecret: brokered ? `$(env:${HQ_SECRET_ENV})` : 'not-set' }
-    }
+    },
+    systemUseNotice: realmSite.systemUseNotice
   };
+}
+
+/** The plain problems of a systemUseNotice (D-76): an object from language code to text, with a non-blank en and no blank text. */
+export function noticeProblems(notice) {
+  if (!notice || typeof notice !== 'object' || Array.isArray(notice)) return ['the realm site file needs systemUseNotice, your organization\'s system use notice by language (D-76)'];
+  const problems = [];
+  if (typeof notice.en !== 'string' || !notice.en.trim()) problems.push('systemUseNotice.en, the English notice, is required and must not be blank (D-76)');
+  for (const [language, text] of Object.entries(notice)) {
+    if (!NOTICE_LANGUAGE.test(language)) problems.push(`systemUseNotice: ${JSON.stringify(language)} is not a language code such as en, fr or fr-CA`);
+    else if (language !== 'en' && (typeof text !== 'string' || !text.trim())) problems.push(`systemUseNotice.${language} is blank; give the text or leave the language out`);
+  }
+  return problems;
+}
+
+/**
+ * A text as a Keycloak message: Keycloak formats every message with Java's MessageFormat, which drops a single apostrophe and reads braces as
+ * arguments (the 47-23 tracer showed "your organization's" rendered as "your organizations"). Doubling apostrophes and quoting braces makes
+ * the page show the text exactly as the site file has it.
+ */
+export const messageText = (text) => String(text).replaceAll("'", "''").replace(/[{}]/g, (brace) => `'${brace}'`);
+
+/**
+ * Writes the notice onto the realm object (never by text substitution, so quotes and accents need no escaping in the site file): the realm
+ * message sterlingSystemUseNotice per language, internationalization on, the notice's languages as the supported locales, English the default.
+ */
+export function applyNotice(realm, notice) {
+  const languages = Object.keys(notice);
+  realm.localizationTexts = Object.fromEntries(languages.map((language) => [language, { [NOTICE_MESSAGE]: messageText(notice[language]) }]));
+  realm.internationalizationEnabled = true;
+  realm.supportedLocales = languages;
+  realm.defaultLocale = 'en';
+  return realm;
 }
 
 /** The realm with the site settings substituted, authenticator config values as strings, and the X.509 flow bound when the site turns it on. */
@@ -153,6 +201,36 @@ export function checkRealm(realm, settings) {
   let email;
   try { email = JSON.parse(profile?.config?.['kc.user.profile.config']?.[0] ?? '{}').attributes?.find((attribute) => attribute.name === 'email'); } catch { email = undefined; }
   need(JSON.stringify(email?.permissions?.edit) === JSON.stringify(['admin']), 'the user profile must let only administrators edit email');
+  // Guest accounts (D-58 to D-60): membership of guests makes a guest and grants nothing; Keycloak keeps only the guest life cycle, which
+  // only administrators see; how a guest serves, their nationality and organization are credentials (Phase 71), never Keycloak data.
+  let profileAttributes = [];
+  try { profileAttributes = JSON.parse(profile?.config?.['kc.user.profile.config']?.[0] ?? '{}').attributes ?? []; } catch { profileAttributes = []; }
+  const groups = realm.groups ?? [];
+  const guests = groups.find((group) => group.name === GUESTS_GROUP);
+  need(Boolean(guests) && (guests.path ?? `/${GUESTS_GROUP}`) === `/${GUESTS_GROUP}`, `the top-level group ${GUESTS_GROUP} must exist (it makes an account a guest)`);
+  if (guests) {
+    need((guests.realmRoles ?? []).length === 0, `${GUESTS_GROUP} must carry no realm role`);
+    need(Object.values(guests.clientRoles ?? {}).every((roles) => (roles ?? []).length === 0), `${GUESTS_GROUP} must carry no client role`);
+    need((guests.subGroups ?? []).length === 0, `${GUESTS_GROUP} must have no subgroup`);
+    need(Object.keys(guests.attributes ?? {}).length === 0, `${GUESTS_GROUP} must carry no attribute`);
+  }
+  const allGroups = (list) => list.flatMap((group) => [group, ...allGroups(group.subGroups ?? [])]);
+  need(!allGroups(groups).some((group) => group.name === 'security-contacts'), 'there must be no security-contacts group: who may approve guests is a SecurityContactCredential (Phase 71)');
+  for (const name of GUEST_ATTRIBUTES) {
+    const entry = profileAttributes.find((attribute) => attribute.name === name);
+    need(Boolean(entry), `${name} must be in the user profile (guest accounts)`);
+    if (entry) need(JSON.stringify(entry.permissions?.view) === '["admin"]' && JSON.stringify(entry.permissions?.edit) === '["admin"]', `${name}: only administrators may view or edit a guest attribute`);
+  }
+  for (const name of ['serves', 'nationality', 'organization']) need(!profileAttributes.some((attribute) => attribute.name === name), `${name} is a credential the security contact issues (Phase 71), not a Keycloak attribute`);
+  // Zero trust: no token carries an attribute or a group, so nothing can decide access from one.
+  const claimMappers = (owner, mappers) => {
+    for (const mapper of mappers ?? []) {
+      if (!CLAIM_MAPPERS.includes(mapper.protocolMapper)) continue;
+      need(mapper.config?.['access.token.claim'] === 'false', `${owner} puts a user attribute or a group into the access token (${mapper.name}); Keycloak decides nothing`);
+    }
+  };
+  for (const client of realm.clients ?? []) claimMappers(`client ${client.clientId}`, client.protocolMappers);
+  for (const scope of realm.clientScopes ?? []) claimMappers(`client scope ${scope.name}`, scope.protocolMappers);
   // Step-up levels (D-34): two levels, the step-up acr at level 2, its max age the site window.
   let loa = {};
   try { loa = JSON.parse(realm.attributes?.['acr.loa.map'] ?? '{}'); } catch { loa = {}; }
@@ -177,6 +255,16 @@ export function checkRealm(realm, settings) {
     need(mapper('oidc-usersessionmodel-note-mapper', (config) => config['user.session.note'] === 'AUTH_TIME' && config['claim.name'] === 'auth_time' && config['access.token.claim'] === 'true'), 'auth_time must be in the access token');
     need(Array.isArray(sessions.redirectUris) && sessions.redirectUris.length > 0 && sessions.redirectUris.every((uri) => String(uri).startsWith('https://')), 'sterling-sessions needs https redirect URIs from the site file');
   }
+  // The system use notice (D-76, AC-8): the login theme sterling shows the realm message sterlingSystemUseNotice on every sign-in page.
+  const noticeIssues = noticeProblems(settings.systemUseNotice);
+  problems.push(...noticeIssues);
+  need(realm.loginTheme === LOGIN_THEME, `the login theme must be ${LOGIN_THEME}, which shows your organization's system use notice on every sign-in page (D-76)`);
+  if (!noticeIssues.length) {
+    const languages = Object.keys(settings.systemUseNotice);
+    need(realm.internationalizationEnabled === true && realm.defaultLocale === 'en' && JSON.stringify(realm.supportedLocales) === JSON.stringify(languages)
+      && languages.every((language) => realm.localizationTexts?.[language]?.[NOTICE_MESSAGE] === messageText(settings.systemUseNotice[language])),
+    `the realm must carry the notice of every language in the realm site file as ${NOTICE_MESSAGE}, with those languages supported and en the default`);
+  }
   return problems;
 }
 
@@ -185,6 +273,7 @@ export function prepareRealm({ site, realmSite, keycloakxSite }) {
   const fill = (value) => JSON.parse(substituteSite(JSON.stringify(value), site, 'the per-site realm file'));
   const settings = realmSettings(site, fill(realmSite), keycloakxSite);
   const realm = substitutedRealm(readFileSync(path.join(ROOT, REALM_FILE), 'utf8'), settings);
+  if (!noticeProblems(settings.systemUseNotice).length) applyNotice(realm, settings.systemUseNotice);
   return { realm, settings, problems: checkRealm(realm, settings) };
 }
 

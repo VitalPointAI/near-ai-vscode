@@ -25,6 +25,7 @@ import { IDENTITY_TEXT, type BoundComputerFile, type DeviceClass, type IdentityS
 import { INBOX_TEXT } from '../../common/issuer-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { KeyService } from '../key-service.js';
+import type { KvSpace } from '../kv-path.js';
 import type { ActiveSession } from '../session-identity.js';
 
 /** The pure code the service runs, from engine/identity.cjs (tools/identity-entry.ts): the extension's own did:webvh and credential code. */
@@ -95,6 +96,8 @@ export interface IdentityServiceDeps {
   readonly kv: IdentityKv;
   /** The active session's entity id, or undefined. */
   readonly entityId: () => string | undefined;
+  /** Where the session's own secrets are (users/, or guests/ for a guest; kv-path.ts); undefined means users/. */
+  readonly space?: () => KvSpace | undefined;
   /** Loaded on first use; undefined when the bundle is missing (then nothing is made). */
   readonly engine: () => IdentityEngine | undefined;
   /** The host people's DIDs live under (STERLING_DID_DOMAIN), for example hq.example.org; undefined: identities are not set up here. */
@@ -117,7 +120,7 @@ export interface IdentityService {
 
 export const PERSON_DID_FORMAT = 'sterling-person-did/1';
 export const directoryPath = (entity: string): string => `site/people/${entity}`;
-export const ownRecordPath = (entity: string): string => `users/${entity}/identity/did-webvh`;
+export const ownRecordPath = (entity: string, space: KvSpace = 'users'): string => `${space}/${entity}/identity/did-webvh`;
 
 const DID_KEY = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$/;
 const DOMAIN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
@@ -176,7 +179,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     const engine = deps.engine();
     if (deps.domain === undefined || !DOMAIN.test(deps.domain) || entity === undefined || engine === undefined) return { state: 'not-configured' };
     try {
-      const own = ownRecordOf(await deps.kv.read(ownRecordPath(entity)));
+      const own = ownRecordOf(await deps.kv.read(ownRecordPath(entity, deps.space?.())));
       if (own !== undefined) {
         // Made in an earlier session (perhaps one that stopped before the directory entry): finish the entry, sign nothing.
         if ((await deps.kv.read(directoryPath(entity))) === undefined) await deps.kv.create(directoryPath(entity), { did: own.did });
@@ -202,9 +205,9 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
       const log = `${genesis.line}\n`;
       if (!engine.verifyWebvhLog(log, { now: now() }).ok) return PENDING;
       const record = { format: PERSON_DID_FORMAT, did: genesis.did, path: `people/${id}`, log, published: false };
-      if ((await deps.kv.create(ownRecordPath(entity), record)) === 'exists') {
+      if ((await deps.kv.create(ownRecordPath(entity, deps.space?.()), record)) === 'exists') {
         // Another of the person's sessions made it a moment ago: use that one, and this signature is never used.
-        const other = ownRecordOf(await deps.kv.read(ownRecordPath(entity)));
+        const other = ownRecordOf(await deps.kv.read(ownRecordPath(entity, deps.space?.())));
         return other === undefined ? PENDING : { state: 'ready', did: other.did, published: other.published };
       }
       await deps.kv.create(directoryPath(entity), { did: genesis.did });
@@ -228,7 +231,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     if (entity === undefined) return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
     let own: OwnRecord | undefined;
     try {
-      own = ownRecordOf(await deps.kv.read(ownRecordPath(entity)));
+      own = ownRecordOf(await deps.kv.read(ownRecordPath(entity, deps.space?.())));
     } catch {
       return refused(IDENTITY_TEXT.notSetUp, IDENTITY_TEXT.retry);
     }
@@ -242,7 +245,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     }
     if (status !== 200 && status !== 201) return refused(IDENTITY_TEXT.notPublished);
     try {
-      await deps.kv.write(ownRecordPath(entity), { format: PERSON_DID_FORMAT, did: own.did, path: own.path, log: own.log, published: true });
+      await deps.kv.write(ownRecordPath(entity, deps.space?.()), { format: PERSON_DID_FORMAT, did: own.did, path: own.path, log: own.log, published: true });
     } catch {
       // The server has the log; the next session posts it again and the server answers that it holds it already.
     }
@@ -260,7 +263,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     if (deviceClass !== 'personal' && deviceClass !== 'managed') return refused(IDENTITY_TEXT.notADevice);
     let own: OwnRecord | undefined;
     try {
-      own = ownRecordOf(await deps.kv.read(ownRecordPath(entity)));
+      own = ownRecordOf(await deps.kv.read(ownRecordPath(entity, deps.space?.())));
     } catch {
       own = undefined;
     }

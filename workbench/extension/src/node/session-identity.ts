@@ -4,7 +4,8 @@
  * the state. Nothing here imports Theia; the clock and timers are injected so every transition is tested.
  *
  *   local                       no STERLING_OPENBAO_ADDR; terminal, never inferred from a missing header (D-25)
- *   identity  -> active         a forwarded token for THEIACLOUD_SESSION_USER logs in to auth/<mount>/login; lookup-self gives the entity id
+ *   identity  -> active         a forwarded token for THEIACLOUD_SESSION_USER logs in to auth/<mount>/login; lookup-self gives the entity id,
+ *                               and whether the entity is a guest's (policy guest-account in identity_policies: its secrets are under guests/)
  *   identity  -> failed         no token within IDENTITY_TIMEOUT_MS (token-missing), the person check fails (person-mismatch),
  *                               OpenBao unreachable (store-unreachable) or refusing (store-refused); no secret is read
  *   active    -> active         renew-self at half the lease; a refused renewal re-logs in once with the latest unexpired token
@@ -19,6 +20,7 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import type { FailureReason, IdentityState, SessionIdentityStatus } from '../common/session-identity.js';
 import type { HostedConfig, HostingConfig } from './hosting-config.js';
+import { GUEST_ACCOUNT_POLICY, type KvSpace } from './kv-path.js';
 import { OpenBaoError, type OpenBaoClient } from './openbao-client.js';
 
 export const SessionIdentity = Symbol('SessionIdentity');
@@ -40,6 +42,11 @@ export interface IdentityClock {
 export interface ActiveSession {
   readonly token: string;
   readonly entityId: string;
+  /**
+   * Where the person's own secrets are: `guests` when OpenBao gives the entity policy guest-account, else `users` (kv-path.ts). OpenBao
+   * enforces it either way: a guest is denied users/, and staff never reach guests/. Absent means users.
+   */
+  readonly space?: KvSpace;
   /** The latest forwarded sign-in token (the JWT), for KeyService's step-up login only. Backend only, like the token. */
   readonly forwardedToken: string;
   readonly acr?: string;
@@ -158,6 +165,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
   let latest: Forwarded | undefined;
   let baoToken: string | undefined;
   let entityId: string | undefined;
+  let space: KvSpace = 'users';
   let leaseEndsAt = 0;
   let identityTimer: unknown;
   let renewTimer: unknown;
@@ -190,8 +198,8 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
   };
   const unexpired = (now: number): Forwarded | undefined => (latest && latest.claims.exp * 1000 > now ? latest : undefined);
 
-  /** auth/<mount>/login with the token, then lookup-self for the entity id. Throws a Refusal or an OpenBaoError. */
-  async function login(jwt: string, mine: number): Promise<{ token: string; entity: string; lease: number }> {
+  /** auth/<mount>/login with the token, then lookup-self for the entity id and space. Throws a Refusal or an OpenBaoError. */
+  async function login(jwt: string, mine: number): Promise<{ token: string; entity: string; space: KvSpace; lease: number }> {
     const answer = await client!.request('POST', `auth/${config.jwtMount}/login`, { body: { role: config.jwtRole, jwt } });
     const auth = (answer.json as { auth?: { client_token?: unknown; lease_duration?: unknown } } | undefined)?.auth;
     if (typeof auth?.client_token !== 'string' || auth.client_token === '' || typeof auth.lease_duration !== 'number') {
@@ -200,10 +208,12 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
     const token = auth.client_token;
     try {
       const looked = await client!.request('GET', 'auth/token/lookup-self', { token });
-      const entity = (looked.json as { data?: { entity_id?: unknown } } | undefined)?.data?.entity_id;
+      const data = (looked.json as { data?: { entity_id?: unknown; identity_policies?: unknown } } | undefined)?.data;
+      const entity = data?.entity_id;
       if (typeof entity !== 'string' || !ENTITY_ID.test(entity)) throw new Refusal('store-refused');
       if (mine !== generation) throw new Refusal('store-refused');
-      return { token, entity, lease: auth.lease_duration };
+      const guest = Array.isArray(data?.identity_policies) && data.identity_policies.includes(GUEST_ACCOUNT_POLICY);
+      return { token, entity, space: guest ? 'guests' : 'users', lease: auth.lease_duration };
     } catch (error) {
       void revokeQuietly(token);
       throw error;
@@ -244,7 +254,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
     if (!forwarded) { fail('token-missing'); return; }
     try {
       const fresh = await login(forwarded.jwt, mine);
-      if (fresh.entity !== entityId) {
+      if (fresh.entity !== entityId || fresh.space !== space) {
         void revokeQuietly(fresh.token);
         fail('store-refused');
         return;
@@ -271,6 +281,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
         clearTimers();
         baoToken = fresh.token;
         entityId = fresh.entity;
+        space = fresh.space;
         moveTo('active');
         scheduleRenewal(fresh.lease, mine);
       } catch (error) {
@@ -366,6 +377,7 @@ export function createSessionIdentity(options: SessionIdentityOptions): SessionI
       return {
         token: baoToken,
         entityId,
+        space,
         forwardedToken: latest.jwt,
         ...(claims.acr === undefined ? {} : { acr: claims.acr }),
         ...(claims.authTime === undefined ? {} : { authTime: claims.authTime }),

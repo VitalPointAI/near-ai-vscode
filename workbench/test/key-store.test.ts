@@ -36,7 +36,7 @@ after(async () => {
 const HOSTED = readHostingConfig({ STERLING_OPENBAO_ADDR: 'http://127.0.0.1:8200', THEIACLOUD_SESSION_USER: 'ada@example.test' }) as HostedConfig;
 
 /** An in-memory KV v2 behind the fake: data and metadata answer like OpenBao for the routes the store uses. */
-async function kvWorld(): Promise<{ fake: FakeOpenBao; store: KeyStore; data: Map<string, string>; active: { on: boolean } }> {
+async function kvWorld(space?: ActiveSession['space']): Promise<{ fake: FakeOpenBao; store: KeyStore; data: Map<string, string>; active: { on: boolean } }> {
   const data = new Map<string, string>();
   const prefix = '/v1/kv/';
   const routes = new Proxy({}, {
@@ -65,7 +65,7 @@ async function kvWorld(): Promise<{ fake: FakeOpenBao; store: KeyStore; data: Ma
   fakes.push(fake);
   const client = createOpenBaoClient({ addr: fake.url, timeoutMs: 2000 });
   const active = { on: true };
-  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, forwardedToken: FORWARDED, client, config: HOSTED };
+  const session: ActiveSession = { token: TOKEN, entityId: ENTITY, forwardedToken: FORWARDED, client, config: HOSTED, ...(space ? { space } : {}) };
   const identity: SessionSource = { session: () => (active.on ? session : undefined) };
   return { fake, store: createOpenBaoKeyStore(identity, { kvMount: 'kv' }), data, active };
 }
@@ -78,6 +78,17 @@ test('setPassword POSTs {data:{password}} to kv/data/users/<id>/<enc>/<enc> with
   assert.equal(call.path, `/v1/kv/data/${secretPath(ENTITY, '127.0.0.1-sterling-test.secret-probe', 'probe')}`);
   assert.deepEqual(call.body, { data: { password: SECRET } });
   assert.equal(call.token, TOKEN);
+});
+
+test('a guest\'s session keeps every secret under kv/guests/<id>/, never kv/users/', async () => {
+  const { fake, store, data } = await kvWorld('guests');
+  await store.setPassword('svc', 'acct', SECRET);
+  assert.equal(await store.getPassword('svc', 'acct'), SECRET);
+  assert.deepEqual(await store.keys('svc'), ['acct']);
+  assert.equal(await store.deletePassword('svc', 'acct'), true);
+  assert.equal(data.size, 0);
+  assert.ok(fake.calls.length >= 4);
+  assert.ok(fake.calls.every((call) => call.path.startsWith(`/v1/kv/data/guests/${ENTITY}/`) || call.path.startsWith(`/v1/kv/metadata/guests/${ENTITY}/`)), JSON.stringify(fake.calls.map((call) => call.path)));
 });
 
 test('getPassword reads data.data.password and answers undefined for a secret that is not there (404)', async () => {
