@@ -1,0 +1,5 @@
+{
+  "component": "cert-manager",
+  "applicableWithoutStatement": 94,
+  "notApplicableAwaitingSignOff": 512
+}
