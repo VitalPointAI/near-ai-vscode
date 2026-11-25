@@ -4,12 +4,25 @@ never have two writers (research Pitfall 10); no autoscaler, and a rolling updat
 The pod has the same hardening as the Compose service in relay/compose.yaml. The hub ends TLS itself; its four secret files come read-only
 from Secret hub-<name>-tls (cert-manager, site-pki-hub) and Secret hub-<name>-keys (the hub's own --generate-key output, kept in OpenBao
 kv/apps/hubs/<name> and written by the install script).
+
+Your organization's rules for the trust routes (Phase 71, 71-09 and 71-11): when the hub item names organizationPolicy (a ConfigMap or a Secret,
+and the key holding the signed organization layer) and organizationKey (your organization's public key, base64url), the layer is mounted
+read-only and both reach the hub as HUB_ORGANIZATION_POLICY and HUB_ORGANIZATION_KEY. Neither has a default: without both, the hub runs with
+its trust routes off, and naming only one of them stops the render.
 */ -}}
 {{- $i := .Values.instance -}}
 {{- if not $i.name }}{{ fail "instance.name is not set" }}{{ end -}}
 {{- if not $i.publicAddress }}{{ fail (printf "hub %s: publicAddress is not set in the site file" $i.name) }}{{ end -}}
 {{- if not $i.storage }}{{ fail (printf "hub %s: storage is not set in the site file" $i.name) }}{{ end -}}
 {{- if not .Values.image }}{{ fail "image is not set" }}{{ end -}}
+{{- $org := $i.organizationPolicy | default dict -}}
+{{- $trust := and $org $i.organizationKey -}}
+{{- if and (or $org $i.organizationKey) (not $trust) }}{{ fail (printf "hub %s: organizationPolicy and organizationKey must be set together" $i.name) }}{{ end -}}
+{{- if $trust }}
+{{- if not $org.key }}{{ fail (printf "hub %s: organizationPolicy.key is not set" $i.name) }}{{ end -}}
+{{- if eq (len (compact (list $org.configMap $org.secret))) 1 | not }}{{ fail (printf "hub %s: organizationPolicy names exactly one of configMap or secret" $i.name) }}{{ end -}}
+{{- if not (regexMatch "^[A-Za-z0-9_-]{43}$" $i.organizationKey) }}{{ fail (printf "hub %s: organizationKey must be 43 base64url characters" $i.name) }}{{ end -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -59,6 +72,10 @@ spec:
             - { name: HUB_TLS_KEY_FILE, value: /run/secrets/hub/tls.key }
             - { name: HUB_SIGNING_KEY_FILE, value: /run/secrets/hub/signing.key }
             - { name: HUB_ENCRYPTION_KEY_FILE, value: /run/secrets/hub/encryption.key }
+            {{- if $trust }}
+            - { name: HUB_ORGANIZATION_POLICY, value: /run/organization/organization.near-org-rules }
+            - { name: HUB_ORGANIZATION_KEY, value: {{ $i.organizationKey | quote }} }
+            {{- end }}
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -84,6 +101,9 @@ spec:
             - { name: state, mountPath: /var/lib/near-ai-hub }
             - { name: secrets, mountPath: /run/secrets/hub, readOnly: true }
             - { name: tmp, mountPath: /tmp }
+            {{- if $trust }}
+            - { name: organization-policy, mountPath: /run/organization, readOnly: true }
+            {{- end }}
       volumes:
         # 0440, not 0400: projected files are owned by root with the pod's fsGroup (65532) as their group, so owner-only 0400 would leave
         # the hub (uid 65532) unable to read them; group read keeps them to this pod's user.
@@ -101,6 +121,20 @@ spec:
                   items:
                     - { key: signing, path: signing.key }
                     - { key: encryption, path: encryption.key }
+        {{- if $trust }}
+        # Your organization's signed rules (public, verified by the hub against organizationKey); read-only, group read as for the secrets.
+        - name: organization-policy
+          {{- if $org.configMap }}
+          configMap:
+            name: {{ $org.configMap | quote }}
+          {{- else }}
+          secret:
+            secretName: {{ $org.secret | quote }}
+          {{- end }}
+            defaultMode: 0440
+            items:
+              - { key: {{ $org.key | quote }}, path: organization.near-org-rules }
+        {{- end }}
         - name: tmp
           emptyDir:
             medium: Memory

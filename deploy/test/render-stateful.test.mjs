@@ -52,6 +52,28 @@ test('two hubs in a site render two StatefulSets with their own volumes, and no 
   }
 });
 
+test('71-11: a hub item naming your organization\'s rules and key mounts the rules read-only and passes both settings to the hub', () => {
+  const key = 'A'.repeat(43);
+  const [set] = renderHubs([{ ...TWO[0], organizationPolicy: { configMap: 'organization-rules', key: 'organization.near-org-rules' }, organizationKey: key }])
+    .filter((doc) => kindOf(doc) === 'StatefulSet');
+  assert.match(set, /name: HUB_ORGANIZATION_POLICY, value: \/run\/organization\/organization\.near-org-rules/);
+  assert.ok(set.includes(`name: HUB_ORGANIZATION_KEY, value: "${key}"`));
+  assert.match(set, /name: organization-policy, mountPath: \/run\/organization, readOnly: true/);
+  assert.match(set, /configMap:\n\s+name: "organization-rules"/);
+  assert.match(set, /key: "organization\.near-org-rules", path: organization\.near-org-rules/);
+  const [fromSecret] = renderHubs([{ ...TWO[0], organizationPolicy: { secret: 'organization-rules', key: 'rules' }, organizationKey: key }])
+    .filter((doc) => kindOf(doc) === 'StatefulSet');
+  assert.match(fromSecret, /secret:\n\s+secretName: "organization-rules"/);
+});
+
+test('71-11: without the rules and key a hub renders with its trust routes off, and naming only one of them stops the render', () => {
+  const [plain] = renderHubs([TWO[0]]).filter((doc) => kindOf(doc) === 'StatefulSet');
+  assert.doesNotMatch(plain, /HUB_ORGANIZATION_/);
+  assert.doesNotMatch(plain, /organization-policy/);
+  assert.throws(() => renderHubs([{ ...TWO[0], organizationKey: 'A'.repeat(43) }]), /organizationPolicy and organizationKey must be set together/);
+  assert.throws(() => renderHubs([{ ...TWO[0], organizationPolicy: { configMap: 'x', key: 'y' }, organizationKey: 'not a key' }]), /43 base64url characters/);
+});
+
 test('sessions reach a hub by its cluster address and members by its node port, both plain TCP to the hub\'s own TLS', () => {
   const docs = renderHubs(TWO);
   const services = docs.filter((doc) => kindOf(doc) === 'Service');
