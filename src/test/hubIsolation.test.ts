@@ -251,6 +251,31 @@ test('the hub job gives the older-Node refusal tests a real Node 24 and still ru
   assert.ok(old < keep && keep < current && current < firstNpm, 'Node 24 is recorded before 26.13.1 is installed, so 26.13.1 is first on PATH for npm');
 });
 
+// Phase 33 plan 14 (D-34, D-46): the real-hub tests start the built hub on Node 26.13.1 and fail in GitHub Actions without NEAR_AI_HUB_NODE.
+test('the hub job runs the real-hub staff scenario with the extension on the kept Node 24, and the test job gives the suite a built hub on 26.13.1', async () => {
+  const workflow = await readWorkflow();
+  const hubSteps = jobSteps(ciJob(workflow, 'hub'));
+  const at = hubSteps.findIndex((step) => step.includes('name: Run the real-hub staff scenario'));
+  assert.ok(at > hubSteps.findIndex((step) => step.includes('run: npm test')), 'the scenario runs after the hub tests built the hub');
+  const scenario = hubSteps[at] ?? '';
+  for (const needle of [HAS_HUB, 'working-directory: .', 'NEAR_AI_HUB_NODE="$(command -v node)"', 'export NEAR_AI_HUB_NODE', 'PATH="$(dirname "$NEAR_AI_HUB_OLD_NODE"):$PATH"',
+    'npm ci --ignore-scripts', 'npm run compile', 'node scripts/run-tests.mjs dist/test/staffLiveScenario.test.js']) {
+    assert.ok(scenario.includes(needle), `the scenario step must contain: ${needle}`);
+  }
+  assert.ok(scenario.indexOf('NEAR_AI_HUB_NODE="$(command -v node)"') < scenario.indexOf('PATH='), 'the hub\'s Node is taken before Node 24 is put first');
+  assert.ok(!scenario.includes('secrets.'), 'the scenario step reads no secret');
+
+  const testSteps = jobSteps(ciJob(workflow, 'test'));
+  const setups = testSteps.filter((step) => step.includes('uses: actions/setup-node@'));
+  assert.equal(setups.length, 2);
+  assert.ok(setups[0]?.includes("node-version: '26.13.1'") && setups[1]?.includes('node-version: ${{ env.NODE_VERSION }}'), 'the extension\'s Node is set up last, so it comes first on PATH');
+  const build = testSteps.find((step) => step.includes('name: Build the hub for the real-hub tests')) ?? '';
+  for (const needle of ['working-directory: hub', 'echo "NEAR_AI_HUB_NODE=$(command -v node)" >> "$GITHUB_ENV"', 'npm ci --ignore-scripts', 'npm run build']) {
+    assert.ok(build.includes(needle), `the test job's hub build must contain: ${needle}`);
+  }
+  assert.ok(testSteps.indexOf(build) < testSteps.indexOf(setups[1] as string), 'the hub is built on 26.13.1 before the extension\'s Node is set up');
+});
+
 test('the merge gates require the hub check after the relay check, and the workflow page lists it', async () => {
   const text = await readFile(path.join(REPO_ROOT, 'scripts', 'lib', 'workflow.mjs'), 'utf8');
   const line = text.split(/\r?\n/).find((candidate) => candidate.startsWith('export const CI_CHECKS'));
