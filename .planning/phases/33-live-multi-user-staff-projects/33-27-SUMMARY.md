@@ -52,7 +52,7 @@ key-decisions:
   - "A project opened again in the same session (reopen) keeps its one session.certify: your organization's server knows the session key by that certificate, and a second one made the server refuse the session."
   - "The hub's join desk (invitation registration, the join-request list and event) takes a standing session key certified by a lead or deputy device as that device. Roster kinds stay the person key's (D-60)."
   - "The section mounts through the one line in sterling-work-areas-module.ts on the Planning and Exercises & Training pages: no 32.1 section registry existed. An invitation file opens the same section on a page of its own."
-  - "Person-key signatures go through the session's personSigner under 33-23's step-up window. 33.1-17's action-bound step-up is on the Phase 33.1 branch, not this base; its rule keeps Phase 33's kinds on 33-23's behaviour, and adopting action ids for Share with people is G426."
+  - "Person-key signatures go through the session's personSigner under 33-23's step-up window. 33.1-17's action-bound step-up is on the Phase 33.1 branch, not this base; its rule keeps Phase 33's kinds on 33-23's behaviour, and adopting action ids for Share with people is G440."
 requirements: [MUS-09]
 requirements-completed: []
 actuals:
@@ -119,7 +119,7 @@ Step 0, each as the plan expects:
 6. **Staff Room actions are not added here.** The Staff Room is 33-26's. The share service is its backend, so 33-26 or 33-29 adds the buttons.
 7. **"Both see each other's text"** is checked as each person's view of the roster (people, and the joiner's certified session key) through the engine. Product text over the hosted path is left to 33-30's scenario.
 8. **Flat workbench test.** It is `workbench/test/staff-share-service.test.ts`, as the coordinator asked.
-9. **The gap count in `compliance/test/gaps.test.ts` was already red at the base.** It expected 391 while 392 gaps existed (G416 from 33-24). It now expects 394, after G426 and G427. `docs-site/content/security/road-to-production.md` was regenerated.
+9. **The gap count in `compliance/test/gaps.test.ts` was already red at the base.** It expected 391 while 392 gaps existed (G416 from 33-24). It now expects 394, after G440 and G441. `docs-site/content/security/road-to-production.md` was regenerated.
 10. **Tests first:** the tests were written with the code, before the first run. The first runs failed on:
     - the hosted genesis held by the decode check;
     - the hub's forbidden join desk;
@@ -152,7 +152,7 @@ All runs used the shared heavy lock, MemoryMax=6G, MemorySwapMax=0 and choom, on
 | T-33-N17 | Admission needs the lead's confirmation that the six words matched; a false `codeMatched` admits nobody (tracer). Joins go through the executed Phase 31 and 32 checks. |
 | T-33-N18 | `readmitHub` writes nothing unless the typed words are the pin's twelve words in order; tested with another pin's words and the reversed order. |
 | T-33-N15 | The extension registers no preview command in the image (test); only the native engine binds. |
-| T-33-N9 | Every roster kind, grant, invitation, join request and `hub.readmit` is signed by the person key through `KeyService.sign`. A stale confirmation signs nothing and returns the Staff Room sentence and its fix (tests in root and workbench). Action-bound step-up is G426. |
+| T-33-N9 | Every roster kind, grant, invitation, join request and `hub.readmit` is signed by the person key through `KeyService.sign`. A stale confirmation signs nothing and returns the Staff Room sentence and its fix (tests in root and workbench). Action-bound step-up is G440. |
 | T-33-SC | No package was installed. |
 
 ## Gate files
@@ -173,8 +173,13 @@ None. The section's "Open a join request file" admits from a file when the serve
 
 ## Open conditions
 
-- **G426:** Share with people's person-key signatures are not yet bound to one confirmed action. When 33.1-17 is merged with Phase 33, begin and resume one pending action per Share with people action.
-- **G427:** a conversion from SovAI accepts any key that signed the legacy staff ledgers. The workbench backend cannot read the extension's key history.
+- **G440:** Share with people's person-key signatures are not yet bound to one confirmed action. When 33.1-17 is merged with Phase 33, begin and resume one pending action per Share with people action.
+- **G441:** a conversion from SovAI accepts any key that signed the legacy staff ledgers. The workbench backend cannot read the extension's key history.
+
+## Hand-offs
+
+These are work for other plans, not compliance conditions.
+
 - **The Staff Room's Share with people actions** (D-58) are for 33-26 or 33-29, over `StaffShareServer`.
 - **Engine sentences.** The engine's Phase 31 and 32 result sentences still say "project", "hub" and "staff lead". The D-69 folder words for the Defence edition come with 32.1's `folderNoun` and 33-26's copy-lint extension.
 - **Shared-file merges.** `staff-engine-entry.ts` and `staff-live-engine.ts` need a merge with 33-25 and 33-26. `replicaProject.ts` is at its 1,200-line limit.

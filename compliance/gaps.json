@@ -5724,7 +5724,7 @@
         "ac-03",
         "ia-11"
       ],
-      "id": "G426",
+      "id": "G440",
       "ownerRole": "maintainers",
       "remediation": "Share with people signs its person-key changes (the genesis and its grant, roster changes, grants, invitations, join requests and hub.readmit) through the person signer under the step-up window of 33-23: any of them signs while the latest sign-in is fresh. The action-bound step-up of 33.1-17 (one confirmation signs exactly the one action whose summary the person saw) is on the Phase 33.1 branch, not on the Phase 33 branch. When the two are merged, begin and resume one pending action per Share with people action and pass its action id to the person signer. Source: .planning/phases/33-live-multi-user-staff-projects/33-27-SUMMARY.md.",
       "title": "Share with people's person-key signatures are not yet bound to one confirmed action"
@@ -5736,7 +5736,7 @@
       "controls": [
         "si-07"
       ],
-      "id": "G427",
+      "id": "G441",
       "ownerRole": "maintainers",
       "remediation": "Sharing a staff project from SovAI converts its legacy staff ledgers after checking their hash chain and signatures, but the workbench backend cannot read the key history of the extension that signed them, so any signing key is accepted as current. Someone who could write the person's workspace volume could put forged ledger lines into the shared history at conversion. Give the conversion the extension's key history (or the person's verified credential for that key) before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-27-SUMMARY.md.",
       "title": "A conversion from SovAI trusts any key that signed the legacy staff ledgers"
