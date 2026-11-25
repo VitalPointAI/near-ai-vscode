@@ -943,8 +943,8 @@ Plans:
   4. A site collector's in-cluster facts and the operator's signed export, rescan and agreements reach every session within the collect interval plus about two minutes through a read-only mount, each with its own time, never cached as if current; air-gapped and disconnected edges work from local signed sources only. (LCE-05, LCE-06, LCE-09)
   5. The view layers release then site evidence, keeps "Authorization is your organization's decision", and in Restricted Mode with no site evidence shows the release evidence clearly labelled, in the original theme with lifted cards. (LCE-07)
   6. `compliance:refresh` writes the public projection 0644 so the README's read-only mount works for the workbench user; the phase's statements, evidence rules, documents and gap rows G475 to G479 exist. (LCE-08, LCE-10)
-**Plans:** 17 plans in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`, revised the same day after the independent plan check; decisions D-01 to D-30, six owner questions with defaults, hand-offs H-1 to H-10 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
-**UI hint**: yes (`48.2-UI-SPEC.md`, being written on `docs/phase-48.2-ui-spec`; 48.2-10 starts with a blocking checkpoint that it is approved and on main)
+**Plans:** 17 plans in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`, revised the same day after the independent plan check; decisions D-01 to D-30, six owner questions, defaults accepted by the owner 2026-11-25, hand-offs H-1 to H-10 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
+**UI hint**: yes (`48.2-UI-SPEC.md`, approved by the owner 2026-11-25; 48.2-10 Task 1 still checks that it is on main)
 
 Plans:
 - [ ] 48.2-01-PLAN.md: Wave 1. Tracer: a judgement re-judged now by the backend over a checked release folder; every bundle's judgement with full parity; the view's first use
