@@ -9,12 +9,12 @@ import { fileURLToPath } from 'node:url';
 const workbenchRoot = fileURLToPath(new URL('..', import.meta.url));
 
 // teams.cjs: the team parser. identity.cjs (71-10): did:webvh, credentials and device words for the identity service.
-// compliance.cjs (48.2-01): the status engine's judgement (compliance/src/judgement.ts: rejudge and the evidence manifest check), so the
-// session re-judges release evidence with the one engine, never a copy (D-11). 48.2-04 replaces the entry with tools/compliance-entry.ts.
+// compliance.cjs (48.2-01, 48.2-04): the status engine's judgement (rejudge and the evidence manifest check) and the Sigstore bundle
+// verifier, through tools/compliance-entry.ts, so the session judges and verifies release evidence with the one engine, never a copy (D-11).
 for (const [entry, outfile] of [
   ['tools/team-parser-entry.ts', 'engine/teams.cjs'],
   ['tools/identity-entry.ts', 'engine/identity.cjs'],
-  ['../compliance/src/judgement.ts', 'engine/compliance.cjs'],
+  ['tools/compliance-entry.ts', 'engine/compliance.cjs'],
 ]) {
   const result = await build({
     absWorkingDir: workbenchRoot,
