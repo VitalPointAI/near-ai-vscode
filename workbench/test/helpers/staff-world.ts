@@ -1,9 +1,8 @@
 // Phase 33 plan 30 (D-65, P9): the two-person world for the native acceptance test. One dev OpenBao with a person key for each of two people
 // (46-08's startDevOpenBao and createPersonKeys), one hub container from the hub image with a test TLS pair and its own signing and encryption
-// keys, and two workbench containers from the built image, each signed in as its own person with its own workspace folder. The hub and OpenBao sit
-// only on an internal Docker network, which has no route out; each workbench joins it beside the bridge network its 127.0.0.1 port is published on
-// (Docker publishes no port from an internal network), and the outbound hook records every connection a workbench makes, allowing only loopback,
-// OpenBao and the hub. Memory: workbench 3g each, OpenBao 512m, hub 512m.
+// keys, and two workbench containers from the built image, each signed in as its own person with its own workspace folder. All four containers use
+// one internal Docker bridge. The Docker host forwards each browser's loopback port to its workbench's port 3000. The outbound hook records
+// connections the workbench makes and permits loopback, OpenBao and the hub. Memory: workbench 3g each, OpenBao 512m, hub 512m.
 //
 // Person A's workspace starts with a staff project made by today's single-machine host (the products ledger and one proposed product), so A shares
 // existing work, as a person would; person B's starts empty. Hygiene as in docker.ts: every object carries the suite's suffix, and stop() removes
@@ -15,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { StaffHost } from '../../../src/staff/staffHost.ts';
 import { callTool, J5_TEAM, memorySecrets, testSigner, trusting, writeBody, type StaffWorld as LegacyWorld } from '../../../src/test/helpers/staffFixtures.ts';
-import { containerName, mustRun, run, runContainer, suffix, waitHealthy, workbenchRoot } from './docker';
+import { addressOnNetwork, containerName, mustRun, run, runContainer, suffix, waitHealthy, workbenchRoot } from './docker';
 import { startDevOpenBao, TEST_AUDIENCE, TEST_STEPUP_ACR, type DevOpenBao } from './openbao-dev';
 import { makeTestCertificate, type TestCertificate } from './tls-cert';
 
@@ -52,7 +51,7 @@ export interface WorldPerson {
   readonly name: string;
   readonly email: string;
   readonly entityId: string;
-  /** The workbench, published on 127.0.0.1. */
+  /** The workbench reached through its host loopback forwarder. */
   readonly url: string;
   /** The suite's short container name (containerName gives the full one). */
   readonly container: string;
@@ -87,17 +86,25 @@ function worldDir(): string {
 }
 
 /** The first free port from `from` on 127.0.0.1 (the coordinator's range for this plan starts at 18900). */
-async function portFrom(from: number, taken: Set<number>): Promise<number> {
+async function listenFrom(server: net.Server, from: number): Promise<number> {
   for (let port = from; port < from + 200; port += 1) {
-    if (taken.has(port)) continue;
-    const free = await new Promise<boolean>((resolve) => {
-      const probe = net.createServer();
-      probe.once('error', () => resolve(false));
-      probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
-    });
-    if (free) {
-      taken.add(port);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const failed = (error: Error): void => {
+          server.off('listening', listening);
+          reject(error);
+        };
+        const listening = (): void => {
+          server.off('error', failed);
+          resolve();
+        };
+        server.once('error', failed);
+        server.listen(port, '127.0.0.1', listening);
+      });
+      server.unref();
       return port;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
     }
   }
   throw new Error(`no free port on 127.0.0.1 from ${from}`);
@@ -124,10 +131,12 @@ export async function seedStaffWork(root: string): Promise<void> {
 export async function startStaffWorld(options: { image: string; hubImage: string; portsFrom?: number }): Promise<StaffWorld> {
   const secrets: string[] = [];
   const made: { networks: string[]; dirs: string[]; certs: TestCertificate[]; bao?: DevOpenBao } = { networks: [], dirs: [], certs: [] };
-  const bridge = `sterling-workbench-test-${suffix}-staff`;
   const internal = `sterling-workbench-test-${suffix}-staff-internal`;
-  const ports = new Set<number>();
+  const forwarders: net.Server[] = [];
+  const connections = new Set<net.Socket>();
   const stop = async (): Promise<void> => {
+    for (const socket of connections) socket.destroy();
+    await Promise.all(forwarders.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
     for (const name of ['staff-a', 'staff-b', 'staff-hub']) await run('docker', ['rm', '-f', containerName(name)]);
     await made.bao?.stop();
     for (const network of made.networks) await run('docker', ['network', 'rm', network]);
@@ -135,13 +144,10 @@ export async function startStaffWorld(options: { image: string; hubImage: string
     for (const dir of made.dirs) rmSync(dir, { recursive: true, force: true });
   };
   try {
-    await mustRun('docker', ['network', 'create', bridge]);
-    made.networks.push(bridge);
     await mustRun('docker', ['network', 'create', '--internal', internal]);
     made.networks.push(internal);
 
-    // OpenBao, only on the internal network (setup goes through its published 127.0.0.1 port).
-    const bao = await startDevOpenBao({ network: internal, tls: true });
+    const bao = await startDevOpenBao({ network: internal, networkOnly: true, tls: true });
     made.bao = bao;
     secrets.push(bao.rootToken);
     const openBaoHost = new URL(bao.tlsNetworkAddr as string).hostname;
@@ -202,16 +208,28 @@ export async function startStaffWorld(options: { image: string; hubImage: string
       chmodSync(workspace, 0o775);
       if (key === 'a') await seedStaffWork(workspace);
       else mkdirSync(workspace, { recursive: true });
-      const port = await portFrom(options.portsFrom ?? 18900, ports);
       const name = `staff-${key}`;
       // The image is arbitrary-UID friendly (group 0 owns the home): the workbench runs as this computer's user so the mounted folder is its own.
-      const started = await runContainer(name, ['-d', '--memory=3g', '--user', `${uid}:0`, '--network', bridge, '-p', `127.0.0.1:${port}:3000`, ...hooked(),
+      const started = await runContainer(name, ['-d', '--memory=3g', '--user', `${uid}:0`, '--network', internal, ...hooked(),
         '-v', `${workspace}:/home/sterling/workspace`, '-v', `${bao.caFile}:${CA_IN_CONTAINER}:ro`,
         '-e', `STERLING_OPENBAO_ADDR=${bao.tlsNetworkAddr}`, '-e', `STERLING_OPENBAO_CA_FILE=${CA_IN_CONTAINER}`,
         '-e', `THEIACLOUD_SESSION_USER=${STAFF_PEOPLE[key].email}`, '-e', `STERLING_STEPUP_ACR=${TEST_STEPUP_ACR}`, '-e', 'STERLING_LISTEN_HOST=0.0.0.0',
         options.image]);
       assert.equal(started.code, 0, started.stderr);
-      await mustRun('docker', ['network', 'connect', internal, containerName(name)]);
+      const address = await addressOnNetwork(containerName(name), internal);
+      const forwarder = net.createServer({ allowHalfOpen: true }, (browser) => {
+        const workbench = net.createConnection({ host: address, port: 3000, allowHalfOpen: true });
+        for (const socket of [browser, workbench]) {
+          connections.add(socket);
+          socket.unref();
+          socket.once('close', () => connections.delete(socket));
+        }
+        browser.once('error', () => workbench.destroy());
+        workbench.once('error', () => browser.destroy());
+        browser.pipe(workbench).pipe(browser);
+      });
+      forwarders.push(forwarder);
+      const port = await listenFrom(forwarder, options.portsFrom ?? 18900);
       const url = `http://127.0.0.1:${port}`;
       await waitHealthy(name, url, 180_000);
       const signedIn = ({ authAgeSeconds = 0, stepUp = true }: { authAgeSeconds?: number; stepUp?: boolean } = {}): SignedIn => {

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { containerName, freePort, run, runContainer, workbenchRoot } from './docker';
+import { addressOnNetwork, containerName, freePort, run, runContainer, workbenchRoot } from './docker';
 import { makeTestSigner, type TestSigner } from './test-jwt';
 import { makeTestCertificate, type TestCertificate } from './tls-cert';
 
@@ -40,7 +40,7 @@ path "transit/sign/person-{{identity.entity.id}}" { capabilities = ["update"] }
 `;
 
 export interface DevOpenBao {
-  /** The address from the host: http to 127.0.0.1 (the loopback rule). */
+  /** The fixture setup address from the host. */
   readonly addr: string;
   /** The address from another container on the given network, for example http://openbao-1:8200. */
   readonly networkAddr: string | undefined;
@@ -73,15 +73,21 @@ export function openBaoTestImage(): string {
 
 let count = 0;
 
-/** The port of the extra TLS listener (the dev listener stays plain http on 8200 for setup through the published 127.0.0.1 port). */
+/** The port of the extra TLS listener. The dev listener on 8200 serves fixture setup from the host. */
 const TLS_PORT = 8443;
 
-export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?: string; network?: string; tls?: boolean } = {}): Promise<DevOpenBao> {
+type DevOpenBaoOptions = { tokenTtl?: string; tokenMaxTtl?: string; tls?: boolean } &
+  ({ network?: string; networkOnly?: false } | { network: string; networkOnly: true });
+
+export async function startDevOpenBao(options: DevOpenBaoOptions = {}): Promise<DevOpenBao> {
   const rootToken = `root-${randomBytes(12).toString('hex')}`;
   const short = `bao-${++count}`;
   const name = containerName(short);
   const alias = `openbao-${count}`;
-  const port = await freePort();
+  const port = options.networkOnly ? undefined : await freePort();
+  const networkArgs = options.networkOnly
+    ? ['--network', options.network, '--network-alias', alias]
+    : ['-p', `127.0.0.1:${port}:8200`];
   assert.ok(!options.tls || options.network, 'a TLS listener is for a workbench on a network, so tls needs network');
   // With tls, a test CA signs a certificate for the network alias; the folder is mounted read-only and the listener added with -config.
   let certificate: TestCertificate | undefined;
@@ -97,19 +103,19 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
     tlsArgs.push('-v', `${certificate.dir}:/sterling-tls:ro`);
     configArgs.push('-config=/sterling-tls/listener.hcl');
   }
-  const started = await runContainer(short, ['-d', '--memory=512m', '-p', `127.0.0.1:${port}:8200`, ...tlsArgs,
+  const started = await runContainer(short, ['-d', '--memory=512m', ...networkArgs, ...tlsArgs,
     '-e', `BAO_DEV_ROOT_TOKEN_ID=${rootToken}`, '-e', 'BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200', '-e', 'SKIP_SETCAP=true',
     openBaoTestImage(), 'server', '-dev', ...configArgs]);
   if (started.code !== 0) certificate?.cleanup();
   assert.equal(started.code, 0, `the dev OpenBao did not start: ${started.stderr.slice(-2000)}`);
-  // On a given network (an --internal one, for example) the workbench reaches it by alias; setup and checks still use the published port.
-  if (options.network) {
+  if (options.network && !options.networkOnly) {
     const joined = await run('docker', ['network', 'connect', '--alias', alias, options.network, name]);
     assert.equal(joined.code, 0, `the dev OpenBao could not join ${options.network}: ${joined.stderr}`);
   }
 
+  const addr = options.networkOnly ? `http://${await addressOnNetwork(name, options.network)}:8200` : `http://127.0.0.1:${port}`;
   const api = async (method: string, apiPath: string, body?: unknown, token = rootToken): Promise<{ status: number; json: unknown }> => {
-    const response = await fetch(`http://127.0.0.1:${port}/v1/${apiPath}`, {
+    const response = await fetch(`${addr}/v1/${apiPath}`, {
       method,
       headers: { 'X-Vault-Token': token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -121,7 +127,7 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
 
   const deadline = Date.now() + 60_000;
   for (;;) {
-    const health = await fetch(`http://127.0.0.1:${port}/v1/sys/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.status, () => 0);
+    const health = await fetch(`${addr}/v1/sys/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.status, () => 0);
     if (health === 200) break;
     if (Date.now() > deadline) {
       const logs = await run('docker', ['logs', name]);
@@ -167,7 +173,7 @@ export async function startDevOpenBao(options: { tokenTtl?: string; tokenMaxTtl?
   });
 
   return {
-    addr: `http://127.0.0.1:${port}`,
+    addr,
     networkAddr: options.network ? `http://${alias}:8200` : undefined,
     tlsNetworkAddr: options.tls ? `https://${alias}:${TLS_PORT}` : undefined,
     caFile: certificate?.caFile,

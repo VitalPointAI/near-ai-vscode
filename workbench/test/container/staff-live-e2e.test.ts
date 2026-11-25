@@ -66,7 +66,7 @@ before(async () => {
 
 after(async () => {
   await new Promise<void>((resolve) => (desk === undefined ? resolve() : desk.close(() => resolve())));
-  // STAFF_WORLD_KEEP=1 leaves the world running for a person to look at after a failure; they remove it with docker rm and docker network rm.
+  // STAFF_WORLD_KEEP=1 retains the fixture containers and network for inspection after the host-side forwarders exit.
   if (process.env.STAFF_WORLD_KEEP === '1') return;
   await world?.stop();
   await removeOwn();
