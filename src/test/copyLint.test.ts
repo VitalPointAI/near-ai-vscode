@@ -426,6 +426,49 @@ test('48.4 D-35 overclaim in documentation: the guides and README files never ov
   assert.deepEqual(scan(REPO_ROOT), [], 'say what the sovereignty card shows, never "fully sovereign", "100% Canadian" or another overclaim');
 });
 
+// ---- Rule 1: "Sovereignty" only in the badge and card sources (48.4 D-35, D-04) ----
+
+test('48.4 D-35 sovereignty word: Sovereignty is a glossary word outside its allowed contexts; SEAL and sovereignty score count everywhere', () => {
+  const card = 'src/domain/sovereignty/words.ts';
+  const contexts = [{ file: card, words: ['sovereignty'], why: 'the badge and card words (test row)' }];
+  const counted = (text: string, file: string): number | undefined => countHits([{ text }], file, { allowedContexts: contexts })[file]?.glossary;
+  for (const text of ['Sovereignty: Met', 'Open the sovereignty card.', 'SOVEREIGNTY']) {
+    assert.equal(counted(text, SERVICE), 1, `${text} outside the card`);
+    assert.equal(counted(text, card), undefined, `${text} in the card`);
+  }
+  for (const text of ['The SEAL level is 3.', 'Your sovereignty score is high.']) {
+    assert.equal(counted(text, SERVICE), 1, `${text} outside the card`);
+    assert.equal(counted(text, card), 1, `${text} in the card`);
+  }
+  // SEAL is case-sensitive: the ordinary word "seal" (a sealed vault) is not the glossary word.
+  assert.equal(counted('The vault is sealed and the seal type is pkcs11.', SERVICE), undefined);
+  // The edition's name is still a name, and "sovereign" alone is still its own glossary word.
+  assert.equal(counted('Sterling Sovereign AI', SERVICE), undefined);
+  assert.equal(counted('A sovereign region.', card), 1);
+  for (const word of ['sovereignty', 'SEAL', 'sovereignty score']) assert.ok(GLOSSARY_WORDS.some((entry) => entry.word === word), word);
+});
+
+test('48.4 D-35 sovereignty sources: src/domain/sovereignty is read as user copy (every string literal) when it exists, and skipped when absent', () => {
+  const file = 'src/domain/sovereignty/words.ts';
+  const source = [
+    `export const DIMENSIONS = { 'data-stored': 'Where your data is stored' };`,
+    `const reason = 'Declared by your operator, not verified';`,
+    `const slug = 'data-stored';`
+  ].join('\n');
+  assert.deepEqual(texts(source, file), ['Where your data is stored', 'Declared by your operator, not verified']);
+  // The same source elsewhere in src/domain gives only exported text constants (none here).
+  assert.deepEqual(texts(source, 'src/domain/example.ts'), []);
+  // A fixture repository with the folder lists it; the real scan works whether or not it exists yet.
+  const root = mkdtempSync(path.join(tmpdir(), 'near-ai-sovereignty-'));
+  mkdirSync(path.join(root, 'src', 'domain', 'sovereignty'), { recursive: true });
+  mkdirSync(path.join(root, 'media'), { recursive: true });
+  for (const folder of ['workbench/extension/src/browser', 'workbench/extension/src/common', 'workbench/extension/src/node']) mkdirSync(path.join(root, folder), { recursive: true });
+  writeFileSync(path.join(root, 'package.json'), '{}');
+  writeFileSync(path.join(root, file), source);
+  assert.ok(copySourceFiles(root).includes(file));
+  assert.equal(copySourceFiles().includes(file), existsSync(path.join(REPO_ROOT, file)));
+});
+
 // ---- The baseline (Task 1, final in Task 3) ----
 
 test('D-41: the repository passes against its baseline', () => {

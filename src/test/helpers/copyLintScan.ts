@@ -100,6 +100,11 @@ export const WORKBENCH_SOURCES: readonly string[] = Object.freeze(['workbench/ex
  * values of the result fields an RPC result carries to the browser (RESULT_COPY_KEYS), and the arguments of refused().
  */
 export const WORKBENCH_BACKEND = 'workbench/extension/src/node';
+/**
+ * The sovereignty badge and card's words (48.4 D-35): every string literal in this folder is read as copy, like the workbench's common modules, because
+ * the desktop badge and the workbench card both show them. Its files are already among the src sources; an absent folder simply gives no file.
+ */
+export const SOVEREIGNTY_SOURCES: readonly string[] = Object.freeze(['src/domain/sovereignty']);
 
 /** Files no rule ever scans: the mode table is where the mode words live (D-40), and term() is its only reader. */
 export const NEVER_SCANNED: readonly string[] = Object.freeze(['src/domain/org/modes.ts', 'src/domain/org/terms.ts']);
@@ -344,8 +349,9 @@ export function extractCopy(source: string, file: string): CopyText[] {
   if (path.posix.basename(file) === 'package.json') return extractPackage(JSON.parse(source) as unknown);
   if (file.endsWith('.html')) return htmlText(source).map((text) => ({ text }));
   const page = file.startsWith('media/');
-  // The Sterling workbench's pages build their DOM from inline strings, so they are read as page scripts, parsed as TypeScript (D-33).
-  const workbench = WORKBENCH_SOURCES.some((folder) => file.startsWith(`${folder}/`));
+  // The Sterling workbench's pages build their DOM from inline strings, so they are read as page scripts, parsed as TypeScript (D-33); so are the
+  // sovereignty badge and card's words (48.4 D-35).
+  const workbench = [...WORKBENCH_SOURCES, ...SOVEREIGNTY_SOURCES].some((folder) => file.startsWith(`${folder}/`));
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, page ? ts.ScriptKind.JS : ts.ScriptKind.TS);
   const collector = new Collector();
   if (file.startsWith(`${WORKBENCH_BACKEND}/`)) walkBackend(parsed, collector);
@@ -417,6 +423,10 @@ export const GLOSSARY_WORDS: readonly GlossaryWord[] = Object.freeze([
   glossary('issuer', 'issuers?', false, RULES_WORD),
   glossary('residency', 'residency', false, '"must stay in Canada" (or the region named)'),
   glossary('sovereign', 'sovereign', false, '"must stay in Canada" (or the region named)'),
+  // 48.4 D-35, D-04: Sovereignty only as the badge and card name (allowed-context rows, one per file, added by the plans that build them).
+  glossary('sovereignty', 'sovereignty', false, 'Sovereignty only as the badge and card name; the dimension\'s plain name elsewhere ("Where your data is stored")'),
+  glossary('SEAL', 'SEAL', true, 'the sovereignty card\'s state words (Met, Partly met, Not met, Unknown), never a level or a score'),
+  glossary('sovereignty score', 'sovereignty\\s+scores?', false, 'the worst state and counts, never a score (48.4 D-02)'),
   glossary('model passport', 'model\\s+passports?', false, '"Approved for {use words} until {date}"'),
   glossary('passport', 'passports?', false, '"Approved for {use words} until {date}"'),
   glossary('risk acceptance', 'risk\\s+acceptances?', false, '"Allowed by {name} until {date}"'),
