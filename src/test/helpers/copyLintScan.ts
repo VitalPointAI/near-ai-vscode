@@ -614,20 +614,20 @@ export const SOVEREIGNTY_OVERCLAIMS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product, the sovereignty overclaims included. The longest phrase wins, so
- * "ITAR compliant" counts once and not also as "compliant", and "certified sovereign" not also as "certified".
+ * Rule 7 (D-64; GLOSSARY section 5; CGP-ITAR.md section 10.3): claims about the product, the sovereignty overclaims included (spelled out, because
+ * compliance/src/wordLint.ts copies this list and compliance/test/wordLintParity.test.ts reads it literally). The longest phrase wins, so "ITAR compliant"
+ * counts once and not also as "compliant", and "certified sovereign" not also as "certified".
  */
 export const COMPLIANCE_CLAIMS: readonly string[] = Object.freeze([
-  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', ...SOVEREIGNTY_OVERCLAIMS, 'compliant',
-  'accredited', 'certified'
+  'ITAR compliant', 'ITAR certified', 'CGP compliant', 'CGP approved', 'export compliant', 'controlled goods approved', 'fully sovereign', '100% sovereign',
+  '100% Canadian', 'sovereign by default', 'sovereignty certified', 'certified sovereign', 'compliant', 'accredited', 'certified'
 ]);
 const CLAIM_MATCHERS = COMPLIANCE_CLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
 const OVERCLAIM_MATCHERS = SOVEREIGNTY_OVERCLAIMS.map((phrase) => ({ phrase, regex: phraseRegex(phrase) }));
-/**
- * A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited", "nothing here is 100%
- * Canadian").
- */
-const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|nothing|none|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
+/** A claim is honest when its own sentence negates it before the phrase ("is not certified", "does not make ... accredited"). */
+const NEGATION = /(?<![A-Za-z0-9_])(?:not|never|no|cannot|without|isn['\u2019]t|doesn['\u2019]t)(?![A-Za-z0-9_])/i;
+/** "Nothing here is 100% Canadian" is the same negation in sentence form; compliance/src/wordLint.ts reads it the same way. */
+const NOTHING = /(?<![A-Za-z0-9_])nothing(?![A-Za-z0-9_])/i;
 const SENTENCE_BREAK = /[.!?]\s+|\n/;
 
 /** Where a compliance phrase may appear, and why. */
@@ -646,7 +646,7 @@ export const ALLOWED_CLAIM_CONTEXTS: readonly ClaimContext[] = Object.freeze([])
 /** True when the hit's own sentence negates it before the phrase. */
 function negated(text: string, hit: Hit): boolean {
   const sentence = text.slice(0, hit.start).split(SENTENCE_BREAK).pop() ?? '';
-  return NEGATION.test(sentence);
+  return NEGATION.test(sentence) || NOTHING.test(sentence);
 }
 
 function claimHits(text: string, allowed: ReadonlySet<string>): number {

@@ -6,6 +6,7 @@ test('finds accredited phrase', () => assert.equal(lintText('The system is accre
 test('finds certified phrase', () => assert.equal(lintText('The product is certified.').length, 1));
 test('accepts a negated claim in its sentence', () => assert.equal(lintText('The product is not certified.').length, 0));
 test('accepts a preceding negation in its sentence', () => assert.equal(lintText('Nothing here makes a system accredited.').length, 0));
+test('48.4 D-35: finds a sovereignty overclaim once, the longest phrase, and accepts its negation', () => { assert.deepEqual(lintText('The product is certified sovereign and 100% Canadian.').map((hit) => hit.phrase), ['certified sovereign', '100% Canadian']); assert.equal(lintText('SovAI is not fully sovereign today.').length, 0); });
 test('does not carry negation across sentences', () => assert.equal(lintText('This is not a promise. The system is certified.').length, 1));
 test('finds an em dash', () => assert.equal(lintText('A reader sees an \u2014 punctuation.')[0].rule, 'em-dash'));
 test('finds the provider organization wording built at run time', () => { const text = ['NEAR', 'AI organization'].join(' '); assert.equal(lintText(text)[0].rule, 'provider-organization'); });
