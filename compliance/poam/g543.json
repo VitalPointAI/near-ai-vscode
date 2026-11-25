@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "sa-11",
+    "sc-07"
+  ],
+  "gap": "G543",
+  "id": "g543",
+  "milestones": [
+    {
+      "phase": "33",
+      "title": "Run the staff acceptance fixture without an outside route and verify browser access from the test host"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The Docker fixture needs a host browser path that adds no external route for the workbenches. Keep the current outbound-hook checks and verify the network boundary in the built-image run.",
+  "title": "The two-browser staff test still needs network isolation evidence"
+}

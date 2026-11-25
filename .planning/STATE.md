@@ -69,6 +69,8 @@ Next, in order (owner, 2026-11-18):
 
 ## Accumulated Context
 
+Phase 33 native staff collaboration (2026-11-25): 33-30 browser acceptance remains blocked on missing native submit and first-decision actions (G542) and needs separate test network isolation evidence (G543). The recovered suite covers invitation confirmation and preserves the existing browser fixture. 33-32 and 33.2-08 still depend on completed 33-30 acceptance.
+
 ### Roadmap Evolution
 
 - 2026-11-18: Milestone versions renumbered by the owner ("considering we are on 0.4 now, lower the rest to start at 0.5"): v0.5.0 Governed agent platform (Phases 68-74, was v0.7.0), v0.6.0 Data platform (Phases 85-101), v0.7.0 Messaging relay (Phases 75-84), v0.8.0 Cybersecurity unchanged and still last; L1b and L2-L6 keep their names. The never-shipped former v0.5.0 knowledge-base plan (archive `.planning/milestones/v0.5.0-paused/`, path unchanged) and former v0.6.0 Team Mode branch plan gave up their numbers. Entries below keep the numbers they were written with.
