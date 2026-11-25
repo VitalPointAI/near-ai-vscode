@@ -399,6 +399,27 @@ test('a guarded locally signed entry refuses a changed store before persisting a
   assert.equal(await first.blob(candidate.blobs[0].hash), undefined);
 });
 
+test('guarded local writes retry when another window stores a cell key grant before commit', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const first = await opened(root, depsFor(lead, secrets));
+  const second = await opened(root, depsFor(lead, secrets));
+  const expected = await first.appendSnapshot();
+  const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
+  const [hosted] = chain(fixedSigner('guarded-hosted-grants'), 1, { big: true });
+  const cell = streamId('store/cell');
+  const grant = signPayload(lead.signer, 'staff-cell-grant', { cell, epoch: 1, device: 'd1', wrapped: 'w' }, { now: () => new Date(AT) });
+  assert.ok('ok' in await second.putGrant(cell, 1, grant));
+
+  assert.deepEqual(await first.appendOwn([candidate], expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await first.ingestForeign([hosted.entry], hosted.blobs, async () => ({ ok: true } as const), expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  for (const entry of [candidate, hosted]) {
+    assert.equal(first.has(entry.hash), false);
+    assert.equal(await first.blob(entry.blobs[0].hash), undefined);
+  }
+});
+
 test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));
