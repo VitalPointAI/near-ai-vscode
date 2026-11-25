@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sr-12",
+    "si-12",
+    "au-11"
+  ],
+  "gap": "G522",
+  "id": "g522",
+  "milestones": [
+    {
+      "title": "Retention policy for the software registry approved by the owner",
+      "targetDate": "2027-02-26"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "Nothing is deleted automatically and approved versions referenced by a supported release are always kept. Draft a retention policy for refused and old quarantined items for the owner's approval; any deletion follows it.",
+  "title": "No retention policy yet: nothing in the software registry is deleted, so refused and old items accumulate"
+}

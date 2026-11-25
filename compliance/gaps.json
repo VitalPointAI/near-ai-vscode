@@ -6500,6 +6500,44 @@
       ],
       "remediation": "A withdrawal reaches a site with the next signed refresh, raises `SupplyWithdrawnRunning` and is listed in the change and impact record. No admission rule blocks it, so a disconnected site never stops a running service on its own. Your organization's authorizing official accepts this or asks for an admission deny list. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-08, D-29. Sovereignty: software.",
       "title": "A withdrawn artefact keeps running at a site until its change board acts (owner decision Q8)"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sr-12",
+        "si-12",
+        "au-11"
+      ],
+      "id": "G522",
+      "ownerRole": "owner",
+      "poam": "g522",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Nothing in your organization's software registry is deleted automatically: refused items stay in quarantine, withdrawn items stay where they are, and tag retention and garbage collection stay off. Approved versions referenced by a supported release are always kept. A retention policy for refused and old quarantined items is drafted for the owner's approval, and any deletion follows it under the owner's rule to ask before deleting. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-11, D-35. Sovereignty: software.",
+      "title": "No retention policy yet: nothing in the software registry is deleted, so refused and old items accumulate"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "sr-11",
+        "si-07"
+      ],
+      "id": "G524",
+      "ownerRole": "owner",
+      "poam": "g524",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The signing host holds the site key and has no internet. It re-derives integrity, registry signatures, install scripts, licences, SBOMs, scans and malware matches from the bytes themselves, so a compromised gather host can misstate only publish time, provenance and publisher. Your organization's authorizing official accepts this, or a second independent source for those facts is added. Source: .planning/phases/48.3-software-supply-registry/48.3-CONTEXT.md D-14. Sovereignty: software.",
+      "title": "Facts only the connected gather host can see (publish time, provenance, publisher) reach the signing host as unsigned claims"
     }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "controls": [
+    "sr-04",
+    "sr-11",
+    "si-07"
+  ],
+  "gap": "G524",
+  "id": "g524",
+  "milestones": [
+    {
+      "title": "Authorizing official's decision on gather-host claims recorded",
+      "targetDate": "2027-05-31"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "The signing host re-derives every fact it can from the bytes; only publish time, provenance and publisher come from the gather host unsigned. Your organization's authorizing official accepts this, or a second independent source for those facts is added.",
+  "title": "Facts only the connected gather host can see (publish time, provenance, publisher) reach the signing host as unsigned claims"
+}
