@@ -6107,6 +6107,43 @@
       "ownerRole": "maintainers",
       "remediation": "The restore drill's postgres, opensearch and volume drivers and drain-check's Longhorn and OpenBao rules are tested on kubectl fixtures only. On the lab VM, cert-check, drain-check's etcd rule, upgrade-check's version and etcd snapshot rules and the escrow drill ran against a real RKE2 node. Run the postgres driver on 47-18's lab site, and the opensearch and volume drivers, the Longhorn drain rule and the OpenBao drain rule on Phase 48's multi-node lab-full rig, and record each in a sterling-restore-test/1 record. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-27-SUMMARY.md.",
       "title": "Restore drivers and maintenance checks for OpenSearch, Longhorn and an OpenBao cluster have not run live"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48",
+      "controls": [
+        "sa-11"
+      ],
+      "id": "G450",
+      "ownerRole": "maintainers",
+      "remediation": "The release image has no browser check for what the bundled extension does in the workbench: a streamed Chat reply, the conversation after a reload, Stop, closing the last conversation hiding the chat drawer, and Download ZIP after SovAI: Generate SA&A Package…. Each is covered by unit tests only. Add a Playwright spec under workbench/test/e2e that runs on the release image (STERLING_BUNDLED_EXTENSION=1, as get-started.spec.ts's create test does) with a fake model server on the test's internal network, in place of Codex's Puppeteer tool (01a9f155, 5a04d3d3). Source: .planning/CODEX-PORT-AUDIT.md (Left over).",
+      "title": "Chat, the drawer close and the SA&A download have no browser check in the release image"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sa-05"
+      ],
+      "id": "G451",
+      "ownerRole": "maintainers",
+      "remediation": "Three texts still call the product NEAR AI because their words are recorded or compared: the labels statement (LABELS_NOT_ACCREDITATION_TEXT, repeated twice in SECURITY.md and embedded in the J2 and J4 staff guidance, whose template history src/agent/teamTemplateHistory.ts is frozen), the scaffolded research verifiers' README (a hashed verifier file), and the git author of team coordination commits. Split teamTemplateHistory.ts below the frozen size, record new staff template versions with the SovAI words, and give the verifier README a new recorded version, so SECURITY.md and the product say Sterling Sovereign AI throughout. Source: .planning/CODEX-PORT-AUDIT.md (Left over).",
+      "title": "The labels statement in SECURITY.md and two recorded texts still name the product NEAR AI"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.1",
+      "controls": [
+        "pl-02",
+        "ca-06"
+      ],
+      "id": "G452",
+      "ownerRole": "owner",
+      "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that name it NEAR AI for VS Code; the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
+      "title": "SA&A drafts made before the rename name the system NEAR AI for VS Code"
     }
   ]
 }
