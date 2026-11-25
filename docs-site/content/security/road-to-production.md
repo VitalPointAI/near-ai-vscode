@@ -11,7 +11,7 @@ This page lists every known gap and open condition: what is still to do before l
 
 Each item is listed once, at the lowest level where it matters. It still matters at every level above that. Items for exchange with allies are listed on their own, because that work can start at any level.
 
-Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 392 items, 378 block production.
+Production means live use for real work at your organization's site. An item that blocks production must be closed, or accepted by your organization's authorizing official, before that. An item that does not block production still matters at its level. Where the right level or the effect on production was not clear, the register uses the stricter value. Of the 393 items, 378 block production.
 
 This page shows the register, not progress. Some items may already be closed by evidence. The [gaps page](../accreditation/gaps.mdx) shows the current state of each one. Your organization decides what it accepts.
 
@@ -23,7 +23,7 @@ The list is generated from the gap register, [`compliance/gaps.json`](https://gi
 
 | Level | Blocks production | Does not block production |
 | --- | --- | --- |
-| [Now, at every level](#now) | 75 | 8 |
+| [Now, at every level](#now) | 75 | 9 |
 | [From Protected A](#protected-a) | 287 | 0 |
 | [From Protected B](#protected-b) | 12 | 0 |
 | [From Protected C](#protected-c) | 0 | 1 |
@@ -124,6 +124,7 @@ These matter today, at every level, including unclassified work.
 - **G376. A person can have only one hosted session at a time.** Each person has one hosted workbench session (plan 33-24), and opening the workbench in a second place uses the same session. Your organization decides whether people need more than one, and the design records the choice. Controls: AC-10, SC-5. Owner role: shared. Tracked as POA&M item g376; first milestone: Your organization's choice on a second session is recorded (by 2027-03-31).
 - **G379. No algorithmic impact assessment covers automated labelling.** Automated labelling proposes classification levels for your organization's data. The Directive on Automated Decision-Making does not bind us, but its algorithmic impact assessment is a useful check. Complete it voluntarily before automated labelling is turned on, and share the result with your organization. Controls: RA-3. Owner role: owner. Tracked as POA&M item g379; first milestone: The assessment is complete before automated labels apply (Phase 93).
 - **G388. Phase 31's typed-in clearance stays readable for replay.** Plan 33.1-01 keeps the typed-in clearance field of Phase 31's member invite and admit entries readable, so existing logs still replay. It grants nothing: access comes only from verified credentials. Remove it once no log from before Phase 33.1 remains. Source: .planning/phases/33.1-assigned-positions-and-handover/33.1-01-PLAN.md. Controls: AC-3. Owner role: maintainers. Tracked as POA&M item g388; first milestone: The typed-in clearance is read only for replay and grants nothing (Phase 33.1).
+- **G430. A late joiner cannot start from a checkpoint and a summary yet.** A person who joins a shared project late pulls its whole history: the changes pulled from after the newest checkpoint of your organization's server stay held, because the project's fold on a computer is never given the checkpoints it stored, and the live engine never asks for a pull from a checkpoint base. Even when that is wired, a late joiner can start from a summary only in the cells your organization's server holds (the base cell and cells granted after the trade-off), because the server checkpoints no other cell. Decide and build the checkpoint-aware fold and the joining pull, then restore the held-back late joiner scenario. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md. Controls: CP-10, SA-11. Owner role: maintainers. Planned in Phase 33.
 
 ## From Protected A {#protected-a}
 

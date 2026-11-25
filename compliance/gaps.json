@@ -5715,6 +5715,19 @@
       "ownerRole": "maintainers",
       "remediation": "The workbench image now carries the staff engine with the vendored Yjs 13.6.33 and lib0 0.2.119 build (workbench/engine/vendor/yjs, hash-pinned in scripts/crdt-vendor.json), which the image SBOM written by syft does not list, because a bundled file has no package manifest. Add those two packages to the image's supply-chain record from scripts/crdt-vendor.json before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-24-SUMMARY.md.",
       "title": "The workbench image SBOM does not list the Yjs build in the staff engine"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "cp-10",
+        "sa-11"
+      ],
+      "id": "G430",
+      "ownerRole": "maintainers",
+      "remediation": "A person who joins a shared project late pulls its whole history: the changes pulled from after the newest checkpoint of your organization's server stay held, because the project's fold on a computer is never given the checkpoints it stored, and the live engine never asks for a pull from a checkpoint base. Even when that is wired, a late joiner can start from a summary only in the cells your organization's server holds (the base cell and cells granted after the trade-off), because the server checkpoints no other cell. Decide and build the checkpoint-aware fold and the joining pull, then restore the held-back late joiner scenario. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
+      "title": "A late joiner cannot start from a checkpoint and a summary yet"
     }
   ]
 }
