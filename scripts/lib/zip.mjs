@@ -17,7 +17,7 @@ const STORED = 0;
 const DEFLATED = 8;
 
 /**
- * Opens the ZIP file at `file` (or a Buffer). Returns { entries, read } where `entries` lists the
+ * Opens the ZIP file at `file` (or a Buffer). Returns { entries, read, compressedSize } where `entries` lists the
  * entry names in central-directory order and `read(name)` returns that entry's bytes, checked
  * against its recorded size and CRC-32. Throws on anything it cannot read exactly.
  */
@@ -77,7 +77,10 @@ export function openZip(file, { maxEntryBytes = 64 * 1024 * 1024 } = {}) {
     return data;
   }
 
-  return { entries: names, read };
+  /** The stored (compressed) size of an entry, or undefined when there is none: what the entry adds to the file. */
+  const compressedSize = (name) => records.get(name)?.compressedSize;
+
+  return { entries: names, read, compressedSize };
 }
 
 /** The offset of the end-of-central-directory record, searched from the end past any comment. */

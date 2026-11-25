@@ -269,12 +269,12 @@ Plans:
   2. The Staff Room shows who is online and what they work on, the sync control shows every connection state in one plain sentence with one action, and an offline banner explains that work is kept and may become contested. (MUS-09)
   3. Two- and three-person scenarios over a real hub pass: co-edit, propose, guard, approve on another machine with equal digests; approve offline and reject online shows contested until a fresh decision; a late joiner loads from a compaction. (MUS-09)
   4. A two-compartment label leak test over the hub passes, README and SECURITY describe multi-user staff projects with the self-declared and not-accreditation sentences, and drop A is released in 0.4.x. (MUS-09)
-**Plans:** 20 plans in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
+**Plans:** 2/20 plans executed locally in 8 waves (planned 2026-11-21, revised the same day to keep each plan within its file and context budget; a tracer first, the feature registry and signed session features in wave 1, `roster.require` and `hub.readmit` settled together in wave 2, the closing plan and the release PR wait for the owner's gate approval and release OK)
 **UI hint**: yes
 
 Plans:
-- [ ] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
-- [ ] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
+- [x] 33-01-PLAN.md: Wave 1. Tracer: two computers, one real hub, one typed change seen live; the sync state machine and the update feed
+- [x] 33-02-PLAN.md: Wave 1. Phase 32 follow-ups: join request cap (IN-06), Start Again count check (IN-02), withheld products notice
 - [ ] 33-03-PLAN.md: Wave 2. POST-01 `roster.require` with the fold-wide stop, and `hub.readmit` with the witness clearing
 - [ ] 33-04-PLAN.md: Wave 2. Editor binding core: no echo, undo only your own changes, read-only header, resync, seeded fuzz
 - [ ] 33-05-PLAN.md: Wave 2. Shared version acts, contested read model, changed-while-deciding refusal
@@ -383,15 +383,15 @@ Plans:
   4. New shared work starts switched; a lead switches an existing project in one step, each cell moves at its next epoch, late computers get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap. (WRAP-04)
   5. A Protected B cell is never wrapped with X25519; a CI check fails if any wrap path bypasses the one entry point; SECURITY.md says which wrap protects shared work, and ML-KEM-1024 with P-384 is reserved for Protected C and classified work. (WRAP-05)
 **Undo cost**: High. The wire format, `device.kem` and grant pages are permanent in shared logs; they are settled at 33.2-01's checkpoint.
-**Plans:** 8 plans in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
+**Plans:** 5/8 plans executed in 7 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-11 and three owner items in `33.2-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
-- [ ] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
-- [ ] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
-- [ ] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
-- [ ] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
-- [ ] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
+- [x] 33.2-01-PLAN.md: Wave 1. Tracer: one epoch key wrapped with `cell-wrap/v2` and opened; runtime confirmations and the probe; the permanent shapes checkpoint
+- [x] 33.2-02-PLAN.md: Wave 2. The second device key binding: `device.kem`, the descriptor's `kem`, safety words, join requests, the hub check
+- [x] 33.2-03-PLAN.md: Wave 2. Grant pages committed by the founding entry
+- [x] 33.2-04-PLAN.md: Wave 3. Where the new private keys live (keyring, Transit envelope, hub) and publishing the binding at open
+- [x] 33.2-05-PLAN.md: Wave 4. `wrap@2` through `roster.require` with the probe; new projects switched at creation; the cutover rule in the fold and the hub
 - [ ] 33.2-06-PLAN.md: Wave 5. Every wrap path through one entry point; the Protected B rule; the CI check; SECURITY.md
 - [ ] 33.2-07-PLAN.md: Wave 6. The Switch, Move and Give keys cards in the native Staff Room
 - [ ] 33.2-08-PLAN.md: Wave 7. Close-out on the built image, the full suites once, the integration PR after the owner's gate approval
@@ -727,10 +727,10 @@ Plans:
 - [ ] 44.1-02-PLAN.md: Triage and close Unclassified and Protected A implementation and evidence gaps by control owner (amended: triage over applicable cells once 44.1-07 lands).
 - [ ] 44.1-03-PLAN.md: Review Protected B, the Classified appliance and applicable overlays after their prerequisites and scope decisions (amended: product steps in 44.1-23 and 44.1-24).
 - [ ] 44.1-04-PLAN.md: Populate and verify the deployment submission, diagrams, forms and approval records.
-- [ ] 44.1-05-PLAN.md: Tracer: one component's "Not applicable to this component" with its reason, from a signed rule to the real hosted level.
-- [ ] 44.1-06-PLAN.md: The full applicability rules from the catalogue, the generated map and its drift check, and your organization's stage 1 review.
+- [x] 44.1-05-PLAN.md: Tracer: one component's "Not applicable to this component" with its reason, from a signed rule to the real hosted level.
+- [x] 44.1-06-PLAN.md: The full applicability rules from the catalogue, the generated map and its drift check, and your organization's stage 1 review.
 - [ ] 44.1-07-PLAN.md: The coverage measure and ratchet in the required docs job, the stage 1 sign-off, and the machinery gate.
-- [ ] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
+- [x] 44.1-08-PLAN.md: A statement needs evidence a CI job reports; the review files are gate paths; the drawer and SSP show each component's reason.
 - [ ] 44.1-09-PLAN.md: Supply-chain and inventory statements for every component, generated from the inventory with each component's evidence.
 - [ ] 44.1-10-PLAN.md: Extension statements and evidence.
 - [ ] 44.1-11-PLAN.md: Hub statements and evidence.
@@ -974,23 +974,23 @@ Plans:
   4. A site collector's in-cluster facts and the operator's signed export, rescan and agreements reach every session within the collect interval plus about two minutes through a read-only mount, each with its own time, never cached as if current; air-gapped and disconnected edges work from local signed sources only. (LCE-05, LCE-06, LCE-09)
   5. The view layers release then site evidence, keeps "Authorization is your organization's decision", and in Restricted Mode with no site evidence shows the release evidence clearly labelled, in the original theme with lifted cards. (LCE-07)
   6. `compliance:refresh` writes the public projection 0644 so the README's read-only mount works for the workbench user; the phase's statements, evidence rules, documents and gap rows G475 to G479 exist. (LCE-08, LCE-10)
-**Plans:** 17 plans in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`, revised the same day after the independent plan check; decisions D-01 to D-30, six owner questions, defaults accepted by the owner 2026-11-25, hand-offs H-1 to H-10 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
+**Plans:** 11/17 plans executed in 10 waves (planned 2026-11-25 on `docs/live-compliance-evidence-plan`, revised the same day after the independent plan check; decisions D-01 to D-30, six owner questions, defaults accepted by the owner 2026-11-25, hand-offs H-1 to H-10 in `48.2-CONTEXT.md`; each wave lands as one combined pull request with one owner gate approval)
 **UI hint**: yes (`48.2-UI-SPEC.md`, approved by the owner 2026-11-25; 48.2-10 Task 1 still checks that it is on main)
 
 Plans:
-- [ ] 48.2-01-PLAN.md: Wave 1. Tracer: a judgement re-judged now by the backend over a checked release folder; every bundle's judgement with full parity; the view's first use
-- [ ] 48.2-02-PLAN.md: Wave 1. compliance:refresh writes the public projection 0644 and 0755 with a umask test; gap rows G475 to G479 (after `feat/phase-48-statements`); wave 1's gate
-- [ ] 48.2-03-PLAN.md: Wave 2. Freshness in the engine: Current, Ageing, Out of date; the default table with the vulnerability and live kinds; tighten-only policy; the clock case; site observations replace release ones
-- [ ] 48.2-04-PLAN.md: Wave 2. A Node verifier for cosign key-mode P-256 bundles held equal to the pinned cosign; anchors only from configuration and checked against the site key; Verified, Not verified, Did not verify
-- [ ] 48.2-05-PLAN.md: Wave 3. The release evidence writer, content and command: SBOM, the scan dated by its database, the compliance package, the gap register and road-to-production; the no-package and no-bundle forms
-- [ ] 48.2-06-PLAN.md: Wave 3. Site evidence formats: the trust document your site key signs with the collector's key versions, the live feed, the operator's export, rescan and agreements, verification to observations
-- [ ] 48.2-17-PLAN.md: Wave 3. Only the install identity may write the trust anchor (Kyverno policy and Roles); every session gets the site key from the site file to check the anchor against
+- [x] 48.2-01-PLAN.md: Wave 1. Tracer: a judgement re-judged now by the backend over a checked release folder; every bundle's judgement with full parity; the view's first use
+- [x] 48.2-02-PLAN.md: Wave 1. compliance:refresh writes the public projection 0644 and 0755 with a umask test; gap rows G475 to G479 (after `feat/phase-48-statements`); wave 1's gate
+- [x] 48.2-03-PLAN.md: Wave 2. Freshness in the engine: Current, Ageing, Out of date; the default table with the vulnerability and live kinds; tighten-only policy; the clock case; site observations replace release ones
+- [x] 48.2-04-PLAN.md: Wave 2. A Node verifier for cosign key-mode P-256 bundles held equal to the pinned cosign; anchors only from configuration and checked against the site key; Verified, Not verified, Did not verify
+- [x] 48.2-05-PLAN.md: Wave 3. The release evidence writer, content and command: SBOM, the scan dated by its database, the compliance package, the gap register and road-to-production; the no-package and no-bundle forms
+- [x] 48.2-06-PLAN.md: Wave 3. Site evidence formats: the trust document your site key signs with the collector's key versions, the live feed, the operator's export, rescan and agreements, verification to observations
+- [x] 48.2-17-PLAN.md: Wave 3. Only the install identity may write the trust anchor (Kyverno policy and Roles); every session gets the site key from the site file to check the anchor against
 - [ ] 48.2-07-PLAN.md: Wave 4 (after 46-09). The image build order, hotfixes included: the software image, its SBOM and scan, one data-only evidence layer proven by one script; the manifest signed in key mode with the P-256 release key
-- [ ] 48.2-08-PLAN.md: Wave 4. The live site layer in the session: the read-only mount watched, verified, layered and re-judged; the long poll; control text; the projection as a Not verified source
-- [ ] 48.2-09-PLAN.md: Wave 5. The site collector program: in-cluster facts with their own times, signed through OpenBao Transit at the trust document's key version, written to the live ConfigMap
-- [ ] 48.2-10-PLAN.md: Wave 5 (starts with the approved UI-SPEC). The Compliance view: release then site cards, the four facts per cell, Restricted Mode, live updates
+- [x] 48.2-08-PLAN.md: Wave 4. The live site layer in the session: the read-only mount watched, verified, layered and re-judged; the long poll; control text; the projection as a Not verified source
+- [x] 48.2-09-PLAN.md: Wave 5. The site collector program: in-cluster facts with their own times, signed through OpenBao Transit at the trust document's key version, written to the live ConfigMap
+- [x] 48.2-10-PLAN.md: Wave 5 (starts with the approved UI-SPEC). The Compliance view: release then site cards, the four facts per cell, Restricted Mode, live updates
 - [ ] 48.2-11-PLAN.md: Wave 6 (after 47-32). The collector CronJob, least-rights RBAC, the live and operator ConfigMaps, the projected session mount, network reach, the interval setting
-- [ ] 48.2-16-PLAN.md: Wave 6. The one focused browser check of the view on the built image: Restricted Mode, live site evidence, tampered, anchor mismatch, projection
+- [x] 48.2-16-PLAN.md: Wave 6. The one focused browser check of the view on the built image: Restricted Mode, live site evidence, tampered, anchor mismatch, projection
 - [ ] 48.2-12-PLAN.md: Wave 7 (after 48.1-15 and 48.1-17). The collector's Transit key, versions and audience-bound sign-only role; the site trust document signed with your site key and installed as the install identity
 - [ ] 48.2-13-PLAN.md: Wave 8. Release evidence re-signed with the site key at bundle build and installed; one command to publish operator evidence as the publish identity; the site evidence runbook with key rotation
 - [ ] 48.2-14-PLAN.md: Wave 9 (after 47-29). The offline rescan as site evidence that replaces an ageing release scan
@@ -1300,13 +1300,13 @@ Plans:
   4. Your organization's guide and compilation rules, code words, fact types, model roles and enforcing levels live in the signed `classification@1` section, are evaluated by pure code over typed facts and a session's running fact set, and newer or lower layers can only tighten them. (CLSF-04)
   5. `label.auto-raised`, `label.exception-queued`, `label.exception-resolved`, `label.could-be-lower` and `label.affirmed` are named and recorded, and anything above the system-high gives a possible spill: raised to the system-high with `local-only` and `no-agent-tools`, frozen and queued. (CLSF-05)
 **Undo cost**: High. The proposal record, the event ids, the basis kinds and the section keys are permanent once shipped; 70.1-01 ends with the owner's shapes checkpoint.
-**Plans:** 5 plans in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner-confirmed items in `70.1-CONTEXT.md`)
+**Plans:** 4/5 plans executed in 4 waves (planned 2026-11-24 on `docs/phase-70.1-74.3-plan`; decisions D-01 to D-22 and four owner-confirmed items in `70.1-CONTEXT.md`)
 
 Plans:
-- [ ] 70.1-01-PLAN.md: Wave 1. Tracer: a marking raises a label through `classification@1`, the engine and the record; record v1, the five events, the owner's shapes checkpoint
-- [ ] 70.1-02-PLAN.md: Wave 2. The asymmetric rule: thresholds and bands, judgements, shadow, review, stale results, the possible spill, property tests
-- [ ] 70.1-03-PLAN.md: Wave 2. Guide and compilation rules, code words and fact types in the signed section; lower layers only tighten; Show Policy words
-- [ ] 70.1-04-PLAN.md: Wave 3. `assess()`, the hidden-instruction detector and the model-free red-team set
+- [x] 70.1-01-PLAN.md: Wave 1. Tracer: a marking raises a label through `classification@1`, the engine and the record; record v1, the five events, the owner's shapes checkpoint
+- [x] 70.1-02-PLAN.md: Wave 2. The asymmetric rule: thresholds and bands, judgements, shadow, review, stale results, the possible spill, property tests
+- [x] 70.1-03-PLAN.md: Wave 2. Guide and compilation rules, code words and fact types in the signed section; lower layers only tighten; Show Policy words
+- [x] 70.1-04-PLAN.md: Wave 3. `assess()`, the hidden-instruction detector and the model-free red-team set
 - [ ] 70.1-05-PLAN.md: Wave 4. The full suite once, the verification record, the integration PR after the owner's gate approval
 
 ### Phase 71: Identities and verified credentials (core), pulled forward
@@ -1328,7 +1328,7 @@ Plans:
   7. Officers issue, revoke and suspend credentials from their own session with their person key after a passkey step-up; status lists are signed by the HQ status-list key in OpenBao, each signature authorized only by an officer's step-up; your organization's server serves the DID logs and status lists, and a trust export carries them to a disconnected edge. (DCAC-05, DCAC-06)
 **Research flags**: (1) DID methods are decided (owner-confirmed 2026-11-15, Platform direction decision 10): `did:key` and `did:webvh`, not `did:near`. (2) Identity lifetime: persistent per person; rotation (`did:webvh` pre-rotation for the root, 71-02's verdict for people) and revocation (status lists for credentials, Phase 69's key history for device keys). (5) Threshold credentials show a holder's maximum level to anyone they present all of them to: present only what a check asks (research risk 7). (6) Revocation lag: a device holding keys offline is trusted until its next contact, bounded by the per-level maximum offline age, now set in this phase (O6), and by rekeying. (7) Not post-quantum: every proof names its cryptosuite so a second suite can sit beside it. (8) Device clocks: expiry checks go through one clock helper that Phase 74's clock rule later tightens. (9) On-chain keys come in L4: keep the binding credential (VCRD-06) able to name a NEAR account, a public key and its allowed methods. Flags 3 and 4 (spend in grants, nesting) moved to Phase 71.1.
 **Undo cost**: High. The DID methods, the credential profile, the status list format and the evidence citation shape are what edge devices hold offline and what shared logs cite; settle them before they ship.
-**Plans:** 8/14 plans executed in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
+**Plans:** 12/14 plans executed in 9 waves (planned 2026-11-24 on `docs/phase-71-core-plan`; decisions D-01 to D-21 and five owner items in `71-CONTEXT.md`)
 **UI hint**: yes
 
 Plans:
@@ -1340,10 +1340,10 @@ Plans:
 - [x] 71-06-PLAN.md: Wave 3. Trusted issuers in the signed policy (`credentials@1`, `agreements@1`), the issuer authority chain, agents and devices never issue
 - [x] 71-07-PLAN.md: Wave 4. The credential checker: evidence cited by hash, `mayRelease`, freshness and offline age, the gate's clearance
 - [x] 71-08-PLAN.md: Wave 5. The person's wallet, the gate's clearance from credentials in your organization, the command-line verifier
-- [ ] 71-09-PLAN.md: Wave 5. Your organization's server serves logs and status lists, checks cited evidence on append and serve, and tells the lead when a holder is revoked
-- [ ] 71-10-PLAN.md: Wave 6. Identities in use: a person's `did:webvh` at first sign-in, your organization's root DID and role credentials offline, binding a computer
-- [ ] 71-11-PLAN.md: Wave 6. The trust export carries logs, status lists and the issuer section to edges
-- [ ] 71-12-PLAN.md: Wave 7. Issuance from the officer's own session: the Issue credential card, the status-list key in OpenBao, revoke and suspend
+- [x] 71-09-PLAN.md: Wave 5. Your organization's server serves logs and status lists, checks cited evidence on append and serve, and tells the lead when a holder is revoked
+- [x] 71-10-PLAN.md: Wave 6. Identities in use: a person's `did:webvh` at first sign-in, your organization's root DID and role credentials offline, binding a computer
+- [x] 71-11-PLAN.md: Wave 6. The trust export carries logs, status lists and the issuer section to edges
+- [x] 71-12-PLAN.md: Wave 7. Issuance from the officer's own session: the Issue credential card, the status-list key in OpenBao, revoke and suspend
 - [ ] 71-13-PLAN.md: Wave 8. Freshness in the session: the credential state, key release in hosted sessions, sign-in tokens that only authenticate
 - [ ] 71-14-PLAN.md: Wave 9. SECURITY.md and README, the full suites once, the verification record, the integration PR after the owner's gate approval
 
@@ -2233,9 +2233,9 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 30. Replication contract and co-editing core | 12/12 | In Progress (staff collaboration drop A) | - |
 | 31. Staff roster, cell keys and migration | 0/23 | Planned (drop A) | - |
 | 32. Your organization's sync hub | 28/28 | Complete: all 28 plans executed; released with drop A after Phase 33 | 2026-11-20 |
-| 33. Live multi-user staff projects | 0/TBD | Not started (drop A release) | - |
+| 33. Live multi-user staff projects | 2/20 | In Progress (drop A release) | - |
 | 33.1. Assigned positions and handover | 0/25 | Planned (native re-plan 2026-11-24; after Phase 33's wave 4, before drop B) | - |
-| 33.2. Post-quantum cell keys (cell-wrap/v2) | 0/8 | Planned 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
+| 33.2. Post-quantum cell keys (cell-wrap/v2) | 5/8 | In Progress 2026-11-24 (after Phase 33; between 33.1 waves 7 and 8; before any site holds Protected B data) | - |
 | 34. Offline transports for staff projects | 0/TBD | Not started (drop B) | - |
 | 35. Shared agent work, observations and hub watches | 0/TBD | Not started (drop B release) | - |
 | 32.1. Guided setup with viable options and a plain recommendation | 0/20 | Planned 2026-11-21 (after Phases 32 and 41, before Phase 36) | - |
@@ -2256,12 +2256,12 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 | 47. On-premise deployment stack and offline bundle | 25/34 | In Progress 2026-11-23 (beside 46) | - |
 | 48. Load and accreditation verification | 5/10 | Planned 2026-11-23 (waves 1 and 2 can start now; 3 and 4 after 46, 47 and the rig) | - |
 | 48.1. Hosted SA&A completeness | 6/23 | In Progress 2026-11-24, revised the same day (owner items a to d answered; starts after the component catalogue merges; cross-phase items in 48.1-HANDOFFS.md) | - |
-| 48.2. Live compliance evidence in the workbench | 0/17 | Planned 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
+| 48.2. Live compliance evidence in the workbench | 11/17 | In Progress 2026-11-25, revised after the plan check (waves 1 to 5 can start now, 48.2-07 after 46-09 and 48.2-10 after the approved UI-SPEC; waves 6 to 10 after 47-32, 48.1-15, 48.1-17, 47-29, 48-07 and 48-08; six owner questions with defaults in 48.2-CONTEXT.md) | - |
 | 68. Relay foundation | 8/8 | Complete (v0.5.0 Governed agent platform); merged as PR #50 (052d5cf); `relay` required on main (D-19) | 2026-11-15 |
 | 69. Team Mode reconciliation | 15/15 | Complete: PR 1 #59 and PR 2 #61 merged | 2026-11-15 |
 | 70. Capability vocabulary, manifests and one gate | 32/32 | Executed: all parts merged (last #95); verification record to write | - |
-| 70.1. Classification engine | 0/5 | Planned 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
-| 71. Identities and verified credentials (core), pulled forward | 8/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
+| 70.1. Classification engine | 4/5 | In Progress 2026-11-24 (pure; may start now, beside Phase 71 core and Phase 33) | - |
+| 71. Identities and verified credentials (core), pulled forward | 12/14 | In Progress 2026-11-24 (re-scoped; plans 01 to 08 run now beside Phases 33, 33.1 waves 1 to 3, 46 and 47; 10, 12 and 13 after 46-02 and 46-07) | - |
 | 71.1. Agent delegation that only narrows | 0/TBD | Not started (split from Phase 71 on 2026-11-24; Stage 1, before Phase 72) | - |
 | 72. Execution backends on a copy, with a guarded apply | 0/TBD | Not started (spike done 2026-11-15) | - |
 | 73. Credential broker | 0/TBD | Not started | - |

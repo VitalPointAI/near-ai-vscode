@@ -347,6 +347,10 @@ const COMPLIANCE_TRUST_ROOTS = [
   'compliance/resources.json',
   'compliance/architecture-areas.json',
   'compliance/schemas/resources.schema.json',
+  // The reviewed applicability map and the coverage baseline (44.1-08, D-11, D-19).
+  'compliance/applicability/reviews.json',
+  'compliance/applicability/rules.json',
+  'compliance/coverage/hub.json',
 ];
 
 test('a change to a compliance trust root (tailoring, sources, catalogues, attestations, engine, statements, rules, responsibility, scope) is a gate change', () => {
@@ -364,6 +368,8 @@ test('other compliance files are not gate changes, and the trust-root patterns r
     'compliance/architecture-areas.json.bak',
     'docs/security/threat-model.md',
     'src/compliance/tailoring/x.json',
+    'compliance/applicability.json',
+    'compliance/coverage.json',
   ];
   assert.deepEqual(gateFileChanges([...others, ...COMPLIANCE_TRUST_ROOTS, 'src/extension.ts']), COMPLIANCE_TRUST_ROOTS);
 });

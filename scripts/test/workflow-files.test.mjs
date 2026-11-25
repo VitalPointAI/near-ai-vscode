@@ -73,8 +73,11 @@ test('release jobs that hold a write token or deployment approval run no npm ins
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
-test('root lint, root tests and both VSIX build paths disable dependency lifecycle scripts', () => {
+test('root lint, root tests, the VS Code test and both VSIX build paths disable dependency lifecycle scripts', () => {
   const ci = jobs(read('ci.yml'));
+  // No CI job installs the root dependencies with their install scripts on (G10, 44.1-02): the VS Code test was the last exception.
+  for (const [id, job] of ci) assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m, `${id} installs with install scripts on`);
+  assert.match(ci.get('e2e'), /^\s*- run: npm ci --ignore-scripts$/m);
   const lint = ci.get('lint');
   assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
   assert.match(lint, /^\s*- run: npm run lint$/m);
@@ -223,7 +226,9 @@ test('the review\'s shared time budget ends inside the review job\'s limit, so a
 test('compliance is a report-only aggregate job with safe evidence handling', () => {
   const job = jobs(read('ci.yml')).get('compliance');
   assert.ok(job, 'compliance job exists');
-  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'relay-image-scan']) assert.match(job, new RegExp(`\\b${need}\\b`));
+  const needs = /needs:\s*\[([^\]]*)\]/.exec(job)?.[1].split(',').map((need) => need.trim()) ?? [];
+  // workbench too (owner 2026-11-25): its report and image SBOM have finished uploading before this job reads them.
+  for (const need of ['lint', 'test', 'e2e', 'release-content', 'audit', 'secret-scan', 'docs', 'relay', 'hub', 'deploy', 'relay-image-scan', 'workbench']) assert.ok(needs.includes(need), need);
   assert.match(job, /if:\s*always\(\)/);
   assert.match(job, /permissions:\s*\n\s*contents: read\s*\n\s*actions: read/);
   assert.match(job, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
@@ -233,6 +238,17 @@ test('compliance is a report-only aggregate job with safe evidence handling', ()
   const inputs = steps(job).find((step) => /name: Write collector inputs and changed paths/.test(step));
   assert.match(inputs, /VSIX_RESULT: \$\{\{ needs\.release-content\.result \}\}/);
   assert.match(inputs, /if \(process\.env\.VSIX_RESULT === "success"\)[\s\S]*read\("extension\/sbom\.cdx\.json"\)[\s\S]*retainVsix: true/);
+  // The workbench image SBOM is a subject only from a workbench job that succeeded on a commit with the workbench, and only when the file
+  // arrived; otherwise no workbench-image observation exists and its rule reads missing-result.
+  const image = steps(job).find((step) => /name: workbench-image-sbom\n/.test(step));
+  assert.match(image, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.ok(image.includes("if: steps.has_compliance.outputs.present == 'true' && needs.workbench.result == 'success' && hashFiles('workbench/package.json') != ''"));
+  assert.match(image, /path: compliance\/out\/workbench-image$/m);
+  assert.ok(steps(job).indexOf(image) < steps(job).indexOf(inputs), 'the SBOM is downloaded before the inputs are written');
+  assert.match(inputs, /WORKBENCH_RESULT: \$\{\{ needs\.workbench\.result \}\}/);
+  assert.ok(inputs.includes('if (process.env.WORKBENCH_RESULT === "success" && existsSync(workbenchSbom)) sboms.push({ subject: "workbench-image", file: workbenchSbom });'));
+  assert.ok(inputs.includes('const workbenchSbom = "compliance/out/workbench-image/workbench-image-sbom.json";'));
+  assert.ok(inputs.includes('if (sboms.length > 0) collectors.sbom ='), 'no sbom input at all when neither SBOM arrived');
   const scan = steps(job).find((step) => /secret-scan\.mjs --dir/.test(step));
   const upload = steps(job).find((step) => /name: compliance-bundle/.test(step));
   assert.match(scan, /id: bundle_scan/);
@@ -522,7 +538,8 @@ printf 'partial or complete combined manifest\\n' > "$6/manifest.json"
 test('CODEOWNERS routes all compliance gate paths to one owner', () => {
   const text = readFileSync(new URL('../../.github/CODEOWNERS', import.meta.url), 'utf8');
   for (const path of ['/.github/', '/SECURITY.md', '/scripts/lib/', '/scripts/test/', '/compliance/tailoring/', '/compliance/sources.json', '/compliance/catalogs/', '/compliance/attestations/',
-    '/compliance/src/', '/compliance/components/', '/compliance/evidence-rules/', '/compliance/responsibility/', '/compliance/profiles/', '/compliance/levels.json', '/compliance/resources.json', '/scripts/resource-check.mjs']) {
+    '/compliance/src/', '/compliance/components/', '/compliance/evidence-rules/', '/compliance/responsibility/', '/compliance/profiles/', '/compliance/levels.json', '/compliance/resources.json', '/scripts/resource-check.mjs',
+    '/compliance/applicability/', '/compliance/coverage/']) {
     assert.match(text, new RegExp(`^${path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\s+@ALuhning\\s*$`, 'm'));
   }
 });
@@ -565,7 +582,6 @@ test('the workbench job builds, tests and drives its image in a browser on Node 
   assert.doesNotMatch(build, /--target/, 'CI tests the default (development) target');
   const { CI_CHECKS } = await import('../lib/workflow.mjs');
   assert.ok(!CI_CHECKS.includes('workbench'), 'workbench is not a required check');
-  assert.doesNotMatch(/needs:\s*\[([^\]]*)\]/.exec(all.get('compliance'))?.[1] ?? '', /\bworkbench\b/);
 });
 
 test('the workbench job records the SBOM, scan and digest of the image it tested, and pushes and signs nothing', () => {
@@ -688,4 +704,21 @@ test('every workflow image build retries only a Red Hat registry refusal, and a 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the required docs job blocks on the applicability drift check and the coverage ratchet; the compliance job reports coverage without failing (44.1-07, D-19)', () => {
+  const ci = jobs(read('ci.yml'));
+  const docs = steps(ci.get('docs'));
+  const step = (pattern) => docs.find((item) => pattern.test(item));
+  for (const pattern of [/npm --prefix compliance ci --ignore-scripts/, /node compliance\/src\/cli\.ts applicability --check/, /node compliance\/src\/cli\.ts coverage --check/]) {
+    const found = step(pattern);
+    assert.ok(found, `docs job step ${pattern}`);
+    assert.doesNotMatch(found, /continue-on-error/, `${pattern} must block`);
+  }
+  const install = docs.findIndex((item) => /npm --prefix compliance ci --ignore-scripts/.test(item));
+  assert.ok(install < docs.findIndex((item) => /coverage --check/.test(item)), 'the compliance package is installed before the checks');
+  const summary = steps(ci.get('compliance')).find((item) => /coverage --bundle compliance\/out\/bundle/.test(item));
+  assert.ok(summary, 'the compliance job prints the coverage summary');
+  assert.match(summary, /continue-on-error: true/);
+  assert.match(summary, /GITHUB_STEP_SUMMARY/);
 });

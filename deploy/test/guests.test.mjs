@@ -10,7 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { checkGuestRequest, createGuest, credentialIssuingShipped, endGuest, expireGuests, extendGuest, guestSettings, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
+import { checkGuestRequest, CREDENTIAL_CARD_REACHABLE, createGuest, credentialIssuingShipped, endGuest, expireGuests, extendGuest, guestSettings, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
+import { POLICIES } from '../openbao/apply.mjs';
 import { enrolPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -431,8 +432,11 @@ test('extend refuses a guest who holds a realm-management role, another group, o
   assert.equal(kc.writes().length, 0);
 });
 
-test('G449: this release has no 71-12 card, so the example site file keeps guests off and create and extend refuse a nonzero maxDays before any call', async () => {
-  assert.equal(credentialIssuingShipped(), false, 'when 71-12 merges, its credential-issuers policy lifts this and G449 closes');
+test('G449: this release has no reachable 71-12 card, so the example site file keeps guests off and create and extend refuse a nonzero maxDays before any call', async () => {
+  // 71-12's credential-issuers policy is in this release, but its card is not reachable in a hosted session until G465 closes.
+  assert.ok(POLICIES.includes('credential-issuers'), '71-12 ships its policy');
+  assert.equal(CREDENTIAL_CARD_REACHABLE, false, 'when G465 closes, the change that closes it sets CREDENTIAL_CARD_REACHABLE and G449 closes after the lab run');
+  assert.equal(credentialIssuingShipped(), false);
   const example = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example/sterling-keycloak-realm.yaml'), 'utf8'));
   assert.equal(example.guests.maxDays, 0, 'the example ships guests off');
   const settings = guestSettings({ guests: { ...example.guests, maxDays: 90, issuing: true } });

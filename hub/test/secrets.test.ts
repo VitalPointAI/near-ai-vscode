@@ -68,12 +68,13 @@ async function refusal(promise: Promise<unknown>): Promise<SecretError> {
   assert.fail('expected the loader to refuse');
 }
 
-test('HUB_SECRETS is exactly the TLS pair and the two hub keys, all required, and holds no model credential (D-62)', () => {
+test('HUB_SECRETS is exactly the TLS pair and the two hub keys, all required, the optional post-quantum key (33.2), and holds no model credential (D-62)', () => {
   assert.deepEqual(HUB_SECRETS.map((spec) => [spec.name, spec.kind, spec.required]), [
     ['HUB_TLS_CERT', 'pem', true],
     ['HUB_TLS_KEY', 'pem', true],
     ['HUB_SIGNING_KEY', 'line', true],
     ['HUB_ENCRYPTION_KEY', 'line', true],
+    ['HUB_KEM_KEY', 'line', false],
   ]);
   for (const spec of HUB_SECRETS) {
     assert.ok(spec.description.length > 0);

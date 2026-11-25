@@ -45,17 +45,22 @@ export const MAX_PAYLOAD_BYTES = 256 * 1024;
 // token pattern by chance (about 5 in 100,000 wraps), which would refuse an admission or a rekey at random. Only these exact paths skip the token
 // patterns, and only for pure base64url text; private key material is still refused everywhere. Phase 32 (D-60): the hub session answer's challenge
 // and TLS keying material, the hub file's X25519 key, its binding signature and the one-time enrolment secret, and the hub join envelope's MAC.
+// Phase 33 (D-62): the sealed body of the session.certify a session key's answer carries.
 const GENERATED_PATHS: Partial<Record<PayloadPurpose, RegExp>> = {
   'staff-cell-grant': /^\$\.(?:labelSealed|wraps\[\d+\]\.wrap)$/,
   'staff-invite': /^\$\.(?:secret|lead\.x25519)$/,
   'staff-join-request': /^\$\.(?:x25519|x25519Sig|mac)$/,
-  'staff-hub-session': /^\$\.(?:challenge|keying)$/,
+  'staff-hub-session': /^\$\.(?:challenge|keying|certificateEntry\.body)$/,
   'staff-hub-file': /^\$\.(?:x25519|x25519Sig|enrolmentSecret)$/,
   'staff-hub-join': /^\$\.hubMac$/
 };
 const PUBLIC_KEY_BYTES = 32;
 
 export interface PayloadSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): string }
+// A signer that signs later (Phase 33 D-60): your organization's key store signs a person-key entry over the network after a fresh step-up. It may
+// answer a refusal instead of a signature; the refusal's text is passed through unchanged to the person.
+export interface SignRefused { refused: string }
+export interface AsyncPayloadSigner { readonly fingerprint: string; readonly publicKey: string; sign(bytes: Buffer): Promise<string | SignRefused> }
 // memberId is left out when absent: the canonical form refuses an undefined value.
 export interface PayloadSignerRef { fingerprint: string; publicKey: string; memberId?: string }
 
@@ -113,8 +118,23 @@ export function implicitAccountId(publicKey: string): string {
 
 export interface SignPayloadOptions { now?: () => Date; memberId?: string; maxBytes?: number }
 
+interface Prepared<T> { unsigned: Omit<SignedPayload<T>, 'sig'>; input: Buffer; maxBytes: number }
+
 // Builds and signs one envelope. It never sees or returns a private key: the signer holds that. Every refusal is a PayloadError with a plain message.
 export function signPayload<T>(signer: PayloadSigner, purpose: PayloadPurpose, payload: T, options: SignPayloadOptions = {}): SignedPayload<T> {
+  const prepared = preparePayload(signer, purpose, payload, options);
+  return finishPayload(signer, prepared, signer.sign(prepared.input));
+}
+
+// signPayload with a signer that answers later. The same checks run before anything is signed and after, so the envelope is the one signPayload makes
+// with the same key. A signer's refusal comes back as it is, and nothing is signed.
+export async function signPayloadAsync<T>(signer: AsyncPayloadSigner | PayloadSigner, purpose: PayloadPurpose, payload: T, options: SignPayloadOptions = {}): Promise<SignedPayload<T> | SignRefused> {
+  const prepared = preparePayload(signer, purpose, payload, options);
+  const sig = await signer.sign(prepared.input);
+  return typeof sig === 'string' ? finishPayload(signer, prepared, sig) : { refused: String(sig.refused) };
+}
+
+function preparePayload<T>(signer: { fingerprint: string; publicKey: string }, purpose: PayloadPurpose, payload: T, options: SignPayloadOptions): Prepared<T> {
   if (!isPurpose(purpose)) throw new PayloadError(`Nothing was signed: "${String(purpose)}" is not a known purpose. Known purposes are ${PAYLOAD_PURPOSES.join(', ')}.`);
   if (!isStrictBase64url(signer.publicKey, PUBLIC_KEY_BYTES) || fingerprintOf(Buffer.from(signer.publicKey, 'base64url')) !== signer.fingerprint) {
     throw new PayloadError('Nothing was signed: the signer\'s public key does not match its fingerprint.');
@@ -144,7 +164,11 @@ export function signPayload<T>(signer: PayloadSigner, purpose: PayloadPurpose, p
     if (error instanceof SecretLeakError) throw new PayloadError(`Nothing was signed: the payload has a secret-like value at ${error.paths[0] ?? '$'}.`);
     throw error;
   }
-  const sig = signer.sign(input);
+  return { unsigned, input, maxBytes };
+}
+
+function finishPayload<T>(signer: { publicKey: string }, prepared: Prepared<T>, sig: string): SignedPayload<T> {
+  const { unsigned, input, maxBytes } = prepared;
   const signed: SignedPayload<T> = { ...unsigned, sig };
   const size = canonicalBytes(signed).length;
   if (size > maxBytes) throw new PayloadError(`Nothing was signed: the payload is ${size} bytes, which is over the ${maxBytes} byte limit.`);

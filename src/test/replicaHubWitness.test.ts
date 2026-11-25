@@ -178,6 +178,21 @@ test('forked-view: the same heads with another count cannot both be right', () =
   assert.equal(result.state.distrusted, true);
 });
 
+test('a hub checkpoint at a roster this computer has not folded yet is not judged: no finding, not kept; at a known roster it is', () => {
+  const state = feed(createWitness(HUB_ID, PROJECT), checkpoint(one(A.writer, 5)));
+  const before = structuredClone(state);
+  const LATER = hex('roster/1');
+  const ahead = signCheckpoint(HUB.signer, { ...checkpoint(one(A.writer, 9)).payload, rosterHead: LATER });
+  const behind = witnessCheckpoint(deepFreeze(state), ahead, roster());
+  assert.deepEqual(behind, { state: before, findings: [], trusted: false });
+  // Once this computer has the roster the checkpoint names (here: a roster view that knows it), the same checkpoint is trusted.
+  const caughtUp = staticRosterView({ rosters: [{ hash: ROSTER, checkpointSigners: [HUB.writer], members: [] }, { hash: LATER, checkpointSigners: [HUB.writer], members: [{ member: 'mbr-hhhh000000000000', name: 'Sync hub', roles: ['member'], devices: [{ writer: HUB.writer, publicKey: HUB.publicKey }] }, { member: 'mbr-aaaa000000000000', name: 'Analyst A', roles: ['member'], devices: [{ writer: A.writer, publicKey: A.publicKey }] }] }] });
+  assert.equal(witnessCheckpoint(state, ahead, caughtUp).trusted, true);
+  // Another device's checkpoint at a roster this computer does not know is still injected: the rule above is only for the watched hub.
+  const byA = signCheckpoint(A.signer, { ...checkpoint(one(A.writer, 9)).payload, signer: A.writer, rosterHead: LATER });
+  assert.deepEqual(kinds(witnessCheckpoint(state, byA, roster()).findings), ['injected']);
+});
+
 test('injected: a checkpoint that does not verify for this roster changes nothing', () => {
   const state = feed(createWitness(HUB_ID, PROJECT), checkpoint(one(A.writer, 5)));
   const before = structuredClone(state);

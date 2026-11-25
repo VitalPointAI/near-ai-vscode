@@ -22,7 +22,7 @@ import { sealedBlobWithin } from './updateGuard';
 import { attributeText, summariseAuthors } from './attribution';
 import type { AuthorSummary } from './attribution';
 import type { CausalGraph } from './causal';
-import { resolveDecisions } from './decisions';
+import { recordedDecisionOutcome, resolveDecisions } from './decisions';
 import { PRODUCT_CELL_REFUSALS, pinProblem } from './productCells';
 import type { PinCandidate } from './productCells';
 import type { DecisionAct, DecisionClass, DecisionOutcome, DecisionResult } from './decisions';
@@ -151,6 +151,8 @@ export interface VersionView {
   // Set while the decisions on the version are in dispute or wait for confirmation (DESIGN 15.5). The state stays where it was.
   overlay?: 'contested' | 'pending-confirmation';
   decision: DecisionSummary;
+  // Presentation only: the current decisions outside the newest verified checkpoint.
+  decisionsSinceCheckpoint: string[];
   // Who shaped the text at the version's snapshot, persons and agents with their run (D-20). Later edits never change it.
   attribution: AuthorSummary[];
   // The products this version pins whose newest released version has a different hash (D-26).
@@ -553,14 +555,6 @@ function deriveVersion(product: ProductEntry, version: VersionProposal, view: Fo
 const DECISION_KINDS: readonly string[] = ['version.decide', 'version.release', 'version.withdraw', 'version.supersede'];
 const SEEN_KINDS: readonly string[] = ['version.decide', 'version.release', 'version.withdraw'];
 
-function outcomeOf(act: VersionAct): DecisionOutcome | undefined {
-  if (act.kind === 'version.release') return 'release';
-  if (act.kind === 'version.withdraw') return 'withdraw';
-  if (act.kind === 'version.supersede') return 'supersede';
-  const outcome = act.data.outcome;
-  return outcome === 'approve' || outcome === 'reject' || outcome === 'decline' ? outcome : undefined;
-}
-
 // How an act is shown to release.ts: a person as a named person with the role the version waits on, an agent as itself, a hub as an agent that can
 // never decide.
 function presented(act: VersionAct, role: string, roster: RosterView): StaffActor {
@@ -621,7 +615,7 @@ function deriveDecisions(product: ProductEntry, version: VersionProposal, start:
 
   // Step one: every act but withdraw, judged alone.
   for (const act of acts) {
-    const outcome = outcomeOf(act);
+    const outcome = recordedDecisionOutcome(act.kind, act.data.outcome);
     if (outcome === undefined || act.kind === 'version.withdraw') continue;
     const actor = presented(act, role, roster);
     const newer = act.kind === 'version.supersede' ? product.versions.find((other) => other.hash === act.data.byHash) : undefined;
@@ -802,6 +796,8 @@ function deriveProduct(product: ProductEntry, text: TextState | undefined, view:
       ...(derived.submitConflict ? { submitConflict: true } : {}),
       ...(derived.overlay === undefined ? {} : { overlay: derived.overlay }),
       decision: derived.decision,
+      decisionsSinceCheckpoint: [...derived.decision.contested, ...derived.decision.effective, ...derived.decision.pending]
+        .filter((hash) => !view.isFinal(hash)).sort(compare),
       attribution,
       sourceChanged: []
     });

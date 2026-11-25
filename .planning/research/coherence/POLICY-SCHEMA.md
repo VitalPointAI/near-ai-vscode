@@ -45,6 +45,12 @@ limits:    { spend: { dailyUsd, vaultHoursPerDay, hubDailyUsd }, trainingTargets
 data:      { personalMark, regimes }
 directives:{ capital?, doctrine? }
 reserved:  { anchorRoots, statusLists, maxOfflineAge }   // today's reserved v1 fields, unchanged meaning
+classification: { systemHigh?, thresholds: { "scale/level": { costRatio, recallTarget (basis points), secondFamily } },
+                  shadow: { defaultMode, levels }, roles: [ { passport, role, levels, evaluation, since } ],
+                  review: { jumpLevels, topLevel, lowerRequestAgeDays }, markings: [ { id, pattern, label } ],
+                  codeWords?: { listLabel, entries: [ { id, token, label } ] }, factTypes,
+                  guideRules, compilationRules: [ { id, guideRef, label, description, when: { allOf, sameSubject }, then } ] }
+                  // feature classification@1 (Phase 70.1, D-16); lower layers only tighten (D-17)
 ```
 
 Naming: sections are nouns, keys are camelCase, ids are lowercase tokens. Each section carries its own `v`; `bundleVersion` changes only for envelope changes. A missing section means today's behaviour, stated in that section's parser.

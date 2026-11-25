@@ -1,0 +1,22 @@
+{
+  "controls": [
+    "si-07",
+    "au-09",
+    "ca-07"
+  ],
+  "gap": "G475",
+  "id": "g475",
+  "milestones": [
+    {
+      "phase": "48.2",
+      "title": "The site collector (48.2-09) signs the live feed and the view names each item's signer beside the operator-signed export"
+    },
+    {
+      "targetDate": "2027-05-31",
+      "title": "The authorizing official accepts the residual risk, or a signer outside OpenBao is designed"
+    }
+  ],
+  "ownerRole": "owner",
+  "remediation": "The site collector signs the live site evidence feed with the OpenBao Transit key site-evidence, so facts about OpenBao (its seal status among them) are signed by the system they describe. The weekly operator-signed site evidence export (48-02) stays the independent check, and the Compliance view names the signer of each item. The authorizing official accepts the residual risk, or a signer outside OpenBao is designed. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-20, D-29).",
+  "title": "The live site feed is signed by a key held in OpenBao, so facts about OpenBao are signed by the system they describe"
+}

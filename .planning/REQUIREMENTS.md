@@ -74,7 +74,7 @@
 - [ ] **VCRD-01**: Authority, clearance (classification level), access roles and compartments are attributed per identity only as W3C Verifiable Credentials 2.0, never inside a DID document and never on chain: membership, clearance (threshold), compartment, role, device binding and delegation credentials, each with an issuer, a subject DID, an expiry and a status entry.
 - [ ] **VCRD-02**: Credentials follow one narrow profile: a fixed `@context` list (the VC 2.0 context plus one of our own; any other is refused and no JSON-LD processing runs), `DataIntegrityProof` with the `eddsa-jcs-2022` cryptosuite only, Ed25519 keys as Multikey, integers only. It is built on `node:crypto` Ed25519 and the existing canonical JSON with zero new runtime dependencies, signs through Phase 69's signer interface and honours its key status (a revoked key is refused for everything).
 - [x] **VCRD-03**: The W3C `eddsa-jcs-2022` test vectors are frozen tests, and Digital Bazaar's `@digitalbazaar/eddsa-jcs-2022-cryptosuite` and `@digitalbazaar/vc`, added as devDependencies only, verify our credentials and we verify theirs; the extension bundle gains no runtime dependency.
-- [ ] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
+- [x] **VCRD-04**: Revocation (permanent) and suspension (reversible) use Bitstring Status List: each credential has a randomly assigned index in a list of at least 131,072 entries, compressed with `node:zlib` and carrying `validUntil`; a verifier checks status from a cached list and fails closed when a needed list is missing or past `validUntil`; lowering a clearance revokes every higher threshold credential.
 - [x] **VCRD-05**: Selective disclosure uses atomic and threshold credentials (one fact each, for example "clearance at least Secret" on a named scale), and a holder presents only the credentials a check asks for; SD-JWT VC and BBS are later options, not built here.
 - [ ] **VCRD-06**: Each device and agent `did:key` is bound to its person (or to your organization) by a device binding or delegation credential with a device class and a short expiry; a lost device is cut off by revoking its binding, with no change to anyone's DID.
 - [x] **VCRD-07**: The gate builds each actor's clearance, roles and compartments only from verified, unexpired, unrevoked credentials and the delegation chain, and a missing or unverifiable credential gives nothing (fail closed). In your organization the issuer is your organization's DID or a person your organization's signed policy authorizes; agents and devices never issue. A person with no organization keeps their own declared clearances on their own computer, shown as "declared, not verified": they are never credentials, are never cited as evidence and count nowhere else (no shared project, hub, wrap or organization policy), so a fresh install keeps working with no HQ. *(Owner, 2026-11-24, owner item 1 of `71-CONTEXT.md` answered "defaults"; was: a person with no organization issues their own credentials from their device DID.)*
@@ -87,7 +87,7 @@ From the owner's data-centric access direction (`.planning/research/data-centric
 - [x] **DCAC-02**: An entry that relies on a person's attribute cites its evidence by hash (the credentials and the status lists checked); the fold checks only the cited evidence at the entry's signed time, so every replica gives the same answer whatever list it holds.
 - [x] **DCAC-03**: One pure `mayRelease` decides every key wrap, release and serve from verified credential facts and the data's own label: level on the scale or an approved mapping, every compartment, releasability for every holder of a marked cell, export eligibility for CGP, ITAR and EAR, and the credentials required by sensitivity; a position's required clearance and ways of serving are checked the same way.
 - [ ] **DCAC-04**: The enforcement points check freshness at the moment of action: your organization's server refuses an append that cites a stale status list and stops serving a member whose credential is revoked, the wrap preparer and the session refuse stale evidence with a plain reason and Retry, an edge refuses past the level's maximum offline age, and a later revocation leads to a rekey.
-- [ ] **DCAC-05**: Credentials are issued, revoked and suspended only from an officer's own session, signed by their person key after a passkey step-up, under a role credential from your organization's root; status lists are signed by the HQ status-list key in OpenBao Transit, each signature authorized only by an officer's step-up (O4); no new runtime service.
+- [x] **DCAC-05**: Credentials are issued, revoked and suspended only from an officer's own session, signed by their person key after a passkey step-up, under a role credential from your organization's root; status lists are signed by the HQ status-list key in OpenBao Transit, each signature authorized only by an officer's step-up (O4); no new runtime service.
 - [x] **DCAC-06**: Your organization's server serves the `did:webvh` logs and status lists, and a trust export carries them and the issuer section to disconnected edges, which verify every object from their own copies.
 
 ### AI classification (Phases 70.1 and 74.3, added 2026-11-24)
@@ -295,7 +295,7 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | VCRD-01 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-02 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-03 | Phase 71: Identities and verified credentials (core) | Complete |
-| VCRD-04 | Phase 71: Identities and verified credentials (core) | Pending |
+| VCRD-04 | Phase 71: Identities and verified credentials (core) | Complete |
 | VCRD-05 | Phase 71: Identities and verified credentials (core) | Complete |
 | VCRD-06 | Phase 71: Identities and verified credentials (core) | Pending |
 | VCRD-07 | Phase 71: Identities and verified credentials (core) | Complete |
@@ -303,7 +303,7 @@ From the AI classification research (`.planning/research/ai-classification/RESEA
 | DCAC-02 | Phase 71: Identities and verified credentials (core) | Complete |
 | DCAC-03 | Phase 71: Identities and verified credentials (core) | Complete |
 | DCAC-04 | Phase 71: Identities and verified credentials (core) | Pending |
-| DCAC-05 | Phase 71: Identities and verified credentials (core) | Pending |
+| DCAC-05 | Phase 71: Identities and verified credentials (core) | Complete |
 | DCAC-06 | Phase 71: Identities and verified credentials (core) | Complete |
 | CLSF-01 | Phase 70.1: Classification engine | Pending |
 | CLSF-02 | Phase 70.1: Classification engine | Pending |
@@ -849,9 +849,9 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 
 **Defined:** 2026-11-24 from the owner's decision O3 (`.planning/research/data-centric-access/RESEARCH.md` section 10), when Phase 33.2 was planned.
 
-- [ ] **WRAP-01**: Cell epoch keys are wrapped with `near-ai/cell-wrap/v2`: P-256 ECDH and ML-KEM-768 joined by HKDF-SHA256 (the SP 800-56C two-step KDF) and AES-256-GCM, bound to the cell, the epoch, the device and both recipient keys, with frozen test vectors; version 1 wraps stay readable.
-- [ ] **WRAP-02**: Every device, hosted person and hub publishes a P-256 key and an ML-KEM-768 key bound to its Ed25519 key (`device.kem`, or `kem` in its descriptor); the safety words cover them; the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file.
-- [ ] **WRAP-03**: An epoch grant may span several signed pages, each within the grant size limit, all committed by the founding roster entry.
+- [x] **WRAP-01**: Cell epoch keys are wrapped with `near-ai/cell-wrap/v2`: P-256 ECDH and ML-KEM-768 joined by HKDF-SHA256 (the SP 800-56C two-step KDF) and AES-256-GCM, bound to the cell, the epoch, the device and both recipient keys, with frozen test vectors; version 1 wraps stay readable.
+- [x] **WRAP-02**: Every device, hosted person and hub publishes a P-256 key and an ML-KEM-768 key bound to its Ed25519 key (`device.kem`, or `kem` in its descriptor); the safety words cover them; the private keys live only in the keyring, the Transit-KEK envelope or the hub's key file.
+- [x] **WRAP-03**: An epoch grant may span several signed pages, each within the grant size limit, all committed by the founding roster entry.
 - [ ] **WRAP-04**: The `wrap@2` feature goes through `roster.require`: new shared projects require it at creation, a lead switches an existing project in one step, each cell moves at its next epoch, late devices get keys in one step, and after the switch the fold and your organization's server refuse any new X25519 wrap.
 - [ ] **WRAP-05**: A cell whose label routes local-only or nowhere (by default Protected B, Protected C and every classified level) is never wrapped with X25519; a required CI check fails if any wrap path bypasses the one entry point; ML-KEM-1024 with P-384 is reserved for Protected C and classified work.
 
@@ -1040,7 +1040,7 @@ The 55 requirements of the former v0.5.0 knowledge-base plan (trusted-source kno
 - [ ] **LCE-05**: A scheduled site collector gathers in-cluster facts with their own collection times, signs them with a key your site key vouches for, and every session sees them within the interval plus about two minutes through a read-only mount, re-judged in place and never cached as if current. [CA-7, SI-4, AU-5, AU-6, CM-2]
 - [ ] **LCE-06**: The operator publishes the signed site evidence export, the offline rescan summary and the exchange agreements as signed site files; each shows with its own time; a site rescan with a newer signed database replaces the release scan. [CA-7, CA-3, RA-5, RA-5(2)]
 - [ ] **LCE-07**: The Compliance view layers release evidence then site evidence; "Authorization is your organization's decision" stays; in Restricted Mode and with no site evidence it shows the release evidence clearly labelled; original theme with lifted cards, codicons and Theia variables only. [CA-7]
-- [ ] **LCE-08**: `compliance:refresh` writes the public projection readable by the workbench user (files 0644, folders 0755) under any umask, with a test; the README's read-only mount works.
+- [x] **LCE-08**: `compliance:refresh` writes the public projection readable by the workbench user (files 0644, folders 0755) under any umask, with a test; the README's read-only mount works.
 - [ ] **LCE-09**: Air-gapped and disconnected edges work with local sources only (the image, the site collector, operator files, the signed database media); nothing fetches outside. [CA-7, SC-7]
 - [ ] **LCE-10**: Statements, evidence rules and documents for the controls this phase implements, gap rows G475 to G479, and the real-time definitions in the continuous monitoring strategy. [CA-7, CM-8, RA-5, SI-4, SA-11]
 

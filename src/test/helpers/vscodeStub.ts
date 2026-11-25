@@ -3,8 +3,78 @@
 // The file has no .test suffix on purpose so the test glob does not run it as a suite.
 export interface RecordedStatusBarItem { id?: string; name?: string; priority?: number; text: string; tooltip: string; command?: string; visible: boolean; disposed: boolean; backgroundColor?: unknown }
 
+type DocumentUri = { scheme: string; fsPath: string; toString(): string };
+type DocumentEdit = { rangeOffset: number; rangeLength: number; text: string };
+
+class StubPosition {
+  public constructor(public readonly line: number, public readonly character: number) {}
+}
+
+class StubRange {
+  public constructor(public readonly start: StubPosition, public readonly end: StubPosition) {}
+}
+
+type StubDecoration = {
+  range: StubRange;
+  hoverMessage: { value: string };
+  renderOptions: { after: { contentText: string } };
+};
+
+class StubQuickPick {
+  public title?: string;
+  public items: readonly { label: string; description?: string }[] = [];
+  public visible = false;
+  private hidden: (() => void) | undefined;
+  public readonly onDidAccept = (): void => undefined;
+  public readonly onDidHide = (listener: () => void): void => { this.hidden = listener; };
+  public show(): void { this.visible = true; }
+  public hide(): void { this.visible = false; this.hidden?.(); }
+  public dispose(): void { this.visible = false; this.hidden = undefined; }
+}
+
+class StubTextEdit {
+  public newEol?: number;
+  public constructor(public readonly range: StubRange, public readonly newText: string) {}
+  public static setEndOfLine(eol: number): StubTextEdit {
+    const zero = new StubPosition(0, 0);
+    const edit = new StubTextEdit(new StubRange(zero, zero), '');
+    edit.newEol = eol;
+    return edit;
+  }
+}
+
+class StubWorkspaceEdit {
+  public readonly changes = new Map<DocumentUri, readonly StubTextEdit[]>();
+  public set(uri: DocumentUri, edits: readonly StubTextEdit[]): void { this.changes.set(uri, edits); }
+}
+
+export class StubTextDocument {
+  public version = 1;
+  public isClosed = false;
+  public constructor(public readonly uri: DocumentUri, public text: string) {}
+  public getText(): string { return this.text; }
+  public positionAt(offset: number): StubPosition {
+    const lines = this.text.slice(0, offset).split('\n');
+    return new StubPosition(lines.length - 1, lines[lines.length - 1].length);
+  }
+  public offsetAt(position: StubPosition): number {
+    const lines = this.text.split('\n');
+    return lines.slice(0, position.line).reduce((offset, line) => offset + line.length + 1, position.character);
+  }
+}
+
 export interface VscodeStub {
   vscode: unknown;
+  fireDocumentOpen(path: string, text: string): StubTextDocument;
+  fireDocumentChange(document: StubTextDocument, edits: readonly DocumentEdit[], reason?: number): void;
+  fireDocumentClose(document: StubTextDocument): void;
+  setActiveDocument(document: StubTextDocument | undefined): void;
+  decorationTypes: Array<{ options: { borderColor?: unknown }; disposed: boolean }>;
+  decorations: Array<{ document: StubTextDocument; values: readonly StubDecoration[] }>;
+  attributionPicks: StubQuickPick[];
+  documentChangeListeners(): number;
+  beforeNextWorkspaceEdit(action: () => void): void;
+  workspaceEdits: Array<{ uri: string; version: number; applied: boolean; edits: readonly StubTextEdit[] }>;
   outputChannels: Array<{ name: string; lines: string[] }>;
   statusBarItems: RecordedStatusBarItem[];
   notifications: Array<{ level: 'info' | 'warn' | 'error'; message: string }>;
@@ -86,10 +156,54 @@ export function createVscodeStub(): VscodeStub {
     return messageAnswers.shift();
   };
 
+  const documents = new Set<StubTextDocument>();
+  const decorationTypes: VscodeStub['decorationTypes'] = [];
+  const decorations: VscodeStub['decorations'] = [];
+  const attributionPicks: StubQuickPick[] = [];
+  type StubTextEditor = { document: StubTextDocument; setDecorations(type: unknown, values: readonly StubDecoration[]): void };
+  let activeTextEditor: StubTextEditor | undefined;
+  const activeEditorListeners = new Set<(editor: StubTextEditor | undefined) => void>();
+  const setActiveDocument = (document: StubTextDocument | undefined): void => {
+    if (activeTextEditor?.document === document) return;
+    activeTextEditor = document === undefined ? undefined : {
+      document,
+      setDecorations(_type, values) { decorations.push({ document, values }); }
+    };
+    for (const listener of [...activeEditorListeners]) listener(activeTextEditor);
+  };
+  const openDocumentListeners = new Set<(document: StubTextDocument) => void>();
+  const closeDocumentListeners = new Set<(document: StubTextDocument) => void>();
+  const changeDocumentListeners = new Set<(event: { document: StubTextDocument; contentChanges: readonly DocumentEdit[]; reason?: number }) => void>();
+  const workspaceEdits: VscodeStub['workspaceEdits'] = [];
+  let beforeWorkspaceEdit: (() => void) | undefined;
+  const listen = <T>(listeners: Set<(event: T) => void>, listener: (event: T) => void): { dispose(): void } => {
+    listeners.add(listener);
+    return { dispose: () => { listeners.delete(listener); } };
+  };
+  const changeDocument = (document: StubTextDocument, contentChanges: readonly DocumentEdit[], reason?: number, eol?: number): void => {
+    let text = document.text;
+    for (const { rangeOffset, rangeLength, text: replacement } of [...contentChanges].sort((a, b) => b.rangeOffset - a.rangeOffset)) {
+      text = text.slice(0, rangeOffset) + replacement + text.slice(rangeOffset + rangeLength);
+    }
+    document.text = eol === 1 ? text.replaceAll('\r\n', '\n') : text;
+    document.version += 1;
+    for (const listener of [...changeDocumentListeners]) listener({ document, contentChanges, reason });
+  };
+
   const vscode = {
+    Position: StubPosition,
+    Range: StubRange,
+    TextEdit: StubTextEdit,
+    WorkspaceEdit: StubWorkspaceEdit,
+    TextDocumentChangeReason: { Undo: 1, Redo: 2 },
+    EndOfLine: { LF: 1, CRLF: 2 },
     StatusBarAlignment: { Left: 1, Right: 2 },
     ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
     ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+    MarkdownString: class MarkdownString {
+      public value = '';
+      public appendText(text: string): this { this.value += text; return this; }
+    },
     ThemeColor: class ThemeColor { public constructor(public readonly id: string) {} },
     ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2 },
     Uri: {
@@ -113,6 +227,18 @@ export function createVscodeStub(): VscodeStub {
       public dispose(): void { this.listeners.clear(); }
     },
     window: {
+      createTextEditorDecorationType(options: { borderColor?: unknown }) {
+        const type = { options, disposed: false, dispose(): void { this.disposed = true; } };
+        decorationTypes.push(type);
+        return type;
+      },
+      createQuickPick() {
+        const pick = new StubQuickPick();
+        attributionPicks.push(pick);
+        return pick;
+      },
+      get activeTextEditor(): StubTextEditor | undefined { return activeTextEditor; },
+      onDidChangeActiveTextEditor: (listener: (editor: StubTextEditor | undefined) => void) => listen(activeEditorListeners, listener),
       get state(): { focused: boolean; active: boolean } { return { focused: windowState.focused, active: windowState.active }; },
       onDidChangeWindowState: (listener: (state: { focused: boolean; active: boolean }) => void) => {
         windowListeners.add(listener);
@@ -179,6 +305,30 @@ export function createVscodeStub(): VscodeStub {
       setTextDocumentLanguage: async <T extends object>(document: T, languageId: string): Promise<T> => Object.assign(document, { languageId })
     },
     workspace: {
+      get textDocuments(): StubTextDocument[] { return [...documents]; },
+      onDidOpenTextDocument: (listener: (document: StubTextDocument) => void) => listen(openDocumentListeners, listener),
+      onDidCloseTextDocument: (listener: (document: StubTextDocument) => void) => listen(closeDocumentListeners, listener),
+      onDidChangeTextDocument: (listener: (event: { document: StubTextDocument; contentChanges: readonly DocumentEdit[]; reason?: number }) => void) =>
+        listen(changeDocumentListeners, listener),
+      applyEdit: async (edit: StubWorkspaceEdit): Promise<boolean> => {
+        for (const [uri, edits] of edit.changes) {
+          const document = [...documents].find((candidate) => candidate.uri.toString() === uri.toString());
+          if (!document) return false;
+          const version = document.version;
+          const before = beforeWorkspaceEdit;
+          beforeWorkspaceEdit = undefined;
+          before?.();
+          const applied = !document.isClosed && document.version === version;
+          workspaceEdits.push({ uri: uri.toString(), version, applied, edits });
+          if (!applied) return false;
+          const contentChanges = edits.filter(({ newEol }) => newEol === undefined).map(({ range, newText }) => {
+            const rangeOffset = document.offsetAt(range.start);
+            return { rangeOffset, rangeLength: document.offsetAt(range.end) - rangeOffset, text: newText };
+          });
+          changeDocument(document, contentChanges, undefined, edits.find(({ newEol }) => newEol !== undefined)?.newEol);
+        }
+        return true;
+      },
       get workspaceFolders(): typeof workspaceFolders { return workspaceFolders; },
       getConfiguration: (section?: string) => ({
         get: <T>(key: string, fallback?: T): T => {
@@ -238,6 +388,23 @@ export function createVscodeStub(): VscodeStub {
   return {
     vscode, outputChannels, statusBarItems, notifications, notificationActions, configUpdates, setContextCalls, contextKeys, commands, inputAnswers, inputRequests, messageAnswers, shownDocuments, contentProviders,
     quickPickAnswers, quickPickRequests, messageOptions, openDialogAnswers, saveDialogAnswers, saveDialogRequests,
+    workspaceEdits, decorationTypes, decorations, attributionPicks,
+    documentChangeListeners: () => changeDocumentListeners.size,
+    beforeNextWorkspaceEdit(action) { beforeWorkspaceEdit = action; },
+    fireDocumentOpen(path, text) {
+      const document = new StubTextDocument(vscode.Uri.file(path), text);
+      documents.add(document);
+      for (const listener of [...openDocumentListeners]) listener(document);
+      return document;
+    },
+    fireDocumentChange: changeDocument,
+    setActiveDocument,
+    fireDocumentClose(document) {
+      document.isClosed = true;
+      documents.delete(document);
+      for (const listener of [...closeDocumentListeners]) listener(document);
+      if (activeTextEditor?.document === document) setActiveDocument(undefined);
+    },
     async fireRename(files: Array<{ from: string; to: string }>): Promise<void> {
       const event = { files: files.map((file) => ({ oldUri: { fsPath: file.from }, newUri: { fsPath: file.to } })) };
       await Promise.all([...renameListeners].map((listener) => Promise.resolve(listener(event))));

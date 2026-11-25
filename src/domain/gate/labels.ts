@@ -95,10 +95,15 @@ export const DEFAULT_SCALE: ScaleId = 'org';
 /**
  * The label events written to the decision log as records of their own, with the event as the record's operation, the way the policy's events are: a label
  * set on a file or folder (plan 20), another branch's signed label file accepted as current by a person (D-61), a session mark raised by what it read
- * (plan 22), a chat's label lowered with a reason (plan 23), and a lowering from another copy of a chat that was not applied (D-58, D-64). Named now so a
- * record written by a later version is never one this version cannot name (D-49).
+ * (plan 22), a chat's label lowered with a reason (plan 23), and a lowering from another copy of a chat that was not applied (D-58, D-64). Then the
+ * classification engine's five (Phase 70.1, D-15): a label raised automatically by a classification proposal, an exception queued for a person (a large
+ * raise, a possible spill, hidden text, a full fact set), that exception resolved, a proposal that the label could be lower (never applied), and the
+ * originator's affirmation. Named now so a record written by a later version is never one this version cannot name (D-49). Append-only.
  */
-export const LABEL_EVENT_IDS = Object.freeze(['label.set', 'label.branch-accepted', 'label.mark-raised', 'label.declassify', 'label.declassify-rejected'] as const);
+export const LABEL_EVENT_IDS = Object.freeze([
+  'label.set', 'label.branch-accepted', 'label.mark-raised', 'label.declassify', 'label.declassify-rejected',
+  'label.auto-raised', 'label.exception-queued', 'label.exception-resolved', 'label.could-be-lower', 'label.affirmed'
+] as const);
 export type LabelEventId = (typeof LABEL_EVENT_IDS)[number];
 
 /**

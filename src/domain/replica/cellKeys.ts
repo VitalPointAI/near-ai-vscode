@@ -37,7 +37,12 @@ export const WRAP_BYTES = X25519_KEY_BYTES + IV_BYTES + TAG_BYTES + EPOCH_KEY_BY
 // One wrap per device; slots are capped at 4095, so a grant never names more devices than that.
 export const MAX_GRANT_WRAPS = 4095;
 // The cell label sealed under the epoch key (sealLabel), as base64url; empty when the grant carries no label.
-const MAX_LABEL_SEALED_CHARS = 8192;
+export const MAX_LABEL_SEALED_CHARS = 8192;
+// A grant page (33.2 D-04, D-12; grantPages.ts) carries pages: the sorted hashes of the other pages of its epoch grant, empty on a page that is not
+// the founding one. Only a page may hold a cell-wrap/v2 wrap: version byte 2 and WRAP_V2_WIRE_BYTES bytes (cellWrapV2.ts WRAP_V2_BYTES, repeated
+// here because cellWrapV2.ts imports this file). A grant without pages is exactly the v1 grant, with v1 wraps only.
+const WRAP_V2_WIRE_BYTES = 1214;
+export const MAX_GRANT_PAGES = 7;
 // The largest signed grant, in canonical bytes. One wrap takes about 210 bytes, so a grant to MAX_GRANT_WRAPS devices with the longest label is about
 // 880 KiB: over the 256 KiB every other signed payload is held to, so grants are signed and read with this limit instead (MN-04).
 export const GRANT_MAX_BYTES = 1024 * 1024;
@@ -142,7 +147,16 @@ export function unwrapEpochKey(input: UnwrapInput): Buffer | undefined {
 
 export interface GrantWrap { writer: string; wrap: string }
 // roster: the roster hash the grant is valid at (its signer must be a roster writer there and every wrap must name a device admitted there).
-export interface CellGrant { cell: string; epoch: number; roster: string; labelSealed: string; wraps: GrantWrap[] }
+export interface CellGrant { cell: string; epoch: number; roster: string; labelSealed: string; wraps: GrantWrap[]; pages?: string[] }
+
+// A copy holding only the grant's own fields; pages only when the grant has them.
+function grantCopy(grant: CellGrant): CellGrant {
+  const copy: CellGrant = { cell: grant.cell, epoch: grant.epoch, roster: grant.roster, labelSealed: grant.labelSealed, wraps: grant.wraps.map((item) => ({ writer: item.writer, wrap: item.wrap })) };
+  if (grant.pages !== undefined) copy.pages = [...grant.pages];
+  return copy;
+}
+
+const isV2WrapText = (wrap: string): boolean => isStrictBase64url(wrap, WRAP_V2_WIRE_BYTES) && Buffer.from(wrap, 'base64url')[0] === 2;
 
 // Authority comes from the roster at the grant's roster hash, never from a clock, so the key status given to verifyPayload is always active.
 const ALWAYS_ACTIVE: KeyStatusLookup = () => ({ state: 'active' });
@@ -151,8 +165,7 @@ const ALWAYS_ACTIVE: KeyStatusLookup = () => ({ state: 'active' });
 export function buildGrant(signer: PayloadSigner, grant: CellGrant): SignedPayload<CellGrant> {
   const problem = grantProblem(grant);
   if (problem !== undefined) throw new Error(`The grant was not signed: ${problem}.`);
-  const copy: CellGrant = { cell: grant.cell, epoch: grant.epoch, roster: grant.roster, labelSealed: grant.labelSealed, wraps: grant.wraps.map((item) => ({ writer: item.writer, wrap: item.wrap })) };
-  return signPayload(signer, 'staff-cell-grant', copy, { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
+  return signPayload(signer, 'staff-cell-grant', grantCopy(grant), { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
 }
 
 // sha256 hex of the canonical signed grant: what project.genesis cells, cell.create and cell.rekey commit to.
@@ -173,8 +186,17 @@ export type GrantRead =
 function grantProblem(value: unknown): string | undefined {
   if (!isRecord(value)) return 'not an object';
   const keys = Object.keys(value);
-  const expected = ['cell', 'epoch', 'roster', 'labelSealed', 'wraps'];
+  const paged = keys.includes('pages');
+  const expected = paged ? ['cell', 'epoch', 'roster', 'labelSealed', 'wraps', 'pages'] : ['cell', 'epoch', 'roster', 'labelSealed', 'wraps'];
   if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) return 'wrong fields';
+  if (paged) {
+    const pages = value.pages;
+    if (!Array.isArray(pages) || pages.length > MAX_GRANT_PAGES) return 'bad pages';
+    for (let index = 0; index < pages.length; index += 1) {
+      const page: unknown = pages[index];
+      if (typeof page !== 'string' || !HASH_PATTERN.test(page) || (index > 0 && !((pages[index - 1] as string) < page))) return 'bad pages';
+    }
+  }
   if (typeof value.cell !== 'string' || !STREAM_ID_PATTERN.test(value.cell)) return 'bad cell';
   if (!isSafeIntegerInRange(value.epoch, 1, Number.MAX_SAFE_INTEGER)) return 'bad epoch';
   if (typeof value.roster !== 'string' || !HASH_PATTERN.test(value.roster)) return 'bad roster';
@@ -186,7 +208,7 @@ function grantProblem(value: unknown): string | undefined {
     const itemKeys = Object.keys(item);
     if (itemKeys.length !== 2 || !itemKeys.includes('writer') || !itemKeys.includes('wrap')) return 'bad wrap';
     if (typeof item.writer !== 'string' || !HASH_PATTERN.test(item.writer) || seen.has(item.writer)) return 'bad wrap writer';
-    if (typeof item.wrap !== 'string' || !isStrictBase64url(item.wrap, WRAP_BYTES)) return 'bad wrap bytes';
+    if (typeof item.wrap !== 'string' || !(isStrictBase64url(item.wrap, WRAP_BYTES) || (paged && isV2WrapText(item.wrap)))) return 'bad wrap bytes';
     seen.add(item.writer);
   }
   return undefined;
@@ -200,8 +222,7 @@ export function readGrant(value: unknown): GrantRead {
     if (!verdict.ok) return { ok: false, reason: verdict.reason === 'bad-signature' ? 'bad-signature' : 'malformed' };
     const payload = verdict.payload;
     if (grantProblem(payload) !== undefined) return { ok: false, reason: 'malformed' };
-    const raw = payload as CellGrant;
-    const grant: CellGrant = { cell: raw.cell, epoch: raw.epoch, roster: raw.roster, labelSealed: raw.labelSealed, wraps: raw.wraps.map((item) => ({ writer: item.writer, wrap: item.wrap })) };
+    const grant = grantCopy(payload as CellGrant);
     return { ok: true, grant, hash: grantHash(value), signer: { publicKey: verdict.signer.publicKey, writer: writerIdOf(verdict.signer.publicKey) } };
   } catch {
     // Hostile input never throws out of the reader.

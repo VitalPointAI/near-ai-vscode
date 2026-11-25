@@ -46,10 +46,11 @@
       "enum": [
         "met", "no-statement", "no-rules", "missing-result", "test-missing-file", "test-missing-name", "test-skipped", "test-todo", "test-failed",
         "test-not-run", "observation-failed", "stale", "your-organization", "inherited", "not-applicable", "not-applicable-unreviewed",
-        "partly-statements", "limitation", "unsettled", "self-signed", "risk-accepted", "appliance-only"
+        "partly-statements", "limitation", "unsettled", "self-signed", "risk-accepted", "appliance-only",
+        "component-not-applicable", "component-not-applicable-unreviewed", "no-component-applies"
       ]
     },
-    "window": { "type": "string", "enum": ["head", "audit", "settings", "harness", "document", "attestation"] },
+    "window": { "type": "string", "enum": ["head", "audit", "settings", "harness", "document", "attestation", "vulnerability", "live"] },
     "detail": {
       "description": "The values of the reason sentence's placeholders.",
       "type": "object",
@@ -128,6 +129,7 @@
         "detail": { "$ref": "#/definitions/detail" },
         "reasonText": { "$ref": "#/definitions/text" },
         "responsibility": { "$ref": "#/definitions/responsibility" },
+        "applicability": { "type": "string", "enum": ["implements", "supports", "not-applicable"] },
         "evidence": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/evidence" } },
         "statement": { "$ref": "#/definitions/text" },
         "limitation": { "$ref": "#/definitions/text" },

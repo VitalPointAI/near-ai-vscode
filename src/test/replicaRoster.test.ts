@@ -489,7 +489,10 @@ test('15.2 active -> quarantined: two or more headers at one seq make the main f
   assert.equal(after.roster.positions[after.roster.positions.length - 1], quarantine.hash);
   // Only the quarantine record itself is added (so the same fork position is never recorded twice); every other member state is unchanged.
   assert.deepEqual([...after.roster.members.quarantines], [`${jo.writer}/${line.world.project}/0`]);
-  assert.deepEqual({ ...after.roster.members, quarantines: new Set() }, { ...before.roster.members, quarantines: new Set() });
+  // The record also keeps the position it applied at (Phase 33 D-62: a quarantine stops the session keys the device certified from there on).
+  assert.deepEqual([...after.roster.members.quarantinedFrom], [[`${jo.writer}/${line.world.project}/0`, after.roster.positions.length - 1]]);
+  const withoutRecord = (members: typeof after.roster.members): unknown => ({ ...members, quarantines: new Set(), quarantinedFrom: new Map() });
+  assert.deepEqual(withoutRecord(after.roster.members), withoutRecord(before.roster.members));
   assert.deepEqual(memberAnswers(after.roster, JO, [jo], quarantine.hash), memberAnswers(after.roster, JO, [jo], head));
   assert.equal(rosterView(after.roster).chosenBranch(jo.writer, line.world.project, 0), undefined);
   // The quarantine comes from the proof in the main fold, not from the entry: it is the same with or without it.

@@ -1,0 +1,121 @@
+{
+  "$id": "urn:near-ai-vscode:compliance:schema:applicability",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Component applicability source (44.1)",
+  "description": "The files of compliance/applicability/: the rules (facets, each component's facets, each control's facets, reviewed per-pair overrides), the generated lock and the stage reviews. Chosen by kind. Applicability is not tailoring: nothing here removes a row or changes a responsibility.",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/definitions/rules" },
+    { "$ref": "#/definitions/lock" },
+    { "$ref": "#/definitions/reviews" }
+  ],
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+    "control": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "class": { "type": "string", "enum": ["implements", "supports", "not-applicable"] },
+    "facetClass": { "type": "string", "enum": ["implements", "supports"] },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "facets", "components", "controls", "overrides"],
+      "properties": {
+        "kind": { "type": "string", "const": "rules" },
+        "facets": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/id" },
+          "additionalProperties": { "type": "object", "additionalProperties": false, "required": ["words"], "properties": { "words": { "$ref": "#/definitions/text" } } }
+        },
+        "components": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/id" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "facets"],
+            "properties": {
+              "role": { "$ref": "#/definitions/text" },
+              "facets": {
+                "type": "object",
+                "propertyNames": { "$ref": "#/definitions/id" },
+                "additionalProperties": { "type": "object", "additionalProperties": false, "required": ["class", "basis"], "properties": { "class": { "$ref": "#/definitions/facetClass" }, "basis": { "$ref": "#/definitions/text" } } }
+              }
+            }
+          }
+        },
+        "controls": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/control" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["facets"],
+            "properties": { "facets": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/id" } } }
+          }
+        },
+        "overrides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["component", "control", "class", "reason", "reviewer", "reviewedAt"],
+            "properties": {
+              "component": { "$ref": "#/definitions/id" },
+              "control": { "$ref": "#/definitions/control" },
+              "class": { "$ref": "#/definitions/class" },
+              "reason": { "$ref": "#/definitions/text" },
+              "reviewer": { "$ref": "#/definitions/text" },
+              "reviewedAt": { "$ref": "#/definitions/date" }
+            }
+          }
+        }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "components"],
+      "properties": {
+        "kind": { "type": "string", "const": "lock" },
+        "components": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/id" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sha256", "lines"],
+            "properties": {
+              "sha256": { "$ref": "#/definitions/sha256" },
+              "lines": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 4000 } }
+            }
+          }
+        }
+      }
+    },
+    "reviews": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "stages"],
+      "properties": {
+        "kind": { "type": "string", "const": "reviews" },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "levels", "reviewer", "reviewedAt", "components"],
+            "properties": {
+              "id": { "$ref": "#/definitions/id" },
+              "levels": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/id" } },
+              "reviewer": { "type": "object", "additionalProperties": false, "required": ["role", "name"], "properties": { "role": { "$ref": "#/definitions/text" }, "name": { "$ref": "#/definitions/text" } } },
+              "reviewedAt": { "$ref": "#/definitions/date" },
+              "components": { "type": "object", "propertyNames": { "$ref": "#/definitions/id" }, "additionalProperties": { "$ref": "#/definitions/sha256" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

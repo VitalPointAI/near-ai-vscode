@@ -38,6 +38,7 @@ import { baseCellHeldProducts, readLegacyCellLabel } from '../../domain/replica/
 import { epochsAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, devicesOfMemberAt, hubAt } from '../../domain/replica/rosterMembers';
 import { MAX_SLOT } from '../../domain/replica/clientIds';
+import { term } from '../../domain/org/terms';
 import { isRecord } from '../../domain/team/validate';
 import { multiUserNoticeLines } from '../../domain/staff/multiUser';
 import { MEMBERSHIP_REFUSALS, append, cellsAt, clearedFor, finishRekeys, gateOf, headOf, inviteToProject, unfinishedRekeys, writerProblem } from './membership';
@@ -88,6 +89,8 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'hub-invite-used': `The hub says this invitation was already used to join the project, so it did not take the join request. Ask the staff lead whether a new invitation is needed. ${SEND_FILE_TEXT}`,
   'hub-invite-voided': `The hub says the staff lead cancelled this invitation, so it did not take the join request. Ask the staff lead for a new invitation if you still need one. ${SEND_FILE_TEXT}`,
   'hub-invite-locked': `The hub takes no more join requests for this invitation, because too many did not match it. Ask the staff lead for a new invitation. ${SEND_FILE_TEXT}`,
+  // D-30: the hub keeps at most 8 waiting requests per invitation and 64 per project; the lead word comes from term() (D-27).
+  'hub-invite-full': `This invitation has too many people waiting. Ask the ${term('lead').toLowerCase()} for a new one. ${SEND_FILE_TEXT}`,
   'hub-busy': `Your organization's hub asked this computer to wait before another join request, so this one was not sent. ${SEND_FILE_TEXT}`,
   'hub-join-refused': `Your organization's hub did not take this join request. ${SEND_FILE_TEXT}`,
   'hub-join-unreachable': `Your organization's hub could not be reached, so the join request was not sent. ${SEND_FILE_TEXT}`
@@ -485,7 +488,8 @@ const HUB_JOIN_REFUSAL: Readonly<Record<string, HubMembershipRefusal>> = {
   'invite-expired': 'hub-invite-expired',
   'invite-used': 'hub-invite-used',
   'invite-voided': 'hub-invite-voided',
-  'invite-locked': 'hub-invite-locked'
+  'invite-locked': 'hub-invite-locked',
+  'invite-full': 'hub-invite-full'
 };
 
 const inviteRefused = (reason: InviteRefusal): HubMembershipResult => refused(reason, Object.hasOwn(MEMBERSHIP_REFUSALS, reason) ? MEMBERSHIP_REFUSALS[reason as keyof typeof MEMBERSHIP_REFUSALS] : INVITE_REFUSALS[reason]);

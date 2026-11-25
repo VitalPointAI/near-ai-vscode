@@ -150,3 +150,17 @@ test('Fluent Bit exposes metrics on its built-in HTTP server with scrape annotat
   assert.match(config, /Alias +site_opensearch/);
   assert.doesNotMatch(config, /Hot_Reload +On/i, 'no reload endpoint');
 });
+
+test('D-26 (G467): a session blocked for claiming too many computer places raises an alert from OpenBao\'s own violation counter', async () => {
+  const { COMPUTER_PLACES_QUOTA } = await import('../openbao/apply.mjs');
+  const rule = rulesOf(alertsFile()).find((entry) => entry.alert === 'ComputerPlaceClaimsLimited');
+  assert.ok(rule, 'the rule exists');
+  assert.match(rule.expr, new RegExp(`vault_quota_rate_limit_violation\\{[^}]*name="${COMPUTER_PLACES_QUOTA.name}"`));
+  assert.match(rule.expr, /increase\(/, 'a counter that appears after its first violation, read with increase()');
+  assert.doesNotMatch(rule.expr, /absent\(/);
+  assert.equal(rule.labels.source, 'openbao', 'guarded by the OpenBao scrape target guards');
+  assert.ok(rule.annotations.runbook.startsWith(RUNBOOK));
+  assert.match(rule.annotations.description, new RegExp(`more than ${COMPUTER_PLACES_QUOTA.rate} computer places in an hour`));
+  assert.deepEqual(guardProblems(alertsFile()), []);
+  assert.match(prometheus.join('\n'), /alert: ComputerPlaceClaimsLimited\b/, 'rendered into the site Prometheus');
+});

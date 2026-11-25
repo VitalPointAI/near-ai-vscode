@@ -51,7 +51,10 @@ export const REASONS = Object.freeze({
   'unsettled': 'This depends on an unsettled question, so evidence cannot show it yet: {question}',
   'self-signed': "This needs an official's signature; a self-signed decision counts as not met.",
   'risk-accepted': 'Not met. A named person accepted the risk until {date}.',
-  'appliance-only': 'Only the appliance can provide this; the extension and its services make no claim for it.'
+  'appliance-only': 'Only the appliance can provide this; the extension and its services make no claim for it.',
+  'component-not-applicable': 'Not applicable to this component: {reason}',
+  'component-not-applicable-unreviewed': 'The applicability map says this component has no part in this control, but your organization has not signed off the current map for this level, so it counts as not met.',
+  'no-component-applies': "No component in this level's scope has a part in this control, so your organization carries it; each component's reason is listed."
 } as const);
 export type ReasonCode = keyof typeof REASONS;
 
@@ -71,9 +74,29 @@ export const FRESHNESS = Object.freeze({
   settings: 7 * DAY_MS,
   harness: 30 * DAY_MS,
   document: 365 * DAY_MS,
-  attestation: 365 * DAY_MS
+  attestation: 365 * DAY_MS,
+  // 48.2-03 (D-13): a vulnerability scan ages from its database build date; live site facts from their collection time.
+  vulnerability: 30 * DAY_MS,
+  live: 2 * HOUR_MS
 } as const);
 export type WindowKind = keyof typeof FRESHNESS;
+
+/**
+ * When evidence starts Ageing (48.2-03, D-12, D-13): past this age a result is Ageing, and past its FRESHNESS window it is Out of date, which
+ * is exactly Stale. `head` evidence has no ageing: it is about the commit being judged.
+ */
+export const AGEING: Readonly<Record<Exclude<WindowKind, 'head'>, number>> = Object.freeze({
+  audit: 18 * HOUR_MS,
+  settings: 5 * DAY_MS,
+  harness: 23 * DAY_MS,
+  document: 335 * DAY_MS,
+  attestation: 335 * DAY_MS,
+  vulnerability: 7 * DAY_MS,
+  live: 30 * 60 * 1000
+});
+
+/** The out-of-date window of each kind in force: FRESHNESS, or a site policy's tighter values (judgement.ts effectivePolicy). */
+export type FreshnessWindows = Readonly<Partial<Record<WindowKind, number | 'head'>>>;
 
 /** The names of the props we add under NS. */
 export const PROP_NAMES = Object.freeze([
@@ -104,7 +127,8 @@ export const SOURCE_DIRS = Object.freeze([
   'tailoring',
   'poam',
   'attestations',
-  'import-reports'
+  'import-reports',
+  'applicability'
 ] as const);
 
 /** The source files at the top of compliance/. */
@@ -237,6 +261,10 @@ export interface StatusInput {
   /** The commit being judged: the current main head or the release tag. */
   readonly head: string;
   readonly now: Date;
+  /** What the applicability map says of this component in this control (44.1-05, D-07, D-11); absent when no rule covers the pair. */
+  readonly applicability?: ApplicabilityRecord;
+  /** The windows in force (48.2-03); FRESHNESS when absent, so nothing changes for an input without a policy. */
+  readonly windows?: FreshnessWindows;
 }
 
 /** What computeStatus returns. `detail` fills the placeholders of the reason's REASONS template. */
@@ -254,6 +282,8 @@ export interface ComponentRow {
   readonly detail?: Readonly<Partial<Record<ReasonPlaceholder, string>>>;
   readonly responsibility: Responsibility;
   readonly evidence: readonly RuleResult[];
+  /** The applicability map's class for a component that has no statement for the control (44.1-05, D-07); absent when no rule covers the pair. */
+  readonly applicability?: ApplicabilityClass;
 }
 
 /** One control at one level. Its state comes from computeStatus only. */
@@ -325,4 +355,18 @@ export function sourcePathForReport(file: string, packagePrefix?: string): strin
     return prefix ? `${prefix}/test/${stem}.ts` : `src/test/${stem}.ts`;
   }
   return prefix ? `${prefix}/${rel}` : rel;
+}
+
+/** The three applicability classes of a (component, control) pair (44.1, D-07). Both implements and supports need a statement and evidence. */
+export const APPLICABILITY_CLASSES = ['implements', 'supports', 'not-applicable'] as const;
+export type ApplicabilityClass = (typeof APPLICABILITY_CLASSES)[number];
+
+/**
+ * The applicability of one component in one control at one level (44.1, D-11, D-13). `reviewed` is true only while a review stage covering the
+ * level lists the component with its current section hash; a not-applicable class takes effect only then.
+ */
+export interface ApplicabilityRecord {
+  readonly class: ApplicabilityClass;
+  readonly reason: string;
+  readonly reviewed: boolean;
 }

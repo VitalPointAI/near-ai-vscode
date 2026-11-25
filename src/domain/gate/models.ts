@@ -173,7 +173,8 @@ export interface ResolvedPassport {
 /** The keys of the models section in the provenance design's schema (WP-0), in the order the design lists them. */
 export const MODELS_SECTION_KEYS = Object.freeze(['mode', 'unknownMaxTier', 'tierByLevel', 'tierByProject', 'passports', 'defaults', 'localCatalogue', 'order'] as const);
 
-const PASSPORT_ID_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
+/** A passport id. The classification section's roles name passports by it (70.1 D-16). */
+export const PASSPORT_ID_PATTERN = /^[a-z0-9][a-z0-9._/-]{0,127}$/;
 const MATCH_PATTERN = /^[A-Za-z0-9._/:*-]{1,128}$/;
 const ORIGIN_PATTERN = /^[A-Z]{2}$/;
 const FAMILY_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;

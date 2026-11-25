@@ -3030,7 +3030,8 @@
       "remediation": "The sponsor identity governance lead and system owner approve account types, user and role memberships, intended use, authorization and monitoring. Verify expiry, inactivity, orphaned accounts, policy violations and significant risk triggers. Sample approvals, privilege changes, disablement, notices for changes in employment or need, and a required logout outcome. Record the applicable ITSP.10.171 deployment boundary.",
       "title": "Supplementary account lifecycle needs sponsor evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3045,7 +3046,8 @@
       "remediation": "The sponsor system and resource owners approve logical access to assessed information and resources, including identities or groups and allowed operations. Demonstrate authorized and denied operations using representative test identities and cite the governing policy and resource boundary. Record applicable scope for ITSP.10.171. Treat mapped base-profile evidence as supporting material until checked against the deployment.",
       "title": "Authorized logical access needs deployment enforcement evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3060,7 +3062,8 @@
       "remediation": "The sponsor data owner and network security lead approve internal and intersystem flows for the specified information categories. Trace representative approved and denied flows through assessed enforcement points. Referenced product records may help establish the path, while sponsor confirms the assessed routing boundary and inherited rules.",
       "title": "Information flow approvals and enforcement need deployed evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3075,7 +3078,8 @@
       "remediation": "The sponsor access governance and business process owners identify duties that must be separated and assign corresponding access authorization. Sample assigned users and a conflicting role request or workflow exercise to verify that access supports the separation. Record any approved exception and its scope for assessment.",
       "title": "Separation of duties needs authorized role and access evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3092,7 +3096,8 @@
       "remediation": "The sponsor identity and privileged access leads define minimum task access for users and delegated processes, authorized security functions and privileged roles. Review representative rights and reassignment or removal. Verify separate ordinary accounts, dedicated isolated administrative workstations for privileged actions, denied privileged functions for standard accounts, and logged authorized execution.",
       "title": "Least privilege and privileged operations need sponsor verification",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3107,7 +3112,8 @@
       "remediation": "The sponsor authentication owner approves the observation window, consecutive failure limit and automatic response, including any unlock or delay criteria. Exercise a representative sign-in route through threshold and recovery with a controlled account. Record inherited service policy and prove it covers the assessed route before accepting it.",
       "title": "Failed logon limits and automatic responses need a test result",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3122,7 +3128,8 @@
       "remediation": "The sponsor privacy and system owners approve notice text covering security and privacy rules for specified information. Demonstrate that the assessed human access routes display the notice before granting access. Record where routes have no direct human sign-in and submit that scope decision for assessor review.",
       "title": "Pre-access system use notices need sponsor approval and display evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3138,7 +3145,8 @@
       "remediation": "The sponsor endpoint and session service owners approve device lock timing or manual lock requirements, renewed authentication, screen concealment and automatic session disconnect triggers. Test lock and unlock on an assessed device and separately demonstrate session termination on a specified trigger. Record provider or platform inheritance for sponsor approval.",
       "title": "Device lock and session termination need distinct test evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3153,7 +3161,8 @@
       "remediation": "The sponsor remote access and security operations leads inventory each remote access type, approve connection and configuration requirements, and route connections through managed control points. Separately verify permissions for remote privileged commands and security-relevant information. Sample a permitted and denied route or action and document inherited control points for review.",
       "title": "Remote access routes and privileged remote actions need authorization evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3169,7 +3178,8 @@
       "remediation": "The sponsor network and endpoint owners approve connection types and configuration for wireless and mobile access before connection. Verify wireless authentication and encryption and that unused radios are disabled before issue or deployment. Sample authorized mobile enrollment and full-device or container encryption for specified information, with a denied or quarantined unapproved connection where practical.",
       "title": "Wireless and mobile access need approved configurations and separate checks",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3184,7 +3194,8 @@
       "remediation": "The sponsor information and service owners record prohibited and specifically authorized external uses, applicable requirements from security and privacy plans, and approved connection or processing agreements. Sample verification before use of a permitted system and verify restrictions on organization-controlled portable storage there. Record the assessed ITSP.10.171 boundary.",
       "title": "External system use needs approved scope, terms and verification",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3199,7 +3210,8 @@
       "remediation": "The sponsor public communications and information owners identify authorized publishers and train them to keep specified information out of public content. Sample a periodic review and a removal or controlled exercise if information is discovered. Record deployment scope for ITSP.10.171 and submit any no-public-content boundary for review.",
       "title": "Public publishing training, review and removal need sponsor evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3215,7 +3227,8 @@
       "remediation": "The sponsor security and privacy training leads establish initial and recurring literacy that covers insider threat, social engineering and social mining. Set role-specific training before access or duties and at reviewed intervals. Track refresh after system or event changes and revisions to both training streams. Use de-identified learner evidence.",
       "title": "Security literacy and role-based training need deployment records",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3232,7 +3245,8 @@
       "remediation": "The sponsor logging and records owners select and periodically review logged event types. Verify generation with event type, time, place, source, outcome and affected identities or entities, plus any approved additional data. Sample retention settings and available logs against the approved records schedule. Document any product-only or provider-only scope limits.",
       "title": "Selected audit events, record content and retention need verification",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3247,7 +3261,8 @@
       "remediation": "The sponsor monitoring and service owners set notification recipients, response time and additional action when logging fails. Use an authorized simulation or a sanitized incident reference to demonstrate detection, timely alert, response and recovery. Confirm which failure modes and components are assessed.",
       "title": "Audit logging failure alerts and response need exercise evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3262,7 +3277,8 @@
       "remediation": "The sponsor security operations lead sets review frequency, criteria for unusual activity and impact, findings recipients and repositories to correlate. Sample a dated review linking records from more than one assessed repository to findings and their reporting. Identify unmonitored sources or provider dependencies for review.",
       "title": "Audit review, correlation and reporting need operational evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3277,7 +3293,8 @@
       "remediation": "The sponsor security analytics and records leads demonstrate an approved reduction and reporting workflow for review or investigation. Compare a representative report with original events and verify that the original contents and time ordering remain intact. Document provider or tool boundary and access to originals for assessment.",
       "title": "Audit reduction and reporting need original record preservation evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3292,7 +3309,8 @@
       "remediation": "The sponsor platform and logging leads document clocks used to produce audit time stamps, precision and permitted UTC or local offset convention. Verify representative records from assessed components against the configuration and show their dates sort and correlate as expected across the specified boundary.",
       "title": "Audit time stamps need clock and precision verification",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3307,7 +3325,8 @@
       "remediation": "The sponsor logging platform and privileged access owners protect audit records and tooling against unauthorized reading, modification and removal. Limit management to a named subset of privileged roles. Review representative access assignments and use controlled checks or dated evidence of protected operations, including a non-management role refusal.",
       "title": "Audit information and logging management need access protection evidence",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3329,7 +3348,8 @@
       "remediation": "The sponsor assessment authority confirms each displayed identifier and edition against the checked-in ITSP.10.171 source, which marks it not allocated and withdrawn by NIST. Record a source-cited scope decision per identifier, including any replacement objective reference where the authority supplies one. Keep the path open pending the reviewed determination.",
       "title": "Unallocated supplementary rows need sponsor source and scope review",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ]
     },
     {
@@ -3343,7 +3363,8 @@
       "ownerRole": "owner",
       "poam": "g245",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor configuration owner maintains the approved component baseline under configuration control and records its review cadence and changes triggered by installations or modifications. Compare effective settings with the most restrictive baseline consistent with approved operations. Record each deviation with approved purpose, scope, authority and review. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 configuration baselines and restrictive settings need approved evidence"
@@ -3360,7 +3381,8 @@
       "ownerRole": "owner",
       "poam": "g246",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor change authority defines controlled change types and approves physical and logical restrictions for change personnel. Trace a representative change through proposal, pre-change security and privacy impact analysis, approval or refusal, implementation, post-change verification and monitoring review. Review allowed and denied change access using redacted records. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 configuration changes, impact review and change privileges need operating evidence"
@@ -3375,7 +3397,8 @@
       "ownerRole": "owner",
       "poam": "g247",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor infrastructure owner defines mission-essential capabilities and the restricted functions, ports, protocols, connections and services. Compare operating settings to this list and sample a periodic review that identified and disabled or removed an unnecessary or nonsecure item. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 least-functionality reviews and removals need effective evidence"
@@ -3390,7 +3413,8 @@
       "ownerRole": "owner",
       "poam": "g248",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor endpoint control owner maintains and periodically reviews the approved software list. Review effective deny-all and allow-by-exception policy for the assessed execution paths. Retain redacted allowed and denied decisions using harmless approved examples. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 authorized execution and deny-by-default settings need operating evidence"
@@ -3406,7 +3430,8 @@
       "ownerRole": "owner",
       "poam": "g249",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor asset manager and information custodian identify assessed components and where specified information is processed and stored. Sample a periodic inventory review and a recorded installation, removal or update. Verify an applicable change in processing or storage location is reflected in the inventory and flow record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 component inventory and specified-information locations need reconciliation"
@@ -3421,7 +3446,8 @@
       "ownerRole": "owner",
       "poam": "g250",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor travel security owner defines high-risk locations and the device configurations and return safeguards for the assessed population. Review authorized issue and return evidence such as a redacted configuration record and completion of required checks. Record an authorized applicability decision if the deployment has no covered travel. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 travel device configuration and return safeguards need disposition"
@@ -3436,7 +3462,8 @@
       "ownerRole": "owner",
       "poam": "g251",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor identity owner maps unique system users to accounts and processes acting for them. Document the re-authentication triggers and effective policies. Collect sanitized operating or controlled verification evidence that the expected user identity is retained in process attribution and re-authentication occurs on an approved trigger. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 unique user identity and re-authentication need assessed records"
@@ -3451,7 +3478,8 @@
       "ownerRole": "owner",
       "poam": "g252",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor endpoint identity owner specifies applicable devices, unique identifiers and approved enrollment and authentication rules. Review effective settings and verify that an authorized synthetic device can connect while an unrecognized or deauthorized synthetic device is refused before an assessed session is established. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 device identity and authentication before connection need evidence"
@@ -3467,7 +3495,8 @@
       "ownerRole": "owner",
       "poam": "g253",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor identity authority identifies assessed sign-in paths for privileged and non-privileged accounts. Review strong multi-factor and replay-resistance configuration and applicable provider evidence. Capture sanitized verification that each category requires its approved strong factors and that a previously used authentication proof is refused by the applicable mechanism. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 strong factors and replay-resistant sign-in need role coverage"
@@ -3482,7 +3511,8 @@
       "ownerRole": "owner",
       "poam": "g254",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor identity governance lead defines authorization and non-reuse periods for individual, group, role, service and device identifiers, plus required individual status markers. Sample approved assignment and retirement, and verify the corresponding recovery or non-reuse handling for the observed period. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 identifier issuance, status and non-reuse need operating evidence"
@@ -3498,7 +3528,8 @@
       "ownerRole": "owner",
       "poam": "g255",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor credential owner reviews how assessed sign-in paths update and enforce prohibited-password lists, protect transmission and stored verifier material, require a changed password after recovery and enforce approved composition rules. Use synthetic values to verify obscured entry, responses that avoid exposing authentication information and the applied policy. Retain sanitized settings and results only. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 password protections and obscured authentication feedback need evidence"
@@ -3513,7 +3544,8 @@
       "ownerRole": "owner",
       "poam": "g256",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor authenticator custodian documents recipient identity verification, approved initial authenticator settings, distribution, default replacement, lost or damaged handling, compromise reporting, refresh triggers and revocation. Review protective access and sample a sanitized initial issue and a rotation or revocation. Retain no authenticator material. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 authenticator issuance, refresh and revocation need lifecycle proof"
@@ -3529,7 +3561,8 @@
       "ownerRole": "owner",
       "poam": "g257",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor incident lead maps the assessed incident handling capability to the approved plan. Record a dated authorized exercise or defensively handled incident covering preparation, detection and analysis, containment, eradication and recovery with review of scope, timing and improvements. Verify the approved exercise cadence and corrective action follow-up. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 incident handling and periodic exercises need assessed records"
@@ -3544,7 +3577,8 @@
       "ownerRole": "owner",
       "poam": "g258",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor response desk owner identifies approved reporting windows, recipient authorities and support contacts for assessed systems. Sample a redacted incident or an approved exercise through recording, timed notification and response assistance. Review that support guidance is available to affected users. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 incident tracking, reporting deadlines and support need operating evidence"
@@ -3559,7 +3593,8 @@
       "ownerRole": "owner",
       "poam": "g259",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor incident training owner approves initial training deadlines for new roles or system access, changes that require new training, recurring cadence and content review triggers. Sample dated completion by an assessed role and a reviewed content update or authorized confirmation of current content. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 role-based incident response training needs completion and refresh records"
@@ -3574,7 +3609,8 @@
       "ownerRole": "owner",
       "poam": "g260",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor incident authority approves a plan for the assessed system that identifies organization structure, response capability, reportable incidents, sharing boundaries and assigned roles. Review controlled distribution and protections against unauthorized disclosure. Sample a revision based on a system change, exercise or tracked issue. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 the incident response plan needs approval, distribution and protected maintenance"
@@ -3589,7 +3625,8 @@
       "ownerRole": "owner",
       "poam": "g261",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor maintenance custodian approves and monitors tools used on assessed systems. Sample a diagnostic-media safe inspection record before use and an equipment removal record showing absence of specified information, approved sanitization or destruction, or retention on site. Keep only traceable sanitized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 maintenance tools and diagnostic media need approved custody evidence"
@@ -3604,7 +3641,8 @@
       "ownerRole": "owner",
       "poam": "g262",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor maintenance and identity owners approve non-local maintenance and diagnostics and review monitored records. Verify required multi-factor and replay-resistant authentication for these sessions and retain a redacted observation that both session and network connection terminate when work concludes. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 approved remote maintenance and session closure need evidence"
@@ -3619,7 +3657,8 @@
       "ownerRole": "owner",
       "poam": "g263",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor maintenance access owner approves personnel and contractor organizations, keeps the authorized list current, and validates access for unescorted personnel. Sample an authorized visit and a supervised visit with the assigned supervisor’s required authorization and documented technical competence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 maintenance personnel authorization and supervision need operating records"
@@ -3635,7 +3674,8 @@
       "ownerRole": "owner",
       "poam": "g264",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor media custodian inventories system media holding specified information and approves storage controls, custodians and access roles. Review physical safeguards and effective access, and sample a controlled retrieval or checkout and return. Document inherited storage boundaries and authorized evidence. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 media storage safeguards and authorized access need assessment evidence"
@@ -3650,7 +3690,8 @@
       "ownerRole": "owner",
       "poam": "g265",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor information custodian documents approved sanitization methods for the assessed media and disposition types. Sample a traceable authorization, sanitization result and verification before reuse, disposal or release outside organizational control. Keep this ITSP deployment decision separate from any CPCSC contract disposition. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 media sanitization before reuse, release or disposal needs verification"
@@ -3666,7 +3707,8 @@
       "ownerRole": "owner",
       "poam": "g266",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor media transport authority approves distribution markings, handling caveats and transport safeguards for assessed media. Verify markings on a representative item and sample transport outside controlled areas with sender and recipient accountability, agreed protective handling, and a dated custody and delivery record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 media markings and transport outside controlled areas need traceable evidence"
@@ -3681,7 +3723,8 @@
       "ownerRole": "owner",
       "poam": "g267",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor endpoint and information custodians define restricted or prohibited media types and permitted uses. Review effective access controls and verify a removable item with no identifiable owner is refused, using a harmless fixture or an authorized implementation record. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 authorized media types and identifiable owners need enforcement evidence"
@@ -3696,7 +3739,8 @@
       "ownerRole": "owner",
       "poam": "g268",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor backup and cryptographic custodians inventory assessed backup stores and specified information, including replicas where applicable. Review effective confidentiality protection and who can use the cryptographic mechanism. Retain sanitized storage and key custody settings and scoped verification that unauthorized roles cannot disclose protected backup information. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 cryptographic protection of backup information needs scoped evidence"
@@ -3721,7 +3765,8 @@
       "ownerRole": "owner",
       "poam": "g269",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor assessment lead and control owners reconcile each identifier with the checked-in ITSP.10.171 catalogue, which labels these entries unallocated and notes NIST withdrawal. Record the source edition and the accountable authority’s separate disposition for every listed identifier, including any successor that applies to the deployment. Leave the assessment rows open pending that authoritative decision. The sponsor confirms the assessed ITSP.10.171 supplementary boundary and accountable owner.",
       "title": "ITSP.10.171 unallocated configuration, identity, maintenance and media entries need sponsor reconciliation"
@@ -3736,7 +3781,8 @@
       "ownerRole": "owner",
       "poam": "g275",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment personnel security authority and access sponsor approve screening criteria, case custody and rescreening triggers for the assessed roles. Verify a redacted timeline from an authorized screening disposition to initial access approval and select a rescreening case or exercise. Retain role and date evidence and protected case references in place of personal screening contents.",
       "title": "Supplementary personnel screening needs dated authorization evidence"
@@ -3751,7 +3797,8 @@
       "ownerRole": "owner",
       "poam": "g276",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The workforce separation owner, identity services lead and facility custodian approve termination and transfer duties and timing. Sample termination and reassignment records to verify credentials, authenticators, logical and physical access, and security property were recovered, revoked or adjusted as required. Compare actual completion times and retain redacted decisions and exceptions.",
       "title": "Supplementary personnel separation and transfer need access and property records"
@@ -3766,7 +3813,8 @@
       "ownerRole": "owner",
       "poam": "g277",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The facility security operations owner identifies assessed locations and defines log review schedules and incident triggers. Verify a redacted review of physical access logs and an approved benign exercise or actual incident reference showing escalation and response. Link verified provider reports for inherited facilities and record collection or review gaps.",
       "title": "Supplementary facility monitoring and access log review need operating evidence"
@@ -3783,7 +3831,8 @@
       "ownerRole": "owner",
       "poam": "g278",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The contracting sponsor assessment authority and assessor reconcile each of the three identifiers to the approved source edition and contract selection. The source records them as not allocated following NIST withdrawal. Log a dated disposition and citation per ID, including an approved alternate objective only where the contracting authority identifies one. Retain pending status until the decision is reviewed.",
       "title": "Unallocated supplementary physical rows need individual sponsor dispositions"
@@ -3798,7 +3847,8 @@
       "ownerRole": "owner",
       "poam": "g279",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor workplace security lead and system owner identify assessed alternate work sites or approved site classes and the safeguards selected for them. Inspect a redacted site approval and verify applicable safeguards or a documented restriction of work activities. Record the owner, review date and any unapproved site disposition.",
       "title": "Supplementary alternate work sites need approved boundaries and verified safeguards"
@@ -3813,7 +3863,8 @@
       "ownerRole": "owner",
       "poam": "g280",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The facility engineering and network security owners identify assessed distribution and transmission lines on restricted drawings. Review controls over physical access at applicable rooms, enclosures and exposed access points. Verify a dated inspection and sampled owner approval or inherited facility assurance, and retain sanitized references in the package.",
       "title": "Supplementary distribution and transmission lines need scoped physical protection evidence"
@@ -3828,7 +3879,8 @@
       "ownerRole": "owner",
       "poam": "g281",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment risk authority and supply chain lead assess unauthorized disclosure over the lifecycle of assessed specified information. Verify the review accounts for relevant suppliers and dependencies, data boundaries, threat and impact findings, assigned actions and approved update timing. Keep sensitive details in the assessment repository with redacted outcome references.",
       "title": "Supplementary disclosure risk assessment needs approved scope and review evidence"
@@ -3843,7 +3895,8 @@
       "ownerRole": "owner",
       "poam": "g282",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment vulnerability management and patch owners define scoped monitoring and scan frequencies, new finding triggers, detection-content update rules and remediation time targets. Review redacted reports from already authorized assessments, scope and content update records, and a sampled finding through remediation verification. Retain approved disposition for scope or timing gaps.",
       "title": "Supplementary vulnerability monitoring needs authorized schedule and remediation records"
@@ -3858,7 +3911,8 @@
       "ownerRole": "owner",
       "poam": "g283",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The contracting sponsor risk authority and assessor reconcile this displayed identifier to the approved source edition and contract selection. The source records it as not allocated following NIST withdrawal. Record the authoritative citation, dated disposition and any successor identified by the contracting authority. Preserve pending status during review.",
       "title": "Unallocated supplementary risk row needs a sponsor source decision"
@@ -3873,7 +3927,8 @@
       "ownerRole": "owner",
       "poam": "g284",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor risk response authority and deployment governance owner identify the decision route for findings from assessment, monitoring and audit. Reconcile sample findings to assigned treatments, approvals, dated action records and review or closure evidence. Retain open status where verification or authority is absent.",
       "title": "Supplementary risk response needs reviewed treatment and follow-up records"
@@ -3888,7 +3943,8 @@
       "ownerRole": "owner",
       "poam": "g285",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor assessment lead and authorized assessor define the system and operating environment, requirements, methods, evidence access and review frequency. Verify the approved assessment plan is traceable to a completed dated scope sample and documented findings or remains pending with a named owner. Retain signed report references and redacted evidence indexes.",
       "title": "Supplementary security assessment needs authorized scope and results"
@@ -3903,7 +3959,8 @@
       "ownerRole": "owner",
       "poam": "g286",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor remediation owner and assessor reconcile the deployment plan of action and milestones to findings from security assessments, audits or reviews, and continuous monitoring. Verify sampled ownership, dates, evidence expectations and updates when findings change. Record independent review or closure evidence where available, with unresolved entries retained.",
       "title": "Supplementary remediation plan needs an operating revision trail"
@@ -3918,7 +3975,8 @@
       "ownerRole": "owner",
       "poam": "g287",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor monitoring lead approves a system-level strategy with assessed boundaries, owners, collection and review cadence and recurring security assessments. Verify at least a representative monitored period and assessment follow-up record. Retain dated metric results, evidence of review, escalation and decisions for missing coverage.",
       "title": "Supplementary continuous monitoring needs operating strategy evidence"
@@ -3933,7 +3991,8 @@
       "ownerRole": "owner",
       "poam": "g288",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The contracting sponsor assessment lead and authorized assessor reconcile the displayed identifier and contract selection to the authoritative edition, which identifies the row as not allocated after NIST withdrawal. Retain the dated source citation and signed scope decision or record the unresolved decision and responsible official.",
       "title": "Unallocated supplementary assessment row needs a sponsor scope decision"
@@ -3948,7 +4007,8 @@
       "ownerRole": "owner",
       "poam": "g289",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor interconnection owner and information custodians inventory assessed exchanges and approved agreement types. Review a scoped agreement for interfaces, privacy and security expectations, assigned responsibilities and review cadence. Match the approved agreement to a redacted deployed connection record and record a dated renewal, closure or gap.",
       "title": "Supplementary information exchanges need approved agreements and review records"
@@ -3963,7 +4023,8 @@
       "ownerRole": "owner",
       "poam": "g290",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment platform security owner identifies assessed shared resources, tenant boundaries and applicable data isolation controls. Review effective scope and security settings and verify isolation across representative authorized and unauthorized identities using synthetic records only. Retain redacted allowed and refused outcomes and observed configuration.",
       "title": "Supplementary shared-resource safeguards need verified isolation evidence"
@@ -3983,7 +4044,8 @@
       "ownerRole": "owner",
       "poam": "g291",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The contracting sponsor network assurance lead and assessor reconcile each displayed identifier to the contract selection and authoritative edition, which records these references as not allocated after NIST withdrawal. Keep a separate cited disposition for every identifier and record any approved successor only if designated by the contracting authority. Retain unresolved rows pending review.",
       "title": "Unallocated supplementary communications rows need per-objective sponsor decisions"
@@ -3998,7 +4060,8 @@
       "ownerRole": "owner",
       "poam": "g292",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment network security owner approves the assessed ingress and egress boundaries, default policy and exception review. Verify effective settings and expiry or disposition for sampled exceptions. Use benign authorized fixtures to document one permitted flow and one denied unapproved flow without collecting live traffic or payloads.",
       "title": "Supplementary network deny-by-default settings need observed rule evidence"
@@ -4013,7 +4076,8 @@
       "ownerRole": "owner",
       "poam": "g293",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment data protection and network owners confirm assessed storage, backups, replicas and transmissions for specified information. Review effective encryption settings and authorized exceptions for each scoped boundary. Verify a redacted configuration and benign synthetic observation for storage and transmission, with separate provider evidence for inherited controls.",
       "title": "Supplementary confidentiality in transit and storage needs scoped protection evidence"
@@ -4028,7 +4092,8 @@
       "ownerRole": "owner",
       "poam": "g294",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment network operations owner identifies assessed connection types and approves inactivity thresholds and termination rules. Verify expected disconnect after inactivity and completion for representative synthetic sessions. Retain timestamps and redacted settings with approved exceptions and inconclusive results tracked for review.",
       "title": "Supplementary network session disconnect needs timed verification"
@@ -4043,7 +4108,8 @@
       "ownerRole": "owner",
       "poam": "g295",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment cryptographic key custodian and independent reviewer approve requirements for key generation, distribution, storage, access and end of use. Verify protected references for representative lifecycle events and custody decisions, including retirement or destruction where applicable. Include only redacted metadata and authorized audit references, with no key material in the assessor export.",
       "title": "Supplementary key lifecycle governance needs protected operating evidence"
@@ -4058,7 +4124,8 @@
       "ownerRole": "owner",
       "poam": "g296",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor cryptographic authority and deployment security engineer verify the contract-selected cryptography and effective settings for each assessed protection use. Retain approved type, module and version references, permitted mode where relevant and a redacted comparison to deployment observations. Leave nonmatching or unresolved scope pending authorized disposition.",
       "title": "Supplementary cryptography approval needs exact deployment configuration evidence"
@@ -4073,7 +4140,8 @@
       "ownerRole": "owner",
       "poam": "g297",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment collaboration and endpoint owners inventory assessed devices and applications, document prohibition rules and approved exceptions, and verify effective activation controls. Observe blocked remote activation and a visible or audible in-use indication on synthetic test sessions. Record authorized exceptions and the tested device or application scope.",
       "title": "Supplementary collaboration remote activation and indicator settings need observed evidence"
@@ -4088,7 +4156,8 @@
       "ownerRole": "owner",
       "poam": "g298",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment application security owner defines mobile code technologies and approved uses within the assessed boundary. Verify authorization, monitoring and enforcement through a sampled approval and benign permitted and denied tests in an authorized environment. Retain reviewed configuration and oversight records without recording live code or content.",
       "title": "Supplementary mobile code governance needs reviewed authorization and monitoring evidence"
@@ -4103,7 +4172,8 @@
       "ownerRole": "owner",
       "poam": "g299",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The network security and application owners approve the authenticity requirements for assessed session types and identify the validating controls. Verify bounded representative sessions follow the approved identity validation and reject an invalid test identity. Retain redacted effective configuration and sanitized observed results.",
       "title": "Supplementary communications session authenticity needs scoped validation evidence"
@@ -4118,7 +4188,8 @@
       "ownerRole": "owner",
       "poam": "g300",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor physical access authority and facility credential custodian define facilities in the assessed ITSP.10.171 contract boundary. Review approved access lists, credential issuance, periodic review and timely removal through redacted samples and provider evidence for inherited facilities. Record applicable parameters, review authority and unresolved settings separately for this assessment.",
       "title": "Supplementary physical access authorization needs verified identity and removal records"
@@ -4133,7 +4204,8 @@
       "ownerRole": "owner",
       "poam": "g301",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The deployment facility security owner identifies assessed facility ingress, egress and output locations. Verify physical permission before entry, monitoring logs, visitor escorts, physical device and key custody and protection of output devices. Retain reviewed samples and verified provider references for inherited controls in this contract boundary.",
       "title": "Supplementary facility access controls need tested boundary and visitor evidence"
@@ -4148,7 +4220,8 @@
       "ownerRole": "owner",
       "poam": "g302",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor network security authority and system owner map the assessed external and key internal interfaces, public components and approved external connections. Review public-to-internal subnet separation, boundary devices and monitoring settings, and verify representative approved and denied connections using benign synthetic observations. Record inherited protection and findings at the scope of this contract.",
       "title": "Supplementary managed interfaces and public subnet separation need deployment verification"
@@ -4163,7 +4236,8 @@
       "ownerRole": "owner",
       "poam": "g305",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor vulnerability and service owners approve how flaws are identified, reported and corrected, and set the time allowed from release to installation of security-relevant software and firmware updates. Sample a flaw through closure and compare release and installation dates against the approved limit for assessed components. Record supplier evidence as a supporting reference and explain any unresolved overdue exposure.",
       "title": "Supplementary flaw remediation requires dated release and update records"
@@ -4178,7 +4252,8 @@
       "ownerRole": "owner",
       "poam": "g306",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor endpoint protection and gateway owners identify assessed entry, exit and endpoint coverage and approve update and scan settings. Verify scheduled scans and real-time inspection of external files at an applicable download, open or execution event. Use an authorized benign test or sanitized record to confirm block, quarantine or documented mitigation and the mechanism update history.",
       "title": "Supplementary malicious code protection needs deployment and response evidence"
@@ -4193,7 +4268,8 @@
       "ownerRole": "owner",
       "poam": "g307",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor vulnerability and incident communications leads define trusted external sources and internal recipients and roles. Sample receipt of an external alert or directive, its assessment and timely preparation and dissemination of internal advice when needed. Cite assessed service boundaries and reviewed subscription or routing settings.",
       "title": "Security advisory receipt and dissemination need operational evidence"
@@ -4208,7 +4284,8 @@
       "ownerRole": "owner",
       "poam": "g308",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor security operations and network monitoring leads map monitored services and communications boundaries. Verify that the assessed monitoring can identify attack indicators, unauthorized connections and use, and unusual or unauthorized inbound and outbound traffic. Use authorized benign exercises or redacted incident records with operator review.",
       "title": "System monitoring needs coverage and detection verification"
@@ -4223,7 +4300,8 @@
       "ownerRole": "owner",
       "poam": "g309",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor information governance, privacy and service owners identify specified information in system records and output. Approve applicable handling, retention and disposition schedules and record which organizational obligations drive them. Verify representative system records and outputs against the schedule while preserving restricted artifact references and provider scope.",
       "title": "Specified information handling and retention need sponsor approval"
@@ -4238,7 +4316,8 @@
       "ownerRole": "owner",
       "poam": "g310",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor privileged access and network security leads document the dedicated hardened physical workstations or thin clients for administrative and superuser actions. Verify segregation from ordinary work, other networks and internet access, and evidence that workstations are assigned to a single security realm. Where remote administration is used, assess approved private carrier transport and VPN encryption at the assessed boundary.",
       "title": "Dedicated administration workstation scope and isolation need verification"
@@ -4255,7 +4334,8 @@
       "ownerRole": "owner",
       "poam": "g311",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor assessment authority reconciles each displayed identifier and edition against the ITSP.10.171 source, which marks these rows not allocated and withdrawn by NIST. Record a source-cited signed scope disposition per identifier, including any replacement objective reference supplied by the competent authority. Keep these paths open pending the reviewed determination.",
       "title": "Unallocated integrity rows need signed source and scope reconciliation"
@@ -4270,7 +4350,8 @@
       "ownerRole": "owner",
       "poam": "g312",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor governance and information security leads approve and document the policies and procedures needed to protect specified information, identify recipients, and define review frequency. Demonstrate that relevant personnel or roles received the current material and trace a dated approval or review against the required cadence.",
       "title": "Specified information security procedures need sponsor adoption and review evidence"
@@ -4285,7 +4366,8 @@
       "ownerRole": "owner",
       "poam": "g313",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor system owner, security lead and privacy lead document constituent components, information types and flows, specific threats, environment and dependencies, requirements, existing and planned safeguards and accountable individuals. Approve the review cadence and verify that unauthorized access to the plan is restricted. Record unresolved provider or deployment boundaries for sponsor review.",
       "title": "System security and privacy plan needs sponsor approval and boundary evidence"
@@ -4300,7 +4382,8 @@
       "ownerRole": "owner",
       "poam": "g314",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor user governance and privacy leads approve roles and expected behaviour for using the system and protecting specified information. Provide current rules to individuals requiring access and verify a dated acknowledgement of agreement before granting access. Record assigned review and update cadence. Use de-identified or restricted evidence.",
       "title": "Rules of behaviour need documented acknowledgement before access"
@@ -4315,7 +4398,8 @@
       "ownerRole": "owner",
       "poam": "g315",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor engineering authority and system owner approve the security engineering principles applicable to development and modification. Trace them into a representative design or change, component acceptance criteria and review outcome. Cite product evidence only where the sponsor has verified the component and deployment boundary.",
       "title": "Security engineering principles need assessed implementation evidence"
@@ -4330,7 +4414,8 @@
       "ownerRole": "owner",
       "poam": "g316",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor component and service owners reconcile installed components to authoritative vendor support status. Sample replacement of a component after support ends or document why it cannot be replaced and the evaluated mitigation or credible alternative support. Record accountable decisions, time limits and evidence of implemented safeguards or alternative support where applicable.",
       "title": "Unsupported components need replacement or an approved mitigation path"
@@ -4345,7 +4430,8 @@
       "ownerRole": "owner",
       "poam": "g317",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor service owner, procurement authority and privacy lead identify external providers that process, store or transmit specified information. Define provider security requirements and shared responsibilities, including applicable user roles. Sample an approved agreement or equivalent provider obligation and a dated monitoring result with follow-up. Keep scope and inherited control determinations open for sponsor review.",
       "title": "External specified information services need requirements and ongoing oversight evidence"
@@ -4360,7 +4446,8 @@
       "ownerRole": "owner",
       "poam": "g318",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor supply chain risk owner and system owner document how risks are managed across research, development, design, manufacture, acquisition, delivery, integration, operation, maintenance and disposal for assessed systems, components and services. Confirm approved review cadence and protection from unauthorized disclosure. Record scope decisions for stages reliant on suppliers.",
       "title": "Supply chain risk management plan needs lifecycle and access evidence"
@@ -4375,7 +4462,8 @@
       "ownerRole": "owner",
       "poam": "g319",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor acquiring authority and supply chain risk owner approve procurement methods and contract tools for identifying, guarding against and mitigating supply chain risk. Sample an acquisition with risk evaluation, evaluated options, applied safeguards and documented contract or award decisions. Reference restricted supplier evidence rather than publishing sensitive material.",
       "title": "Acquisition strategies and contract tools need procurement evidence"
@@ -4390,7 +4478,8 @@
       "ownerRole": "owner",
       "poam": "g320",
       "profiles": [
-        "itsp-10-171"
+        "itsp-10-171",
+        "hosted-itsp-10-171"
       ],
       "remediation": "The sponsor supply chain and service owners establish how weaknesses are identified and addressed and define enforceable security requirements that reduce risk and limit harm. Trace an assessed supply chain issue or authorized exercise through notification, triage, corrective action and follow-up. Verify a representative requirement or enforcement record in the assessed boundary.",
       "title": "Supply chain weaknesses and security requirements need operational evidence"
@@ -4736,8 +4825,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add evidence rules on the realm as code that prove each signInKeys level: passkeys accepts synced and device-bound passkeys; hardware-only requires attestation, a non-empty AAGUID allowlist and device-bound keys and is the recommended production setting. State that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped.",
-      "title": "The signInKeys levels have no evidence rule yet"
+      "remediation": "The realm-test rule keycloak.ia-05.sign-in-keys proves each signInKeys level of the realm as code: passkeys asks for no attestation and keeps no allowlist; hardware-only asks for direct or enterprise attestation and accepts only the authenticator models on the site allowlist. The statement says that cross-device passkey sign-in needs an Apple or Google internet relay and is unavailable air-gapped. This gap closes when ia-02 and ia-05 read Met from evidence on the hosted levels.",
+      "title": "The signInKeys levels have their rule; the site evidence is still to come"
     },
     {
       "appliesAt": "protected-a",
@@ -4754,7 +4843,7 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add the evidence rule that proves each site's relying-party ID is the shared parent domain of its DNS layout (O3).",
+      "remediation": "The realm check proves only that the relying-party ID is the one bare domain name the site file names. Add the check and its evidence rule that the relying-party ID is the shared parent domain of every host name in the site's DNS layout (O3).",
       "title": "The shared relying-party ID has no evidence rule yet"
     },
     {
@@ -4815,9 +4904,7 @@
       "controls": [
         "sc-13",
         "sc-12",
-        "cm-06",
-        "au-02",
-        "au-12"
+        "cm-06"
       ],
       "id": "G334",
       "ownerRole": "maintainers",
@@ -4826,8 +4913,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components, the STIG profile, the Kubernetes audit policy and hosts in FIPS mode: test rules on the Phase 47 rendered configuration, and observations from the deployment evidence export.",
-      "title": "RKE2 has no statements for four of its section 10 conditions"
+      "remediation": "Add rke2 statements with evidence rules for the FIPS build with Canal and the bundled FIPS components (the running version and a dated record) and the STIG profile (the rendered configuration names the CIS profile today). The audit policy and the hosts in FIPS mode have their rules (rke2.au-02.audit-policy, rke2.sc-13.fips-hosts).",
+      "title": "RKE2 has no statements for its FIPS build or the STIG profile"
     },
     {
       "appliesAt": "protected-a",
@@ -4836,11 +4923,7 @@
       "controls": [
         "si-02",
         "ia-02",
-        "ia-05",
-        "au-02",
-        "au-12",
-        "sc-08",
-        "sc-28"
+        "au-12"
       ],
       "id": "G335",
       "ownerRole": "maintainers",
@@ -4849,8 +4932,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add keycloak statements with evidence rules for a version at or above the recorded minimum for CVE-2026-6856, password and OTP authenticators disabled, events shipped to the audit store, and its Postgres with TLS and encryption at rest: test rules on the realm as code and Phase 47 manifests, and observations from the deployment evidence export.",
-      "title": "Keycloak has no statements for its section 10 conditions"
+      "remediation": "Keycloak's statements and rules are in place for section 10 rows 6, 7, 8 and 47. The version, the live authenticators and the shipped events are deployment observations, which read as missing results until the reference site's signed export is committed (48-09). This gap closes when si-02, ia-02 and au-12 read Met from that evidence.",
+      "title": "Keycloak statements wait on the site evidence export"
     },
     {
       "appliesAt": "protected-a",
@@ -4859,14 +4942,6 @@
       "controls": [
         "sc-13",
         "sa-10",
-        "sr-03",
-        "sr-11",
-        "si-07",
-        "sc-08",
-        "sc-23",
-        "au-02",
-        "au-12",
-        "cm-02",
         "cm-07"
       ],
       "id": "G336",
@@ -4876,19 +4951,15 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add theia-cloud statements with evidence rules for the rebuild on a FIPS-capable UBI 9 JRE, signature, SBOM and provenance per image digest, the fixed oauth2-proxy defaults in the chart, the audit policy on Session and Workspace records, the pin to the assessed commit and no Debian or Alpine bases at Protected B.",
-      "title": "Theia Cloud has no statements for its section 10 conditions"
+      "remediation": "Add theia-cloud statements with evidence rules for the rebuild from source on a FIPS-capable UBI 9 JRE (a test on the image build and the running image digest) and for no Debian or Alpine base at Protected B. The signature, SBOM and provenance per image, the chart's sidecar defaults, the audit of Session and Workspace records and the pinned images have their rules.",
+      "title": "Theia Cloud has no statements for its FIPS rebuild or its image bases"
     },
     {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "sc-13",
-        "sc-08",
-        "sc-23",
-        "ia-05",
-        "ia-02"
+        "sc-13"
       ],
       "id": "G337",
       "ownerRole": "maintainers",
@@ -4897,8 +4968,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add oauth2-proxy statements with evidence rules for the rebuild with the pinned Go FIPS module version, TLS verify on, secure cookies, a real client secret and token forwarding, as test rules on the Phase 47 build job and rendered manifests.",
-      "title": "oauth2-proxy has no statements for its section 10 conditions"
+      "remediation": "Add the oauth2-proxy statement with an evidence rule on the image build with the pinned Go FIPS module version. TLS verification, secure cookies, the real client secret and the forwarded identity have their rules.",
+      "title": "oauth2-proxy has no statement for its Go FIPS module build"
     },
     {
       "appliesAt": "protected-a",
@@ -4957,11 +5028,9 @@
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "si-07",
         "ra-05",
         "cm-08",
-        "ia-02",
-        "au-12"
+        "ia-02"
       ],
       "id": "G341",
       "ownerRole": "maintainers",
@@ -4970,16 +5039,14 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add image-registry statements with evidence rules for signature-enforced import and admission, scanning, SBOM storage, OIDC to Keycloak and the audit log at Harbor sites, and the same import rules at Zot sites: observations from the deployment evidence export and test rules on the Phase 47 configuration.",
-      "title": "The image registry has no statements for its section 10 conditions"
+      "remediation": "Add image-registry statements with evidence rules for scanning (Harbor renders no Trivy scanner today), SBOM storage and OIDC sign-in to Keycloak. Signature-enforced admission at Harbor and Zot sites and the registry audit events have their rules.",
+      "title": "The image registry has no statements for scanning, SBOM storage or OIDC"
     },
     {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "sc-13",
-        "sc-12",
         "cm-02"
       ],
       "id": "G342",
@@ -4989,8 +5056,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add workbench statements with evidence rules for the UBI 9 base, Node with OpenSSL 3 and the RHEL FIPS provider on a FIPS host, and signing and unwrapping through OpenBao or the HSM: test rules on the Phase 46 image build and P4 tests, and an observation of the FIPS mode Node reports.",
-      "title": "The workbench image has no statements for its section 10 conditions"
+      "remediation": "Add the workbench statement for the UBI 9 base with a test rule whose result reaches the evidence bundle: the container suite that checks the running image (base, user, Node major) writes no test report today, so its results cannot be evidence. Signing and unwrapping through OpenBao and the FIPS provider have their rules (workbench.sc-12.sign-after-step-up, workbench.sc-13.fips-provider, workbench.sc-13.provider-record).",
+      "title": "The workbench image has no statement for its UBI 9 base"
     },
     {
       "appliesAt": "protected-a",
@@ -5007,16 +5074,14 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the cert-manager fit check, then add its statement with a test rule on the rendered manifests for a CA issuer chained to the OpenBao PKI. The statement that no rendered issuer uses ACME already has its rule (cert-manager.sc-17.no-acme).",
-      "title": "cert-manager is not assessed and has no CA issuer statement"
+      "remediation": "The rules cert-manager.sc-12.issuers, cert-manager.sc-12.certificates and cert-manager.sc-17.no-acme prove from the rendered manifests that every certificate comes from the OpenBao-backed issuers and none from ACME. This gap closes when sc-12 and sc-23 read Met from evidence on the hosted levels.",
+      "title": "cert-manager statements wait on evidence"
     },
     {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",
       "controls": [
-        "cm-06",
-        "ac-03",
         "ia-05.02"
       ],
       "id": "G344",
@@ -5026,8 +5091,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Add hub statements with evidence rules for its Kubernetes deployment, several hubs per site each serving a set of projects, and session keys with a site-issued certificate: test rules on the hub and Phase 47 manifest tests and an observation of the hub workload settings.",
-      "title": "The sync hub is not re-assessed for the hosted deployment"
+      "remediation": "Add the hub statement with an evidence rule on the hub tests for session keys with a site-issued certificate. The Kubernetes hardening and several hubs per site have their rules (hub.cm-06.kubernetes, hub.sc-07.separate-hubs).",
+      "title": "The sync hub has no statement for session keys with a site-issued certificate"
     },
     {
       "appliesAt": "protected-a",
@@ -5043,8 +5108,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the storage class fit check, then add its statement for declared encryption at rest with a test rule on the install check.",
-      "title": "The site storage class is not assessed"
+      "remediation": "The rules site-storage.sc-28.encrypted-class and its install rules prove from the rendered manifests and the install that every storage class is encrypted. This gap closes when sc-28 reads Met from evidence on the hosted levels.",
+      "title": "The site storage class statements wait on evidence"
     },
     {
       "appliesAt": "protected-a",
@@ -5060,8 +5125,8 @@
         "hosted-protected-b",
         "hosted-itsp-10-171"
       ],
-      "remediation": "Record the fit check for the log and metrics stores, a log store that is not AGPL (Loki is not chosen), then add their statements with test rules and deployment observations.",
-      "title": "The site log and metrics stores are not assessed"
+      "remediation": "The rules site-logging.au-09.store and site-logging.au-09.shipping prove from the rendered manifests that audit and container logs go only to the site OpenSearch, which runs with its security plugin; OpenSearch is Apache-2.0 licensed, recorded in the register. This gap closes when au-09 reads Met from evidence on the hosted levels.",
+      "title": "The site log store statements wait on evidence"
     },
     {
       "appliesAt": "protected-b",
@@ -5486,8 +5551,8 @@
       "id": "G373",
       "ownerRole": "maintainers",
       "poam": "g373",
-      "remediation": "CI refuses an extension package over 14 MiB, and the package has little room left. Watch its size in each release, and move large bundled data out of the package before the limit blocks a release.",
-      "title": "The extension package is close to its size limit"
+      "remediation": "CI checks the extension package against a 64 MiB sanity ceiling and 4,000 entries, which catch an accidental inclusion such as node_modules or source artwork; the former 14 MiB cap was self-imposed, and the owner raised it on 2026-11-25 (\"keep it efficient, but it can grow\"). The release-content job prints the package size and its change from main's last package, and warns when one change grows it by more than 1 MiB. Watch that report, and move large bundled data out of the package when it stops being needed.",
+      "title": "The extension package's size is watched, not tightly capped"
     },
     {
       "appliesAt": "now",
@@ -6077,7 +6142,7 @@
       ],
       "id": "G427",
       "ownerRole": "maintainers",
-      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer needs status list indexes from your organization's issuance setup (71-12); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
+      "remediation": "People's identities are made by their own backend at first sign-in, but three parts are not in service yet (Phase 71, 71-10). First, each person's identity log reaches your organization's server only through that person's first session with it, which needs Phase 33's hosted session keys (33-21 to 33-23); until they are on main the logs stay in each person's own secret store, so no check can find a person's identity on the server. Second, the site does not set STERLING_DID_DOMAIN for the workbench yet, so a hosted session makes no identity at all; the site chart must render it (Phase 47's site values). Third, binding a computer takes its status list places from the person's own computer slots (D-25, at most 5), which needs your organization's status lists in the session (G465); until then it is refused with a plain sentence. Close each when its dependency lands, and test the post against the real server then.",
       "title": "People's identities are made but not yet published, and computers cannot be bound yet"
     },
     {
@@ -6119,6 +6184,19 @@
       "ownerRole": "maintainers",
       "remediation": "The site install writes the static application secrets its release descriptors declare (install.mjs secrets): today longhorn-crypto, postgres-superuser, keycloak-db and keycloak-admin-bootstrap, and the registry account through install.mjs registry. The others the charts expect are not declared yet: opensearch-internal-users with opensearch-admin and opensearch-writer (bcrypt hashes), oauth2-proxy-secrets, keycloak-realm-applier, the Harbor Secrets on Harbor sites, and each hub-<name>-keys (the hub-key generator exists). Without them a full apply stops at the first release that needs one. Declare them, with their hashing, before 47-18's lab run. Source: .planning/phases/47-on-premise-deployment-stack-and-offline-bundle/47-16-SUMMARY.md.",
       "title": "The site install does not yet write every application secret the charts expect"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "33",
+      "controls": [
+        "cm-08",
+        "sr-04"
+      ],
+      "id": "G422",
+      "ownerRole": "maintainers",
+      "remediation": "The workbench image now carries the staff engine with the vendored Yjs 13.6.33 and lib0 0.2.119 build (workbench/engine/vendor/yjs, hash-pinned in scripts/crdt-vendor.json), which the image SBOM written by syft does not list, because a bundled file has no package manifest. Add those two packages to the image's supply-chain record from scripts/crdt-vendor.json before Phase 33 closes. Source: .planning/phases/33-live-multi-user-staff-projects/33-24-SUMMARY.md.",
+      "title": "The workbench image SBOM does not list the Yjs build in the staff engine"
     },
     {
       "appliesAt": "now",
@@ -6171,8 +6249,33 @@
       ],
       "id": "G449",
       "ownerRole": "maintainers",
-      "remediation": "Guest accounts (deploy/keycloak/guests.mjs, 47-19) hold lifecycle attributes only: how a guest serves, their organization, access agreement and visit clearance are credentials the security contact issues to the guest in their own session, and an early end files a revocation request that only 71-12's revocation card shows to the issuing officers. 71-12 is not on main, so a site must keep guests off (guests.maxDays 0 or absent in the realm site file) until it runs a release that includes 71-12: the example ships maxDays 0, and guests.mjs create and extend refuse a nonzero maxDays while the release has no credential-issuers policy (71-12's); 47-20, the automatic end, waits on it too. Close this when 71-12 is merged and the lab run shows a guest's credentials issued and an early end's request revoked.",
+      "remediation": "Guest accounts (deploy/keycloak/guests.mjs, 47-19) hold lifecycle attributes only: how a guest serves, their organization, access agreement and visit clearance are credentials the security contact issues to the guest in their own session, and an early end files a revocation request that only 71-12's revocation card shows to the issuing officers. 71-12 is now in the release, but its card is not reachable in a hosted session until G465 closes, so guests.mjs keeps CREDENTIAL_CARD_REACHABLE false and a site must keep guests off (guests.maxDays 0 or absent in the realm site file) until it runs a release that includes 71-12: the example ships maxDays 0, and guests.mjs create and extend refuse a nonzero maxDays while the release has no credential-issuers policy (71-12's); 47-20, the automatic end, waits on it too. Close this when G465 is closed, CREDENTIAL_CARD_REACHABLE is set, and the lab run shows a guest's credentials issued and an early end's request revoked.",
       "title": "Guest accounts stay off until a release includes the credential issuing and revocation card (71-12)"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "33",
+      "controls": [
+        "cp-10",
+        "sa-11"
+      ],
+      "id": "G430",
+      "ownerRole": "maintainers",
+      "remediation": "A person who joins a shared project late now starts each log from the newest checkpoint your organization's server signed, but only in the base cell and the cells granted to that server after the trade-off: the server checkpoints no other cell, so there the history is read in full (nothing is left out, and the person is told so). A summary of a product's text also counts only once the registrations of the editing sessions it holds have arrived, and those are written before the checkpoint, so the text is complete only when the earlier history has been served. Decide how a summary may name the sessions it holds without their registrations, then build serving the earlier history after the start. Source: .planning/phases/33-live-multi-user-staff-projects/33-14-SUMMARY.md.",
+      "title": "A late joiner starts from a checkpoint only in cells the server holds, and its text waits for the earlier history"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.1",
+      "controls": [
+        "sc-12"
+      ],
+      "id": "G445",
+      "ownerRole": "shared",
+      "remediation": "pkcs11-tool --keypairgen --usage-sign only adds CKA_SIGN to the private key template and never sets the other usages false (OpenSC 0.27 gen_keypair), so SoftHSM2's defaults leave the development site key's private key with decrypt and unwrap usage as well (Usage: decrypt, sign, signRecover, unwrap; seen on a real token by deploy/test/dev-site-key-softhsm.test.mjs, 48.1-22 field fix). SoftHSM2 has no EC decrypt or unwrap mechanism and CKA_DERIVE is false, so the extra flags cannot be used in development, and the script still requires the key to be sensitive and never extractable. Production: generate the site key in your organization's HSM with a template that sets CKA_SIGN true and CKA_DECRYPT, CKA_UNWRAP and CKA_DERIVE false (the HSM vendor's tool, or a PKCS#11 template), record the key's usage attributes in the key ceremony record (deploy/runbooks/key-ceremony.md), and add that step to the ceremony.",
+      "title": "The development site key's private key also carries decrypt and unwrap usage"
     },
     {
       "appliesAt": "now",
@@ -6210,6 +6313,94 @@
       "ownerRole": "owner",
       "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that use the old product name (the VS Code extension's former name); the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
       "title": "SA&A drafts made before the rename call the system by its old name"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "74.3",
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G460",
+      "ownerRole": "maintainers",
+      "remediation": "Phase 70.1 ships the pure classification engine (src/domain/classify: assess, decide, the proposal record v1, the classification@1 section and the five label events) with no caller: nothing in the product proposes or raises a label from content yet, and no document says it does. Phase 74.3 wires the runner, the panel, affirmation and the spill report to it. Until then labels are set by people and by the session mark only. Source: 70.1-HANDOFFS.md E-01, E-04.",
+      "title": "The classification engine has no caller until Phase 74.3"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G461",
+      "ownerRole": "shared",
+      "poam": "g461",
+      "remediation": "Nothing ships as values (70.1 D-07): a level with no threshold has no automatic model raise, a section with no systemHigh gives no possible-spill outcome, and no marking pattern, code word or guide rule is built in. Your organization's security officer sets the cost ratios and recall targets per level, the system-high of each deployment layer, the English and French banner and portion markings, the code-word list (labelled at its own level) and the guide and compilation rules from your organization's security classification guide, signed in the classification@1 section. Phase 74.3 documents how. Source: 70.1-CONTEXT.md D-07, D-13, D-16.",
+      "title": "Classification thresholds, the system-high, markings, code words and guide rules are your organization's to set"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "si-10"
+      ],
+      "id": "G462",
+      "ownerRole": "maintainers",
+      "poam": "g462",
+      "remediation": "src/domain/classify/hidden.ts finds instructions hidden from the reader and aimed at a classifier by a fixed list of English and French phrases after normalising case, accents, compatibility forms and zero-width characters. A rephrased or optimised injection, or one in another language, is not found by it; the engine still never lowers a label whatever the text says (D-05, D-04). Phase 74.3 adds an evaluated hidden-instruction model role (74.3 D-24) beside the list, and the red-team set grows with it. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+      "title": "The hidden-instruction detector matches a fixed English and French phrase list"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G463",
+      "ownerRole": "shared",
+      "poam": "g463",
+      "remediation": "The owner-confirmed marking pattern grammar of classification@1 (2026-11-25) is plain words: letters and digits, single spaces, - and /. A portion marking written (S) is therefore listed as the bare token S, which also matches any standalone capital S and can over-raise (the safe direction, which still costs people time). Decide with the owner whether a classification@2 marking pattern may carry the brackets of a portion marking, and until then list only portion tokens your organization's texts do not use as words. Source: 70.1-04 SUMMARY.",
+      "title": "Portion markings such as (S) match only as bare tokens"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "si-10",
+        "ac-16"
+      ],
+      "id": "G464",
+      "ownerRole": "maintainers",
+      "poam": "g464",
+      "remediation": "assess() reads the visible text and the hidden parts it is given; white-on-white text, tiny fonts, PDF layers and office document metadata reach it only if the caller extracts them. Phase 74.3-03 extracts plain text, Markdown (HTML comments, zero-width text, image alt text, front matter) and staff product documents with their comments; ingested files of other formats are Phase 93's. Source: 70.1-CONTEXT.md D-19; research 3.6.",
+      "title": "The classification engine sees only the hidden parts its caller extracts"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "71",
+      "controls": [
+        "ia-05",
+        "sc-12",
+        "sc-17"
+      ],
+      "id": "G465",
+      "ownerRole": "maintainers",
+      "remediation": "Issuing, revoking and suspending credentials from an officer's own session are built and tested against fakes (Phase 71, 71-12), but a hosted session cannot use them yet, for four reasons. First, the session has no copy of your organization's credential rules: the issuer service and the inbox pickup read them from the hosted trust source of 71-13, which is not on main, so issuing refuses with a plain sentence and inbox items wait. Second, status lists are read from and put on your organization's server only through the officer's hub session, which needs Phase 33's hosted session keys (33-21 to 33-23). Third, the site does not set STERLING_STATUS_LIST_KEY (status-list-<siteName>) or STERLING_OPENBAO_ISSUER_ROLE for the workbench yet, and no site file names its credentialIssuers; Phase 47's site values must render both and the key ceremony runbook must name the officers. Fourth, the person's backend moves checked credentials into their own wallet folder in OpenBao (kv/users/<entity>/credentials-wallet/), which the extension's Wallet does not read yet; 71-13 joins the two. Close each when its dependency lands, and test issuance end to end against a real OpenBao and hub then.",
+      "title": "Credential issuance is built but not yet reachable in a hosted session"
+    },
+    {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "closesInPhase": "71",
+      "controls": [
+        "sc-05",
+        "si-04"
+      ],
+      "id": "G467",
+      "ownerRole": "maintainers",
+      "remediation": "Computer bindings are now checked by every verifier (D-26): a binding counts only when its status places are in the computer part of the lists and the person's own DID document lists it in one of at most five slots, and the HQ hub refuses a DID log whose computer uses another person's place. What is left is the limit on claiming computer places in OpenBao (kv/data/site/status-index/device-), which only keeps one person from using up the places others need: deploy/openbao/apply.mjs sets the rate limit quota computer-places (12 claims an hour per client address, then blocked for an hour, violations audited), and the alert ComputerPlaceClaimsLimited reads vault_quota_rate_limit_violation. That the quota matches the path prefix and counts each session pod's address separately comes from OpenBao's documentation and is not yet checked against a running OpenBao 2.7. Check it in the lab install (Phase 47): claim 13 places from one session, see the 13th refused, the counter rise and the alert fire; then close this gap.",
+      "title": "The limit on computer place claims is not yet checked against a running OpenBao"
     },
     {
       "appliesAt": "protected-a",
@@ -6251,6 +6442,112 @@
       "title": "The sessions certificate carries a wildcard name for the webview hosts, which needs accepting"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "si-07",
+        "au-09",
+        "ca-07"
+      ],
+      "id": "G475",
+      "ownerRole": "owner",
+      "poam": "g475",
+      "remediation": "The site collector signs the live site evidence feed with the OpenBao Transit key site-evidence, so facts about OpenBao (its seal status among them) are signed by the system they describe. The weekly operator-signed site evidence export (48-02) stays the independent check, and the Compliance view names the signer of each item. The authorizing official accepts the residual risk, or a signer outside OpenBao is designed. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-20, D-29).",
+      "title": "The live site feed is signed by a key held in OpenBao, so facts about OpenBao are signed by the system they describe"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "si-07"
+      ],
+      "id": "G476",
+      "ownerRole": "maintainers",
+      "poam": "g476",
+      "remediation": "The GitHub attestations of the installer and the compliance package are keyless and need the public Sigstore service, so an air-gapped workbench cannot check them; the Compliance view lists them as not checked here, with the gh attestation verify command. The bundle build on your organization's connected build host verifies them with gh attestation verify and carries the result as signed site evidence. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-16, D-29).",
+      "title": "Keyless GitHub attestations of the installer and compliance package cannot be checked inside an air-gapped workbench"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.2",
+      "controls": [
+        "si-07",
+        "sr-04"
+      ],
+      "id": "G477",
+      "ownerRole": "maintainers",
+      "remediation": "The release image cannot hold its own signature, so the image signature and the SBOM attestation are made after the image exists and a session relies on your site's admission policy for them; the Compliance view shows them as checked by your site's admission policy when the session started, with the cosign verify command. The site collector reports the admission results (48.2-09) and the view shows them as your site's evidence. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-16, D-29).",
+      "title": "The image signature and SBOM attestation are made after the image exists, so a session relies on site admission for them"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.2",
+      "controls": [
+        "au-08",
+        "ca-07"
+      ],
+      "id": "G478",
+      "ownerRole": "shared",
+      "remediation": "Every state and freshness is judged against the session clock, so a wrong site clock can make old evidence read current until the clock-error alerts fire. The view refuses a clock earlier than the release build and future-dated evidence (48.2-03), and your site's clock-error alerts (48.1-23) reach the view as live site evidence (48.2-09). Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-14, D-29).",
+      "title": "Freshness is judged against the session clock; a wrong site clock can make old evidence read current until clock alerts fire"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "si-02",
+        "ra-05"
+      ],
+      "id": "G479",
+      "ownerRole": "maintainers",
+      "poam": "g479",
+      "remediation": "The Compliance view shows the release scan and site rescans with their counts and fixes, but SI-2 remediation timeliness is not judged from the findings. A later phase adds a rule on fixable critical and high findings older than your organization's remediation time. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-29).",
+      "title": "Vulnerability findings are shown but SI-2 remediation timeliness is not judged from them"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cm-02",
+        "cm-06",
+        "sc-07"
+      ],
+      "id": "G480",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The workbench container suite (npm run test:container in the workbench job and the release image job) checks the running image: its UBI 9 base, its non-root user, its Node major, its health and that it makes no outbound connection outside its allow list. It writes no test report, so none of those results can be an evidence rule. Write its per-test report with NEAR_AI_TEST_REPORT and upload it beside the unit-test report (a gate change to ci.yml), then add the workbench statements for the image base, the Node major shared with the hub and the run-time egress check.",
+      "title": "The workbench container suite writes no evidence report"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "ia-02",
+        "au-12",
+        "si-02",
+        "si-07",
+        "sc-13"
+      ],
+      "id": "G482",
+      "ownerRole": "owner",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Hosted statements that need the running site (the live Keycloak realm, its version and events, the OpenBao audit device, the audit of Session and Workspace records, nodes and sessions in FIPS mode, signed image admission, registry audit and verified image signatures, SBOMs and provenance) rest on deployment observations. There is no reference site export under compliance/site-evidence/ and the site trust list is empty, so each of those rules reads as a missing result. Add the reference rig's operator key to compliance/attestations/site-signers.json and commit its signed export (48-09); the export must then be renewed at least every 7 days or the rows turn Stale.",
+      "title": "No reference site evidence export or site signer key yet"
+    },
+    {
       "appliesAt": "now",
       "blocksProduction": false,
       "closesInPhase": "44.1",
@@ -6260,7 +6557,7 @@
       ],
       "id": "G490",
       "ownerRole": "maintainers",
-      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. The draft rules move about 8,016 cells, two thirds, to Not applicable; 44.1-07 replaces this estimate here with the count it measures on the signed map. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
+      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. Measured at commit 2f35f92c on the map your organization reviewed (its sections unchanged since b87d11f5): the map gives 3,800 stage 1 cells (Unclassified, Protected A, hosted Protected A) and 3,775 stage 2 cells (Protected B, hosted Protected B) no part, each with its reason, and 4,541 applicable cells over those five levels have no statement yet. Each stage's cells read Not applicable only once its sign-off is recorded in compliance/applicability/reviews.json; until then they read Not met, awaiting sign-off. 44.1-22 and 44.1-23 update this count as later stages land. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
       "title": "The dashboard assesses every component against every control"
     },
     {
@@ -6384,6 +6681,41 @@
       "poam": "g504",
       "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
       "title": "Some OpenTDF forms are refused as not supported yet"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "cp-06",
+        "cp-06.01",
+        "cp-09",
+        "cp-09.03"
+      ],
+      "id": "G515",
+      "ownerRole": "shared",
+      "poam": "g515",
+      "remediation": "Owner decision d (D-81) requires a daily copy of the Longhorn backup target and the write-once audit archive to a write-once store at your organization's second site, and the backup runbook describes a sterling-offsite CronJob and offsite.mjs pack and verify for it. Neither exists yet; plan 47-33 builds them. Until then a site has no automated off-site copy: your organization makes the copy by its own means and records each one. This closes when 47-33 lands the CronJob, offsite.mjs pack and verify, and their tests, and a lab run copies and verifies one day's set.",
+      "title": "The daily off-site copy has no tooling yet"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "controls": [
+        "ca-03",
+        "sa-09",
+        "sc-07",
+        "sc-08"
+      ],
+      "id": "G516",
+      "ownerRole": "shared",
+      "poam": "g516",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "Hosted workbench sessions send prompts and context up to Protected A or B to the model servers your organization's signed policy lists (the model-servers exchange), but compliance/levels.json does not list model-endpoints in the hosted levels, so the model servers have no rows there and no section in the hosted applicability map. Plan 48.1-06 (D-12) adds model-endpoints to hosted-protected-a, hosted-protected-b and hosted-itsp-10-171. When it lands, the applicability map gains a model-endpoints section at those levels that your organization must review before it takes effect, and the existing hosted sections, whose reasons name the components that carry each facet, must be re-checked and signed again. This closes when 48.1-06 has landed and the hosted stages are signed with the model-endpoints section.",
+      "title": "The hosted levels do not yet assess the model servers"
     }
   ]
 }

@@ -12,6 +12,9 @@
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
     "forceConsistentCasingInFileNames": true
   },
   "include": ["test/**/*.ts", "tools/**/*.ts"]

@@ -2,9 +2,13 @@
 // (fixtures/collectors/tests/root.ndjson, made by make-report.mjs) and a fixture checkout holding the test's source file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { checkRuleTargets, evaluateObservationRule, evaluateTestRule, hasStringLiteral, windowForCollector, type RuleContext } from '../src/rules.ts';
+import { ACCEPTED_OBSERVATION_COLLECTORS, checkRuleTargets, evaluateObservationRule, evaluateTestRule, hasStringLiteral, REPORTED_TEST_ROOTS, statementsWithoutAcceptableRule, windowForCollector, type RuleContext } from '../src/rules.ts';
+import { COLLECTORS } from '../src/bundle.ts';
+import { loadComponents } from '../src/components.ts';
+import { loadEvidenceRules } from '../src/evidenceRuleFiles.ts';
 import { computeStatus, isFresh } from '../src/status.ts';
 import { readReport } from '../src/collectors/tests.ts';
 import type { EvidenceRule, ReasonCode, TestReportRow } from '../src/model.ts';
@@ -148,4 +152,56 @@ test('a carried CODEOWNERS observation is stale at another commit while unrelate
   const unrelated = evaluateObservationRule({ ...rule, observation: { collector: 'settings', subject } }, [{ ...observation, subject }], context);
   assert.equal(unrelated.window, 'settings');
   assert.equal(isFresh(unrelated, COMMIT, now), true);
+});
+
+// ---- 44.1-08 (D-18): a statement needs a rule backed by a reported test, a CI artefact collector or the site collector -------------------------
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const realSources = () => {
+  const { levels } = JSON.parse(readFileSync(path.join(REPO, 'compliance', 'levels.json'), 'utf8')) as { levels: { components: string[]; claim?: boolean }[] };
+  return { components: loadComponents(path.join(REPO, 'compliance', 'components')).components, rules: loadEvidenceRules(path.join(REPO, 'compliance', 'evidence-rules')), levels };
+};
+
+test('over the real sources, the only statement without an acceptable rule is the appliance\'s ac-03, which is exempt (claim false at every level)', () => {
+  const { components, rules, levels } = realSources();
+  assert.deepEqual(statementsWithoutAcceptableRule(components, rules, levels).map(({ component, control, exempt }) => [component, control, exempt]), [['appliance', 'ac-03', true]]);
+});
+
+test('a statement with no rule, a test rule outside the reported folders and an observation on an unknown collector are found with their reason', () => {
+  const statement = (id: string) => ({ id, description: 'A fixture statement.' });
+  const components = [{ id: 'fixture', implemented: [{ control: 'fx-01', responsibility: 'shared' as const, statements: [statement('fx-01_smt.none'), statement('fx-01_smt.compliance'), statement('fx-01_smt.docs'), statement('fx-01_smt.unknown'), statement('fx-01_smt.good'), statement('fx-01_smt.mixed')] }] }];
+  const testRule = (statementId: string, file: string): EvidenceRule => ({ id: `fixture.${statementId}`, component: 'fixture', control: 'fx-01', statement: statementId, kind: 'test', test: { file, path: [], name: 'x' } });
+  const rules: EvidenceRule[] = [
+    testRule('fx-01_smt.compliance', 'compliance/test/status.test.ts'),
+    testRule('fx-01_smt.docs', 'docs-site/test/pages.test.mjs'),
+    { id: 'fixture.unknown', component: 'fixture', control: 'fx-01', statement: 'fx-01_smt.unknown', kind: 'observation', observation: { collector: 'trust-me', subject: 'x' } },
+    testRule('fx-01_smt.good', 'hub/test/append.test.ts'),
+    testRule('fx-01_smt.mixed', 'compliance/test/status.test.ts'),
+    { id: 'fixture.mixed.settings', component: 'fixture', control: 'fx-01', statement: 'fx-01_smt.mixed', kind: 'observation', observation: { collector: 'settings', subject: 'docs-required' } }
+  ];
+  const found = statementsWithoutAcceptableRule(components, rules, [{ components: ['fixture'], claim: true }]);
+  assert.deepEqual(found.map(({ statement, reason, exempt }) => [statement, reason, exempt]), [
+    ['fx-01_smt.none', 'no rule', false],
+    ['fx-01_smt.compliance', 'not in a reported test job', false],
+    ['fx-01_smt.docs', 'not in a reported test job', false],
+    ['fx-01_smt.unknown', 'not from a known collector', false]
+  ]);
+  assert.equal(statementsWithoutAcceptableRule(components, rules, [{ components: ['fixture'], claim: false }]).every((entry) => entry.exempt), true, 'a component only in claim-false levels is exempt');
+});
+
+test('each reported test folder maps to a CI job that sets NEAR_AI_TEST_REPORT and uploads a test-report artifact, and no other folder is accepted', () => {
+  const ci = readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const jobs = new Map(ci.split(/\n(?= {2}[a-z][a-z0-9-]*:\n)/).slice(1).map((job) => [/^ {2}([a-z][a-z0-9-]*):/.exec(job)?.[1] ?? '', job]));
+  const jobFor: Record<string, string> = { 'src/test': 'test', 'scripts/test': 'test', 'relay/test': 'relay', 'hub/test': 'hub', 'workbench/test': 'workbench', 'deploy/test': 'deploy' };
+  assert.deepEqual([...REPORTED_TEST_ROOTS].sort(), Object.keys(jobFor).sort());
+  for (const root of REPORTED_TEST_ROOTS) {
+    const job = jobs.get(jobFor[root]);
+    assert.ok(job, `${root}: job ${jobFor[root]}`);
+    assert.match(job, /NEAR_AI_TEST_REPORT: test-report-[a-z]+\.ndjson/, root);
+    assert.match(job, /name: test-report-[a-z]+/, root);
+  }
+});
+
+test('the accepted observation collectors are exactly the bundle\'s collectors', () => {
+  assert.deepEqual([...ACCEPTED_OBSERVATION_COLLECTORS].sort(), COLLECTORS.map((collector) => collector.id).sort());
 });

@@ -16,6 +16,7 @@ import type { IssuerDidState, IssuerPolicy, RoleEvidence } from './issuerAuthori
 import { factsFrom } from './mayRelease';
 import type { CredentialFacts } from './mayRelease';
 import { DEVICE_BINDING_TYPE, credentialTimeMs, isRoleType } from './types';
+import { COMPUTER_SLOT_TEXT, checkComputerBinding } from './computerSlots';
 import { resolveDidKey } from '../did/didKey';
 import { methodsAt } from '../did/didWebvh';
 
@@ -66,7 +67,10 @@ export const EVIDENCE_REFUSALS = {
   'list-too-old': 'A cited status list is older than this level allows to be used offline.',
   'status-not-cited': 'A cited credential\'s status was not checked against a cited list.',
   'revoked': 'A cited credential is revoked.',
-  'suspended': 'A cited credential is suspended.'
+  'suspended': 'A cited credential is suspended.',
+  // D-25, G467: a computer binding counts only in the computer places and in one of its person's listed slots.
+  'binding-outside-computer-range': COMPUTER_SLOT_TEXT['binding-outside-computer-range'],
+  'binding-not-in-slots': COMPUTER_SLOT_TEXT['binding-not-in-slots']
 } as const;
 export type EvidenceRefusal = keyof typeof EVIDENCE_REFUSALS;
 
@@ -184,7 +188,15 @@ export function checkEvidence(citation: EvidenceCitation, context: EvidenceConte
     for (const credential of [...mine, ...bindings]) {
       if (!issuerAuthority(credential, roles, context.policy, didState).ok) throw new Refused('issuer-authority');
     }
-    if (context.memberKey !== undefined && !memberKeyInForce(context.memberKey, [...(context.didState.deviceBindings ?? []), ...bindings], context)) {
+    // A computer binding counts only when its person's DID document lists it in one of at most five slots, in the computer places (D-25).
+    const slotOf = (binding: VerifiedCredential) => checkComputerBinding(binding, own(context.didState.states, binding.issuer), context.signedAt);
+    for (const binding of bindings) {
+      const refusal = slotOf(binding);
+      if (refusal !== undefined) throw new Refused(refusal);
+    }
+    // Bindings the replica knows (not cited) only make a key the member's under the same rule.
+    const known = (context.didState.deviceBindings ?? []).filter((binding) => slotOf(binding) === undefined);
+    if (context.memberKey !== undefined && !memberKeyInForce(context.memberKey, [...known, ...bindings], context)) {
       throw new Refused('member-key');
     }
     const facts = factsFrom(mine.map((credential) => ({ credential, status: 'clear' as const })));

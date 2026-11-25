@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import { controlTextPath } from '../../compliance/lib.mjs';
 import styles from './styles.module.css';
+import StateBadge from './StateBadge';
+// The applicability map's classes (44.1, D-07), in the words a reader sees.
+const APPLICABILITY_WORDS = { implements: 'Implements', supports: 'Supports', 'not-applicable': 'Not applicable to this component' };
 const safeHttps = (url, githubOnly = false) => /^https:\/\//.test(url ?? '') && (!githubOnly || /^https:\/\/github\.com\//.test(url));
 export default function ControlDrawer({ row, gap, textIndex, onClose, opener }) {
   const close = useRef(null); const [text, setText] = useState();
@@ -36,7 +39,9 @@ export default function ControlDrawer({ row, gap, textIndex, onClose, opener }) 
       </> : <p>Official text is not present in this dashboard.</p>}
       <h4>Our statement</h4>
       {row.components?.map((component) => <section key={component.component}>
-        <p><strong>Our statement:</strong> {component.statement ?? row.reasonText}</p>
+        <h5>{component.component}: <StateBadge state={component.state} /></h5>
+        {component.applicability && <p><strong>Applicability:</strong> {APPLICABILITY_WORDS[component.applicability] ?? component.applicability}</p>}
+        <p><strong>Our statement:</strong> {component.statement ?? component.reasonText}</p>
         <p><strong>Responsibility:</strong> {component.responsibility}</p>
         <h5>Evidence</h5>
         <ul>{(component.evidence ?? []).map((evidence) => <li key={`${evidence.rule}-${evidence.collectedAt}`}>{evidence.rule}; {evidence.collectedAt}; {evidence.commit?.slice(0, 12) ?? 'no commit'} {safeHttps(evidence.runUrl, true) ? <a href={evidence.runUrl}>CI run</a> : null}</li>)}</ul>

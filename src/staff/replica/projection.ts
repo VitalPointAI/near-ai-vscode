@@ -635,7 +635,7 @@ async function writeProjected(root: string, relative: string, text: string, keep
 }
 
 /** A product file's body as the staff host and the conversion read it: what follows its header, or the whole text when it has none. */
-function productBodyOf(text: string): string {
+export function productBodyOf(text: string): string {
   return splitProductFile(text)?.body ?? text;
 }
 
@@ -647,8 +647,8 @@ function productBodyOf(text: string): string {
  * an imported product adds no step to it (its events were sent when the steps were made), and steps written on top arrive with Phase 33's live layer.
  *
  * A product file is written over only when its body is already the fold's text, so only its header changes (MJ-09): a body that differs holds an
- * edit the shared history does not, and is left as it is and listed with PROJECTION_LEFT_REASONS['text-changed']. (Phase 33, which writes other
- * people's text, compares with the text it last projected instead.)
+ * edit the shared history does not, and is left as it is and listed with PROJECTION_LEFT_REASONS['text-changed']. (Phase 33's live projector,
+ * liveProjection.ts, writes other people's text and compares with the text it last projected instead.)
  */
 export async function writeProjections(root: string, input: ProjectionInput, passthrough: readonly PassthroughLedger[] = []): Promise<ProjectionWrite> {
   const out: ProjectionWrite = { written: [], unchanged: [], left: [] };

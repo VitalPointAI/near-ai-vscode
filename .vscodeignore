@@ -13,6 +13,9 @@ package-lock.json
 *.map
 **/*.map
 dist/test/**
+# The full-size source artwork the shipped icons are made from (media/near-ai-vscode-icon-128.png is package.json's icon, and the views use
+# media/near-ai-vscode-icon.png). Nothing at run time reads it, and leaving it out keeps the package 117 KB (compressed) smaller.
+media/near-ai-vscode-icon-master.png
 # Test-only layout measurement, loaded only by the extension-host tests (NEAR_AI_E2E=1).
 media/shared/layout-probe.js
 node_modules/**

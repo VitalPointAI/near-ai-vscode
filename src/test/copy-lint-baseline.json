@@ -49,7 +49,7 @@
   },
   "package.json": {
     "bare-team": 21,
-    "glossary": 40,
+    "glossary": 39,
     "mode-word": 3
   },
   "src/domain/cyberModel.ts": {
@@ -141,14 +141,13 @@
   },
   "src/services/onboarding.ts": {
     "bare-team": 3,
-    "brand": 2,
     "glossary": 7
   },
   "src/services/onlineHomeVscode.ts": {
     "glossary": 2
   },
   "src/services/panelView.ts": {
-    "glossary": 9
+    "glossary": 7
   },
   "src/services/projectInitialization.ts": {
     "bare-team": 1

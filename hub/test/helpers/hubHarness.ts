@@ -3,6 +3,7 @@ import type https from 'node:https';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { KNOWN_REPLICA_FEATURES } from '@ext/domain/replica/features';
 import { buildSessionAnswer, readSessionAnswer } from '@ext/domain/replica/hubFile';
 import type { SessionExpectation, SessionRead } from '@ext/domain/replica/hubFile';
 import type { PayloadSigner } from '@ext/domain/team/signedPayload';
@@ -19,6 +20,7 @@ import type { EventHub, Scheduler } from '../../src/live/events';
 import type { PresenceHub } from '../../src/live/presence';
 import { composeHub, sweepBlobsOnce } from '../../src/main';
 import { listen } from '../../src/http/server';
+import type { RestoreMode } from '../../src/restore';
 import { openHubStore } from '../../src/store/hubStore';
 import type { HubStore } from '../../src/store/hubStore';
 import type { OrganizationSource, TrustStore } from '../../src/store/trustStore';
@@ -84,6 +86,9 @@ export interface Hub {
   trust: TrustStore;
   /** Every join desk log line (32-25). */
   joinLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
+  /** Restore mode's log lines (Phase 33 D-32), and the mode itself. */
+  restoreLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
+  restore: RestoreMode | undefined;
   /** Every checkpoint log line (32-22). */
   checkpointLogs: Array<{ level: string; event: string; fields: Record<string, string | number> }>;
   /** The key lines the hub runs with, to start the same hub again. */
@@ -120,6 +125,7 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
   const equivocations: Hub['equivocations'] = [];
   const checkpointLogs: Hub['checkpointLogs'] = [];
   const joinLogs: Hub['joinLogs'] = [];
+  const restoreLogs: Hub['restoreLogs'] = [];
   const readAnswer = (answer: unknown, expected: SessionExpectation): SessionRead => {
     checks += 1;
     return readSessionAnswer(answer, expected);
@@ -141,6 +147,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     ...(options.joinChecks === undefined ? {} : { joinChecks: options.joinChecks }),
     ...(options.organization === undefined ? {} : { organization: options.organization }),
     onJoinLog: (level, event, fields) => joinLogs.push({ level, event, fields }),
+    stateDir: dir,
+    onRestoreLog: (level, event, fields) => restoreLogs.push({ level, event, fields }),
     onAccepted: (project, list, rosterChanged) => accepted.push({ project, accepted: list, rosterChanged }),
     onEquivocation: (project, proofs) => equivocations.push({ project, proofs }),
   });
@@ -163,6 +171,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
     join: composed.join,
     trust: composed.trust,
     joinLogs,
+    restoreLogs,
+    restore: composed.restore,
     keys,
     now: () => clock,
     advance: (ms) => {
@@ -197,7 +207,8 @@ export async function startHub(options: StartOptions = {}): Promise<Hub> {
       const challenge = await connection.post('/v1/session', { project });
       assert.equal(challenge.status, 200, challenge.text);
       const body = challenge.json<{ project: string; hub: string; challenge: string }>();
-      const answer = buildSessionAnswer(device.signer, { hub: body.hub, project, challenge: body.challenge, keying: connection.keying(), now: new Date(clock) });
+      // As a current client does (POST-01): the session answer announces the features this build folds.
+      const answer = buildSessionAnswer(device.signer, { hub: body.hub, project, challenge: body.challenge, keying: connection.keying(), features: KNOWN_REPLICA_FEATURES, now: new Date(clock) });
       const opened = await connection.post('/v1/session', { answer });
       assert.equal(opened.status, 200, opened.text);
       const session = opened.json<{ project: string; token: string; expiresAt: string }>();

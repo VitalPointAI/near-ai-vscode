@@ -1,0 +1,107 @@
+{{- /*
+Who may write the root of site evidence (48.2-17, D-17, D-21, D-23). Every session trusts only the public keys in two ConfigMaps of this
+namespace: sterling-evidence-trust (your organization's site key as organization.pub, and the site trust document it signs) and
+sterling-release-evidence (the site key's signatures over each release's evidence manifest). The install's evidence step (48.2-12) writes them
+as the identity sterling-evidence-install, which the operator's kubeconfig impersonates (kubectl --as=system:serviceaccount:<namespace>:...);
+no long-lived token is made for it. The chart creates neither ConfigMap, so a chart upgrade is never refused here.
+
+The ValidatingPolicy denies every CREATE, UPDATE (a PATCH is an UPDATE) and DELETE of those two names by anyone else, cluster administrators
+included, failing closed. The one exception is DELETE alone by the namespace controller, by its exact name, so deleting this namespace
+(uninstall, site rebuild) can finish; it grants no create or update, and an anchor made again afterwards still has to come from the install
+identity. A full cluster administrator can still remove this policy; each session's comparison of organization.pub with
+STERLING_ORGANIZATION_PUBLIC_KEY (site-env.yaml, 48.2-04) is the second layer, and the hosted threat model records the rest (T-48.2-44).
+
+The publish identity sterling-evidence-publish (the operator's site files, 48.2-13) may change only sterling-site-evidence-operator and read
+the trust document; it creates and deletes nothing. render-sessions.test.mjs holds every rendered chart to this.
+*/ -}}
+{{- $install := printf "system:serviceaccount:%s:sterling-evidence-install" .Release.Namespace -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sterling-evidence-install
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sterling-evidence-install
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sterling-evidence-trust, sterling-release-evidence]
+    verbs: [get, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sterling-evidence-install
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sterling-evidence-install
+subjects:
+  - kind: ServiceAccount
+    name: sterling-evidence-install
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sterling-evidence-publish
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sterling-evidence-publish
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sterling-site-evidence-operator]
+    verbs: [get, update, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [sterling-evidence-trust]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sterling-evidence-publish
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sterling-evidence-publish
+subjects:
+  - kind: ServiceAccount
+    name: sterling-evidence-publish
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: sterling-evidence-trust-writes
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [configmaps]
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Release.Namespace }}
+  matchConditions:
+    - name: evidence-trust-anchor
+      expression: "(object != null ? object.metadata.name : oldObject.metadata.name) in ['sterling-evidence-trust', 'sterling-release-evidence']"
+  validations:
+    - expression: {{ printf "request.userInfo.username == '%s' || (request.operation == 'DELETE' && request.userInfo.username == 'system:serviceaccount:kube-system:namespace-controller')" $install | quote }}
+      message: "Only the install identity sterling-evidence-install may write the evidence trust anchor."

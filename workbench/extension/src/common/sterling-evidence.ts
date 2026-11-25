@@ -34,3 +34,6 @@ export function isDocumentationPages(value: unknown): value is DocumentationPage
     typeof page === 'object' && page !== null &&
     ['source', 'route', 'category', 'title', 'html', 'text'].every(key => typeof (page as Record<string, unknown>)[key] === 'string'));
 }
+
+// The evidence service's view model and words (48.2-01 to 48.2-08) live in compliance-evidence.ts; re-exported here for the existing imports.
+export * from './compliance-evidence.js';

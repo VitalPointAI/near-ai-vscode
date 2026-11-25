@@ -124,13 +124,14 @@ const escape = (text) => text.replace(/[.*?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Whether a token holding these policies, for the entity `entity`, may use `capability` on `apiPath`, by OpenBao's ACL path rules: the
- * entity template is filled in, a path matches exactly, a trailing "*" matches any rest, and "+" matches one segment. A "deny" on a matching
- * block wins over every grant (guest-account denies the staff KV path on exactly the path sterling-workbench grants, so OpenBao merges the
- * two into one rule and the deny wins); otherwise any matching block that lists the capability allows it.
+ * entity templates are filled in (the id with `entity`, the name with `keycloak-<entity>` as enrol.mjs names staff entities), a path matches
+ * exactly, a trailing "*" matches any rest, and "+" matches one segment. A "deny" on a matching block wins over every grant (guest-account
+ * denies the staff KV path on exactly the path sterling-workbench grants, so OpenBao merges the two into one rule and the deny wins);
+ * otherwise any matching block that lists the capability allows it.
  */
 function allows(policies, entity, capability, apiPath) {
   const matching = policies.flatMap((name) => pathBlocks(policy(name))).filter((block) => {
-    const filled = block.path.replaceAll('{{identity.entity.id}}', entity);
+    const filled = block.path.replaceAll('{{identity.entity.id}}', entity).replaceAll('{{identity.entity.name}}', `keycloak-${entity}`);
     const glob = filled.endsWith('*');
     const pattern = (glob ? filled.slice(0, -1) : filled).split('+').map(escape).join('[^/]+');
     return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath);
@@ -154,6 +155,8 @@ test('a session token reads only its own signing key under transit/keys/, and si
   assert.deepEqual(sign.map((block) => block.path), ['transit/sign/person-{{identity.entity.id}}']);
   assert.deepEqual(base.map((block) => block.path).sort(), ['auth/token/lookup-self', 'auth/token/renew-self', 'auth/token/revoke-self',
     'kv/data/site/people/{{identity.entity.id}}',
+    ...[1, 2, 3, 4, 5].map((slot) => `kv/data/site/device-slots/{{identity.entity.id}}/slot-${slot}`),
+    'kv/data/site/status-index/device-*', 'kv/data/site/revocation-requests/{{identity.entity.name}}-computer-lost-*',
     'kv/data/users/{{identity.entity.id}}/*', 'kv/metadata/users/{{identity.entity.id}}/*', 'transit/datakey/wrapped/kek-{{identity.entity.id}}',
     'transit/decrypt/kek-{{identity.entity.id}}', 'transit/keys/person-{{identity.entity.id}}'].sort());
   // No glob anywhere under transit/ in a session policy.
@@ -217,10 +220,18 @@ test('every per-person path is templated on the entity and no policy names a lit
   const exceptions = [];
   const files = readdirSync(POLICY_DIR).filter((name) => name.endsWith('.hcl'));
   assert.ok(files.length >= 4);
+  // The two paths that are not one person's own, by design, each with exactly this capability (71-12, D-14, D-15): an officer creates an inbox item
+  // for another person (never reads, changes or deletes one), and signs with the site's status-list key, which belongs to no person.
+  const notPerPerson = { 'credential-issuers.hcl': { 'kv/data/users/+/credentials-inbox/*': ['create'], 'transit/sign/status-list-${site.siteName}': ['update'] } };
   for (const file of files) {
     const text = readFileSync(path.join(POLICY_DIR, file), 'utf8');
     assert.doesNotMatch(text, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, `${file} names a literal id`);
     for (const block of pathBlocks(text)) {
+      const allowed = notPerPerson[file]?.[block.path];
+      if (allowed !== undefined) {
+        assert.deepEqual(capabilitiesOf(block), allowed, `${file}: ${block.path} grants exactly ${allowed.join(', ')}`);
+        continue;
+      }
       if (/^(kv\/(data|metadata)\/(users|guests)\/|transit\/(sign|datakey|decrypt)\/)/.test(block.path)) {
         // The one exception (D-84, owner 2026-11-25): the security officer's step-up role removes ended guests' secrets.
         if (file === PER_PERSON_EXCEPTION.file && block.path === PER_PERSON_EXCEPTION.path) { exceptions.push(file); continue; }
@@ -290,6 +301,175 @@ test('apply.mjs gives only the step-up role the signing policy, bound to the ste
 
 test('the install policy reaches only the static application secrets under kv/data/apps/', () => {
   assert.deepEqual(pathBlocks(policy('install')).map((block) => block.path), ['kv/data/apps/*']);
+});
+
+// Phase 71, plan 12, task 1 (D-14, D-15, D-22): the status-list key, the issuer step-up role and the credential-issuers policy.
+const ISSUERS_SITE = () => ({ ...loadSite(SITE_FILE), credentialIssuers: ['kc-officer-a', 'kc-officer-b'] });
+const operationAt = (operations, write) => operations.find((operation) => operation.write === write);
+/** Whether credential-issuers, with the site name filled in, lets a token use `capability` on `apiPath` (the same path rules as allows()). */
+const issuerAllows = (capability, apiPath, siteName = 'ci') => pathBlocks(policy('credential-issuers')).some((block) => {
+  const filled = block.path.replaceAll('${site.siteName}', siteName);
+  const glob = filled.endsWith('*');
+  const pattern = (glob ? filled.slice(0, -1) : filled).split('+').map(escape).join('[^/]+');
+  return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath) && capabilitiesOf(block).includes(capability);
+});
+
+test('71-12: planApply makes the non-exportable ed25519 key status-list-<site>, the credential-issuers policy and the issuer step-up role', async () => {
+  const { planApply } = await import('../openbao/apply.mjs');
+  const site = ISSUERS_SITE();
+  const operations = planApply(site);
+  assert.deepEqual(operationAt(operations, `transit/keys/status-list-${site.siteName}`)?.body, { type: 'ed25519', exportable: false, allow_plaintext_backup: false });
+  const written = operationAt(operations, 'sys/policies/acl/credential-issuers')?.body.policy;
+  assert.match(written, new RegExp(`^path "transit/sign/status-list-${site.siteName}" \\{$`, 'm'), 'the site name is filled in');
+  assert.doesNotMatch(written, /\$\{site\./, 'no placeholder is left in what OpenBao receives');
+  const role = operationAt(operations, 'auth/jwt/role/sterling-issuer-stepup')?.body;
+  assert.deepEqual(role.bound_claims, { acr: site.stepUpAcr, sub: ['kc-officer-a', 'kc-officer-b'] });
+  assert.equal(role.bound_claims_type, 'string');
+  for (const ttl of ['token_ttl', 'token_max_ttl', 'token_explicit_max_ttl']) assert.equal(role[ttl], site.stepUpMaxAgeSeconds, ttl);
+  assert.equal(role.token_period, 0);
+  assert.deepEqual(role.token_policies, ['sterling-workbench', 'sterling-workbench-sign', 'credential-issuers']);
+  assert.deepEqual(role.bound_audiences, ['sterling-sessions']);
+  assert.equal(role.user_claim, 'sub');
+  assert.equal(role.token_no_default_policy, true);
+  // Only the issuer role holds the policy: not the session role, not the person's own step-up role.
+  for (const name of ['sterling-workbench', 'sterling-workbench-stepup']) {
+    assert.ok(!operationAt(operations, `auth/jwt/role/${name}`).body.token_policies.includes('credential-issuers'), name);
+  }
+});
+
+test('71-12: officer subjects come only from the site file, and a bad list or site name stops the plan', async () => {
+  const { planApply } = await import('../openbao/apply.mjs');
+  const site = loadSite(SITE_FILE);
+  for (const credentialIssuers of ['kc-officer-a', [''], ['kc-a', 'kc-a'], [42]]) {
+    assert.throws(() => planApply({ ...site, credentialIssuers }), /credentialIssuers/, JSON.stringify(credentialIssuers));
+  }
+  assert.throws(() => planApply({ ...ISSUERS_SITE(), siteName: 'Bad Name/..' }), /siteName/);
+});
+
+test('71-12: without credentialIssuers the key and policy are made but no issuer role, and the dry run says so', async () => {
+  const { planApply } = await import('../openbao/apply.mjs');
+  const operations = planApply(loadSite(SITE_FILE));
+  assert.ok(operationAt(operations, 'transit/keys/status-list-ci'));
+  assert.ok(operationAt(operations, 'sys/policies/acl/credential-issuers'));
+  assert.equal(operationAt(operations, 'auth/jwt/role/sterling-issuer-stepup'), undefined);
+  const run = spawnSync(process.execPath, [path.join(ROOT, 'deploy/openbao/apply.mjs'), '--site', SITE_FILE, '--dry-run'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stderr, /no jwt role sterling-issuer-stepup: the site file names no credentialIssuers, so nobody can sign status lists yet/);
+});
+
+test('71-12: credential-issuers signs only with the status-list key, creates inbox items and never reads, changes or deletes one', () => {
+  assert.equal(issuerAllows('update', 'transit/sign/status-list-ci'), true);
+  assert.equal(issuerAllows('update', 'transit/sign/status-list-other'), false, 'only this site\'s key');
+  for (const other of [`transit/sign/person-${ADA}`, 'transit/keys/status-list-ci', 'transit/keys/status-list-ci/rotate', 'transit/keys/status-list-ci/config',
+    'transit/export/signing-key/status-list-ci', 'transit/backup/status-list-ci', 'transit/keys/', 'sys/policies/acl/credential-issuers']) {
+    for (const capability of ['read', 'create', 'update', 'delete', 'list', 'sudo']) assert.equal(issuerAllows(capability, other), false, `${capability} ${other}`);
+  }
+  const inbox = `kv/data/users/${ADA}/credentials-inbox/${'0f'.repeat(32)}`;
+  assert.equal(issuerAllows('create', inbox), true);
+  for (const capability of ['read', 'update', 'delete', 'list', 'patch']) {
+    assert.equal(issuerAllows(capability, inbox), false, capability);
+    assert.equal(issuerAllows(capability, inbox.replace('/data/', '/metadata/')), false, `metadata ${capability}`);
+  }
+  // Nothing else of a person's own: not their wallet, not their identity record, not a deeper folder that merely ends the same way.
+  for (const other of [`kv/data/users/${ADA}/credentials-wallet/0f`, `kv/data/users/${ADA}/identity/did-webvh`, `kv/data/users/${ADA}/x/credentials-inbox/0f`]) {
+    for (const capability of ['create', 'read', 'update']) assert.equal(issuerAllows(capability, other), false, `${capability} ${other}`);
+  }
+  assert.equal(issuerAllows('read', `kv/data/site/people/${ADA}`), true);
+  assert.equal(issuerAllows('list', 'kv/metadata/site/people/'), true);
+  for (const capability of ['create', 'update', 'delete']) assert.equal(issuerAllows(capability, `kv/data/site/people/${ADA}`), false, capability);
+});
+
+test('71-12: the revocation inbox is read and deleted, never written, and the issued register is create and read only', () => {
+  const request = 'kv/data/site/revocation-requests/keycloak-kc-1-disabled';
+  const requestMeta = 'kv/metadata/site/revocation-requests/keycloak-kc-1-disabled';
+  assert.equal(issuerAllows('read', request), true);
+  assert.equal(issuerAllows('list', 'kv/metadata/site/revocation-requests/'), true);
+  assert.equal(issuerAllows('delete', requestMeta), true);
+  for (const capability of ['create', 'update', 'patch']) {
+    assert.equal(issuerAllows(capability, request), false, `${capability}: requests come only from 47-20 and 47-31`);
+    assert.equal(issuerAllows(capability, requestMeta), false, `metadata ${capability}`);
+  }
+  assert.equal(issuerAllows('delete', request), false, 'a soft delete would leave the request listed');
+  assert.equal(issuerAllows('read', 'identity/entity/name/keycloak-kc-1'), true);
+  for (const capability of ['create', 'update', 'delete', 'list']) assert.equal(issuerAllows(capability, 'identity/entity/name/keycloak-kc-1'), false, capability);
+  assert.equal(issuerAllows('read', `identity/entity/id/${ADA}`), false);
+  const issued = `kv/data/site/issued/${ADA}/${'a'.repeat(64)}`;
+  assert.equal(issuerAllows('create', issued), true);
+  assert.equal(issuerAllows('read', issued), true);
+  assert.equal(issuerAllows('list', `kv/metadata/site/issued/${ADA}/`), true);
+  for (const capability of ['update', 'delete', 'patch']) assert.equal(issuerAllows(capability, issued), false, capability);
+  assert.equal(issuerAllows('delete', issued.replace('/data/', '/metadata/')), false, 'the register is never deleted');
+  assert.equal(issuerAllows('create', 'kv/data/site/status-index/revocation/1234'), true, 'an index is claimed once');
+  for (const capability of ['read', 'update', 'delete']) assert.equal(issuerAllows(capability, 'kv/data/site/status-index/revocation/1234'), false, capability);
+  for (const other of ['kv/data/apps/keycloak', 'kv/data/site/other/x']) for (const capability of ['read', 'create', 'list']) assert.equal(issuerAllows(capability, other), false, `${capability} ${other}`);
+});
+
+test('71-12: a second run against the recorded state writes nothing', async () => {
+  const { applyPlan, planApply } = await import('../openbao/apply.mjs');
+  const state = new Map();
+  const request = async (method, apiPath, body) => {
+    if (method === 'POST') { state.set(apiPath, body); return { status: 204, data: null }; }
+    const under = (prefix) => Object.fromEntries([...state].filter(([where]) => where.startsWith(prefix)).map(([where, value]) => [`${where.slice(prefix.length)}/`, value]));
+    if (apiPath === 'sys/mounts') return { status: 200, data: { data: under('sys/mounts/') } };
+    if (apiPath === 'sys/auth') return { status: 200, data: { data: under('sys/auth/') } };
+    return state.has(apiPath) ? { status: 200, data: { data: state.get(apiPath) } } : { status: 404, data: null };
+  };
+  const first = await applyPlan(request, planApply(ISSUERS_SITE()));
+  assert.ok(first.every((item) => item.result === 'written'));
+  assert.ok(first.some((item) => item.what === 'jwt role sterling-issuer-stepup'));
+  const second = await applyPlan(request, planApply(ISSUERS_SITE()));
+  assert.deepEqual(second.filter((item) => item.result !== 'unchanged'), []);
+});
+
+// Phase 71, D-25 (owner decision 2026-11-25, closing G466): a person claims their own computer's status list place through a narrow create-only
+// path, under their own entity only, at most 5 computers; they never claim another person's slot, change a claimed one or sign a status list.
+test('D-25: a person creates and reads only their own five computer slots, never a sixth, never another person\'s, and never changes one', () => {
+  for (let slot = 1; slot <= 5; slot += 1) {
+    const own = `kv/data/site/device-slots/${ADA}/slot-${slot}`;
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', own), true, own);
+    assert.equal(allows(SESSION_POLICIES, ADA, 'read', own), true, own);
+    for (const capability of ['update', 'delete', 'patch', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, own), false, `${capability} ${own}: a claimed slot is never changed`);
+    assert.equal(allows(SESSION_POLICIES, ADA, 'delete', `kv/metadata/site/device-slots/${ADA}/slot-${slot}`), false, 'nor removed by the person');
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/device-slots/${BEN}/slot-${slot}`), false, 'never under another entity');
+    assert.equal(allows(SESSION_POLICIES, ADA, 'read', `kv/data/site/device-slots/${BEN}/slot-${slot}`), false);
+  }
+  // The cap is the five names: a sixth slot, any other name or a deeper path has no create.
+  for (const other of ['slot-6', 'slot-0', 'slot-10', 'slot-1x', 'slot-1/x', 'slot', 'x']) {
+    assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/device-slots/${ADA}/${other}`), false, other);
+  }
+  assert.equal(allows(SESSION_POLICIES, ADA, 'list', `kv/metadata/site/device-slots/${ADA}/`), false);
+});
+
+test('D-25: a person claims device places only, once each, never an officer\'s place, never a list signature, and reports only their own lost computer', () => {
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/device-revocation-revocation-1/120000'), true);
+  for (const capability of ['read', 'update', 'delete', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, 'kv/data/site/status-index/device-revocation-revocation-1/120000'), false, capability);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/revocation-revocation-1/4000'), false, 'officers\' places are theirs');
+  for (const key of ['transit/sign/status-list-ci', 'transit/sign/status-list-site']) assert.equal(allows(SESSION_POLICIES, ADA, 'update', key), false, key);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${ADA}-computer-lost-2`), true);
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${BEN}-computer-lost-2`), false, 'never about another person');
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/site/revocation-requests/keycloak-${ADA}-disabled`), false, 'only a lost computer');
+  for (const capability of ['read', 'update', 'delete', 'list']) assert.equal(allows(SESSION_POLICIES, ADA, capability, `kv/data/site/revocation-requests/keycloak-${ADA}-computer-lost-2`), false, capability);
+});
+
+test('D-25: officers read people\'s computer slots and free one by removing it; they never create or change one', () => {
+  const slot = `kv/data/site/device-slots/${ADA}/slot-3`;
+  assert.equal(issuerAllows('read', slot), true);
+  assert.equal(issuerAllows('delete', slot.replace('/data/', '/metadata/')), true);
+  assert.equal(issuerAllows('list', `kv/metadata/site/device-slots/${ADA}/`), true);
+  for (const capability of ['create', 'update', 'delete']) assert.equal(issuerAllows(capability, slot), false, capability);
+});
+
+test('D-26 (G467): OpenBao limits each session to a few computer place claims an hour, audits violations, and only on the computer places', async () => {
+  const { COMPUTER_PLACES_QUOTA, planApply } = await import('../openbao/apply.mjs');
+  const operations = planApply(loadSite(SITE_FILE));
+  const quota = operationAt(operations, `sys/quotas/rate-limit/${COMPUTER_PLACES_QUOTA.name}`)?.body;
+  assert.deepEqual(quota, { path: 'kv/data/site/status-index/device-', rate: 12, interval: 3600, block_interval: 3600 });
+  // Five computers (two places each) fit in one hour; officers' places (status-index/<purpose>-...) are outside the limited prefix.
+  assert.ok(quota.rate >= 2 * 5 && quota.rate < 4 * 5, 'room for five bindings, not for a sweep of the index space');
+  assert.ok(!'kv/data/site/status-index/revocation-revocation-1/4000'.startsWith(quota.path));
+  assert.ok('kv/data/site/status-index/device-revocation-revocation-1/120000'.startsWith(quota.path));
+  assert.ok(allows(SESSION_POLICIES, ADA, 'create', 'kv/data/site/status-index/device-revocation-revocation-1/120000'), 'the quota covers the path a session may write');
+  assert.deepEqual(operationAt(operations, 'sys/quotas/config')?.body, { enable_rate_limit_audit_logging: true });
 });
 
 // Guest accounts (D-62, D-63, 47-19): the automatic end can only disable guest entities and file a create-only revocation request; every

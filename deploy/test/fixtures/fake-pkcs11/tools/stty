@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fake stty for deploy/test/dev-site-key.test.mjs. Records its arguments in $FAKE_LOG; it only accepts -echo, and only under the fake
+# script (FAKE_PTY=1), which stands in for the terminal the real stty would change.
+set -eu
+printf 'stty' >> "$FAKE_LOG"
+for arg in "$@"; do printf '|%s' "$arg" >> "$FAKE_LOG"; done
+printf '\n' >> "$FAKE_LOG"
+[ "$*" = -echo ] && [ "${FAKE_PTY:-0}" = 1 ] || { echo "stty: 'standard input': Inappropriate ioctl for device" >&2; exit 1; }

@@ -38,8 +38,14 @@ RUN JOBS=2 npm_config_build_from_source=true npm_config_nodedir=/usr/local npm r
     && mkdir -p "node_modules/node-pty/prebuilds/$dist" \
     && cp node_modules/node-pty/build/Release/pty.node "node_modules/node-pty/prebuilds/$dist/pty.node"
 
-# The engine bundle reads the repository's src/; the documentation tool reads the published guides.
+# The engine bundle reads the repository's src/ and the compliance status engine's compliance/src/ with the exchange register (48.2-01,
+# 48.2-08: only engine/compliance.cjs reaches the runtime stage), and copies the vendored Yjs build after checking it against its pin (Phase 33
+# D-51; run `node scripts/vendor-libs.mjs` before the image build); the documentation tool reads the published guides.
 COPY src /repo/src
+COPY compliance/src /repo/compliance/src
+COPY compliance/hosted/exchanges.json /repo/compliance/hosted/exchanges.json
+COPY scripts/crdt-vendor.json /repo/scripts/crdt-vendor.json
+COPY vendor/yjs/yjs.cjs vendor/yjs/LICENSES.txt /repo/vendor/yjs/
 COPY README.md SECURITY.md CHANGELOG.md CONTRIBUTING.md /repo/
 COPY docs/development-workflow.md docs/testing.md docs/staff-env-packs.md /repo/docs/
 # The screenshots README.md shows: bundled as same-origin images by the documentation tool, never loaded from GitHub.

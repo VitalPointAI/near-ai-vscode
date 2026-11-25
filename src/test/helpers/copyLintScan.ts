@@ -473,7 +473,8 @@ export const ALLOWED_CONTEXTS: readonly AllowedContext[] = Object.freeze([
   { file: 'media/tools/tools.js', words: ['GSD'], why: 'Tools page detail only (glossary section 3)' },
   { file: 'src/domain/gate/labels.ts', words: ['CGP', 'ITAR', 'EAR'], why: 'the label module that holds the reserved compartments\' shown words; they are produced there (D-62)' },
   { file: 'src/services/policyEditor.ts', words: EXPORT_WORDS, why: 'your organization\'s rules page, the administrator view (glossary section 1, D-64)' },
-  { file: 'media/policy/policy.js', words: EXPORT_WORDS, why: 'your organization\'s rules page, the administrator view (glossary section 1, D-64)' }
+  { file: 'media/policy/policy.js', words: EXPORT_WORDS, why: 'your organization\'s rules page, the administrator view (glossary section 1, D-64)' },
+  { file: 'workbench/extension/src/common/compliance-evidence.ts', words: ['attestation'], why: 'the cosign verify-attestation and gh attestation verify commands\' own names, inside the release checks disclosure (48.2-UI-SPEC P5)' }
 ].map((row) => Object.freeze({ ...row, words: Object.freeze([...row.words]) })));
 
 const TOKEN_BEFORE = '(?<![A-Za-z0-9_])';

@@ -872,3 +872,124 @@ test('D-40: a permission your organization leaves to the mode is never turned on
   assert.equal(none.effective.people?.organization, undefined);
   assert.deepEqual(keysOf(none.ignored), ['people.organization']);
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Phase 70.1 (D-17): lower layers only tighten the classification section
+
+const CLS_SECRET = { scale: 'ca-classified', level: 'Secret', compartments: [], releasability: [], handling: [] };
+
+function clsRule(id: string): Loose {
+  return {
+    id, guideRef: `SCG ${id}`, label: { ...CLS_SECRET, level: 'Confidential' }, description: 'A unit with its location and a future move date',
+    when: { allOf: ['future-date', 'location', 'unit'], sameSubject: true }, then: CLS_SECRET
+  };
+}
+
+function classificationSection(extra: Loose = {}): Loose {
+  return {
+    v: 1, systemHigh: [CLS_SECRET],
+    thresholds: { 'ca-classified/Secret': { costRatio: 19, recallTarget: 9800, secondFamily: true } },
+    shadow: { defaultMode: 'shadow', levels: [] },
+    markings: [{ id: 'banner-secret', pattern: 'SECRET', label: CLS_SECRET }],
+    guideRules: [clsRule('r-1'), clsRule('r-2')],
+    ...extra
+  };
+}
+
+function withClassification(doc: Loose, section: Loose): void {
+  doc.classification = section;
+  doc.requires = [...doc.requires, 'classification@1'].sort();
+}
+
+function composedClassification(org: Loose, mine: Loose): { section: Loose; ignored: readonly IgnoredSetting[] } {
+  const composed = composeLayers({ organization: organization((doc) => withClassification(doc, org)), personal: personal((doc) => withClassification(doc, mine)) });
+  return { section: composed.effective.classification as Loose, ignored: composed.ignored };
+}
+
+test('70.1 D-17: a personal layer may lower Secret\'s threshold (a higher cost ratio), and is kept and not listed', () => {
+  const { section, ignored } = composedClassification(classificationSection(), classificationSection({ thresholds: { 'ca-classified/Secret': { costRatio: 49, recallTarget: 9900, secondFamily: true } } }));
+  assert.deepEqual(section.thresholds['ca-classified/Secret'], { costRatio: 49, recallTarget: 9900, secondFamily: true });
+  assert.deepEqual(ignored, []);
+});
+
+test('70.1 D-17: raising a threshold (a lower cost ratio) or dropping the second family is refused and listed', () => {
+  const { section, ignored } = composedClassification(classificationSection(), classificationSection({ thresholds: { 'ca-classified/Secret': { costRatio: 9, recallTarget: 9800, secondFamily: false } } }));
+  assert.deepEqual(section.thresholds['ca-classified/Secret'], { costRatio: 19, recallTarget: 9800, secondFamily: true });
+  assert.deepEqual(ignored.map((entry) => entry.key), ['classification.thresholds.ca-classified/Secret']);
+});
+
+test('70.1 D-17: removing a rule is refused; adding a rule is kept', () => {
+  const removed = composedClassification(classificationSection(), classificationSection({ guideRules: [clsRule('r-1')] }));
+  assert.deepEqual(removed.section.guideRules.map((rule: Loose) => rule.id), ['r-1', 'r-2']);
+  const added = composedClassification(classificationSection(), classificationSection({ guideRules: [clsRule('r-1'), clsRule('r-2'), clsRule('r-3')] }));
+  assert.deepEqual(added.section.guideRules.map((rule: Loose) => rule.id), ['r-1', 'r-2', 'r-3']);
+  assert.deepEqual(added.ignored, []);
+  const changed = composedClassification(classificationSection(), classificationSection({ guideRules: [clsRule('r-1'), { ...clsRule('r-2'), then: { ...CLS_SECRET, level: 'Confidential' } }] }));
+  assert.deepEqual(changed.section.guideRules[1].then, CLS_SECRET, 'your organization\'s rule stands');
+  assert.deepEqual(changed.ignored.map((entry) => entry.key), ['classification.guideRules[r-2]']);
+});
+
+test('70.1 D-17: changing systemHigh is refused and listed', () => {
+  const { section, ignored } = composedClassification(classificationSection(), classificationSection({ systemHigh: [{ ...CLS_SECRET, level: 'Top Secret' }] }));
+  assert.deepEqual(section.systemHigh, [CLS_SECRET]);
+  assert.ok(ignored.some((entry) => entry.key.startsWith('classification.systemHigh')));
+});
+
+test('70.1 D-17: moving a level from shadow to enforce is refused, by the default mode or by the levels list', () => {
+  const byDefault = composedClassification(classificationSection(), classificationSection({ shadow: { defaultMode: 'enforce', levels: [] } }));
+  assert.equal(byDefault.section.shadow.defaultMode, 'shadow');
+  const byList = composedClassification(classificationSection(), classificationSection({ shadow: { defaultMode: 'shadow', levels: ['ca-classified/Secret'] } }));
+  assert.deepEqual(byList.section.shadow.levels, []);
+  assert.ok(byList.ignored.some((entry) => entry.key === 'classification.shadow.levels'));
+});
+
+test('70.1 D-17: adding a code word, a marking and a fact type is kept; your organization\'s code-word list label stands', () => {
+  const orgWords = { listLabel: CLS_SECRET, entries: [{ id: 'cw-1', token: 'NORTHERNEXAMPLE', label: CLS_SECRET }] };
+  const mineWords = { listLabel: { ...CLS_SECRET, level: 'Confidential' }, entries: [...orgWords.entries, { id: 'cw-2', token: 'SOUTHERNEXAMPLE', label: CLS_SECRET }] };
+  const { section, ignored } = composedClassification(classificationSection({ codeWords: orgWords }), classificationSection({
+    codeWords: mineWords, markings: [{ id: 'banner-secret', pattern: 'SECRET', label: CLS_SECRET }, { id: 'banner-tres-secret', pattern: 'TRÈS SECRET', label: CLS_SECRET }],
+    factTypes: ['convoy-route']
+  }));
+  assert.deepEqual(section.codeWords.entries.map((entry: Loose) => entry.id), ['cw-1', 'cw-2']);
+  assert.deepEqual(section.codeWords.listLabel, CLS_SECRET);
+  assert.deepEqual(section.markings.map((entry: Loose) => entry.id), ['banner-secret', 'banner-tres-secret']);
+  assert.deepEqual(section.factTypes, ['convoy-route']);
+  assert.deepEqual(ignored, []);
+});
+
+test('70.1 D-17: review.jumpLevels may only fall, and topLevel may only turn on', () => {
+  const lower = composedClassification(classificationSection({ review: { jumpLevels: 2, topLevel: false } }), classificationSection({ review: { jumpLevels: 1, topLevel: true } }));
+  assert.equal(lower.section.review.jumpLevels, 1);
+  assert.equal(lower.section.review.topLevel, true);
+  const higher = composedClassification(classificationSection(), classificationSection({ review: { jumpLevels: 3, topLevel: false } }));
+  assert.equal(higher.section.review.jumpLevels, 1);
+  assert.equal(higher.section.review.topLevel, true);
+  assert.deepEqual(higher.ignored.map((entry) => entry.key).sort(), ['classification.review.jumpLevels', 'classification.review.topLevel']);
+});
+
+test('70.1 D-17: a personal layer cannot change the roles, and without an organization section it cannot set the system-high or enforce', () => {
+  const role = { passport: 'openai/gpt-oss', role: 'primary', levels: ['ca-classified/Secret'], evaluation: 'e'.repeat(64), since: '2026-11-24T00:00:00.000Z' };
+  const roles = composedClassification(classificationSection(), classificationSection({ roles: [role] }));
+  assert.deepEqual(roles.section.roles, []);
+  const composed = composeLayers({ organization: organization(), personal: personal((doc) => withClassification(doc, classificationSection({ shadow: { defaultMode: 'enforce', levels: [] } }))) });
+  const section = composed.effective.classification as Loose;
+  assert.equal(section.systemHigh, undefined);
+  assert.equal(section.shadow.defaultMode, 'shadow');
+  assert.deepEqual(section.guideRules.map((rule: Loose) => rule.id), ['r-1', 'r-2'], 'the personal rules still tighten');
+});
+
+test('70.1 D-17: a newer organization layer may change anything in the section', () => {
+  const org = organization((doc) => withClassification(doc, classificationSection({ shadow: { defaultMode: 'enforce', levels: [] }, guideRules: [] })));
+  assert.equal(org.classification?.shadow.defaultMode, 'enforce');
+  assert.deepEqual(org.classification?.guideRules, []);
+});
+
+test('70.1 D-17: an Edit Policy draft that lowers a threshold narrows; one that removes a rule or raises a threshold widens', () => {
+  assert.equal(narrowingOf('classification.thresholds.ca-classified/Secret.costRatio', 19, 49), 'narrows');
+  assert.equal(narrowingOf('classification.thresholds.ca-classified/Secret.costRatio', 19, 9), 'widens');
+  assert.equal(narrowingOf('classification.guideRules[r-1]', clsRule('r-1'), undefined), 'widens');
+  assert.equal(narrowingOf('classification.guideRules[r-3]', undefined, clsRule('r-3')), 'narrows');
+  assert.equal(narrowingOf('classification.thresholds.ca-classified/Top Secret', undefined, { costRatio: 49, recallTarget: 9900, secondFamily: true }), 'narrows');
+  assert.equal(narrowingOf('classification.systemHigh', [CLS_SECRET], []), undefined, 'your organization\'s alone');
+  assert.equal(directionOf('classification.shadow.defaultMode')?.direction, 'organization-only');
+});

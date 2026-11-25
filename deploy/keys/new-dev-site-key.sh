@@ -9,19 +9,25 @@
 # meant for unattended runs. That refusal is not a security control: anything that gives it a terminal can run it.
 #
 # What it does:
-#   1. Checks for softhsm2-util, pkcs11-tool and the SoftHSM2 module. If any is missing it shows the install command for the packages
-#      listed for this script in deploy/host-packages.json (softhsm2 and opensc, from your OS vendor's signed archive) and runs it only
-#      after you type yes.
+#   1. Checks for softhsm2-util, pkcs11-tool, script and the SoftHSM2 module. If any is missing it shows the install command for the
+#      packages listed for this script in deploy/host-packages.json (softhsm2, opensc and util-linux's script, from your OS vendor's
+#      signed archive) and runs it only after you type yes.
 #   2. Writes ~/.config/sterling-signing/softhsm/softhsm2.conf with the tokens folder beside it (both 0700).
 #   3. Initialises the token sterling-site-dev. softhsm2-util asks for the security officer PIN and the token PIN itself.
 #   4. Makes an EC P-256 key pair labelled sterling-site, id 01, inside the token with pkcs11-tool (which asks for the token PIN
-#      itself), and stops unless the private key is sensitive and never extractable.
+#      itself), and stops unless the private key is sensitive and never extractable. pkcs11-tool runs under script(1), on a terminal
+#      of its own: OpenSC's PIN prompt (util_getpass in src/tools/util.c) turns echo off on standard output's terminal and fails with
+#      "util_getpass error" when standard output is not one, so its output cannot be read through a pipe. script hands a copy of
+#      what pkcs11-tool prints straight back to this script through a file descriptor (/dev/fd/3), never through a file, and this
+#      script reads the private key's Access line from it. Echo is off on that terminal, so the PIN is not in the copy.
 #   5. Prints the public key (PEM) and the PKCS#11 URI, without any PIN, and saves the public key, and only it, to
 #      ~/.config/sterling-signing/site-key.pub.pem. Put that public key in your site file as organizationPublicKey.
+# A run where the key already exists makes nothing: it logs in the same way (pkcs11-tool asks for the token PIN) and runs the same
+# check on the existing private key, because SoftHSM2 shows a private key only after a login. --show does not log in or check.
 #
 # PINs are only ever typed into the token tools' own prompts: never passed as arguments, written to a file, printed or logged.
-# Nothing is ever deleted: a second run refuses to make a key where one exists, and --rotate moves the old token folder, its
-# configuration and the saved public key to ~/.config/sterling-signing/softhsm/.archive/<UTC time>/ before making a new one.
+# Nothing is ever deleted: a second run refuses to make a key where one exists, and --rotate, or a private key that fails the check,
+# moves the token folder, its configuration and the saved public key to ~/.config/sterling-signing/softhsm/.archive/<UTC time>/.
 #
 # --test (for deploy/test/dev-site-key.test.mjs only) runs without a terminal, and only when SOFTHSM2_CONF names a softhsm2.conf in a
 # folder strictly inside a temporary folder ($TMPDIR or /tmp) that is not the home folder and holds neither the home folder nor
@@ -157,28 +163,32 @@ find_module() {
 }
 
 tools_ready() {
-  command -v softhsm2-util >/dev/null 2>&1 && command -v pkcs11-tool >/dev/null 2>&1 && MODULE=$(find_module)
+  command -v softhsm2-util >/dev/null 2>&1 && command -v pkcs11-tool >/dev/null 2>&1 && command -v script >/dev/null 2>&1 && MODULE=$(find_module) || return 1
+  # The module path goes into the PKCS#11 URI and into the command line script runs, so it must need no quoting or escaping.
+  case "$MODULE" in
+    *[!A-Za-z0-9._/-]*) fail "the SoftHSM2 module path $MODULE has characters a PKCS#11 URI would need escaped; set STERLING_PKCS11_MODULE to a plain path" ;;
+  esac
 }
 
 ensure_tools() {
   tools_ready && return 0
   if command -v apt-get >/dev/null 2>&1; then family=apt; manager=apt-get
   elif command -v dnf >/dev/null 2>&1; then family=dnf; manager=dnf
-  else fail "softhsm2-util, pkcs11-tool or the SoftHSM2 module is missing and this machine has neither apt-get nor dnf; install SoftHSM2 and OpenSC from your OS packages, then run this again"
+  else fail "softhsm2-util, pkcs11-tool, script or the SoftHSM2 module is missing and this machine has neither apt-get nor dnf; install SoftHSM2, OpenSC and util-linux from your OS packages, then run this again"
   fi
   names=$(package_names "$family")
   case "$names" in
     '' | *[!a-z0-9.+\ -]*) fail "no usable $family package names for $SELF in $PACKAGES_FILE" ;;
   esac
   if [ "$(id -u)" -eq 0 ]; then command="$manager install $names"; else command="sudo $manager install $names"; fi
-  say "This needs SoftHSM2 and OpenSC from your OS vendor's signed packages ($names). The install command is:"
+  say "This needs SoftHSM2, OpenSC and util-linux's script from your OS vendor's signed packages ($names). The install command is:"
   say "  $command"
   printf 'Install them now? Type yes to continue: ' >&2
   read -r answer || answer=""
   [ "$answer" = yes ] || fail "nothing installed and nothing changed; install the packages yourself or run this again and type yes"
   # Word splitting is wanted here: the command and the checked package names.
   $command
-  tools_ready || fail "the packages are installed but softhsm2-util, pkcs11-tool or the SoftHSM2 module is still missing; set STERLING_PKCS11_MODULE to the libsofthsm2.so path"
+  tools_ready || fail "the packages are installed but softhsm2-util, pkcs11-tool, script or the SoftHSM2 module is still missing; set STERLING_PKCS11_MODULE to the libsofthsm2.so path"
 }
 
 token_present() {
@@ -204,9 +214,6 @@ read_public_key() {
   esac
   [ "${#b64}" -eq 124 ] || fail "the token returned a public key of an unexpected length for $KEY_LABEL"
   PEM=$(printf '%s\n' '-----BEGIN PUBLIC KEY-----'; printf '%s' "$b64" | fold -w 64; printf '\n%s\n' '-----END PUBLIC KEY-----')
-  case "$MODULE" in
-    *[!A-Za-z0-9._/-]*) fail "the SoftHSM2 module path $MODULE has characters a PKCS#11 URI would need escaped; set STERLING_PKCS11_MODULE to a plain path" ;;
-  esac
   URI="pkcs11:token=$TOKEN_LABEL;object=$KEY_LABEL;id=%01;type=private?module-path=$MODULE"
 }
 
@@ -240,6 +247,46 @@ archive_existing() {
   say "Archived the earlier token, its configuration and public key to $ARCHIVE (nothing was deleted)."
 }
 
+# Runs pkcs11-tool with the arguments given on a terminal of its own (script from util-linux), so that it can ask for the token PIN, and
+# sets SESSION to a copy of what it prints. The terminal shows the prompt and the output as usual (script's standard output goes to
+# standard error); script writes its copy to /dev/fd/3, which is this command substitution, so the copy never touches the disk, and the
+# substitution's status is pkcs11-tool's (script -e). Echo is turned off on that terminal first (stty -echo, or nothing runs):
+# pkcs11-tool turns it off only once its prompt is up, so a PIN typed before the prompt would otherwise be echoed into the copy.
+# Every argument is a fixed word or the checked module path; anything that would need quoting stops the script before anything runs.
+pkcs11_on_terminal() {
+  line="stty -echo && pkcs11-tool"
+  for word in "$@"; do
+    case "$word" in
+      '' | *[!A-Za-z0-9._/:-]*) fail "refusing to run pkcs11-tool with the argument $word" ;;
+    esac
+    line="$line $word"
+  done
+  SESSION=$(SHELL=/bin/sh script -q -e -c "$line" /dev/fd/3 3>&1 >&2)
+}
+
+# Stops unless the private key $KEY_LABEL (id $KEY_ID) that pkcs11-tool printed in the session is sensitive and never extractable. OpenSC
+# prints it with an Access line such as "sensitive, always sensitive, never extractable, local". A key that fails, or no such key, means
+# the token is archived (moved, not deleted) so nothing uses it.
+require_safe_private_key() {
+  access=$(printf '%s\n' "$SESSION" | tr -d '\r' | awk -v want="$KEY_LABEL" -v wantid="$KEY_ID" '
+    function close_object() { if (p && label == want && id == wantid && found == "") found = acc; p = 0 }
+    /^[^ ]/ { close_object() }
+    /^Private Key Object/ { p = 1; label = ""; id = ""; acc = ""; next }
+    p && /^ *label:/ { sub(/^ *label: */, ""); label = $0 }
+    p && /^ *ID:/ { sub(/^ *ID: */, ""); id = $0 }
+    p && /^ *Access:/ { sub(/^ *Access: */, ""); acc = $0 }
+    END { close_object(); print found }')
+  list=", $access,"
+  ok=yes
+  case "$list" in *", sensitive,"*) ;; *) ok=no ;; esac
+  case "$list" in *", never extractable,"*) ;; *) ok=no ;; esac
+  case "$list" in *", extractable,"*) ok=no ;; esac
+  if [ "$ok" = no ]; then
+    archive_existing
+    fail "the private key $KEY_LABEL in token $TOKEN_LABEL is extractable, not sensitive or not shown (Access: ${access:-not shown}), so it is not used; the token was archived. Check the SoftHSM2 and OpenSC versions and run this again"
+  fi
+}
+
 create_key() {
   mkdir -p "$SOFTHSM_DIR"
   chmod 700 "$SOFTHSM_DIR"
@@ -253,21 +300,10 @@ create_key() {
   softhsm2-util --init-token --free --label "$TOKEN_LABEL" >&2 \
     || fail "softhsm2-util could not initialise the token. Left behind: the configuration file $CONF and the tokens folder $TOKENS; run sh $SELF --rotate to archive them and start again"
 
-  say "Step 2 of 2: make the key inside the token. Type the token (user) PIN and press Enter (it is not shown)."
-  out=$(pkcs11-tool --module "$MODULE" --token-label "$TOKEN_LABEL" --login --keypairgen --key-type EC:prime256v1 \
-    --label "$KEY_LABEL" --id "$KEY_ID" --usage-sign --sensitive) || fail "pkcs11-tool could not make the key; the token is in $TOKENS, and --rotate archives it"
-
-  # OpenSC prints the new private key object with an Access line such as "sensitive, always sensitive, never extractable, local".
-  access=$(printf '%s\n' "$out" | awk '/^Private Key Object/ { p = 1; next } /^[^ ]/ { p = 0 } p && /^ *Access:/ { sub(/^ *Access: */, ""); print; exit }')
-  list=", $access,"
-  ok=yes
-  case "$list" in *", sensitive,"*) ;; *) ok=no ;; esac
-  case "$list" in *", never extractable,"*) ;; *) ok=no ;; esac
-  case "$list" in *", extractable,"*) ok=no ;; esac
-  if [ "$ok" = no ]; then
-    archive_existing
-    fail "the token made a private key that is extractable or not sensitive (Access: ${access:-not shown}), so it is not used; the token was archived. Check the SoftHSM2 and OpenSC versions and run this again"
-  fi
+  say "Step 2 of 2: make the key inside the token. When pkcs11-tool asks, type the token (user) PIN and press Enter (it is not shown)."
+  pkcs11_on_terminal --module "$MODULE" --token-label "$TOKEN_LABEL" --login --keypairgen --key-type EC:prime256v1 \
+    --label "$KEY_LABEL" --id "$KEY_ID" --usage-sign --sensitive || fail "pkcs11-tool could not make the key; the token is in $TOKENS, and --rotate archives it"
+  require_safe_private_key
 
   read_public_key
   save_public_key
@@ -285,8 +321,17 @@ ensure_tools
 
 if [ "$MODE" != rotate ] && [ -e "$CONF" ]; then
   if token_present && key_present; then
+    if [ "$MODE" = show ]; then
+      say "The development site key already exists in token $TOKEN_LABEL; nothing was changed. --show does not log in, so it did not check the private key; run sh $SELF without --show to check it."
+    else
+      say "The development site key already exists in token $TOKEN_LABEL. To check that its private key is sensitive and never extractable,"
+      say "type the token (user) PIN when pkcs11-tool asks and press Enter (it is not shown)."
+      pkcs11_on_terminal --module "$MODULE" --token-label "$TOKEN_LABEL" --login --list-objects --type privkey --label "$KEY_LABEL" --id "$KEY_ID" \
+        || fail "pkcs11-tool could not log in to token $TOKEN_LABEL to check the private key; nothing was changed"
+      require_safe_private_key
+      say "The private key is sensitive and never extractable; nothing was changed."
+    fi
     read_public_key
-    say "The development site key already exists in token $TOKEN_LABEL; nothing was changed."
     save_public_key
     print_key
     exit 0

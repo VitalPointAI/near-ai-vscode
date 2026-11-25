@@ -50,7 +50,9 @@ In the lab and CI, OpenBao's seal is SoftHSM2 with its token folder on a volume.
 
 ## The off-site copy (required, 3-2-1)
 
-Owner decision d (D-81):
+Owner decision d (D-81).
+
+**Planned, not built yet (gap G515).** The `sterling-offsite` CronJob and `offsite.mjs` described below are planned in 47-33; neither is in this repository yet. Until they are, a site has no automated off-site copy: your organization copies the Longhorn backup target and the audit archive to its second site by its own means, and records each copy. The steps below describe the planned behaviour.
 
 - Every day the `sterling-offsite` CronJob (47-33) copies the Longhorn backup target (every volume's encrypted backup) and the write-once audit archive to a write-once store at your organization's second site. Archive objects are locked 1,825 days (owner decision b).
 - A disconnected site writes the same set with `offsite.mjs pack` to signed media, under the media handling runbook.

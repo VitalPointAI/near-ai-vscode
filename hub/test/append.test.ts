@@ -562,14 +562,16 @@ test('grants: a grant signed by a member is refused grant-not-placed and not sto
     assert.equal(hub.store.grants(hub.world.project).some((grant) => grant.body.includes(stranger.writer)), false);
   }));
 
-test('blob references: a blob the hub does not hold refuses the whole batch with blob-missing; a held blob is marked referenced', () =>
+test('blob references: a blob the hub does not hold refuses the entry that names it with blob-missing (per entry since Phase 33 D-28, no longer the whole batch); a held blob is marked referenced', () =>
   withHub(undefined, async (hub) => {
     const written = note(hub.world, hub.world.lead);
     const blobBytes = Buffer.from('fictional sealed blob bytes');
     const blobHash = createHash('sha256').update(blobBytes).digest('hex');
     const before = storedHashes(hub.store, hub.world.project);
     const missing = await checkBatch(input(hub, [written.entry], { blobRefs: [{ entry: written.hash, blob: blobHash }] }), hub.ctx());
-    assert.equal(missing.ok ? 'ok' : missing.reason, 'blob-missing');
+    assert.ok(missing.ok, 'the batch itself is taken; the entry is refused on its own (Phase 33 D-28)');
+    assert.deepEqual(missing.checked.refused.map((item) => [item.hash, item.reason]), [[written.hash, 'blob-missing']]);
+    assert.deepEqual(missing.checked.entries, []);
     assert.deepEqual(storedHashes(hub.store, hub.world.project), before);
 
     await hub.store.putBlob(hub.world.project, blobHash, blobBytes, hub.world.lead.writer, NOW_MS);

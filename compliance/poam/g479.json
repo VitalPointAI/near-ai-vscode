@@ -1,0 +1,17 @@
+{
+  "controls": [
+    "si-02",
+    "ra-05"
+  ],
+  "gap": "G479",
+  "id": "g479",
+  "milestones": [
+    {
+      "targetDate": "2027-05-31",
+      "title": "A rule judges fixable critical and high findings older than your organization's remediation time"
+    }
+  ],
+  "ownerRole": "maintainers",
+  "remediation": "The Compliance view shows the release scan and site rescans with their counts and fixes, but SI-2 remediation timeliness is not judged from the findings. A later phase adds a rule on fixable critical and high findings older than your organization's remediation time. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-29).",
+  "title": "Vulnerability findings are shown but SI-2 remediation timeliness is not judged from them"
+}
