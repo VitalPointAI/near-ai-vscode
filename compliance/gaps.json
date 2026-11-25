@@ -6160,6 +6160,46 @@
       "ownerRole": "owner",
       "remediation": "The system was renamed Sterling Sovereign AI on 2026-11-24 (owner). SA&A packages, OSCAL SSP, assessment and POA&M drafts and sponsor reports made before that use the old product name (the VS Code extension's former name); the system ids (near-ai-<level>) are unchanged, so evidence still links. When the next package goes to an assessor or sponsor, say in its covering note that earlier drafts used the old name for the same system, and replace any earlier draft held for the authorization. Source: .planning/CODEX-PORT-AUDIT.md.",
       "title": "SA&A drafts made before the rename call the system by its old name"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cm-02",
+        "cm-06",
+        "sc-07"
+      ],
+      "id": "G480",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The workbench container suite (npm run test:container in the workbench job and the release image job) checks the running image: its UBI 9 base, its non-root user, its Node major, its health and that it makes no outbound connection outside its allow list. It writes no test report, so none of those results can be an evidence rule. Write its per-test report with NEAR_AI_TEST_REPORT and upload it beside the unit-test report (a gate change to ci.yml), then add the workbench statements for the image base, the Node major shared with the hub and the run-time egress check.",
+      "title": "The workbench container suite writes no evidence report"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": true,
+      "closesInPhase": "48",
+      "controls": [
+        "cm-08",
+        "ia-02",
+        "ia-05",
+        "sc-07",
+        "sc-12"
+      ],
+      "id": "G481",
+      "ownerRole": "maintainers",
+      "profiles": [
+        "hosted-protected-a",
+        "hosted-protected-b",
+        "hosted-itsp-10-171"
+      ],
+      "remediation": "The compliance job does not wait for the workbench job (the workbench is not a required check), so the workbench image SBOM cannot reach the sbom collector as subject workbench-image, and the workbench test report is read only when its upload finished before the compliance job started. Decide with the owner whether the compliance job waits for the workbench job, or whether a later job collects the workbench evidence; until then a workbench rule can read test-not-run on a commit whose tests passed.",
+      "title": "The compliance job can miss the workbench evidence"
     }
   ]
 }
