@@ -26,8 +26,8 @@ export interface PanelSpec {
   readonly retain?: boolean;
 }
 
-/** A tab title with a brand prefix ("NEAR AI:", "Near AI:"): the title says what the page is, never whose it is. */
-export const BRANDED_TITLE = /^(NEAR AI|Near AI)\s*:/i;
+/** A tab title with a brand prefix ("NEAR AI:", "Near AI:", "SovAI:"): the title says what the page is, never whose it is. */
+export const BRANDED_TITLE = /^(NEAR AI|Near AI|SovAI)\s*:/i;
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');

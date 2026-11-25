@@ -110,7 +110,7 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
   return {
     confirmStart: async () => await vscode.window.showInformationMessage(
       'Give this project an online home?',
-      { modal: true, detail: 'This creates a repository on your GitHub account (you choose public or private next) and keeps your NEAR AI project state there, encrypted. Nothing is created until you continue.' },
+      { modal: true, detail: 'This creates a repository on your GitHub account (you choose public or private next) and keeps your SovAI project state there, encrypted. Nothing is created until you continue.' },
       'Continue'
     ) === 'Continue',
     progress: (message) => {
@@ -149,7 +149,7 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
     confirmDefaultBranch: async (branch) => {
       const make = `Make ${branch} the default`;
       return await vscode.window.showInformationMessage(
-        `GitHub shows NEAR AI's encrypted sync branch first in this repository. Show ${branch} first instead?`,
+        `GitHub shows SovAI's encrypted sync branch first in this repository. Show ${branch} first instead?`,
         make,
         NOT_NOW
       ) === make;
@@ -159,7 +159,7 @@ export function vscodeOnlineHomeUi(): OnlineHomeUi {
 }
 
 /**
- * "NEAR AI: Put This Project's Code Online": the checked code push on the person's own command, for a project that already has an online home (G-27-6b).
+ * "SovAI: Put This Project's Code Online": the checked code push on the person's own command, for a project that already has an online home (G-27-6b).
  * The offer question is not asked, running the command is the choice; every other question of the checked step is.
  */
 export function registerCodePushCommand(context: vscode.ExtensionContext): void {
@@ -189,7 +189,7 @@ async function hasRemote(root: string): Promise<boolean> {
 }
 
 /**
- * Shown once when a NEAR AI project (one with saved project state) has no repository or no remote. Only the person's click on the button starts
+ * Shown once when a SovAI project (one with saved project state) has no repository or no remote. Only the person's click on the button starts
  * anything; "Not now" is remembered for this workspace, and closing the message changes nothing.
  */
 export async function offerOnlineHomeAtStart(context: vscode.ExtensionContext, root: string, run: () => PromiseLike<unknown>): Promise<void> {

@@ -1,4 +1,4 @@
-// The NEAR AI for VS Code documentation site (Docusaurus 3).
+// The Sterling Sovereign AI documentation site (Docusaurus 3).
 //
 // It is built for reading on this computer: no analytics, no external search service, no web
 // fonts or CDNs. Search is a local index built with the site. Pages under content/ named
@@ -11,7 +11,7 @@ const repoUrl = 'https://github.com/VitalPointAI/near-ai-vscode';
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'NEAR AI for VS Code',
+  title: 'Sterling Sovereign AI',
   tagline: 'How to use it, and how it is built',
   url: 'http://127.0.0.1:3210',
   baseUrl: '/',
@@ -84,7 +84,7 @@ const config = {
       colorMode: { respectPrefersColorScheme: true },
       docs: { sidebar: { hideable: true } },
       navbar: {
-        title: 'NEAR AI for VS Code',
+        title: 'Sterling Sovereign AI',
         items: [
           { type: 'docSidebar', sidebarId: 'docs', label: 'Docs', position: 'left' },
           { type: 'docsVersionDropdown', position: 'right' },
@@ -93,7 +93,7 @@ const config = {
       },
       footer: {
         style: 'dark',
-        copyright: 'NEAR AI for VS Code. MIT licence. Built from the repository at every change.'
+        copyright: 'Sterling Sovereign AI. MIT licence. Built from the repository at every change.'
       },
       prism: {
         theme: prismThemes.github,

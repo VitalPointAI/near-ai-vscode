@@ -211,7 +211,7 @@ export class GateHost {
   }
 
   /**
-   * NEAR AI: Add Your Organization's Rules (FND-01, D-11 to D-14). Takes an enrolment file or a rules file from your organization; a first enrolment and a
+   * SovAI: Add Your Organization's Rules (FND-01, D-11 to D-14). Takes an enrolment file or a rules file from your organization; a first enrolment and a
    * key handover need `wordsConfirmed` (the twelve words were compared aloud). Every decision reads the composed policy from the next one on. A file that
    * is refused is recorded as policy.organization-refused, and the plain OrganizationStoreError is thrown with nothing changed.
    */
@@ -260,7 +260,7 @@ export class GateHost {
     } catch (error) {
       // A log that cannot be set up (its folder lies inside the project) is reported once; decisions carry on unrecorded rather than fail.
       usable = false;
-      try { this.options.onProblem?.(error instanceof Error ? error.message : 'NEAR AI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
+      try { this.options.onProblem?.(error instanceof Error ? error.message : 'SovAI could not set up its record of what was allowed or refused.'); } catch { /* ignored */ }
     }
     return {
       bundleState: () => (notLoaded !== undefined && !this.settled ? notLoaded : this.bundleState()),
@@ -509,7 +509,7 @@ export class GateHost {
       outcome: 'denied',
       path: relative,
       ...(labels.length === 0 ? {} : { mark: labels }),
-      reason: 'A raise this file needed could not be written (the label file did not verify) and was kept for Sign Again, but too many were kept, so it was dropped. Sign Again will not write it: set the label with NEAR AI: Set Label if it is still needed.'
+      reason: 'A raise this file needed could not be written (the label file did not verify) and was kept for Sign Again, but too many were kept, so it was dropped. Sign Again will not write it: set the label with SovAI: Set Label if it is still needed.'
     });
   }
 
@@ -632,7 +632,7 @@ export class GateHost {
     };
   }
 
-  /** NEAR AI: Reset Policy to Defaults. Signs a fresh default policy (the old file is kept beside it) and records policy.reset. Throws a plain BundleStoreError when nothing could be changed. */
+  /** SovAI: Reset Policy to Defaults. Signs a fresh default policy (the old file is kept beside it) and records policy.reset. Throws a plain BundleStoreError when nothing could be changed. */
   public async reset(): Promise<BundleResult> {
     await this.start();
     const result = await resetPolicyToDefaults(this.options.globalStorageDir, this.options.secrets, this.storeOptions());
@@ -646,7 +646,7 @@ export class GateHost {
   }
 
   /**
-   * NEAR AI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
+   * SovAI: Apply Policy Draft (D-41, D-53). Applies a draft made from the policy whose hash is `baseHash`, the way reset() replaces the policy: every runtime
    * and the status bar read the new policy from the next decision on, the listeners are told, and policy.edit is recorded with the old and new hashes. A
    * refused draft throws a plain BundleStoreError and changes nothing.
    */

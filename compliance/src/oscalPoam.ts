@@ -42,7 +42,7 @@ export function buildPoam(input: { readonly gaps: readonly PoamGap[]; readonly g
   });
   return { 'plan-of-action-and-milestones': {
     uuid: '10000000-0000-5000-8000-000000000004',
-    metadata: { title: 'NEAR AI POA&M draft', 'last-modified': input.generatedAt, version: '1.0.0', 'oscal-version': OSCAL_VERSION },
+    metadata: { title: 'Sterling Sovereign AI POA&M draft', 'last-modified': input.generatedAt, version: '1.0.0', 'oscal-version': OSCAL_VERSION },
     ...(risks.length ? { risks } : {}), ...(items.length ? { 'poam-items': items } : {})
   } };
 }

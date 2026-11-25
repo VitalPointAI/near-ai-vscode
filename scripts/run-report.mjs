@@ -4,7 +4,7 @@
 //   npm run report:runs -- <path/to/activity.json> [more.json …]
 //   npm run report:runs -- --json <path/to/activity.json>
 //
-// Reads only; never writes the log. The same report opens in VS Code with "NEAR AI: Show Run Performance Report".
+// Reads only; never writes the log. The same report opens in VS Code with "SovAI: Show Run Performance Report".
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';

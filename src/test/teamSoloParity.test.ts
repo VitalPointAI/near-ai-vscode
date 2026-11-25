@@ -157,7 +157,7 @@ test('Verify Team Log in a solo project only explains how to turn Team Mode on',
     timers.restore();
     assert.deepEqual(stub.notifications, [{ level: 'info', message: SOLO_TEXT }]);
     assert.deepEqual(stub.notificationActions, [[]], 'the explanation has no buttons');
-    assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.');
+    assert.equal(SOLO_TEXT, 'Team Mode is not on for this project. Run "SovAI: Enable Team Mode" to turn it on.');
     assert.deepEqual(timers.setTimeoutCalls, []);
     assert.equal(timers.setIntervalCalls, 0);
     assert.equal(stub.statusBarItems.length, 0);
@@ -214,7 +214,7 @@ test('a team project loads the session lazily, shows Team: <name> and stops its 
     assert.equal(stub.statusBarItems.length, 1);
     assert.equal(stub.statusBarItems[0]?.text, 'Team: Parity team');
     assert.equal(stub.statusBarItems[0]?.visible, true);
-    assert.ok(stub.outputChannels.some((channel) => channel.name === 'NEAR AI Team'), 'the team output channel exists once there is a team');
+    assert.ok(stub.outputChannels.some((channel) => channel.name === 'SovAI Team'), 'the team output channel exists once there is a team');
     const polls = timers.created.filter((entry) => entry.ms === 15_000);
     assert.ok(polls.length >= 1, 'a poll timer is waiting at the default 15 seconds');
 

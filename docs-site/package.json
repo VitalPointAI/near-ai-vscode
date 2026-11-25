@@ -2,7 +2,7 @@
   "name": "near-ai-vscode-docs",
   "version": "0.0.0",
   "private": true,
-  "description": "The NEAR AI for VS Code documentation site. A separate workspace: nothing here ships in the extension.",
+  "description": "The Sterling Sovereign AI documentation site. A separate workspace: nothing here ships in the extension.",
   "license": "MIT",
   "engines": {
     "node": ">=20.0"

@@ -115,16 +115,16 @@ export const ENROLMENT_REFUSALS = {
   'rotation-invalid': 'This file says your organization replaced its key, but the handover was not signed by the key it names, so nothing was changed. Ask your organization\'s security contact.',
   'other-organization': 'This computer already uses rules signed by another key, and this file carries no handover from that key, so nothing was changed. Ask your organization\'s security contact.',
   'older-file': 'This file is not newer than the key handover already in use on this computer, so nothing was changed. Ask your organization\'s security contact for the current file.',
-  'needs-update': 'This file needs a newer version of NEAR AI. Update the NEAR AI extension, then open the file again.',
+  'needs-update': 'This file needs a newer version of SovAI. Update SovAI, then open the file again.',
   'layer-refused': 'The rules inside this enrolment file could not be used, so nothing was changed. Ask your organization\'s security contact for a new enrolment file.'
 } as const;
 export type EnrolmentRefusal = keyof typeof ENROLMENT_REFUSALS;
 
 /** Every reason an organization layer (a rules file, or the first rules inside an enrolment file) is refused. */
 export const ORGANIZATION_LAYER_REFUSALS = {
-  malformed: 'Your organization\'s rules are not in a form this version of NEAR AI can read, so they were not used. Ask your organization\'s security contact for a new rules file.',
+  malformed: 'Your organization\'s rules are not in a form this version of SovAI can read, so they were not used. Ask your organization\'s security contact for a new rules file.',
   'too-large': 'Your organization\'s rules file is larger than the allowed size, so it was not opened. Ask your organization\'s security contact for a new rules file.',
-  'needs-update': 'Your organization\'s rules need a feature this version of NEAR AI does not have. Update the NEAR AI extension to use them. Until then only reading and planning run.',
+  'needs-update': 'Your organization\'s rules need a feature this version of SovAI does not have. Update SovAI to use them. Until then only reading and planning run.',
   'unknown-key': 'Your organization\'s rules were not signed by the key this computer uses for your organization, so they were not used.',
   'bad-signature': 'Your organization\'s rules were changed after they were signed, so they were not used. Ask your organization\'s security contact for a new rules file.',
   'signer-mismatch': 'Your organization\'s rules name a different signer than the key that signed them, so they were not used. Ask your organization\'s security contact for a new rules file.',

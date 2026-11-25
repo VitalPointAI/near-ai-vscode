@@ -1025,8 +1025,8 @@ function checkReads(args: Word[], state: SegmentState, context: CommandContext, 
     if (!facts.inside && !facts.device) return unknownRead(`${label} names ${value}, which is outside the workspace`);
   }
   if (scratchRead) return safe(`${label} reads inside the workspace and a temporary folder`);
-  // 0.4.18: the trusted roots are the managed Open-GSD runtime and the person's own team library, both of which NEAR AI installed or wrote.
-  return safe(readsTrusted ? `${label} only reads inside the workspace and the files NEAR AI installed for this project and its teams` : `${label} only reads inside the workspace`);
+  // 0.4.18: the trusted roots are the managed Open-GSD runtime and the person's own team library, both of which SovAI installed or wrote.
+  return safe(readsTrusted ? `${label} only reads inside the workspace and the files SovAI installed for this project and its teams` : `${label} only reads inside the workspace`);
 }
 
 /** gsd-tools verbs that act outside the workspace or contact the network. */
@@ -1055,7 +1055,7 @@ function classifyGsdTools(args: Word[], state: SegmentState, context: CommandCon
   if (GSD_RISKY_VERBS.has(verb) || [...positional.slice(0, 3), ...command.split('.')].some((word) => RELEASE_NAME.test(word))) return risky(`${label} pushes, publishes, or changes another repository`, publishTo(GSD_RISKY_VERBS.has(verb) ? 'git-remote' : 'release'));
   if (GSD_UNCHECKED_VERBS.has(verb)) return unknownRead(`${label} can reach the network or folders outside the workspace`);
   const reads = checkReads(args, state, context, label, true);
-  return reads.verdict === 'safe' ? safe(`${label} runs Open-GSD's own tool from the runtime NEAR AI installed`) : reads;
+  return reads.verdict === 'safe' ? safe(`${label} runs Open-GSD's own tool from the runtime SovAI installed`) : reads;
 }
 
 /** Checks the targets of a command that writes files: outside the workspace, credentials, or protected folders are risky. */

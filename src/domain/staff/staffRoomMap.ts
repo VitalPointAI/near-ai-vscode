@@ -368,7 +368,7 @@ function layersOf(cop: CopModel, drawn: Partial<Record<CopLayerId, number>>): Ma
 /** Builds the map from the scenario (its frame, terrain, forces, control measures), the J2's adversary COAs and the COP layer read model. */
 export function buildStaffMap(input: StaffMapInput): StaffMapModel {
   const scenario = input.scenario;
-  if (!scenario) return emptyMap(input.scenarioProblem ?? 'No exercise scenario is loaded in this project. Load one with NEAR AI: Load a Staff Exercise Scenario.', input.cop);
+  if (!scenario) return emptyMap(input.scenarioProblem ?? 'No exercise scenario is loaded in this project. Load one with SovAI: Load a Staff Exercise Scenario.', input.cop);
   const frame: ExerciseFrame | undefined = scenario.region.frame;
   const gridName = frame?.grid ?? (scenario.region.grid.kind === 'fictional' ? scenario.region.grid.name : '');
   const square = frame?.squareMetres ?? 1000;

@@ -117,7 +117,7 @@
     sv('path', { d: 'M12 2l9 5v10l-9 5-9-5V7z', class: 'mark-hex' }, mark);
     sv('path', { d: 'M8 15V9l8 6V9', class: 'mark-n' }, mark);
     const brandText = el('span', 'brand-t');
-    brandText.append(document.createTextNode('NEAR AI '), el('b', '', 'Staff Room'));
+    brandText.append(document.createTextNode('SovAI '), el('b', '', 'Staff Room'));
     brand.append(mark, brandText);
     const op = el('div', 'op');
     nodes.opName = el('span', 'op-name', 'Staff Room');
@@ -655,7 +655,7 @@
     if (team.state === 'ready' && typeof team.name === 'string') {
       const name = el('span', 'mono', '/team:' + team.name);
       name.title = 'The ' + squad.code + ' team in your teams';
-      line.append(name, action = button('Task in chat', 'ghost', () => vscode.postMessage({ type: 'task-team', section: squad.section }), { 'aria-label': 'Task the ' + squad.code + ' team in the chat', title: 'Puts /team:' + team.name + ' in the NEAR AI chat; nothing is sent' }));
+      line.append(name, action = button('Task in chat', 'ghost', () => vscode.postMessage({ type: 'task-team', section: squad.section }), { 'aria-label': 'Task the ' + squad.code + ' team in the chat', title: 'Puts /team:' + team.name + ' in the SovAI chat; nothing is sent' }));
     } else if (team.state === 'missing' && typeof team.name === 'string') {
       line.append(el('span', 'faint', team.name + ' is missing from your teams'), action = button('Set up again', 'ghost', () => vscode.postMessage({ type: 'set-up-section', section: squad.section }), { 'aria-label': 'Set up the ' + squad.code + ' team again' }));
     } else {
@@ -819,7 +819,7 @@
     nodes.activity.replaceChildren();
     if (model.eventLogProblem) nodes.activity.append(el('li', 'problem', model.eventLogProblem));
     if (!model.activity.length) {
-      nodes.activity.append(el('li', 'empty', model.run ? 'Nothing recorded in this run yet.' : 'No staff run yet. Run a staff team with /team:<name> in the NEAR AI chat and the room fills as it works.'));
+      nodes.activity.append(el('li', 'empty', model.run ? 'Nothing recorded in this run yet.' : 'No staff run yet. Run a staff team with /team:<name> in the SovAI chat and the room fills as it works.'));
       return;
     }
     for (const line of model.activity) {

@@ -37,7 +37,7 @@ export async function runApprovedCommand(command: string): Promise<{ ok: boolean
     'Install'
   );
   if (approved !== 'Install') return { ok: false, reason: 'The install was not approved.' };
-  const terminal = vscode.window.createTerminal({ name: 'NEAR AI: install host tool' });
+  const terminal = vscode.window.createTerminal({ name: 'SovAI: install host tool' });
   terminal.show(true);
   const integration = (terminal as unknown as { shellIntegration?: { executeCommand(text: string): { exitCode: Thenable<number> } } }).shellIntegration;
   if (!integration) {
@@ -83,7 +83,7 @@ export function cyberAssembly(context: {
     storeDirectory,
     stopped: () => isEmergencyStopped(),
     driver: new CyberProtocolDriver({ model, complete }),
-    title: 'NEAR AI: Cybersecurity',
+    title: 'Cybersecurity',
     toolContext: options.toolContext,
     currentAcceptance: (engagement) => ({
       region: engagement.region,

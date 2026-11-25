@@ -195,7 +195,7 @@ test('classifier: reasons explain the decision', () => {
   assert.match(verdict('echo x > /etc/hosts').reason, /outside the workspace/);
 });
 
-// The Open-GSD runtime NEAR AI installed and verified is trusted: its gsd-tools runs and its files
+// The Open-GSD runtime SovAI installed and verified is trusted: its gsd-tools runs and its files
 // may be read in auto. A user-level install, look-alike paths, variables, and writes are not.
 const GSD = '/home/dev/.config/Code/User/globalStorage/vitalpoint.near-ai-vscode/gsd/1.2.3';
 const TOOLS = `${GSD}/gsd-core/bin/gsd-tools.cjs`;

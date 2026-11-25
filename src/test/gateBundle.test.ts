@@ -448,7 +448,7 @@ test('changing one byte after signing fails closed with the bad-signature senten
   envelope.payload.defaultLabel.level = 'Internal';
   const state = check(envelope, signer);
   assert.equal(failedWith(state), 'bad-signature');
-  assert.equal(state.state === 'failed-closed' ? state.sentence : '', 'Your policy file was changed outside NEAR AI. Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.');
+  assert.equal(state.state === 'failed-closed' ? state.sentence : '', 'Your policy file was changed outside SovAI. Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only.');
 });
 
 test('the same envelope offered for another purpose is refused, and a revoked or rotated key fails closed', () => {
@@ -533,7 +533,7 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
     assert.ok(state.sentence.endsWith('.'), 'one sentence-like line');
     assert.ok(!state.sentence.includes('\n'));
     if (reason === 'identity-unavailable') {
-      assert.equal(state.sentence, 'NEAR AI could not save its signing key on this computer, so only reading and planning are allowed until it can.');
+      assert.equal(state.sentence, 'SovAI could not save its signing key on this computer, so only reading and planning are allowed until it can.');
     } else if (reason === 'not-loaded') {
       assert.match(state.sentence, /Start the run again in a moment, or reload the window\.$/);
     } else if (reason === 'unavailable') {
@@ -543,14 +543,14 @@ for (const reason of Object.keys(BUNDLE_FAILURES) as BundleFailureReason[]) {
     } else if (reason === 'unknown-field') {
       // PR #143 review: a newer version's setting and a hand edit look alike here, so the sentence names both ways on and points at Show Policy, which
       // offers Reset only for the person's own policy.
-      assert.match(state.sentence, /If a newer version of NEAR AI wrote it, update the extension\. If you changed your own policy by hand, open NEAR AI: Policy and choose Show as stored to see how to go back\.$/);
+      assert.match(state.sentence, /If a newer version of SovAI wrote it, update the extension\. If you changed your own policy by hand, open SovAI: Policy and choose Show as stored to see how to go back\.$/);
       assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else if (UPDATE_REASONS.has(reason)) {
       // Coherence review S6: a policy written for a newer version is fixed by updating; Reset would discard an organization's rules, so it is never offered.
-      assert.match(state.sentence, /Update the NEAR AI extension to use it\. Until then only reading and planning run, and your policy file is left as it is\.$/);
+      assert.match(state.sentence, /Update SovAI to use it\. Until then only reading and planning run, and your policy file is left as it is\.$/);
       assert.ok(!/Reset/.test(state.sentence), state.sentence);
     } else {
-      assert.match(state.sentence, /Open NEAR AI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only\.$/);
+      assert.match(state.sentence, /Open SovAI: Policy and choose Reset my rules to sign a fresh one; it resets your own rules only\.$/);
     }
   });
 }
@@ -705,7 +705,7 @@ test('S6: an unknown required feature fails closed as needs-update, before an un
   assert.equal(failedWith(unknown), 'unknown-field');
   assert.match(unknown.state === 'failed-closed' ? unknown.sentence : '', /update the extension/);
   for (const reason of UPDATE_REASONS) {
-    assert.match(BUNDLE_FAILURES[reason], /Update the NEAR AI extension/);
+    assert.match(BUNDLE_FAILURES[reason], /Update SovAI/);
     assert.ok(!/Reset/.test(BUNDLE_FAILURES[reason]), reason);
   }
   // Every other reason keeps its own fix.
@@ -745,7 +745,7 @@ test('S6 (Phase 41 schema): a feature id may carry an @N version; an unknown one
     const state = check(signBundle(signer, edited(signer, (p) => { p.requires = [feature]; })), signer);
     assert.equal(failedWith(state), 'needs-update', feature);
     const sentence = state.state === 'failed-closed' ? state.sentence : '';
-    assert.match(sentence, /Update the NEAR AI extension/);
+    assert.match(sentence, /Update SovAI/);
     assert.ok(!/Reset/.test(sentence), feature);
   }
   for (const feature of ['x@0', 'x@', 'x@01', 'x@12345', 'X@1', 'x@1@2', '@1', 'labels@01', 'Labels@1', 'Has Capitals']) {

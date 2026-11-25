@@ -46,11 +46,11 @@ const MARKER_VERSION = 1;
 
 /** The sentence an unreadable map gives (D-53). */
 export const LABEL_MAP_UNREADABLE_TEXT =
-  "This project's label file .planning/.near-ai/labels.json cannot be read (for example, it has a merge conflict), so NEAR AI cannot tell which files are labelled. Fix the file, then run NEAR AI: Set Label to sign it again.";
+  "This project's label file .planning/.near-ai/labels.json cannot be read (for example, it has a merge conflict), so SovAI cannot tell which files are labelled. Fix the file, then run SovAI: Set Label to sign it again.";
 
 /** The sentence a deleted or older map gives (D-59). */
 export const LABEL_MAP_ROLLED_BACK_TEXT =
-  "This project's label file .planning/.near-ai/labels.json is missing, or cannot be checked against the one this computer last checked, so labels may have been removed without a signature. Agents cannot read files in this project until you put the file back (for example with git restore) or run NEAR AI: Set Label, which offers to sign the labels this computer last checked again.";
+  "This project's label file .planning/.near-ai/labels.json is missing, or cannot be checked against the one this computer last checked, so labels may have been removed without a signature. Agents cannot read files in this project until you put the file back (for example with git restore) or run SovAI: Set Label, which offers to sign the labels this computer last checked again.";
 
 /** The sentence of a signed label file that is not the one this computer last checked, such as another branch's (D-61). */
 export const LABEL_MAP_OTHER_REVISION_TEXT =
@@ -61,7 +61,7 @@ export const USE_BRANCH_LABELS_ACTION = "Use this branch's labels";
 
 /** The notice for a map that does not verify, told once per window (D-53). */
 export const LABEL_MAP_UNVERIFIED_TEXT =
-  "This project's label file .planning/.near-ai/labels.json is not signed by a key this computer knows (it was changed by hand, merged, or signed on another computer). NEAR AI uses it only where it makes a label stricter, never where it would lower one. Run NEAR AI: Set Label to sign it again with this computer's key.";
+  "This project's label file .planning/.near-ai/labels.json is not signed by a key this computer knows (it was changed by hand, merged, or signed on another computer). SovAI uses it only where it makes a label stricter, never where it would lower one. Run SovAI: Set Label to sign it again with this computer's key.";
 
 /** The question before an unverified map is signed again with this computer's key (D-53). */
 export const LABEL_MAP_RESIGN_QUESTION = "Sign it again with this computer's key, keeping only the labels that raise?";
@@ -70,7 +70,7 @@ export const LABEL_MAP_RESIGN_QUESTION = "Sign it again with this computer's key
 export const LABEL_MAP_RESTORE_QUESTION = 'Sign the labels this computer last checked again?';
 
 /** Said when a label change needs this computer's signing key and there is none yet. */
-export const NO_SIGNING_KEY_TEXT = 'Nothing was written: NEAR AI has no signing key on this computer yet. Open NEAR AI: Policy and try again.';
+export const NO_SIGNING_KEY_TEXT = 'Nothing was written: SovAI has no signing key on this computer yet. Open SovAI: Policy and try again.';
 
 /** A change that wrote nothing, with a plain message. */
 export class LabelMapError extends Error {
@@ -433,7 +433,7 @@ export type LabelLowering = { readonly kind: 'person'; readonly reason: string }
 
 /** Said when a write would lower or drop a label and is not a person's recorded change: nothing is written (PR #87 review, never lower). */
 export const LABEL_LOWERING_REFUSED_TEXT =
-  'Nothing was written: this change would lower or remove a label, and only a person can do that, with NEAR AI: Set Label and a reason.';
+  'Nothing was written: this change would lower or remove a label, and only a person can do that, with SovAI: Set Label and a reason.';
 
 /** The key of a label map payload's project label, beside its entries, for the never-lower check. */
 function labelsByKey(map: LabelMapPayload): Map<string, Label> {
@@ -692,7 +692,7 @@ export class LabelReader implements LabelSource {
     if (view.problem !== undefined) tell(view.state, view.problem, view.state);
     if (view.missing.length > 0) {
       const shown = view.missing.slice(0, 5).join(', ');
-      tell(`missing:${view.missing.join('\n')}`, `Some labelled paths in .planning/.near-ai/labels.json no longer exist: ${shown}${view.missing.length > 5 ? ` and ${String(view.missing.length - 5)} more` : ''}. Their labels are kept. Run NEAR AI: Set Label on the new path, or remove the old one there.`);
+      tell(`missing:${view.missing.join('\n')}`, `Some labelled paths in .planning/.near-ai/labels.json no longer exist: ${shown}${view.missing.length > 5 ? ` and ${String(view.missing.length - 5)} more` : ''}. Their labels are kept. Run SovAI: Set Label on the new path, or remove the old one there.`);
     }
   }
 

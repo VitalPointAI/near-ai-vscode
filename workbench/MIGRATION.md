@@ -18,7 +18,7 @@ Run each group against the actual browser container. Installed and registered co
 
 ## Confirmed host differences
 
-- Theia 1.77 returns a stub from `vscode.chat.createChatParticipant`. Preserve the NEAR AI chat behavior through a working Theia command and chat view. Verify the existing sidebar path independently. [Plugin API implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/plugin/plugin-context.ts)
+- Theia 1.77 returns a stub from `vscode.chat.createChatParticipant`. Preserve the SovAI chat behavior through a working Theia command and chat view. Verify the existing sidebar path independently. [Plugin API implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/plugin/plugin-context.ts)
 - Theia 1.77 forwards VSIX `SecretStorage` calls to its workbench credentials service. Its default server falls back to an in-memory provider when the OS credential store is unavailable. A browser container must demonstrate an available durable store and successful secret retrieval after restart before accounts and sync pass parity. [SecretStorage bridge](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/plugin-ext/src/main/browser/secrets-main.ts) · [Key store implementation](https://github.com/eclipse-theia/theia/blob/v1.77.0/packages/core/src/node/key-store-server.ts)
 
 ## First browser checks

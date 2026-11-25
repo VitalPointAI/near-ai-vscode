@@ -104,7 +104,7 @@ export interface SeedItem { role: ThreadRole; body: unknown }
 export const PARTICIPANT_STOPPED_NOTICE = 'The reply stopped before it finished.';
 
 /**
- * What a /gsd-* command typed in the Chat view is kept as: one notice, since the workflow itself runs in the NEAR AI panel and the model never saw it
+ * What a /gsd-* command typed in the Chat view is kept as: one notice, since the workflow itself runs in the SovAI panel and the model never saw it
  * as a message. It says what was run and repeats the reply the person read.
  */
 export function commandNoticeText(command: string, args: string, reply: string): string {
@@ -288,7 +288,7 @@ export interface ThreadPanelLike {
 }
 
 /**
- * The command behind a reply's "Open this chat in the NEAR AI panel" button: shows the panel and reopens the thread there with its whole history
+ * The command behind a reply's "Open this chat in the SovAI panel" button: shows the panel and reopens the thread there with its whole history
  * (nearAi.openThread). The id comes from a button argument, so it is checked before it goes anywhere (T-27-31); a bad one is refused with a message.
  */
 export async function openThreadInPanel(threadId: unknown, panel: ThreadPanelLike, warn: (text: string) => void): Promise<boolean> {

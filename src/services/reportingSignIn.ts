@@ -139,7 +139,7 @@ export async function startLoopbackSignIn(options: { external?: (local: string) 
   }
   if (!isLoopbackUrl(callback)) {
     server.close();
-    throw new SignInError('remote', 'This VS Code window is not on the machine its browser runs on, so NEAR AI cannot send the sign-in back to it.');
+    throw new SignInError('remote', 'This VS Code window is not on the machine its browser runs on, so SovAI cannot send the sign-in back to it.');
   }
   for (const address of [local, callback]) origins.add(new URL(address).origin);
   const timer = setTimeout(() => finish(new SignInError('timeout', 'Sign-in timed out after 5 minutes.')), options.timeoutMs ?? SIGN_IN_TIMEOUT_MS);
@@ -169,9 +169,9 @@ export async function firstSession(loopback: Pick<LoopbackSignIn, 'tokens' | 'cl
 
 /** The page NEAR redirects to: hands the fragment to the listener and takes it off the address bar. */
 function callbackPage(nonce: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>NEAR AI for VS Code</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sterling Sovereign AI</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="font: 16px system-ui, sans-serif; max-width: 36rem; margin: 4rem auto; padding: 0 1rem;">
-<h1 style="font-size: 1.25rem;">NEAR AI for VS Code</h1><p id="m">Finishing sign-in…</p>
+<h1 style="font-size: 1.25rem;">Sterling Sovereign AI</h1><p id="m">Finishing sign-in…</p>
 <script nonce="${nonce}">
 const hash = location.hash.slice(1);
 history.replaceState(null, '', location.pathname);
@@ -241,7 +241,7 @@ export async function setUpReportingToken(options: SetUpReportingTokenOptions): 
     if (response.status === 403) throw new SignInError('not-admin', 'Only an owner or admin of the organization this API key belongs to can create a usage reporting token. Ask one to sign in here, or to create a token for you.');
     if (!response.ok) {
       const detail = await errorText(response);
-      throw new SignInError('failed', `NEAR AI could not create the token (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`);
+      throw new SignInError('failed', `SovAI could not create the token (HTTP ${response.status})${detail ? `: ${detail}` : '.'}`);
     }
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     const token = typeof body.token === 'string' ? body.token : '';
@@ -272,5 +272,5 @@ export const PASTE_CALLBACK = 'http://127.0.0.1:9/near-ai/signed-in';
 
 /** The token's name in NEAR's list, so whoever looks there knows what made it. */
 export function reportingTokenName(now = new Date()): string {
-  return `NEAR AI for VS Code (${now.toISOString().slice(0, 10)})`;
+  return `Sterling Sovereign AI (${now.toISOString().slice(0, 10)})`;
 }

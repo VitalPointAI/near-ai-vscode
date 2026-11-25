@@ -105,7 +105,7 @@ export class SafetyModelCheck implements CommandSafetyCheck {
     for (const model of models) {
       const now = this.options.now?.() ?? Date.now();
       if (now < (this.pausedUntil.get(model) ?? 0)) {
-        last = last ?? { verdict: { allow: false, reason: 'The safety check model was busy (rate limited by NEAR) or unreachable a moment ago, so NEAR AI is asking you instead.' }, answered: false };
+        last = last ?? { verdict: { allow: false, reason: 'The safety check model was busy (rate limited by NEAR) or unreachable a moment ago, so SovAI is asking you instead.' }, answered: false };
         continue;
       }
       last = await this.ask(model, command, where, signal);
@@ -140,15 +140,15 @@ export class SafetyModelCheck implements CommandSafetyCheck {
       const verdict = parseSafetyVerdict(reply.text);
       if (!verdict) {
         const why = reply.finishReason === 'length' ? `The safety model (${model}) used up its answer length before giving a verdict` : !reply.text.trim() ? `The safety model (${model}) gave an empty answer` : `The safety model's (${model}) answer was not the expected verdict`;
-        return { verdict: { allow: false, reason: `${why}, so NEAR AI is asking you instead.` }, answered: false };
+        return { verdict: { allow: false, reason: `${why}, so SovAI is asking you instead.` }, answered: false };
       }
       return { verdict: { allow: verdict.allow, reason: `Safety model: ${verdict.reason}` }, answered: true };
     } catch (error) {
       if (signal?.aborted) return { verdict: { allow: false, reason: 'The run was cancelled.' }, answered: false };
-      if (timedOut) return { verdict: { allow: false, reason: `The safety model did not answer within ${Math.round(timeoutMs / 1000)} seconds, so NEAR AI is asking you instead.` }, answered: false };
+      if (timedOut) return { verdict: { allow: false, reason: `The safety model did not answer within ${Math.round(timeoutMs / 1000)} seconds, so SovAI is asking you instead.` }, answered: false };
       const status = (error as { status?: unknown }).status;
       if (status === 429 || (typeof status === 'number' && status >= 500)) this.pausedUntil.set(model, (this.options.now?.() ?? Date.now()) + (this.options.cooldownMs ?? COOLDOWN_MS));
-      return { verdict: { allow: false, reason: status === 429 ? 'The safety check model is busy (rate limited by NEAR), so NEAR AI is asking you instead.' : 'The safety check model could not be reached, so NEAR AI is asking you instead.' }, answered: false };
+      return { verdict: { allow: false, reason: status === 429 ? 'The safety check model is busy (rate limited by NEAR), so SovAI is asking you instead.' : 'The safety check model could not be reached, so SovAI is asking you instead.' }, answered: false };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', forward);

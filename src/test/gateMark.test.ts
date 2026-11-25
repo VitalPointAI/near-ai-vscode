@@ -50,7 +50,7 @@ import { call, grantsAt, keys, label, labelledProject, runWith, scripted } from 
 const NEAR = 'https://cloud-api.near.ai/v1';
 const raised = (records: readonly DecisionRecord[]): DecisionRecord[] => records.filter((record) => record.authorizations[0]?.policy.name === 'label.mark-raised');
 
-/** A streaming chat completion with one chunk and a usage chunk, as NEAR AI sends it. */
+/** A streaming chat completion with one chunk and a usage chunk, as SovAI sends it. */
 function sse(delta: Record<string, unknown>): Response {
   const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
   const body = chunk({ id: 'c1', choices: [{ delta, finish_reason: 'tool_calls' in delta ? 'tool_calls' : 'stop' }] }) + chunk({ id: 'c1', choices: [], usage: { prompt_tokens: 3, completion_tokens: 1 } }) + 'data: [DONE]\n\n';

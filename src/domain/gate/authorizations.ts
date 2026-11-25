@@ -513,7 +513,7 @@ export function parsePolicySigners(value: unknown, path = 'signers'): Parsed<rea
 
 /** Every reason an authorization does not count, each one plain sentence. A reason is added here with its sentence and a test, never at a call site. */
 export const AUTHORIZATION_REFUSALS = Object.freeze({
-  malformed: 'This approval is not one this version of NEAR AI can read.',
+  malformed: 'This approval is not one this version of SovAI can read.',
   'wrong-purpose': 'This signed item is not an approval.',
   'too-large': 'This approval is larger than the allowed size.',
   'bad-signature': 'This approval was changed after it was signed, or was not signed by the key it names.',

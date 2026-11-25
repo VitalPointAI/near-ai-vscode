@@ -4,7 +4,7 @@ import { CLEAR_REPORTING_TOKEN_COMMAND, REPORTING_TOKEN_HOW_TO, ReportingTokenSt
 import { reportingTokenState, spendAccountForRoot } from './spendTracking';
 import { readRunBudget, readSettings } from './settings';
 
-// NEAR AI: Spending Limits. Shows today's spend and the limits that stop requests and runs, and
+// SovAI: Spending Limits. Shows today's spend and the limits that stop requests and runs, and
 // changes them for the user or just this workspace. The values are ordinary settings. It also
 // sets or clears the usage reporting token, which makes every figure NEAR's own total.
 

@@ -19,7 +19,7 @@ function feedAt(start = 1_000_000, limits = { maxAgeMs: 60 * 60_000, maxBytes: 8
 
 test('streamed text becomes one entry per reply, tool rows get their result, and stats add up', () => {
   const { feed, advance } = feedAt();
-  feed.agentStarted({ agentId: 'main-1', agent: 'agent', runId: 'run-1', model: 'z-ai/glm-5.3' }, 'Fix the bug', 'You are NEAR AI…');
+  feed.agentStarted({ agentId: 'main-1', agent: 'agent', runId: 'run-1', model: 'z-ai/glm-5.3' }, 'Fix the bug', 'You are SovAI…');
   feed.stream('main-1', 'reasoning', 'Look at ');
   feed.stream('main-1', 'reasoning', 'cart.js');
   feed.stream('main-1', 'text', 'Let me ');
@@ -35,7 +35,7 @@ test('streamed text becomes one entry per reply, tool rows get their result, and
   const { snapshot, dispose } = feed.subscribe(() => undefined);
   dispose();
   assert.deepEqual(snapshot.map((entry) => [entry.kind, entry.text ?? entry.title]), [
-    ['agent-start', 'agent started on z-ai/glm-5.3'], ['system', 'You are NEAR AI…'], ['prompt', 'Fix the bug'],
+    ['agent-start', 'agent started on z-ai/glm-5.3'], ['system', 'You are SovAI…'], ['prompt', 'Fix the bug'],
     ['reasoning', 'Look at cart.js'], ['text', 'Let me check.'], ['tool', '1 failing'], ['text', 'Fixed.'],
     ['retry', 'NEAR AI stopped sending the response. Retrying in 2 s (attempt 2).'], ['agent-end', 'agent completed']
   ]);

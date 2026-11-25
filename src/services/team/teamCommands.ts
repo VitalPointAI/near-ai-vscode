@@ -13,14 +13,14 @@ import type { TeamSession } from './teamSession';
 
 export const ENABLE_COMMAND = 'nearAi.team.enable';
 export const VERIFY_LOG_COMMAND = 'nearAi.team.verifyLog';
-export const SOLO_TEXT = 'Team Mode is not on for this project. Run "NEAR AI: Enable Team Mode" to turn it on.';
+export const SOLO_TEXT = 'Team Mode is not on for this project. Run "SovAI: Enable Team Mode" to turn it on.';
 export const PUSH_ACTION = 'Share with my team';
 export const SHARED_TEXT = 'Shared with your team.';
-export const PREVIEW_OFF_TEXT = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "NEAR AI: Enable Team Mode" again.';
+export const PREVIEW_OFF_TEXT = 'Team Mode is an early preview and is off. Turn on the setting nearAi.team.preview in Settings, then run "SovAI: Enable Team Mode" again.';
 export const VERIFY_ACTION = 'Verify Team Log';
 export const TRUST_NEW_TEAM_ACTION = 'Trust this new team';
 export const TRUST_CONFIRM_ACTION = 'Trust this team';
-const OUTPUT_CHANNEL_NAME = 'NEAR AI Team';
+const OUTPUT_CHANNEL_NAME = 'SovAI Team';
 const TEAM_FILE_PARTS = ['.planning', '.near-ai', 'team.json'];
 const ENABLE_PROGRESS_TITLE = 'Enabling Team Mode';
 
@@ -209,7 +209,7 @@ export function registerTeamMode(context: vscode.ExtensionContext): TeamModeHand
     }
     const projectRoot = firstFolder();
     if (projectRoot === undefined) {
-      announce('error', 'Open your project folder first, then run "NEAR AI: Enable Team Mode" again.');
+      announce('error', 'Open your project folder first, then run "SovAI: Enable Team Mode" again.');
       return;
     }
     const enableModule = await import('../../team/enable');

@@ -27,7 +27,7 @@ export interface StaffRoomEffects {
   readonly refresh: () => void;
   /** A short line the page shows (and announces) when a request could not be done. */
   readonly notice: (text: string) => void;
-  /** Focuses the NEAR AI chat and puts `/team:<team> ` in its message box, nothing sent. Without it, "Task in chat" says it cannot. */
+  /** Focuses the SovAI chat and puts `/team:<team> ` in its message box, nothing sent. Without it, "Task in chat" says it cannot. */
   readonly taskInChat?: (team: string) => Promise<unknown>;
 }
 
@@ -61,7 +61,7 @@ export async function handleStaffRoomMessage(raw: unknown, effects: StaffRoomEff
       // Only a team the host itself last sent as ready for that section: the page names the section, never the command.
       const team = effects.model()?.squads.find((squad) => squad.section === message.section)?.team;
       if (team?.state !== 'ready' || !team.name) { effects.notice(`The ${message.section.toUpperCase()} has no team to task. Set it up first.`); effects.refresh(); return 'refused'; }
-      if (!effects.taskInChat) { effects.notice('The NEAR AI chat is not available here.'); return 'refused'; }
+      if (!effects.taskInChat) { effects.notice('The SovAI chat is not available here.'); return 'refused'; }
       await effects.taskInChat(team.name);
       return 'done';
     }

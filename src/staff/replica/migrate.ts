@@ -116,7 +116,7 @@ export const LEGACY_LEDGERS: readonly LegacyLedger[] = [
 export const PASSTHROUGH_LEDGERS: readonly PassthroughLedger[] = LEGACY_LEDGERS.filter((item) => item.ledger !== IMPORTED_PRODUCTS_LEDGER).map((item) => ({ ledger: item.ledger, path: item.path }));
 
 // Today's way out of a broken product ledger, word for word (staffHost.ts SET_ASIDE_WAY_OUT and ledgerWayOut; a test pins it to the host's refusal).
-const SET_ASIDE_WAY_OUT = 'A person can set it aside with NEAR AI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
+const SET_ASIDE_WAY_OUT = 'A person can set it aside with SovAI: Staff: Set Aside the Product Ledger, which keeps the old file and starts a new one.';
 
 function productLedgerWayOut(reason: string): string {
   return reason === LEDGER_PROBLEMS.truncated || reason === LEDGER_PROBLEMS.replaced ? `${USE_BRANCH_LEDGER_WAY_OUT} Otherwise: ${SET_ASIDE_WAY_OUT}` : SET_ASIDE_WAY_OUT;

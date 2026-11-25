@@ -10,7 +10,7 @@ import * as path from 'node:path';
 // that a later event overwrites. An entry starts with its estimate and is settled later with
 // NEAR's actual cost (from /v1/billing/costs) in a separate record keyed by its inference-id.
 
-/** What a request was for, so displays can show where the money went (`eval`: NEAR AI: Compare Models). */
+/** What a request was for, so displays can show where the money went (`eval`: SovAI: Compare Models). */
 export type SpendKind = 'main' | 'sub-agent' | 'safety' | 'summary' | 'attachment' | 'transcription' | 'image' | 'generation' | 'participant' | 'eval';
 /** `open` while a stream is still arriving; `partial` when it broke off; `aborted` when it was cancelled or timed out. */
 export type SpendStatus = 'open' | 'completed' | 'partial' | 'aborted';

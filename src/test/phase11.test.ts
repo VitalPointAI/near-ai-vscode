@@ -75,7 +75,7 @@ test('running a team gives the lead its members as sub-agents with their own too
   const reputation = new ReputationStore(root);
   const conversation = newTestConversation(root, () => undefined, path.join(root, '.ckpt'));
   await conversation.send({ text: '/team:crew add a flag', team, client: client as never, model: 'm', privacy: 'Private', policy: { mode: 'approve-risky', emergencyStop: false }, rules: DEFAULT_RULES, reputation });
-  assert.match(requests[0].system, /You are NEAR AI/);
+  assert.match(requests[0].system, /You are SovAI/);
   assert.ok(requests[0].tools.includes('Agent') && !requests[0].tools.includes('Skill'), 'teams get Agent but not GSD skills');
   const child = requests.find((request) => request.system.startsWith('You are planner'))!;
   assert.deepEqual([...child.tools].sort(), ['Glob', 'Grep', 'Read', 'TodoWrite'], 'planner tools come from its team definition (Recall needs memory, which this run has none of)');

@@ -90,7 +90,7 @@ async function gitTopLevel(cwd: string): Promise<string | undefined> {
  */
 export async function resolveGsdRun(cwd: string, home: string, env: NodeJS.ProcessEnv): Promise<GsdRunResolution> {
   if (env.RUNTIME_DIR) return { trusted: false, reason: 'RUNTIME_DIR is set, so the Open-GSD preamble would look for gsd-tools there instead of the managed runtime' };
-  if (!env.CLAUDE_CONFIG_DIR || path.resolve(env.CLAUDE_CONFIG_DIR) !== path.resolve(home)) return { trusted: false, reason: 'the shell\'s CLAUDE_CONFIG_DIR is not the Open-GSD runtime NEAR AI installed' };
+  if (!env.CLAUDE_CONFIG_DIR || path.resolve(env.CLAUDE_CONFIG_DIR) !== path.resolve(home)) return { trusted: false, reason: 'the shell\'s CLAUDE_CONFIG_DIR is not the Open-GSD runtime SovAI installed' };
   if (env.CLAUDE_ENV_FILE) return { trusted: false, reason: 'CLAUDE_ENV_FILE is set, and the Open-GSD preamble would write to it' };
   const roots = [...new Set([await gitTopLevel(cwd), path.resolve(cwd)].filter((root): root is string => Boolean(root)))];
   for (const root of roots) {

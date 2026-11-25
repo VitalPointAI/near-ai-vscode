@@ -72,9 +72,9 @@ test('clear empties the queue and returns what was waiting', () => {
 });
 
 test('the pinned header says who is asking and how many wait', () => {
-  assert.equal(pending.headerText(approval('a', 'x'), 1, 1), 'NEAR AI needs your approval');
+  assert.equal(pending.headerText(approval('a', 'x'), 1, 1), 'SovAI needs your approval');
   assert.equal(pending.headerText(approval('a', 'x', 'gsd-planner'), 2, 3), 'gsd-planner needs your approval · 2 of 3 waiting');
-  assert.equal(pending.headerText({ id: 'q', kind: 'questions', title: 'Which phase?' }, 1, 1), 'NEAR AI is asking you');
+  assert.equal(pending.headerText({ id: 'q', kind: 'questions', title: 'Which phase?' }, 1, 1), 'SovAI is asking you');
 });
 
 test('the transcript line records the outcome, with the answer for questions', () => {

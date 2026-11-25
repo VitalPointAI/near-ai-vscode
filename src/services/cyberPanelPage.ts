@@ -155,8 +155,8 @@ export interface CyberPageHost {
 export function cyberPanelHtml(options: { cspSource: string; nonce: string; script: string; style: string }): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${options.cspSource}; script-src 'nonce-${options.nonce}';">
-<link rel="stylesheet" href="${options.style}"><title>NEAR AI Cybersecurity</title></head><body>
-<header><h1>NEAR AI Cybersecurity</h1><p class="hint">Pick a target, resolve its scope, accept the regional disclaimer once per engagement, then run a defensive, offensive, or full scan. Nothing is sent to a model until you press Run.</p>
+<link rel="stylesheet" href="${options.style}"><title>SovAI Cybersecurity</title></head><body>
+<header><h1>SovAI Cybersecurity</h1><p class="hint">Pick a target, resolve its scope, accept the regional disclaimer once per engagement, then run a defensive, offensive, or full scan. Nothing is sent to a model until you press Run.</p>
 <p id="status" class="status" role="status" aria-live="polite"></p>
 </header>
 <main>

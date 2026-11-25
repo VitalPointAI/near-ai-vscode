@@ -69,8 +69,8 @@ export function initEmergencyStop(context: vscode.ExtensionContext): void {
   memento = context.globalState;
   sharedFile = context.globalStorageUri ? path.join(context.globalStorageUri.fsPath, 'emergency-stop.json') : undefined;
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
-  item.text = '$(debug-stop) NEAR AI stopped';
-  item.tooltip = 'Emergency stop is on: NEAR AI sends nothing and runs nothing. Click to resume.';
+  item.text = '$(debug-stop) SovAI stopped';
+  item.tooltip = 'Emergency stop is on: SovAI sends nothing and runs nothing. Click to resume.';
   item.command = 'nearAi.resume';
   item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
   const sync = (engaged: boolean) => { if (engaged) item.show(); else item.hide(); };

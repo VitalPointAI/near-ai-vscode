@@ -1,11 +1,7 @@
-/* The first-project welcome page. The NEAR brand colours are the page's own; everything else comes
-   from the active VS Code theme. The page fits any panel width: the steps reflow into fewer columns
-   and the spacing tightens on a narrow panel. */
+/* The first-project welcome page reflows its steps for narrow panels. */
 :root { color-scheme: dark; --near-orange: #ffb81c; --near-orange-deep: #ff7a18; --near-ink: #161616; --near-purple: #8b5cf6; --panel: #171717; --muted: #a3a3a3; }
 body { background: var(--vscode-editor-background); max-width: 860px; margin: 0 auto; padding: 36px 28px 56px; line-height: 1.55; }
 .hero { border: 1px solid color-mix(in srgb, var(--near-orange) 45%, transparent); background: linear-gradient(135deg, color-mix(in srgb, var(--near-purple) 22%, transparent), color-mix(in srgb, var(--near-orange) 12%, transparent)); border-radius: 18px; padding: 30px; }
-.mark { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(135deg, var(--near-orange), var(--near-orange-deep)); color: var(--near-ink); font-weight: 900; font-size: 20px; animation: breathe 2.2s ease-in-out infinite; }
-@keyframes breathe { 50% { transform: translateY(-3px) scale(1.04); box-shadow: 0 0 24px color-mix(in srgb, var(--near-orange) 50%, transparent); } }
 h1 { margin: 18px 0 8px; font-size: 30px; overflow-wrap: anywhere; }
 h2 { margin-top: 34px; font-size: 20px; }
 p { color: var(--muted); }
@@ -28,4 +24,3 @@ code { color: var(--near-orange); }
   h1 { font-size: 22px; }
   h2 { margin-top: 24px; font-size: 17px; }
 }
-@media (prefers-reduced-motion: reduce) { .mark { animation: none; } }

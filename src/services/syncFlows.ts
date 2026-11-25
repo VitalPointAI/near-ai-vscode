@@ -30,8 +30,8 @@ import type { ThreadStore } from './threadStore';
 export const SYNC_LEAK_EXPLANATION = [
   "Project sync keeps an encrypted copy of this project's chats, runs, comparisons, model choices and your NEAR AI key on your git host, on a branch of this project's own repository.",
   'Everything is encrypted on this computer before it leaves, and only your recovery code can open it. Your git host, and anyone who can read the repository, cannot read your chats or your key.',
-  'They can see that this project uses NEAR AI sync, roughly how much is stored, and when you save.',
-  'Nobody, including NEAR AI, can recover your recovery code for you.'
+  'They can see that this project uses SovAI sync, roughly how much is stored, and when you save.',
+  'Nobody, including SovAI, can recover your recovery code for you.'
 ].join('\n\n');
 
 const NO_HOME = 'This project has no online home yet, so it cannot sync.';

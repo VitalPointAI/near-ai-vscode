@@ -116,7 +116,7 @@ export function parseTeamFile(text: string): TeamFile {
     throw new TeamFileError('team.json is not valid JSON.', { cause: error });
   }
   if (isRecord(parsed) && parsed.version !== undefined && parsed.version !== 1) {
-    throw new TeamFileError('team.json was written by a newer version of NEAR AI. Update the extension to use Team Mode in this project.');
+    throw new TeamFileError('team.json was written by a newer version of SovAI. Update the extension to use Team Mode in this project.');
   }
   const top = exactKeys(parsed, 'team.json', ['version', 'teamId', 'name', 'coordination', 'genesis', 'createdAt'], ['near']);
   if (top.version !== 1) return refuse('version');

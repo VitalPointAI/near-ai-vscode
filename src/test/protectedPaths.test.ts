@@ -38,8 +38,8 @@ test('file tools: a write into the state folder, the locks folder, a *.git folde
 
 test('the sentences: .git and .planning/.near-ai keep their wording, .near-ai and a *.git folder get their own', () => {
   assert.equal(protectedWriteReason('.git/config'), '.git/config is inside .git, where hooks and config run code on the next git command. Approve this write only if you expect it.');
-  assert.equal(protectedWriteReason('.planning/.near-ai/x.json'), ".planning/.near-ai/x.json is inside .planning/.near-ai, which holds this project's NEAR AI settings. Approve this write only if you expect it.");
-  assert.equal(protectedWriteReason('.near-ai/state/meta.json'), ".near-ai/state/meta.json is inside .near-ai, where NEAR AI keeps this project's saved state, keys and locks. Approve this write only if you expect it.");
+  assert.equal(protectedWriteReason('.planning/.near-ai/x.json'), ".planning/.near-ai/x.json is inside .planning/.near-ai, which holds this project's SovAI settings. Approve this write only if you expect it.");
+  assert.equal(protectedWriteReason('.near-ai/state/meta.json'), ".near-ai/state/meta.json is inside .near-ai, where SovAI keeps this project's saved state, keys and locks. Approve this write only if you expect it.");
   assert.match(String(protectedWriteReason('vendor/mirror.git/config')), /is inside mirror\.git, where hooks and config run code/);
   assert.equal(protectedWriteReason('src/app.ts'), undefined);
   assert.equal(PROTECTED_WRITE.test('.near-ai/scratch/x.py'), false);

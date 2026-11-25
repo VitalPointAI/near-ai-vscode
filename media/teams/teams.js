@@ -1,4 +1,4 @@
-// NEAR AI Team Studio. The host sends the team library and everything the pickers need; the page
+// SovAI Team Studio. The host sends the team library and everything the pickers need; the page
 // edits a draft and asks the host to check it (the host renders the exact Markdown it would save).
 // Everything is rendered with textContent. Messages only name teams by the ids the host listed.
 (function () {
@@ -699,7 +699,7 @@
     // 0.4.27: a private team (marked private, or every member private) runs and is reviewed only on private models.
     if (team.private) head.append(badge('Private', 'kind private', 'Every member runs only on a private model (NEAR TEE or this machine), and Improve with AI uses only a private model.'));
     // A staff section team: who decides in gold, that its members draft in violet (the Staff Room's colours, with words).
-    if (team.staff) head.append(badge('Staff ' + team.staff.section.toUpperCase(), 'staff-agent', 'A military staff section team. Its members draft and recommend.'), badge((team.staff.humanLead || 'A named person') + ' decides', 'staff-person', 'Only a named person approves, rejects and releases its products, with the NEAR AI: Staff commands.'));
+    if (team.staff) head.append(badge('Staff ' + team.staff.section.toUpperCase(), 'staff-agent', 'A military staff section team. Its members draft and recommend.'), badge((team.staff.humanLead || 'A named person') + ' decides', 'staff-person', 'Only a named person approves, rejects and releases its products, with the SovAI: Staff commands.'));
     card.setAttribute('aria-labelledby', title.id);
     card.append(head);
     // The status, as words in a pill (never colour alone), and Watch it live while it runs.

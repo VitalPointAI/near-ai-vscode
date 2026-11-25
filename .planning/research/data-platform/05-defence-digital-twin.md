@@ -1,0 +1,87 @@
+# DND/CAF digital twin foundation
+
+> **DRAFT, not approved for execution.** Written by Codex on 2026-11-23 (`174da11d`) and brought onto main by the Codex port (`.planning/CODEX-PORT-AUDIT.md`) only so a planner can re-check it against #188 to #198 (verified credentials and DIDs, the 70.1 classification engine and 74.3 assistant, 74.1 model passports and use tiers, Phase 47 waves 5 to 7, 48.1). Nothing here is planned work until that re-check lands. The provisional CAF catalogue data it names (`caf-public-catalogue.snapshot.json`, `caf-vehicle-historical-model-index.csv`) stays out of main until Phase 88's governed store holds it (owner, 2026-11-24). Paths under `.planning/spikes/theia-team-studio/` are now under `workbench/`.
+
+Status: proposed design for the existing identity, data platform, and portfolio phases. The local Theia preview exercises the interaction and reference model with approved snapshots. Production deployment depends on the existing identity, source permission, and accreditation gates.
+
+## Architecture
+
+Use the governed PostgreSQL store and TypeScript query service already planned for the data platform. Keep a singular catalogue, asset identity registry, and source ledger on that host. Theia reads scoped pages and subscriptions from the host. The context graph and portfolio are derived views of the same records and evidence.
+
+```
+Authorized sources
+  -> inventory-first connectors and source checkpoints
+  -> catalogue, identity registry, and evidence ledger in PostgreSQL
+  -> policy-filtered projections for inventory, search, graph, and portfolio
+  -> Theia work areas
+```
+
+The design follows Eclipse Ditto's separation of twin state, policy, and derived search, and NGSI-LD's explicit entity and relationship vocabulary. Keep both as interoperability references while the existing host and gate own the system of record. Ditto supplies an evolved twin and permissions model with its own search stack. Orion-LD offers a standardized context API with an AGPL-licensed broker and its own store. Adopting either broker now would add deployment and authorization boundaries for data already covered by the host. [Eclipse Ditto policy and search](https://eclipse.dev/ditto/architecture-services-things-search.html) · [FIWARE Orion-LD](https://github.com/FIWARE/context.Orion-LD) · [Sterling data platform design](00-DESIGN.md)
+
+## Records and identity
+
+| Record | Key | Source authority and use |
+| --- | --- | --- |
+| Equipment model | Versioned model ID | Public CAF material and approved technical references supply model descriptions, family, and illustrative images. Models group variants and may relate to several catalogue items. |
+| Catalogue item | NSN where assigned, plus authoritative system key | An approved NMCRL or departmental export supplies item identification. Several physical assets or bulk lots can refer to the same item. |
+| Individual asset | Internal ID and one opaque, controller-issued DID | An approved asset master supplies existing unique identifiers and lifecycle observations. The DID remains stable as the asset moves between custodians or changes inventory sources. |
+| Lot or fungible holding | Stable holding ID in the source namespace | Stock counts are modelled at the grain reported by the source. Identified lots can have their own DID when tracked individually. Issue individual asset DIDs as serialized instances enter scope. |
+| Person and organizational position | Existing person DID and separate position ID | Directory, personnel and position authorities supply scoped identity and role evidence. Keep person-to-position evidence and personal details permissioned and time-bounded. |
+| Organization, work area and capability | Stable ID and governed relationships | The portfolio authority publishes the approved L0–L5 tree. Work areas reference resource identities. Capabilities reference programs, projects, initiatives and products. |
+| Observation, link, and decision | Immutable event ID and provenance | Source versions, validity intervals, observed time, received time, label, and ACL evidence explain why a current field or relationship is visible. |
+
+Use a permanent mapping between an internal entity ID, the DID, and source aliases. The ingest uniqueness key is `(tenant, source, external_id)` with the source's region or inventory scope included in its identity. A maintainer can correct a mistaken association through an audited split or alias change. Preserve history and never reissue a retired identifier to another asset. Use match suggestions for review when inventory sources disagree. [DND Materiel Identification](https://www.canada.ca/en/department-national-defence/corporate/policies-standards/defence-administrative-orders-directives/3000-series/3038/3038-0-materiel-identification.html) · [NATO stock catalogue](https://eportal.nspa.nato.int/ac135/nmcrl) · [W3C DID Core](https://www.w3.org/TR/did/)
+
+For passive assets, the organization controls the DID document through delegated issuer authority. Do not provision a private key for every asset. Separate the issuance job from the display record so retries reuse the same requested identity. For independent devices, use Phase 71's device identity and bind it to the asset record through a verified relationship. Evaluate controlled asset resolution with that phase's existing DID methods and access model. Keep DID documents minimal and sensitive aliases out of them. L4's batched roots can cover the permitted identity and policy commitments without publishing individual asset records. W3C DID Core supports methods that use different registries, including distributed ledgers. The existing L4 path can anchor verification proofs on NEAR and retain the same DID. Choosing a blockchain-backed DID method would assign identifiers under that method and requires an explicit migration or verified alias plan.
+
+## Source update and lifecycle
+
+1. **Connect and scope.** An administrator approves each source, its access, classification inherited by its records, and permitted use. Start in inventory-only dry run. Validate provenance, record granularity, units of measure, image rights, and update cadence. Examples of source systems are an approved DRMIS asset export, a licensed stock catalogue, scoped personnel data, and signed unit publications.
+2. **Backfill and preview.** Import bounded pages into staging, normalize codes and units, and show new, matched, ambiguous and rejected records. Persist a source watermark. Unmatched items stay in a steward review queue until an authoritative alias or documented exception exists.
+3. **Issue in batches.** The approved job takes idempotent issuance requests tied to existing internal IDs. The issuer records controller and identity provenance, then returns references using bounded parallelism, retries, and partial-failure reports. Refreshing the same source must not repeat issuance. Track issued, awaiting review and rejected counts only within the viewer's authorization.
+4. **Apply changes.** Deduplicate using source version or event ID. Commit the accepted batch, checkpoint, and outbox together. Allow source precedence per field. Keep reported and effective values separate. Resolve conflicting authoritative updates in review and preserve the evidence.
+5. **Track lifecycle.** Record observed inventory, custody transfer, maintenance state and retirement as versioned evidence. Mark stale sources and gaps explicitly. Reconcile an authorized source periodically even when its delta feed is healthy. Replays rebuild projections and apply current policy, deletion decisions, and holds. A tombstone denies discovery before workers remove derivatives from indexes and caches. Keep hold payloads in a separate governed scope. [Existing connector design](01-connectors-extraction-etl.md) · [Debezium outbox](https://debezium.io/documentation/reference/transformations/outbox-event-router.html)
+
+## Policy and derived views
+
+An asset's controller authorizes its identity. The accountable policy authority approves its use. Store the signed, versioned policy or grant separately and reference the asset DID, scope, purpose, role or delegated recipient, allowed action, applicable conditions, and validity. The existing gate checks the current revision and revocation status at action time. A resource link, a reported inventory status, or a visible search result conveys provenance only. Authorization to reserve, transfer, or use a resource comes through the appropriate human decision and signed policy.
+
+Keep the original permissions and labels from each source. Use the existing signed request context and a non-owner query role without bypass privileges under forced row security. Gate and database access must apply before returning list rows, counts, facets, exports, hints, relationship traversals, or images. Join the labels across the authorized fields and edges that support a derived view, then apply aggregation rules. A viewer's output remains the same when restricted items are present elsewhere. Asset images follow the same path with provenance and a rights record. Bulk exports and background indexing use the same permissions as interactive queries. People enter through approved personnel and role records. Keep personal data out of public identity documents and out of cross-unit rollups. [Data security design](02-classification-tagging-data-centric-security.md) · [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) · [Portfolio publication design](../portfolio-and-assignment/DESIGN.md)
+
+Use the existing context graph's evidence-backed edges. Start with explicit relations such as `instanceOf`, `custodiedBy`, `partOfCapability`, `requiresResource`, and `governedBy`. Include edge validity and provenance. Use server-side cursor pagination and bounded graph expansion. Each node opens an entity page with its source, identity, policy revision, and history where permitted. Prompt users to review ambiguous matches before they change the graph. [Context graph and search design](03-context-graph-analytics-knowledge-layer.md)
+
+## Operating scale and interaction
+
+- **Inventory first.** Search by name, number, or DID in one box and narrow by type, organization, source, and freshness. Use indexed exact identifier lookup and approved text search. Open the hierarchy or graph progressively from those results.
+- **Bulk stewardship.** Show import and issuance jobs with counts, provenance, progress, reviewable conflicts, and a resumable retry for failed rows. Give maintainers a filtered work queue for stale records, missing authoritative matches, and pending identity.
+- **Freshness.** Display source time and projection time distinctly. Subscribe to scoped changes from the host. A disconnected or delayed source retains its last permitted observation and reports its age. Allocation decisions continue through the signed workflow.
+- **Storage.** Use PostgreSQL constraints for identity uniqueness and composite indexes for tenant, source, exact IDs and common cursor filters. Materialize current state from the ingest ledger. Partition event tables or split projections when measurements show pressure. Images are objects served by the approved source or governed media store, with metadata keys and checksums. Retain the full provenance trail within the configured policy.
+- **Acceptance targets.** Start with a synthetic benchmark of 100,000 entities and 1 million observations or links. Treat this as a test envelope and grow it after measuring the target host. Measure import and projection lag, authorized search and graph drill-down latency, storage growth, and recovery time. Test recount and replay, conflict resolution, revoked grants, held data and non-disclosure through results and timing before extending the scope.
+
+## Later spatial visualization and VR/AR
+
+Defer visualization work until identity issuance, governed ingest, policy enforcement, asset inventory and entity relationships work at scale. Today's foundation keeps stable IDs and provenance, explicit relationships and an optional reference to approved media. It adds no rendering dependencies. Reassess the following framework choices when the spatial milestone is planned.
+
+Keep one governed twin and give it multiple renderers. Use OpenUSD for governed 3D source assets and scene composition. Scenes are versioned projections with stable entity bindings. Each viewer receives a manifest of authorized scene objects and metadata, with provenance and expiry.
+
+| Framework | Fit for Sterling | Decision |
+| --- | --- | --- |
+| Eclipse Ditto | IoT middleware for connected-device state, messaging and access policies. Provides search and revision history. | Use as an integration option if a device programme already uses it or the connector spike needs its protocol layer. Map its approved observations into the existing source ledger. [Ditto overview](https://eclipse.dev/ditto/intro-overview.html) · [History](https://eclipse.dev/ditto/basic-history.html) |
+| OpenUSD + Babylon.js/WebXR | OpenUSD supports composition, variants and deferred payloads. Publish approved lightweight glTF/GLB views through Babylon.js in Theia with optional WebXR and a standard screen view. | Use this as the default spatial path on AMD-first hardware. Test the target browsers and headsets. Choose WebGL for supported XR when the WebGPU XR binding is unavailable. [OpenUSD composition](https://openusd.org/dev/intro.html) · [Khronos glTF](https://www.khronos.org/gltf/) · [Babylon.js WebXR](https://github.com/BabylonJS/Documentation/blob/master/content/features/featuresDeepDive/webXR/introToWebXR.md) |
+| NVIDIA Omniverse Kit + CloudXR | Rich OpenUSD scene authoring, RTX rendering and streamed spatial views for larger or higher-fidelity scenes. The XR server and headset profile carry separate GPU, runtime and latency requirements. | Prototype as an optional renderer in an approved deployment. Verify headset support, licensing and isolated operation before committing to hardware. [Omniverse Spatial](https://docs.omniverse.nvidia.com/xr/omniverse-spatial-docs/index.html) · [NVIDIA technical requirements](https://docs.omniverse.nvidia.com/dev-overview/latest/common/technical-requirements.html) · [Kit template terms](https://github.com/NVIDIA-Omniverse/kit-app-template/blob/main/LICENSE) |
+
+Start the spatial acceptance check with a synthetic maintenance inspection or training gallery. Use the same authorized object relationships and 3D source in browser and Kit. Compare time to first view, frame and motion performance, bandwidth, accessibility, and workload per concurrent session. When a permission is revoked, the scoped stream and scene access must expire within the policy window. Verify that hidden object names, mesh IDs, textures and aggregate counts stay out of packages, scene metadata, exports and interaction messages.
+
+Keep the scene renderer separate from identity resolution, records, and policy decisions. Transform and filter before packaging. Allowlist asset and texture resolvers so a scene can load in the accredited environment. The 3D asset source may carry an approved model ID. Runtime bindings use authorized references or view-scoped handles, and selecting one opens the corresponding governed entity view. A headset's pose data and session recordings are subject to the deployment's data policy.
+
+## Delivery sequence
+
+| Gate | Implementation |
+| --- | --- |
+| Theia preview | Resource Management and per-area resource links use approved local snapshots. Display source, catalogue identifiers and reported asset identity as supplied metadata. |
+| Phases 71, 73 and 74 | Extend the existing issuer and gate for delegated asset custody and signed usage policy. Verify identity issuance, rotation, retirement, and revocation with synthetic assets and fail-closed operations. |
+| Phases 38–40 | Connect the approved organization tree and signed resource publications to the Portfolio Room. Verify clearance-safe aggregates and signed allocation decisions without a real DND feed. |
+| Phases 88, 93, 96–97 and 100 | Build governed ingest, derived label propagation, search and entity pages, context graph views, and authorized inventory connectors. Use agreed source and custody authority when onboarding real data on an accredited host. |
+| Later spatial milestone | Evaluate a browser viewer and an optional Omniverse renderer against the same governed twin after the foundations pass acceptance. |
+
+Model-level public sources seed descriptive coverage. The public CAF equipment CSV has type, name, and description columns. The complete catalogue, current holdings, authoritative photographs and permissioned personnel or custody records require approved source agreements and access. Track coverage and freshness per source, region, and entity type before making a completeness claim. [CAF Equipment dataset](https://open.canada.ca/data/en/dataset/18beb583-8dbe-434e-ba49-970658fcd6ef) · [CAF public equipment pages](https://www.canada.ca/en/services/defence/caf/equipment.html)

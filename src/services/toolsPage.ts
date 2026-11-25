@@ -16,7 +16,7 @@ import { webSearchProvider } from './webSearchSetup';
 import { currentReportingTokenHint, onReportingTokenChange } from './spendTracking';
 import { homeFolder, teamLibraryDir } from '../domain/teamStorage';
 
-// The NEAR AI Tools tab: the directory of what the agents can use. It reads; the only things it
+// The SovAI Tools tab: the directory of what the agents can use. It reads; the only things it
 // changes are through existing actions (switching an MCP server on for this project, which the
 // MCP Connections page also does, and NEAR AI commands). It never sends anything to a model.
 
@@ -114,7 +114,7 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
     webSearchProvider(context.secrets).catch(() => undefined),
     mcp.status().catch(() => []),
     // The catalog list (cached per profile); no completion is requested.
-    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, host: active?.provider.client.baseHost, problem: active ? undefined : root ? 'Set up a NEAR AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, host: undefined, problem: providerErrorMessage(error) })),
+    (root ? activeProvider(root, auth) : Promise.resolve(undefined)).then((active) => ({ models: active?.models, host: active?.provider.client.baseHost, problem: active ? undefined : root ? 'Set up an AI profile for this project to see the models your key can use.' : 'Open a folder to see the models your key can use.' }), (error: unknown) => ({ models: undefined, host: undefined, problem: providerErrorMessage(error) })),
     currentReportingTokenHint().catch(() => undefined)
   ]);
   return {
@@ -136,12 +136,12 @@ export async function gatherDirectoryInput(context: vscode.ExtensionContext, aut
 
 let panel: vscode.WebviewPanel | undefined;
 
-/** Opens (or shows) the NEAR AI Tools tab. */
+/** Opens (or shows) the SovAI Tools tab. */
 export function openTools(context: vscode.ExtensionContext, auth: AuthService, sidebar: ChatPrefill): void {
   if (panel) { panel.reveal(); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'tools');
   const shared = sharedMedia(context.extensionUri);
-  const view = vscode.window.createWebviewPanel('nearAiTools', 'NEAR AI Tools', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, shared] });
+  const view = vscode.window.createWebviewPanel('nearAiTools', 'SovAI Tools', vscode.ViewColumn.Active, { enableScripts: true, localResourceRoots: [media, shared] });
   panel = view;
   view.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'near-ai-vscode-icon.png');
   const asset = (file: string) => view.webview.asWebviewUri(vscode.Uri.joinPath(media, file)).toString();

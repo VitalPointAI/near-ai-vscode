@@ -15,7 +15,7 @@ import { gitText, redactGitMessage, runStateGit } from './stateGit';
 import type { GitRunner } from './stateGit';
 import { memorySyncSettings, resolveRemote, type SyncSettingsStore } from './syncFlows';
 
-export const NO_ONLINE_HOME = 'This project has no online home yet, so there is nowhere to put its code. Run "NEAR AI: Give This Project an Online Home" first.';
+export const NO_ONLINE_HOME = 'This project has no online home yet, so there is nowhere to put its code. Run "SovAI: Give This Project an Online Home" first.';
 const NOT_CHOSEN = 'Your code was not pushed because no online repository was chosen.';
 
 export interface CodePushLaterInput {

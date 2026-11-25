@@ -56,7 +56,7 @@ test('SARIF 2.1.0 carries the version, schema, driver, rules, and a location on 
   assert.equal(sarif.$schema, SARIF_SCHEMA);
   const runs = sarif.runs as Array<Record<string, any>>;
   assert.equal(runs.length, 1);
-  assert.equal(runs[0].tool.driver.name, 'Near AI Cybersecurity');
+  assert.equal(runs[0].tool.driver.name, 'SovAI Cybersecurity');
   assert.equal(runs[0].tool.driver.version, '0.4.10');
   assert.ok(Array.isArray(runs[0].tool.driver.rules) && runs[0].tool.driver.rules.length >= 2);
   const results = runs[0].results as Array<Record<string, any>>;

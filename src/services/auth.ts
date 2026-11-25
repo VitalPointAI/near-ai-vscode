@@ -82,7 +82,7 @@ export class AuthService {
       await this.secrets.store(scopedSecret(scope, 'api-key-endpoint'), wanted);
       return apiKey;
     }
-    if (bound !== wanted) throw new Error(`This profile's endpoint (${wanted}) is not the one its key was saved for. Run NEAR AI: Set Up again to use it.`);
+    if (bound !== wanted) throw new Error(`This profile's endpoint (${wanted}) is not the one its key was saved for. Run SovAI: Set Up again to use it.`);
     return apiKey;
   }
 

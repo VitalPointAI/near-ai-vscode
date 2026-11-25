@@ -1,4 +1,4 @@
-// Whether a workflow carries on by itself (owner, 2026-11-06): GSD stopped between discuss, plan and execution even in Auto, because NEAR AI never set
+// Whether a workflow carries on by itself (owner, 2026-11-06): GSD stopped between discuss, plan and execution even in Auto, because SovAI never set
 // the project flags Open-GSD reads.
 import assert from 'node:assert/strict';
 import test from 'node:test';

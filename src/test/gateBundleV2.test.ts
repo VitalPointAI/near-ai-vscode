@@ -113,7 +113,7 @@ test('D-06, D-07: a feature this version lacks is needs-update, before an unknow
   const sentence = failedSentence(verifyPersonal(named));
   assert.equal(sentence, needsUpdateSentence('0.4.40'));
   assert.match(sentence, /0\.4\.40 or later/);
-  assert.match(sentence, /Update the NEAR AI extension/);
+  assert.match(sentence, /Update SovAI/);
   assert.ok(!/Reset/.test(sentence));
   assert.equal(needsUpdateSentence(), BUNDLE_FAILURES['needs-update']);
 });

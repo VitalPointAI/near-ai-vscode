@@ -187,7 +187,7 @@ test('OutboundGuard under tee-only blocks exactly when decideRoute refuses (a TE
 
 test('OutboundGuard under tee-only keeps its other checks: the emergency stop and spend limit first, and the data-class checks with their one-time override on an allowed model', () => {
   const stopped = new OutboundGuard({ ...TEE_ONLY, actionPolicy: { mode: 'approve-risky', emergencyStop: true } }).check({ model: 'mystery', text: 'hello' }, 0);
-  assert.deepEqual(stopped.outcome === 'block' ? stopped.reason : '', 'Emergency stop is on. Run "NEAR AI: Resume" to send again.');
+  assert.deepEqual(stopped.outcome === 'block' ? stopped.reason : '', 'Emergency stop is on. Run "SovAI: Resume" to send again.');
   const limited = new OutboundGuard({ ...TEE_ONLY, dailySpendLimitUsd: 1 }).check({ model: 'mystery', text: 'hello' }, 1);
   assert.match(limited.outcome === 'block' ? limited.reason : '', /daily limit of \$1\.00/);
   const guard = new OutboundGuard(TEE_ONLY);

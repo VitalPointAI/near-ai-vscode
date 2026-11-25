@@ -6,7 +6,7 @@ import { executionTaskFiles, gradeExecution, loadExecutionTasks, runNode, setUpE
 import { gradePlan, gradeResearch, PLAN_PROMPT, PLAN_SPEC, RESEARCH_PROMPT, RESEARCH_SOURCES } from './graders';
 
 // The benchmark's tasks, how each is set up and graded, and what one run of it measures. One list
-// for the live eval (src/test/live.test.ts) and NEAR AI: Compare Models, so both score models the
+// for the live eval (src/test/live.test.ts) and SovAI: Compare Models, so both score models the
 // same way. No VS Code imports.
 
 export type TaskKind = 'coding' | 'research' | 'planning' | 'execution';

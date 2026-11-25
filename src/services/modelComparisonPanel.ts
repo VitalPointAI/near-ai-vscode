@@ -25,7 +25,7 @@ import { editorWriter } from './stateHome';
 import { ensureMigrated } from './stateMigration';
 import { panelCommand } from './webview/openPanel';
 
-// NEAR AI: Compare Models. A tab that ranks every model tested on this computer, runs new
+// SovAI: Compare Models. A tab that ranks every model tested on this computer, runs new
 // comparisons (only what has no saved result, or everything again), saves each one as it goes,
 // and puts a model into a role with one click. Runs use the extension's agent loop and permission
 // rules in temporary folders outside the workspace, and are billed to the key's spend ledger as `eval`.
@@ -90,8 +90,8 @@ async function gather(context: vscode.ExtensionContext, auth: AuthService): Prom
   const settings = readSettings();
   let problem: string | undefined;
   const active = root ? await activeProvider(root, auth).catch((error: unknown) => { problem = providerErrorMessage(error); return undefined; }) : undefined;
-  if (!root) problem = 'Open a folder with a NEAR AI profile to test models. Results saved earlier are shown below.';
-  else if (!active && !problem) problem = 'Set up a NEAR AI profile for this project (NEAR AI: Set Up) to test models.';
+  if (!root) problem = 'Open a folder with an AI profile to test models. Results saved earlier are shown below.';
+  else if (!active && !problem) problem = 'Set up an AI profile for this project (SovAI: Set Up) to test models.';
   const models = active?.models ?? [];
   const roles = roleOptions({ mainModel: settings.defaultModel, tiers: readModelTiers(), roleModels: readRoleModels() }, models);
   const teeOnly = settings.privacyMode === 'tee-only';
@@ -222,10 +222,10 @@ const money = (usd: number) => `$${usd < 0.01 && usd > 0 ? usd.toFixed(4) : usd.
 
 async function start(context: vscode.ExtensionContext, auth: AuthService, picked: Selection, show: (saved: SavedRun) => void): Promise<void> {
   if (running) { post({ type: 'error', text: 'A comparison is already running. Cancel it first to start another.' }); return; }
-  if (isEmergencyStopped()) { post({ type: 'error', text: 'Emergency stop is on, so nothing runs. Resume NEAR AI first.' }); return; }
+  if (isEmergencyStopped()) { post({ type: 'error', text: 'Emergency stop is on, so nothing runs. Run SovAI: Resume first.' }); return; }
   const { gathered, tasks, plan, estimate, problem } = await planFor(context, auth, picked);
   const active = gathered.active;
-  if (problem || !active) { post({ type: 'error', text: problem ?? gathered.state.problem ?? 'NEAR AI is not set up for this project.' }); return; }
+  if (problem || !active) { post({ type: 'error', text: problem ?? gathered.state.problem ?? 'No AI provider is set up for this project.' }); return; }
   if (plan.toRun > 0) {
     const reused = plan.reusedCells ? ` ${plan.reusedCells} model-task result${plan.reusedCells === 1 ? '' : 's'} saved earlier will be reused at no cost.` : '';
     const unpriced = estimate.unpriced.length ? ` Not included (no published prices): ${estimate.unpriced.join(', ')}.` : '';

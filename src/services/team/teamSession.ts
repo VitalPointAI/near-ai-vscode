@@ -28,11 +28,11 @@ import type { TransportStatus } from '../../team/transport';
 import { PAUSED_REFUSED_TEXT, createTeamStatusBar, safeReason, statusText } from './teamStatusBar';
 import type { TeamStatusBar } from './teamStatusBar';
 
-export const TEAM_OUTPUT_CHANNEL = 'NEAR AI Team';
+export const TEAM_OUTPUT_CHANNEL = 'SovAI Team';
 // The context key the manifest's palette when clause reads (D-24): true while a team session runs, so Verify Team Log is never hidden from a team project.
 export const TEAM_ACTIVE_CONTEXT = 'nearAi.team.active';
 export const SHOW_DETAILS_ACTION = 'Show details';
-export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of NEAR AI. Update the extension to read them.';
+export const UPDATE_EXTENSION_TEXT = 'Some events need a newer version of SovAI. Update the extension to read them.';
 export const READ_ONLY_TEXT = 'This computer is not a device of this team yet, so it can read the team record but not write to it.';
 const VERIFY_PROGRESS_TITLE = 'Checking the team record';
 const AUDIT_FILE_PARTS = ['.planning', '.near-ai', 'audit.json'];

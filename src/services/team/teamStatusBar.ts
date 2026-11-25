@@ -43,7 +43,7 @@ export function statusText(status: TransportStatus, teamName: string): { text: s
   const lead = reason === '' ? 'The team remote could not be reached.' : `The team remote could not be reached: ${reason}.`;
   return {
     text: PAUSED_UNREACHABLE_TEXT,
-    tooltip: `${lead} NEAR AI keeps retrying, up to every 10 minutes, and right away when this window gets focus.`
+    tooltip: `${lead} SovAI keeps retrying, up to every 10 minutes, and right away when this window gets focus.`
   };
 }
 
@@ -54,7 +54,7 @@ export interface TeamStatusBar {
 
 export function createTeamStatusBar(): TeamStatusBar {
   const item = vscode.window.createStatusBarItem('nearAi.team', vscode.StatusBarAlignment.Left, 50);
-  item.name = 'NEAR AI Team';
+  item.name = 'SovAI Team';
   item.command = VERIFY_LOG_COMMAND;
   item.show();
   return {

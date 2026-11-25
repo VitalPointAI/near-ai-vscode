@@ -122,7 +122,7 @@ async function readAsAgent(s: Started, file: string): Promise<string> {
 test('tracer: a person adds a Protected B clearance through Edit Policy and Apply Policy Draft, and Set Label then accepts that label', async () => {
   const s = await started();
   assert.equal(await setLabelPB(s), false, 'refused before the clearance exists');
-  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open NEAR AI: Policy and choose Edit my rules/);
+  assert.match(stub.notifications.find((entry) => entry.level === 'warn')?.message ?? '', /open SovAI: Policy and choose Edit my rules/);
   const before = s.host.bundleState();
   assert.equal(before.state, 'valid');
   const draft = await editPolicy(s);
@@ -148,11 +148,11 @@ test('tracer: a person adds a Protected B clearance through Edit Policy and Appl
   assert.match(await readAsAgent(s, 'secret/plan.md'), new RegExp(SECRET), 'and an agent under that policy reads it');
 });
 
-test('Edit Policy and Apply Policy Draft are contributed in the NEAR AI category', async () => {
+test('Edit Policy and Apply Policy Draft are contributed in the SovAI category', async () => {
   const manifest = JSON.parse(await readFile(path.join(__dirname, '..', '..', 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category?: string }> } };
   const find = (id: string) => manifest.contributes.commands.find((entry) => entry.command === id);
-  assert.deepEqual(find('nearAi.policy.edit'), { command: 'nearAi.policy.edit', title: 'Edit Policy', category: 'NEAR AI' });
-  assert.deepEqual(find('nearAi.policy.applyDraft'), { command: 'nearAi.policy.applyDraft', title: 'Apply Policy Draft', category: 'NEAR AI' });
+  assert.deepEqual(find('nearAi.policy.edit'), { command: 'nearAi.policy.edit', title: 'Edit Policy', category: 'SovAI' });
+  assert.deepEqual(find('nearAi.policy.applyDraft'), { command: 'nearAi.policy.applyDraft', title: 'Apply Policy Draft', category: 'SovAI' });
 });
 
 test('Edit Policy\'s notice names Apply and Discard and says the clearance is self-declared and labels are not accreditation', async () => {
@@ -293,5 +293,5 @@ test('Show Policy names the command that changes the policy (Edit Policy) beside
   stub.shownDocuments.length = 0;
   await stub.commands.get(gateCommands.SHOW_POLICY_AS_STORED_COMMAND)?.();
   const text = stub.shownDocuments[0]?.text ?? '';
-  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, open NEAR AI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only\./);
+  assert.match(text, /This view only shows your policy\. Editing it changes nothing\. To change your policy, open SovAI: Policy and choose Edit my rules; to go back to the default, choose Reset my rules there, which resets your own rules only\./);
 });

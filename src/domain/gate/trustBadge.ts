@@ -30,7 +30,7 @@ export const TRUST_BADGE_TEXT = Object.freeze({
   explanation: Object.freeze({
     'verified-private': 'This answer\'s signature and NEAR AI Cloud\'s attestation were checked, and the connection that carried your request was proven to end inside NEAR AI Cloud\'s private enclave.',
     'model-verified': 'This answer\'s signature and NEAR AI Cloud\'s attestation were checked, so a private model on NEAR AI Cloud sent it. The connection that carried your request was not proven to end inside the private enclave.',
-    'not-verified': 'NEAR AI could not show that a private model on NEAR AI Cloud sent this answer. The reasons below say why.'
+    'not-verified': 'SovAI could not show that a private model on NEAR AI Cloud sent this answer. The reasons below say why.'
   } satisfies Record<TrustBadgeState, string>),
   helpers: 'This badge is about the answer above. Helper agents in the run may have used other models; each of their requests was routed by the chat\'s label and recorded.',
   checking: 'Checking now.',

@@ -278,8 +278,8 @@ export async function decide(request: GateRequest, bundleState: BundleState, set
     if (request.outsideWorkspace !== undefined) return make('deny', OUTSIDE_WORKSPACE_RULE, 'approve-risky', { reason: request.outsideWorkspace });
     const person = request.presence === 'person' && request.context === 'interactive';
     return person
-      ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
-      : make('deny', 'manifest.effects-unknown', 'approve-risky', { reason: `NEAR AI cannot tell what ${shown(request.tool)} would do with this call, and nobody is here to answer, so it is refused.` });
+      ? make('ask', 'manifest.effects-unknown', 'approve-risky', { reason: `SovAI cannot tell what ${shown(request.tool)} would do with this call, so it needs your answer.` })
+      : make('deny', 'manifest.effects-unknown', 'approve-risky', { reason: `SovAI cannot tell what ${shown(request.tool)} would do with this call, and nobody is here to answer, so it is refused.` });
   }
   const mode: ActionPolicyMode = bundleState.state === 'valid' ? effectiveMode(policy.mode, bundleState.bundle.ceiling.maxMode[request.context]) : 'approve-risky';
   const verdict = floorFor(request, options.locations);

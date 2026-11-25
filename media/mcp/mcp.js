@@ -70,7 +70,7 @@
     name.focus();
   }
 
-  // What the person says a tool does. This is a declaration NEAR AI cannot check, and the server's own last sentence says so under the menu.
+  // What the person says a tool does. This is a declaration SovAI cannot check, and the server's own last sentence says so under the menu.
   const DECLARE = { unknown: 'Not known', reads: 'Only reads', 'changes-remote': 'Changes data on the server' };
   function declareControl(server, tool, words) {
     const choice = (server.toolChoices || {})[tool.name] || 'unknown';

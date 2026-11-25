@@ -1,4 +1,4 @@
-// "NEAR AI: Put This Project's Code Online" (D-14, G-27-6b): the checked code push for a project that already has an online home, run after the person
+// "SovAI: Put This Project's Code Online" (D-14, G-27-6b): the checked code push for a project that already has an online home, run after the person
 // declined it once. Fake GitHub, fake sign-in and local bare remotes only: nothing contacts GitHub, creates a repository or uses a real token.
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -212,7 +212,7 @@ test('the command is declared once in the manifest, registered once from the ext
   const root = path.join(__dirname, '..', '..');
   const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { contributes: { commands: Array<{ command: string; title: string; category: string }> } };
   const declared = manifest.contributes.commands.filter((command) => command.command === 'nearAi.sync.pushCode');
-  assert.deepEqual(declared, [{ command: 'nearAi.sync.pushCode', title: 'Put This Project\'s Code Online', category: 'NEAR AI' }]);
+  assert.deepEqual(declared, [{ command: 'nearAi.sync.pushCode', title: 'Put This Project\'s Code Online', category: 'SovAI' }]);
   const extensionSource = path.join(root, 'src', 'extension.ts');
   const hostSource = path.join(root, 'src', 'services', 'onlineHomeVscode.ts');
   if (existsSync(extensionSource) && existsSync(hostSource)) {

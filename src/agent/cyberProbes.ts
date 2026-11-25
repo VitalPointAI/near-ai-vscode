@@ -928,7 +928,7 @@ function iacProbe(deps: CyberProbeDeps): AgentTool<IacProbeInput> {
 interface DependencyProbeInput { root: string }
 
 /** The register securityTool.ts uses, so a not-checked result never reads as clean. */
-const NOT_CONSENTED = 'Vulnerability checks are not enabled for this project. Ask the user to run "NEAR AI: Scan Dependencies for Vulnerabilities" once to allow them. Until then, dependencies were not checked.';
+const NOT_CONSENTED = 'Vulnerability checks are not enabled for this project. Ask the user to run "SovAI: Scan Dependencies for Vulnerabilities" once to allow them. Until then, dependencies were not checked.';
 
 function dependencyProbe(deps: CyberProbeDeps): AgentTool<DependencyProbeInput> {
   return {

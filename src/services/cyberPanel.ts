@@ -144,7 +144,7 @@ async function engagementForRun(engagements: CyberEngagementStore, runId: string
 export function openCyberPanel(context: vscode.ExtensionContext, service: CyberPanelServiceDeps): void {
   if (current) { current.reveal(); return; }
   const media = vscode.Uri.joinPath(context.extensionUri, 'media', 'cyber');
-  const view = vscode.window.createWebviewPanel('nearAiCyber', 'NEAR AI: Cybersecurity', vscode.ViewColumn.Active, {
+  const view = vscode.window.createWebviewPanel('nearAiCyber', 'Cybersecurity', vscode.ViewColumn.Active, {
     enableScripts: true,
     retainContextWhenHidden: true,
     localResourceRoots: [media]
@@ -158,7 +158,7 @@ export function openCyberPanel(context: vscode.ExtensionContext, service: CyberP
   // The sandbox tier is detected once per panel open, and detection never installs anything (D-12).
   void depsFor(context, service)
     .then((deps) => { context.subscriptions.push(attachCyberPanel(page, deps)); })
-    .catch((error: Error) => { void vscode.window.showErrorMessage(`NEAR AI: the Cybersecurity panel could not start: ${error.message}`); });
+    .catch((error: Error) => { void vscode.window.showErrorMessage(`The Cybersecurity panel could not start: ${error.message}`); });
   view.onDidDispose(() => { current = undefined; }, undefined, context.subscriptions);
 }
 

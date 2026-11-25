@@ -167,7 +167,7 @@ export async function gsdShellEnv(home: string, storageDir: string, hasSystemNod
 }
 
 /**
- * A workspace counts as a NEAR AI project only after the user acts in the extension there
+ * A workspace counts as a SovAI project only after the user acts in the extension there
  * (running a workflow, saving a profile, …), which creates `.planning/.near-ai/`.
  */
 export async function isNearAiProject(workspaceRoot: string): Promise<boolean> {
