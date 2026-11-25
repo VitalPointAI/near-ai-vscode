@@ -313,6 +313,7 @@ Plans:
   - The Sterling status entry (33-28).
   - Native cursors and Show Who Wrote This (33-29).
   - Two-browser acceptance against the built image (33-30).
+  - The late joiner's text at once and its history checked in the background (33-32, D-70, wave 11 after 33-30); G430 narrowed to cells the server does not hold.
 - **Order:** native plans start after Phase 46-01, 46-02 and 46-07 are on `main`.
 - **Release:** criterion 4's release is the next Sterling container image by digest (33-17 replanned). There is no VSIX or Marketplace release.
 
