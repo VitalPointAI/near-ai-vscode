@@ -34,7 +34,7 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 | `37ac1832` | Sterling navigation order, SA&A command label | Partly | **Port** (with `637bff5c`) | Rail order is on main; the SA&A command's SovAI category comes with the rename |
 | `247a8a55` | chat drawer slides in and out | Fully | Done | `slideChat` and `collapseChat` in the welcome module |
 | `b42b5fb1` | organize defence work areas, toggle the chat drawer | Partly: work-area pages, `sterling.chat.closeDrawer` and `sterling.workAreas.create` are on main; closing the last conversation does not hide the drawer | **Partly port** | The extension never calls `sterling.chat.closeDrawer`, so closing the last chat tab discards it instead of hiding the drawer |
-| `881c0564` | open the shared Staff Center from Planning | Fully | Done (owner question 3) | The Planning page shows "Open Staff Center"; 33.1 D-23 plans "Open Staff Room" |
+| `881c0564` | open the shared Staff Center from Planning | Fully | Done; renamed (owner answer 3) | The Planning page button now reads "Open Staff Room"; the copy lint counts "Staff Center" |
 | `4b96f4ad` | download SA&A archives, keep Outline with editor tools | Partly: Outline move is on main (improved) | **Partly port** | In the browser workbench the SA&A ZIP is saved on the server side and the person has no way to get it |
 | `e7fc76c7` | prompt to reconnect when a saved credential is missing | No | **Port** | A cloud profile whose key is gone shows the chat as ready, and the first message fails |
 | `f73bc988` | discard setup choices after switching projects | No | **Port** | Project Setup can run a step in the project that was open when the menu was built |
@@ -63,9 +63,9 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 | `08bfb4a4` | plan signed postings and position workspaces (33.1) | Superseded | Superseded | 33.1 was re-planned for native Theia (#180) and verified credentials (#189); its CONTEXT maps every Codex plan to a new one |
 | `5b188718` | 33.1 plan clarifications (WIP) | Superseded | Superseded | Mapped in 33.1-CONTEXT: design 2.11 is a deferred idea, 2.12's workspace part is D-16, D-19, D-20, D-23 |
 | `e723a61d` | Planning and Staff Center workspaces (WIP) | Fully for the UI; design note superseded | Done | Planning page and artwork are on main; the design note is mapped in 33.1-CONTEXT |
-| `b968c8b6` | work areas, inventory and planning state (WIP) | Partly: inventory UI is on main; catalogue fixtures and planning edits are not | **Ask the owner** (questions 4, 5) | The CAF catalogue files are provisional public-source inferences, not an authoritative record; the ROADMAP, REQUIREMENTS and STATE edits are for Phase 88 and the digital twin |
-| `9225afe1` | plan and verify governed inventory delivery (88) | No | **Ask the owner** (question 5) | Eight plans written before #188 to #196 (verified credentials, 70.1 classification engine); Phase 88 waits for the Stage 1 gate |
-| `174da11d` | plan the governed defence digital twin | No | **Ask the owner** (question 5) | Research note and ROADMAP lines for a direction the owner has not confirmed on `main` |
+| `b968c8b6` | work areas, inventory and planning state (WIP) | Partly: inventory UI is on main; catalogue fixtures and planning edits are not | **Not ported** (owner answer 4) | The CAF catalogue files stay out of main until Phase 88's governed store holds them; the ROADMAP, REQUIREMENTS and STATE edits are not taken |
+| `9225afe1` | plan and verify governed inventory delivery (88) | Now on the branch as drafts | **Ported as drafts** (owner answer 5) | The ten phase files, each marked `draft: true` with a banner, for a planner to re-check against #188 to #198; no ROADMAP, REQUIREMENTS or STATE edits |
+| `174da11d` | plan the governed defence digital twin | Now on the branch as a draft | **Ported as a draft** (owner answer 5) | The research note with the same banner; not its ROADMAP lines |
 
 ## Per commit: what it changes for a person
 
@@ -94,16 +94,16 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 - The provider: NEAR AI Cloud, NEAR AI private hardware, a NEAR AI key, the NEAR AI console, NEAR AI's usage total.
 - Internal ids: `nearAi.*` settings and commands, `near-ai-vscode`, `.near-ai` folders, the `near-ai/state` branch, view and container ids.
 - Signed or recorded formats: the audit record's `product.name` (`src/domain/gate/record.ts`), so existing records and new ones agree.
-- The SA&A and OSCAL system name (`compliance/src/oscalSsp.ts`, `src/services/saaPackage.ts`, `src/services/saaSponsorReport.ts`): owner question 1.
+- Technical ids in the SA&A and OSCAL output: the system ids `near-ai-<level>` and their identifier type, and the importers' user agents.
 - `CHANGELOG.md` history and the `.planning` record.
 
-## Owner questions
+## Owner answers (2026-11-24)
 
-1. **SA&A system name.** The OSCAL SSP, the SA&A package and the sponsor report name the system "NEAR AI for VS Code". Rename it to "Sterling Sovereign AI" for the next package? It is an accreditation identity, and `compliance/src/` is a gate path.
-2. **Extension display name in the container.** This port sets the bundled extension's display name to "Sterling Sovereign AI" (Codex used "Sterling"). Confirm.
-3. **Staff Center or Staff Room.** The Planning page on `main` says "Open Staff Center" (from `881c0564`); 33.1 D-23 plans "no Staff Center word" and "Open Staff Room". Which one?
-4. **CAF catalogue files.** Keep the provisional public-source CAF catalogue snapshot and the historical vehicle index (`b968c8b6`, about 3,700 lines) out of `main` until Phase 88's governed store, or add them as demo data with their provenance?
-5. **Phase 88 plans and the digital twin.** Take Codex's eight Phase 88 plans (`9225afe1`) and the digital twin research note (`174da11d`) into `main` for a re-check against #188 to #196, or leave them on their branches?
+1. **SA&A system name: renamed.** The OSCAL SSP's `system-name`, the SSP, assessment plan, assessment results and POA&M titles, the readable package heading, the SA&A package text and the sponsor report say Sterling Sovereign AI. Technical ids are unchanged. Gap G452 records that earlier drafts used the old name.
+2. **Display name: Sterling Sovereign AI.** Kept.
+3. **Staff Room is the one name.** The Planning page button reads "Open Staff Room"; the glossary has a Staff Room row and the copy lint counts "Staff Center" as a never-on-main-screens word.
+4. **CAF catalogue data stays out of main** until Phase 88's governed store holds it. Not ported: `caf-public-catalogue.snapshot.json` and `caf-vehicle-historical-model-index.csv` (`b968c8b6`), which remain on `feat/theia-team-studio-preview`.
+5. **Phase 88 plans and the digital twin note come over as drafts** (`9225afe1`, `174da11d`), marked for a planner to re-check against #188 to #198, without the CAF data files and without their ROADMAP, REQUIREMENTS and STATE edits.
 
 ## Ported on `feat/codex-port`
 
@@ -121,13 +121,12 @@ Written 2026-11-24 against `origin/main` at `873d9234`, on branch `feat/codex-po
 
 ## Left over
 
-- Three product sentences still say NEAR AI because their words are recorded or compared:
+- Three product sentences still say NEAR AI because their words are recorded or compared (gap G451):
   - `LABELS_NOT_ACCREDITATION_TEXT` ("They check what NEAR AI itself sends", also twice in SECURITY.md): the J2 and J4 staff guidance embeds it, so new words need new staff template versions (`node scripts/template-history.mjs` adds 289 lines), and `src/agent/teamTemplateHistory.ts` is frozen at 2,335 lines. Split that file first, then rename.
   - The scaffolded research verifiers' README (`src/gsd/verifierScaffold.ts`), a hashed verifier file: new words would mark it edited in projects scaffolded without a manifest. It still names "NEAR AI: Trust Research Verifiers"; the palette search still finds the command.
   - The team coordination commits' git author ("NEAR AI Team", `src/team/runGit.ts`).
-- The component catalogue page `docs-site/content/architecture/components/workbench.md` is generated from `compliance/resources.json` (a gate file), whose workbench entry says "the NEAR AI chat"; the page keeps the register's words until that entry changes.
 - A comment in `scripts/verify-release-content.mjs` (a gate file) still says "NEAR AI: Load Staff Exercise Scenario"; left to avoid a second gate file for a comment.
-- A Playwright spec for Chat in the release image (streamed reply with a fake model server, history after reload, Stop), replacing the Puppeteer tool of `01a9f155` and `5a04d3d3`. It needs the release image with the bundled VSIX, like `get-started.spec.ts`'s create test.
+- Gap G450: a Playwright spec for Chat in the release image (streamed reply with a fake model server, history after reload, Stop), replacing the Puppeteer tool of `01a9f155` and `5a04d3d3`. It needs the release image with the bundled VSIX, like `get-started.spec.ts`'s create test.
 
 ## Checks on the merged branch (main at `bcc85d44`)
 
