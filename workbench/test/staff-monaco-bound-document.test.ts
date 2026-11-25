@@ -56,7 +56,8 @@ test('at any other version the request is refused and the model is unchanged', a
   assert.equal(bound.applyRemote(3, [{ offset: 0, length: 4, text: 'Water' }], 1), false);
   await bound.settled();
   assert.equal(model.getValue(), 'A Fuel for three days.');
-  assert.deepEqual(sent.map((item) => item.slice(0, 5)), [['changed', 'doc-1', [{ offset: 0, length: 0, text: 'A ' }], 2], ['applied', 'doc-1', 3, false, 2]]);
+  assert.deepEqual(sent.map((item) => item.slice(0, 4)), [['changed', 'doc-1', [{ offset: 0, length: 0, text: 'A ' }], 2], ['applied', 'doc-1', 3, false]]);
+  assert.equal(sent[1][4], 2, 'the answer names the model\'s version now');
 });
 
 test('a native undo is sent with its reason, and the whole text goes once when asked', async () => {

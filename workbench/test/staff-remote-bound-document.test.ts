@@ -96,12 +96,15 @@ test('moving edits keeps the other side\'s insert at the same place before or af
 async function openBound(person: Person, tab: FakeTab = new FakeTab(person.service), text = ''): Promise<{ tab: FakeTab; model: FakeSourceModel; doc: string }> {
   const model = new FakeSourceModel(person.uri, text);
   tab.open(model);
-  const entry = await until(() => tab.contribution.bindings().find((item) => item.model === model), (item) => item?.state === 'bound', 'the bound product');
+  const entry = await until(() => tab.contribution.bindings().find((item) => item.model === model), (item) => item?.state === 'bound', () => `the bound product (${person.logs.join(' | ')})`);
   return { tab, model, doc: entry?.doc as string };
 }
 
+/** The product's text in the shared record, as the person's live engine holds it. */
 async function sharedBody(person: Person, stream: string): Promise<string | undefined> {
-  return productOutput((await person.device.project.state()).fold as never, stream, PRODUCT)?.text;
+  const shared = person.live.shared(person.device.project.projectId);
+  const state = await shared?.project.state() as unknown as { fold: never } | undefined;
+  return state === undefined ? undefined : productOutput(state.fold, stream, PRODUCT)?.text;
 }
 
 test('tracer: a change typed in one model reaches the backend binding and the shared record, and appears in the other person\'s model without echo', async () => {
@@ -123,7 +126,8 @@ test('tracer: a change typed in one model reaches the backend binding and the sh
     assert.equal(right.model.textModel.canUndo, false, 'another person\'s change adds nothing to the native undo stack');
     await settle();
     assert.equal(left.model.textModel.applied, leftApplied, 'nothing was applied back into the author\'s model');
-    assert.deepEqual(await blake.device.project.findOwnAll('doc.update', () => true), [], 'and nothing was echoed into a shared change');
+    const blakeProject = blake.live.shared(blake.device.project.projectId)?.project as unknown as { findOwnAll(kind: string, predicate: () => boolean): Promise<unknown[]> };
+    assert.deepEqual(await blakeProject.findOwnAll('doc.update', () => true), [], 'and nothing was echoed into a shared change');
   });
 });
 
@@ -143,16 +147,18 @@ test('a model that is not a product is never touched, and the first open of a st
 
 test('a forced hash mismatch makes the backend ask for the whole text once, and the binding core resynchronizes with one log line', async () => {
   await withProduct(async ({ avery }) => {
-    const { tab, model, doc } = await openBound(avery);
+    const { tab, model } = await openBound(avery);
     const logged = avery.logs.length;
     let asked = 0;
     tab.events.onDidRequestFullText(() => { asked += 1; });
     const initial = model.textModel.getValue();
-    await avery.service.changed(doc, [{ offset: initial.length, length: 0, text: 'lost' }], model.textModel.getVersionId() + 1, sha('something else'));
-    await until(() => avery.logs.slice(logged).filter((line) => line === RESYNC).length, (count) => count === 1, 'the resync line');
+    // A change event lost on the way: the model now holds text the backend never heard of, and the next change's hash shows it.
+    model.textModel.diverge(`${initial} lost`);
+    model.textModel.type(model.textModel.getValue().length, 0, '!');
+    await until(() => avery.logs.slice(logged).filter((line) => line === RESYNC).length, (count) => count === 1, () => `the resync line (${avery.logs.join(' | ')})`);
+    await until(() => model.textModel.getValue(), (text) => text === initial, 'the shared text back');
     await settle();
     assert.equal(asked, 1);
-    assert.equal(model.textModel.getValue(), initial, 'the model shows the shared text');
     assert.deepEqual(avery.logs.slice(logged).filter((line) => line === RESYNC), [RESYNC]);
   });
 });

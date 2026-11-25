@@ -89,3 +89,12 @@ export function applyBindingEdits(text: string, edits: readonly BindingEdit[]): 
   for (const { offset, length, text: insert } of [...edits].sort((a, b) => b.offset - a.offset)) out = out.slice(0, offset) + insert + out.slice(offset + length);
   return out;
 }
+
+/** The one replacement that turns `before` into `after`, between their common start and common end (so a header both share is never touched). */
+export function diffEdit(before: string, after: string): BindingEdit {
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+  let end = 0;
+  while (end < before.length - start && end < after.length - start && before[before.length - 1 - end] === after[after.length - 1 - end]) end += 1;
+  return { offset: start, length: before.length - start - end, text: after.slice(start, after.length - end) };
+}

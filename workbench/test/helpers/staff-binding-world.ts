@@ -2,6 +2,7 @@
 // not load under the Node test runner: its modules import CSS), the browser contribution wired to the backend service in one process, and a shared
 // project of two people from the live world with one product. Fictional exercise data only.
 import 'reflect-metadata';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { Container } from '@theia/core/shared/inversify';
@@ -10,11 +11,12 @@ import { ContextKeyService } from '@theia/core/lib/browser/context-key-service.j
 import { loadStaffEngine, type EngineLiveStatus, type EngineReplicator, type StaffEngine } from '../../extension/src/node/staff/staff-engine.ts';
 import { StaffLiveEngine } from '../../extension/src/node/staff/staff-live-engine.ts';
 import { StaffBindingService } from '../../extension/src/node/staff/binding-service.ts';
-import { StaffBindingServer, type StaffBindingClient } from '../../extension/src/common/staff-binding.ts';
+import { diffEdit, StaffBindingServer, type StaffBindingClient } from '../../extension/src/common/staff-binding.ts';
 import {
   StaffBindingContribution, StaffBindingEvents, StaffEditorSource, type SourceEditor, type SourceModel,
 } from '../../extension/src/browser/staff/binding-contribution.ts';
 import type { BoundTextModel, ModelContentChange, ModelRange } from '../../extension/src/browser/staff/monaco-bound-document.ts';
+import { REPLICA_DIR } from '../../../src/domain/staff/multiUser.ts';
 import { staffProductPath } from '../../../src/domain/staff/writeLimits.ts';
 import { clientIdOf } from '../../../src/domain/replica/clientIds.ts';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../../../src/domain/replica/doc.ts';
@@ -22,7 +24,8 @@ import { appendProductEntry, proposeVersion } from '../../../src/staff/replica/l
 import { carryThroughFake, createLiveWorld, type LiveDevice, type LiveWorld } from '../../../src/test/helpers/liveWorld.ts';
 import { fileURLToPath } from 'node:url';
 
-const workbenchRoot = fileURLToPath(new URL('../../..', import.meta.url));
+// The tests that use this helper are bundled into dist/test/, so the workbench is two folders up from the running file.
+const workbenchRoot = fileURLToPath(new URL('../..', import.meta.url));
 export const engine = loadStaffEngine<StaffEngine>(workbenchRoot);
 export const PRODUCT = 'logistics-estimate';
 const LABEL = 'org/Internal';
@@ -99,6 +102,12 @@ export class FakeTextModel implements BoundTextModel {
 
   get canUndo(): boolean { return this.undoStack.length > 0; }
 
+  /** The text changes and no event says so: a change event lost on the way, which only the hash can show. */
+  diverge(text: string): void {
+    this.text = text;
+    this.versionId += 1;
+  }
+
   private change(ops: readonly Op[], flags: { isUndoing?: boolean }): void {
     const sorted = [...ops].sort((a, b) => b.offset - a.offset);
     for (const { offset, length, text } of sorted) this.text = this.text.slice(0, offset) + text + this.text.slice(offset + length);
@@ -141,11 +150,14 @@ export class FakeSourceModel implements SourceModel {
     await this.onSaved?.(this.textModel.getValue());
   }
 
-  /** Theia reloads the file from disk (MonacoEditorModel.doSync). */
+  /** Theia reloads the file from disk (MonacoEditorModel.doSync); Monaco's updateModel applies the smallest edit between the two texts. */
   reloadFromDisk(text: string): void {
+    const edit = diffEdit(this.textModel.getValue(), text);
+    const start = this.textModel.getPositionAt(edit.offset);
+    const end = this.textModel.getPositionAt(edit.offset + edit.length);
     this.diskSync = true;
     try {
-      this.textModel.applyEdits([{ range: { startLineNumber: 1, startColumn: 1, ...((): { endLineNumber: number; endColumn: number } => { const end = this.textModel.getPositionAt(this.textModel.getValue().length); return { endLineNumber: end.lineNumber, endColumn: end.column }; })() }, text }]);
+      this.textModel.applyEdits([{ range: { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: end.lineNumber, endColumn: end.column }, text: edit.text }]);
     } finally {
       this.diskSync = false;
     }
@@ -238,12 +250,12 @@ export interface Person {
 
 export async function personOf(device: LiveDevice): Promise<Person> {
   let replicator: FakeReplicator | undefined;
+  const logs: string[] = [];
   const live = new StaffLiveEngine({
     engine: { ...engine, LiveReplicator: function Made() { replicator = new FakeReplicator(); return replicator; } as never, projectLive: async () => ({ written: [], left: [] }) } as StaffEngine,
-    roots: async () => [device.at.root], globalStorageDir: device.at.global, secrets: device.at.secrets,
+    roots: async () => [device.at.root], globalStorageDir: device.at.global, secrets: device.at.secrets, log: (line) => logs.push(line),
   });
   await live.start();
-  const logs: string[] = [];
   const service = new StaffBindingService({ live: () => live, engine, log: (line) => logs.push(line) });
   const file = path.join(device.at.root, ...staffProductPath('j4', PRODUCT).split('/'));
   return { device, live, service, replicator: replicator as FakeReplicator, logs, uri: pathToFileURL(file).toString(), file };
@@ -279,11 +291,20 @@ export async function withProduct(run: (people: ProductWorld) => Promise<void>):
     if (!update.ok) throw new Error(update.message);
     const proposed = await proposeVersion(averyDevice.host, { product: PRODUCT, text: docText(doc), header: { kind: 'estimate', label: LABEL, profile: 'j4', level: 'official' }, pins: [], snapshot: snapshotOf(doc) });
     if (!proposed.ok) throw new Error(proposed.message);
+    // Each person's live engine holds its own open copy of the project, as in a session: changes go from one engine's copy to the other's.
+    const engineSide = (person: Person): LiveDevice => {
+      const shared = person.live.shared(person.device.project.projectId);
+      if (shared === undefined) throw new Error('the live engine has the shared project open');
+      return { ...person.device, project: shared.project as unknown as LiveDevice['project'] };
+    };
     const carry = async (from: Person, to: Person): Promise<void> => {
-      // The live engine's own copy of the project wrote some of these: the world's copy reads them from the store first.
-      await from.device.project.state();
-      await carryThroughFake(from.device, to.device, from.device.project.projectId);
-      await carryThroughFake(from.device, to.device, created.stream);
+      await carryThroughFake(engineSide(from), engineSide(to), from.device.project.projectId);
+      // The key group's grants travel beside the entries (labelCellWorld.syncTo does the same): without them its text does not open.
+      const grants = path.join(from.device.at.root, ...REPLICA_DIR.split('/'), 'grants', created.stream);
+      const signed = existsSync(grants) ? readdirSync(grants).filter((name) => name.endsWith('.json')).sort().map((name) => JSON.parse(readFileSync(path.join(grants, name), 'utf8')) as unknown) : [];
+      const target = engineSide(to).project as unknown as { putGrants(grants: readonly unknown[]): Promise<unknown> };
+      await target.putGrants(signed);
+      await carryThroughFake(engineSide(from), engineSide(to), created.stream);
     };
     const avery = await personOf(averyDevice);
     people.push(avery);
@@ -302,12 +323,12 @@ export async function settle(rounds = 30): Promise<void> {
   for (let index = 0; index < rounds; index += 1) await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-export async function until<T>(read: () => T | Promise<T>, done: (value: T) => boolean, what: string, ms = 10_000): Promise<T> {
+export async function until<T>(read: () => T | Promise<T>, done: (value: T) => boolean, what: string | (() => string), ms = 10_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const value = await read();
     if (done(value)) return value;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${JSON.stringify(value)}`);
+    if (Date.now() > end) throw new Error(`timed out waiting for ${typeof what === 'string' ? what : what()}: ${JSON.stringify(value)}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }

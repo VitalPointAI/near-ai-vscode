@@ -12,7 +12,7 @@
  * Every message leaves in the order the model changed, so the backend sees a version only after the change that made it. Nothing here imports
  * Monaco or Theia: the model is typed by the members it uses, so a test drives it with a model of the same shape.
  */
-import { textHash, type BindingEdit, type BindingReason, type StaffBindingServer } from '../../common/staff-binding.js';
+import { diffEdit, textHash, type BindingEdit, type BindingReason, type StaffBindingServer } from '../../common/staff-binding.js';
 
 /** A Monaco range (1-based lines and columns). */
 export interface ModelRange {
@@ -155,7 +155,7 @@ export class MonacoBoundDocument {
     const current = model.getValue();
     this.applyingRemote = true;
     try {
-      model.applyEdits([this.operation({ offset: 0, length: current.length, text: disk.before })]);
+      model.applyEdits([this.operation(diffEdit(current, disk.before))]);
     } finally {
       this.applyingRemote = false;
     }
@@ -181,12 +181,12 @@ export class MonacoBoundDocument {
     if (text === before) return;
     this.applyingRemote = true;
     try {
-      model.applyEdits([this.operation({ offset: 0, length: before.length, text })]);
+      model.applyEdits([this.operation(diffEdit(before, text))]);
     } finally {
       this.applyingRemote = false;
     }
     this.lastText = model.getValue();
-    this.disk = { edits: [{ offset: 0, length: before.length, text }], version: model.getVersionId(), text: this.lastText, before };
+    this.disk = { edits: [diffEdit(before, text)], version: model.getVersionId(), text: this.lastText, before };
     this.options.setReadOnly?.(true);
   }
 
@@ -210,7 +210,7 @@ export class MonacoBoundDocument {
       // A reload from disk is held as one change against the text before it; a second one on top joins it as one replacement.
       this.disk = this.disk === undefined
         ? { edits, version: event.versionId, text, before }
-        : { edits: [{ offset: 0, length: this.disk.before.length, text }], version: event.versionId, text, before: this.disk.before };
+        : { edits: [diffEdit(this.disk.before, text)], version: event.versionId, text, before: this.disk.before };
       this.options.setReadOnly?.(true);
       this.options.onDiskChange?.();
       return;
