@@ -19,7 +19,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { mustRun, removeOwn, run, runPlaywright, suffix, testImage } from '../helpers/docker';
+import { containerName, mustRun, removeOwn, run, runPlaywright, suffix, testImage } from '../helpers/docker';
 import { SECRET_MARKER, SECRET_PRODUCT, SEED_PRODUCT, startStaffWorld, type StaffPersonKey, type StaffWorld } from '../helpers/staff-world';
 import { staffProductPath } from '../../../src/domain/staff/writeLimits.ts';
 
@@ -72,6 +72,18 @@ after(async () => {
   await removeOwn();
   if (ownHubImage !== undefined) await run('docker', ['image', 'rm', '-f', ownHubImage]);
   rmSync(scratch, { recursive: true, force: true });
+});
+
+test('the staff fixture services share one internal Docker bridge', async () => {
+  const network = `sterling-workbench-test-${suffix}-staff-internal`;
+  const { stdout: topology } = await mustRun('docker', ['network', 'inspect', '--format',
+    '{{json .Internal}} {{.Driver}}', network]);
+  assert.equal(topology.trim(), 'true bridge');
+  for (const name of [containerName(world.a.container), containerName(world.b.container), containerName('staff-hub'), world.bao.name]) {
+    const { stdout: attached } = await mustRun('docker', ['container', 'inspect', '--format',
+      '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{println}}{{end}}', name]);
+    assert.deepEqual(attached.trim().split('\n'), [network], `${name} uses only the fixture bridge`);
+  }
 });
 
 test('the staff-live browser run: co-edit, cursors, own undo, status, invitation step-up and nothing secret on the wire', { timeout: 1_800_000 }, async () => {
