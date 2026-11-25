@@ -1,5 +1,7 @@
 # DND/CAF digital twin foundation
 
+> **DRAFT, not approved for execution.** Written by Codex on 2026-11-23 (`174da11d`) and brought onto main by the Codex port (`.planning/CODEX-PORT-AUDIT.md`) only so a planner can re-check it against #188 to #198 (verified credentials and DIDs, the 70.1 classification engine and 74.3 assistant, 74.1 model passports and use tiers, Phase 47 waves 5 to 7, 48.1). Nothing here is planned work until that re-check lands. The provisional CAF catalogue data it names (`caf-public-catalogue.snapshot.json`, `caf-vehicle-historical-model-index.csv`) stays out of main until Phase 88's governed store holds it (owner, 2026-11-24). Paths under `.planning/spikes/theia-team-studio/` are now under `workbench/`.
+
 Status: proposed design for the existing identity, data platform, and portfolio phases. The local Theia preview exercises the interaction and reference model with approved snapshots. Production deployment depends on the existing identity, source permission, and accreditation gates.
 
 ## Architecture

@@ -1,5 +1,7 @@
 # Phase 88 context
 
+> **DRAFT, not approved for execution.** Written by Codex on 2026-11-23 (`9225afe1`) and brought onto main by the Codex port (`.planning/CODEX-PORT-AUDIT.md`) only so a planner can re-check it against #188 to #198 (verified credentials and DIDs, the 70.1 classification engine and 74.3 assistant, 74.1 model passports and use tiers, Phase 47 waves 5 to 7, 48.1). Nothing here is planned work until that re-check lands. The provisional CAF catalogue data it names (`caf-public-catalogue.snapshot.json`, `caf-vehicle-historical-model-index.csv`) stays out of main until Phase 88's governed store holds it (owner, 2026-11-24). Paths under `.planning/spikes/theia-team-studio/` are now under `workbench/`.
+
 ## Scope
 
 Phase 88 builds the ingestion core, governed PostgreSQL store and data map on the Phase 85 host. Real organizational data requires the existing Stage 1 gate. Use synthetic sources to verify storage, authorization and concurrency. Phase 100 owns approved departmental connectors and L1b owns full production Theia integration.
