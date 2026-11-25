@@ -32,6 +32,9 @@ import { readGrant } from './cellKeys';
 import type { CellGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
 import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
+import { CELL_ACCESS_FEATURE } from './features';
+import { accessRevisionId, verifiesAccessWrite } from './rotationProof';
+import type { AccessRevision } from './rotationProof';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -42,7 +45,7 @@ import type { MembersState } from './rosterMembers';
 import { POSITION_REFUSALS, applyPositionEntry, createPostsState, positionAt, positionTakenAt, postingAt, postingReportedAt } from './rosterPositions';
 import type { PositionRefusal, PostsState } from './rosterPositions';
 import type { KeyRing, ReplicaContext, RosterView } from './rosterView';
-import { SESSION_MAX_LIFETIME_MS, certificateProblem } from './sessionKeys';
+import { SESSION_MAX_LIFETIME_MS, certificateProblem, certifiedWriter } from './sessionKeys';
 import type { SessionCertificate, SessionCertifyData } from './sessionKeys';
 import { verifyEntry } from './verify';
 import type { VerifiedEntry } from './verify';
@@ -74,6 +77,7 @@ export const ROSTER_KIND_OWNER: Readonly<Record<string, RosterKindOwner>> = Obje
   'invite.void': 'members',
   'cell.create': 'cells',
   'cell.rekey': 'cells',
+  'cell.access.commit': 'roster',
   'lead.handover': 'roster',
   'roster.choose': 'roster',
   'deputy.name': 'roster',
@@ -156,6 +160,7 @@ export interface RosterState {
   required: readonly string[];
   // The roster position at which each required feature was first required (33.2 D-06 reads wrap@2's).
   requiredFrom: Map<string, number>;
+  accessRevision?: AccessRevision;
   // The session key certificates placed after the line (Phase 33 D-62), by the session's writer id. Certificates take no position.
   sessions: Map<string, SessionCertificate>;
   // Each device's latest placed device.kem (33.2 D-03), by the device's writer id. kemKeysAt (deviceKem.ts) reads it. No position.
@@ -203,6 +208,27 @@ export function isRosterWriterAt(state: RosterState, writer: string, position: n
   const device = deviceAt(state.members, writer, position);
   if (device === undefined || memberAt(state.members, device.member, position) === undefined) return false;
   return device.member === leadAt(state, position) || device.member === deputyAt(state, position);
+}
+
+/** Undefined delegates to the existing guard on a project which has not enabled managed access. */
+export function managedWriteAllowed(state: RosterState, stream: string, epoch: number, writer: string, cited: number, now: Date, proof: unknown): boolean | undefined {
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE)) return undefined;
+  const revision = state.accessRevision;
+  const head = state.positions.length - 1;
+  if (revision === undefined || state.pending.length > 0 || epochAt(state.cells, stream, head) !== epoch) return false;
+  const at = state.positionOf.get(revision.entry);
+  const predecessor = state.positionOf.get(revision.predecessor);
+  if (at === undefined || predecessor === undefined || cited < at) return false;
+  const certificate = state.sessions.get(writer);
+  let device = writer;
+  if (certificate !== undefined) {
+    if (certifiedWriter(rosterView(state), writer, state.positions[head]) === undefined || !(Date.parse(certificate.notAfter) > now.getTime())) return false;
+    device = certificate.device;
+  } else if (deviceAt(state.members, writer, head) === undefined) return false;
+  return verifiesAccessWrite(revision, proof, {
+    project: state.anchor.project, cell: stream, epoch, device, writer, certificate: certificate?.hash ?? null,
+    authorityKey: (authority) => isRosterWriterAt(state, authority, predecessor) ? deviceKeyOf(state.members, authority)?.publicKey : undefined
+  });
 }
 
 /** The parts of an entry the position write rule reads: the same from a verified entry (the fold) and an opened base-stream body (the hub). */
@@ -255,7 +281,9 @@ const positionWriteOf = (entry: VerifiedEntry): PositionWrite => ({ writer: entr
 // writer for every other kind.
 function authorityProblem(state: RosterState, entry: VerifiedEntry, head: number): string | undefined {
   if (ROSTER_KIND_OWNER[entry.body.kind] === 'positions') return positionWriteProblem(state, positionWriteOf(entry), head);
-  return isRosterWriterAt(state, entry.header.writer, head) ? undefined : 'not-a-roster-writer';
+  if (!isRosterWriterAt(state, entry.header.writer, head)) return 'not-a-roster-writer';
+  const access = nextAccessRevision(state, entry);
+  return typeof access === 'string' ? access : undefined;
 }
 
 // The member whose device wrote the entry, at the roster the entry cites.
@@ -410,7 +438,7 @@ function applyRequire(state: RosterState, entry: VerifiedEntry, position: number
   return { status: 'applied' };
 }
 
-function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+function applyOperation(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   const position = state.positions.length;
   const owner = ROSTER_KIND_OWNER[entry.body.kind];
   if (entry.body.kind === 'project.genesis') return applyGenesis(state, entry, position);
@@ -423,6 +451,7 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   if (entry.body.kind === 'deputy.name') return applyDeputyName(state, entry, position);
   if (entry.body.kind === 'lead.handover') return applyHandover(state, entry, position);
   if (entry.body.kind === 'roster.require') return applyRequire(state, entry, position);
+  if (entry.body.kind === 'cell.access.commit') return { status: 'applied' };
   if (owner === 'positions') {
     // Judged again at the roster it cites, because a chosen branch reaches here without the head's authority check.
     const problem = positionWriteProblem(state, positionWriteOf(entry), position - 1);
@@ -432,6 +461,32 @@ function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
   }
   // roster.choose is decided by the driver at the split point (chooseProblem), never here.
   return { status: 'refused', reason: 'roster-kind-pending' };
+}
+
+const ACCESS_CHANGES: ReadonlySet<string> = new Set(['member.remove', 'device.revoke', 'device.rotate', 'hub.revoke', 'cell.create', 'cell.rekey', 'cell.access.commit']);
+
+function nextAccessRevision(state: RosterState, entry: VerifiedEntry): { id: string; root: string } | string | undefined {
+  if (entry.body.kind === 'project.genesis') return undefined;
+  const { accessRevision, accessRoot, rosterPrev: _prev, ...operation } = entry.data as Record<string, unknown>;
+  const kind = entry.body.kind;
+  const changesAccess = ACCESS_CHANGES.has(kind) || (kind === 'member.update' &&
+    ('clearance' in operation || 'did' in operation || 'evidence' in operation));
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE) || !changesAccess) {
+    return accessRevision !== undefined || accessRoot !== undefined ? 'cell-access-not-required' : undefined;
+  }
+  const id = accessRevisionId(state.anchor.project, state.accessRevision?.id ?? null, entry.body.roster, kind, operation);
+  return accessRevision === id && typeof accessRoot === 'string' ? { id, root: accessRoot } : 'cell-access-revision-invalid';
+}
+
+/** A managed mutation and its access revision apply together, including on a chosen roster branch. */
+function applyOne(state: RosterState, entry: VerifiedEntry): ApplyOutcome {
+  const access = nextAccessRevision(state, entry);
+  if (typeof access === 'string') return { status: 'refused', reason: access };
+  const outcome = applyOperation(state, entry);
+  if (outcome.status === 'applied' && access !== undefined) state.accessRevision = Object.freeze({
+    ...access, entry: entry.hash, predecessor: entry.body.roster, cells: Object.freeze([...state.cells.cells.keys()].sort())
+  });
+  return outcome;
 }
 
 const isRouted = (kind: string): boolean => Object.prototype.hasOwnProperty.call(ROSTER_KIND_OWNER, kind);

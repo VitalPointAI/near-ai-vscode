@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { accessPermitBytes, accessRevisionId, buildAccessCommitment, verifiesAccessWrite } from '../domain/replica/rotationProof';
 import type { AccessPermit, AccessWriteContext, CellAccessDecision } from '../domain/replica/rotationProof';
+import { isPersonKeyKind, requiresActionId } from '../domain/replica/sessionKeys';
 import { fixedSigner } from './helpers/replicaWorld';
+import { createRosterWorld } from './helpers/replicaRosterWorld';
 
 const project = '0'.repeat(32);
 const cell = '1'.repeat(32);
@@ -61,4 +63,27 @@ test('commitments reject duplicate slots and permits from another signature doma
   assert.equal(buildAccessCommitment(revisionId, [{ ...decision, decision: 'pending' }], [signed]), undefined);
   const wrong = fixture(decision.salt, lead.signer.sign(Buffer.from(revisionId)));
   assert.equal(verifiesAccessWrite(wrong.revision, wrong.proof, context), false);
+});
+
+test('a managed access commit needs the person key and an action ID', () => {
+  assert.equal(isPersonKeyKind('cell.access.commit'), true);
+  assert.equal(requiresActionId('cell.access.commit'), true);
+});
+
+test('a verified roster choice selects the root without treating a shared revision ID as a branch identifier', () => {
+  const world = createRosterWorld();
+  const genesis = world.genesis().entry.hash;
+  const arm = world.rosterEntry(world.lead, 'roster.require', { features: ['cell-access@1'] }, genesis);
+  const id = accessRevisionId(world.project, null, arm.hash, 'cell.access.commit', {});
+  const common = { accessRevision: id };
+  const before = world.rosterEntry(world.lead, 'cell.access.commit', { ...common, accessRoot: 'a'.repeat(64) }, arm.hash);
+  const selected = world.rosterEntry(world.lead, 'cell.access.commit', { ...common, accessRoot: 'b'.repeat(64) }, arm.hash);
+  const split = world.foldRoster();
+  assert.equal(split.accessRevision, undefined);
+  assert.deepEqual(split.pending[0]?.branches, [before.hash, selected.hash].sort());
+  world.rosterEntry(world.lead, 'roster.choose', { chosen: selected.hash }, arm.hash);
+  const chosen = world.foldRoster();
+  assert.equal(chosen.accessRevision?.entry, selected.hash);
+  assert.equal(chosen.accessRevision?.id, id);
+  assert.equal(chosen.accessRevision?.root, 'b'.repeat(64));
 });

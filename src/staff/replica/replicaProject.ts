@@ -38,7 +38,7 @@ import type { FoldResult, FoldState } from '../../domain/replica/fold';
 import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, rosterView } from '../../domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, managedWriteAllowed, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
@@ -166,6 +166,7 @@ export interface AppendOwnOptions {
   deps?: readonly string[];
   /** A blob already sealed to the cited cell and epoch, stored with this entry after the write check. */
   contentBlob?: SealedBlob;
+  accessProof?: unknown;
   /** The roster cited; the roster head when absent. */
   roster?: string;
   actor?: Actor;
@@ -1115,8 +1116,9 @@ export class ReplicaProject {
     // Recovery instructions must still reach the roster while the base cell is awaiting rotation.
     const rosterControl = stream === this.anchor.project &&
       (Object.hasOwn(ROSTER_KIND_OWNER, kind) || kind === 'device.kem' || kind === 'session.certify');
-    if (!rosterControl && !canWriteCurrentEpoch(roster, stream, epoch)) return refuse('rekey-pending');
     const chosen = options.signer ?? this.signerOf(kind);
+    if (!rosterControl && !(managedWriteAllowed(roster, stream, epoch, writerIdOf(chosen.publicKey), position, this.now(), options.accessProof)
+      ?? canWriteCurrentEpoch(roster, stream, epoch))) return refuse('rekey-pending');
     // 33.1 D-09: in a hosted project only the person signer signs a person-key kind, and a kind outside Phase 33's list only under its action.
     const person = this.deps.personSigner;
     if ((person !== undefined || this.deps.sessionSigner !== undefined) && isPersonKeyKind(kind) && chosen !== person) return refuse('person-key-required');
@@ -1145,7 +1147,6 @@ export class ReplicaProject {
   }
 }
 
-/** Two sets of reading keys hold the same key for every epoch. */
 function sameKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>): boolean {
   if (a.size !== b.size) return false;
   for (const [epoch, key] of a) if (b.get(epoch)?.equals(key) !== true) return false;

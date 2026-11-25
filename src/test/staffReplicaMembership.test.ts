@@ -17,6 +17,7 @@ import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../doma
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
+import { accessPermitBytes, accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
 import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
@@ -804,6 +805,53 @@ test('managed access pauses ordinary writes and prepared blobs until there is ve
     { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } }, { contentBlob });
   assert.equal(isProjectRefused(result) && result.refused, 'rekey-pending');
   assert.equal(existsSync(path.join(at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
+});
+
+test('a signed clearance transition pauses the affected cell and its verified unaffected cell still writes', async () => {
+  const at = install('managed-continuity');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  const lead = { at, p, host: hostOf(p, at) };
+  const affected = await createCell(lead, LABEL_X, [p.deviceWriter]);
+  const member = await bringIn(lead, 'managed-analyst', 'Mo Analyst', CLEARED_X);
+  assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
+  const { hash: predecessor } = await head(p);
+  const operation = { member: member.member, clearance: OFFICIAL };
+  const invalid = await p.appendOwn('member.update', operation);
+  assert.ok('ok' in invalid);
+  const unchanged = await head(p);
+  assert.equal(unchanged.hash, predecessor);
+  assert.equal(unchanged.roster.refused.find((item) => item.hash === invalid.hash)?.reason, 'cell-access-revision-invalid');
+  const revision = accessRevisionId(p.projectId, null, predecessor, 'member.update', operation);
+  const permit = { project: p.projectId, cell: p.projectId, epoch: 1, revision, predecessor,
+    device: p.deviceWriter, writer: p.deviceWriter, authority: p.deviceWriter, certificate: null };
+  const commitment = buildAccessCommitment(revision, [affected, p.projectId].sort().map((cell) => ({
+    cell, previousEpoch: 1, epoch: 1, decision: cell === affected ? 'pending' : 'continues',
+    salt: randomBytes(32).toString('hex'), evidence: randomBytes(32).toString('hex')
+  })), [{ permit, signature: p.signer.sign(accessPermitBytes(permit)) }]);
+  assert.ok(commitment);
+  const transition = await p.appendOwn('member.update', { ...operation, accessRevision: revision, accessRoot: commitment.root });
+  assert.ok('ok' in transition);
+  const current = await head(p);
+  assert.equal(current.hash, transition.hash);
+  assert.equal(current.roster.accessRevision?.entry, transition.hash);
+  assert.deepEqual(memberAt(current.roster.members, member.member, current.position)?.clearance, OFFICIAL);
+  const accessProof = commitment.proof(p.projectId, p.deviceWriter);
+  assert.ok(accessProof);
+  const slot = deviceAt(current.roster.members, p.deviceWriter, current.position)?.slot;
+  assert.ok(slot !== undefined);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const key = p.keys.epochKey(affected, 1);
+  assert.ok(key);
+  const contentBlob = sealBlob(key, affected, 1, Buffer.from('fictional pending draft'));
+  const blocked = await p.appendOwn('doc.client', data, { stream: affected, accessProof, contentBlob });
+  assert.equal(isProjectRefused(blocked) && blocked.refused, 'rekey-pending');
+  assert.equal(existsSync(path.join(at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
+  const written = await p.appendOwn('doc.client', data, { accessProof });
+  assert.ok('ok' in written);
+  assert.equal(written.built.entry.header.epoch, 1);
 });
 
 /** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */
