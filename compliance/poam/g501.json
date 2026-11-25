@@ -1,0 +1,16 @@
+{
+  "controls": [
+    "ac-16"
+  ],
+  "gap": "G501",
+  "id": "g501",
+  "milestones": [
+    {
+      "phase": "45.2",
+      "title": "Each partner's marking guide is asked for at the acceptance trial (45.2-12, owner actions a and c), and its markings are added as classification section patterns"
+    }
+  ],
+  "ownerRole": "shared",
+  "remediation": "Markings on plain files are read only when your organization's signed classification section lists them as patterns, through the marking reader of Phase 70.1, which only ever raises a label. Partners' national markings are read once your security officer adds them there as patterns mapped to your organization's labels; until then such files arrive unlabelled and an exchange officer labels them, and a site with no classification section reads no markings. Each partner's label-policy owner can supply its marking guide for the security officer to add. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-30.",
+  "title": "Partners' own national markings are not read yet"
+}

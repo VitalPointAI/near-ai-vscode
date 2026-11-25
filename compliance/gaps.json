@@ -6249,6 +6249,141 @@
       ],
       "remediation": "The sessions certificate (theia-cloud ws-cert-secret, issued by site-pki) now names the wildcard *.webview.<instance>.<domain> beside <instance>.<domain>, so the workbench's webviews keep one origin each. Wildcard certificates are discouraged when their scope is wide (a stolen key covers every name under it); this one covers only the webview names, which HAProxy routes to the same session backends as the session host, behind the same sign-in. Describe the scope in the hosted system description (SC-17) and get your organization's PKI authority and the assessor to accept it. If policy refuses wildcard names, the alternatives are a single fixed webview host through THEIA_WEBVIEW_EXTERNAL_ENDPOINT (one name, no wildcard, but the webviews then share one origin and Theia warns about the changed pattern at every start) or per-session certificates, which Theia Cloud 1.2.0's shared instances Ingress does not support.",
       "title": "The sessions certificate carries a wildcard name for the webview hosts, which needs accepting"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "pl-02",
+        "cm-08"
+      ],
+      "id": "G490",
+      "ownerRole": "maintainers",
+      "remediation": "The dashboard assesses every in-scope component against every control, so at commit 32007751 12,242 component cells read Not met with no statement, many of them for components that have no part in the control (the HSM in account management, for example). This overstates the work and misleads readers of the dashboard and the SSP. Plans 44.1-05 to 44.1-08 add a rule-based applicability map derived from the component catalogue, a component-level Not applicable that always carries its reason, and its display in the docs drawer and the SSP. The draft rules move about 8,016 cells, two thirds, to Not applicable; 44.1-07 replaces this estimate here with the count it measures on the signed map. Source: .planning/phases/44.1-accreditation-control-implementation-and-evidence-closure/44.1-RESEARCH.md.",
+      "title": "The dashboard assesses every component against every control"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "44.1",
+      "controls": [
+        "pl-10",
+        "pl-11"
+      ],
+      "id": "G491",
+      "ownerRole": "owner",
+      "remediation": "Which controls each component has a part in is a scope decision your organization reviews before an assessment relies on it. Plan 44.1-06 takes your organization's sign-off of the generated map for stage 1 (Unclassified, Protected A, hosted Protected A), 44.1-23 for stage 2 (Protected B) and 44.1-24 for stage 3 (the appliance and the overlays, after 44.1-03's scope decision). Until a stage is signed, its cells keep reading Not met, and a changed map section reads Not met until it is signed again. Each deploying organization re-reviews the map in its own assessment (44.1-04).",
+      "title": "Your organization has not yet reviewed which controls each component carries"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": true,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ac-02",
+        "ac-03",
+        "au-02",
+        "sa-09",
+        "sc-07",
+        "si-03",
+        "si-04"
+      ],
+      "id": "G492",
+      "ownerRole": "maintainers",
+      "remediation": "At Unclassified, component and control pairs that the draft map makes applicable have no statement: extension (ac-02, si-03, si-04, sa-09), hub (ac-02, au-02, sc-07, si-04), model-endpoints (sc-07), relay (ac-02, ac-03, au-02, sa-09, sc-07, si-04) and release-pipeline (si-03); cm-02 and si-02 for each come from 44.1-09's inventory statements and G10. Plans 44.1-10 to 44.1-13 write each statement with evidence a CI job reports, or link the pair to the phase that builds it (the relay's messaging: G3 and Phases 75 to 84). Pairs reserved by other plans stay theirs (44.1-HANDOFFS.md). The Protected A pairs follow in 44.1-10 to 44.1-21.",
+      "title": "Unclassified pairs where a component has a part have no statement yet"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ca-07",
+        "cm-04"
+      ],
+      "id": "G493",
+      "ownerRole": "maintainers",
+      "remediation": "The pull request summary shows state changes, but nothing stops a change that removes a statement or widens a profile from adding cells that read No statement yet. Plan 44.1-07 adds a coverage measure (counts per state and component) and a ratchet in the required docs job: the count of applicable cells without a statement per component may only fall, and a rise needs a change to the gated baseline that the owner approves.",
+      "title": "The count of cells without a statement can rise without anyone noticing"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "44.1",
+      "controls": [
+        "ca-02",
+        "sa-11"
+      ],
+      "id": "G494",
+      "ownerRole": "maintainers",
+      "remediation": "Only the test, relay, hub, workbench and deploy jobs write the per-test reports the evidence bundle reads. A rule on a compliance or docs-site test never gets a result, and a statement with no rule at all is allowed in the sources; both read Not met on the dashboard, but nothing refuses them when they are written. Plan 44.1-08 refuses both at source time, through 44.1-07's required check; the appliance's reference statement stays exempt while its level makes no claim. How fresh each kind of evidence must be stays with Phase 48.2 (Live compliance evidence).",
+      "title": "A statement can cite a test that no CI job reports"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "ac-21",
+        "sc-16"
+      ],
+      "id": "G500",
+      "ownerRole": "owner",
+      "poam": "g500",
+      "remediation": "Partners whose systems are not like ours can send files whose label cannot be checked: a binding with no signature, a signature by an anchor your organization has not pinned for that partner, a form this version cannot check yet, a marking read from the file's text, or no label at all. Such files are held in quarantine in a protected cell at a provisional label, and an exchange officer confirms, raises or sets the label; a label lower than the sender's is refused. A person's confirmation is recorded as that person's act, never as a check of the file, so a mistaken confirmation is the risk that remains. Setting the label of an unlabelled arrival below its holding ceiling (the agreement's ceiling, released to no one) is not lowering: the holding label is your organization's protective default, not the sender's claim. Your organization's security officer accepts this condition; pinning each partner's signing anchors in exchangePartners turns claimed labels into checked ones. A label counts as checked only while the person who recorded the arrival is an exchange officer and the partner's anchor is still pinned, so removing an anchor turns that partner's earlier arrivals back into not checked. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-25, D-28 and D-29.",
+      "title": "Labels on partner files that cannot be checked are confirmed by an exchange officer"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16"
+      ],
+      "id": "G501",
+      "ownerRole": "shared",
+      "poam": "g501",
+      "remediation": "Markings on plain files are read only when your organization's signed classification section lists them as patterns, through the marking reader of Phase 70.1, which only ever raises a label. Partners' national markings are read once your security officer adds them there as patterns mapped to your organization's labels; until then such files arrive unlabelled and an exchange officer labels them, and a site with no classification section reads no markings. Each partner's label-policy owner can supply its marking guide for the security officer to add. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-30.",
+      "title": "Partners' own national markings are not read yet"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "sc-12",
+        "sc-13"
+      ],
+      "id": "G502",
+      "ownerRole": "shared",
+      "poam": "g502",
+      "remediation": "ITSP.40.111 version 5 (section 5.1) asks for RSA keys of at least 3072 bits by the end of 2030. Partner key servers may use 2048-bit RSA keys today, because the public OpenTDF key access types name them, so from 2031-01-01 every export wrapped to a 2048-bit partner key is refused. Your organization's own receiving key is RSA-3072. Partners are asked for an EC key (ec:secp256r1) or a longer RSA key before then. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-32.",
+      "title": "Partner key servers with 2048-bit RSA keys can be used only until the end of 2030"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "sc-16"
+      ],
+      "id": "G503",
+      "ownerRole": "shared",
+      "poam": "g503",
+      "remediation": "NATO profiles labelled mail (ADatP-4778.2 chapter 3, a binding object in a mail header beside the RFC 7444 security label header) and labelled chat (chapter 4, XMPP), and military mail gateways support them with S/MIME security labels. Your organization's exchange is a file handover at the release boundary, not a mail or chat gateway, so these labels are not read: a saved message arrives as a plain file and is held as unlabelled unless a marking your organization lists is found in it. A mail adapter is planned when a partner or the allied test cell shows it hands over labelled messages as files. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-33 and 45.2-RESEARCH.md section 12.3.",
+      "title": "Labelled mail and chat from partners are not read"
+    },
+    {
+      "appliesAt": "coalition-exchange",
+      "blocksProduction": false,
+      "controls": [
+        "ac-16",
+        "sc-13"
+      ],
+      "id": "G504",
+      "ownerRole": "maintainers",
+      "poam": "g504",
+      "remediation": "Some forms of OpenTDF objects are not read yet: NanoTDF, objects whose key is split across several key servers, remote key access, and post-quantum key access addressed to your organization's own key. Such objects are refused with a plain sentence; post-quantum key access addressed to a partner's listed key server opens through that server. Each form is added when a development or partner sample uses it. Source: .planning/phases/45.2-nato-and-five-eyes-exchange-part-2-ztdf-and-the-nato-texts/45.2-CONTEXT.md D-24.",
+      "title": "Some OpenTDF forms are refused as not supported yet"
     }
   ]
 }
