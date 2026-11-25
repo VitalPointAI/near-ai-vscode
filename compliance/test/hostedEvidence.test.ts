@@ -23,12 +23,25 @@ const REPORT = path.join(COMPLIANCE, 'test', 'fixtures', 'hosted', 'deploy-repor
 const LEVEL = 'hosted-protected-b';
 const RENDER_TEST = 'every rendered release meets the global invariants';
 
-/** The Phase 47 statements on main, each proven by the render test's global invariants. Later batches add their rows here. */
+/** The Phase 47 statements on main, each proven by the render test's global invariants. */
 const BATCH = [
   { component: 'rke2', control: 'cm-07', rule: 'rke2.cm-07.no-k3s' },
   { component: 'ingress', control: 'cm-07', rule: 'ingress.cm-07.no-ingress-nginx' },
   { component: 'cert-manager', control: 'sc-17', rule: 'cert-manager.sc-17.no-acme' }
 ] as const;
+
+/** Every hosted component and control whose statements rest only on deploy report tests: each must read Met from the passing report alone. */
+function deployOnlyPairs(): { component: string; control: string; rules: string[] }[] {
+  const hosted = levels().find((level) => level.id === LEVEL)!;
+  const rules = loadEvidenceRules(path.join(COMPLIANCE, 'evidence-rules'));
+  return loadComponents(path.join(COMPLIANCE, 'components')).components.filter((component) => hosted.components.includes(component.id))
+    .flatMap((component) => component.implemented.filter((item) => item.statements.length > 0).map((item) => ({
+      component: component.id, control: item.control,
+      rules: rules.filter((rule) => rule.component === component.id && rule.control === item.control)
+    })))
+    .filter(({ rules: list }) => list.length > 0 && list.every((rule) => rule.kind === 'test' && rule.test!.file.startsWith('deploy/test/')))
+    .map((pair) => ({ ...pair, rules: pair.rules.map((rule) => rule.id).sort() }));
+}
 
 const levels = () => (JSON.parse(readFileSync(path.join(COMPLIANCE, 'levels.json'), 'utf8')).levels as { id: string; components: string[] }[]);
 const reportRows = () => readFileSync(REPORT, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
@@ -77,6 +90,31 @@ test('a passing render-test row makes each batch statement Met for its component
     const row = componentRow(dashboard, control, component);
     assert.equal(row?.state, 'met', `${control}/${component}: ${row?.reason}`);
     assert.deepEqual(row.evidence.map((item: any) => [item.rule, item.passed]), [[rule, true]], `${control}/${component}`);
+  }
+});
+
+test('every hosted statement proven only by deploy tests names passing rows of the fixture and reads Met from it on hosted Protected B', async () => {
+  const rules = loadEvidenceRules(path.join(COMPLIANCE, 'evidence-rules'));
+  const pairs = deployOnlyPairs();
+  assert.ok(pairs.length > BATCH.length, 'the later batches add statements proven by deploy tests');
+  const { dashboard } = await passingBundle();
+  for (const { component, control, rules: ids } of pairs) {
+    for (const id of ids) {
+      const target = rules.find((rule) => rule.id === id)!.test!;
+      assert.ok(reportRows().some((row) => row.file === target.file && row.name === target.name && row.status === 'passed'), `${id}: no passing fixture row`);
+    }
+    const row = componentRow(dashboard, control, component);
+    assert.equal(row?.state, 'met', `${control}/${component}: ${row?.reason}`);
+    assert.deepEqual(row.evidence.map((item: any) => item.rule).sort(), ids, `${control}/${component}`);
+  }
+});
+
+test('with every deploy row failed, or no deploy report, no statement proven only by deploy tests reads Met', async () => {
+  const failed = await bundle(reportRows().map((row) => ({ ...row, status: 'failed' })));
+  const absent = await bundle();
+  for (const { component, control } of deployOnlyPairs()) {
+    assert.equal(componentRow(failed.dashboard, control, component)?.reason, 'test-failed', `${control}/${component}`);
+    assert.equal(componentRow(absent.dashboard, control, component)?.reason, 'test-not-run', `${control}/${component}`);
   }
 });
 
