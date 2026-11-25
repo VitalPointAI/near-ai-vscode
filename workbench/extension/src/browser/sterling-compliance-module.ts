@@ -221,7 +221,7 @@ class SterlingComplianceWidget extends BaseWidget {
       this.showStatus(`${RELEASE_EVIDENCE_TEXT.didNotVerify} ${RELEASE_DID_NOT_VERIFY_TEXT[release.reason].replace('{file}', release.file)} ${RELEASE_EVIDENCE_TEXT.didNotVerifyTail}`);
       return;
     }
-    if (release?.verification === 'not-verified') {
+    if (release?.verification === 'not-verified' || release?.verification === 'verified') {
       this.showRelease(release);
       return;
     }
@@ -265,25 +265,32 @@ class SterlingComplianceWidget extends BaseWidget {
   }
 
   /**
-   * The release's own evidence, judged now by the backend (48.2-01). No configured key vouches for it yet, so every line shows "Not verified"
-   * in place of its state, the engine's state only in the detail pane, and nothing counts as Met (D-18).
+   * The release's own evidence, judged now by the backend (48.2-01, 48.2-04). A Verified line shows its engine state; a Not verified line shows
+   * "Not verified" in place of its state, the engine's state only in the detail pane, and never counts as Met (D-18).
    */
-  private showRelease(release: Extract<ReleaseEvidence, { verification: 'not-verified' }>): void {
+  private showRelease(release: Extract<ReleaseEvidence, { verification: 'not-verified' | 'verified' }>): void {
     const version = RELEASE_EVIDENCE_TEXT.release.replace('{version}', release.version);
-    const metadata = element('p', `${version} · ${RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', release.asOf)} · Commit ${release.commit.slice(0, 12)}`, 'sterling-evidence-meta');
-    const verification = element('p', RELEASE_EVIDENCE_TEXT.noTrustKey, 'sterling-evidence-message');
+    const metadata = element('p', `${version} · ${RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', release.asOf)} · Commit ${release.commit.slice(0, 12)} · ${RELEASE_EVIDENCE_TEXT.checkedAt.replace('{time}', release.checkedAt)}`, 'sterling-evidence-meta');
+    const notVerifiedWords = { 'no-trust-key': RELEASE_EVIDENCE_TEXT.noTrustKey, 'no-signature': RELEASE_EVIDENCE_TEXT.noSignature, 'anchor-unconfirmed': RELEASE_EVIDENCE_TEXT.anchorUnconfirmed } as const;
+    const verification = release.verification === 'verified'
+      ? element('p', release.anchor === 'organization' ? RELEASE_EVIDENCE_TEXT.verifiedOrganization : RELEASE_EVIDENCE_TEXT.verifiedSupplier, 'sterling-evidence-meta')
+      : element('p', notVerifiedWords[release.reason], 'sterling-evidence-message');
+    const header = [metadata, verification];
+    if (release.clock) header.push(element('p', RELEASE_EVIDENCE_TEXT.clockNote.replace('{time}', release.asOf), 'sterling-evidence-message'));
     const freshnessWords = {
       current: RELEASE_EVIDENCE_TEXT.current, ageing: RELEASE_EVIDENCE_TEXT.ageing, 'out-of-date': RELEASE_EVIDENCE_TEXT.outOfDate,
       unknown: RELEASE_EVIDENCE_TEXT.unknown, none: RELEASE_EVIDENCE_TEXT.noEvidence
     } as const;
     const facts = (row: EvidenceRow): string => [version, row.asOf ? RELEASE_EVIDENCE_TEXT.asOf.replace('{time}', row.asOf) : undefined,
-      freshnessWords[row.freshness], RELEASE_EVIDENCE_TEXT.notVerified].filter(Boolean).join(' · ');
+      freshnessWords[row.freshness], row.verification === 'verified' ? RELEASE_EVIDENCE_TEXT.verified : RELEASE_EVIDENCE_TEXT.notVerified].filter(Boolean).join(' · ');
     const rows: Control[] = release.rows.map(row => ({
       control: row.control, label: row.label, title: row.title, level: row.level, reasonText: row.reasonText,
       ...(row.textFile ? { textFile: row.textFile } : {}), ...(row.gap ? { gap: row.gap } : {}),
-      state: 'not-verified', engineState: row.state, facts: facts(row),
+      facts: facts(row),
+      ...(row.verification === 'verified' ? { state: row.state } : { state: 'not-verified' as const, engineState: row.state }),
       components: row.components.map(component => ({
-        component: component.component, responsibility: component.responsibility, state: 'not-verified' as const, engineState: component.state,
+        component: component.component, responsibility: component.responsibility,
+        ...(row.verification === 'verified' ? { state: component.state } : { state: 'not-verified' as const, engineState: component.state }),
         reasonText: component.reasonText, ...(component.statement ? { statement: component.statement } : {}),
         evidence: component.evidence.map(({ rule, passed, collectedAt, commit, runUrl }) => ({ rule, passed, collectedAt, ...(commit ? { commit } : {}), ...(runUrl ? { runUrl } : {}) }))
       }))
@@ -292,7 +299,7 @@ class SterlingComplianceWidget extends BaseWidget {
       schemaVersion: 1, generatedAt: release.asOf, commit: release.commit, source: { kind: 'release', ref: release.commit },
       levels: release.levels.map(({ id, title, claim }) => ({ id, title, claim })), rows
     };
-    this.showDashboard(dashboard, [metadata, verification]);
+    this.showDashboard(dashboard, header);
   }
 
   private showDashboard(dashboard: Dashboard, header: HTMLElement[]): void {

@@ -54,6 +54,8 @@ export interface EvidenceResult {
   readonly window: string;
   readonly runUrl?: string;
   readonly freshness: EvidenceFreshness;
+  /** Where the result comes from (D-24). */
+  readonly source: 'release' | 'site' | 'reference-site';
 }
 
 export interface EvidenceComponent {
@@ -80,6 +82,8 @@ export interface EvidenceRow {
   /** The oldest result time of the row; absent when the row has no evidence. */
   readonly asOf?: string;
   readonly freshness: EvidenceFreshness;
+  /** Verified only when a key from configuration vouches for the row's source; a Not verified row never counts as Met (D-18). */
+  readonly verification: 'verified' | 'not-verified';
 }
 
 export interface EvidenceLevel {
@@ -88,26 +92,40 @@ export interface EvidenceLevel {
   readonly claim: boolean;
 }
 
-/** Why the release evidence did not verify: a file that is missing, extra, a link, the wrong size or changed, or an unreadable format. */
-export type ReleaseDidNotVerifyReason = 'format' | 'field' | 'path' | 'missing' | 'extra' | 'symlink' | 'size' | 'hash' | 'unreadable';
+/**
+ * Why the release evidence did not verify (D-18): a file that is missing, extra, a link, the wrong size or changed; an unreadable format;
+ * a bad signature or one for other evidence; or a site key in the trust folder that is not your organization's site key.
+ */
+export type ReleaseDidNotVerifyReason = 'format' | 'field' | 'path' | 'missing' | 'extra' | 'symlink' | 'size' | 'hash' | 'unreadable'
+  | 'signature' | 'other-manifest' | 'anchor-mismatch';
+/** Why the release evidence is Not verified: no key from configuration, no signature for this release, or a site key the session cannot confirm. */
+export type ReleaseNotVerifiedReason = 'no-trust-key' | 'no-signature' | 'anchor-unconfirmed';
+/** Which configured key vouches for the release: your organization's site key, or the supplier release key a person mounted (D-17). */
+export type EvidenceAnchor = 'organization' | 'supplier';
+
+/** A release layer that checked out: its content is shown, Verified or Not verified. */
+export interface ReleaseLayer {
+  readonly version: string;
+  readonly commit: string;
+  /** The release build time: the as-of time of the release layer. */
+  readonly asOf: string;
+  /** When the backend last checked the trust anchors and the signature. */
+  readonly checkedAt: string;
+  /** Present when the session clock is earlier than the release build: freshness is Unknown and nothing is Met (D-14). */
+  readonly clock?: 'clock-behind-build';
+  readonly levels: readonly EvidenceLevel[];
+  readonly rows: readonly EvidenceRow[];
+}
 
 /**
  * The release layer. `none`: the image carries no release evidence. `did-not-verify`: nothing from it is shown, only the reason.
- * `not-verified`: the content is shown, but no configured key vouches for it, so no row counts as Met (48.2-04 adds signatures).
+ * `not-verified`: the content is shown, but no configured key vouches for it, so no row counts as Met. `verified`: a configured key does.
  */
 export type ReleaseEvidence =
   | { readonly verification: 'none' }
   | { readonly verification: 'did-not-verify'; readonly reason: ReleaseDidNotVerifyReason; readonly file: string }
-  | {
-    readonly verification: 'not-verified';
-    readonly reason: 'no-trust-key';
-    readonly version: string;
-    readonly commit: string;
-    /** The release build time: the as-of time of the release layer. */
-    readonly asOf: string;
-    readonly levels: readonly EvidenceLevel[];
-    readonly rows: readonly EvidenceRow[];
-  };
+  | (ReleaseLayer & { readonly verification: 'not-verified'; readonly reason: ReleaseNotVerifiedReason; readonly anchor?: EvidenceAnchor })
+  | (ReleaseLayer & { readonly verification: 'verified'; readonly anchor: EvidenceAnchor });
 
 export interface EvidenceSnapshot {
   /** When the backend judged the rows. */
@@ -132,6 +150,12 @@ export const RELEASE_EVIDENCE_TEXT = {
   unknown: 'Unknown',
   noEvidence: 'No evidence',
   noTrustKey: 'Not verified: no key from your organization’s configuration vouches for this release’s evidence, so nothing counts as Met.',
+  noSignature: 'Not verified: there is no signature for this release’s evidence, so nothing counts as Met.',
+  anchorUnconfirmed: 'Not verified: this session cannot confirm your organization’s site key, so nothing counts as Met. Ask your organization’s administrator.',
+  verifiedOrganization: 'Verified with your organization’s site key.',
+  verifiedSupplier: 'Verified with the supplier release key mounted on this computer.',
+  checkedAt: 'checked {time}',
+  clockNote: 'Freshness is Unknown: this computer’s clock is earlier than the release build ({time}).',
   wouldBe: 'Would be {state} if verified.',
   didNotVerify: 'The release evidence did not verify.',
   didNotVerifyTail: 'Nothing from this source is shown.',
@@ -149,4 +173,7 @@ export const RELEASE_DID_NOT_VERIFY_TEXT: Readonly<Record<ReleaseDidNotVerifyRea
   field: '{file} is in a format this release does not read.',
   path: '{file} is in a format this release does not read.',
   unreadable: '{file} could not be read.',
+  signature: 'The signature does not match this release’s evidence.',
+  'other-manifest': 'The signature is for different evidence than this release carries.',
+  'anchor-mismatch': 'The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator.',
 };
