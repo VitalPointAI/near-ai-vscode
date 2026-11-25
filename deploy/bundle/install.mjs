@@ -390,6 +390,16 @@ export async function writeSecrets({ root = ROOT, site, bao, run = defaultRun, l
 
 // ---- apply ------------------------------------------------------------------------------------------------------------------------------
 
+/**
+ * A one-line YAML scalar as text. Single-quoted: every character is literal (backslashes too) and '' is one quote. Double-quoted: YAML's
+ * escapes, which for the values helm renders are JSON's. Plain: as written.
+ */
+export function yamlScalarValue(rest) {
+  if (rest.length >= 2 && rest.startsWith("'") && rest.endsWith("'")) return rest.slice(1, -1).replaceAll("''", "'");
+  if (rest.length >= 2 && rest.startsWith('"') && rest.endsWith('"')) return JSON.parse(rest);
+  return rest;
+}
+
 /** The data of a rendered ConfigMap as { key: text } (block scalars | and |-, and quoted or plain one-line values). */
 export function configMapData(doc) {
   const lines = doc.split('\n');
@@ -413,7 +423,7 @@ export function configMapData(doc) {
       }
       data[key] = `${body.join('\n').replace(/\s+$/, '')}${rest.startsWith('|-') ? '' : '\n'}`;
     } else {
-      data[key] = /^["']/.test(rest) ? JSON.parse(rest.startsWith("'") ? `"${rest.slice(1, -1).replace(/"/g, '\\"')}"` : rest) : rest;
+      data[key] = yamlScalarValue(rest);
     }
   }
   return data;

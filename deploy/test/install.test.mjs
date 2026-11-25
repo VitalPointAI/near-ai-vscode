@@ -350,6 +350,20 @@ test('apply puts the rendered OpenSearch objects through the API with the creden
   assert.equal(configMapData('kind: ConfigMap\ndata:\n  a: |\n    {"x": 1}\n  b: "two"\n').a, '{"x": 1}\n');
 });
 
+test('ConfigMap values decode YAML quoting exactly, backslashes included', () => {
+  const data = configMapData([
+    'kind: ConfigMap', 'data:',
+    String.raw`  single: 'C:\path\to "x" and it''s'`,
+    String.raw`  trailing: 'ends with \'`,
+    String.raw`  double: "tab\tand \\ and \"q\""`,
+    '  plain: just text',
+  ].join('\n'));
+  assert.equal(data.single, String.raw`C:\path\to "x" and it's`);
+  assert.equal(data.trailing, 'ends with \\');
+  assert.equal(data.double, 'tab\tand \\ and "q"');
+  assert.equal(data.plain, 'just text');
+});
+
 test('install.mjs --help lists every step', async () => {
   const lines = [];
   assert.equal(await main(['--help'], { log: (line) => lines.push(line) }), 0);
