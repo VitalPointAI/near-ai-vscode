@@ -27,13 +27,15 @@
 //   connection flags: --keycloak <https://keycloak.<domain>> --keycloak-token-file <file> [--realm sterling] --bao <https://openbao:8200>
 //                     --ca-file <site CA pem> --bao-token-file <file> (a token with policy guest-operator) --realm-site <realm site file>
 //
-// The realm site file's guests.maxDays limits every end date; 0 or absent turns guests off. Tokens come from files, never arguments.
+// The realm site file's guests.maxDays limits every end date; 0 or absent turns guests off. Until a release includes the credential issuing
+// and revocation card (71-12, whose OpenBao policy credential-issuers apply.mjs then writes), create and extend refuse any nonzero maxDays
+// (G449). Tokens come from files, never arguments.
 // Node built-ins only.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openbaoClient } from '../openbao/apply.mjs';
+import { GUEST_ACCOUNT_POLICY, openbaoClient, POLICIES } from '../openbao/apply.mjs';
 import { countPasswordlessKeys } from '../openbao/enrol.mjs';
 import { keycloakAdmin } from './users.mjs';
 
@@ -69,11 +71,20 @@ export function utcInstant(value) {
 }
 export const attribute = (user, name) => user?.attributes?.[name]?.[0];
 
-/** The guests settings of the realm site file: { maxDays, checkMinutes, sessionsNamespace }. Guests are off when maxDays is 0 or absent. */
-export function guestSettings(realmSite) {
+/**
+ * Whether this release includes the credential issuing and revocation card (71-12): it ships the OpenBao policy credential-issuers, which
+ * apply.mjs then lists. Without it a guest would hold no credentials and an early end's revocation request would reach no officer (G449).
+ */
+export const credentialIssuingShipped = () => POLICIES.includes('credential-issuers');
+
+/**
+ * The guests settings of the realm site file: { maxDays, checkMinutes, sessionsNamespace, retentionDays, issuing }. Guests are off when
+ * maxDays is 0 or absent. issuing comes from this release, never from the file: whether the 71-12 card is here (credentialIssuingShipped).
+ */
+export function guestSettings(realmSite, issuing = credentialIssuingShipped()) {
   const guests = realmSite?.guests ?? {};
   return { maxDays: Number(guests.maxDays ?? 0) || 0, checkMinutes: Number(guests.checkMinutes ?? 15), sessionsNamespace: guests.sessionsNamespace || 'theia-cloud',
-    retentionDays: Number(guests.retentionDays ?? 0) || 0 };
+    retentionDays: Number(guests.retentionDays ?? 0) || 0, issuing: issuing === true };
 }
 
 /**
@@ -85,6 +96,9 @@ export function checkGuestRequest(request, settings, now = Date.now()) {
   const problems = [];
   const maxDays = Number(settings?.maxDays ?? 0);
   if (!(maxDays > 0)) problems.push('Guests are off at this site. Set guests.maxDays in the realm site file.');
+  else if (settings?.issuing !== true) {
+    problems.push(`Guests stay off on this release: the realm site file sets guests.maxDays to ${maxDays}, but this release does not include the credential issuing and revocation card (71-12), so a guest would hold no credentials and ending one early could not revoke them. Set guests.maxDays to 0 until your organization runs a release that includes it.`);
+  }
   if (!(Number(settings?.retentionDays ?? 0) > 0)) problems.push('Set guests.retentionDays in the realm site file: how long an ended guest\'s records are kept before a security officer removes their secrets (D-84).');
   for (const field of CREDENTIAL_FIELDS) {
     if (request[field] !== undefined) problems.push(`--${field} is not kept in Keycloak any more: how a guest serves, their nationality and organization are credentials the security contact issues to the guest in their own session (Phase 71). Leave it out.`);
@@ -315,7 +329,8 @@ export function guestStatus(user, keyCount, now = Date.now()) {
 
 /**
  * What a guest must never hold (D-60, fail closed): a realm-management role, a group besides guests, or an OpenBao policy or group on its
- * entity. Returns { reasons, entity } (entity null when the guest has none); a read that fails is thrown, so it is reported, never ignored.
+ * entity besides guest-account. Returns { reasons, entity } (entity null when the guest has none); a read that fails is thrown, so it is
+ * reported, never ignored.
  */
 async function forbiddenHoldings({ keycloak, bao, userId, reasons = [] }) {
   const mappings = answer(await keycloak('GET', `users/${enc(userId)}/role-mappings`), 'read role mappings') ?? {};
@@ -323,7 +338,8 @@ async function forbiddenHoldings({ keycloak, bao, userId, reasons = [] }) {
   for (const group of await groupsOf(keycloak, userId)) if (group.path !== GUESTS_GROUP) reasons.push(`member of ${group.path}`);
   const found = await bao('GET', `identity/entity/name/guest-${userId}`);
   const entity = found.status === 404 ? null : ok(found, `read guest-${userId}`);
-  for (const policy of entity?.policies ?? []) reasons.push(`OpenBao entity holds the policy ${policy}`);
+  // guest-account is the one policy a guest entity carries (enrol.mjs): it only keeps the guest's secrets under kv/guests/ (D-84).
+  for (const policy of entity?.policies ?? []) if (policy !== GUEST_ACCOUNT_POLICY) reasons.push(`OpenBao entity holds the policy ${policy}`);
   for (const group of entity?.direct_group_ids ?? entity?.group_ids ?? []) reasons.push(`OpenBao entity is in the group ${group}`);
   return { reasons, entity };
 }
@@ -380,18 +396,23 @@ export async function listGuests({ keycloak, now = Date.now() }) {
  * The end at the end date, and the fail-closed end (D-63): every enabled member of guests past guestUntil (or without one), and every one
  * found with a realm-management role, another group or an OpenBao policy or group, is ended through endGuest. Each account is read again
  * just before acting, and one whose end moved into the future (with nothing forbidden) is skipped. A fail-closed end before the end date is
- * early, so it files a revocation request. Every guest is tried; failures are returned, not thrown. Returns { ended, skipped, failures }.
+ * early, so it files a revocation request. A guest whose fail-closed check could not run (a Keycloak or OpenBao read failed) and who is not
+ * past their end is never counted as fine: it is listed as unchecked, with the failure, and ended on a later run if the check finds anything.
+ * Every guest is tried; failures are returned, not thrown. Returns { ended, skipped, unchecked, failures }.
  */
 export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), job = 'guests.mjs expire', retentionDays }) {
   const ended = [];
   const skipped = [];
+  const unchecked = [];
   const failures = [];
   for (const member of await guestMembers(keycloak)) {
     if (member.enabled === false) continue;
     const reasons = [];
+    let checkFailed = false;
     try {
       await forbiddenHoldings({ keycloak, bao, userId: member.id, reasons });
     } catch (error) {
+      checkFailed = true;
       failures.push(`${member.username}: ${/OpenBao/.test(error.message) ? 'OpenBao' : 'Keycloak'}: ${error.message}`);
     }
     try {
@@ -400,7 +421,8 @@ export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), 
       const until = attribute(fresh, 'guestUntil');
       const due = !until || !(Date.parse(until) > now);
       if (!due && !reasons.length) {
-        if (!attribute(member, 'guestUntil') || !(Date.parse(attribute(member, 'guestUntil')) > now)) skipped.push({ username: member.username, until });
+        if (checkFailed) unchecked.push({ username: member.username, until });
+        else if (!attribute(member, 'guestUntil') || !(Date.parse(attribute(member, 'guestUntil')) > now)) skipped.push({ username: member.username, until });
         continue;
       }
       const reason = due ? (until ? `end date ${until} passed` : 'no end date') : reasons.join('; ');
@@ -411,7 +433,7 @@ export async function expireGuests({ keycloak, bao, sessions, now = Date.now(), 
       failures.push(`${member.username}: Keycloak: ${error.message}`);
     }
   }
-  return { ended, skipped, failures };
+  return { ended, skipped, unchecked, failures };
 }
 
 /** The CLI's sessions client: kubectl lists the Theia Cloud Session records of one namespace and deletes the guest's by name. */
@@ -484,6 +506,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const result = await expireGuests({ keycloak, bao, sessions: sessionsClient(), retentionDays: settings.retentionDays });
       for (const entry of result.ended) console.log(`ended ${entry.username}: ${entry.reason}`);
       for (const entry of result.skipped) console.log(`skipped ${entry.username}: the end moved to ${entry.until}`);
+      for (const entry of result.unchecked) console.error(`unchecked ${entry.username}: the check for a role, another group or an OpenBao policy could not run (see the failure below), so this guest is not known to be fine; run expire again`);
       for (const failure of result.failures) console.error(`failed: ${failure}`);
       if (!result.ended.length && !result.failures.length) console.log('No guest is due to end.');
       if (result.failures.length) exit = 1;

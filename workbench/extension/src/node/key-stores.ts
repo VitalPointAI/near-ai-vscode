@@ -59,7 +59,7 @@ export function createOpenBaoKeyStore(identity: SessionSource, mounts: { readonl
   }
 
   async function list(session: ActiveSession, service: string): Promise<string[]> {
-    const answer = await session.client.request('GET', `${kv}/metadata/${serviceFolder(session.entityId, service)}?list=true`, { token: session.token });
+    const answer = await session.client.request('GET', `${kv}/metadata/${serviceFolder(session.entityId, service, session.space)}?list=true`, { token: session.token });
     if (answer.status === 404) return [];
     const names = (answer.json as { data?: { keys?: unknown } } | undefined)?.data?.keys;
     if (!Array.isArray(names)) return [];
@@ -75,7 +75,7 @@ export function createOpenBaoKeyStore(identity: SessionSource, mounts: { readonl
   async function credentials(session: ActiveSession, service: string): Promise<Array<{ account: string; password: string }>> {
     const found: Array<{ account: string; password: string }> = [];
     for (const account of await list(session, service)) {
-      const password = await read(session, secretPath(session.entityId, service, account));
+      const password = await read(session, secretPath(session.entityId, service, account, session.space));
       if (password !== undefined) found.push({ account, password });
     }
     return found;
@@ -83,12 +83,12 @@ export function createOpenBaoKeyStore(identity: SessionSource, mounts: { readonl
 
   return {
     setPassword: (service, account, password) => withSession(async (session, client) => {
-      await client.request('POST', `${kv}/data/${secretPath(session.entityId, service, account)}`, { token: session.token, body: { data: { password } } });
+      await client.request('POST', `${kv}/data/${secretPath(session.entityId, service, account, session.space)}`, { token: session.token, body: { data: { password } } });
     }),
-    getPassword: (service, account) => withSession((session) => read(session, secretPath(session.entityId, service, account))),
+    getPassword: (service, account) => withSession((session) => read(session, secretPath(session.entityId, service, account, session.space))),
     // Metadata, not data: a data delete is a soft delete that keeps every version readable by an operator; this removes them all.
     deletePassword: (service, account) => withSession(async (session, client) => {
-      const path = `${kv}/metadata/${secretPath(session.entityId, service, account)}`;
+      const path = `${kv}/metadata/${secretPath(session.entityId, service, account, session.space)}`;
       const existing = await client.request('GET', path, { token: session.token });
       if (existing.status === 404) return false;
       await client.request('DELETE', path, { token: session.token });

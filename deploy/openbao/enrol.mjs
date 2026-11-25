@@ -8,7 +8,9 @@
 //           then the person can sign in but cannot sign. A second run changes nothing. The workbench never creates or deletes keys.
 //           A member of the Keycloak group guests (deploy/keycloak/guests.mjs, D-61, D-62) is a guest: the account must be enabled with a
 //           guestUntil in the future, and the entity is named guest-<Keycloak id> (staff: keycloak-<id>). A staff entity never becomes a
-//           guest entity or back.
+//           guest entity or back. A guest entity carries exactly the policy guest-account, which keeps the guest's secrets under
+//           kv/guests/<entity>/ (where a security officer removes them after retention, D-84) and denies them kv/users/; a run adds it to a
+//           guest entity that lacks it and refuses one that holds any other policy.
 //   rebind: after the runbook has revoked the old credentials in Keycloak and the person has a new account with two new keys, moves the
 //           person's jwt alias from the old Keycloak user id to the new one, so the same entity, secrets and keys stay theirs.
 //
@@ -23,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openbaoClient } from './apply.mjs';
+import { GUEST_ACCOUNT_POLICY, openbaoClient } from './apply.mjs';
 
 const GUESTS_GROUP = '/guests';
 const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
@@ -119,10 +121,21 @@ export async function enrolPerson({ username, keycloak, bao, now = Date.now() })
   }
   if (!found) {
     const metadata = guest ? { keycloak_user_id: user.id, account: 'guest' } : { keycloak_user_id: user.id };
-    const entity = ok(await bao('POST', 'identity/entity', { name: `${prefix}-${user.id}`, metadata }), 'create entity');
+    const entity = ok(await bao('POST', 'identity/entity', { name: `${prefix}-${user.id}`, metadata, ...(guest ? { policies: [GUEST_ACCOUNT_POLICY] } : {}) }), 'create entity');
     ok(await bao('POST', 'identity/entity-alias', { name: user.id, canonical_id: entity.id, mount_accessor: accessor }), 'create entity alias');
     created.push('entity', 'alias');
     found = { entityId: entity.id };
+  }
+  if (guest) {
+    // The guest's one policy (D-84): its secrets go under kv/guests/, never kv/users/. Added if missing; any other policy is refused (D-60).
+    const entity = ok(await bao('GET', `identity/entity/id/${found.entityId}`), 'read the guest entity');
+    const held = entity?.policies ?? [];
+    const others = held.filter((name) => name !== GUEST_ACCOUNT_POLICY);
+    if (others.length) throw new Error(`${username}'s OpenBao entity holds the policy ${others.join(', ')}; a guest holds only ${GUEST_ACCOUNT_POLICY}. An administrator removes it first.`);
+    if (!held.includes(GUEST_ACCOUNT_POLICY)) {
+      ok(await bao('POST', `identity/entity/id/${found.entityId}`, { policies: [GUEST_ACCOUNT_POLICY] }), `attach the policy ${GUEST_ACCOUNT_POLICY}`);
+      created.push(GUEST_ACCOUNT_POLICY);
+    }
   }
   for (const { prefix, type } of KEYS) {
     const name = `${prefix}-${found.entityId}`;

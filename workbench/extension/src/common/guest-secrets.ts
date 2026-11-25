@@ -42,6 +42,8 @@ export const GUEST_SECRETS_TEXT = {
   none: "No ended guest's secrets are waiting for removal.",
   notDue: "This guest's secrets are not past the retention period, the account is in use again, or they were removed already.",
   badRecord: 'This is not an ended guest record.',
+  removedByOther: "Another security officer is removing this guest's secrets, or has just removed them. Nothing was removed by you.",
+  unfinished: (left: number): string => `The removal is recorded, but ${left} secret${left === 1 ? ' was' : 's were'} not removed because your organization's secret store did not answer. Run "Remove ended guests' secrets" again to finish.`,
   pick: 'Choose the ended guest whose secrets to remove',
   all: 'All of them',
   confirmTitle: "Remove ended guests' secrets",

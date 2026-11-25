@@ -4,10 +4,13 @@
 # and no job holds it.
 #
 # The KV delete below is the one exception to the rule that every policy reaching a person's KV path names it through the entity template
-# (deploy/test/openbao.test.mjs): a guest's secrets live under their entity id, which no template of the officer's own entity can name.
-# OpenBao cannot limit the path to guests, so the workbench deletes only after checking that the entity is a disabled guest-<id> whose end
-# record's removeAfter has passed and that has no removal record; OpenBao's audit device records every request with the officer's entity,
-# and each removal writes a create-only removal record. Values are never read: list shows names, and delete removes every version.
+# (deploy/test/openbao.test.mjs): a guest's secrets live under their entity id, which no template of the officer's own entity can name. It is
+# limited to guests: every guest entity carries policy guest-account, which keeps its secrets under kv/guests/<entity>/ and denies it
+# kv/users/, so this path never reaches a staff member's secrets. What OpenBao cannot limit is which guest: for the step-up window, a
+# hand-made request with this token could delete the secrets of a guest who is still active. The workbench deletes only after checking that
+# the entity is a disabled guest-<id> whose end record's removeAfter has passed, and it writes the create-only removal record before it
+# deletes; OpenBao's audit device records every request with the officer's entity. Values are never read: list shows names, and delete
+# removes every version.
 
 # The end records (guests.mjs) and the removal records.
 path "kv/metadata/site/guest-ended/" {
@@ -28,8 +31,8 @@ path "identity/entity/name/guest-*" {
   capabilities = ["read"]
 }
 
-# The guest's secrets: list their names and delete them (metadata delete removes every version).
-path "kv/metadata/users/*" {
+# Guests' secrets only (kv/guests/, see guest-account.hcl): list their names and delete them (metadata delete removes every version).
+path "kv/metadata/guests/*" {
   capabilities = ["list", "delete"]
 }
 

@@ -1,6 +1,7 @@
 // Phase 47 plan 34 (D-84, owner 2026-11-25), against the fake OpenBao: the notice reaches named security officers only; listing and removing
-// need a fresh step-up and the removal role's token, which is revoked after each call; remove deletes only the guest entity's own secrets, and
-// only for a disabled guest past its retention with no removal record, then writes one removal record; nothing leaks to the console.
+// need a fresh step-up and the removal role's token, which is revoked after each call; remove writes one create-only removal record first and
+// only then deletes the guest entity's own secrets (kv/guests/<entity>/), only for a disabled guest past its retention; a second officer or a
+// failed write deletes nothing, and a failed delete is finished by the next removal; nothing leaks to the console.
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { GUEST_SECRETS_TEXT } from '../extension/src/common/guest-secrets.ts';
@@ -35,15 +36,19 @@ interface State {
   officer: boolean;
   kv: Map<string, Record<string, unknown>>;
   entities: Map<string, { id: string; name: string; disabled: boolean }>;
+  /** Called before a KV data write is applied; may answer for it (another officer's record, a store that is down). */
+  beforeWrite?: (key: string) => FakeAnswer | undefined;
+  /** KV keys whose metadata delete answers 503. */
+  failDelete: Set<string>;
 }
 
 /** A stateful fake: KV v2 under kv/, identity entities by name, and the two jwt roles admitting the officer only. */
 async function world(options: { officer?: boolean; session?: Partial<ActiveSession>; seed?: (state: State) => void } = {}) {
-  const state: State = { officer: options.officer ?? true, kv: new Map(), entities: new Map() };
+  const state: State = { officer: options.officer ?? true, kv: new Map(), entities: new Map(), failDelete: new Set() };
   state.entities.set(GUEST, { id: GUEST_ENTITY, name: GUEST, disabled: true });
   state.kv.set(`site/guest-ended/${RECORD}`, { format: 'sterling-guest-ended/1', entity: GUEST, endedAt: '2026-11-24T12:00:00Z', removeAfter: '2027-11-24T12:00:00Z' });
-  state.kv.set(`users/${GUEST_ENTITY}/mail/work`, { v: 'guest' });
-  state.kv.set(`users/${GUEST_ENTITY}/files/notes/a`, { v: 'guest' });
+  state.kv.set(`guests/${GUEST_ENTITY}/mail/work`, { v: 'guest' });
+  state.kv.set(`guests/${GUEST_ENTITY}/files/notes/a`, { v: 'guest' });
   state.kv.set(`users/${STAFF_ENTITY}/mail/work`, { v: 'staff' });
   state.kv.set('site/notices/guest-secrets-removal', { format: 'sterling-notice/1', count: 1, checkedAt: '2027-12-01T00:40:00Z' });
   options.seed?.(state);
@@ -66,10 +71,17 @@ async function world(options: { officer?: boolean; session?: Partial<ActiveSessi
       for (const key of state.kv.keys()) if (key.startsWith(prefix)) { const rest = key.slice(prefix.length); keys.add(rest.includes('/') ? `${rest.split('/')[0]}/` : rest); }
       return keys.size ? { json: { data: { keys: [...keys].sort() } } } : { status: 404, json: { errors: [] } };
     }
-    if (call.method === 'DELETE' && p.startsWith('kv/metadata/')) { state.kv.delete(p.slice('kv/metadata/'.length)); return { status: 204 }; }
+    if (call.method === 'DELETE' && p.startsWith('kv/metadata/')) {
+      const key = p.slice('kv/metadata/'.length);
+      if (state.failDelete.has(key)) return { status: 503, json: { errors: ['sealed'] } };
+      state.kv.delete(key);
+      return { status: 204 };
+    }
     if (p.startsWith('kv/data/')) {
       const key = p.slice('kv/data/'.length);
       if (call.method === 'GET') return state.kv.has(key) ? { json: { data: { data: state.kv.get(key) } } } : { status: 404, json: { errors: [] } };
+      const early = state.beforeWrite?.(key);
+      if (early) return early;
       if (state.kv.has(key)) return { status: 400, json: { errors: ['check-and-set parameter did not match the current version'] } };
       state.kv.set(key, (call.body as { data: Record<string, unknown> }).data);
       return { json: { data: { version: 1 } } };
@@ -126,12 +138,14 @@ test('candidates lists the newest end record of each disabled guest past retenti
   assert.deepEqual(await service.candidates(), { kind: 'ok', value: [{ record: RECORD, endedAt: '2026-11-24T12:00:00Z', removeAfter: '2027-11-24T12:00:00Z' }] });
 });
 
-test('remove deletes every secret of the guest entity, nothing of anyone else, records who did it once, and the token is revoked', async () => {
+test('remove records who did it once, then deletes every secret of the guest entity and nothing of anyone else, and the token is revoked', async () => {
   const { fake, state, service } = await world();
   assert.deepEqual(await service.remove(RECORD), { kind: 'ok', value: { removed: 2 } });
-  assert.deepEqual([...state.kv.keys()].filter((key) => key.startsWith('users/')), [`users/${STAFF_ENTITY}/mail/work`]);
+  assert.deepEqual([...state.kv.keys()].filter((key) => key.startsWith('users/') || key.startsWith('guests/')), [`users/${STAFF_ENTITY}/mail/work`]);
   const deletes = fake.calls.filter((call) => call.method === 'DELETE').map((call) => call.path);
-  assert.deepEqual(deletes.sort(), [`/v1/kv/metadata/users/${GUEST_ENTITY}/files/notes/a`, `/v1/kv/metadata/users/${GUEST_ENTITY}/mail/work`]);
+  assert.deepEqual(deletes.sort(), [`/v1/kv/metadata/guests/${GUEST_ENTITY}/files/notes/a`, `/v1/kv/metadata/guests/${GUEST_ENTITY}/mail/work`]);
+  const recordAt = fake.calls.findIndex((call) => call.method === 'POST' && call.path.startsWith('/v1/kv/data/site/guest-secrets-removed/'));
+  assert.ok(recordAt >= 0 && fake.calls.findIndex((call) => call.method === 'DELETE') > recordAt, 'the removal record is written before any delete');
   assert.ok(fake.calls.filter((call) => call.path !== '/v1/auth/jwt/login').every((call) => call.token === REMOVAL_TOKEN), 'only the step-up removal token acts');
   assert.equal(fake.calls.at(-1)!.path, '/v1/auth/token/revoke-self');
   const write = fake.calls.find((call) => call.path === `/v1/kv/data/site/guest-secrets-removed/${RECORD}`);
@@ -140,6 +154,41 @@ test('remove deletes every secret of the guest entity, nothing of anyone else, r
   const before = fake.calls.filter((call) => call.method === 'DELETE').length;
   assert.deepEqual(await service.remove(RECORD), { kind: 'refused', reason: GUEST_SECRETS_TEXT.notDue });
   assert.equal(fake.calls.filter((call) => call.method === 'DELETE').length, before);
+});
+
+test('a second officer who wrote the removal record first, or a record write that fails, means nothing is deleted', async () => {
+  const raced = await world({ seed: (state) => {
+    // Another officer's record lands between this officer's checks and their write: the create-only write is refused (check-and-set).
+    state.beforeWrite = (key) => {
+      if (key !== `site/guest-secrets-removed/${RECORD}`) return undefined;
+      state.kv.set(key, { format: 'sterling-guest-secrets-removed/1', removedBy: STAFF_ENTITY });
+      return { status: 400, json: { errors: ['check-and-set parameter did not match the current version'] } };
+    };
+  } });
+  assert.deepEqual(await raced.service.remove(RECORD), { kind: 'refused', reason: GUEST_SECRETS_TEXT.removedByOther });
+  assert.equal(raced.fake.calls.filter((call) => call.method === 'DELETE').length, 0);
+  assert.equal(raced.state.kv.size, 6, 'the guest\'s secrets are all still there');
+  assert.equal(raced.fake.calls.at(-1)!.path, '/v1/auth/token/revoke-self');
+  for (const answer of [{ status: 503, json: { errors: ['sealed'] } }, { status: 403, json: { errors: ['permission denied'] } }]) {
+    const down = await world({ seed: (state) => { state.beforeWrite = () => answer; } });
+    assert.deepEqual(await down.service.remove(RECORD), { kind: 'refused', reason: GUEST_SECRETS_TEXT.unreachable }, String(answer.status));
+    assert.equal(down.fake.calls.filter((call) => call.method === 'DELETE').length, 0, `no delete after a ${answer.status} write`);
+    assert.ok(down.state.kv.has(`guests/${GUEST_ENTITY}/mail/work`));
+  }
+});
+
+test('a delete that fails leaves the record written; the guest is offered again and the next removal finishes without a second record', async () => {
+  const { fake, state, service } = await world({ seed: (seeded) => { seeded.failDelete.add(`guests/${GUEST_ENTITY}/mail/work`); } });
+  assert.deepEqual(await service.remove(RECORD), { kind: 'refused', reason: GUEST_SECRETS_TEXT.unfinished(1), fix: GUEST_SECRETS_TEXT.command });
+  assert.ok(state.kv.has(`site/guest-secrets-removed/${RECORD}`), 'recorded');
+  assert.deepEqual([...state.kv.keys()].filter((key) => key.startsWith('guests/')), [`guests/${GUEST_ENTITY}/mail/work`]);
+  assert.deepEqual(await service.candidates(), { kind: 'ok', value: [{ record: RECORD, endedAt: '2026-11-24T12:00:00Z', removeAfter: '2027-11-24T12:00:00Z' }] });
+  state.failDelete.clear();
+  const writes = fake.calls.filter((call) => call.method === 'POST' && call.path.includes('guest-secrets-removed')).length;
+  assert.deepEqual(await service.remove(RECORD), { kind: 'ok', value: { removed: 1 } });
+  assert.equal(fake.calls.filter((call) => call.method === 'POST' && call.path.includes('guest-secrets-removed')).length, writes, 'no second record');
+  assert.deepEqual([...state.kv.keys()].filter((key) => key.startsWith('guests/')), []);
+  assert.deepEqual(await service.candidates(), { kind: 'ok', value: [] }, 'finished: not offered again');
 });
 
 test('remove refuses a guest enabled again, one not past retention, a staff entity and a malformed record, before any delete', async () => {

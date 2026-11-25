@@ -8,7 +8,7 @@
 # needs deletion_allowed set on it first, which is a key configuration change behind the existing key-move Control Group
 # (transit/keys/+/config).
 #
-# The guest's KV data (kv/metadata/users/<entity id>/...) is not here: a security officer removes it in the workbench after a passkey
+# The guest's KV data (kv/metadata/guests/<entity id>/..., see guest-account.hcl) is not here: a security officer removes it in the workbench after a passkey
 # step-up, through policy guest-secrets-removal, the one tested exception to the per-person template rule (D-84, owner 2026-11-25).
 
 path "identity/entity/name/guest-*" {

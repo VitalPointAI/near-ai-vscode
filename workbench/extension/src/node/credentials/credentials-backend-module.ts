@@ -66,6 +66,7 @@ export default new ContainerModule(bind => {
       keys: context.container.get<KeyService>(KeyService),
       kv: openBaoKv(() => identity.session()),
       entityId: () => identity.session()?.entityId,
+      space: () => identity.session()?.space,
       engine: engineLoader(),
       domain: domain === undefined || domain === '' ? undefined : domain,
     });

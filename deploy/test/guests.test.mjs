@@ -9,13 +9,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { checkGuestRequest, createGuest, endGuest, expireGuests, extendGuest, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
+import { readFileSync } from 'node:fs';
+import { checkGuestRequest, createGuest, credentialIssuingShipped, endGuest, expireGuests, extendGuest, guestSettings, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
 import { enrolPerson } from '../openbao/enrol.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOW = Date.parse('2026-11-24T12:00:00Z');
 const UNTIL = '2026-12-20T17:00:00Z';
-const SETTINGS = { maxDays: 90, checkMinutes: 15, sessionsNamespace: 'theia-cloud', retentionDays: 365 };
+// issuing: true stands for a release that includes the credential issuing and revocation card (71-12); this one does not yet (see below).
+const SETTINGS = { maxDays: 90, checkMinutes: 15, sessionsNamespace: 'theia-cloud', retentionDays: 365, issuing: true };
 const LEAD = 'kc-lead-1';
 const SEC = 'kc-sec-1';
 
@@ -98,8 +100,15 @@ function fakeBao({ createOnly = true } = {}) {
       Object.assign(entities.get(name), body);
       return { status: 204, data: null };
     }
+    if (apiPath.startsWith('identity/entity/id/')) {
+      const entity = [...entities.values()].find((item) => item.id === apiPath.slice('identity/entity/id/'.length));
+      if (!entity) return { status: 404, data: { errors: [] } };
+      if (method === 'GET') return reply(200, structuredClone(entity));
+      Object.assign(entity, body);
+      return { status: 204, data: null };
+    }
     if (apiPath === 'identity/lookup/entity') return { status: 204, data: null };
-    if (apiPath === 'identity/entity') { const entity = addEntity(body.name, { metadata: body.metadata }); return reply(200, { id: entity.id, name: entity.name }); }
+    if (apiPath === 'identity/entity') { const entity = addEntity(body.name, { metadata: body.metadata, policies: body.policies ?? [] }); return reply(200, { id: entity.id, name: entity.name }); }
     if (apiPath === 'identity/entity-alias') return reply(200, { id: 'alias-1' });
     if (apiPath.startsWith('transit/keys/')) return method === 'GET' ? { status: 404, data: { errors: [] } } : { status: 204, data: null };
     if (apiPath === 'sys/capabilities-self') return reply(200, Object.fromEntries(body.paths.map((where) => [where, /^kv\/data\/site\/(revocation-requests|guest-ended)\/guest-/.test(where) ? ['create'] : ['deny']])));
@@ -246,6 +255,7 @@ test('enrolPerson names a guest\'s entity guest-<id> with account guest, and ref
   const entity = bao.entities.get('guest-kc-ada');
   assert.equal(entity.id, entityId);
   assert.deepEqual(entity.metadata, { keycloak_user_id: 'kc-ada', account: 'guest' });
+  assert.deepEqual(entity.policies, ['guest-account'], 'a guest entity carries guest-account, so its secrets go under kv/guests/');
   assert.deepEqual(created, ['entity', 'alias', `person-${entityId}`, `kek-${entityId}`]);
 
   const late = fakeKeycloak();
@@ -258,6 +268,20 @@ test('enrolPerson names a guest\'s entity guest-<id> with account guest, and ref
   late.add({ id: 'kc-off', username: 'off.guest', email: 'guest-12@site.example', enabled: false, attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'], keys: ['k1', 'k2'] });
   await assert.rejects(enrolPerson({ username: 'off.guest', keycloak: enrolKeycloak(late), bao: untouched.request, now: NOW }), /disabled/);
   assert.equal(untouched.calls.length, 0);
+});
+
+test('enrolPerson attaches guest-account to an adopted guest entity that lacks it, and refuses one holding any other policy', async () => {
+  const kc = fakeKeycloak();
+  kc.add({ id: 'kc-ada', username: 'ada.observer', email: 'guest-07@site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'], keys: ['k1', 'k2'] });
+  const bao = fakeBao();
+  bao.addEntity('guest-kc-ada', { metadata: { keycloak_user_id: 'kc-ada', account: 'guest' } });
+  const { created } = await enrolPerson({ username: 'ada.observer', keycloak: enrolKeycloak(kc), bao: bao.request, now: NOW });
+  assert.ok(created.includes('guest-account'));
+  assert.deepEqual(bao.entities.get('guest-kc-ada').policies, ['guest-account']);
+  const held = fakeBao();
+  held.addEntity('guest-kc-ada', { metadata: { keycloak_user_id: 'kc-ada', account: 'guest' }, policies: ['sterling-admin'] });
+  await assert.rejects(enrolPerson({ username: 'ada.observer', keycloak: enrolKeycloak(kc), bao: held.request, now: NOW }), /holds the policy sterling-admin; a guest holds only guest-account/);
+  assert.deepEqual(held.entities.get('guest-kc-ada').policies, ['sterling-admin']);
 });
 
 test('enrolPerson refuses a guest-<id> entity it did not make (a disabled one, or one without this account\'s id)', async () => {
@@ -330,6 +354,9 @@ test('checkGuestRequest refuses each broken rule and accepts a good request', ()
   assert.match(refusal({ until: '2027-03-01T00:00:00Z' }), /The end date is more than 90 days away\. This site allows guests for at most 90 days \(guests\.maxDays\)\./);
   assert.match(checkGuestRequest(REQUEST, { ...SETTINGS, maxDays: 0 }, NOW).problems.join('\n'), /Guests are off at this site\. Set guests\.maxDays in the realm site file\./);
   assert.match(checkGuestRequest(REQUEST, {}, NOW).problems.join('\n'), /Guests are off at this site/);
+  // G449: a nonzero maxDays on a release without the credential issuing and revocation card (71-12) is refused, plainly.
+  assert.match(checkGuestRequest(REQUEST, { ...SETTINGS, issuing: false }, NOW).problems.join('\n'),
+    /Guests stay off on this release: the realm site file sets guests\.maxDays to 90, but this release does not include the credential issuing and revocation card \(71-12\).*Set guests\.maxDays to 0/);
   assert.match(refusal({ approvedBy: undefined }), /security contact's approval/);
   assert.match(refusal({ approverCredential: undefined }), /--approver-credential/);
   assert.match(refusal({ approvalRef: undefined }), /--approval-ref/);
@@ -404,6 +431,20 @@ test('extend refuses a guest who holds a realm-management role, another group, o
   assert.equal(kc.writes().length, 0);
 });
 
+test('G449: this release has no 71-12 card, so the example site file keeps guests off and create and extend refuse a nonzero maxDays before any call', async () => {
+  assert.equal(credentialIssuingShipped(), false, 'when 71-12 merges, its credential-issuers policy lifts this and G449 closes');
+  const example = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example/sterling-keycloak-realm.yaml'), 'utf8'));
+  assert.equal(example.guests.maxDays, 0, 'the example ships guests off');
+  const settings = guestSettings({ guests: { ...example.guests, maxDays: 90, issuing: true } });
+  assert.equal(settings.issuing, false, 'the site file cannot claim the card is here');
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  await assert.rejects(createGuest({ request: REQUEST, settings, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /Guests stay off on this release/);
+  await assert.rejects(extendGuest({ request: REQUEST, settings, keycloak: kc.keycloak, bao: bao.request, checkCredential: holds(), now: NOW }), /Guests stay off on this release/);
+  assert.equal(kc.calls.length, 0);
+  assert.equal(bao.calls.length, 0);
+});
+
 test('guestStatus: pending-keys, active, overdue and ended', () => {
   const user = (attributes, enabled = true) => ({ enabled, attributes });
   assert.equal(guestStatus(user({ guestUntil: [UNTIL] }), 1, NOW), 'pending-keys');
@@ -439,6 +480,7 @@ test('expireGuests ends the overdue, fails closed on a role, a group or an OpenB
   kc.roles = { 'kc-admin': { clientMappings: { 'realm-management': { mappings: [{ name: 'view-users' }] } } } };
   guest('kc-grouped', {}, { groupPaths: ['/guests', '/staff'] });
   guest('kc-policy', {}).policies = ['sterling-admin'];
+  guest('kc-own', {}).policies = ['guest-account'];
   guest('kc-moved', { guestUntil: ['2026-11-24T11:00:00Z'] });
   kc.beforeRead = { 'kc-moved': (user) => { user.attributes.guestUntil = ['2026-12-31T00:00:00Z']; } };
   const result = await expireGuests({ keycloak: kc.keycloak, bao: bao.request, sessions, now: NOW, job: 'sterling-guest-expiry', retentionDays: 365 });
@@ -447,7 +489,8 @@ test('expireGuests ends the overdue, fails closed on a role, a group or an OpenB
     ['admin', 'holds the realm-management role view-users'], ['grouped', 'member of /staff'], ['late', 'end date 2026-11-24T11:00:00Z passed'], ['policy', 'OpenBao entity holds the policy sterling-admin']].sort());
   assert.deepEqual(result.skipped.map((entry) => entry.username), ['moved']);
   for (const id of ['kc-late', 'kc-admin', 'kc-grouped', 'kc-policy']) assert.equal(kc.users.get(id).enabled, false, id);
-  for (const id of ['kc-fine', 'kc-moved']) assert.equal(kc.users.get(id).enabled, true, id);
+  for (const id of ['kc-fine', 'kc-moved', 'kc-own']) assert.equal(kc.users.get(id).enabled, true, id);
+  assert.deepEqual(result.unchecked, []);
   assert.equal(sessions.stopped.length, 4);
   // Fail-closed ends before the end date are early, so they file a revocation request; the date end does not.
   const requests = [...bao.kv.keys()].filter((key) => key.includes('revocation-requests')).sort();
@@ -465,6 +508,20 @@ test('expireGuests still ends on the Keycloak side when OpenBao fails, reports t
   assert.equal(kc.users.get('kc-one').enabled, false);
   assert.equal(kc.users.get('kc-two').enabled, false);
   assert.ok(result.failures.length >= 2 && result.failures.every((failure) => /OpenBao/.test(failure)), JSON.stringify(result.failures));
+});
+
+test('expireGuests lists a guest whose fail-closed check could not run as unchecked, never as fine, and reports the failure', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  kc.add({ id: 'kc-ada', username: 'ada.observer', email: 'kc-ada@guests.site.example', attributes: structuredClone(GUEST_ATTRS) }, { groupPaths: ['/guests'] });
+  kc.add({ id: 'kc-late', username: 'late', email: 'kc-late@guests.site.example', attributes: { ...structuredClone(GUEST_ATTRS), guestUntil: ['2026-11-01T00:00:00Z'] } }, { groupPaths: ['/guests'] });
+  const sealed = async (method, apiPath, body) => (apiPath.startsWith('identity/entity/name/') && method === 'GET' ? { status: 503, data: { errors: ['sealed'] } } : bao.request(method, apiPath, body));
+  const result = await expireGuests({ keycloak: kc.keycloak, bao: sealed, sessions: null, now: NOW, retentionDays: 365 });
+  assert.deepEqual(result.unchecked.map((entry) => entry.username), ['ada.observer']);
+  assert.deepEqual(result.skipped, []);
+  assert.deepEqual(result.ended.map((entry) => entry.username), ['late'], 'a guest past the end is still ended');
+  assert.ok(result.failures.some((failure) => /^ada\.observer: OpenBao/.test(failure)), JSON.stringify(result.failures));
+  assert.equal(kc.users.get('kc-ada').enabled, true, 'not ended for a failed read');
 });
 
 // ---- 47-34 (D-84): the end record that starts the retention period ----

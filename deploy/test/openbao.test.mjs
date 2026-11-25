@@ -124,16 +124,19 @@ const escape = (text) => text.replace(/[.*?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * Whether a token holding these policies, for the entity `entity`, may use `capability` on `apiPath`, by OpenBao's ACL path rules: the
- * entity template is filled in, a path matches exactly, a trailing "*" matches any rest, and "+" matches one segment. These policies have no
- * deny blocks, so any matching block that lists the capability allows it.
+ * entity template is filled in, a path matches exactly, a trailing "*" matches any rest, and "+" matches one segment. A "deny" on a matching
+ * block wins over every grant (guest-account denies the staff KV path on exactly the path sterling-workbench grants, so OpenBao merges the
+ * two into one rule and the deny wins); otherwise any matching block that lists the capability allows it.
  */
 function allows(policies, entity, capability, apiPath) {
-  return policies.flatMap((name) => pathBlocks(policy(name))).some((block) => {
+  const matching = policies.flatMap((name) => pathBlocks(policy(name))).filter((block) => {
     const filled = block.path.replaceAll('{{identity.entity.id}}', entity);
     const glob = filled.endsWith('*');
     const pattern = (glob ? filled.slice(0, -1) : filled).split('+').map(escape).join('[^/]+');
-    return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath) && capabilitiesOf(block).includes(capability);
+    return new RegExp(`^${pattern}${glob ? '.*' : ''}$`).test(apiPath);
   });
+  if (matching.some((block) => capabilitiesOf(block).includes('deny'))) return false;
+  return matching.some((block) => capabilitiesOf(block).includes(capability));
 }
 
 const SESSION_POLICIES = ['sterling-workbench', 'sterling-workbench-sign'];
@@ -207,8 +210,8 @@ test('every key-move path needs two approvals from key-custodians', () => {
   }
 });
 
-/** The one policy block allowed to reach any person's KV path (D-84): list and delete, in the officer's step-up role only. */
-const PER_PERSON_EXCEPTION = Object.freeze({ file: 'guest-secrets-removal.hcl', path: 'kv/metadata/users/*' });
+/** The one policy block allowed to reach another person's KV path (D-84): list and delete of guests' secrets, in the officer's step-up role only. */
+const PER_PERSON_EXCEPTION = Object.freeze({ file: 'guest-secrets-removal.hcl', path: 'kv/metadata/guests/*' });
 
 test('every per-person path is templated on the entity and no policy names a literal entity id', () => {
   const exceptions = [];
@@ -218,7 +221,7 @@ test('every per-person path is templated on the entity and no policy names a lit
     const text = readFileSync(path.join(POLICY_DIR, file), 'utf8');
     assert.doesNotMatch(text, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, `${file} names a literal id`);
     for (const block of pathBlocks(text)) {
-      if (/^(kv\/(data|metadata)\/users\/|transit\/(sign|datakey|decrypt)\/)/.test(block.path)) {
+      if (/^(kv\/(data|metadata)\/(users|guests)\/|transit\/(sign|datakey|decrypt)\/)/.test(block.path)) {
         // The one exception (D-84, owner 2026-11-25): the security officer's step-up role removes ended guests' secrets.
         if (file === PER_PERSON_EXCEPTION.file && block.path === PER_PERSON_EXCEPTION.path) { exceptions.push(file); continue; }
         assert.match(block.path, /\{\{identity\.entity\.id\}\}/, `${file}: ${block.path} is a per-person path without the entity template`);
@@ -416,7 +419,7 @@ test('guest-secrets-removal lists and reads the end and removal records, reads g
     ['kv/metadata/site/guest-secrets-removed/', ['list'], ''],
     ['kv/data/site/guest-secrets-removed/guest-*', ['create', 'read'], ''],
     ['identity/entity/name/guest-*', ['read'], ''],
-    ['kv/metadata/users/*', ['list', 'delete'], ''],
+    ['kv/metadata/guests/*', ['list', 'delete'], ''],
     ['auth/token/lookup-self', ['read'], ''],
     ['auth/token/revoke-self', ['update'], '']
   ]);
@@ -426,7 +429,37 @@ test('guest-secrets-removal lists and reads the end and removal records, reads g
   assert.equal(allows(officer, ADA, 'update', 'identity/entity/name/guest-kc-1'), false);
   for (const name of POLICIES.filter((item) => item !== 'guest-secrets-removal')) {
     assert.equal(allows([name], ADA, 'delete', `kv/metadata/users/${BEN}/mail/work`), false, `${name} cannot delete another person's secrets`);
+    assert.equal(allows([name], ADA, 'delete', `kv/metadata/guests/${BEN}/mail/work`), false, `${name} cannot delete a guest's secrets`);
   }
+  // The officer reaches guests' secrets (kv/guests/) and never a staff member's (kv/users/), not even by a hand-made request.
+  assert.equal(allows(officer, ADA, 'delete', `kv/metadata/guests/${BEN}/mail/work`), true);
+  assert.equal(allows(officer, ADA, 'list', `kv/metadata/guests/${BEN}/`), true);
+  for (const capability of ['list', 'delete']) assert.equal(allows(officer, ADA, capability, `kv/metadata/users/${BEN}/mail/work`), false, `no ${capability} of a staff member's secrets`);
+  for (const capability of ['read', 'create', 'update']) assert.equal(allows(officer, ADA, capability, `kv/data/guests/${BEN}/mail/work`), false, `no ${capability} of a guest's secret values`);
+});
+
+test('guest-account: a guest\'s session keeps its secrets under kv/guests/<own entity>, is denied kv/users/, and staff never reach kv/guests/', () => {
+  assert.ok(POLICIES.includes('guest-account'), 'apply.mjs writes the policy');
+  assert.deepEqual(shape('guest-account'), [
+    ['kv/data/users/{{identity.entity.id}}/*', ['deny'], ''],
+    ['kv/metadata/users/{{identity.entity.id}}/*', ['deny'], ''],
+    ['kv/data/guests/{{identity.entity.id}}/*', ['create', 'read', 'update', 'delete', 'list'], ''],
+    ['kv/metadata/guests/{{identity.entity.id}}/*', ['create', 'read', 'update', 'delete', 'list'], '']
+  ]);
+  // A guest's token: the session policies plus the entity's guest-account.
+  const guest = [...SESSION_POLICIES, 'guest-account'];
+  for (const capability of ['create', 'read', 'update', 'delete', 'list']) {
+    assert.equal(allows(guest, ADA, capability, `kv/data/users/${ADA}/mail/work`), false, `a guest cannot ${capability} under kv/users/`);
+    assert.equal(allows(guest, ADA, capability, `kv/metadata/users/${ADA}/mail/work`), false, `a guest cannot ${capability} under kv/metadata/users/`);
+    assert.equal(allows(guest, ADA, capability, `kv/data/guests/${ADA}/mail/work`), true, `a guest can ${capability} their own`);
+    assert.equal(allows(guest, ADA, capability, `kv/data/guests/${BEN}/mail/work`), false, `not another guest's (${capability})`);
+  }
+  // Staff (no guest-account) keep kv/users/<own> and never reach kv/guests/.
+  assert.equal(allows(SESSION_POLICIES, ADA, 'create', `kv/data/users/${ADA}/mail/work`), true);
+  for (const capability of ['create', 'read', 'list', 'delete']) assert.equal(allows(SESSION_POLICIES, ADA, capability, `kv/data/guests/${ADA}/mail/work`), false, capability);
+  // The rest of the guest's session (their own keys, the people directory) is unchanged.
+  assert.equal(allows(guest, ADA, 'read', `transit/keys/person-${ADA}`), true);
+  assert.equal(allows(guest, ADA, 'create', `kv/data/site/people/${ADA}`), true);
 });
 
 test('the retention check reads the records and writes only the notice; officers read only the notice', () => {

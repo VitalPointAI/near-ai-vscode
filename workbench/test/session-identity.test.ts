@@ -150,11 +150,27 @@ test('hosted: a valid token with the matching person logs in once, reads the ent
   assert.equal(fake.callsTo('GET /v1/auth/token/lookup-self').length, 1);
   const session = identity.session();
   assert.equal(session?.entityId, ENTITY);
+  assert.equal(session?.space, 'users', 'staff: no guest-account policy');
   assert.equal(fake.callsTo('GET /v1/auth/token/lookup-self')[0].token, session?.token);
   const status = JSON.stringify(identity.status());
   assert.ok(!status.includes(ENTITY) && !status.includes(session!.token) && !status.includes(token), 'no token or entity id in the status');
   assert.ok(logs.some((line) => /active/.test(line)));
   for (const line of logs) assert.ok(!line.includes(ENTITY), 'no entity id in a log line');
+});
+
+test('a guest\'s entity (identity policy guest-account) gets the guests space; a re-login that changes the space fails the session', async () => {
+  const made = await world({ lease: 4 });
+  made.answers.lookup = { json: { data: { entity_id: ENTITY, ttl: 3600, identity_policies: ['guest-account'] } } };
+  await made.identity.start();
+  made.identity.observe(headers(jwt()));
+  await until(() => (made.identity.status() as { state: string }).state === 'active', 'active');
+  assert.equal(made.identity.session()?.space, 'guests');
+  // A refused renewal re-logs in; if OpenBao no longer gives the entity guest-account, the session fails instead of switching folders.
+  made.answers.renew = { status: 403, json: { errors: ['permission denied'] } };
+  made.answers.lookup = { json: { data: { entity_id: ENTITY, ttl: 3600 } } };
+  made.clock.advance(2_000);
+  await until(() => (made.identity.status() as { state: string }).state === 'failed', 'failed');
+  assert.equal(made.identity.session(), undefined);
 });
 
 test('a token observed before start is used as soon as start runs', async () => {

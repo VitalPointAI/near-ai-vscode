@@ -21,7 +21,12 @@ import { loadSite } from '../bundle/lib/render.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 /** The policies written from deploy/openbao/policies/<name>.hcl. */
 export const POLICIES = Object.freeze(['sterling-workbench', 'sterling-workbench-sign', 'key-move', 'enrolment', 'install', 'cert-manager', 'guest-operator', 'guest-expiry',
-  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices']);
+  'guest-removal', 'raft-snapshot', 'guest-secrets-removal', 'guest-retention-check', 'security-officer-notices', 'guest-account']);
+/**
+ * The policy every guest entity carries, and the only one (D-84; deploy/openbao/enrol.mjs attaches it): it denies the guest the staff KV path
+ * kv/users/<entity>/ and gives them kv/guests/<entity>/ instead, so a security officer's removal reaches guests' secrets and nobody else's.
+ */
+export const GUEST_ACCOUNT_POLICY = 'guest-account';
 /** The OIDC client whose access tokens a session forwards (47-08 creates it); the jwt roles' bound audience. */
 export const AUDIENCE = 'sterling-sessions';
 export const REALM = 'sterling';
@@ -39,10 +44,6 @@ export const GUEST_EXPIRY = Object.freeze({ role: 'guest-expiry', client: 'sterl
  * service account token never leaves the cluster.
  */
 export const CERT_MANAGER = Object.freeze({ role: 'cert-manager', serviceAccount: 'openbao-issuer', namespace: 'cert-manager', audience: 'sterling-openbao-pki' });
-/**
- * The scheduled Raft snapshot (D-73, 47-24): CronJob openbao-raft-snapshot logs in with a projected token of its own ServiceAccount for this
- * audience (so the token is no use to the Kubernetes API) and gets a 5-minute token holding only policy raft-snapshot.
- */
 /** The hourly check for guests past retention (D-84, 47-34): CronJob guest-retention-check, read-only but for the officers' notice. */
 export const GUEST_RETENTION_CHECK = Object.freeze({ role: 'guest-retention-check', serviceAccount: 'guest-retention-check', namespace: 'sterling-openbao', audience: 'sterling-openbao-guest-retention' });
 /** A subject no sign-in token carries: the officer roles bind it when the site names no security officer, so a stale list never stays admitted. */
@@ -56,6 +57,10 @@ export function securityOfficers(site) {
   }
   return officers.length ? [...officers] : [NO_SUBJECT];
 }
+/**
+ * The scheduled Raft snapshot (D-73, 47-24): CronJob openbao-raft-snapshot logs in with a projected token of its own ServiceAccount for this
+ * audience (so the token is no use to the Kubernetes API) and gets a 5-minute token holding only policy raft-snapshot.
+ */
 export const RAFT_SNAPSHOT = Object.freeze({ role: 'raft-snapshot', serviceAccount: 'openbao-snapshot', namespace: 'sterling-openbao', audience: 'sterling-openbao-snapshot' });
 /**
  * The cluster service domains the ingress role may sign besides the site domain: the in-cluster names of the services that serve TLS from the

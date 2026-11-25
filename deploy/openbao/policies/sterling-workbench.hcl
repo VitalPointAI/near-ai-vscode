@@ -4,7 +4,8 @@
 # rotates, configures, exports or deletes a key (only deploy/openbao/enrol.mjs creates them). Signing is not here: it is granted only by
 # sterling-workbench-sign, through the step-up role.
 
-# The person's own secrets, KV v2 at kv/: kv/users/<entity>/<service>/<account>.
+# The person's own secrets, KV v2 at kv/: kv/users/<entity>/<service>/<account>. A guest's entity policy guest-account denies this path and
+# gives kv/guests/<entity>/ instead (D-84).
 path "kv/data/users/{{identity.entity.id}}/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
