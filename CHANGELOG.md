@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.4.39
+
+Sterling Sovereign AI (SovAI) is now the product's name everywhere, and the Sterling workbench
+image becomes the native Defence workbench the owner reviewed: a right-hand rail, Get Started
+with the four Defence work areas, the Portfolio Room, the Resource Inventory, and documentation
+whose figures render. NEAR AI stays only as a model provider.
+
+### One name: Sterling Sovereign AI
+
+- **Commands are listed under SovAI.** Every command in the Command Palette now shows under
+  **SovAI** (for example **SovAI: Open Chat**), and messages that name a command use the same
+  words. Before, they said NEAR AI, which is only one of the providers you can choose.
+- **Chat and setup no longer assume one provider.** The empty chat says **Connect AI to start**
+  and offers local models and NEAR AI Cloud alike, and the chat input says **Ask a question**.
+- **The SA&A package names the system Sterling Sovereign AI.** The OSCAL documents, the readable
+  package and the sponsor report use the product name; their technical ids are unchanged, so
+  earlier packages still line up.
+- **Staff Room is the one name.** The Planning page's button reads **Open Staff Room**, the same
+  name the rest of the product uses.
+
+### The Sterling workbench
+
+- **A right-hand rail.** Ten shortcuts sit on the right edge: Get Started, Portfolio, Chat, Team
+  Studio, Agent Activity, Governance, Compliance and Documentation open their page; Data
+  Management and Model Factory are shown as planned. The rail stays even when the chat is
+  unavailable.
+- **Get Started for the Canadian Defence Edition.** Set up Sterling, Open Chat and Explore a
+  sample agent team, then four Defence work areas: Capability Development, Exercises & Training,
+  Planning and Resource Management. Each card opens that work area's own page, Planning with
+  its artwork, and each page's **Create** button makes a new work area in a new folder without
+  overwriting anything.
+- **Portfolio Room and Resource Inventory.** The Portfolio Room previews your DND and CAF
+  portfolio, and the Resource Inventory lists resources by source and links them to work areas.
+- **The chat drawer slides in and out.** The rail's Chat shortcut opens and closes the drawer,
+  and closing the last conversation hides the drawer and keeps the conversation, instead of
+  discarding it.
+- **Download the SA&A ZIP from the workbench.** After **SovAI: Generate SA&A Package…** saves
+  the package, a **Download ZIP** button sends it to your browser. Before, the file stayed on
+  the workbench server with no way to get it.
+- **Documentation with its figures.** Guides are rendered when the image is built, with their
+  screenshots and diagrams bundled, so the Documentation view shows pictures instead of source
+  and fetches nothing from outside.
+- **Contributing and Environment packs are back in Documentation.** The two guides the docs
+  site publishes had dropped out of the workbench's Documentation view; Environment packs is
+  listed under Reference and Contributing under Developing again.
+- **Wide diagrams are no longer cut off.** A diagram wider than the page now shrinks to fit or
+  scrolls inside its own frame, instead of losing its right-hand side.
+- **A hardened image.** The workbench runs on Red Hat UBI 9 with Node 26 as a non-root user,
+  listens on `127.0.0.1` by default, keeps telemetry off, and contacts no outside server unless
+  you configure one. Each release checks this before publishing.
+
+### Fixes
+
+- **A missing saved key asks you to reconnect.** A NEAR AI Cloud or hybrid profile whose saved
+  key is gone shows "Your saved profile needs its connection checked again" instead of a ready
+  chat whose first message fails. A local profile with no key stays ready.
+- **Project Setup follows the project you chose.** If you switch projects while Project Setup is
+  open, it says so and runs nothing, instead of running a step in the project you left.
+- **Proxy advice fits the workbench.** The browser and remote proxy advice talks about the
+  workbench instead of VS Code.
+- **A high-severity advisory in a workbench dependency is fixed** (GHSA-mrhx-c7xc-m3w5, in zod),
+  and the workbench's dependency audit blocks on high findings again.
+
+### For your organization's own sites
+
+- **The on-premise site stack is in the repository.** Air-gapped installation, site
+  certificates, passwordless sign-in, signed offline bundles, federation between a headquarters
+  and its edge sites, time sources, key escrow, recovery and maintenance checks, with operator
+  runbooks. These are previews for your organization's deployment team; Sterling Sovereign AI
+  itself still runs on `127.0.0.1` only.
+- **Verified credentials, the engine.** The groundwork for people's identities and verified
+  credentials (who holds which role and clearance) is in place and tested. Nothing in the product
+  uses it yet, so clearances still show as declared, not verified.
+- **Compliance documentation grows.** The documentation lists every component with why the
+  architecture needs it and its exact version, the SA&A export includes the component inventory,
+  and a new page, Road to production and higher classification, lists every open condition by
+  classification level.
+
 ## 0.4.38
 
 This is the first complete container release. 0.4.37's image reached the registry, but its last
