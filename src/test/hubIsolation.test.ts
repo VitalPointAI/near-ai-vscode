@@ -252,19 +252,10 @@ test('the hub job gives the older-Node refusal tests a real Node 24 and still ru
 });
 
 // Phase 33 plan 14 (D-34, D-46): the real-hub tests start the built hub on Node 26.13.1 and fail in GitHub Actions without NEAR_AI_HUB_NODE.
-test('the hub job runs the real-hub staff scenario with the extension on the kept Node 24, and the test job gives the suite a built hub on 26.13.1', async () => {
+// The test job is the one canonical run of the real-hub staff scenarios (staffLiveScenario is in the suite); the hub job does not run them again.
+test('the test job gives the suite a built hub on 26.13.1 and the extension\'s Node first, and the hub job runs no second copy of the staff scenarios', async () => {
   const workflow = await readWorkflow();
-  const hubSteps = jobSteps(ciJob(workflow, 'hub'));
-  const at = hubSteps.findIndex((step) => step.includes('name: Run the real-hub staff scenario'));
-  assert.ok(at > hubSteps.findIndex((step) => step.includes('run: npm test')), 'the scenario runs after the hub tests built the hub');
-  const scenario = hubSteps[at] ?? '';
-  for (const needle of [HAS_HUB, 'working-directory: .', 'NEAR_AI_HUB_NODE="$(command -v node)"', 'export NEAR_AI_HUB_NODE', 'PATH="$(dirname "$NEAR_AI_HUB_OLD_NODE"):$PATH"',
-    'npm ci --ignore-scripts', 'npm run compile', 'node scripts/run-tests.mjs dist/test/staffLiveScenario.test.js']) {
-    assert.ok(scenario.includes(needle), `the scenario step must contain: ${needle}`);
-  }
-  assert.ok(scenario.indexOf('NEAR_AI_HUB_NODE="$(command -v node)"') < scenario.indexOf('PATH='), 'the hub\'s Node is taken before Node 24 is put first');
-  assert.ok(!scenario.includes('secrets.'), 'the scenario step reads no secret');
-
+  assert.ok(!ciJob(workflow, 'hub').includes('staffLiveScenario'), 'the hub job runs the hub\'s own suite only');
   const testSteps = jobSteps(ciJob(workflow, 'test'));
   const setups = testSteps.filter((step) => step.includes('uses: actions/setup-node@'));
   assert.equal(setups.length, 2);
