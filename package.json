@@ -319,6 +319,11 @@
         "icon": "$(beaker)"
       },
       {
+        "command": "nearAi.models.exportAiBom",
+        "title": "Export AI Bill of Materials",
+        "category": "SovAI"
+      },
+      {
         "command": "nearAi.clearProjectModelChoices",
         "title": "Clear This Project's Model Choices",
         "category": "SovAI"
@@ -1084,6 +1089,10 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "nearAi.models.exportAiBom",
+          "when": "workspaceFolderCount > 0"
+        },
         {
           "command": "sterling.workAreas.create",
           "when": "false"

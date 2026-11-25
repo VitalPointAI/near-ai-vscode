@@ -22,6 +22,8 @@ import { isChatModel, modelOptions } from './services/chatBridge';
 import { RESEARCH_WORKSPACE_COMMAND, openResearchWorkspace } from './services/researchWorkspace';
 import { RESEARCH_TEXT } from './domain/gate/researchLane';
 import { catalogRows } from './domain/gate/modelRow';
+import { AI_BOM_COMMAND, exportAiBom } from './services/aiBomExport';
+import { resolvePassport } from './domain/gate/models';
 import { chatHandoff, runApprovedCommand } from './services/cyberHandoff';
 import { panelCyberRunStarter } from './services/cyberAssembly';
 import { openOnboarding } from './services/onboarding';
@@ -174,6 +176,17 @@ export function activate(context: vscode.ExtensionContext): NearAiTestApi | unde
     runtime: () => gate.runtimeFor({ actor: { kind: 'person', sessionId: 'research-workspace' }, presence: 'person', context: 'interactive' }),
     projectFolders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)
   }), RESEARCH_TEXT.command)));
+  // Export AI Bill of Materials (74.1 D-24): the open project's model requests, from this computer's own log; Restricted Mode is identical (Q8).
+  context.subscriptions.push(vscode.commands.registerCommand(AI_BOM_COMMAND, () => exportAiBom({
+    folders: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({ name: folder.name, root: folder.uri.fsPath })),
+    pick: async (folders, title) => (await vscode.window.showQuickPick(folders.map((folder) => ({ label: folder.name, folder })), { title }))?.folder,
+    globalStorageDir: context.globalStorageUri.fsPath,
+    resolve: (model) => resolvePassport(gate.policyLayers().effective?.models, model, Date.now()),
+    progress: (title, work) => Promise.resolve(vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title }, work)),
+    info: (message, ...actions) => Promise.resolve(vscode.window.showInformationMessage(message, ...actions)),
+    error: (message) => Promise.resolve(vscode.window.showErrorMessage(message)),
+    open: (file) => Promise.resolve(vscode.window.showTextDocument(vscode.Uri.file(file)))
+  }).catch((error: unknown) => { void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); })));
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(NearAiPanelViewProvider.viewId, sidebar, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('nearAi.setup', panelCommand(() => openOnboarding(context, {
