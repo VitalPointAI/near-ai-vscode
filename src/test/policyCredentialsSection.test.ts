@@ -83,7 +83,9 @@ test('tracer: a v2 document with credentials@1 and agreements@1 parses through t
   assert.ok(doc.requires.includes('credentials@1') && doc.requires.includes('agreements@1'));
   assert.equal(featureForSection('credentials'), 'credentials@1');
   assert.equal(featureForSection('agreements'), 'agreements@1');
-  assert.deepEqual(FEATURE_IDS.slice(-2), ['credentials@1', 'agreements@1'], 'appended, never inserted');
+  // Appended after the Phase 41 list, never inserted; later phases (45.1's label-interop@1, 70.1's classification@1) append after them.
+  const after = FEATURE_IDS.indexOf('export-control@1') + 1;
+  assert.deepEqual(FEATURE_IDS.slice(after, after + 2), ['credentials@1', 'agreements@1'], 'appended, never inserted');
   assert.deepEqual(parsed(plain(doc)), doc, 'a parsed document is its own wire form');
 });
 
