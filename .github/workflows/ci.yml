@@ -89,7 +89,7 @@ jobs:
           restore-keys: vscode-test-${{ runner.os }}-
       - name: Install xvfb if the runner lacks it
         run: command -v xvfb-run >/dev/null || (sudo apt-get update && sudo apt-get install -y xvfb)
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run compile
       - name: Run the extension in a real VS Code
         run: env -u ELECTRON_RUN_AS_NODE xvfb-run -a -s "-screen 0 1920x1080x24" node dist/test/e2e/run.js

@@ -73,8 +73,11 @@ test('release jobs that hold a write token or deployment approval run no npm ins
   for (const id of writers) assert.doesNotMatch(all.get(id), /npm (ci|install|test|run)|actions\/checkout/, `${id} only handles the built artifact`);
 });
 
-test('root lint, root tests and both VSIX build paths disable dependency lifecycle scripts', () => {
+test('root lint, root tests, the VS Code test and both VSIX build paths disable dependency lifecycle scripts', () => {
   const ci = jobs(read('ci.yml'));
+  // No CI job installs the root dependencies with their install scripts on (G10, 44.1-02): the VS Code test was the last exception.
+  for (const [id, job] of ci) assert.doesNotMatch(job, /^\s*- run: npm ci\s*$/m, `${id} installs with install scripts on`);
+  assert.match(ci.get('e2e'), /^\s*- run: npm ci --ignore-scripts$/m);
   const lint = ci.get('lint');
   assert.match(lint, /^\s*- run: npm ci --ignore-scripts$/m);
   assert.match(lint, /^\s*- run: npm run lint$/m);
