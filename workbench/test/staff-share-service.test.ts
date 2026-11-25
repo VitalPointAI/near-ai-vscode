@@ -1,0 +1,331 @@
+// Phase 33 plan 27 (D-10, D-13, D-21, D-42, D-58, D-60, D-61; superseded 33-11). Share with people in the session backend, over the session's live
+// engine and the engine bundle. The tracer runs two hosted people against a real hub child (D-46 skip rule): the lead shares a staff project, connects
+// your organization's server and invites; the second person opens the invitation file, is admitted after the six words, opens the welcome and goes
+// live with a certified session key. Every signature the roster checks is a person key's. Then the server actions on a single machine: grant with
+// the trade-off, revoke, change address, re-admit with twelve words, the single-machine copy and the presence setting. Fictional exercise data only.
+import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test, type TestContext } from 'node:test';
+import { KEY_SERVICE_TEXT } from '../extension/src/common/key-service.ts';
+import { STAFF_SHARE_TEXT, type ShareOutcome } from '../extension/src/common/staff-share.ts';
+import type { ServiceResult } from '../extension/src/common/service-result.ts';
+import { INVITE_OPEN_TEXT, InviteOpenHandler, invitationFields, type InvitationOpened } from '../extension/src/browser/staff/invite-open-handler.ts';
+import { SESSION_KEY_TEXT, startSessionKeys } from '../extension/src/node/staff/session-keys.ts';
+import { SHOW_WORK_SECRET, StaffShareService, type StaffShareApi } from '../extension/src/node/staff/share-service.ts';
+import { loadStaffEngine, type EngineProject, type StaffEngine } from '../extension/src/node/staff/staff-engine.ts';
+import { StaffLiveEngine } from '../extension/src/node/staff/staff-live-engine.ts';
+import type * as StaffEntry from '../tools/staff-engine-entry.ts';
+import { buildHubFile } from '../../src/domain/replica/hubFile.ts';
+import { readGrant } from '../../src/domain/replica/cellKeys.ts';
+import { serverPinWords } from '../../src/domain/replica/serverWords.ts';
+import { ensureLabelCell } from '../../src/staff/replica/labelCells.ts';
+import { hubNodeOrSkip, startHubChild } from '../../src/test/helpers/hubChild.ts';
+import { MemorySecrets, grantsOn } from '../../src/test/helpers/labelCellWorld.ts';
+import { rosterDevice } from '../../src/test/helpers/replicaRosterWorld.ts';
+import { fixedSigner } from '../../src/test/helpers/replicaWorld.ts';
+
+type ShareEngine = StaffEngine & StaffShareApi & { x25519BindingBytes(rawX25519: string, writer: string): Buffer };
+// The workbench lint checks that the bundle's entry gives every name the share service types.
+type EntryMatches = typeof StaffEntry extends StaffShareApi ? true : never;
+const entryMatches: EntryMatches = true;
+
+const workbenchRoot = fileURLToPath(new URL('../..', import.meta.url));
+const engine = loadStaffEngine<ShareEngine>(workbenchRoot);
+const INTERNAL = { scale: 'org', level: 'Internal', compartments: [], releasability: [] };
+
+async function until<T>(read: () => T | Promise<T>, done: (value: T) => boolean, what: string, ms = 30_000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const value = await read();
+    if (done(value)) return value;
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}: ${JSON.stringify(value)}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+function value<T>(answer: ServiceResult<T>, what: string): T {
+  assert.equal(answer.kind, 'ok', `${what}: ${answer.kind === 'refused' ? answer.reason : ''}`);
+  return (answer as { value: T }).value;
+}
+
+/** One person's session: a live engine over their folder and Share with people over it; hosted with a fake KeyService, or a single machine. */
+interface Person {
+  readonly root: string;
+  readonly global: string;
+  readonly live: StaffLiveEngine;
+  readonly service: StaffShareService;
+  readonly secrets: MemorySecrets;
+  readonly personKey?: string;
+  stale: boolean;
+  signed: number;
+}
+
+async function person(label: string, options: { hosted: boolean; staff: boolean }): Promise<Person> {
+  const base = mkdtempSync(path.join(tmpdir(), `sterling-share-${label}-`));
+  const root = path.join(base, 'project');
+  const global = path.join(base, 'global');
+  mkdirSync(options.staff ? path.join(root, '.planning', 'staff') : root, { recursive: true });
+  const secrets = new MemorySecrets();
+  const state = { stale: false, signed: 0 };
+  let hosted: ConstructorParameters<typeof StaffLiveEngine>[0]['hosted'];
+  let personKey: string | undefined;
+  if (options.hosted) {
+    // Your organization's KeyService: the person key in Transit, which refuses without a fresh passkey confirmation (46-07).
+    const key = fixedSigner(`person/${label}`);
+    personKey = key.publicKey;
+    const keyService = {
+      sign: async (message: string) => {
+        if (state.stale) return { kind: 'refused' as const, reason: KEY_SERVICE_TEXT.stepUpNeeded, fix: KEY_SERVICE_TEXT.confirm };
+        state.signed += 1;
+        return { kind: 'ok' as const, value: { signature: Buffer.from(key.signer.sign(Buffer.from(message, 'base64')), 'base64url').toString('base64'), keyVersion: 1 } };
+      },
+      personPublicKey: async () => ({ kind: 'ok' as const, value: { publicKey: key.publicKey, keyVersion: 1 } }),
+    };
+    const started = await startSessionKeys(keyService, { status: () => ({ mode: 'hosted' as const, state: 'active' as const }) as never }, { now: () => Date.now() }, { engine });
+    assert.equal(started.kind, 'ok');
+    const { privateKey } = generateKeyPairSync('x25519');
+    const publicKey = Buffer.from(privateKey.export({ format: 'jwk' }).x as string, 'base64url').toString('base64url');
+    if (started.kind !== 'ok') throw new Error('the session keys were not made');
+    hosted = { keys: started.value, encryption: { publicKey, privateKey, kem: undefined, drop: () => undefined } };
+  }
+  const live = new StaffLiveEngine({ engine, roots: async () => [root], globalStorageDir: global, secrets, ...(hosted === undefined ? {} : { hosted }) });
+  await live.start();
+  const service = new StaffShareService({ engine, live: () => live, root: async () => root });
+  const result: Person = { root, global, live, service, secrets, ...(personKey === undefined ? {} : { personKey }), stale: false, signed: 0 };
+  Object.defineProperty(result, 'stale', { get: () => state.stale, set: (next: boolean) => { state.stale = next; } });
+  Object.defineProperty(result, 'signed', { get: () => state.signed });
+  return result;
+}
+
+const rowOf = (who: Person) => who.live.projects()[0];
+const projectOf = (who: Person): EngineProject => who.live.project(rowOf(who).project) as EngineProject;
+
+// ---- Task 1: the tracer -------------------------------------------------------------------------------------------------------------------------
+
+test('tracer: a hosted lead shares and invites; a second hosted person opens the invitation file, is admitted and goes live', async (t: TestContext) => {
+  assert.equal(entryMatches, true);
+  const node = hubNodeOrSkip(t);
+  if (node === undefined) return;
+  const server = await startHubChild(node);
+  const lead = await person('avery', { hosted: true, staff: true });
+  const blake = await person('blake', { hosted: true, staff: false });
+  try {
+    assert.equal(value(await lead.service.view(), 'view').state, 'not-shared');
+    const shared = value(await lead.service.turnOn({ clearance: INTERNAL }), 'turn on');
+    assert.deepEqual(shared.withheld, []);
+    const project = projectOf(lead);
+    assert.equal(project.deviceWriter, engine.writerIdOf(lead.personKey as string), 'the person key is the lead device');
+
+    value(await lead.service.connectServer({ hubFile: await server.hubFileText(), ceiling: INTERNAL }), 'connect your organization\'s server');
+    await until(() => rowOf(lead), (row) => row?.state === 'live', 'the lead live on the server');
+    const invited = value(await lead.service.invite({ name: 'Blake Rivers', seat: 'j4-planner', clearance: INTERNAL }), 'invite');
+    assert.ok(invited.file?.name.endsWith('.near-staff-invite'));
+
+    // The invitation file opens through the OpenHandler into the join flow, filled in.
+    let opened: InvitationOpened | undefined;
+    const handler = new InviteOpenHandler({ read: async () => ({ value: invited.file?.text as string }), size: async () => invited.file?.text.length }, (fields) => { opened = fields; }, () => assert.fail('no warning'));
+    const uri = { path: { base: invited.file?.name as string } } as never;
+    assert.equal(handler.canHandle(uri), 500);
+    await handler.open(uri);
+    assert.equal(opened?.text, invited.file?.text);
+    const joined = value(await blake.service.openInvitation({ text: opened?.text as string, name: 'Blake Rivers' }), 'open the invitation');
+    assert.equal(joined.safetyWords?.length, 6);
+    const address = await engine.readHubAddress(blake.global, project.projectId);
+    assert.equal(address?.address, server.address, 'the invitation\'s server address is kept for the project being joined');
+
+    const waiting = value(await lead.service.joinRequests(), 'join requests');
+    assert.equal(waiting.length, 1);
+    assert.deepEqual(waiting[0].safetyWords, joined.safetyWords, 'the lead compares the same six words');
+    const refusedAdmit = await lead.service.admit({ request: waiting[0].text, codeMatched: false });
+    assert.equal(refusedAdmit.kind, 'refused', 'nobody is admitted unless the words matched');
+    const admitted = value(await lead.service.admit({ request: waiting[0].text, codeMatched: true }), 'admit');
+    const welcomed = value(await blake.service.openWelcome({ text: admitted.file?.text as string }), 'open the welcome');
+    assert.ok(welcomed.message.length > 0);
+
+    await until(() => rowOf(blake), (row) => row?.state === 'live', 'the joiner live on the server');
+    const joinedProject = projectOf(blake);
+    assert.equal(joinedProject.deviceWriter, engine.writerIdOf(blake.personKey as string), 'the joiner\'s person key is its device');
+    const { roster } = await joinedProject.state();
+    const sessions = (roster as unknown as { sessions: Map<string, { member: string }> }).sessions;
+    const self = roster.members.devices.get(joinedProject.deviceWriter)?.at(-1);
+    assert.ok([...sessions.values()].some((item) => item.member === self?.member), 'the joiner\'s session key is certified for its member');
+    const people = await until(async () => value(await lead.service.view(), 'view').people.map((item) => item.name), (names) => names.includes('Blake Rivers'), 'the lead sees the new member');
+    assert.ok(people.length >= 2);
+    const theirs = await until(async () => value(await blake.service.view(), 'view').people.length, (count) => count >= 2, 'the joiner sees the people');
+    assert.ok(theirs >= 2);
+
+    // Every grant either computer stores is signed by a person key: the lead's (D-60). The session keys signed none.
+    for (const at of [lead, blake]) {
+      for (const { signed } of grantsOn({ root: at.root } as never)) {
+        const read = readGrant(signed);
+        assert.ok(read.ok);
+        assert.equal(read.signer.publicKey, lead.personKey, 'a grant is the lead\'s person key\'s');
+      }
+    }
+  } finally {
+    await blake.live.stop();
+    await lead.live.stop();
+    await server.dispose();
+  }
+});
+
+test('the open handler takes only .near-staff-invite files, fills in the name and expiry, and refuses a file too large to be an invitation', async () => {
+  const text = JSON.stringify({ payload: { name: 'Exercise Northwind', expiresAt: '2026-12-01T00:00:00.000Z' } });
+  const shown: InvitationOpened[] = [];
+  const warnings: string[] = [];
+  const handler = new InviteOpenHandler({ read: async () => ({ value: text }), size: async () => text.length }, (fields) => { shown.push(fields); }, (line) => warnings.push(line));
+  assert.equal(handler.canHandle({ path: { base: 'inv-1.near-staff-invite' } } as never), 500);
+  assert.equal(handler.canHandle({ path: { base: 'notes.md' } } as never), 0);
+  await handler.open({ path: { base: 'inv-1.near-staff-invite' } } as never);
+  assert.deepEqual(shown, [{ text, name: 'Exercise Northwind', expiresAt: '2026-12-01T00:00:00.000Z' }]);
+  assert.deepEqual(invitationFields('not json'), { text: 'not json' });
+  const big = new InviteOpenHandler({ read: async () => ({ value: '' }), size: async () => 10 * 1024 * 1024 }, () => assert.fail('not shown'), (line) => warnings.push(line));
+  await big.open({ path: { base: 'inv-2.near-staff-invite' } } as never);
+  assert.deepEqual(warnings, [INVITE_OPEN_TEXT.tooLarge]);
+});
+
+test('a conversion names each product it withheld with its way out (D-31), and the share section\'s trade-off is the engine\'s word for word', async () => {
+  assert.equal(STAFF_SHARE_TEXT.tradeOff, engine.HUB_GRANT_TRADE_OFF);
+  const lead = await person('withheld', { hosted: false, staff: true });
+  try {
+    const conversion = { ok: true as const, notices: ['n'], cells: [{ cell: 'c'.repeat(32), label: 'org/Confidential' }], withheld: [{ product: 'logistics-estimate', cell: 'c'.repeat(32) }], unversioned: [] };
+    const service = new StaffShareService({ engine: { ...engine, makeMultiUser: async () => conversion } as never, live: () => lead.live, root: async () => lead.root });
+    const result = value(await service.turnOn({}), 'turn on');
+    assert.deepEqual(result.withheld, ['Some history for logistics-estimate was left out because it refers to a product with a higher label. Ask someone cleared for org/Confidential to make a single-machine copy and share it again.']);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+// ---- Task 2: server actions on a single machine -------------------------------------------------------------------------------------------------
+
+const UNREACHABLE = '127.0.0.1:9';
+const CERT_PIN = 'b'.repeat(64);
+
+function localHubFile(): string {
+  const device = rosterDevice('HUB-SOUTH', 'hub');
+  return JSON.stringify(buildHubFile(device.signer, {
+    address: UNREACHABLE, certPin: CERT_PIN, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: 'enr-00112233aabbccdd',
+    enrolmentSecret: Buffer.alloc(32, 7).toString('base64url'), expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(), now: new Date(),
+  }));
+}
+
+/** A single-machine lead with the project shared and your organization's server admitted (its enrolment unreachable, as offline). */
+async function localLead(label: string): Promise<Person> {
+  const lead = await person(label, { hosted: false, staff: true });
+  value(await lead.service.turnOn({ clearance: INTERNAL }), 'turn on');
+  const connected = await lead.service.connectServer({ hubFile: localHubFile(), ceiling: INTERNAL });
+  assert.equal(connected.kind, 'refused', 'the enrolment does not reach an unreachable server');
+  return lead;
+}
+
+test('grant: refused with the trade-off sentence unless confirmed; confirmed, the server holds the part', async () => {
+  const lead = await localLead('grant');
+  try {
+    const made = await ensureLabelCell({ project: projectOf(lead), deps: lead.live.shareContext().deps } as never, 'org/Internal');
+    assert.ok(made.ok);
+    const part = value(await lead.service.view(), 'view').parts.find((item) => item.label === 'org/Internal');
+    assert.ok(part !== undefined && !part.onServer);
+    const unconfirmed = await lead.service.grant({ cell: part.cell, confirmed: false });
+    assert.equal(unconfirmed.kind, 'refused');
+    assert.ok(unconfirmed.kind === 'refused' && unconfirmed.reason.includes(STAFF_SHARE_TEXT.tradeOff), 'the refusal carries the trade-off word for word');
+    value(await lead.service.grant({ cell: part.cell, confirmed: true }), 'grant');
+    assert.equal(value(await lead.service.view(), 'view').parts.find((item) => item.cell === part.cell)?.onServer, true);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('change address keeps the pin and stores the new address; a bad address is refused; revoke writes the revocation', async () => {
+  const lead = await localLead('address');
+  try {
+    const before = value(await lead.service.view(), 'view').server;
+    assert.equal(before?.address, UNREACHABLE);
+    assert.equal((await lead.service.changeAddress({ address: 'not an address' })).kind, 'refused');
+    value(await lead.service.changeAddress({ address: '127.0.0.1:10' }), 'change address');
+    const after = value(await lead.service.view(), 'view').server;
+    assert.equal(after?.address, '127.0.0.1:10');
+    assert.deepEqual(after?.words, serverPinWords(CERT_PIN), 'the pin, and so its twelve words, did not change');
+    value(await lead.service.revoke(), 'revoke');
+    assert.equal(value(await lead.service.view(), 'view').server?.standing, 'revoked');
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('re-admit: words that differ are refused and nothing is written; the twelve words of the pin write hub.readmit', async () => {
+  const lead = await localLead('readmit');
+  try {
+    const positions = async (): Promise<number> => (await projectOf(lead).state()).roster.positions.length;
+    const before = await positions();
+    const wrong = await lead.service.readmit({ words: serverPinWords('c'.repeat(64)).join(' ') });
+    assert.equal(wrong.kind, 'refused');
+    assert.equal(await positions(), before);
+    value(await lead.service.readmit({ words: serverPinWords(CERT_PIN).join(' ') }), 'readmit');
+    assert.equal(await positions(), before + 1);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('single-machine copy makes the copy and names what it left out; "Show others what I am working on" is on by default and kept per person', async () => {
+  const lead = await localLead('copy');
+  try {
+    const destination = path.join(mkdtempSync(path.join(tmpdir(), 'sterling-share-copy-')), 'copy');
+    const copied = value(await lead.service.singleCopy({ destination }), 'copy');
+    assert.match(copied.message, /single-machine copy is ready/);
+    assert.ok(copied.notices.length > 0, 'the copy names what it carried and left');
+    assert.equal(value(await lead.service.view(), 'view').showWork, true);
+    assert.equal(value(await lead.service.setShowWork(false), 'off'), false);
+    assert.equal(await lead.secrets.get(SHOW_WORK_SECRET), '0');
+    assert.equal(value(await lead.service.view(), 'view').showWork, false);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('a 0.4.35 preview project, its products in the base cell, is refused with its way out and never converted in place (D-48)', async () => {
+  const lead = await person('preview', { hosted: false, staff: true });
+  try {
+    value(await lead.service.turnOn({ clearance: INTERNAL }), 'turn on');
+    // The 0.4.35 preview wrote products into the base cell, which the server must read.
+    const written = await projectOf(lead).appendOwn('product.create', { product: 'fuel-estimate', section: 'j4', roles: { owner: 'j4-planner', sectionLead: 'j4-lead', releaseGuard: 'j4-guard' }, title: 'Fuel estimate' });
+    assert.ok('ok' in written);
+    const positions = (await projectOf(lead).state()).roster.positions.length;
+    const refused = await lead.service.connectServer({ hubFile: localHubFile(), ceiling: INTERNAL });
+    assert.equal(refused.kind, 'refused');
+    assert.match(refused.kind === 'refused' ? refused.reason : '', /Make a single-machine copy and make that copy multi-user again/);
+    assert.equal((await projectOf(lead).state()).roster.positions.length, positions, 'nothing was written');
+    assert.equal(value(await lead.service.view(), 'view').server, undefined);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {
+  const lead = await person('stale', { hosted: true, staff: true });
+  try {
+    lead.stale = true;
+    const refused: ServiceResult<ShareOutcome> = await lead.service.turnOn({ clearance: INTERNAL });
+    assert.deepEqual(refused, { kind: 'refused', reason: SESSION_KEY_TEXT.stepUp, fix: KEY_SERVICE_TEXT.confirm });
+    assert.equal(value(await lead.service.view(), 'view').state, 'not-shared', 'nothing was shared');
+    assert.equal(existsSync(path.join(lead.root, '.planning', 'staff', 'replica')), false);
+  } finally {
+    await lead.live.stop();
+  }
+});
+
+test('a folder without a staff project offers nothing to share, and a lead action on work that is not open is refused', async () => {
+  const empty = await person('empty', { hosted: false, staff: false });
+  try {
+    assert.equal(value(await empty.service.view(), 'view').state, 'no-project');
+    assert.deepEqual(await empty.service.turnOn({}), { kind: 'refused', reason: STAFF_SHARE_TEXT.noProject });
+    assert.deepEqual(await empty.service.invite({ name: 'Casey Stone', seat: 'j4-planner', clearance: INTERNAL }), { kind: 'refused', reason: STAFF_SHARE_TEXT.notOpen });
+  } finally {
+    await empty.live.stop();
+  }
+});

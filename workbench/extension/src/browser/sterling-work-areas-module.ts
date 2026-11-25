@@ -11,6 +11,7 @@ import { WorkspaceTrustService } from '@theia/workspace/lib/browser/workspace-tr
 import { workAreaKind, type WorkAreaKind, type WorkAreaResourceRef } from '../common/sterling-work-areas.js';
 import { listWorkAreas, verifyWorkArea, type LocalWorkArea } from './sterling-work-area-files.js';
 import { linkWorkAreaResource } from './sterling-work-area-resource-links.js';
+import { mountShareSection } from './staff/share-part.js';
 import './sterling-work-areas.css';
 
 const factoryId = 'sterling-work-areas';
@@ -164,6 +165,7 @@ class WorkAreaLanding extends BaseWidget {
     main.append(back, hero, this.feedback);
     if (config.shortcuts.length) main.append(shortcuts);
     main.append(local);
+    if (kind === 'training' || kind === 'operations') { const share = mountShareSection(main); if (share) this.toDispose.push(share); }
     this.node.append(main);
 
     this.source.addEventListener('change', () => { void this.load(); });
