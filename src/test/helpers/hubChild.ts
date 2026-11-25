@@ -1,8 +1,8 @@
 // Your organization's server as a real child process for extension tests (Phase 33, D-34, D-46): the built hub (hub/dist/bin.mjs) started on the
 // Node binary NEAR_AI_HUB_NODE names, the way an operator runs it. The launch copies hub/test/helpers/hubProcess.ts, because extension tests cannot
-// import the hub workspace: four secret files with mode 0600, each named through its NAME_FILE setting, a temporary state directory, HUB_PORT=0 on
+// import the hub workspace: five secret files with mode 0600, each named through its NAME_FILE setting, a temporary state directory, HUB_PORT=0 on
 // the first start so parallel runs never collide, and nothing else in the environment but PATH and HOME. The certificate is made at run time with
-// openssl and the hub's two key lines by the hub's own --generate-key, so no key text lives in any file. The hub file comes from the operator
+// openssl and the hub's three key lines by the hub's own --generate-key, so no key text lives in any file. The hub file comes from the operator
 // command --hub-file, run against the same state directory while the hub runs.
 //
 // The rule for when the real-hub tests run (D-46): with NEAR_AI_HUB_NODE set they run; without it they are skipped with a printed reason, except in
@@ -51,7 +51,7 @@ export function repoRoot(): string {
   }
 }
 
-const SECRET_NAMES = ['HUB_TLS_CERT', 'HUB_TLS_KEY', 'HUB_SIGNING_KEY', 'HUB_ENCRYPTION_KEY'] as const;
+const SECRET_NAMES = ['HUB_TLS_CERT', 'HUB_TLS_KEY', 'HUB_SIGNING_KEY', 'HUB_ENCRYPTION_KEY', 'HUB_KEM_KEY'] as const;
 type SecretName = (typeof SECRET_NAMES)[number];
 /** A hub left running by a failed test is stopped at the latest after this long. */
 const KILL_AFTER_MS = 60_000;
@@ -97,7 +97,7 @@ function makeCertificate(dir: string): { certPem: string; keyPem: string } {
 }
 
 /** One key line from the hub's own --generate-key command. */
-function generateKey(node: string, bin: string, kind: 'signing' | 'encryption', env: NodeJS.ProcessEnv): string {
+function generateKey(node: string, bin: string, kind: 'signing' | 'encryption' | 'kem', env: NodeJS.ProcessEnv): string {
   const run = spawnSync(node, [bin, '--generate-key', kind], { encoding: 'utf8', env, timeout: 30_000 });
   if (run.status !== 0 || run.stdout.trim() === '') throw new Error(`The hub could not make its ${kind} key (exit ${String(run.status)}).`);
   return `${run.stdout.trim()}\n`;
@@ -157,7 +157,8 @@ export async function startHubChild(node: string): Promise<HubChild> {
     HUB_TLS_CERT: certificate.certPem,
     HUB_TLS_KEY: certificate.keyPem,
     HUB_SIGNING_KEY: generateKey(node, bin, 'signing', base),
-    HUB_ENCRYPTION_KEY: generateKey(node, bin, 'encryption', base)
+    HUB_ENCRYPTION_KEY: generateKey(node, bin, 'encryption', base),
+    HUB_KEM_KEY: generateKey(node, bin, 'kem', base)
   };
   const env: NodeJS.ProcessEnv = { ...base, HUB_HOST: '127.0.0.1', HUB_PORT: '0', HUB_STATE_DIR: stateDir };
   for (const name of SECRET_NAMES) {

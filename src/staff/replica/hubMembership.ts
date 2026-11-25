@@ -27,7 +27,7 @@
 import { parseClearance } from '../../domain/gate/labels';
 import { REKEY_KEEP_TEXT } from '../../domain/replica/cellKeys';
 import { earlierEpochGrants } from '../../domain/replica/grantPages';
-import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
+import { SWITCH_FIRST_TEXT, formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 import type { WrapCell } from './wrapPlan';
 import { HUB_FILE_REFUSALS, isHubAddress, readHubFile } from '../../domain/replica/hubFile';
 import { INVITE_REFUSALS, buildHubJoinAsync, buildInviteAsync, checkJoinRequest, hubJoinCheckKey, hubJoinMac, inviteSafetyCode, joinRequestHash, readInvite } from '../../domain/replica/invite';
@@ -67,6 +67,7 @@ export const HUB_MEMBERSHIP_REFUSALS = {
   'trade-off-not-confirmed': `Nothing was given to the hub, because the trade-off was not confirmed. Give the hub this part of the project only after reading and confirming this: ${HUB_GRANT_TRADE_OFF}`,
   'legacy-cell': 'This part of the project holds its history from before it was shared. It stays with the staff lead and the deputy lead only, so it is never given to the hub. Nothing was changed.',
   'above-hub-ceiling': 'This part of the project is labelled above the highest clearance you set for the hub, so it was not given to the hub. Nothing was changed.',
+  'hub-needs-post-quantum-keys': 'The hub needs post-quantum keys to read this part of the project. Ask the hub operator to publish the keys and try again.',
   'hub-holds-cell': 'The hub already holds this part of the project, so nothing was changed.',
   'cell-unknown': 'That part of the project is not in the roster, so nothing was given to the hub. Nothing was changed.',
   'no-hub': 'This project has no hub admitted, so nothing was changed. Admit your organization\'s hub first.',
@@ -140,6 +141,16 @@ function missingEpochs(roster: RosterState, cell: string, writer: string, positi
     .map((item) => ({ epoch: item.epoch, from: item.from }));
 }
 
+/** Checks every missing epoch before a roster item promises the hub access to the cell. */
+function hubWrapProblem(shared: SharedProjectHost, roster: RosterState, cell: WrapCell, epochs: ReadonlyArray<{ from: number }>, hasKem: boolean): HubMembershipResult | undefined {
+  for (const { from } of epochs) {
+    const format = formatFor(roster, cell, from, shared.routing);
+    if (format === 'switch-first') return refused('switch-first', SWITCH_FIRST_TEXT);
+    if (format === 2 && !hasKem) return refuse('hub-needs-post-quantum-keys');
+  }
+  return undefined;
+}
+
 /**
  * Signs and stores one grant per epoch of the cell to the hub, each at the roster that gave the hub the cell (or the epoch's own founding entry when
  * that came later, since a grant may not name a roster before its epoch), in the format wrapPlan.formatFor gives the epoch with the hub's keys as the
@@ -151,7 +162,8 @@ async function grantEpochs(shared: SharedProjectHost, input: { cell: string; inf
   const byRoster = new Map<number, Array<{ epoch: number; key: Buffer; format: 1 | 2 }>>();
   for (const item of input.epochs) {
     const choice = formatFor(input.roster, input.info, item.from, shared.routing);
-    if (choice === 'switch-first') continue;
+    if (choice === 'switch-first') return refused('switch-first', SWITCH_FIRST_TEXT);
+    if (choice === 2 && device.kem === undefined) return refuse('hub-needs-post-quantum-keys');
     const at = Math.max(input.grantedAt, item.from);
     byRoster.set(at, [...(byRoster.get(at) ?? []), { epoch: item.epoch, key: item.key, format: formatForDevice(choice, device) }]);
   }
@@ -159,6 +171,7 @@ async function grantEpochs(shared: SharedProjectHost, input: { cell: string; inf
     cell: input.cell, epochs, roster: input.roster.positions[at], writer: input.hub.writer, ...(device.x25519 === undefined ? {} : { recipient: device.x25519 }),
     ...(device.kem === undefined ? {} : { kem: device.kem }), ...(input.label === undefined ? {} : { label: input.label })
   }));
+  if (grants.length !== input.epochs.length) return refuseMembership('no-grant-key');
   if (grants.length === 0) return undefined;
   const stored = await shared.project.putGrants(grants);
   return isProjectRefused(stored) ? refused(stored.refused, stored.message) : undefined;
@@ -240,7 +253,11 @@ export function admitHub(shared: SharedProjectHost, hubFileText: unknown, input:
       device = { writer: file.writer, publicKey: file.publicKey, x25519: file.x25519, x25519Sig: file.x25519Sig, slot, ...(file.kem === undefined ? {} : { kem: { ...file.kem } }) };
     }
     // Every base cell key is checked before the first write, so a device that cannot give the hub the roster writes nothing.
-    if (epochKeys(shared, base, missingEpochs(before, base, file.writer, at.position)) === undefined) return refuseMembership('no-grant-key');
+    const missingBase = missingEpochs(before, base, file.writer, at.position);
+    const hasKem = device === undefined ? wrapDeviceAt(before, file.writer, at.position).kem !== undefined : device.kem !== undefined;
+    const wrapProblem = hubWrapProblem(shared, before, { base: true }, missingBase, hasKem);
+    if (wrapProblem !== undefined) return wrapProblem;
+    if (epochKeys(shared, base, missingBase) === undefined) return refuseMembership('no-grant-key');
     let roster = before;
     if (device !== undefined) {
       const admitted = await append(shared, 'hub.admit', { hub: file.hub, device, certPin: file.certPin, ceiling });
@@ -314,10 +331,13 @@ export function grantCellToHub(shared: SharedProjectHost, input: GrantCellToHubI
     const hub = hubOf(roster, at.position, input.hub);
     if (isResult(hub)) return hub;
     const holds = hub.cells.includes(info.cell);
-    if (holds && missingEpochs(roster, info.cell, hub.writer, at.position).length === 0) return refuse('hub-holds-cell');
+    const missingBefore = missingEpochs(roster, info.cell, hub.writer, at.position);
+    if (holds && missingBefore.length === 0) return refuse('hub-holds-cell');
     if (!info.known) return refuseMembership('no-grant-key');
     if (!clearedFor(hub.ceiling, info, false, gate)) return refuse('above-hub-ceiling');
-    if (epochKeys(shared, info.cell, missingEpochs(roster, info.cell, hub.writer, at.position)) === undefined) return refuseMembership('no-grant-key');
+    const wrapProblem = hubWrapProblem(shared, roster, info, missingBefore, wrapDeviceAt(roster, hub.writer, at.position).kem !== undefined);
+    if (wrapProblem !== undefined) return wrapProblem;
+    if (epochKeys(shared, info.cell, missingBefore) === undefined) return refuseMembership('no-grant-key');
     let current = roster;
     let grantedAt = grantedAtOf(roster, hub.hub, info.cell);
     if (!holds) {

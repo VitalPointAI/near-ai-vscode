@@ -49,14 +49,15 @@ const hubKemSeeds = (device: RosterDevice): KemSeeds => ({ p256: createHash('sha
 const hubKem = (device: RosterDevice) => signKemBinding(kemPublicFromSeeds(hubKemSeeds(device)), device.writer, (bytes) => device.signer.sign(bytes));
 
 /** A hub file signed by the hub's own key (labels give fixed keys), as the operator prints it, valid for a week from WORLD_NOW unless told. */
-function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; expiresAt?: string } = {}): TestHub {
+function hubFile(label = 'HUB-NORTH', options: { certPin?: string; now?: Date; expiresAt?: string; legacy?: boolean } = {}): TestHub {
   const device = rosterDevice(label, 'hub');
   const now = options.now ?? WORLD_NOW;
   const enrolmentSecret = Buffer.alloc(32, 7).toString('base64url');
   const certPin = options.certPin ?? CERT_PIN;
   const signed = buildHubFile(device.signer, {
     address: HUB_ADDRESS, certPin, x25519: device.x25519, x25519Sig: device.x25519Sig, enrolment: 'enr-00112233aabbccdd', enrolmentSecret,
-    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now, kem: hubKem(device)
+    expiresAt: options.expiresAt ?? new Date(now.getTime() + 7 * DAY_MS).toISOString(), now,
+    ...(options.legacy ? {} : { kem: hubKem(device) })
   });
   return { device, text: JSON.stringify(signed), enrolmentSecret, certPin };
 }
@@ -241,6 +242,30 @@ test('trade-off confirmed: hub.grant and one grant per epoch of the cell with it
     const key = lead.p.keys.epochKey(cell, grant.epoch) as Buffer;
     assert.deepEqual(openLabel(key, cell, grant.epoch, grant.grant.labelSealed), { scale: 'org', level: 'Internal', compartments: [], releasability: [], handling: [] }, 'the label is sealed');
   }
+});
+
+test('a hub without hybrid keys cannot be given a new post-quantum cell', async () => {
+  const lead = await leadWith();
+  const hub = hubFile('legacy', { legacy: true });
+  ok(await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') }), 'admit the hub with the original base cell');
+  const cell = await labelCell(lead);
+  const before = storeCounts(lead.at, lead.p.projectId);
+  const result = await grantCellToHub(lead.host, { cell, confirmed: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'hub-needs-post-quantum-keys');
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
+});
+
+test('admitting a hub without hybrid keys fails before writing when the base cell has a post-quantum epoch', async () => {
+  const lead = await leadWith();
+  const member = await bringIn(lead, 'member', 'Nell Planner', orgClearance('Internal'));
+  ok(await removeFromProject(lead.host, { member: member.member }), 'move the base cell to a new epoch');
+  const hub = hubFile('legacy', { legacy: true });
+  const before = storeCounts(lead.at, lead.p.projectId);
+  const result = await admitHub(lead.host, hub.text, { ceiling: orgClearance('Internal') });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'hub-needs-post-quantum-keys');
+  assert.deepEqual(storeCounts(lead.at, lead.p.projectId), before);
 });
 
 test('above-hub-ceiling: a cell whose label the hub\'s ceiling does not dominate is refused and nothing is written', async () => {
