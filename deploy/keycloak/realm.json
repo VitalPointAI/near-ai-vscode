@@ -436,6 +436,47 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "sterling-guest-expiry",
+      "name": "Sterling guest expiry",
+      "description": "The automatic end of guest accounts (CronJob sterling-guest-expiry, 47-20): a service account that may only see and manage members of the group guests; OpenBao role guest-expiry binds its audience",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "$(env:STERLING_GUEST_EXPIRY_CLIENT_SECRET)",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "fullScopeAllowed": false,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "sterling-guest-expiry audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "sterling-guest-expiry",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "kc-admin-api"
+      ],
+      "optionalClientScopes": []
     }
   ]
 }

@@ -16,6 +16,7 @@ Back to the [component catalogue](./index.md).
 | image:docker.io/adorsys/keycloak-config-cli | Container image | runtime | Pass with conditions |
 | image:quay.io/keycloak/keycloak | Container image | runtime | Pass with conditions |
 | image:registry.access.redhat.com/ubi9/go-toolset | Container image | build | Pass with conditions |
+| image:registry.access.redhat.com/ubi9/nodejs-22-minimal | Container image | runtime | Pass with conditions |
 | image:registry.access.redhat.com/ubi9/ubi-minimal | Container image | runtime | Pass with conditions |
 | chart:keycloakx | Helm chart | runtime | Pass with conditions |
 | tool:postgresql | Pinned tool | runtime | Pass with conditions |
@@ -103,6 +104,34 @@ Conditions:
 - Rebuilt from pinned source with the Go FIPS module (GOFIPS140); the module's CMVP status is unverified.
 - Runs with TLS verification on, secure cookies, real generated secrets and token forwarding (D-22); the render invariants check each.
 - Build stage only: nothing but the compiled binary reaches the final image.
+
+## image:registry.access.redhat.com/ubi9/nodejs-22-minimal
+
+**What it provides.** Runtime base of our sterling/guest-expiry image, which runs our own Node scripts for three jobs: the automatic end of guest accounts with the realm applier's permission step (47-20), the access revocation job (47-31) and the off-site copy (47-33).
+
+**Why it is needed.** Node.js runtime of the in-cluster jobs that keep identity in step. Without it an overdue guest stays enabled until an operator runs guests.mjs expire by hand, and the expiry job's one Keycloak permission could not be granted, because keycloak-config-cli cannot apply it.
+
+| | |
+| --- | --- |
+| Kind | Container image |
+| Pinned version or digest | `9.9@sha256:ae7d09b6a6c0ca2690ee41db9e163f293712a872c6a6e15869ca61e433aa9c7d` |
+| Architecture component | `keycloak` |
+| Used in | `deploy/images/guest-expiry/Containerfile` |
+| Scope | Runtime: it runs in the product |
+| Licence | Red Hat UBI EULA (redistributable); Node.js MIT |
+| Cryptography | Uses the platform's cryptography |
+| Air gap | Works with no internet access |
+| Compliance fit | Pass with conditions |
+| Controls | AC-2, AC-3, AC-6, CM-7, SC-8 |
+| Security fixes | The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image. |
+| Reviewed | Claude (agent review; owner to confirm), 2026-11-25 |
+
+Conditions:
+
+- Runs only our own zero-dependency Node scripts from deploy/ (Node built-ins only); no npm package is installed into the image and nothing is downloaded during the build.
+- Node's TLS and crypto (the jobs' https calls to Keycloak, OpenBao and the Kubernetes API, and the off-site copy's TLS and SigV4 signing) use the RHEL OpenSSL FIPS provider only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).
+- Runs as a non-root user with a read-only root filesystem, all capabilities dropped and the RuntimeDefault seccomp profile.
+- Built only into an image this repository builds (deploy/images, D-23): signed with your organization's cosign key in the container-release environment, with a CycloneDX SBOM and an attestation, and admitted by Kyverno's signature check.
 
 ## image:registry.access.redhat.com/ubi9/ubi-minimal
 

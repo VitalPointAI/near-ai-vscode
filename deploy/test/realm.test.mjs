@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import { FORBIDDEN_AUTHENTICATOR, checkRealm, prepareRealm, realmSettings, substitutedRealm } from '../keycloak/apply.mjs';
 import { listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
 import { readImagesLock, resolveImage } from '../bundle/lib/locks.mjs';
+import { applyExpiryPermission } from '../keycloak/admin-permissions.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const readJson = (file) => JSON.parse(readFileSync(path.join(ROOT, file), 'utf8'));
@@ -264,4 +265,151 @@ test('quotes, an apostrophe, braces and accented letters reach the realm message
   const { realm, problems } = withNotice({ en: 'Text.', fr: text });
   assert.deepEqual(problems, []);
   assert.equal(realm.localizationTexts.fr.sterlingSystemUseNotice, '« Accès réservé » "quoted" l\'\'usage \'{\'0\'}\' ç.');
+});
+
+// --- The automatic end of guest accounts (47-20): its client and its one admin permission ----------------------------------------------
+
+const expiryClient = (realm) => realm.clients.find((client) => client.clientId === 'sterling-guest-expiry');
+const guestsOn = (maxDays = 30) => prepare(SITE, KEYCLOAKX_SITE, { ...REALM_SITE, guests: { ...REALM_SITE.guests, maxDays } });
+
+test('client sterling-guest-expiry is a confidential service account with no flow, its secret from the environment and its own audience', () => {
+  const client = expiryClient(passkeys().realm);
+  assert.deepEqual([client.publicClient, client.serviceAccountsEnabled, client.standardFlowEnabled, client.implicitFlowEnabled, client.directAccessGrantsEnabled],
+    [false, true, false, false, false]);
+  assert.equal(client.secret, '$(env:STERLING_GUEST_EXPIRY_CLIENT_SECRET)');
+  assert.ok(client.protocolMappers.some((mapper) => mapper.protocolMapper === 'oidc-audience-mapper' && mapper.config['included.client.audience'] === 'sterling-guest-expiry'
+    && mapper.config['access.token.claim'] === 'true'), 'OpenBao role guest-expiry binds this audience and azp');
+  for (const [change, pattern] of [
+    [(copy) => { copy.clients = copy.clients.filter((entry) => entry !== expiryClient(copy)); }, /client sterling-guest-expiry must exist/],
+    [(copy) => { expiryClient(copy).publicClient = true; }, /sterling-guest-expiry must be confidential/],
+    [(copy) => { expiryClient(copy).standardFlowEnabled = true; }, /sterling-guest-expiry must be confidential/],
+    [(copy) => { expiryClient(copy).implicitFlowEnabled = true; }, /sterling-guest-expiry must be confidential/],
+    [(copy) => { expiryClient(copy).directAccessGrantsEnabled = true; }, /sterling-guest-expiry must not allow direct grants/],
+    [(copy) => { expiryClient(copy).serviceAccountsEnabled = false; }, /sterling-guest-expiry must be confidential/],
+    [(copy) => { expiryClient(copy).secret = 'a-literal-secret'; }, /sterling-guest-expiry secret must come from the applier Job environment/],
+    [(copy) => { expiryClient(copy).protocolMappers = []; }, /sterling-guest-expiry must add its own audience/]
+  ]) assert.match(broken(change).join('\n'), pattern);
+});
+
+test('the expiry client\'s token carries only the admin API audience and sub: client scopes basic and kc-admin-api, no optional scope, no full scope', () => {
+  // Keycloak 26.8 accepts an admin API call only from a token whose audience holds the realm's admin API address (client scope kc-admin-api;
+  // without it every call answers 401). basic keeps sub for OpenBao's user_claim. Nothing else: no role reaches the token.
+  const client = expiryClient(passkeys().realm);
+  assert.deepEqual(client.defaultClientScopes, ['basic', 'kc-admin-api']);
+  assert.deepEqual(client.optionalClientScopes, []);
+  assert.equal(client.fullScopeAllowed, false);
+  assert.match(broken((copy) => { expiryClient(copy).defaultClientScopes = ['basic']; }).join('\n'), /default client scopes must be exactly basic and kc-admin-api/);
+  assert.match(broken((copy) => { expiryClient(copy).defaultClientScopes = ['basic', 'kc-admin-api', 'roles']; }).join('\n'), /default client scopes must be exactly basic and kc-admin-api/);
+  assert.match(broken((copy) => { delete expiryClient(copy).defaultClientScopes; }).join('\n'), /default client scopes must be exactly basic and kc-admin-api/);
+  assert.match(broken((copy) => { expiryClient(copy).optionalClientScopes = ['offline_access']; }).join('\n'), /must have no optional client scope/);
+  assert.match(broken((copy) => { delete expiryClient(copy).optionalClientScopes; }).join('\n'), /must have no optional client scope/);
+  assert.match(broken((copy) => { expiryClient(copy).fullScopeAllowed = true; }).join('\n'), /fullScopeAllowed must be false/);
+  assert.match(broken((copy) => { delete expiryClient(copy).fullScopeAllowed; }).join('\n'), /fullScopeAllowed must be false/);
+});
+
+test('the expiry client\'s service account holds no realm-management role, and realm.json never carries the admin-permissions client', () => {
+  const account = (roles) => (copy) => { copy.users = [{ username: 'service-account-sterling-guest-expiry', serviceAccountClientId: 'sterling-guest-expiry', clientRoles: { 'realm-management': roles } }]; };
+  assert.match(broken(account(['view-users'])).join('\n'), /service account of sterling-guest-expiry must hold no realm-management role \(view-users\)/);
+  assert.match(broken(account(['query-users', 'manage-users'])).join('\n'), /\(query-users, manage-users\)/);
+  assert.match(broken((copy) => { copy.clients.push({ clientId: 'admin-permissions', directAccessGrantsEnabled: false, authorizationSettings: { policies: [] } }); }).join('\n'),
+    /admin-permissions client is system-managed/);
+});
+
+test('fine-grained admin permissions are on exactly when guests are on, so a site without guests applies as before', () => {
+  assert.equal(passkeys().realm.adminPermissionsEnabled, false);
+  const on = guestsOn();
+  assert.deepEqual(on.problems, []);
+  assert.equal(on.realm.adminPermissionsEnabled, true);
+  assert.match(broken((copy) => { copy.adminPermissionsEnabled = true; }).join('\n'), /adminPermissionsEnabled must be on exactly when guests are on/);
+});
+
+/**
+ * Keycloak's admin REST paths applyExpiryPermission calls, under fine-grained admin permissions v2 (Keycloak 26.8.2, probed for 47-20).
+ * Policies are kept as Keycloak returns them; every call is recorded with its body.
+ */
+function fakeAuthz({ switchOn = true, saRoles = [], policies = [] } = {}) {
+  const calls = [];
+  const state = new Map(policies.map((policy) => [policy.id, structuredClone(policy)]));
+  let next = 0;
+  const base = 'clients/ap/authz/resource-server';
+  const reply = (status, data = null) => ({ status, data });
+  const admin = async (method, apiPath, body) => {
+    calls.push({ method, path: apiPath, body: body === undefined ? undefined : structuredClone(body) });
+    const [route, query = ''] = apiPath.split('?');
+    if (method === 'GET' && route === '') return reply(200, { realm: 'sterling', adminPermissionsEnabled: switchOn });
+    if (method === 'GET' && route === 'clients') {
+      const ids = { 'admin-permissions': 'ap', 'sterling-guest-expiry': 'ge', 'realm-management': 'rm' };
+      const clientId = new URLSearchParams(query).get('clientId');
+      return reply(200, ids[clientId] ? [{ id: ids[clientId], clientId }] : []);
+    }
+    if (method === 'GET' && route === 'group-by-path/guests') return reply(200, { id: 'g-guests', path: '/guests' });
+    if (method === 'GET' && route === 'clients/ge/service-account-user') return reply(200, { id: 'sa', username: 'service-account-sterling-guest-expiry' });
+    if (method === 'GET' && route === 'users/sa/role-mappings/clients/rm') return reply(200, saRoles.map((name) => ({ name })));
+    if (method === 'GET' && route === `${base}/policy`) {
+      const name = new URLSearchParams(query).get('name');
+      return reply(200, [...state.values()].filter((policy) => policy.name.includes(name)).map(({ id, name: policyName, type }) => ({ id, name: policyName, type })));
+    }
+    if (method === 'POST' && (route === `${base}/policy/client` || route === `${base}/permission/scope`)) {
+      next += 1;
+      const id = `p-${next}`;
+      state.set(id, { ...structuredClone(body), id });
+      return reply(201, { id });
+    }
+    const match = /^clients\/ap\/authz\/resource-server\/(policy\/client|permission\/scope|policy)\/([^/]+)(?:\/(\w+))?$/.exec(route);
+    if (match && state.has(match[2])) {
+      const policy = state.get(match[2]);
+      if (method === 'PUT') { state.set(match[2], { ...structuredClone(body), id: match[2] }); return reply(201); }
+      if (!match[3]) return reply(200, { ...policy });
+      if (match[3] === 'resources') return reply(200, (policy.resources ?? []).map((name) => ({ _id: `r-${name}`, name })));
+      if (match[3] === 'scopes') return reply(200, (policy.scopes ?? []).map((name) => ({ id: `s-${name}`, name })));
+      if (match[3] === 'associatedPolicies') return reply(200, (policy.policies ?? []).map((id) => ({ id, name: state.get(id)?.name })));
+      if (match[3] === 'dependentPolicies') return reply(200, [...state.values()].filter((entry) => (entry.policies ?? []).includes(match[2])).map(({ id, name }) => ({ id, name })));
+    }
+    return reply(404, { error: `unexpected ${method} ${apiPath}` });
+  };
+  return { admin, calls, state };
+}
+const writes = (calls) => calls.filter((call) => call.method !== 'GET');
+const POLICY_BODY = { name: 'sterling-guest-expiry client', description: 'The service account of the automatic end of guest accounts (47-20).', type: 'client', logic: 'POSITIVE',
+  decisionStrategy: 'UNANIMOUS', clients: ['ge'] };
+const PERMISSION_BODY = (policyId) => ({ name: 'guest-expiry manages members of guests', description: 'Only the members of the group guests; nothing on other groups, users, clients or roles (47-20).',
+  type: 'scope', resourceType: 'Groups', resources: ['g-guests'], scopes: ['manage-members', 'view', 'view-members'], policies: [policyId], logic: 'POSITIVE', decisionStrategy: 'UNANIMOUS' });
+
+test('the realm applier grants the expiry job its one permission with these exact bodies, and a second run writes nothing', async () => {
+  const keycloak = fakeAuthz();
+  assert.deepEqual(await applyExpiryPermission(keycloak.admin), [{ what: 'client policy', result: 'written' }, { what: 'permission on the group guests', result: 'written' }]);
+  assert.deepEqual(writes(keycloak.calls), [
+    { method: 'POST', path: 'clients/ap/authz/resource-server/policy/client', body: POLICY_BODY },
+    { method: 'POST', path: 'clients/ap/authz/resource-server/permission/scope', body: PERMISSION_BODY('p-1') }
+  ]);
+  keycloak.calls.length = 0;
+  assert.deepEqual(await applyExpiryPermission(keycloak.admin), [{ what: 'client policy', result: 'unchanged' }, { what: 'permission on the group guests', result: 'unchanged' }]);
+  assert.deepEqual(writes(keycloak.calls), []);
+});
+
+test('a permission or policy that drifted wider is written back to exactly guests, the three scopes and the one client', async () => {
+  const policy = { ...POLICY_BODY, id: 'p-client' };
+  for (const drift of [{ scopes: ['manage-members', 'view', 'view-members', 'impersonate-members'] }, { resources: ['g-guests', 'g-staff'] }, { resourceType: 'Users' }]) {
+    const keycloak = fakeAuthz({ policies: [policy, { ...PERMISSION_BODY('p-client'), id: 'p-perm', ...drift }] });
+    assert.deepEqual(await applyExpiryPermission(keycloak.admin), [{ what: 'client policy', result: 'unchanged' }, { what: 'permission on the group guests', result: 'written' }]);
+    assert.deepEqual(writes(keycloak.calls), [{ method: 'PUT', path: 'clients/ap/authz/resource-server/permission/scope/p-perm', body: { id: 'p-perm', ...PERMISSION_BODY('p-client') } }]);
+  }
+  const otherClient = fakeAuthz({ policies: [{ ...policy, clients: ['ge', 'someone-else'] }] });
+  await applyExpiryPermission(otherClient.admin);
+  assert.deepEqual(writes(otherClient.calls)[0], { method: 'PUT', path: 'clients/ap/authz/resource-server/policy/client/p-client', body: { id: 'p-client', ...POLICY_BODY } });
+});
+
+test('the step refuses, before any write, a switched-off realm, a service account with a realm-management role and another permission on its policy', async () => {
+  const policy = { ...POLICY_BODY, id: 'p-client' };
+  for (const [options, pattern] of [
+    [{ switchOn: false }, /fine-grained admin permissions are off/],
+    [{ saRoles: ['view-users'] }, /holds the realm-management role view-users/],
+    [{ saRoles: ['query-users'] }, /holds the realm-management role query-users/],
+    [{ policies: [policy, { name: 'hand-made: manage all users', type: 'scope', resourceType: 'Users', resources: [], scopes: ['manage'], policies: ['p-client'], id: 'p-extra' }] },
+      /"hand-made: manage all users" also uses "sterling-guest-expiry client"/]
+  ]) {
+    const keycloak = fakeAuthz(options);
+    await assert.rejects(applyExpiryPermission(keycloak.admin), pattern);
+    assert.deepEqual(writes(keycloak.calls), []);
+  }
 });

@@ -1,0 +1,134 @@
+{{- /*
+The automatic end of guest accounts (47-20, D-62, D-63): every guests.checkMinutes the CronJob sterling-guest-expiry runs
+`guests.mjs expire --in-cluster` from our image sterling/guest-expiry. Rendered only when the realm site file turns guests on (guests.maxDays
+above 0); with guests off nothing here exists.
+
+Its access, each the least that works:
+- Keycloak: the client sterling-guest-expiry, whose service account holds no role, only the one admin permission on the group guests that the
+  realm applier Job grants after keycloak-config-cli (deploy/keycloak/admin-permissions.mjs). Its secret is mounted read-only (0400; the kubelet
+  adds group read for the pod's fsGroup) from Secret sterling-guest-expiry, which install.mjs secrets keeps in OpenBao kv/apps/guest-expiry.
+- OpenBao: the jwt role guest-expiry with that client's token: a 5-minute token that may only disable guest entities and file records.
+- Kubernetes: this ServiceAccount's Role allows get, list and delete on Session records in the sessions namespace and nothing else. Its
+  token is the only ServiceAccount token the realm release mounts; the applier Job keeps automountServiceAccountToken false.
+Only Session records are deleted: the guest's Workspace and its volume stay.
+*/ -}}
+{{- $guests := .Values.guests }}
+{{- if gt (int ($guests.maxDays | default 0)) 0 }}
+{{- $minutes := int ($guests.checkMinutes | default 15) }}
+{{- if or (lt $minutes 1) (gt $minutes 59) }}{{ fail (printf "guests.checkMinutes must be a whole number of minutes from 1 to 59, not %v" $guests.checkMinutes) }}{{ end }}
+{{- if not $guests.image }}{{ fail "guests.image is not set: the image sterling/guest-expiry comes from deploy/bundle/images.lock.json by digest" }}{{ end }}
+{{- if not (contains "@sha256:" $guests.image) }}{{ fail (printf "guests.image %q is not pinned by digest" $guests.image) }}{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sterling-guest-expiry
+  labels:
+    app.kubernetes.io/name: sterling-guest-expiry
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sterling-guest-expiry
+  namespace: {{ $guests.sessionsNamespace | quote }}
+  labels:
+    app.kubernetes.io/name: sterling-guest-expiry
+rules:
+  - apiGroups: ["theia.cloud"]
+    resources: ["sessions"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sterling-guest-expiry
+  namespace: {{ $guests.sessionsNamespace | quote }}
+  labels:
+    app.kubernetes.io/name: sterling-guest-expiry
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sterling-guest-expiry
+subjects:
+  - kind: ServiceAccount
+    name: sterling-guest-expiry
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sterling-guest-expiry
+  labels:
+    app.kubernetes.io/name: sterling-guest-expiry
+spec:
+  schedule: {{ printf "*/%d * * * *" $minutes | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: sterling-guest-expiry
+        spec:
+          restartPolicy: Never
+          serviceAccountName: sterling-guest-expiry
+          # The Kubernetes API is needed for the Session records; this is the one pod of the release that mounts its ServiceAccount token.
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: expire
+              image: {{ $guests.image | quote }}
+              imagePullPolicy: IfNotPresent
+              args: ["expire", "--in-cluster"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: KEYCLOAK_URL
+                  value: {{ .Values.keycloakUrl | quote }}
+                - name: KEYCLOAK_REALM
+                  value: sterling
+                - name: GUEST_EXPIRY_CLIENT_ID
+                  value: sterling-guest-expiry
+                - name: GUEST_EXPIRY_CLIENT_SECRET_FILE
+                  value: /var/run/sterling-guest-expiry/client-secret
+                - name: OPENBAO_ADDR
+                  value: {{ .Values.openbaoAddr | quote }}
+                - name: OPENBAO_JWT_ROLE
+                  value: guest-expiry
+                - name: SITE_CA_FILE
+                  value: /etc/site-ca/ca.crt
+                - name: SESSIONS_NAMESPACE
+                  value: {{ $guests.sessionsNamespace | quote }}
+                - name: GUEST_RETENTION_DAYS
+                  value: {{ $guests.retentionDays | default 0 | toString | quote }}
+              resources:
+                {{- toYaml $guests.resources | nindent 16 }}
+              volumeMounts:
+                - { name: client-secret, mountPath: /var/run/sterling-guest-expiry, readOnly: true }
+                - { name: site-ca, mountPath: /etc/site-ca, readOnly: true }
+          volumes:
+            - name: client-secret
+              secret:
+                secretName: sterling-guest-expiry
+                defaultMode: 0400
+                items:
+                  - { key: client-secret, path: client-secret }
+            - name: site-ca
+              configMap:
+                name: sterling-site-ca
+                items:
+                  - { key: ca.crt, path: ca.crt }
+{{- end }}

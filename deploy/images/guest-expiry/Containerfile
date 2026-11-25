@@ -1,0 +1,13 @@
+# The image of the automatic end of guest accounts (47-20, D-63, D-65): our own zero-dependency Node scripts on the UBI 9 Node.js 22 minimal
+# runtime, nothing else. It runs the CronJob sterling-guest-expiry (guests.mjs expire --in-cluster) and, when guests are on, the realm
+# applier's permission step (admin-permissions.mjs). No npm install and no download during the build; the context is the repository root.
+# The base is pinned to its linux/amd64 image manifest digest, the form that survives the bundle copy (deploy/images/README.md).
+FROM registry.access.redhat.com/ubi9/nodejs-22-minimal:9.9@sha256:ae7d09b6a6c0ca2690ee41db9e163f293712a872c6a6e15869ca61e433aa9c7d
+WORKDIR /opt/sterling
+# The scripts keep their repository layout (guests.mjs imports ../openbao/ and ../bundle/), owned by root and read-only for the job's user.
+COPY --chown=0:0 --chmod=0755 deploy/keycloak/ /opt/sterling/deploy/keycloak/
+COPY --chown=0:0 --chmod=0755 deploy/openbao/ /opt/sterling/deploy/openbao/
+COPY --chown=0:0 --chmod=0755 deploy/bundle/lib/ /opt/sterling/deploy/bundle/lib/
+COPY --chown=0:0 --chmod=0644 deploy/bundle/signed-file.mjs /opt/sterling/deploy/bundle/signed-file.mjs
+USER 1001
+ENTRYPOINT ["node", "/opt/sterling/deploy/keycloak/guests.mjs"]

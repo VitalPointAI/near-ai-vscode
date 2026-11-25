@@ -50,7 +50,8 @@
     { "name": "sterling/postgres", "image": "deploy/images/postgres/image.json", "component": "keycloak", "digest": null },
     { "name": "sterling/openbao", "image": "deploy/images/openbao/image.json", "component": "openbao", "tag": "2.7.3", "note": "tag: the OpenBao release it is built from; the chart joins repository and tag, the digest is what pins it.", "digest": null },
     { "name": "sterling/openbao-softhsm", "image": "deploy/images/openbao-softhsm/image.json", "component": "hsm", "scope": "test", "digest": null },
-    { "name": "sterling/near-ai-hub", "image": "deploy/images/hub/image.json", "component": "hub", "note": "Built from the unchanged hub/Dockerfile (D-45, D-46).", "digest": null }
+    { "name": "sterling/near-ai-hub", "image": "deploy/images/hub/image.json", "component": "hub", "note": "Built from the unchanged hub/Dockerfile (D-45, D-46).", "digest": null },
+    { "name": "sterling/guest-expiry", "image": "deploy/images/guest-expiry/image.json", "component": "keycloak", "note": "The automatic end of guest accounts and the realm applier's permission step (47-20).", "digest": null }
   ],
   "release": [
     { "name": "sterling/sterling-workbench", "from": "Phase 46: the GHCR repository #165's Release workflow publishes, by digest, signed in container-release (D-12)", "digest": null }

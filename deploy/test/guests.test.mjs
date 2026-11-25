@@ -10,9 +10,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { checkGuestRequest, CREDENTIAL_CARD_REACHABLE, createGuest, credentialIssuingShipped, endGuest, expireGuests, extendGuest, guestSettings, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
+import { checkGuestRequest, CREDENTIAL_CARD_REACHABLE, createGuest, credentialIssuingShipped, endGuest, expireGuests, expireInCluster, extendGuest, guestSettings, guestStatus, linkGuest, listGuests, GuestRefusal, REVOCATION_FORMAT } from '../keycloak/guests.mjs';
 import { POLICIES } from '../openbao/apply.mjs';
 import { enrolPerson } from '../openbao/enrol.mjs';
+import { releaseValueFiles } from '../keycloak/apply.mjs';
+import { listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NOW = Date.parse('2026-11-24T12:00:00Z');
@@ -553,4 +555,166 @@ test('without guests.retentionDays no end record is filed, the end says so, and 
   assert.equal(kc.users.get('kc-ada').enabled, false, 'the end itself still happens');
   assert.equal([...bao.kv.keys()].filter((key) => key.includes('guest-ended')).length, 0);
   assert.match(checkGuestRequest(REQUEST, { ...SETTINGS, retentionDays: 0 }, NOW).problems.join('\n'), /Set guests\.retentionDays/);
+});
+
+// --- The automatic end in the cluster (47-20): expire --in-cluster -----------------------------------------------------------------------
+
+const IN_CLUSTER_ENV = Object.freeze({ KEYCLOAK_URL: 'https://keycloakx-http.sterling-identity.svc:8443', KEYCLOAK_REALM: 'sterling', GUEST_EXPIRY_CLIENT_ID: 'sterling-guest-expiry',
+  GUEST_EXPIRY_CLIENT_SECRET_FILE: '/var/run/sterling-guest-expiry/client-secret', OPENBAO_ADDR: 'https://openbao.sterling-openbao.svc:8200', OPENBAO_JWT_ROLE: 'guest-expiry',
+  SITE_CA_FILE: '/etc/site-ca/ca.crt', SESSIONS_NAMESPACE: 'theia-cloud', GUEST_RETENTION_DAYS: '365', KUBERNETES_SERVICE_HOST: '10.43.0.1', KUBERNETES_SERVICE_PORT: '443' });
+const SECRET = 'the-client-secret-from-its-file';
+/** The files the job's pod mounts. */
+const podFiles = (file) => ({ '/var/run/sterling-guest-expiry/client-secret': `${SECRET}\n`, '/etc/site-ca/ca.crt': 'site CA', '/var/run/secrets/kubernetes.io/serviceaccount/token': 'sa-token',
+  '/var/run/secrets/kubernetes.io/serviceaccount/ca.crt': 'cluster CA' })[file];
+/** The job's raw HTTP calls: Keycloak's token endpoint, OpenBao's jwt login and the Kubernetes API, each recorded. */
+function podNetwork({ login = 200, sessions = [] } = {}) {
+  const calls = [];
+  const call = async (request) => {
+    calls.push(structuredClone(request));
+    if (request.url.endsWith('/realms/sterling/protocol/openid-connect/token')) return { status: 200, data: { access_token: 'expiry-access-token' } };
+    if (request.url.endsWith('/v1/auth/jwt/login')) return login === 200 ? { status: 200, data: { auth: { client_token: 'bao-job-token' } } } : { status: login, data: { errors: ['permission denied'] } };
+    if (request.method === 'GET' && request.url.endsWith('/apis/theia.cloud/v1beta8/namespaces/theia-cloud/sessions')) return { status: 200, data: { items: sessions } };
+    if (request.method === 'DELETE' && request.url.includes('/apis/theia.cloud/v1beta8/namespaces/theia-cloud/sessions/')) return { status: 200, data: {} };
+    return { status: 404, data: null };
+  };
+  return { call, calls };
+}
+const overdueGuest = (kc, bao, id = 'kc-late') => {
+  kc.add({ id, username: id.slice(3), email: `${id}@guests.site.example`, attributes: { ...structuredClone(GUEST_ATTRS), guestUntil: ['2026-11-24T11:00:00Z'] } }, { groupPaths: ['/guests'], keys: ['k1', 'k2'] });
+  bao.addEntity(`guest-${id}`, { metadata: { keycloak_user_id: id, account: 'guest' }, policies: ['guest-account'] });
+};
+
+test('expire --in-cluster asks Keycloak for its token with the secret only in the Basic header, logs in to OpenBao as guest-expiry, ends the guest and revokes its token', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  overdueGuest(kc, bao);
+  const network = podNetwork({ sessions: [{ metadata: { name: 's-late' }, spec: { user: 'kc-late@guests.site.example' } }, { metadata: { name: 's-staff' }, spec: { user: 'lead.one@site.example' } }] });
+  const made = {};
+  const result = await expireInCluster({ env: IN_CLUSTER_ENV, readFile: podFiles, call: network.call, now: NOW,
+    makeKeycloak: (options) => { made.keycloak = options; return kc.keycloak; },
+    makeBao: (options) => {
+      made.bao = options;
+      return async (method, apiPath, body) => {
+        if (apiPath !== 'auth/token/revoke-self') return bao.request(method, apiPath, body);
+        bao.calls.push({ method, path: apiPath, body });
+        return { status: 204, data: null };
+      };
+    } });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.exit, 0);
+  assert.deepEqual(result.lines, ['ended late: end date 2026-11-24T11:00:00Z passed']);
+  const [token, login] = network.calls;
+  assert.equal(token.url, 'https://keycloakx-http.sterling-identity.svc:8443/realms/sterling/protocol/openid-connect/token');
+  assert.equal(token.headers.authorization, `Basic ${Buffer.from(`sterling-guest-expiry:${SECRET}`).toString('base64')}`);
+  assert.equal(token.body, 'grant_type=client_credentials');
+  for (const request of network.calls) {
+    assert.equal(`${request.url} ${request.body ?? ''}`.includes(SECRET), false, 'the secret is never in a URL or a body');
+  }
+  assert.equal(login.url, 'https://openbao.sterling-openbao.svc:8200/v1/auth/jwt/login');
+  assert.deepEqual(JSON.parse(login.body), { role: 'guest-expiry', jwt: 'expiry-access-token' });
+  assert.deepEqual([made.keycloak.token, made.keycloak.caPem, made.bao.token], ['expiry-access-token', 'site CA', 'bao-job-token']);
+  assert.equal(kc.users.get('kc-late').enabled, false);
+  assert.equal(bao.entities.get('guest-kc-late').disabled, true);
+  // Only the guest's Session record is deleted, with the ServiceAccount token; the Workspace and its volume are never touched.
+  const kube = network.calls.filter((request) => request.url.startsWith('https://10.43.0.1:443/'));
+  assert.deepEqual(kube.map((request) => `${request.method} ${request.url.slice('https://10.43.0.1:443'.length)}`), [
+    'GET /apis/theia.cloud/v1beta8/namespaces/theia-cloud/sessions', 'DELETE /apis/theia.cloud/v1beta8/namespaces/theia-cloud/sessions/s-late']);
+  assert.ok(kube.every((request) => request.headers.authorization === 'Bearer sa-token' && request.caPem === 'cluster CA'));
+  assert.deepEqual(bao.calls.at(-1), { method: 'POST', path: 'auth/token/revoke-self', body: undefined });
+});
+
+test('expire --in-cluster with OpenBao\'s login refused still ends the guest in Keycloak, reports it and exits non-zero', async () => {
+  const kc = fakeKeycloak();
+  const bao = fakeBao();
+  overdueGuest(kc, bao);
+  const network = podNetwork({ login: 403 });
+  const result = await expireInCluster({ env: IN_CLUSTER_ENV, readFile: podFiles, call: network.call, now: NOW, noSessions: true,
+    makeKeycloak: () => kc.keycloak, makeBao: () => { throw new Error('no OpenBao client without a login'); } });
+  assert.equal(result.exit, 1);
+  assert.equal(kc.users.get('kc-late').enabled, false, 'the Keycloak side ends the guest');
+  assert.equal(kc.users.get('kc-late').attributes.guestEndedReason[0], 'end date 2026-11-24T11:00:00Z passed');
+  assert.match(result.errors.join('\n'), /OpenBao refused the login to role guest-expiry \(403/);
+  assert.match(result.errors.join('\n'), /failed: late: OpenBao/);
+  assert.equal(bao.entities.get('guest-kc-late').disabled, false, 'OpenBao was never reached');
+  assert.ok(network.calls.every((request) => !request.url.includes('/apis/')), '--no-sessions skips Kubernetes');
+});
+
+test('expire --in-cluster refuses to start without its settings, and stops when Keycloak refuses the client', async () => {
+  const { KEYCLOAK_URL: _url, ...withoutUrl } = IN_CLUSTER_ENV;
+  const missing = await expireInCluster({ env: withoutUrl, readFile: podFiles, call: async () => { throw new Error('no call'); } });
+  assert.deepEqual([missing.exit, missing.errors], [1, ['the job\'s settings are missing: KEYCLOAK_URL']]);
+  const refused = await expireInCluster({ env: IN_CLUSTER_ENV, readFile: podFiles, call: async () => ({ status: 401, data: { error: 'unauthorized_client' } }) });
+  assert.equal(refused.exit, 1);
+  assert.match(refused.errors[0], /Keycloak refused the client credentials of sterling-guest-expiry in realm sterling: it answered 401/);
+});
+
+// --- The automatic end in the realm release (47-20): rendered only with guests on -------------------------------------------------------
+
+const HELM = process.env.HELM || 'helm';
+const CI_SITE = loadSite(path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml'));
+const REALM_RELEASE = () => listReleases(ROOT).find((release) => release.name === 'sterling-keycloak-realm');
+const EXAMPLE_REALM_SITE = JSON.parse(readFileSync(path.join(ROOT, 'deploy/values/site.example/sterling-keycloak-realm.yaml'), 'utf8'));
+/** A site folder whose realm site file sets guests (as a site's own copy of the example would). */
+const realmSiteDir = (guests) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'realm-site-'));
+  writeFileSync(path.join(dir, 'sterling-keycloak-realm.yaml'), JSON.stringify({ ...EXAMPLE_REALM_SITE, guests: { ...EXAMPLE_REALM_SITE.guests, ...guests } }));
+  return dir;
+};
+const renderRealm = (guests) => splitDocs(renderRelease(ROOT, REALM_RELEASE(), { site: CI_SITE, helm: HELM, ...(guests ? { siteDir: realmSiteDir(guests) } : {}) }));
+const docOf = (docs, kind, name) => docs.find((doc) => new RegExp(`^kind: ${kind}$`, 'm').test(doc) && new RegExp(`^  name: ${name}$`, 'm').test(doc));
+
+test('with guests off the realm release renders no CronJob, ServiceAccount, Role or RoleBinding, and the applier Job is as before (needs helm)', () => {
+  const docs = renderRealm();
+  assert.deepEqual(docs.map((doc) => /^kind: (\S+)$/m.exec(doc)[1]).sort(), ['ConfigMap', 'Job']);
+  const job = docOf(docs, 'Job', 'sterling-keycloak-realm-\\w+');
+  assert.doesNotMatch(job, /initContainers|guest-expiry-permission/);
+  assert.match(job, /automountServiceAccountToken: false/);
+  // The realm sets the client's secret from the same Secret the CronJob mounts.
+  assert.match(job, /- name: STERLING_GUEST_EXPIRY_CLIENT_SECRET\n\s+valueFrom:\n\s+secretKeyRef: \{ name: sterling-guest-expiry, key: client-secret \}/);
+});
+
+test('with guests on the CronJob runs expire --in-cluster every checkMinutes, hardened, from the locked image, with its secret and the site CA (needs helm)', () => {
+  const docs = renderRealm({ maxDays: 30, checkMinutes: 15, retentionDays: 365 });
+  const cron = docOf(docs, 'CronJob', 'sterling-guest-expiry');
+  assert.ok(cron, 'CronJob sterling-guest-expiry');
+  assert.match(cron, /schedule: "\*\/15 \* \* \* \*"/);
+  assert.match(cron, /concurrencyPolicy: Forbid/);
+  assert.match(cron, /successfulJobsHistoryLimit: 3\n\s+failedJobsHistoryLimit: 3/);
+  assert.match(cron, /image: "registry\.site\.example\/sterling\/guest-expiry@sha256:[0-9a-f]{64}"/);
+  assert.match(cron, /args: \["expire", "--in-cluster"\]/);
+  for (const setting of [/runAsNonRoot: true/, /readOnlyRootFilesystem: true/, /allowPrivilegeEscalation: false/, /drop: \[ALL\]/, /type: RuntimeDefault/, /limits:\n\s+memory: 128Mi/]) assert.match(cron, setting);
+  assert.match(cron, /- name: client-secret\n\s+secret:\n\s+secretName: sterling-guest-expiry\n\s+defaultMode: 0400\n\s+items:\n\s+- \{ key: client-secret, path: client-secret \}/);
+  assert.match(cron, /- name: site-ca\n\s+configMap:\n\s+name: sterling-site-ca/);
+  const env = Object.fromEntries([...cron.matchAll(/- name: ([A-Z_]+)\n\s+value: "?([^"\n]*)"?/g)].map((match) => [match[1], match[2]]));
+  assert.deepEqual(env, { KEYCLOAK_URL: 'https://keycloakx-http.sterling-identity.svc:8443', KEYCLOAK_REALM: 'sterling', GUEST_EXPIRY_CLIENT_ID: 'sterling-guest-expiry',
+    GUEST_EXPIRY_CLIENT_SECRET_FILE: '/var/run/sterling-guest-expiry/client-secret', OPENBAO_ADDR: 'https://openbao.sterling-openbao.svc:8200', OPENBAO_JWT_ROLE: 'guest-expiry',
+    SITE_CA_FILE: '/etc/site-ca/ca.crt', SESSIONS_NAMESPACE: 'theia-cloud', GUEST_RETENTION_DAYS: '365' });
+  assert.throws(() => renderRealm({ maxDays: 30, checkMinutes: 60 }), /guests\.checkMinutes must be a whole number of minutes from 1 to 59/);
+});
+
+test('with guests on the Role allows only get, list and delete on Session records in the sessions namespace, and only the CronJob pod mounts a token (needs helm)', () => {
+  const docs = renderRealm({ maxDays: 30 });
+  const role = docOf(docs, 'Role', 'sterling-guest-expiry');
+  assert.match(role, /namespace: "theia-cloud"/);
+  assert.equal(role.slice(role.indexOf('rules:')).trim(), 'rules:\n  - apiGroups: ["theia.cloud"]\n    resources: ["sessions"]\n    verbs: ["get", "list", "delete"]');
+  const binding = docOf(docs, 'RoleBinding', 'sterling-guest-expiry');
+  assert.match(binding, /namespace: "theia-cloud"/);
+  assert.match(binding, /subjects:\n\s+- kind: ServiceAccount\n\s+name: sterling-guest-expiry\n\s+namespace: sterling-identity/);
+  assert.match(docOf(docs, 'ServiceAccount', 'sterling-guest-expiry'), /automountServiceAccountToken: false/);
+  assert.equal(docs.filter((doc) => /kind: (ClusterRole|ClusterRoleBinding)\b/.test(doc)).length, 0);
+  const cron = docOf(docs, 'CronJob', 'sterling-guest-expiry');
+  assert.match(cron, /serviceAccountName: sterling-guest-expiry\n\s+# [^\n]*\n\s+automountServiceAccountToken: true/);
+  // The applier Job runs keycloak-config-cli first, then the permission step, and mounts no ServiceAccount token.
+  const job = docOf(docs, 'Job', 'sterling-keycloak-realm-\\w+');
+  assert.match(job, /automountServiceAccountToken: false/);
+  assert.match(job, /initContainers:\n\s+- name: keycloak-config-cli[\s\S]*\n {6}containers:\n\s+- name: guest-expiry-permission\n\s+image: "registry\.site\.example\/sterling\/guest-expiry@sha256:[0-9a-f]{64}"/);
+  assert.match(job, /command: \["node", "\/opt\/sterling\/deploy\/keycloak\/admin-permissions\.mjs"\]/);
+});
+
+test('apply.mjs hands helm the realm site file it checked, and the example only when none is given', () => {
+  const release = REALM_RELEASE();
+  const own = path.join(realmSiteDir({ maxDays: 30 }), 'sterling-keycloak-realm.yaml');
+  assert.equal(releaseValueFiles(release, own).at(-1), own);
+  assert.equal(releaseValueFiles(release).at(-1), path.join(ROOT, 'deploy/values/site.example/sterling-keycloak-realm.yaml'));
+  assert.deepEqual(releaseValueFiles(release, own).slice(0, -1), [path.join(ROOT, 'deploy/values/sterling-keycloak-realm.yaml')]);
 });

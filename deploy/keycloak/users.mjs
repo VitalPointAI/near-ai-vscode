@@ -318,6 +318,43 @@ export async function importUsers(admin, { file, publicKey, rpId, cosign, featur
   return { ok: true, results };
 }
 
+/**
+ * One HTTP call with the site CA: { method, url, headers, body (a string, sent as is), caPem } -> { status, data } with data the parsed
+ * JSON, { raw } for other text, or null.
+ */
+export function httpCall({ method, url, headers = {}, body, caPem }) {
+  const target = new URL(url);
+  const transport = target.protocol === 'https:' ? https : http;
+  return new Promise((resolve, reject) => {
+    const request = transport.request(target, { method, ca: caPem, headers }, (response) => {
+      let text = '';
+      response.on('data', (chunk) => { text += chunk; });
+      response.on('end', () => {
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+        resolve({ status: response.statusCode, data });
+      });
+    });
+    request.on('error', reject);
+    if (body !== undefined) request.write(body);
+    request.end();
+  });
+}
+
+/**
+ * A client-credentials access token from Keycloak. The client id and secret travel only in the Basic Authorization header (RFC 6749 2.3.1,
+ * each form-encoded first), never in the URL, the body or a command line.
+ */
+export async function clientCredentialsToken({ base, realm, clientId, secret, caPem, call = httpCall }) {
+  const basic = Buffer.from(`${encodeURIComponent(clientId)}:${encodeURIComponent(secret)}`).toString('base64');
+  const result = await call({ method: 'POST', url: new URL(`/realms/${encodeURIComponent(realm)}/protocol/openid-connect/token`, base).toString(), caPem,
+    headers: { authorization: `Basic ${basic}`, 'content-type': 'application/x-www-form-urlencoded' }, body: 'grant_type=client_credentials' });
+  if (result.status !== 200 || typeof result.data?.access_token !== 'string') {
+    throw new Error(`Keycloak refused the client credentials of ${clientId} in realm ${realm}: it answered ${result.status} ${JSON.stringify(result.data?.error_description ?? result.data?.error ?? '')}.`);
+  }
+  return result.data.access_token;
+}
+
 /** The admin REST client: admin(method, path relative to /admin/realms/<realm>/, body) -> { status, data }. */
 export function keycloakAdmin({ base, realm = 'sterling', token, caPem }) {
   const root = new URL(base);

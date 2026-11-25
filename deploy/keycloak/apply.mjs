@@ -17,6 +17,9 @@
 // Guests (D-58 to D-60): the top-level group guests carries no role, subgroup or attribute; the six guest life-cycle attributes are in the
 // user profile for administrators only; serves, nationality, organization and a security-contacts group are refused (they are credentials,
 // Phase 71); and no client or client scope puts a user attribute or a group into the access token (zero trust: Keycloak decides nothing).
+// The automatic end of guest accounts (47-20): client sterling-guest-expiry is a service account with no role; with guests on the realm turns
+// fine-grained admin permissions on and the applier Job grants that client its one permission on the group guests after keycloak-config-cli
+// (deploy/keycloak/admin-permissions.mjs), and the release renders the CronJob sterling-guest-expiry. helm gets the realm site file checked here.
 // The system use notice (D-76, AC-8): the realm site file's systemUseNotice (language to text, en required) becomes the realm message
 // sterlingSystemUseNotice, which the login theme sterling (deploy/charts/sterling-keycloak-theme) shows on every sign-in page.
 // --dry-run prints the checked realm's summary and installs nothing. Node built-ins only; helm from $HELM or PATH.
@@ -43,6 +46,9 @@ export const HQ_SECRET_ENV = 'STERLING_HQ_BROKER_CLIENT_SECRET';
 export const HQ_PLACEHOLDER_ISSUER = 'https://hq.invalid/realms/sterling';
 const HQ_FIRST_LOGIN_STEPS = JSON.stringify([['idp-detect-existing-broker-user', 'REQUIRED'], ['idp-auto-link', 'REQUIRED']]);
 const ENV_SECRET = /^\$\(env:[A-Z0-9_]+\)$/;
+/** The automatic end's client (47-20) and the only client scopes its token takes. */
+export const EXPIRY_CLIENT = 'sterling-guest-expiry';
+export const EXPIRY_CLIENT_SCOPES = Object.freeze(['basic', 'kc-admin-api']);
 /** The system use notice (D-76): the realm message the login theme sterling renders in footer.ftl, and the language codes it accepts. */
 export const NOTICE_MESSAGE = 'sterlingSystemUseNotice';
 export const LOGIN_THEME = 'sterling';
@@ -87,7 +93,9 @@ export function realmSettings(site, realmSite, keycloakxSite = {}) {
       },
       hq: { enabled: brokered, issuer, clientId: brokered ? orNotSet(realmSite.hqBroker.clientId) : 'not-set', clientSecret: brokered ? `$(env:${HQ_SECRET_ENV})` : 'not-set' }
     },
-    systemUseNotice: realmSite.systemUseNotice
+    systemUseNotice: realmSite.systemUseNotice,
+    // Guests on (D-63): the automatic end's client gets its one admin permission, which needs the realm's fine-grained admin permissions.
+    guestsOn: Number(realmSite.guests?.maxDays ?? 0) > 0
   };
 }
 
@@ -129,6 +137,7 @@ export function substitutedRealm(text, settings) {
   for (const entry of realm.authenticatorConfig ?? []) entry.config = Object.fromEntries(Object.entries(entry.config ?? {}).map(([key, value]) => [key, String(value)]));
   if (realm.smtpServer) realm.smtpServer = Object.fromEntries(Object.entries(realm.smtpServer).map(([key, value]) => [key, String(value)]));
   if (settings.realm.x509.enabled) realm.browserFlow = 'sterling-x509';
+  realm.adminPermissionsEnabled = settings.guestsOn === true;
   return realm;
 }
 
@@ -255,6 +264,29 @@ export function checkRealm(realm, settings) {
     need(mapper('oidc-usersessionmodel-note-mapper', (config) => config['user.session.note'] === 'AUTH_TIME' && config['claim.name'] === 'auth_time' && config['access.token.claim'] === 'true'), 'auth_time must be in the access token');
     need(Array.isArray(sessions.redirectUris) && sessions.redirectUris.length > 0 && sessions.redirectUris.every((uri) => String(uri).startsWith('https://')), 'sterling-sessions needs https redirect URIs from the site file');
   }
+  // The automatic end of guest accounts (47-20, D-62, D-63): a service account whose only access is one admin permission on the group guests,
+  // granted after keycloak-config-cli by deploy/keycloak/admin-permissions.mjs (keycloak-config-cli 6.5.1 refuses the system client
+  // admin-permissions). Its token carries the admin API audience (kc-admin-api, without which Keycloak 26.8 answers 401), sub (basic) and its
+  // own audience for OpenBao's role guest-expiry, and no role.
+  const expiry = (realm.clients ?? []).find((client) => client.clientId === EXPIRY_CLIENT);
+  need(Boolean(expiry), `client ${EXPIRY_CLIENT} must exist (the automatic end of guest accounts)`);
+  if (expiry) {
+    need(expiry.publicClient === false && expiry.serviceAccountsEnabled === true && expiry.standardFlowEnabled === false && expiry.implicitFlowEnabled === false,
+      `${EXPIRY_CLIENT} must be confidential, a service account, with the standard and implicit flows off`);
+    need(ENV_SECRET.test(expiry.secret ?? ''), `the ${EXPIRY_CLIENT} secret must come from the applier Job environment, never be written in realm.json`);
+    need((expiry.protocolMappers ?? []).some((entry) => entry.protocolMapper === 'oidc-audience-mapper' && entry.config?.['included.client.audience'] === EXPIRY_CLIENT
+      && entry.config?.['access.token.claim'] === 'true'), `${EXPIRY_CLIENT} must add its own audience to the access token (OpenBao role guest-expiry binds it)`);
+    need(JSON.stringify(expiry.defaultClientScopes) === JSON.stringify(EXPIRY_CLIENT_SCOPES), `${EXPIRY_CLIENT}'s default client scopes must be exactly basic and kc-admin-api`);
+    need(Array.isArray(expiry.optionalClientScopes) && expiry.optionalClientScopes.length === 0, `${EXPIRY_CLIENT} must have no optional client scope`);
+    need(expiry.fullScopeAllowed === false, `${EXPIRY_CLIENT}'s fullScopeAllowed must be false, so no role reaches its token`);
+  }
+  for (const user of realm.users ?? []) {
+    const roles = user.serviceAccountClientId === EXPIRY_CLIENT ? user.clientRoles?.['realm-management'] ?? [] : [];
+    need(!roles.length, `the service account of ${EXPIRY_CLIENT} must hold no realm-management role (${roles.join(', ')}); its only access is the permission on the group guests`);
+  }
+  need(!(realm.clients ?? []).some((client) => client.clientId === 'admin-permissions'),
+    'the admin-permissions client is system-managed by Keycloak and keycloak-config-cli refuses it; deploy/keycloak/admin-permissions.mjs grants the one permission');
+  need(realm.adminPermissionsEnabled === (settings.guestsOn === true), 'adminPermissionsEnabled must be on exactly when guests are on (guests.maxDays above 0)');
   // The system use notice (D-76, AC-8): the login theme sterling shows the realm message sterlingSystemUseNotice on every sign-in page.
   const noticeIssues = noticeProblems(settings.systemUseNotice);
   problems.push(...noticeIssues);
@@ -266,6 +298,14 @@ export function checkRealm(realm, settings) {
     `the realm must carry the notice of every language in the realm site file as ${NOTICE_MESSAGE}, with those languages supported and en the default`);
   }
   return problems;
+}
+
+/**
+ * The values files helm gets for the realm release: the release's own, then the realm site file that was checked (--realm-site), so the
+ * release follows the site's own guests settings; the example only when no realm site file is given.
+ */
+export function releaseValueFiles(release, realmSiteFile) {
+  return [...release.values.map((file) => path.join(ROOT, file)), realmSiteFile ? path.resolve(realmSiteFile) : path.join(ROOT, release.site)];
 }
 
 /** Reads, fills and checks the realm for a site. Returns { realm, settings, problems }. */
@@ -286,7 +326,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (!option('--site')) throw new Error(usage);
     const site = loadSite(option('--site'));
     const release = listReleases(ROOT).find((entry) => entry.name === RELEASE);
-    const realmSite = readJson(option('--realm-site') ?? path.join(ROOT, release.site));
+    const realmSiteFile = releaseValueFiles(release, option('--realm-site')).at(-1);
+    const realmSite = readJson(realmSiteFile);
     const keycloakxSite = readJson(option('--keycloakx-site') ?? path.join(ROOT, 'deploy/values/site.example/keycloakx.yaml'));
     const { realm, settings, problems } = prepareRealm({ site, realmSite, keycloakxSite });
     if (problems.length) {
@@ -301,9 +342,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     try {
       const realmFile = path.join(scratch, 'realm.json');
       writeFileSync(realmFile, JSON.stringify(realm, null, 2), { mode: 0o600 });
-      const valueFiles = [...release.values, release.site].map((file, index) => {
+      const valueFiles = releaseValueFiles(release, option('--realm-site')).map((file, index) => {
         const copy = path.join(scratch, `${index}.yaml`);
-        writeFileSync(copy, substituteSite(readFileSync(path.join(ROOT, file), 'utf8'), site, file));
+        writeFileSync(copy, substituteSite(readFileSync(file, 'utf8'), site, file));
         return copy;
       });
       const run = spawnSync(process.env.HELM || 'helm', ['upgrade', '--install', RELEASE, path.join(ROOT, release.chart.slice('path:'.length)), '--namespace', release.namespace,

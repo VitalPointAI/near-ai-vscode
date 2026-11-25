@@ -1,0 +1,7 @@
+# The build context allow-list of the guest-expiry image (context: the repository root). Docker BuildKit and podman read
+# <Containerfile>.dockerignore beside the Containerfile in place of the root .dockerignore, which stays the relay's and the hub's.
+*
+!deploy/keycloak/
+!deploy/openbao/
+!deploy/bundle/lib/
+!deploy/bundle/signed-file.mjs

@@ -5,7 +5,20 @@
   "values": ["deploy/values/sterling-keycloak-realm.yaml"],
   "site": "deploy/values/site.example/sterling-keycloak-realm.yaml",
   "images": [
-    { "lock": "docker.io/adorsys/keycloak-config-cli", "set": { "image": "ref" } }
+    { "lock": "docker.io/adorsys/keycloak-config-cli", "set": { "image": "ref" } },
+    { "lock": "sterling/guest-expiry", "set": { "guests.image": "ref" } }
   ],
-  "note": "keycloak-config-cli applies realm sterling (deploy/keycloak/realm.json) after Keycloak; installed only by deploy/keycloak/apply.mjs, which checks the realm first (D-30)."
+  "secrets": [
+    {
+      "secret": "sterling-guest-expiry",
+      "kv": "guest-expiry",
+      "keys": {
+        "client-secret": {
+          "generate": "random-32",
+          "minLength": 43
+        }
+      }
+    }
+  ],
+  "note": "keycloak-config-cli applies realm sterling (deploy/keycloak/realm.json) after Keycloak; installed only by deploy/keycloak/apply.mjs, which checks the realm first (D-30). With guests on, the same release grants the automatic end's admin permission after keycloak-config-cli and runs the CronJob sterling-guest-expiry (47-20)."
 }

@@ -1,0 +1,5 @@
+{
+  "name": "guest-expiry",
+  "containerfile": "deploy/images/guest-expiry/Containerfile",
+  "context": "."
+}

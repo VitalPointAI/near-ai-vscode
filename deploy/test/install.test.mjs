@@ -204,14 +204,17 @@ test('secrets: values travel only on stdin, kv is written only when absent, and 
   const bao = fakeBao();
   await writeSecrets({ site: CI, bao, run, log: () => {} });
   assert.deepEqual(bao.writes.map((write) => `${write.kvPath} cas ${write.cas}`).sort(),
-    ['apps/keycloak-bootstrap cas 0', 'apps/postgres cas 0', 'apps/storage cas 0']);
+    ['apps/guest-expiry cas 0', 'apps/keycloak-bootstrap cas 0', 'apps/postgres cas 0', 'apps/storage cas 0']);
   const key = bao.store.get('apps/storage').data.CRYPTO_KEY_VALUE;
   assert.ok(key.length >= 43, 'at least 256 random bits');
-  const values = [key, bao.store.get('apps/postgres').data['keycloak-password'], bao.store.get('apps/keycloak-bootstrap').data.password];
+  const values = [key, bao.store.get('apps/postgres').data['keycloak-password'], bao.store.get('apps/keycloak-bootstrap').data.password,
+    bao.store.get('apps/guest-expiry').data['client-secret']];
+  assert.ok(values[3].length >= 43, 'the guest expiry client secret is 256 random bits (47-20)');
   for (const value of values) assert.ok(!argvText(calls).includes(value), 'no secret value in any argv');
   const applied = calls.filter((call) => call.args.join(' ') === 'apply -f -').map((call) => JSON.parse(call.input));
   assert.deepEqual(applied.map((secret) => `${secret.metadata.namespace}/${secret.metadata.name}`),
-    ['longhorn-system/longhorn-crypto', 'sterling-identity/postgres-superuser', 'sterling-identity/keycloak-db', 'sterling-identity/keycloak-admin-bootstrap']);
+    ['longhorn-system/longhorn-crypto', 'sterling-identity/postgres-superuser', 'sterling-identity/keycloak-db', 'sterling-identity/keycloak-admin-bootstrap',
+      'sterling-identity/sterling-guest-expiry']);
   const crypto = applied[0];
   assert.equal(Buffer.from(crypto.data.CRYPTO_KEY_VALUE, 'base64').toString(), key);
   assert.equal(Buffer.from(applied[2].data.password, 'base64').toString(), values[1], 'Keycloak and Postgres share the password');

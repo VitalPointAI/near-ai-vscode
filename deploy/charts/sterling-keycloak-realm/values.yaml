@@ -4,9 +4,25 @@ realm: ""
 image: ""
 # Keycloak inside the cluster, over TLS with the site CA.
 keycloakUrl: ""
+# OpenBao inside the cluster (the automatic end of guest accounts logs in there).
+openbaoAddr: "https://openbao.sterling-openbao.svc:8200"
 resources:
   requests:
     cpu: 100m
     memory: 256Mi
   limits:
     memory: 768Mi
+# Guest accounts (47-20): the realm site file's guests settings. With maxDays 0 or absent nothing for guests is rendered. image is
+# sterling/guest-expiry by digest from deploy/bundle/images.lock.json (the release descriptor sets it).
+guests:
+  maxDays: 0
+  checkMinutes: 15
+  sessionsNamespace: theia-cloud
+  retentionDays: 0
+  image: ""
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

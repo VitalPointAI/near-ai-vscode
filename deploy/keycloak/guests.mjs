@@ -21,7 +21,7 @@
 //           enrolled guest also files an end record whose removeAfter (the end plus guests.retentionDays) is when a security officer may
 //           remove the guest's secrets in the workbench (D-84). Nothing is deleted here.
 //   list    one line per guest: username, end, status (pending-keys, active, overdue, ended), lead and approver
-//   expire  [--no-sessions] ends every guest past their end date, and fails closed on any guest holding a realm-management role, another
+//   expire  [--no-sessions] [--in-cluster] ends every guest past their end date, and fails closed on any guest holding a realm-management role, another
 //           group or an OpenBao policy or group (the automatic end runs the same function in the cluster, 47-20)
 //
 //   connection flags: --keycloak <https://keycloak.<domain>> --keycloak-token-file <file> [--realm sterling] --bao <https://openbao:8200>
@@ -37,7 +37,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GUEST_ACCOUNT_POLICY, openbaoClient, POLICIES } from '../openbao/apply.mjs';
 import { countPasswordlessKeys } from '../openbao/enrol.mjs';
-import { keycloakAdmin } from './users.mjs';
+import { clientCredentialsToken, httpCall, keycloakAdmin } from './users.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const GUESTS_GROUP = '/guests';
@@ -458,6 +458,88 @@ export function kubectlSessions(namespace, kubectl = process.env.KUBECTL || 'kub
   };
 }
 
+/** The Theia Cloud Session records (the vendored theia-cloud-crds chart serves sessions.theia.cloud at v1beta8). */
+export const SESSIONS_API = '/apis/theia.cloud/v1beta8';
+const SERVICE_ACCOUNT_DIR = '/var/run/secrets/kubernetes.io/serviceaccount';
+
+/**
+ * The job's sessions client over the Kubernetes API with its mounted ServiceAccount token: lists the Session records of one namespace and
+ * deletes the guest's by name. Only Session records: the Workspace and its volume stay.
+ */
+export function kubeSessions({ namespace, apiBase, token, caPem, call = httpCall }) {
+  const url = (suffix) => `${apiBase}${SESSIONS_API}/namespaces/${enc(namespace)}/sessions${suffix}`;
+  const headers = { authorization: `Bearer ${token}` };
+  return {
+    stop: async (email) => {
+      const listed = await call({ method: 'GET', url: url(''), headers, caPem });
+      if (listed.status >= 300) throw new Error(`listing sessions in ${namespace}: the Kubernetes API answered ${listed.status}`);
+      const mine = (listed.data?.items ?? []).filter((item) => item.spec?.user === email).map((item) => item.metadata.name);
+      for (const name of mine) {
+        const removed = await call({ method: 'DELETE', url: url(`/${enc(name)}`), headers, caPem });
+        if (removed.status >= 300 && removed.status !== 404) throw new Error(`stopping session ${name}: the Kubernetes API answered ${removed.status}`);
+      }
+      return mine.length;
+    }
+  };
+}
+
+/**
+ * The automatic end in the cluster (47-20, D-63): the CronJob sterling-guest-expiry runs `guests.mjs expire --in-cluster`. Settings come
+ * from the environment: KEYCLOAK_URL, KEYCLOAK_REALM, GUEST_EXPIRY_CLIENT_ID, GUEST_EXPIRY_CLIENT_SECRET_FILE, OPENBAO_ADDR,
+ * OPENBAO_JWT_ROLE, SITE_CA_FILE, SESSIONS_NAMESPACE and GUEST_RETENTION_DAYS. It gets the client's token (the secret only in the Basic
+ * header), logs in to OpenBao with it (role guest-expiry), ends every guest due with expireGuests, and revokes its OpenBao token. Every side
+ * is tried even when another failed: a refused OpenBao login still lets the Keycloak side end the guest. Returns { lines, errors, exit }.
+ */
+export async function expireInCluster({ env = process.env, noSessions = false, readFile = readFileSync, call = httpCall, makeKeycloak = keycloakAdmin,
+  makeBao = openbaoClient, makeSessions = kubeSessions, now = Date.now() } = {}) {
+  const lines = [];
+  const errors = [];
+  const missing = ['KEYCLOAK_URL', 'GUEST_EXPIRY_CLIENT_ID', 'GUEST_EXPIRY_CLIENT_SECRET_FILE', 'OPENBAO_ADDR', 'OPENBAO_JWT_ROLE', 'SITE_CA_FILE',
+    ...(noSessions ? [] : ['SESSIONS_NAMESPACE'])].filter((name) => !env[name]);
+  if (missing.length) return { lines, errors: [`the job's settings are missing: ${missing.join(', ')}`], exit: 1 };
+  const caPem = readFile(env.SITE_CA_FILE, 'utf8');
+  let token;
+  try {
+    token = await clientCredentialsToken({ base: env.KEYCLOAK_URL, realm: env.KEYCLOAK_REALM || 'sterling', clientId: env.GUEST_EXPIRY_CLIENT_ID,
+      secret: readFile(env.GUEST_EXPIRY_CLIENT_SECRET_FILE, 'utf8').trim(), caPem, call });
+  } catch (error) {
+    return { lines, errors: [error.message], exit: 1 };
+  }
+  const keycloak = makeKeycloak({ base: env.KEYCLOAK_URL, realm: env.KEYCLOAK_REALM || 'sterling', token, caPem });
+  const login = await call({ method: 'POST', url: new URL('/v1/auth/jwt/login', env.OPENBAO_ADDR).toString(), caPem, headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ role: env.OPENBAO_JWT_ROLE, jwt: token }) }).catch((error) => ({ status: 0, data: { errors: [error.message] } }));
+  const baoToken = login.status < 300 ? login.data?.auth?.client_token : undefined;
+  let bao;
+  if (baoToken) bao = makeBao({ addr: env.OPENBAO_ADDR, token: baoToken, caPem });
+  else {
+    errors.push(`OpenBao refused the login to role ${env.OPENBAO_JWT_ROLE} (${login.status} ${JSON.stringify(login.data?.errors ?? '')}); guests are still ended in Keycloak`);
+    const refused = { status: 403, data: { errors: ['the OpenBao login of the automatic end was refused'] } };
+    bao = async () => refused;
+  }
+  let sessions = null;
+  if (!noSessions) {
+    const host = env.KUBERNETES_SERVICE_HOST;
+    const port = env.KUBERNETES_SERVICE_PORT || '443';
+    sessions = makeSessions({ namespace: env.SESSIONS_NAMESPACE, apiBase: `https://${host?.includes(':') ? `[${host}]` : host}:${port}`, call,
+      token: readFile(`${SERVICE_ACCOUNT_DIR}/token`, 'utf8').trim(), caPem: readFile(`${SERVICE_ACCOUNT_DIR}/ca.crt`, 'utf8') });
+  }
+  try {
+    const result = await expireGuests({ keycloak, bao, sessions, now, job: 'sterling-guest-expiry', retentionDays: Number(env.GUEST_RETENTION_DAYS ?? 0) || 0 });
+    for (const entry of result.ended) lines.push(`ended ${entry.username}: ${entry.reason}`);
+    for (const entry of result.skipped) lines.push(`skipped ${entry.username}: the end moved to ${entry.until}`);
+    for (const entry of result.unchecked) errors.push(`unchecked ${entry.username}: the check for a role, another group or an OpenBao policy could not run`);
+    errors.push(...result.failures.map((failure) => `failed: ${failure}`));
+    if (!result.ended.length && !result.failures.length) lines.push('No guest is due to end.');
+  } catch (error) {
+    errors.push(`failed: ${error.message}`);
+  }
+  if (baoToken) {
+    const revoked = await bao('POST', 'auth/token/revoke-self').catch((error) => ({ status: 0, data: { errors: [error.message] } }));
+    if (revoked.status >= 300) errors.push(`revoking the job's OpenBao token: ${revoked.status}`);
+  }
+  return { lines, errors, exit: errors.length ? 1 : 0 };
+}
+
 export const SUBCOMMANDS = Object.freeze(['create', 'link', 'extend', 'end', 'list', 'expire']);
 const USAGE = `usage: guests.mjs <command> [flags] <connection flags>
   create --user <name> --email <address> --first <name> --last <name> --until <UTC time> --requested-by <lead>
@@ -468,6 +550,7 @@ const USAGE = `usage: guests.mjs <command> [flags] <connection flags>
   end    --user <name> --reason <text> [--no-sessions]      (needs --realm-site for guests.retentionDays)
   list
   expire [--no-sessions]                                     (needs --realm-site)
+  expire --in-cluster [--no-sessions]                        the CronJob sterling-guest-expiry: settings from its environment (47-20)
   connection flags: --keycloak <url> --keycloak-token-file <file> [--realm sterling] --bao <url> --ca-file <pem> --bao-token-file <file>
                     --realm-site <realm site file>`;
 
@@ -475,6 +558,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const [command, ...argv] = process.argv.slice(2);
   const option = (flag) => { const index = argv.indexOf(flag); return index < 0 ? undefined : argv[index + 1]; };
   if (!command || command === '--help' || argv.includes('--help')) { console.log(USAGE); process.exit(command ? 0 : 2); }
+  if (command === 'expire' && argv.includes('--in-cluster')) {
+    const { lines, errors, exit } = await expireInCluster({ noSessions: argv.includes('--no-sessions') });
+    for (const line of lines) console.log(line);
+    for (const line of errors) console.error(line);
+    process.exit(exit);
+  }
   try {
     if (!SUBCOMMANDS.includes(command)) throw new Error(USAGE);
     const needed = ['--keycloak', '--keycloak-token-file', '--bao', '--ca-file', '--bao-token-file', ...(['list', 'expire'].includes(command) ? [] : ['--user']),

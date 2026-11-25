@@ -5,7 +5,12 @@ passes it in with --set-file realm=...; the realm value is empty in a plain rend
 client (Secret keycloak-realm-applier), never as a person, and the sterling-sessions client secret (and the HQ broker's, when a site turns it
 on) reaches the realm only through the Job's environment ($(env:STERLING_SESSIONS_CLIENT_SECRET) in the realm, keycloak-config-cli variable
 substitution), never through this chart.
+
+With guests on (47-20), keycloak-config-cli runs first as an init container and then the step guest-expiry-permission grants the client
+sterling-guest-expiry its one admin permission (deploy/keycloak/admin-permissions.mjs), which keycloak-config-cli 6.5.1 cannot apply under
+fine-grained admin permissions v2. It signs in as the same applier client and writes only what differs. With guests off the Job is as before.
 */ -}}
+{{- $guestsOn := gt (int (.Values.guests.maxDays | default 0)) 0 }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,7 +24,8 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   # One Job per realm content, so a changed realm is applied by a new Job and an unchanged one is not re-run.
-  name: {{ printf "%s-%s" .Release.Name (.Values.realm | default "{}" | sha256sum | trunc 10) }}
+  # With guests on, the permission step's image is part of the name too, so a new image runs the step again.
+  name: {{ printf "%s-%s" .Release.Name ((ternary (printf "%s|%s" (.Values.realm | default "{}") .Values.guests.image) (.Values.realm | default "{}") $guestsOn) | sha256sum | trunc 10) }}
   labels:
     app.kubernetes.io/name: sterling-keycloak-realm
 spec:
@@ -38,7 +44,11 @@ spec:
         runAsGroup: 1001
         seccompProfile:
           type: RuntimeDefault
+      {{- if $guestsOn }}
+      initContainers:
+      {{- else }}
       containers:
+      {{- end }}
         - name: keycloak-config-cli
           image: {{ .Values.image | quote }}
           imagePullPolicy: IfNotPresent
@@ -78,12 +88,45 @@ spec:
             - name: STERLING_HQ_BROKER_CLIENT_SECRET
               valueFrom:
                 secretKeyRef: { name: keycloak-hq-broker, key: client-secret, optional: true }
+            # The automatic end's client secret (47-20; Secret sterling-guest-expiry, kept in OpenBao kv/apps/guest-expiry by install.mjs secrets).
+            - name: STERLING_GUEST_EXPIRY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: sterling-guest-expiry, key: client-secret }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - { name: realm, mountPath: /config, readOnly: true }
             - { name: truststore, mountPath: /truststore, readOnly: true }
             - { name: tmp, mountPath: /tmp }
+      {{- if $guestsOn }}
+      containers:
+        - name: guest-expiry-permission
+          image: {{ .Values.guests.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["node", "/opt/sterling/deploy/keycloak/admin-permissions.mjs"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ .Values.keycloakUrl | quote }}
+            - name: KEYCLOAK_REALM
+              value: sterling
+            - name: KEYCLOAK_CLIENTID
+              valueFrom:
+                secretKeyRef: { name: keycloak-realm-applier, key: client-id }
+            - name: KEYCLOAK_CLIENTSECRET
+              valueFrom:
+                secretKeyRef: { name: keycloak-realm-applier, key: client-secret }
+            - name: SITE_CA_FILE
+              value: /etc/site-ca/ca.crt
+          resources:
+            {{- toYaml .Values.guests.resources | nindent 12 }}
+          volumeMounts:
+            - { name: site-ca, mountPath: /etc/site-ca, readOnly: true }
+      {{- end }}
       volumes:
         - name: realm
           configMap:
@@ -96,3 +139,10 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if $guestsOn }}
+        - name: site-ca
+          configMap:
+            name: sterling-site-ca
+            items:
+              - { key: ca.crt, path: ca.crt }
+        {{- end }}

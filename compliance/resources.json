@@ -1657,6 +1657,39 @@
       "reviewedAt": "2026-11-24"
     },
     {
+      "id": "image:registry.access.redhat.com/ubi9/nodejs-22-minimal",
+      "kind": "image",
+      "where": [
+        "deploy/images/guest-expiry/Containerfile"
+      ],
+      "component": "keycloak",
+      "scope": "runtime",
+      "purpose": "Runtime base of our sterling/guest-expiry image, which runs our own Node scripts for three jobs: the automatic end of guest accounts with the realm applier's permission step (47-20), the access revocation job (47-31) and the off-site copy (47-33).",
+      "role": "Node.js runtime of the in-cluster jobs that keep identity in step. Without it an overdue guest stays enabled until an operator runs guests.mjs expire by hand, and the expiry job's one Keycloak permission could not be granted, because keycloak-config-cli cannot apply it.",
+      "architectureArea": "identity",
+      "licence": "Red Hat UBI EULA (redistributable); Node.js MIT",
+      "controls": [
+        "ac-02",
+        "ac-03",
+        "ac-06",
+        "cm-07",
+        "sc-08"
+      ],
+      "evidence": "Pinned by its linux/amd64 manifest digest in the Containerfile; the deploy-images workflow builds the image, writes a CycloneDX SBOM with syft and records a grype scan on every PR that changes it.",
+      "crypto": "uses-platform",
+      "cveResponse": "The rebuilt image is scanned by grype (report-only, --only-fixed --fail-on high) in deploy-images on every PR that changes it; the base digest is re-pinned by hand in a reviewed change when Red Hat publishes a fixed image.",
+      "airGap": "ok",
+      "fit": "pass-with-conditions",
+      "conditions": [
+        "Runs only our own zero-dependency Node scripts from deploy/ (Node built-ins only); no npm package is installed into the image and nothing is downloaded during the build.",
+        "Node's TLS and crypto (the jobs' https calls to Keycloak, OpenBao and the Kubernetes API, and the off-site copy's TLS and SigV4 signing) use the RHEL OpenSSL FIPS provider only on a host in FIPS mode; the CMVP certificate number for this image is not yet confirmed (Phase 48).",
+        "Runs as a non-root user with a read-only root filesystem, all capabilities dropped and the RuntimeDefault seccomp profile.",
+        "Built only into an image this repository builds (deploy/images, D-23): signed with your organization's cosign key in the container-release environment, with a CycloneDX SBOM and an attestation, and admitted by Kyverno's signature check."
+      ],
+      "reviewer": "Claude (agent review; owner to confirm)",
+      "reviewedAt": "2026-11-25"
+    },
+    {
       "id": "image:registry.access.redhat.com/ubi9/nginx-126",
       "kind": "image",
       "where": [

@@ -13,7 +13,7 @@ Nothing here is typed by hand. The pages are generated from the compliance fit r
 
 This catalogue is evidence for these controls in the compliance package: CM-8 and CM-8(1) (the inventory, kept current with each change), CM-7 (why each component is needed), SA-4 (the review before a component is used), SA-5 (this documentation) and SR-3 (exact pins). It is evidence only: your organization decides what it accepts.
 
-There are 141 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
+There are 142 components in 10 areas. The role of 23 of them is waiting for the owner to confirm it; each says so.
 
 ## How to read an entry
 
@@ -46,7 +46,7 @@ Every hosted site runs the same platform. RKE2 is the Kubernetes the rest runs o
 
 Keycloak signs people in with passkeys or hardware security keys only; there are no passwords. Its settings are applied from the repository as code, and its data sits in a PostgreSQL database we build ourselves. oauth2-proxy sits in front of each workbench session, so a session is reached only after sign-in.
 
-6 components: image:docker.io/adorsys/keycloak-config-cli, image:quay.io/keycloak/keycloak, image:registry.access.redhat.com/ubi9/go-toolset, image:registry.access.redhat.com/ubi9/ubi-minimal, chart:keycloakx, tool:postgresql.
+7 components: image:docker.io/adorsys/keycloak-config-cli, image:quay.io/keycloak/keycloak, image:registry.access.redhat.com/ubi9/go-toolset, image:registry.access.redhat.com/ubi9/nodejs-22-minimal, image:registry.access.redhat.com/ubi9/ubi-minimal, chart:keycloakx, tool:postgresql.
 
 ### [Secrets and keys](./secrets-and-keys.md)
 

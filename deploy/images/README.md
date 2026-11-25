@@ -16,6 +16,7 @@ A folder with only a Containerfile is a set of pinned base stages waiting for it
 | `openbao`, `openbao-softhsm` (test scope only) | built (`image.json`); `openbao-softhsm` builds on the same pinned upstream base as `openbao`, not on our image, because the CI builds every image in parallel | 47-07 |
 | `postgres` | built (`image.json`; the pinned PGDG RPMs and key from the `postgresql` pin, signature-checked) | 47-11 |
 | `hub` | `image.json` only, pointing at the unchanged `hub/Dockerfile` with context `.` (D-45, D-46) | 47-11 |
+| `guest-expiry` | built (`image.json`, context `.`): our Node scripts from `deploy/` on the UBI 9 Node.js 22 minimal runtime, for the automatic end of guest accounts and the realm applier's permission step | 47-20 |
 
 ## `image.json`
 
