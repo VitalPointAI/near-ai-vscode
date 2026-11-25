@@ -145,6 +145,12 @@ export function closureOf(repoRoot: string, start: readonly string[]): Closure {
  */
 export const HUB_TRUST_SIDE: readonly string[] = ['domain/credentials/', 'domain/did/', 'domain/gate/credentialsSection', 'domain/gate/enrolment'];
 
+/** The replica hub-side modules alone (HUB_SIDE) and everything they import: the part of the closure that must never reach src/domain/gate. */
+export function replicaSideClosure(repoRoot: string): string[] {
+  const hubSide = readHubSide(repoRoot);
+  return closureOf(repoRoot, sourcesUnder(repoRoot, REPLICA).filter((file) => isHubSide(hubSide, stemOf(file)))).files;
+}
+
 /** The hub-side modules and everything they import, value or type-only, as files under src. */
 export function hubSideClosure(repoRoot: string): string[] {
   const hubSide = readHubSide(repoRoot);
