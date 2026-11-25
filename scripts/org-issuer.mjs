@@ -25,6 +25,21 @@
 // An enrolment file is at most 64 KiB: when the first rules do not fit, enrol with a smaller first set and send the rest with sign-layer (up to 1 MiB).
 // For rotate, the new key's passphrase comes from NEAR_ORG_ISSUER_NEW_PASSPHRASE or --new-passphrase-file, else it is the same passphrase.
 //
+// Your organization's root identity (Phase 71, 71-10; D-07, D-13), made in a key ceremony on the same offline computer. Its keys are DID key files:
+// sealed exactly like the rules key file, but of their own kind, so the rules key can never sign as the root identity or the other way round
+// (owner item 4: one compromise does not cover rules and identities).
+//
+//   node scripts/org-issuer.mjs create-did --key <root key file> --next-key <next key file> --domain <host> --out <name.did.jsonl> [--path org]
+//   node scripts/org-issuer.mjs rotate-did --log <name.did.jsonl> --key <next key file> --next-key <new next key file> --out <name.did.jsonl>
+//   node scripts/org-issuer.mjs issue-role --key <root key file> --log <name.did.jsonl> --type <role type> --subject <person did:webvh> \
+//     --claims <claims.json> --status <revocation list id>#<index> --suspension <suspension list id>#<index> --out <name.near-vc> [--days 365]
+//
+// create-did makes both key files (never over an existing file) and the root's did:webvh log, with pre-rotation on: the next key's hash is in
+// nextKeyHashes, so only that key can make the next change. rotate-did moves the root to that key and commits to a new next key; any other key is
+// refused. issue-role signs a role credential (IssuerRoleCredential, SecurityContactCredential, ReleaseAuthorityCredential,
+// ClassificationAuthorityCredential, RoleCredential) for a person's did:webvh only, never a did:key (devices and agents never issue). Its status
+// indexes come from the operator, because this computer has no hub; revoke through the officers' revocation card (71-12).
+//
 // Exit codes: 0 done, 1 refused (one plain sentence on stderr, nothing written), 2 usage.
 import { createCipheriv, createDecipheriv, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, scryptSync, sign as cryptoSign } from 'node:crypto';
 import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -34,6 +49,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEY_KIND = 'near-ai-org-issuer-key';
+const DID_KEY_KIND = 'near-ai-org-did-key';
 const KEY_FILE_VERSION = 2;
 /**
  * WR-04: the one sealing the key file accepts. Fixed, not read from the file, so a file that names a cheaper cost is refused rather than opened.
@@ -46,7 +62,10 @@ const KEY_FILE_FIELDS = ['createdAt', 'kind', 'privateKey', 'publicKey', 'v'];
 const MIN_PASSPHRASE = 12;
 const MAX_KEY_FILE_BYTES = 16 * 1024;
 const MAX_INPUT_BYTES = 2 * 1024 * 1024;
-const DAY_LIMITS = { layer: 366, enrolment: 90 };
+const DAY_LIMITS = { layer: 366, enrolment: 90, role: 731 };
+const DID_LOG_EXTENSION = '.did.jsonl';
+const CREDENTIAL_FILE_EXTENSION = '.near-vc';
+const ROOT_METHOD = 'root';
 
 class Refusal extends Error {}
 class Usage extends Error {}
@@ -61,7 +80,13 @@ function loadDist() {
     return {
       enrolment: require(path.join(ROOT, 'dist', 'domain', 'gate', 'enrolment.js')),
       canonical: require(path.join(ROOT, 'dist', 'domain', 'team', 'canonical.js')),
-      policyDocument: require(path.join(ROOT, 'dist', 'domain', 'gate', 'policyDocument.js'))
+      policyDocument: require(path.join(ROOT, 'dist', 'domain', 'gate', 'policyDocument.js')),
+      webvh: require(path.join(ROOT, 'dist', 'domain', 'did', 'didWebvh.js')),
+      profile: require(path.join(ROOT, 'dist', 'domain', 'credentials', 'profile.js')),
+      multibase: require(path.join(ROOT, 'dist', 'domain', 'credentials', 'multibase.js')),
+      context: require(path.join(ROOT, 'dist', 'domain', 'credentials', 'context.js')),
+      types: require(path.join(ROOT, 'dist', 'domain', 'credentials', 'types.js')),
+      labels: require(path.join(ROOT, 'dist', 'domain', 'gate', 'labels.js'))
     };
   } catch {
     usage('Run npm run compile first: this tool uses the compiled signer in dist/.');
@@ -78,6 +103,12 @@ const COMMANDS = {
   rotate: {
     required: ['--key', '--new-key', '--organization', '--rules', '--out', '--serial'],
     optional: ['--days', '--layer-days', '--passphrase-file', '--new-passphrase-file']
+  },
+  'create-did': { required: ['--key', '--next-key', '--domain', '--out'], optional: ['--path', '--passphrase-file'] },
+  'rotate-did': { required: ['--log', '--key', '--next-key', '--out'], optional: ['--passphrase-file'] },
+  'issue-role': {
+    required: ['--key', '--log', '--type', '--subject', '--claims', '--status', '--suspension', '--out'],
+    optional: ['--days', '--passphrase-file']
   }
 };
 
@@ -159,19 +190,19 @@ function wrappingKey(passphrase, salt) {
 }
 
 /** Ties the ciphertext to the public key and the sealing it names, so neither can be swapped without the open failing. */
-function sealedHeader(publicKey, sealed) {
-  return Buffer.from(JSON.stringify([KEY_KIND, KEY_FILE_VERSION, publicKey, sealed.kdf, sealed.N, sealed.r, sealed.p, sealed.salt, sealed.cipher, sealed.nonce]), 'utf8');
+function sealedHeader(publicKey, sealed, kind = KEY_KIND) {
+  return Buffer.from(JSON.stringify([kind, KEY_FILE_VERSION, publicKey, sealed.kdf, sealed.N, sealed.r, sealed.p, sealed.salt, sealed.cipher, sealed.nonce]), 'utf8');
 }
 
 /** Seals the 32-byte private key with the passphrase. */
-function seal(publicKey, privateKeyBytes, passphrase) {
+function seal(publicKey, privateKeyBytes, passphrase, kind = KEY_KIND) {
   const salt = randomBytes(SEAL.saltBytes);
   const nonce = randomBytes(SEAL.nonceBytes);
   const sealed = { kdf: SEAL.kdf, N: SEAL.N, r: SEAL.r, p: SEAL.p, salt: salt.toString('base64url'), cipher: SEAL.cipher, nonce: nonce.toString('base64url') };
   const key = wrappingKey(passphrase, salt);
   try {
     const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: SEAL.tagBytes });
-    cipher.setAAD(sealedHeader(publicKey, sealed));
+    cipher.setAAD(sealedHeader(publicKey, sealed, kind));
     const ciphertext = Buffer.concat([cipher.update(privateKeyBytes), cipher.final()]);
     return { ...sealed, ciphertext: ciphertext.toString('base64url'), tag: cipher.getAuthTag().toString('base64url') };
   } finally {
@@ -180,12 +211,17 @@ function seal(publicKey, privateKeyBytes, passphrase) {
 }
 
 /** The key file's public part and sealed private key, checked; the private key stays sealed. */
-function readKeyFile(dist, file) {
+function readKeyFile(dist, file, kind = KEY_KIND) {
   const text = readSmall(file, MAX_KEY_FILE_BYTES, 'key file');
   const name = path.basename(file);
   let key;
   try { key = JSON.parse(text); } catch { refuse(`The key file ${name} is not a key file from this tool.`); }
-  if (key === null || typeof key !== 'object' || Array.isArray(key) || key.kind !== KEY_KIND) refuse(`The key file ${name} is not a key file from this tool.`);
+  if (key !== null && typeof key === 'object' && !Array.isArray(key) && (key.kind === KEY_KIND || key.kind === DID_KEY_KIND) && key.kind !== kind) {
+    refuse(kind === DID_KEY_KIND
+      ? `The key file ${name} is your organization's rules key, not a root identity key. Nothing was written: the two are kept apart.`
+      : `The key file ${name} is a root identity key, not your organization's rules key. Nothing was written: the two are kept apart.`);
+  }
+  if (key === null || typeof key !== 'object' || Array.isArray(key) || key.kind !== kind) refuse(`The key file ${name} is not a key file from this tool.`);
   // WR-04: an unencrypted key, or the older PKCS#8 file this tool once wrote, is never opened, so a key someone decrypted "for now" stops working.
   if (key.v !== KEY_FILE_VERSION || Object.prototype.hasOwnProperty.call(key, 'privateKeyPem') || typeof key.privateKey === 'string') {
     refuse(`The key file ${name} does not keep its key sealed with scrypt and AES-256-GCM as this tool does. Nothing was written: make a new key with create-key and enrol with it, or hand over to it with rotate.`);
@@ -203,14 +239,14 @@ function readKeyFile(dist, file) {
 }
 
 /** Opens the key with its passphrase and returns the one signer shape every builder takes. The private key never leaves this function's closure. */
-function signerFor(dist, file, passphrase) {
-  const key = readKeyFile(dist, file);
+function signerFor(dist, file, passphrase, kind = KEY_KIND) {
+  const key = readKeyFile(dist, file, kind);
   const sealed = key.privateKey;
   const wrap = wrappingKey(passphrase, Buffer.from(sealed.salt, 'base64url'));
   let seed;
   try {
     const decipher = createDecipheriv('aes-256-gcm', wrap, Buffer.from(sealed.nonce, 'base64url'), { authTagLength: SEAL.tagBytes });
-    decipher.setAAD(sealedHeader(key.publicKey, sealed));
+    decipher.setAAD(sealedHeader(key.publicKey, sealed, kind));
     decipher.setAuthTag(Buffer.from(sealed.tag, 'base64url'));
     seed = Buffer.concat([decipher.update(Buffer.from(sealed.ciphertext, 'base64url')), decipher.final()]);
   } catch {
@@ -269,16 +305,15 @@ function built(make) {
 }
 
 // ---- Commands -----------------------------------------------------------------------------------------------------------------------------------------
-function createKey(dist, options) {
-  const out = options['--out'];
-  const passphrase = passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options);
+/** Makes and seals a new key file (never over an existing file), opens it again with the passphrase, and returns its public key. */
+function makeKeyFile(dist, out, passphrase, kind = KEY_KIND) {
   if (existsSync(out)) refuse(`${path.basename(out)} already exists. Nothing was written: a key file is never replaced.`);
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   const raw = publicKey.export({ format: 'jwk' }).x;
   const seed = Buffer.from(privateKey.export({ format: 'jwk' }).d, 'base64url');
   let sealed;
-  try { sealed = seal(raw, seed, passphrase); } finally { seed.fill(0); }
-  const file = { v: KEY_FILE_VERSION, kind: KEY_KIND, publicKey: raw, privateKey: sealed, createdAt: new Date().toISOString() };
+  try { sealed = seal(raw, seed, passphrase, kind); } finally { seed.fill(0); }
+  const file = { v: KEY_FILE_VERSION, kind, publicKey: raw, privateKey: sealed, createdAt: new Date().toISOString() };
   try {
     writeFileSync(out, `${JSON.stringify(file, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   } catch (error) {
@@ -289,7 +324,7 @@ function createKey(dist, options) {
   // use to anyone (nothing has been signed with it yet), so it is removed rather than left to be kept offline by mistake.
   let opened;
   try {
-    opened = signerFor(dist, out, passphrase);
+    opened = signerFor(dist, out, passphrase, kind);
   } catch (error) {
     opened = undefined;
     if (!(error instanceof Refusal)) throw error;
@@ -298,6 +333,13 @@ function createKey(dist, options) {
     try { unlinkSync(out); } catch { /* reported below */ }
     refuse(`${path.basename(out)} did not open again with the passphrase and was removed. Make a new key file.`);
   }
+  return raw;
+}
+
+function createKey(dist, options) {
+  const out = options['--out'];
+  const passphrase = passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options);
+  const raw = makeKeyFile(dist, out, passphrase);
   console.log(`Wrote ${path.basename(out)}. Keep it offline, with its passphrase stored apart from it.`);
   printWords(dist, raw, 'Your organization\'s key reads as these twelve words:');
 }
@@ -355,18 +397,151 @@ function enrolmentFile(dist, options, rotation) {
     : 'Read these twelve words to each person when they open the file:');
 }
 
+// ---- Your organization's root identity (71-10) ---------------------------------------------------------------------------------------------------------
+/** The signer shape the credential and DID builders take, over an opened DID key file. */
+function credentialSigner(dist, signer, verificationMethod) {
+  return { verificationMethod, suite: 'eddsa-jcs-2022', sign: async (bytes) => new Uint8Array(Buffer.from(signer.sign(Buffer.from(bytes)), 'base64url')) };
+}
+
+const multikeyOf = (dist, publicKey) => dist.multibase.encodePublicKeyMultibase('Ed25519', new Uint8Array(Buffer.from(publicKey, 'base64url')));
+
+/** The root's DID document: one Multikey, the root key in force, for assertions and authentication. */
+function rootDocument(multikey) {
+  return (did) => ({
+    '@context': ['https://www.w3.org/ns/did/v1', 'https://w3id.org/security/multikey/v1'], id: did, controller: did,
+    verificationMethod: [{ id: `${did}#${ROOT_METHOD}`, type: 'Multikey', controller: did, publicKeyMultibase: multikey }],
+    authentication: [`${did}#${ROOT_METHOD}`], assertionMethod: [`${did}#${ROOT_METHOD}`]
+  });
+}
+
+function didOut(options, extension) {
+  const out = options['--out'];
+  if (!out.endsWith(extension)) usage(`--out must name a file ending with ${extension}.`);
+  if (existsSync(out)) refuse(`${path.basename(out)} already exists. Nothing was written: choose another name.`);
+  return out;
+}
+
+/** The root's verified log state from a log file. */
+function readRootLog(dist, file) {
+  const text = readSmall(file, 1024 * 1024, 'identity log');
+  const verified = dist.webvh.verifyWebvhLog(text, { now: Date.now() });
+  if (!verified.ok) refuse(`The identity log ${path.basename(file)} does not verify: ${verified.message}`);
+  return { text, state: verified.state };
+}
+
+function checkLog(dist) {
+  return (candidate) => {
+    const verified = dist.webvh.verifyWebvhLog(candidate, { now: Date.now() });
+    return verified.ok ? undefined : verified.message;
+  };
+}
+
+async function createDid(dist, options) {
+  const out = didOut(options, DID_LOG_EXTENSION);
+  const domain = options['--domain'];
+  const segments = (options['--path'] ?? 'org').split('/');
+  if (!/^[a-z0-9.-]{1,253}$/.test(domain) || !segments.every((part) => /^[a-z0-9][a-z0-9-]{0,62}$/.test(part))) {
+    usage('--domain must be a host name and --path lower-case words separated by /, for example --domain hq.example.org --path org.');
+  }
+  for (const flag of ['--key', '--next-key']) if (existsSync(options[flag])) refuse(`${path.basename(options[flag])} already exists. Nothing was written: a key file is never replaced.`);
+  const passphrase = passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options);
+  const rootPublic = makeKeyFile(dist, options['--key'], passphrase, DID_KEY_KIND);
+  const nextPublic = makeKeyFile(dist, options['--next-key'], passphrase, DID_KEY_KIND);
+  const signer = signerFor(dist, options['--key'], passphrase, DID_KEY_KIND);
+  const multikey = multikeyOf(dist, rootPublic);
+  const genesis = await dist.webvh.buildGenesisEntry({
+    domain, path: segments, updateKeys: [multikey], nextKeyHashes: [dist.webvh.nextKeyHash(multikeyOf(dist, nextPublic))], portable: false,
+    versionTime: new Date(Math.floor(Date.now() / 1000) * 1000).toISOString().replace('.000Z', 'Z'), document: rootDocument(multikey)
+  }, credentialSigner(dist, signer, `did:key:${multikey}#${multikey}`));
+  writeChecked(out, `${genesis.line}\n`, checkLog(dist));
+  console.log(`Wrote ${path.basename(out)}: your organization's root identity ${genesis.did}.`);
+  console.log(`Keep ${path.basename(options['--key'])} and ${path.basename(options['--next-key'])} offline and apart. Only the second one can make the next change.`);
+}
+
+async function rotateDid(dist, options) {
+  const out = didOut(options, DID_LOG_EXTENSION);
+  const { text, state } = readRootLog(dist, options['--log']);
+  if (existsSync(options['--next-key'])) refuse(`${path.basename(options['--next-key'])} already exists. Nothing was written: a key file is never replaced.`);
+  const passphrase = passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options);
+  const signer = signerFor(dist, options['--key'], passphrase, DID_KEY_KIND);
+  const multikey = multikeyOf(dist, signer.publicKey);
+  if (!state.parameters.nextKeyHashes.includes(dist.webvh.nextKeyHash(multikey))) {
+    refuse(`${path.basename(options['--key'])} is not the key the root identity committed to for its next change. Nothing was written.`);
+  }
+  const nextPublic = makeKeyFile(dist, options['--next-key'], passphrase, DID_KEY_KIND);
+  const update = await dist.webvh.buildUpdateEntry(state, {
+    parameters: { updateKeys: [multikey], nextKeyHashes: [dist.webvh.nextKeyHash(multikeyOf(dist, nextPublic))] },
+    versionTime: new Date(Math.max(Math.floor(Date.now() / 1000) * 1000, Date.parse(state.versions[state.versions.length - 1].versionTime) + 1000)).toISOString().replace('.000Z', 'Z'),
+    document: rootDocument(multikey)
+  }, credentialSigner(dist, signer, `did:key:${multikey}#${multikey}`));
+  const base = text.endsWith('\n') ? text : `${text}\n`;
+  writeChecked(out, `${base}${update.line}\n`, checkLog(dist));
+  console.log(`Wrote ${path.basename(out)}: your organization's root identity now uses ${path.basename(options['--key'])}.`);
+  console.log(`Keep ${path.basename(options['--next-key'])} offline: only it can make the next change. Publish the new log to your organization's server.`);
+}
+
+function statusEntry(text, purpose, flag) {
+  const at = typeof text === 'string' ? text.lastIndexOf('#') : -1;
+  const list = at > 0 ? text.slice(0, at) : '';
+  const index = at > 0 ? text.slice(at + 1) : '';
+  if (!/^https:\/\/[^\s#]{1,2000}$/.test(list) || !/^[0-9]{1,6}$/.test(index) || Number(index) >= 262144) {
+    usage(`${flag} must be a status list id and an index, for example https://hq.example.org/v1/trust/status/revocation-1#4821.`);
+  }
+  return { type: 'BitstringStatusListEntry', statusPurpose: purpose, statusListIndex: String(Number(index)), statusListCredential: list };
+}
+
+async function issueRole(dist, options) {
+  const out = didOut(options, CREDENTIAL_FILE_EXTENSION);
+  const type = options['--type'];
+  if (!dist.types.ROLE_TYPES.includes(type)) usage(`--type must be one of: ${dist.types.ROLE_TYPES.join(', ')}.`);
+  const subject = options['--subject'];
+  if (subject.startsWith('did:key:')) refuse('A role credential is only for a person\'s did:webvh. A device or an agent never issues, so it never holds a role. Nothing was written.');
+  if (!subject.startsWith('did:webvh:')) refuse('A role credential is only for a person\'s did:webvh. Nothing was written.');
+  const days = whole(options, '--days', 365, 1, DAY_LIMITS.role);
+  const claims = readJson(options['--claims'], 'claims file');
+  if (claims === null || typeof claims !== 'object' || Array.isArray(claims) || Object.prototype.hasOwnProperty.call(claims, 'id')) {
+    refuse('The claims file must be one JSON object of the role\'s claims, without an id: the tool writes the subject. Nothing was written.');
+  }
+  const revocation = statusEntry(options['--status'], 'revocation', '--status');
+  const suspension = statusEntry(options['--suspension'], 'suspension', '--suspension');
+  const { state } = readRootLog(dist, options['--log']);
+  const signer = signerFor(dist, options['--key'], passphraseFrom('NEAR_ORG_ISSUER_PASSPHRASE', '--passphrase-file', options), DID_KEY_KIND);
+  const multikey = multikeyOf(dist, signer.publicKey);
+  // The latest version of the log is the one in force; a credential is never dated before it, so a verifier finds this key at its validFrom.
+  const latest = Date.parse(state.versions[state.versions.length - 1].versionTime);
+  const now = new Date(Math.max(Math.floor(Date.now() / 1000) * 1000, latest));
+  const inForce = dist.webvh.methodsAt(state, now.getTime()).some((method) => method.publicKeyMultibase === multikey);
+  if (!inForce) refuse(`${path.basename(options['--key'])} is not the root identity's key in force. Nothing was written: use the key the latest log names.`);
+  const until = new Date(now.getTime() + days * 86_400_000);
+  const iso = (date) => date.toISOString().replace('.000Z', 'Z');
+  const scales = dist.labels.SCALE_PRESETS;
+  const credential = await built(() => dist.profile.issueCredential(credentialSigner(dist, signer, `${state.did}#${ROOT_METHOD}`), {
+    '@context': [...dist.context.CREDENTIAL_CONTEXTS], type: ['VerifiableCredential', type], issuer: state.did,
+    validFrom: iso(now), validUntil: iso(until), credentialSubject: { id: subject, ...claims }, credentialStatus: [revocation, suspension]
+  }, 'eddsa-jcs-2022', { scales })).catch((error) => refuse(`The credential could not be made: ${String(error && error.message ? error.message : error).split('\n')[0]}`));
+  const key = dist.multibase.decodePublicKeyMultibase(multikey);
+  writeChecked(out, `${JSON.stringify(credential, null, 2)}\n`, (candidate) => {
+    const verified = dist.profile.verifyCredential(JSON.parse(candidate), { scales, publicKey: key });
+    return verified.ok ? undefined : verified.message;
+  });
+  console.log(`Wrote ${path.basename(out)}: a ${type} for the person named in it, valid until ${iso(until)}. Give it to that person; it is not secret, but it is theirs.`);
+}
+
 const HANDLERS = {
   'create-key': createKey,
   words,
   'sign-layer': signLayer,
   'sign-enrolment': (dist, options) => enrolmentFile(dist, options, false),
-  rotate: (dist, options) => enrolmentFile(dist, options, true)
+  rotate: (dist, options) => enrolmentFile(dist, options, true),
+  'create-did': createDid,
+  'rotate-did': rotateDid,
+  'issue-role': issueRole
 };
 
 try {
   const { command, options } = parseArgs(process.argv.slice(2));
   const dist = loadDist();
-  HANDLERS[command](dist, options);
+  await HANDLERS[command](dist, options);
   process.exitCode = 0;
 } catch (error) {
   if (error instanceof Usage) {
