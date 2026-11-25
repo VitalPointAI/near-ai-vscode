@@ -12,7 +12,7 @@ test('package.json declares the same agent defaults the code and the live tests 
   const configuration = pkg.contributes.configuration;
   const props = (Array.isArray(configuration) ? configuration[0] : configuration).properties as Record<string, { default: unknown }>;
   const expected: Record<string, unknown> = {
-    'nearAi.agent.deepModel': AGENT_DEFAULTS.tiers.deep, 'nearAi.agent.standardModel': AGENT_DEFAULTS.tiers.standard, 'nearAi.agent.fastModel': AGENT_DEFAULTS.tiers.fast,
+    'nearAi.agent.deepModel': AGENT_DEFAULTS.reportFallback.deep, 'nearAi.agent.standardModel': AGENT_DEFAULTS.reportFallback.standard, 'nearAi.agent.fastModel': AGENT_DEFAULTS.reportFallback.fast,
     'nearAi.agent.maxTurns': AGENT_DEFAULTS.maxTurns, 'nearAi.agent.maxParallelAgents': AGENT_DEFAULTS.maxParallelAgents,
     'nearAi.agent.maxRunCostUsd': AGENT_DEFAULTS.maxRunCostUsd, 'nearAi.agent.maxRunTokens': AGENT_DEFAULTS.maxRunTokens,
     'nearAi.agent.maxOutputTokens': AGENT_DEFAULTS.maxOutputTokens, 'nearAi.agent.approvalTimeoutMinutes': AGENT_DEFAULTS.approvalTimeoutMinutes,

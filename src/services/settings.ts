@@ -69,7 +69,7 @@ export function readModelTiers(): { deep: string; standard: string; fast: string
     const value = resolveSetting(inspectedSetting(configuration, key), projectString(key), configuration.get<unknown>(key, fallback));
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
   };
-  return { deep: pick('agent.deepModel', AGENT_DEFAULTS.tiers.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.tiers.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.tiers.fast) };
+  return { deep: pick('agent.deepModel', AGENT_DEFAULTS.reportFallback.deep), standard: pick('agent.standardModel', AGENT_DEFAULTS.reportFallback.standard), fast: pick('agent.fastModel', AGENT_DEFAULTS.reportFallback.fast) };
 }
 
 /** The auto mode's safety model (nearAi.agent.safetyModel); empty means the fast tier's model. */
