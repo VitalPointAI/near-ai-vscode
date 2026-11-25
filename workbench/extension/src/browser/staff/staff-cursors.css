@@ -1,0 +1,62 @@
+/*
+ * Other people's cursors and Show Who Wrote This in bound editors (Phase 33 D-18, D-56). Eight fixed colour slots from theme tokens; a person's
+ * name is never in a class or a rule here, only in the hover and the injected label, as plain text. Colour is never the only carrier: the label,
+ * the hover, the gutter tooltip and the Staff Room's people list say who it is.
+ */
+.sterling-cursor-slot-0 { --sterling-cursor: var(--theia-charts-blue); }
+.sterling-cursor-slot-1 { --sterling-cursor: var(--theia-charts-green); }
+.sterling-cursor-slot-2 { --sterling-cursor: var(--theia-charts-orange); }
+.sterling-cursor-slot-3 { --sterling-cursor: var(--theia-charts-purple); }
+.sterling-cursor-slot-4 { --sterling-cursor: var(--theia-charts-yellow); }
+.sterling-cursor-slot-5 { --sterling-cursor: var(--theia-charts-red); }
+.sterling-cursor-slot-6 { --sterling-cursor: var(--theia-terminal-ansiCyan, var(--theia-charts-blue)); }
+.sterling-cursor-slot-7 { --sterling-cursor: var(--theia-terminal-ansiMagenta, var(--theia-charts-purple)); }
+
+.monaco-editor .sterling-cursor-selection {
+  background-color: color-mix(in srgb, var(--sterling-cursor) 22%, transparent);
+}
+
+.monaco-editor .sterling-cursor-caret {
+  position: relative;
+  border-left: 2px solid var(--sterling-cursor);
+  margin-left: -1px;
+  margin-right: -1px;
+  box-sizing: border-box;
+}
+
+/* The name after the caret: a small lifted tag in the person's colour, readable in light, dark and high contrast themes. */
+.monaco-editor .sterling-cursor-label {
+  font-size: 0.8em;
+  font-family: var(--theia-ui-font-family);
+  padding: 0 4px;
+  margin-left: 2px;
+  border-radius: 3px;
+  color: var(--theia-editor-background);
+  background-color: var(--sterling-cursor);
+  box-shadow: 0 1px 2px var(--theia-widget-shadow);
+}
+body.theia-hc .monaco-editor .sterling-cursor-label,
+body.theia-hc-light .monaco-editor .sterling-cursor-label {
+  color: var(--theia-editor-foreground);
+  background-color: var(--theia-editor-background);
+  border: 1px solid var(--sterling-cursor);
+  box-shadow: none;
+}
+
+/* Show Who Wrote This: a bar in the gutter per author, in the slot's colour; text no update backs gets the warning colour. */
+.monaco-editor .sterling-wwt {
+  width: 4px !important;
+  margin-left: 3px;
+  border-radius: 2px;
+}
+.sterling-wwt-slot-0 { background-color: var(--theia-charts-blue); }
+.sterling-wwt-slot-1 { background-color: var(--theia-charts-green); }
+.sterling-wwt-slot-2 { background-color: var(--theia-charts-orange); }
+.sterling-wwt-slot-3 { background-color: var(--theia-charts-purple); }
+.sterling-wwt-slot-4 { background-color: var(--theia-charts-yellow); }
+.sterling-wwt-slot-5 { background-color: var(--theia-charts-red); }
+.sterling-wwt-slot-6 { background-color: var(--theia-terminal-ansiCyan, var(--theia-charts-blue)); }
+.sterling-wwt-slot-7 { background-color: var(--theia-terminal-ansiMagenta, var(--theia-charts-purple)); }
+.sterling-wwt-unverified {
+  background: repeating-linear-gradient(45deg, var(--theia-editorWarning-foreground) 0 3px, transparent 3px 6px);
+}

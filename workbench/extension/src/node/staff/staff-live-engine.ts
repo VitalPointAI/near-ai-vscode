@@ -15,6 +15,8 @@
  *   join       a join-request frame reaches the clients only on a lead or deputy device (D-12)
  *   keys       the switch to post-quantum keys (33.2 D-05): this computer's cards, and switchToV2, moveCellsToV2 and giveKeys for the Staff Room
  *   update     a project that requires a feature this build lacks stops with the D-67 sentence; its store keeps every entry
+ *   presence   one LivePresence per project (33-12, run here by 33-29): sealed heartbeats and cursors through the replicator, the people list
+ *              to listeners (the Staff Room, the editor binding's cursors); nothing about it is stored
  *   stop       replicators stopped, projects closed, the session keys and the opened encryption key dropped
  *
  * No log line holds project text, a key, a token or a name. Nothing here imports Theia.
@@ -22,7 +24,9 @@
 import type { SessionKeys } from './session-keys.js';
 import type { OpenedEncryptionKey } from './encryption-key.js';
 import type { SecretStorageLike } from './keystore-secrets.js';
-import type { EngineHubStanding, EngineLiveStatus, EngineProject, EngineReplicator, StaffEngine } from './staff-engine.js';
+import type {
+  EngineHubStanding, EngineLiveStatus, EnginePresencePerson, EnginePresenceTimers, EngineProject, EngineProjectPresence, EngineReplicator, StaffEngine,
+} from './staff-engine.js';
 import type { StaffJoinRequest, StaffStatusRow } from '../../common/staff-live.js';
 import { STAFF_ROOM_TEXT } from '../../common/staff-room.js';
 import { publishPersonKem } from './person-kem.js';
@@ -46,6 +50,8 @@ export interface StaffLiveEngineOptions {
   /** Replicator options the tests set: the transport, the timers and the clock. */
   readonly replicator?: Readonly<Record<string, unknown>>;
   readonly now?: () => Date;
+  /** The clock and timers presence runs on (the tests set them). */
+  readonly presence?: { readonly now?: () => number; readonly timers?: EnginePresenceTimers };
   /** One short line per step; never project text, a key, a token or a name. */
   readonly log?: (line: string) => void;
 }
@@ -55,6 +61,8 @@ interface LiveProject {
   readonly project: EngineProject;
   readonly deps: object;
   replicator?: EngineReplicator;
+  presence?: EngineProjectPresence;
+  people: EnginePresencePerson[];
   row: StaffStatusRow;
   pulled: number;
   bound: Set<string>;
@@ -86,6 +94,7 @@ function keysAnswer(result: unknown): StaffKeysAnswer {
 
 type RowListener = (row: StaffStatusRow) => void;
 type JoinListener = (request: StaffJoinRequest) => void;
+type PeopleListener = (project: string, people: readonly EnginePresencePerson[]) => void;
 
 /** In a hosted session the store's mark is trusted by the person's key store path, which only the person's token writes: any session key signs it. */
 const HOSTED_MARK_KEYS = (): Promise<() => { state: 'active' }> => Promise.resolve(() => ({ state: 'active' as const }));
@@ -94,6 +103,7 @@ export class StaffLiveEngine {
   private readonly open = new Map<string, LiveProject>();
   private readonly rowListeners = new Set<RowListener>();
   private readonly joinListeners = new Set<JoinListener>();
+  private readonly peopleListeners = new Set<PeopleListener>();
   private readonly certificates = new Map<string, unknown>();
   private started = false;
   private stopped = false;
@@ -114,11 +124,7 @@ export class StaffLiveEngine {
   public async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
-    for (const live of this.open.values()) {
-      for (const subscription of live.subscriptions) subscription.dispose();
-      await live.replicator?.stop();
-      await live.project.close();
-    }
+    for (const live of this.open.values()) await this.close(live);
     this.open.clear();
     this.options.hosted?.keys.stop();
     this.options.hosted?.encryption.drop();
@@ -157,9 +163,7 @@ export class StaffLiveEngine {
     const live = this.open.get(root);
     if (live !== undefined) {
       this.open.delete(root);
-      for (const subscription of live.subscriptions) subscription.dispose();
-      await live.replicator?.stop();
-      await live.project.close();
+      await this.close(live);
     }
     await this.startRoot(root);
   }
@@ -228,12 +232,73 @@ export class StaffLiveEngine {
     return { dispose: () => { this.joinListeners.delete(listener); } };
   }
 
+  /** The people list of an open project, each time it changes (33-29: cursors; the Staff Room's people). */
+  public onPeople(listener: PeopleListener): { dispose(): void } {
+    this.peopleListeners.add(listener);
+    return { dispose: () => { this.peopleListeners.delete(listener); } };
+  }
+
+  /** The people list of an open project now, or undefined when presence does not run for it. */
+  public people(id: string): readonly EnginePresencePerson[] | undefined {
+    const live = this.find(id);
+    return live?.presence === undefined ? undefined : live.people;
+  }
+
+  /** This person's selection in a product of the project, as Yjs relative positions; at most 10 sends a second (LivePresence). */
+  public cursor(id: string, cell: string, product: string, anchor?: string, head?: string): void {
+    const presence = this.find(id)?.presence;
+    if (presence === undefined) return;
+    if (presence.holds(cell)) {
+      presence.presence.cursor(cell, product, anchor, head);
+      return;
+    }
+    // A cell this computer came to hold since presence last read the project (a grant, a product made here): read it again first.
+    void presence.refresh().then(() => presence.presence.cursor(cell, product, anchor, head), () => undefined);
+  }
+
+  /** This person left the product they worked in. */
+  public idle(id: string): void {
+    this.find(id)?.presence?.presence.idle();
+  }
+
   private find(id: string): LiveProject | undefined {
     return [...this.open.values()].find((live) => live.project.projectId === id);
   }
 
   private log(line: string): void {
     this.options.log?.(line);
+  }
+
+  private async close(live: LiveProject): Promise<void> {
+    for (const subscription of live.subscriptions) subscription.dispose();
+    await live.presence?.presence.stop().catch(() => undefined);
+    live.presence = undefined;
+    await live.replicator?.stop();
+    await live.project.close();
+  }
+
+  /** Presence over the project, sent by the writer the replicator signs as (the session key in a hosted session). */
+  private async startPresence(live: LiveProject, replicator: EngineReplicator, signer: { readonly publicKey: string }): Promise<void> {
+    const { engine } = this.options;
+    const { postPresence, leavePresence } = replicator;
+    if (postPresence === undefined || leavePresence === undefined) return;
+    try {
+      const presence = await engine.openProjectPresence(live.project as never, {
+        send: { postPresence: (cell, sealed) => postPresence.call(replicator, cell, sealed), leavePresence: (cell) => leavePresence.call(replicator, cell) },
+        writer: engine.writerIdOf(signer.publicKey),
+        setPeople: (people) => {
+          live.people = people;
+          for (const listener of [...this.peopleListeners]) listener(live.project.projectId, people);
+        },
+        ...(this.options.presence?.now === undefined ? {} : { now: this.options.presence.now }),
+        ...(this.options.presence?.timers === undefined ? {} : { timers: this.options.presence.timers }),
+      });
+      if (this.stopped) return;
+      live.presence = presence;
+      presence.presence.start();
+    } catch {
+      this.log('staff: presence did not start for a shared project');
+    }
   }
 
   private depsFor(): object {
@@ -276,6 +341,7 @@ export class StaffLiveEngine {
     const project = opened;
     const live: LiveProject = {
       root, project, deps, pulled: 0, bound: new Set(), subscriptions: [],
+      people: [],
       row: { project: project.projectId, root, state: 'connecting', sentence: engine.syncSentence({ state: 'connecting', findings: [] } as never) },
     };
     this.open.set(root, live);
@@ -301,6 +367,7 @@ export class StaffLiveEngine {
       isLeadDevice: () => this.isLeadDevice(project),
       onJoinRequest: (invite?: string) => this.joinRequest(project, invite),
       onCheckpoint: () => { void this.compact(live, hub, memory); },
+      onPresence: (frame: Record<string, unknown>) => { live.presence?.presence.receive(frame); },
       ...(this.options.now === undefined ? {} : { now: this.options.now }),
       log: (line: string) => this.log(`staff: ${line}`),
       ...this.options.replicator,
@@ -308,6 +375,7 @@ export class StaffLiveEngine {
     live.replicator = replicator;
     live.subscriptions.push(replicator.onStatus((status) => { void this.statusChanged(live, status); }));
     await replicator.start();
+    await this.startPresence(live, replicator, signer);
     await this.statusChanged(live, replicator.status);
   }
 
@@ -391,6 +459,8 @@ export class StaffLiveEngine {
     }
     if (status.pulled > live.pulled) {
       live.pulled = status.pulled;
+      // What this computer holds may have changed (a grant, a roster change): presence reads it again.
+      await live.presence?.refresh().catch(() => undefined);
       await this.projectFiles(live);
     }
   }

@@ -10,6 +10,10 @@
  *   the projector leaves bound products to their binding (StaffLiveEngine.setBound); a save flushes the binding first, so the saved file is the
  *     text the projector would write, never a conflict
  *   a closed connection detaches every document of that tab
+ *   cursors (33-29, D-18, D-56): a tab's selection becomes Yjs relative positions (EditorBinding.relativeAt) and goes to the live engine's
+ *     presence at most 10 times a second, the latest always last; other people's cursors in a bound product come back as offsets in this
+ *     binding's text (EditorBinding.indexOf), again after every change, so a cursor moves with the text. Nothing about cursors is stored.
+ *   Show Who Wrote This (33-29): the fold's author spans of the product, labelled by the executed whoWroteThis.ts, as ranges of the model
  *
  * No log line holds text, a key, a token or a name. Nothing here imports Theia's browser code.
  */
@@ -18,22 +22,38 @@ import { fileURLToPath } from 'node:url';
 import type { interfaces } from '@theia/core/shared/inversify';
 import type { RpcProxy } from '@theia/core/lib/common/messaging/index.js';
 import {
-  OTHER_TAB_TEXT, STAFF_BINDING_PATH, StaffBindingServer, type AttachAnswer, type BindingEdit, type BindingReason, type StaffBindingClient,
+  OTHER_TAB_TEXT, STAFF_BINDING_PATH, STAFF_BINDING_TEXT, StaffBindingServer, type AttachAnswer, type AttributionAnswer, type BindingEdit,
+  type BindingReason, type RemoteCursor, type StaffBindingClient,
 } from '../../common/staff-binding.js';
 import { bindBackendService } from '../backend-service.js';
 import { RemoteBoundDocument } from './remote-bound-document.js';
-import type { EngineEditorBinding, EngineProject, StaffEngine } from './staff-engine.js';
+import type { EngineEditorBinding, EnginePresencePerson, EnginePresenceTimers, EngineProject, StaffEngine } from './staff-engine.js';
 import type { StaffLiveEngine } from './staff-live-engine.js';
 
-/** What the binding reads of the session's live engine. */
-export type BindingLiveSource = Pick<StaffLiveEngine, 'projects' | 'project' | 'projectionInput' | 'setBound' | 'localAppended' | 'onStatus'>;
+/** What the binding reads of the session's live engine; presence (33-29) is optional, so a source without it binds as before. */
+export type BindingLiveSource = Pick<StaffLiveEngine, 'projects' | 'project' | 'projectionInput' | 'setBound' | 'localAppended' | 'onStatus'>
+  & Partial<Pick<StaffLiveEngine, 'onPeople' | 'people' | 'cursor' | 'idle'>>;
+
+/** The shortest time between two selections sent on (D-18: at most 10 a second). */
+export const SELECTION_INTERVAL_MS = 100;
 
 export interface StaffBindingServiceOptions {
   /** The session's live engine once it has started. */
   readonly live: () => BindingLiveSource | undefined;
   /** The engine bundle's binding names. */
-  readonly engine: Pick<StaffEngine, 'EditorBinding' | 'RESYNC_LOG_LINE' | 'projectProductStates' | 'projectProductFile' | 'staffProductPath'>;
+  readonly engine: Pick<StaffEngine, 'EditorBinding' | 'RESYNC_LOG_LINE' | 'projectProductStates' | 'projectProductFile' | 'staffProductPath'>
+    & Partial<Pick<StaffEngine, 'productOutput' | 'namesAtRegistration' | 'authorRows'>>;
+  /** The clock and timers selections are paced by (the tests set them). */
+  readonly now?: () => number;
+  readonly timers?: EnginePresenceTimers;
   readonly log?: (line: string) => void;
+}
+
+/** A tab's selection waiting for its turn to go to presence. */
+interface PendingSelection {
+  anchor: number;
+  head: number;
+  timer?: unknown;
 }
 
 /** A product of an open shared project, as a bound model names it. */
@@ -52,9 +72,15 @@ interface Attachment {
   readonly key: string;
   readonly projectId: string;
   readonly product: string;
+  readonly stream: string;
   mirror?: RemoteBoundDocument;
   binding?: EngineEditorBinding;
   header?: string;
+  /** The cursors last sent to the tab, to send only a change. */
+  cursorsSent?: string;
+  /** When this tab's selection last went to presence, and the one waiting. */
+  selectionSentAt?: number;
+  selection?: PendingSelection;
 }
 
 interface ProductSlot {
@@ -63,6 +89,11 @@ interface ProductSlot {
 }
 
 const lf = (text: string): string => text.replaceAll('\r\n', '\n');
+
+const REAL_TIMERS: EnginePresenceTimers = {
+  setTimeout: (run, ms) => setTimeout(run, ms).unref(),
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+};
 
 export class StaffBindingService implements StaffBindingServer {
   private readonly clients = new Map<string, StaffBindingClient>();
@@ -93,7 +124,7 @@ export class StaffBindingService implements StaffBindingServer {
     const key = `${found.projectId}/${found.product}`;
     const slot = this.slots.get(key) ?? { waiting: [] };
     this.slots.set(key, slot);
-    const attachment: Attachment = { doc: `doc-${this.nextDoc++}`, client, key, projectId: found.projectId, product: found.product };
+    const attachment: Attachment = { doc: `doc-${this.nextDoc++}`, client, key, projectId: found.projectId, product: found.product, stream: found.stream };
     if (slot.editing !== undefined) {
       slot.waiting.push(attachment);
       this.docs.set(attachment.doc, attachment);
@@ -126,15 +157,63 @@ export class StaffBindingService implements StaffBindingServer {
       return { kind: 'not-shared' };
     }
     this.updateBound(live, found.projectId);
+    // Other people already in this product show at once.
+    this.cursorsLater(attachment);
     return { kind: 'bound', doc: attachment.doc };
   }
 
   public async changed(doc: string, edits: readonly BindingEdit[], version: number, hash: string, reason?: BindingReason): Promise<void> {
-    this.docs.get(doc)?.mirror?.browserChanged(edits, version, hash, reason);
+    const attachment = this.docs.get(doc);
+    attachment?.mirror?.browserChanged(edits, version, hash, reason);
+    if (attachment !== undefined) this.cursorsLater(attachment);
   }
 
   public async applied(doc: string, request: number, ok: boolean, version: number, hash: string): Promise<void> {
-    this.docs.get(doc)?.mirror?.browserApplied(request, ok, version, hash);
+    const attachment = this.docs.get(doc);
+    attachment?.mirror?.browserApplied(request, ok, version, hash);
+    if (attachment !== undefined) this.cursorsLater(attachment);
+  }
+
+  public async selection(doc: string, anchor: number, head: number): Promise<void> {
+    const attachment = this.docs.get(doc);
+    if (attachment?.binding === undefined || !Number.isSafeInteger(anchor) || !Number.isSafeInteger(head)) return;
+    const pending = attachment.selection ?? { anchor, head };
+    pending.anchor = anchor;
+    pending.head = head;
+    attachment.selection = pending;
+    if (pending.timer !== undefined) return;
+    const wait = (attachment.selectionSentAt ?? -Infinity) + SELECTION_INTERVAL_MS - this.now();
+    if (wait <= 0) {
+      this.sendSelection(attachment);
+      return;
+    }
+    // Within the interval: the latest selection goes when it ends, so the last place a person stopped is the one others see.
+    pending.timer = this.timers.setTimeout(() => {
+      pending.timer = undefined;
+      this.sendSelection(attachment);
+    }, wait);
+  }
+
+  public async attribution(doc: string): Promise<AttributionAnswer> {
+    const wait: AttributionAnswer = { kind: 'none', message: STAFF_BINDING_TEXT.attributionWait };
+    const attachment = this.docs.get(doc);
+    const project = this.options.live()?.project(attachment?.projectId ?? '');
+    const { productOutput, namesAtRegistration, authorRows } = this.options.engine;
+    if (attachment?.binding === undefined || attachment.mirror === undefined || project === undefined
+      || productOutput === undefined || namesAtRegistration === undefined || authorRows === undefined) return wait;
+    await attachment.binding.flush().catch(() => undefined);
+    const { fold, roster } = await project.state();
+    const output = productOutput(fold as never, attachment.stream, attachment.product);
+    const header = lf(attachment.header ?? '');
+    if (output === undefined || output.incomplete === true || attachment.binding.text() !== output.text || lf(attachment.mirror.getText()) !== header + output.text) return wait;
+    const rows = authorRows(output.attribution as never, namesAtRegistration(output.registrations as never, roster as never) as never);
+    if (rows.length === 0) return { kind: 'none', message: STAFF_BINDING_TEXT.attributionEmpty };
+    return {
+      kind: 'rows',
+      rows: rows.map(({ label, share, spans }) => ({
+        label, share, unverified: spans[0]?.unverified === true, ranges: spans.map(({ start, length }) => ({ offset: header.length + start, length })),
+      })),
+    };
   }
 
   public async fullText(doc: string, text: string, version: number): Promise<void> {
@@ -177,6 +256,7 @@ export class StaffBindingService implements StaffBindingServer {
       const header = headers.get(attachment.product);
       if (header !== undefined) attachment.header = header;
       await attachment.binding?.refresh().catch(() => undefined);
+      this.cursorsLater(attachment);
     }
   }
 
@@ -184,10 +264,60 @@ export class StaffBindingService implements StaffBindingServer {
     if (this.watched.has(live)) return;
     this.watched.add(live);
     live.onStatus((row) => { void this.refresh(row.project); });
+    live.onPeople?.((project) => {
+      for (const attachment of this.docs.values()) if (attachment.projectId === project) this.cursorsLater(attachment);
+    });
+  }
+
+  private now(): number {
+    return (this.options.now ?? Date.now)();
+  }
+
+  private get timers(): EnginePresenceTimers {
+    return this.options.timers ?? REAL_TIMERS;
+  }
+
+  /** This tab's latest selection as relative positions to presence; a selection the binding cannot place yet waits for the next one. */
+  private sendSelection(attachment: Attachment): void {
+    const pending = attachment.selection;
+    const binding = attachment.binding;
+    if (pending === undefined || binding === undefined || this.docs.get(attachment.doc) !== attachment) return;
+    attachment.selection = undefined;
+    attachment.selectionSentAt = this.now();
+    this.options.live()?.cursor?.(attachment.projectId, attachment.stream, attachment.product, binding.relativeAt(pending.anchor), binding.relativeAt(pending.head));
+  }
+
+  /** Sends the tab the cursors of other people in its product once the current message work has run (after a change, they move with the text). */
+  private cursorsLater(attachment: Attachment): void {
+    void Promise.resolve().then(() => new Promise<void>((resolve) => setImmediate(resolve))).then(() => this.sendCursors(attachment));
+  }
+
+  private sendCursors(attachment: Attachment): void {
+    const live = this.options.live();
+    const binding = attachment.binding;
+    if (live?.people === undefined || binding === undefined || this.docs.get(attachment.doc) !== attachment) return;
+    const people: readonly EnginePresencePerson[] = live.people(attachment.projectId) ?? [];
+    const cursors: RemoteCursor[] = [];
+    for (const person of people) {
+      if (!person.live || person.product !== attachment.product || person.cursor === undefined) continue;
+      const anchor = binding.indexOf(person.cursor.anchor);
+      const head = binding.indexOf(person.cursor.head);
+      // The binding is between two versions of the text: the next change sends the cursors again.
+      if (anchor === undefined || head === undefined) return;
+      cursors.push({ member: person.member, name: person.name, ...(person.position === undefined ? {} : { position: person.position }), anchor, head });
+    }
+    const sent = JSON.stringify(cursors);
+    if (sent === attachment.cursorsSent) return;
+    attachment.cursorsSent = sent;
+    this.clients.get(attachment.client)?.onPresence(attachment.doc, cursors);
   }
 
   private async release(attachment: Attachment): Promise<void> {
     if (!this.docs.delete(attachment.doc)) return;
+    if (attachment.selection?.timer !== undefined) this.timers.clearTimeout(attachment.selection.timer);
+    attachment.selection = undefined;
+    // The person left the product: others stop seeing a cursor in it from the next heartbeat.
+    if (attachment.binding !== undefined) this.options.live()?.idle?.(attachment.projectId);
     const slot = this.slots.get(attachment.key);
     if (slot !== undefined) {
       const index = slot.waiting.indexOf(attachment);
