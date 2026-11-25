@@ -1,6 +1,7 @@
 {
   "realm": "sterling",
   "displayName": "Sterling",
+  "loginTheme": "sterling",
   "enabled": true,
   "sslRequired": "all",
   "registrationAllowed": false,
