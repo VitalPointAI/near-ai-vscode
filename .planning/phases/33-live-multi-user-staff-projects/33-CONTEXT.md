@@ -274,6 +274,13 @@ These continue the numbered list above. Each item gives the default the plans us
        - The witness memory keeps which streams each base was judged on (`judged`). `vouchingOf` derives the vouching map from that and the owed list. The fold's `baseOf` answers only from bases in that map, and only for their streams (`FoldOptions.vouching`). The chain stage's join bases are unchanged.
        - When a base leaves the owed list without being judged on a stream (`history-refused`, `base-unverifiable`), it stops vouching in that stream. The provisional compaction there falls back to refused, and a D-71 update to held.
        - A base is never "done" without a judged stream.
+       - **It cannot be relied on again to vouch there (final check, second pass).** The witness memory keeps a bounded record, `unvouched: [{ base, coverage, streams | all }]`.
+         - It holds every base that settled without judgement on some streams, with those streams.
+         - It also holds every judged base dropped by `MAX_JUDGED`, with all of its streams.
+         - `vouchingOf` subtracts those streams even while the base is owed again.
+         - `witnessRelied` on such a base, for a stream in its record, reads that log in full instead of starting it at the base.
+         - A stream leaves the record only when a later recheck of that base judges it.
+         - At `MAX_UNVOUCHED`, the oldest record is dropped, and `unvouchedFloor` rises to its coverage. Every base at or below the floor vouches nowhere and is never relied on, so dropping a record only ever removes vouching. Text never flips back to shown between runs.
      - **Each owed base is handled on its own, and the run reports the worst state.** A base that is waiting, unchecked or missing never stops work on the others. Every entry ends in one of these:
        - **Done.** Its recheck judged at least one stream with no mismatch. It leaves the list, and those streams are recorded in `judged`. Streams it could not judge stop being vouched for.
        - **Settled without judgement.** It leaves the list and vouches nowhere, and it is never "done".
