@@ -1,0 +1,105 @@
+/* Share with people (33-27): the original theme's lifted cards, Theia colour variables and codicons only. */
+.sterling-share {
+  margin: 28px 0 0;
+  color: var(--theia-foreground);
+  font-family: var(--theia-ui-font-family), system-ui, sans-serif;
+}
+
+.sterling-share-header h2,
+.sterling-share-card h3 {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+}
+
+.sterling-share-header p { margin: 0 0 12px; color: var(--theia-descriptionForeground); }
+
+.sterling-share-status { margin: 0 0 12px; }
+
+.sterling-share-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.sterling-share-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--theia-editorWidget-background);
+  border: 1px solid var(--theia-widget-border, var(--theia-editorWidget-border));
+  border-radius: 8px;
+  box-shadow: 0 2px 8px var(--theia-widget-shadow);
+}
+
+.sterling-share-field,
+.sterling-share-check {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--theia-descriptionForeground);
+}
+
+.sterling-share-check { flex-direction: row; align-items: center; gap: 8px; color: var(--theia-foreground); }
+
+.sterling-share input[type='text'],
+.sterling-share select {
+  padding: 5px 8px;
+  color: var(--theia-input-foreground);
+  background: var(--theia-input-background);
+  border: 1px solid var(--theia-input-border, var(--theia-dropdown-border));
+  border-radius: 4px;
+  font: inherit;
+}
+
+.sterling-share-primary,
+.sterling-share-action {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sterling-share-primary {
+  color: var(--theia-button-foreground);
+  background: var(--theia-button-background);
+  border: 1px solid var(--theia-button-border, transparent);
+}
+
+.sterling-share-primary:hover { background: var(--theia-button-hoverBackground); }
+
+.sterling-share-action {
+  color: var(--theia-button-secondaryForeground);
+  background: var(--theia-button-secondaryBackground);
+  border: 1px solid var(--theia-button-border, transparent);
+}
+
+.sterling-share-action:hover { background: var(--theia-button-secondaryHoverBackground); }
+
+.sterling-share button:focus-visible,
+.sterling-share input:focus-visible,
+.sterling-share select:focus-visible {
+  outline: 2px solid var(--theia-focusBorder);
+  outline-offset: 2px;
+}
+
+.sterling-share-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+
+.sterling-share-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+
+.sterling-share-request {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--theia-widget-border, var(--theia-editorWidget-border));
+  border-radius: 6px;
+}
+
+.sterling-share-words { font-family: var(--theia-code-font-family); letter-spacing: 0.02em; }

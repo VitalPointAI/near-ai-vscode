@@ -127,6 +127,11 @@ export function shownRefusal(reason: string | undefined, message: string): strin
   return HAS_NEXT_STEP.test(message) ? message : `${message} ${GENERAL_NEXT_STEP}`;
 }
 
+/** True inside the Sterling workbench image, which sets STERLING_WORKBENCH=1 (D-64); the one place the extension reads that variable. */
+export function inSterlingWorkbench(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.STERLING_WORKBENCH === '1';
+}
+
 /** Whether the multi-user commands are switched on. Read at every run, so turning the setting on or off needs no reload. */
 export function multiUserPreviewOn(): boolean {
   return vscode.workspace.getConfiguration().get<boolean>(MULTI_USER_PREVIEW_SETTING, false) === true;
@@ -836,6 +841,8 @@ async function startHistoryAgainCommand(context: StaffCommandContext): Promise<v
  * MULTI_USER_PREVIEW_OFF_TEXT and does nothing else.
  */
 export function registerStaffMultiUserCommands(context: StaffCommandContext, identity: () => Promise<{ fingerprint: string }>, register: Register): void {
+  // D-64: in the Sterling image only the native engine edits shared projects, so none of these preview commands is registered there.
+  if (inSterlingWorkbench()) return;
   const gated = (id: string, run: () => Promise<void>): void => {
     register(id, async () => {
       if (!multiUserPreviewOn()) { void vscode.window.showInformationMessage(MULTI_USER_PREVIEW_OFF_TEXT); return; }

@@ -296,6 +296,16 @@ export class ProjectRoster {
     return certifiedWriter(this.view, certificate.writer, this.head) === undefined ? 'revoked' : 'admitted';
   }
 
+  /**
+   * May this writer act for the lead at the head (the join desk: registering invitations, reading join requests): a lead or deputy device, or a
+   * session key one of them certified that stands (Phase 33 D-62, 33-27). It never writes the roster: roster kinds are the person key's (D-60).
+   */
+  actsForRosterWriter(writer: string): boolean {
+    const certificate = this.sessionOf(writer);
+    if (certificate !== undefined) return this.standing(writer) === 'admitted' && this.isRosterWriter(certificate.device);
+    return this.isRosterWriter(writer);
+  }
+
   /** May this device write the roster at the head: a device of the staff lead or the deputy lead there. */
   isRosterWriter(writer: string): boolean {
     return isRosterWriterAt(this.state, writer, this.headPosition);

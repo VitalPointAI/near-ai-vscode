@@ -69,6 +69,7 @@ export class StaffLiveEngine {
   private readonly open = new Map<string, LiveProject>();
   private readonly rowListeners = new Set<RowListener>();
   private readonly joinListeners = new Set<JoinListener>();
+  private readonly certificates = new Map<string, unknown>();
   private started = false;
   private stopped = false;
 
@@ -112,6 +113,30 @@ export class StaffLiveEngine {
   public setBound(id: string, products: readonly string[]): void {
     const live = this.find(id);
     if (live !== undefined) live.bound = new Set(products);
+  }
+
+  /** What Share with people (33-27) works with: the deps shared projects open with here, the person's secrets and storage, the session keys. */
+  public shareContext(): { deps: object; secrets: SecretStorageLike; globalStorageDir: string; hosted?: HostedSessionKeys } {
+    const { secrets, globalStorageDir, hosted } = this.options;
+    return { deps: this.depsFor(), secrets, globalStorageDir, ...(hosted === undefined ? {} : { hosted }) };
+  }
+
+  /** Hosted: the session key's certificate in this project, which a lead flow's own connection to the server carries (33-27). */
+  public certificateOf(id: string): unknown {
+    return this.certificates.get(id);
+  }
+
+  /** Opens a folder that became shared, or opens it again after its server changed (33-27): its replicator starts as at start. */
+  public async reopen(root: string): Promise<void> {
+    if (this.stopped) return;
+    const live = this.open.get(root);
+    if (live !== undefined) {
+      this.open.delete(root);
+      for (const subscription of live.subscriptions) subscription.dispose();
+      await live.replicator?.stop();
+      await live.project.close();
+    }
+    await this.startRoot(root);
   }
 
   /** Runs one exchange for the project now; undefined when it is not open here. */
@@ -230,11 +255,15 @@ export class StaffLiveEngine {
       this.log('staff: the person key is not a device of this shared project');
       return undefined;
     }
+    // A project opened again in this session (33-27 reopen) keeps its one certificate: your organization's server knows the session key by it.
+    const known = this.certificates.get(project.projectId);
+    if (known !== undefined) return known;
     const certified = await hosted.keys.certificate(project, seat);
     if (certified.kind === 'refused') {
       this.log('staff: the session key was not certified in a shared project');
       return undefined;
     }
+    this.certificates.set(project.projectId, certified.value.entry);
     return certified.value.entry;
   }
 

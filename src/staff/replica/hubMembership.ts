@@ -27,7 +27,7 @@
 import { parseClearance } from '../../domain/gate/labels';
 import { REKEY_KEEP_TEXT, earlierEpochGrants } from '../../domain/replica/cellKeys';
 import { HUB_FILE_REFUSALS, isHubAddress, readHubFile } from '../../domain/replica/hubFile';
-import { INVITE_REFUSALS, buildHubJoin, buildInvite, checkJoinRequest, hubJoinCheckKey, hubJoinMac, inviteSafetyCode, joinRequestHash, readInvite } from '../../domain/replica/invite';
+import { INVITE_REFUSALS, buildHubJoinAsync, buildInviteAsync, checkJoinRequest, hubJoinCheckKey, hubJoinMac, inviteSafetyCode, joinRequestHash, readInvite } from '../../domain/replica/invite';
 import type { InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
 import type { SignedPayload } from '../../domain/team/signedPayload';
 import type { HubFilePayload } from '../../domain/replica/hubFile';
@@ -46,7 +46,7 @@ import type { Gate, InviteInput, MembershipResult, SharedProjectHost } from './m
 import { HubTransport, HubTransportError, enrolmentRequest } from './hubTransport';
 import type { HubTransportOptions } from './hubTransport';
 import { joinSecret } from './keyring';
-import { ReplicaProject, ReplicaProjectError, isProjectRefused, syncLocalOf } from './replicaProject';
+import { ReplicaProject, ReplicaProjectError, isProjectRefused, settled, syncLocalOf } from './replicaProject';
 import type { ReplicaProjectDeps } from './replicaProject';
 
 /** Shown to the lead at each grant of a cell to the hub (DESIGN 10.2), word for word; the lead confirms it before anything is written. */
@@ -470,13 +470,13 @@ export function inviteThroughHub(shared: SharedProjectHost, input: InviteInput, 
       transport?.close();
     }
     if (!registered) return done(`${what} ${HUB_NOT_TOLD_TEXT} ${rest}`, { file: invited.file, invite: payload.invite, registered: false, hub: found.hub.hub });
-    const signed = buildInvite(project.signer, {
+    const signed = await settled(buildInviteAsync(project.rosterSigner, {
       genesisHash: payload.genesisHash, project: payload.project, name: payload.name,
       lead: { member: payload.lead.member, x25519: payload.lead.x25519, publicKey: payload.lead.publicKey },
       inviter: { member: payload.inviter.member, x25519: payload.inviter.x25519 }, invite: payload.invite, secret, expiresAt: payload.expiresAt, now: now(shared),
       ...(payload.forMember === undefined ? {} : { forMember: payload.forMember }),
       hub: { address: endpoint.address, certPin: found.certPin, writer: found.hub.writer }
-    });
+    }));
     return done(`${what} Your organization's hub knows it, so their join request can come back through the hub. ${rest}`, {
       file: { name: invited.file.name, text: JSON.stringify(signed) }, invite: payload.invite, registered: true, hub: found.hub.hub
     });
@@ -519,7 +519,7 @@ export async function sendJoinRequestThroughHub(inviteText: unknown, requestText
     return inviteRefused('malformed');
   }
   const fields = { hub: hub.writer, project: invite.project, invite: invite.invite, request: joinRequestHash(request) };
-  const join = buildHubJoin(device.signer, { hub: hub.writer, project: invite.project, request, hubMac: hubJoinMac(hubJoinCheckKey(invite.secret, invite.invite), fields), now: at });
+  const join = await settled(buildHubJoinAsync(device.rosterSigner, { hub: hub.writer, project: invite.project, request, hubMac: hubJoinMac(hubJoinCheckKey(invite.secret, invite.invite), fields), now: at }));
   let transport: HubCalls | undefined;
   try {
     transport = open({ address: hub.address, project: invite.project, hub: hub.writer, trust: { pin: hub.certPin }, signer: device.signer, now: () => deps.now?.() ?? new Date() });

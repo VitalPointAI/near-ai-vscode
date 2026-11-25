@@ -43,12 +43,12 @@ import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, buildGrant, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, earlierEpochGrants, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel, wrapEpochKey } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
 import { HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
 import type { SealedEntry } from '../../domain/replica/entry';
 import {
-  INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, WELCOME_MAX_BYTES, buildInvite, buildJoinRequest,
+  INVITE_FILE_EXTENSION, INVITE_REFUSALS, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, WELCOME_MAX_BYTES, buildInviteAsync, buildJoinRequestAsync,
   checkAdmittedRequest, checkJoinRequest, inviteAnchor, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite, readWelcome
 } from '../../domain/replica/invite';
 import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } from '../../domain/replica/invite';
@@ -67,7 +67,7 @@ import { MULTI_USER_DECLARED_TEXT, REPLICA_DIR, multiUserNoticeLines } from '../
 import { readWhole, snapshotOf, writeIfUnchanged } from '../staffFiles';
 import { forgetJoinSecret, joinSecret, storeJoinSecret } from './keyring';
 import type { DeviceKeyRing } from './keyring';
-import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, genesisPinFile, isProjectRefused, projectFile, sameAnchor } from './replicaProject';
+import { PROJECT_REFUSALS_HOST, ReplicaProject, ReplicaProjectError, anchorOf, genesisPinFile, isProjectRefused, projectFile, sameAnchor, settled } from './replicaProject';
 import type { ProjectRefused, ReplicaProjectDeps } from './replicaProject';
 import { parseSealed } from './store';
 
@@ -397,12 +397,12 @@ async function writeInvite(shared: SharedProjectHost, input: InviteInput & { for
   const written = await append(shared, 'member.invite', data);
   if (isResult(written)) return written;
   await storeJoinSecret(deps.secrets, invite, secret);
-  const signed = buildInvite(project.signer, {
+  const signed = await settled(buildInviteAsync(project.rosterSigner, {
     genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
     lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
     inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt, now: at,
     ...(input.forMember === undefined ? {} : { forMember: input.forMember })
-  });
+  }));
   const when = expiresAt.slice(0, 10);
   const what = input.forMember === undefined ? `The invitation for ${input.name} is ready.` : `The invitation for ${input.name}'s other computer is ready.`;
   return done(`${what} Send the file to them any way you like. It works once and expires on ${when}. When their join request comes back, compare the six words with them out loud or in person before you admit them.`, {
@@ -455,12 +455,12 @@ export function remakeInvite(shared: SharedProjectHost, invite: string): Promise
     // The inviter's keys as they stood when the invitation was written, which the joining device checks against the roster.
     const inviter = selfAt(shared, roster, record.from);
     if (inviter === undefined) return refuse('invite-not-remade');
-    const signed = buildInvite(project.signer, {
+    const signed = await settled(buildInviteAsync(project.rosterSigner, {
       genesisHash: project.anchor.genesisHash, project: project.projectId, name: projectName(fold, project.projectId),
       lead: { member: project.anchor.lead.member, x25519: project.anchor.lead.x25519, publicKey: project.anchor.lead.publicKey },
       inviter: { member: inviter.member, x25519: inviter.x25519 }, invite, secret, expiresAt: record.expiresAt, now: at,
       ...(record.forMember === undefined ? {} : { forMember: record.forMember })
-    });
+    }));
     const who = record.forMember === undefined ? record.name : `${record.name}'s other computer`;
     return done(`The invitation for ${who} is ready again. Nothing was changed in the project. It still works once and expires on ${record.expiresAt.slice(0, 10)}.`, {
       file: { name: `${invite}${INVITE_FILE_EXTENSION}`, text: JSON.stringify(signed) }, invite
@@ -683,7 +683,7 @@ export async function joinFromInvite(root: string, deps: ReplicaProjectDeps, inv
   if (pin.kind === 'anchor' && !sameAnchor(pin.anchor, inviteAnchor(invite))) return hostRefusal('pin-mismatch');
   await keepPending(deps, invite);
   const device = await ReplicaProject.localDevice(deps);
-  const request = buildJoinRequest(device.signer, invite, { name: input.name, x25519: device.x25519, now: now(deps) });
+  const request = await settled(buildJoinRequestAsync(device.rosterSigner, invite, { name: input.name, x25519: device.x25519, now: now(deps) }));
   const safetyWords = inviteSafetyCode(invite, request.payload);
   const where = invite.forMember === undefined ? `to join ${invite.name}` : `to add this computer to ${invite.name}`;
   return done(`Your request ${where} is ready. Send the file back to the staff lead any way you like, then read these six words to them out loud or in person: ${safetyWords.join(' ')}. They admit you only if the words match.`, {
@@ -1069,7 +1069,7 @@ async function writeRekeys(shared: SharedProjectHost, plans: readonly RekeyPlan[
       if (recipient === undefined) throw new Error('The cell key was not moved: a device to receive it has no encryption key in the roster.');
       return { writer, wrap: wrapEpochKey({ cell: plan.cell, epoch, writer, recipient, epochKey: key }) };
     });
-    const founding = buildGrant(project.signer, { cell: plan.cell, epoch, roster: head.hash, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw), wraps });
+    const founding = await project.signGrant({ cell: plan.cell, epoch, roster: head.hash, labelSealed: info.base || info.raw === undefined ? '' : sealLabel(key, plan.cell, epoch, info.raw), wraps });
     // The key and the founding grant are kept before the entry that commits to them, so a crash never leaves an epoch nobody can open. The key is
     // kept with its grant's hash: if the entry is not written, the next rekey of the cell makes another key for the same epoch, and the ring takes
     // the one whose grant the roster commits to (MJ-04).

@@ -223,3 +223,31 @@ test('a fifth live certificate of one device is refused too-many-sessions; certi
     assert.deepEqual((await append(s.world, later, [fifth])).accepted, [fifth.hash]);
     assert.equal((await hub.cache.get(s.world.project)).liveSessionsOf(s.pat.writer, hub.now()), 1);
   }));
+
+// ---- 33-27: the join desk for a lead in a hosted session --------------------------------------------------------------------------------------
+
+test('a session key the lead\'s device certified registers an invitation and reads join requests; a member\'s session key is refused forbidden', () =>
+  withHub({}, async (hub) => {
+    const s = await enrolled(hub);
+    const leadSession = s.world.device('LEAD-SESSION', s.world.lead.member);
+    const leadData = sessionCertifyData({ project: s.world.project, member: s.world.lead.member, device: s.world.lead.writer, sessionKey: leadSession.publicKey, slot: 1, notAfter: NOT_AFTER }, (bytes) => leadSession.signer.sign(bytes));
+    const leadCertificate = s.world.write(s.world.lead, { kind: 'session.certify', data: leadData, at: new Date(NOW_MS - 30 * 60 * 1000).toISOString() });
+    const lead = (await sessionKeySession(hub, s.world, leadSession, leadCertificate.entry)).opened;
+    assert.ok(lead !== undefined);
+    assert.deepEqual((await append(s.world, lead, [leadCertificate])).accepted, [leadCertificate.hash], 'the certificate is stored');
+    const invitesPath = `/v1/projects/${s.world.project}/invites`;
+    const registration = { invite: 'inv-0011223344aa', expiresAt: new Date(hub.now() + 24 * HOUR).toISOString(), checkKey: Buffer.alloc(32, 3).toString('base64url') };
+    const registered = await lead.connection.post(invitesPath, registration, lead.token);
+    assert.equal(registered.status, 201, registered.text);
+    const listed = await lead.connection.get(`/v1/projects/${s.world.project}/join-requests`, lead.token);
+    assert.equal(listed.status, 200, listed.text);
+
+    const patSession = s.world.device('PAT-SESSION', s.pat.member);
+    const patCertificate = certify(s, patSession);
+    const pat = (await sessionKeySession(hub, s.world, patSession, patCertificate.entry)).opened;
+    assert.ok(pat !== undefined);
+    assert.deepEqual((await append(s.world, pat, [patCertificate])).accepted, [patCertificate.hash]);
+    const refused = await pat.connection.post(invitesPath, { ...registration, invite: 'inv-0011223344bb' }, pat.token);
+    assert.equal(refused.status, 403, refused.text);
+    assert.equal((await pat.connection.get(`/v1/projects/${s.world.project}/join-requests`, pat.token)).status, 403);
+  }));

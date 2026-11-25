@@ -20,8 +20,8 @@ import { createCipheriv, createDecipheriv, createHash, createPrivateKey, createP
 import type { KeyObject } from 'node:crypto';
 import { canonicalBytes, isStrictBase64url } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, verifyPayload } from '../team/signedPayload';
-import type { PayloadSigner, SignedPayload } from '../team/signedPayload';
+import { signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, writerIdOf } from './entry';
 import { CELL_REKEY_REASONS } from './kindSchemas/roster';
@@ -166,6 +166,14 @@ export function buildGrant(signer: PayloadSigner, grant: CellGrant): SignedPaylo
   const problem = grantProblem(grant);
   if (problem !== undefined) throw new Error(`The grant was not signed: ${problem}.`);
   return signPayload(signer, 'staff-cell-grant', grantCopy(grant), { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
+}
+
+// buildGrant with a signer that answers later: the person key in a hosted session signs grants as the device the roster names (Phase 33 D-60,
+// 33-27). Same payload and signing time, so the grant and its hash are the ones buildGrant makes with that key; a refusal comes back as it is.
+export function buildGrantAsync(signer: PayloadSigner | AsyncPayloadSigner, grant: CellGrant): Promise<SignedPayload<CellGrant> | SignRefused> {
+  const problem = grantProblem(grant);
+  if (problem !== undefined) throw new Error(`The grant was not signed: ${problem}.`);
+  return signPayloadAsync(signer, 'staff-cell-grant', grantCopy(grant), { now: () => new Date(REPLICA_SIGNED_AT), maxBytes: GRANT_MAX_BYTES });
 }
 
 // sha256 hex of the canonical signed grant: what project.genesis cells, cell.create and cell.rekey commit to.

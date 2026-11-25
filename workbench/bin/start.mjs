@@ -7,6 +7,9 @@
 //   STERLING_OPENBAO_ADDR         set in hosted mode (sign-in in front, Phase 47); unset means local mode.
 //   STERLING_PREVIEW_NO_SIGN_IN   local mode only: `accept` confirms a non-loopback bind is published on 127.0.0.1 only (the #162 guard).
 //
+//   STERLING_WORKBENCH            set to 1 here for the backend and every plugin host it starts (Phase 33 D-64): the VS Code extension reads it
+//                                 and registers none of its multi-user preview commands, so only the native engine edits shared projects.
+//
 // Any arguments the image's CMD passes (the release target's session preference) go to Theia after the workspace, host and port.
 import net from 'node:net';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -27,6 +30,8 @@ if (localMode && !LOOPBACK.has(host) && process.env.STERLING_PREVIEW_NO_SIGN_IN 
 
 // Hosted mode with one specific address (the pod IP): the workbench itself is never served there, only behind the sidecar on loopback.
 const theiaHost = !localMode && !LOOPBACK.has(host) && !WILDCARD.has(host) && net.isIP(host) !== 0 ? '127.0.0.1' : host;
+
+process.env.STERLING_WORKBENCH = '1';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
 // Theia resolves its own relative paths (plugins, src-gen) from the working folder, so make it the app root.
