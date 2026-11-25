@@ -113,6 +113,6 @@ None.
 
 ## Open conditions
 
-- The default English and French wording needs your organization's legal review (47-COMPLIANCE-CONTEXT owner item 7).
-- A real browser with a passkey, the console's script redirect, and the theme mounted from the ConfigMap in a cluster belong to the lab run (47-18).
-- Node console and SSH banners with the same text are the OS hardening baseline's (D-76, runbook line), not this plan's.
+- G231: the default English and French wording needs your organization's legal review and the sponsor's approval (47-COMPLIANCE-CONTEXT owner item 7).
+- G423: a real browser with a passkey, the console's script redirect, and the theme mounted from the ConfigMap in a cluster belong to the lab run (47-18).
+- G38: node console and SSH banners with the same text are the OS hardening baseline's (D-76, runbook line), not this plan's.

@@ -178,9 +178,12 @@ None.
 - Files exist: guests.mjs, guest-operator.hcl, guest-expiry.hcl, guest-removal.hcl, guests.test.mjs.
 - Commits `2998c629`, `d6425c4c`, `1d9e841a` and `1278258b` are ancestors of HEAD.
 
+## Hand-offs
+
+- 47-20 builds the in-cluster job on `expireGuests`, `endGuest` and the role `guest-expiry`; 47-31 moves the shared functions (`fileRevocationRequest` among them) into `deploy/keycloak/lib/offboard.mjs`.
+
 ## Open conditions
 
 - G447 (owner): how a guest's KV secrets are removed after the retention period.
-- Guests are turned on at a site only on a release that includes 71-12 (the revocation card that reads the requests, and the security contact's issuing). 71-12 is not on main.
-- The registration link through a real mail server, and a real WebAuthn registration, are not shown here (synthetic keys); they belong to the lab run with guests on (47-18).
-- 47-20 builds the in-cluster job on `expireGuests`, `endGuest` and the role `guest-expiry`; 47-31 moves the shared functions into `deploy/keycloak/lib/offboard.mjs`.
+- G449: guests stay off at every site until a release includes 71-12 (the security contact's issuing and the revocation card that reads the requests); 71-12 is not on main.
+- G423: the registration link through a real mail server and a real WebAuthn registration are not shown here (synthetic keys); they belong to the lab run with guests on (47-18).

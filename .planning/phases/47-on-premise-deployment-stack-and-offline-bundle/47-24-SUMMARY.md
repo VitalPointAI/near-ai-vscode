@@ -131,9 +131,12 @@ None.
 - Files exist: raft-snapshot.hcl, the four values files, the two test files.
 - Commits `0b8ebdb8`, `c93beb85` and `8da398af` are ancestors of HEAD.
 
+## Hand-offs
+
+- `opensearch.yaml` is shared with 48.1-16 (H-10): its retention change for `audit-*` and the `audit-archiver` role are not on main yet; whichever lands second keeps the other's settings.
+
 ## Open conditions
 
 - G448: a ReadWriteMany snapshot volume on the encrypted Longhorn class for multi-node OpenSearch is unchecked until Phase 48's lab-full rig.
-- The in-cluster runs (the CronJobs, the projected-token login at `auth/kubernetes`, the Longhorn backups of both volumes, 47-16's apply step putting the two bodies through the API with the security plugin on) belong to the lab run (47-18).
-- `opensearch.yaml` is shared with 48.1-16 (H-10): its retention change for `audit-*` and the `audit-archiver` role are not on main yet; whichever lands second keeps the other's settings.
-- The sizes (200Gi, 5Gi) and schedules are provisional until Phase 48; the recovery point setting (47-27) is checked against them.
+- G424: the in-cluster runs (the CronJobs, the projected-token login at `auth/kubernetes`, the Longhorn backups of both volumes, 47-16's apply step putting the two bodies through the API with the security plugin on) have not run live; the lab run (47-18) does them.
+- G46: the sizes (200Gi, 5Gi) and schedules are provisional until Phase 48 measures them; the recovery point setting (47-27) is checked against them.
