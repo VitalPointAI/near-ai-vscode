@@ -503,6 +503,16 @@ const states = [
     <h2>Evidence sources</h2>
     <div class="sources">${releaseCard({ v: 'did-not-verify', extra: `<p class="line">${I('error', 'e')}<span><span class="mono">bundle/dashboard/judgement.json</span> has changed since the evidence was signed. Nothing from this source is shown.</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
     ${controls([], '', { msg: 'No controls to show: no evidence source verified.' })}`),
+  frame('S6c Site key does not match (anchor-mismatch): one shared notice for both sources', `${header()}
+    ${notice('error', 'error', 'The release evidence and your site’s evidence did not verify: The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from them is shown.')}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ v: 'did-not-verify', extra: `<p class="line">${I('error', 'e')}<span>The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from this source is shown.</span></p>` })}${siteCard({ v: 'did-not-verify', msg: `<p class="line">${I('error', 'e')}<span>The site key in this session’s evidence settings is not your organization’s site key, the one your site checks every image against. Ask your organization’s administrator. Nothing from this source is shown.</span></p>` })}</div>
+    ${controls([], '', { msg: 'No controls to show: no evidence source verified.' })}`),
+  frame('S13 A release with no control evidence (bundle: none): SBOM and scan only', `${header()}
+    <h2>Evidence sources</h2>
+    <div class="sources">${releaseCard({ extra: facts([['Software list (SBOM)', 'included'], ['Compliance package', 'not in this release']]) + `<p class="line">${I('package')}<span>This release carries no control evidence, so no control state can be judged. Its software list (SBOM) and vulnerability scan are shown.</span></p>` })}${siteCard({ none: 'This computer is not part of a site, so there is no site evidence. The release evidence is shown alone.' })}</div>
+    ${controls([], '', { msg: 'No controls to show: this release carries no control evidence. Its software list and vulnerability scan are on the release card.' })}
+    <p class="sr-note">Needs attention, filters, charts and the summary are not shown: there is nothing to count.</p>`),
   frame('S7 Live updates paused: connection lost', `${header('Live updates paused · Last updated 25 Nov 2026 13:58 UTC', 'lost')}
     ${notice('warning', 'disconnect', 'Live updates paused: the view lost its connection to the workbench. Freshness shows as Unknown until it is back. Trying again on its own.')}
     <h2>Evidence sources</h2>
