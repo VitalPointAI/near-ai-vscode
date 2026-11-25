@@ -5,13 +5,13 @@ milestone_name: Governed agent platform
 current_plan: 21
 status: executing
 stopped_at: Completed 47-16, 47-17, 47-27, 47-28 (wave 7 except 47-23, 47-24); 47-19 still blocked
-last_updated: "2026-11-25T12:11:31.535Z"
-state_head: 7dce3ff2652e2d74ac62d5721cb7683f4651f70c
+last_updated: "2026-11-25T12:49:20.617Z"
+state_head: 34fef33f8daafcc3b9fb201564b92469df3eb096
 progress:
   total_phases: 12
   completed_phases: 1
   total_plans: 109
-  completed_plans: 67
+  completed_plans: 70
   percent: 8
 last_activity: 2026-11-19
 current_phase: 70
@@ -331,3 +331,4 @@ Verbatim in PROJECT.md, Platform direction decisions 18-25; the design's section
 - [Phase 47]: 47-16: registry-images.tar is site-neutral in the bundle; install.mjs node-files names it for the site registry, checked against the signed manifest
 - [Phase 47]: 47-27: drill.mjs plan reads every schedule from the rendered releases; drill verify restores into scratch copies only, with --confirm <siteName>
 - [Phase 70.1]: 70.1-01 owner checkpoint 2026-11-25: permanent shapes accepted as built; model names servedModel and endpoint; no model is { none: cause }; numbers in basis points
+- [Phase 70.1]: 70.1 engine executed on feat/phase-70.1 (01-04 complete, 05 Tasks 1-2 done); open conditions G460-G464; integration PR waits for the owner's gate approval
