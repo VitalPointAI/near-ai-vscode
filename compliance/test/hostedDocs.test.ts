@@ -177,7 +177,7 @@ test('implemented exchanges name files that exist, planned ones name their plan,
 });
 
 // 48.4 D-08: whose law governs the operator of each exchange's far end, and where that end is.
-const fixtureExchange = (extra: Record<string, unknown>) => ({
+const fixtureExchange = <T extends Record<string, unknown>>(extra: T) => ({
   id: 'probe', title: 'Probe', kind: 'network', from: 'A', to: 'B', direction: 'one-way', data: 'Data.', format: 'JSON.', protection: 'TLS.',
   frequency: 'Daily.', status: 'planned', plannedIn: 'Phase 99', siteSettings: [], controls: ['ca-3'], agreement: 'To be completed by your organization', ...extra
 });
