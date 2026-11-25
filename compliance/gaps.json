@@ -6416,6 +6416,72 @@
       "title": "The sessions certificate carries a wildcard name for the webview hosts, which needs accepting"
     },
     {
+      "appliesAt": "protected-b",
+      "blocksProduction": false,
+      "controls": [
+        "si-07",
+        "au-09",
+        "ca-07"
+      ],
+      "id": "G475",
+      "ownerRole": "owner",
+      "poam": "g475",
+      "remediation": "The site collector signs the live site evidence feed with the OpenBao Transit key site-evidence, so facts about OpenBao (its seal status among them) are signed by the system they describe. The weekly operator-signed site evidence export (48-02) stays the independent check, and the Compliance view names the signer of each item. The authorizing official accepts the residual risk, or a signer outside OpenBao is designed. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-20, D-29).",
+      "title": "The live site feed is signed by a key held in OpenBao, so facts about OpenBao are signed by the system they describe"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "controls": [
+        "sr-04",
+        "si-07"
+      ],
+      "id": "G476",
+      "ownerRole": "maintainers",
+      "poam": "g476",
+      "remediation": "The GitHub attestations of the installer and the compliance package are keyless and need the public Sigstore service, so an air-gapped workbench cannot check them; the Compliance view lists them as not checked here, with the gh attestation verify command. The bundle build on your organization's connected build host verifies them with gh attestation verify and carries the result as signed site evidence. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-16, D-29).",
+      "title": "Keyless GitHub attestations of the installer and compliance package cannot be checked inside an air-gapped workbench"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.2",
+      "controls": [
+        "si-07",
+        "sr-04"
+      ],
+      "id": "G477",
+      "ownerRole": "maintainers",
+      "remediation": "The release image cannot hold its own signature, so the image signature and the SBOM attestation are made after the image exists and a session relies on your site's admission policy for them; the Compliance view shows them as checked by your site's admission policy when the session started, with the cosign verify command. The site collector reports the admission results (48.2-09) and the view shows them as your site's evidence. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-16, D-29).",
+      "title": "The image signature and SBOM attestation are made after the image exists, so a session relies on site admission for them"
+    },
+    {
+      "appliesAt": "now",
+      "blocksProduction": false,
+      "closesInPhase": "48.2",
+      "controls": [
+        "au-08",
+        "ca-07"
+      ],
+      "id": "G478",
+      "ownerRole": "shared",
+      "remediation": "Every state and freshness is judged against the session clock, so a wrong site clock can make old evidence read current until the clock-error alerts fire. The view refuses a clock earlier than the release build and future-dated evidence (48.2-03), and your site's clock-error alerts (48.1-23) reach the view as live site evidence (48.2-09). Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-14, D-29).",
+      "title": "Freshness is judged against the session clock; a wrong site clock can make old evidence read current until clock alerts fire"
+    },
+    {
+      "appliesAt": "protected-a",
+      "blocksProduction": false,
+      "controls": [
+        "si-02",
+        "ra-05"
+      ],
+      "id": "G479",
+      "ownerRole": "maintainers",
+      "poam": "g479",
+      "remediation": "The Compliance view shows the release scan and site rescans with their counts and fixes, but SI-2 remediation timeliness is not judged from the findings. A later phase adds a rule on fixable critical and high findings older than your organization's remediation time. Source: .planning/phases/48.2-live-compliance-evidence-in-the-workbench/48.2-CONTEXT.md (D-29).",
+      "title": "Vulnerability findings are shown but SI-2 remediation timeliness is not judged from them"
+    },
+    {
       "appliesAt": "protected-a",
       "blocksProduction": true,
       "closesInPhase": "48",

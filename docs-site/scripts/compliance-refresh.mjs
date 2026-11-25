@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Refreshes the public, hash-verified compliance dashboard without rebuilding the docs site.
 import { createHash } from 'node:crypto';
-import { lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,15 @@ export async function verifyBundleDir(dir) {
   if (!expected.has('dashboard/dashboard.json')) throw new Error('Bundle has no dashboard/dashboard.json');
   return { root, manifest };
 }
-async function atomicWrite(path, content) { await mkdir(dirname(path), { recursive: true }); const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`); await writeFile(temporary, content, { mode: 0o600 }); await rename(temporary, path); }
+// The projection is public (the dashboard and control text the documentation site publishes) and the
+// workbench (uid 10001) reads it through a read-only bind mount, so files are 0644 and the folders this
+// script creates are 0755 whatever the umask (D-07). `mode` alone is masked by the umask, hence chmod.
+async function ensureFolder(dir) {
+  const first = await mkdir(dir, { recursive: true });
+  if (!first) return;
+  for (let folder = dir; ; folder = dirname(folder)) { await chmod(folder, 0o755); if (folder === first || dirname(folder) === folder) break; }
+}
+async function atomicWrite(path, content) { await ensureFolder(dirname(path)); const temporary = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`); await writeFile(temporary, content, { mode: 0o644 }); await chmod(temporary, 0o644); await rename(temporary, path); }
 async function copyDashboard(bundle, site, refresh) {
   const dashboardRoot = join(bundle, 'dashboard'); const sources = ['dashboard.json', ...(await walk(dashboardRoot)).filter((path) => path.startsWith('text/'))];
   for (const target of [join(site, 'static/compliance'), join(site, 'build/compliance')]) {

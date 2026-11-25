@@ -11,7 +11,8 @@
       "STERLING_STEPUP_ACR": "webauthn-fresh",
       "STERLING_STEPUP_MAX_AGE_SECONDS": "300",
       "STERLING_OPEN_VSX_URL": "https://open-vsx.site.example",
-      "STERLING_MODEL_SERVERS": "[]"
+      "STERLING_MODEL_SERVERS": "[]",
+      "STERLING_ORGANIZATION_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELgccMIMQR1p/dPYJso3uFGVTwvnu\nPcEV4z7RGTCasboXVSpUBmqLHQ4j/R5/dAiRsis//JwnVWczgTbiewaKuQ==\n-----END PUBLIC KEY-----"
     },
     "model-servers": {
       "STERLING_OPENBAO_ADDR": "https://openbao.sterling-openbao.svc:8200",
@@ -23,7 +24,8 @@
       "STERLING_STEPUP_ACR": "webauthn-fresh",
       "STERLING_STEPUP_MAX_AGE_SECONDS": "300",
       "STERLING_OPEN_VSX_URL": "https://open-vsx.site.example",
-      "STERLING_MODEL_SERVERS": "[\"https://models.site.example:8443/v1\",\"https://inference.site.example/v1,beta\"]"
+      "STERLING_MODEL_SERVERS": "[\"https://models.site.example:8443/v1\",\"https://inference.site.example/v1,beta\"]",
+      "STERLING_ORGANIZATION_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELgccMIMQR1p/dPYJso3uFGVTwvnu\nPcEV4z7RGTCasboXVSpUBmqLHQ4j/R5/dAiRsis//JwnVWczgTbiewaKuQ==\n-----END PUBLIC KEY-----"
     }
   }
 }

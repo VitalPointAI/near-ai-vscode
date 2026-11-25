@@ -30,7 +30,12 @@ export const OBSERVATION_WINDOWS: Readonly<Record<string, WindowKind>> = Object.
   attestation: 'attestation',
   attestations: 'attestation',
   // A site's signed export (48-02): dated at its signed time, so an export older than 7 days reads Stale.
-  deployment: 'settings'
+  deployment: 'settings',
+  // 48.2 (D-13, D-15, D-23): the image's vulnerability scan, dated by its database build date; the site collector's live facts; the
+  // site's exchange agreements, dated by their review date.
+  'image-scan': 'vulnerability',
+  'site-live': 'live',
+  'site-agreements': 'document'
 });
 
 /** The window for a collector id; unknown collectors are judged against the head commit. */

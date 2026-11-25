@@ -3,6 +3,8 @@
 // - teams.cjs: tools/team-parser-entry.ts re-exports parseTeam from src/agent/teams, the same entry the extension calls, so the backend gives the
 //   extension's own refusals (D-16). Loaded lazily by extension/src/node/team-preview-reader.ts.
 // - identity.cjs (71-10): tools/identity-entry.ts, did:webvh, credentials and device words for the identity service.
+// - compliance.cjs (48.2-01, 48.2-04): tools/compliance-entry.ts, the status engine's judgement (rejudge and the evidence manifest check) and the
+//   Sigstore bundle verifier, so the session judges and verifies release evidence with the one engine, never a copy (D-11).
 // - staff.cjs: tools/staff-engine-entry.ts, the staff backend's engine (Phase 33 D-51): session keys, the keyring, the replica project and the live
 //   replicator. Loaded lazily by extension/src/node/staff/staff-engine.ts.
 // - decodeWorker.js: the replica's memory-capped decode worker, which decodeHost.ts starts from beside the bundle that holds it (staff.cjs).
@@ -37,6 +39,7 @@ const yjsBesideBundle = {
 const bundles = [
   { entry: 'tools/team-parser-entry.ts', outfile: 'engine/teams.cjs' },
   { entry: 'tools/identity-entry.ts', outfile: 'engine/identity.cjs' },
+  { entry: 'tools/compliance-entry.ts', outfile: 'engine/compliance.cjs' },
   { entry: 'tools/staff-engine-entry.ts', outfile: 'engine/staff.cjs' },
   { entry: '../src/staff/replica/decodeWorker.ts', outfile: 'engine/decodeWorker.js' },
 ];

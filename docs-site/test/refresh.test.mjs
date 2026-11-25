@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,4 +77,33 @@ if (args[1] === 'list') {
   assert.equal(accepted.status, 0, accepted.stderr);
   const metadata = JSON.parse(readFileSync(join(dir, 'build/compliance/refresh.json')));
   assert.equal(metadata.source, 'GitHub run 2');
+});
+
+// D-07: the workbench user (uid 10001) reads the projection through a read-only bind mount,
+// so every file the refresh writes is 0644 and every folder it creates is 0755, whatever the umask.
+function refreshUnderUmask(from, to) {
+  return spawnSync('sh', ['-c', 'umask 077; exec "$0" "$@"', process.execPath, script.pathname, '--from-dir', from, '--site-dir', to], { encoding: 'utf8' });
+}
+const mode = (path) => (statSync(path).mode & 0o777).toString(8);
+function tree(path, files = [], folders = []) {
+  if (statSync(path).isDirectory()) { folders.push(path); for (const name of readdirSync(path)) tree(join(path, name), files, folders); } else files.push(path);
+  return { files, folders };
+}
+const textBundle = () => bundle({ 'dashboard/dashboard.json': readFileSync(fixture), 'dashboard/text/medium/ac-02.md': '# AC-2\n' });
+const written = ['dashboard.json', 'refresh.json', 'text/medium/ac-02.md'];
+test('modes: a refresh under umask 077 leaves files 0644 and the folders it created 0755', () => {
+  const dir = site(); const result = refreshUnderUmask(textBundle(), dir);
+  assert.equal(result.status, 0, result.stderr);
+  const files = []; const folders = [join(dir, 'static')];
+  tree(join(dir, 'static/compliance'), files, folders); tree(join(dir, 'build/compliance'), files, folders);
+  for (const name of written) for (const base of ['static/compliance', 'build/compliance']) assert.ok(files.includes(join(dir, base, name)), `${base}/${name}`);
+  for (const file of files) assert.equal(mode(file), '644', file);
+  for (const folder of folders) assert.equal(mode(folder), '755', folder);
+});
+test('replace: a refresh over files an older version left at 0600 leaves them 0644', () => {
+  const dir = site(); mkdirSync(join(dir, 'static/compliance/text/medium'), { recursive: true });
+  for (const name of written) { writeFileSync(join(dir, 'static/compliance', name), 'old'); chmodSync(join(dir, 'static/compliance', name), 0o600); }
+  const result = refreshUnderUmask(textBundle(), dir);
+  assert.equal(result.status, 0, result.stderr);
+  for (const name of written) assert.equal(mode(join(dir, 'static/compliance', name)), '644', name);
 });

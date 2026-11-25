@@ -27,6 +27,8 @@ siteEnv:
   openbaoAddr: ""
   stepUpAcr: ""
   stepUpMaxAgeSeconds: 300
+  # Your organization's site key (PEM text), from the site file's organizationPublicKey; required (48.2-17).
+  organizationPublicKey: ""
   openVsxUrl: ""
   # The model servers your organization's policy lists, as a list of URLs. site-env.yaml renders them as one JSON array of strings
   # (STERLING_MODEL_SERVERS), the form the workbench reads (workbench/README.md, Settings); empty or unset renders [] (none).
