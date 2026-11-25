@@ -5,19 +5,21 @@
 // Run it with `npm run test:container`; it is not part of `npm test`. Hygiene: test/helpers/docker.ts. Screenshots: COMPLIANCE_SHOTS.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { cosignBinary, signBlob } from '../../../deploy/bundle/lib/cosign.mjs';
-import { freePort, removeOwn, runContainer, runPlaywright, testImage, waitHealthy, workbenchRoot } from '../helpers/docker';
+import { attachLiveSignature, buildLiveFeed, liveSigningInput, makeTrustDocument } from '../../../compliance/src/siteEvidence.ts';
+import { freePort, removeOwn, repoRoot, runContainer, runPlaywright, testImage, waitHealthy, workbenchRoot } from '../helpers/docker';
 
 const engineFile = path.join(workbenchRoot, 'engine', 'compliance.cjs');
 const engine = createRequire(engineFile)(engineFile) as { JUDGEMENT_FORMAT: string; EVIDENCE_FORMAT: string; judgementRow(input: unknown, presentation: unknown): unknown };
 
 const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
 const VERSION = '0.5.0';
 const COMMIT = 'a'.repeat(40);
 const now = Date.now();
@@ -92,7 +94,7 @@ function releaseFolder(name: string): string {
   return dir;
 }
 
-// ---- Keys and signatures: a cosign key pair (ECDSA P-256) for the supplier ----
+// ---- Keys and signatures: cosign key pairs (ECDSA P-256) for the supplier, your site and a stranger; Ed25519 for the collector ----
 
 function cosignKeyPair(prefix: string): void {
   const run = spawnSync(cosignBinary(), ['generate-key-pair', '--output-key-prefix', prefix], { cwd: KEYS, encoding: 'utf8' });
@@ -102,6 +104,23 @@ function cosignKeyPair(prefix: string): void {
 const publicKey = (prefix: string): string => readFileSync(path.join(KEYS, `${prefix}.pub`), 'utf8');
 /** Signs `file` with the prefix's key; the Sigstore bundle goes to `bundleFile`. */
 const signWith = (prefix: string, file: string, bundleFile: string): void => { signBlob(file, path.join(KEYS, `${prefix}.key`), { bundleFile }); };
+const collector = generateKeyPairSync('ed25519');
+const rawKey = (key: KeyObject): string => (key.export({ type: 'spki', format: 'der' }) as Buffer).subarray(12).toString('base64url');
+
+/** The site files your site's collector and install identity write: the trust document signed by `siteKey`, and a live feed. */
+function siteFiles(dir: string, siteKey: string): void {
+  const trust = makeTrustDocument({
+    site: 'site-a', issuedAt: new Date(now - HOUR).toISOString(), notBefore: new Date(now - 24 * HOUR).toISOString(), notAfter: new Date(now + 300 * 24 * HOUR).toISOString(),
+    now: new Date(now), collectorKeys: [{ version: 1, publicKey: rawKey(collector.publicKey) }], operatorKeys: [],
+  });
+  writeFileSync(path.join(dir, 'trust.json'), `${JSON.stringify(trust, null, 2)}\n`);
+  signWith(siteKey, path.join(dir, 'trust.json'), path.join(dir, 'trust.json.sigstore.json'));
+  const collectedAt = new Date(now - 5 * MINUTE).toISOString();
+  const payload = buildLiveFeed({ site: 'site-a', generatedAt: new Date(now - MINUTE).toISOString(), keyVersion: 1,
+    groups: { openbao: { collectedAt, sealed: false, type: 'pkcs11' }, nodes: { collectedAt, count: 3 } } as never });
+  const { unsigned, bytes } = liveSigningInput(payload, rawKey(collector.publicKey));
+  writeFileSync(path.join(dir, 'live.json'), JSON.stringify(attachLiveSignature(unsigned, sign(null, bytes, collector.privateKey))));
+}
 
 let image = '';
 const shots = process.env.COMPLIANCE_SHOTS?.trim();
@@ -110,7 +129,7 @@ before(async () => {
   image = await testImage();
   process.env.COSIGN_PASSWORD ??= 'compliance-browser-check';
   mkdirSync(KEYS, { recursive: true });
-  cosignKeyPair('supplier');
+  for (const prefix of ['supplier', 'site', 'stranger']) cosignKeyPair(prefix);
   if (shots) mkdirSync(shots, { recursive: true });
 });
 
@@ -142,4 +161,47 @@ test('Restricted, release only: a verified release folder and no site evidence, 
   writeFileSync(path.join(trust, 'supplier.pub'), publicKey('supplier'));
   signWith('supplier', path.join(release, 'manifest.json'), path.join(trust, `release-${VERSION}.sigstore.json`));
   await runCase('compliance-release-only', 'Restricted, release only', [...bind(release, EVIDENCE), ...bind(trust, TRUST)]);
+});
+
+test('Site layered: your site\'s files land in the mounted folder while the page is open and appear within 40 seconds, without a reload', async () => {
+  const release = releaseFolder('site');
+  const trust = folder('site-trust');
+  signWith('site', path.join(release, 'manifest.json'), path.join(trust, `release-${VERSION}.sigstore.json`));
+  // The files the install identity and the collector write, staged beside the mount and moved in by the spec while the page is open.
+  const staged = folder('site-staged');
+  writeFileSync(path.join(staged, 'organization.pub'), publicKey('site'));
+  siteFiles(staged, 'site');
+  readable(staged);
+  await runCase('compliance-site', 'Site layered', [...bind(release, EVIDENCE), ...bind(trust, TRUST)], ['-e', `STERLING_ORGANIZATION_PUBLIC_KEY=${publicKey('site')}`],
+    { COMPLIANCE_SITE_STAGED: staged, COMPLIANCE_SITE_MOUNT: trust });
+});
+
+test('Tampered: one byte changed in the release folder after signing shows only Did not verify and no cells', async () => {
+  const release = releaseFolder('tampered');
+  const trust = folder('tampered-trust');
+  writeFileSync(path.join(trust, 'supplier.pub'), publicKey('supplier'));
+  signWith('supplier', path.join(release, 'manifest.json'), path.join(trust, `release-${VERSION}.sigstore.json`));
+  const sbom = path.join(release, 'sbom', 'sterling-image.cdx.json');
+  const bytes = readFileSync(sbom);
+  bytes[2] = bytes[2]! ^ 1;
+  writeFileSync(sbom, bytes);
+  await runCase('compliance-tampered', 'Tampered', [...bind(release, EVIDENCE), ...bind(trust, TRUST)]);
+});
+
+test('Anchor mismatch: an organization.pub that is not STERLING_ORGANIZATION_PUBLIC_KEY shows only Did not verify, for the release and the site', async () => {
+  const release = releaseFolder('mismatch');
+  const trust = folder('mismatch-trust');
+  // Everything in the folder agrees with the stranger's key, which is not the site key admission checks every image against.
+  writeFileSync(path.join(trust, 'organization.pub'), publicKey('stranger'));
+  signWith('stranger', path.join(release, 'manifest.json'), path.join(trust, `release-${VERSION}.sigstore.json`));
+  siteFiles(trust, 'stranger');
+  await runCase('compliance-mismatch', 'Anchor mismatch', [...bind(release, EVIDENCE), ...bind(trust, TRUST)], ['-e', `STERLING_ORGANIZATION_PUBLIC_KEY=${publicKey('site')}`]);
+});
+
+test('Projection: the README\'s projection mount alone is its own source, Not verified, with no Met count', async () => {
+  const projection = folder('projection');
+  const dashboard = readFileSync(path.join(repoRoot, 'compliance', 'test', 'fixtures', 'dashboard', 'dashboard.json'), 'utf8');
+  writeFileSync(path.join(projection, 'dashboard.json'), dashboard);
+  writeFileSync(path.join(projection, 'refresh.json'), JSON.stringify({ source: 'local bundle', commit: JSON.parse(dashboard).commit, fetchedAt: new Date(now - HOUR).toISOString(), manifest: 'verified', attestation: 'none' }));
+  await runCase('compliance-projection', 'Projection', bind(projection, '/app/lib/frontend/compliance'));
 });
