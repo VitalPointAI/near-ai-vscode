@@ -18,7 +18,7 @@
 #      itself), and stops unless the private key is sensitive and never extractable. pkcs11-tool runs under script(1), on a terminal
 #      of its own: OpenSC's PIN prompt (util_getpass in src/tools/util.c) turns echo off on standard output's terminal and fails with
 #      "util_getpass error" when standard output is not one, so its output cannot be read through a pipe. script keeps a copy of
-#      what pkcs11-tool prints (the PIN is not echoed, so it is not in it) in a 0600 file in a 0700 temporary folder; the script reads
+#      what pkcs11-tool prints (echo is off on that terminal, so the PIN is not in it) in a 0600 file in a 0700 temporary folder; the script reads
 #      the private key's Access line from it and removes that file and folder when it exits.
 #   5. Prints the public key (PEM) and the PKCS#11 URI, without any PIN, and saves the public key, and only it, to
 #      ~/.config/sterling-signing/site-key.pub.pem. Put that public key in your site file as organizationPublicKey.
@@ -257,13 +257,15 @@ trap remove_session EXIT
 trap 'exit 1' HUP INT TERM
 
 # Runs pkcs11-tool with the arguments given on a terminal of its own (script from util-linux), so that it can ask for the token PIN, and
-# keeps a copy of what it prints in $SESSION_DIR/session. The terminal shows the prompt and the output as usual. Every argument is a fixed
-# word or the checked module path; anything that would need quoting stops the script before anything runs.
+# keeps a copy of what it prints in $SESSION_DIR/session. The terminal shows the prompt and the output as usual. Echo is turned off on
+# that terminal first (stty -echo, or nothing runs): pkcs11-tool turns it off only once its prompt is up, so a PIN typed before the
+# prompt would otherwise be echoed into the copy. Every argument is a fixed word or the checked module path; anything that would need
+# quoting stops the script before anything runs.
 pkcs11_on_terminal() {
   if [ -z "$SESSION_DIR" ]; then
     SESSION_DIR=$(mktemp -d "${TMPDIR:-/tmp}/new-dev-site-key.XXXXXX") || fail "could not make a temporary folder for pkcs11-tool's output"
   fi
-  line=pkcs11-tool
+  line="stty -echo && pkcs11-tool"
   for word in "$@"; do
     case "$word" in
       '' | *[!A-Za-z0-9._/:-]*) fail "refusing to run pkcs11-tool with the argument $word" ;;

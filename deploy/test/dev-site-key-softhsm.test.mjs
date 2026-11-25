@@ -22,7 +22,7 @@ const SO_PIN = 'so-pin-8164';
 const USER_PIN = 'user-pin-2937';
 const TOOLS = ['softhsm2-util', 'pkcs11-tool', 'script'];
 const UTILITIES = ['sh', 'cat', 'mkdir', 'chmod', 'mv', 'cp', 'date', 'base64', 'tr', 'fold', 'awk', 'grep', 'sed', 'id', 'dirname', 'basename', 'ls', 'wc', 'head',
-  'mktemp', 'rm', 'rmdir'];
+  'mktemp', 'rm', 'rmdir', 'stty'];
 const FORBIDDEN = [path.join(homedir(), '.config', 'sterling-signing'), path.join(homedir(), '.near-credentials')];
 const which = (name) => ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].map((dir) => path.join(dir, name)).find((file) => existsSync(file));
 
