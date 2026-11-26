@@ -8,13 +8,14 @@ import { BLOB_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, openBlob, sealBlob, sha
 import type { SealedBlob } from '../../domain/replica/entry';
 import { readGrantPages, wrapsFor } from '../../domain/replica/grantPages';
 import type { WrapDevice } from '../../domain/replica/grantPages';
-import { managedWriteAllowed } from '../../domain/replica/roster';
+import { isRosterWriterAt, managedWriteAllowed } from '../../domain/replica/roster';
 import type { RosterState } from '../../domain/replica/roster';
-import { epochAt } from '../../domain/replica/rosterCells';
+import { addGrant, epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
 import { matchesGrantEvidence, openGrantEvidence, readAuthoredAccessStage, readContinuityReceipt, readGrantDelivery } from '../../domain/replica/rotationGrants';
 import { readAccessWriteProof } from '../../domain/replica/rotationProof';
 import type { AccessWriteProof } from '../../domain/replica/rotationProof';
+import { WRAP_FEATURE, wrapFormatProblem } from '../../domain/replica/wrapFormat';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
@@ -184,4 +185,40 @@ export function openManagedGrantArtifact(project: string, device: DeliveryDevice
   if (receipt === undefined) return grantForRecipient(project, device.writer, artifact);
   const target = receipt.accessProofs[0].signed.permit;
   return target.project === project && target.device === device.writer ? receipt : undefined;
+}
+
+/** Validate a live handoff against the selected roster before allowing the confidential sender to retire its handle. */
+export function verifySelectedManagedArtifact(roster: RosterState, recipient: string, artifact: unknown, now: Date):
+  true | { cell: string; epoch: number } | undefined {
+  const revision = roster.accessRevision;
+  const head = roster.positions.length - 1;
+  if (revision === undefined || roster.pending.length > 0 || deviceAt(roster.members, recipient, head) === undefined) return undefined;
+  const permits = (state: RosterState, proof: AccessWriteProof): boolean => {
+    const { cell, epoch, writer, device } = proof.signed.permit;
+    return device === recipient && managedWriteAllowed(state, cell, epoch, writer, head, now, proof) === true;
+  };
+  const continuity = readContinuityReceipt(artifact);
+  if (continuity !== undefined) return continuity.entry === revision.entry && continuity.accessProofs.every((proof) => permits(roster, proof)) ? true : undefined;
+
+  const delivery = readGrantDelivery(artifact);
+  if (delivery?.recipients.includes(recipient) !== true) return undefined;
+  const opening = openGrantEvidence(roster.anchor.project, roster.accessHistory, delivery.opening);
+  if (opening?.entry !== revision.entry || opening.decision !== 'continues' || opening.evidence.excluded.includes(recipient)) return undefined;
+  const [first, ...pages] = delivery.grants;
+  const verified = pages.length === 0 ? readGrant(first) : readGrantPages(first, pages);
+  if (!verified.ok) return undefined;
+  const { cell, epoch } = verified.grant;
+  const issuedAt = roster.positionOf.get(verified.grant.roster);
+  const revisionAt = roster.positionOf.get(revision.entry);
+  const record = roster.cells.cells.get(cell);
+  const current = record?.epochs.at(-1);
+  if (record === undefined || current?.epoch !== epoch || issuedAt === undefined || revisionAt === undefined || issuedAt > revisionAt ||
+      wrapFormatProblem(verified.grant, current.from, roster.requiredFrom.get(WRAP_FEATURE)) !== undefined) return undefined;
+  const cells = { project: roster.cells.project, cells: new Map(roster.cells.cells) };
+  cells.cells.set(cell, { ...record, grants: [...record.grants] });
+  const placement = addGrant(cells, { grant: verified.grant, hash: verified.hash, position: issuedAt,
+    signerIsRosterWriter: isRosterWriterAt(roster, verified.signer.writer, issuedAt),
+    admitted: (writer) => deviceAt(roster.members, writer, issuedAt) !== undefined });
+  if (placement.status !== 'applied' || (delivery.accessProof !== undefined && !permits({ ...roster, cells }, delivery.accessProof))) return undefined;
+  return { cell, epoch };
 }

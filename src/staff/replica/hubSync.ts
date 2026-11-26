@@ -29,6 +29,8 @@ import type { RosterView } from '../../domain/replica/rosterView';
 import type { HeadSet } from '../../domain/replica/transport';
 import { CHECKPOINTS_PER_ASK, HUB_TRANSPORT_FAILURES, HubTransportError, appendBatches, pushPlan } from './hubTransport';
 import type { HubTransport, HubTransportFailure } from './hubTransport';
+import { exchangeManaged } from './managedSync';
+import type { ManagedSyncHandoffs, ManagedSyncLocal, ManagedSyncRoute } from './managedSync';
 
 /** What one exchange needs of this computer's replica. ReplicaProject provides it through syncLocalOf; the hub's tests use a memory replica. */
 export interface SyncLocal {
@@ -54,6 +56,7 @@ export interface SyncLocal {
   /** Stores entries and blobs from outside through the project's decode check. added counts entries written; notStored those not written now. */
   ingest(entries: readonly SealedEntry[], blobs: readonly SealedBlob[]): Promise<{ added: number; notStored: number }>;
   putGrants(grants: readonly unknown[]): Promise<void>;
+  managed?: ManagedSyncLocal;
   checkpoints(): Promise<SignedCheckpoint[]>;
   putCheckpoint(signed: SignedCheckpoint): Promise<void>;
   /** The streams the hub can checkpoint (the base cell and the cells granted with hub.grant), for the delayed finding (D-63). */
@@ -145,9 +148,11 @@ export interface SyncReport {
   /** One plain sentence for the outcome when it was not synced. */
   message?: string;
   retryAfterSeconds?: number;
+  managed?: 'waiting' | 'complete';
 }
 
 export interface SyncOptions {
+  managed?: ManagedSyncHandoffs;
   now?: () => Date;
   /**
    * A late joiner (D-43, F5): a writer log this computer holds nothing of starts at the head a trusted version 2 checkpoint of this hub names,
@@ -157,7 +162,7 @@ export interface SyncOptions {
 }
 
 /** The transport calls one exchange makes. HubTransport has them all. */
-export type SyncTransport = Pick<HubTransport, 'project' | 'hub' | 'hubHeads' | 'entries' | 'append' | 'getBlob' | 'grant' | 'askCheckpoint'>;
+export type SyncTransport = Pick<HubTransport, 'project' | 'hub' | 'hubHeads' | 'entries' | 'append' | 'getBlob' | 'grant' | 'askCheckpoint'> & { managedRoute?: ManagedSyncRoute };
 
 const ATTENTION_FINDINGS: ReadonlySet<HubFindingKind> = new Set(['rolled-back', 'forked-view', 'wrong-project']);
 const COUNTED_BY_WITNESS: ReadonlySet<HubFindingKind> = new Set(['withheld', 'delayed', 'rolled-back']);
@@ -307,6 +312,8 @@ export async function syncOnce(transport: SyncTransport, local: SyncLocal, memor
 
     // Pull, unless the hub showed an older copy: then this computer only pushes back what it has.
     if (!rolledBack) await pull(heads.streams);
+    if (options.managed !== undefined) report.managed = rolledBack || state.distrusted ? 'waiting' :
+      await exchangeManaged(options.managed, local.managed, transport.managedRoute);
 
     // Withheld (D-50): the hub's heads, the trusted checkpoint's heads and the deps of held entries this computer still does not hold, timed by the
     // witness. The deps are what catches withholding in a cell no checkpoint covers when the hub also leaves the entry out of its heads (D-63).

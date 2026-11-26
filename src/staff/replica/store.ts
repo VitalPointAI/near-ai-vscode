@@ -1002,18 +1002,7 @@ export class ReplicaStore {
     }
   }
 
-  /**
-   * Takes entries and blobs from outside the machine. Each input is checked for shape and body hash (signatures are the fold's job), except that an
-   * entry naming this device as its writer must carry this device's valid signature or it is dropped (CR-02); such an entry is this device's own and
-   * needs no decode check. Each other new entry then passes `check`. Every new entry is written; one the check refuses is held, and one the check
-   * cannot run on yet waits, both recorded in the signed mark with the lines, so neither reaches the fold. An entry already stored is neither written
-   * nor checked again. A check that throws counts as a refusal.
-   *
-   * Refused entries are bounded (D-14), in input order: a writer's refused entries in one stream are held up to MAX_REFUSED_PER_WRITER, the last of
-   * them as its flooded line; from then on that writer's entries in that stream are not written (counted in `flooded`) and not checked. The entry
-   * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
-   * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
-   */
+  /** Check foreign entries and stage valid blobs. Bound waiting and held entries and defer flooded writers (D-14). */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
@@ -1218,11 +1207,16 @@ export class ReplicaStore {
     }
   }
 
-  public async putAccessEvidence(evidence: unknown): Promise<{ ok: true; hash: string } | StoreRefused> {
+  public async putAccessEvidence(evidence: unknown, expectedSnapshot?: string): Promise<{ ok: true; hash: string } | StoreRefused> {
     const bytes = canonicalBytes(evidence);
     if (bytes.length > BLOB_MAX_BYTES) return refusal('blob-too-large');
     const hash = sha256Hex(bytes);
-    return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash);
+    return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash, expectedSnapshot === undefined ? undefined : async () => {
+      await this.catchUp();
+      await this.syncMark();
+      if (await this.appendSnapshot() !== expectedSnapshot) throw new Refusal('snapshot-changed');
+      await this.writeAccessStage(evidence);
+    });
   }
   public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
     return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), BLOB_MAX_BYTES);
@@ -1256,9 +1250,9 @@ export class ReplicaStore {
     await writeAtomic(file, bytes, mode);
   }
 
-  private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {
+  private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string, write = () => this.writeSigned(parts, name, bytes)): Promise<{ ok: true; hash: string } | StoreRefused> {
     try {
-      await this.locked(() => this.writeSigned(parts, name, bytes));
+      await this.locked(write);
       return { ok: true, hash };
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);

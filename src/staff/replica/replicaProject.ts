@@ -61,7 +61,7 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { openManagedGrantArtifact, sealPlacedSupplemental } from './managedGrantDelivery';
+import { openManagedGrantArtifact, sealPlacedSupplemental, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { SupplementalHandoff } from './managedGrantDelivery';
 import { verifyManagedStage } from './managedWithdrawal';
 
@@ -166,16 +166,13 @@ export interface CreateSharedInput {
 export interface AppendOwnOptions {
   stream?: string;
   deps?: readonly string[];
-  /** A blob already sealed to the cited cell and epoch, stored with this entry after the write check. */
   contentBlob?: SealedBlob;
   accessProof?: unknown;
   stageAccess?: (entry: string) => unknown;
   roster?: string;
   actor?: Actor;
   at?: string;
-  /** The signer, when not the one signerOf(kind) gives (Phase 33 D-60). */
   signer?: PayloadSigner | AsyncPayloadSigner;
-  /** The one person action this entry belongs to (33.1 D-09); passed to the signer, never written into the entry. */
   action?: string;
 }
 export type AppendOwnResult = { ok: true; hash: string; built: BuiltEntry } | ProjectRefused;
@@ -564,7 +561,6 @@ export class ReplicaProject {
     });
   }
 
-  /** Stage signed grants and evidence, then open only what the roster places. Hosted grants use the person key. */
   public putGrants(grants: readonly unknown[], evidence: readonly unknown[] = []): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
     return this.exclusive(async () => {
       const own: unknown[] = [];
@@ -600,14 +596,19 @@ export class ReplicaProject {
     });
   }
 
-  public ingestManagedGrantDelivery(file: unknown): Promise<{ ok: true } | ProjectRefused> {
+  public ingestManagedGrantDelivery(file: unknown, source: 'file' | 'peer' = 'file'): Promise<{ ok: true } | ProjectRefused> {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
       const { writer, privateKey: x25519, kem } = ringDevice(this.device);
       const delivery = openManagedGrantArtifact(this.projectId, { writer, x25519, kem }, file, this.now());
       if (delivery === undefined) return refuse('welcome-refused');
-      const staged = await this.store.putAccessEvidence(delivery);
-      return 'ok' in staged ? await this.settledFold() ?? { ok: true as const } : storeRefused(staged);
+      const roster = source === 'peer' ? (await this.foldNow()).roster : undefined;
+      const expected = roster === undefined ? undefined : await this.store.appendSnapshot();
+      const checked = roster === undefined ? true : verifySelectedManagedArtifact(roster, writer, delivery, this.now());
+      if (checked === undefined) return refuse('welcome-refused');
+      const staged = await this.store.putAccessEvidence(delivery, expected);
+      if (!('ok' in staged)) return storeRefused(staged);
+      return await this.settledFold() ?? (checked === true || this.keys.holds(checked.cell, checked.epoch) ? { ok: true as const } : refuse('no-key'));
     });
   }
 
@@ -619,7 +620,6 @@ export class ReplicaProject {
     });
   }
 
-  /** Check and ingest remote entries and their separately supplied blobs. */
   public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[]): Promise<IngestResult | ProjectRefused> {
     return this.exclusive(async () => {
       const result = await this.store.ingestForeign(entries, blobs, this.foreignCheck(blobs));
@@ -1160,11 +1160,7 @@ export class ReplicaProject {
   }
 }
 
-/**
- * The replica a one-shot hub sync reads and writes (32-23): this project's store through its read accessors, entries from the hub through
- * ingestForeign (the decode check), grants through putGrants, and the roster as this device folds it. hubSync.ts imports nothing from this file, so
- * the hub's tests bundle the sync without the fold or Yjs (D-27).
- */
+/** Present the store and its verified intake to the normal hub exchange. */
 export function syncLocalOf(project: ReplicaProject): SyncLocal {
   const settle = <T>(value: T | ProjectRefused): T => {
     if (isProjectRefused(value)) throw new ReplicaProjectError(value);
@@ -1182,6 +1178,10 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
     wantedBlobs: () => project.wantedBlobs(),
     blobsCitedBy: (hashes) => project.blobsCitedBy(hashes),
     grants: () => project.signedGrants(),
+    managed: {
+      seal: (offer) => project.sealManagedSupplemental(offer),
+      stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer'))
+    },
     async ingest(entries, blobs) {
       const result = settle(await project.ingestForeign(entries, blobs));
       return { added: result.added, notStored: result.deferred + result.flooded + result.dropped };

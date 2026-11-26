@@ -32,7 +32,9 @@ import {
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ensureLabelCell } from '../staff/replica/labelCells';
-import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
+import { hubMemoryOf, syncOnce } from '../staff/replica/hubSync';
+import type { SyncTransport } from '../staff/replica/hubSync';
+import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import { appendManagedWithdrawal } from '../staff/replica/managedWithdrawal';
@@ -1024,7 +1026,7 @@ test('managed clearance reduction commits decisions using the lead’s custom sc
   assert.equal((await head(viewer)).hash, recovered.hash);
 });
 
-test('managed Give keys authorizes the current epoch before a private handoff', async () => {
+async function supplementalFixture() {
   const lead = await founded('managed-give');
   ok(await updateMember(lead.host, { member: 'mbr-lead', clearance: CLEARED_X }), 'declare lead clearance');
   const peer = await bringIn(lead, 'new-cell-recipient', 'Mo Analyst', CLEARED_X);
@@ -1034,6 +1036,11 @@ test('managed Give keys authorizes the current epoch before a private handoff', 
   assert.ok('ok' in await lead.p.putGrants([], receipts));
   assert.equal(peer.p.keys.holds(cell, 1), false);
 
+  return { lead, peer, cell, seed };
+}
+
+test('managed Give keys authorizes the current epoch before a private file handoff', async () => {
+  const { lead, peer, cell, seed } = await supplementalFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
   assert.equal(await lead.p.sealManagedSupplemental(request), undefined);
   const ensured = await ensureLabelCell(lead.host, LABEL_X);
@@ -1076,6 +1083,68 @@ test('managed Give keys authorizes the current epoch before a private handoff', 
   assert.ok('ok' in await peer.p.appendOwn('doc.client',
     { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } }, { stream: cell }));
 
+});
+
+test('normal managed peer sync adopts the recipient package only after pulling its signed commitment', async () => {
+  const { lead, peer, cell } = await supplementalFixture();
+  const placed = await ensureLabelCell(lead.host, LABEL_X);
+  assert.ok(placed.ok && placed.granted.includes(peer.writer));
+  const selected = await head(lead.p);
+  const welcome = await lead.p.welcomeFor(peer.writer, []);
+  const root = welcome.roster.find((entry) => entryHash(entry.header) === selected.hash);
+  assert.ok(root);
+  peer.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  assert.ok('ok' in await peer.p.ingestForeign([welcome.genesis, ...welcome.roster.filter((entry) => entry !== root)], welcome.blobs));
+
+  const offer = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const stored = new Map<string, unknown>();
+  const sharedHandles: string[] = [];
+  let accepted = 0;
+  let revealRoot = false;
+  const project = lead.p.projectId;
+  const tip = { writer: root.header.writer, seq: root.header.seq, hash: selected.hash };
+  const transport: SyncTransport = {
+    project, hub: lead.p.deviceWriter,
+    hubHeads: async () => ({ project, rosterHead: revealRoot ? selected.hash : (await head(peer.p)).hash,
+      streams: revealRoot ? [{ stream: project, heads: [tip] }] : [], grants: [] }),
+    entries: async (stream, writer, from) => {
+      assert.deepEqual([stream, writer, from], [project, tip.writer, tip.seq]);
+      return { project, stream, writer, entries: [root], more: false, head: tip };
+    },
+    append: async (batch) => ({ project, accepted: batch.entries.map((entry) => entryHash(entry.header)),
+      refused: [], grantsRefused: [], rosterHead: selected.hash, blobsPut: false }),
+    getBlob: async (hash) => ({ kind: 'missing', hash }),
+    grant: async () => { throw new Error('Managed packets must never use the public grants route.'); },
+    askCheckpoint: async () => ({ project, kept: 0 }),
+    managedRoute: {
+      put: async (handle, packet) => { stored.set(handle, packet); return true; },
+      get: async (handle) => stored.get(handle)
+    }
+  };
+  const away = hubMemoryOf(new MemorySecrets());
+  const sent = await syncOnce(transport, syncLocalOf(lead.p), away, { now: () => NOW, managed: {
+    offers: async () => [offer], pending: async () => [],
+    published: async (_offer, handle) => { sharedHandles.push(handle); },
+    accepted: async () => { throw new Error('The sending replica has no incoming delivery.'); }
+  } });
+  assert.equal(sent.managed, 'complete');
+  assert.equal(sharedHandles.length, 1);
+  const receiver = { now: () => NOW, managed: {
+    offers: async () => [], pending: async () => sharedHandles,
+    published: async () => { throw new Error('The receiving replica has no outgoing delivery.'); },
+    accepted: async () => { accepted += 1; }
+  } };
+  const memory = hubMemoryOf(new MemorySecrets());
+  const before = await syncOnce(transport, syncLocalOf(peer.p), memory, receiver);
+  assert.equal(before.managed, 'waiting');
+  assert.equal(accepted, 0);
+  assert.equal(peer.p.keys.holds(cell, 1), false);
+  revealRoot = true;
+  const after = await syncOnce(transport, syncLocalOf(peer.p), memory, receiver);
+  assert.equal(after.managed, 'complete');
+  assert.equal(after.pulled, 1);
+  assert.equal(accepted, 1);
+  assert.deepEqual(peer.p.keys.epochKey(cell, 1), lead.p.keys.epochKey(cell, 1));
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {

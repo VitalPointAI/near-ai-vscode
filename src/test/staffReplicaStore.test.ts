@@ -376,6 +376,10 @@ test('guarded append detects another window recording a roster head even when wr
   const expected = await first.appendSnapshot();
   const [candidate] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash } });
   assert.deepEqual(await second.recordRosterHead(built[1].hash), { ok: true });
+  const packet = { purpose: 'verified peer fixture' };
+  assert.deepEqual(await first.putAccessEvidence(packet, expected),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await first.accessEvidence(), []);
   assert.deepEqual(await first.appendOwn([candidate], expected),
     { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
   assert.equal(first.has(candidate.hash), false);
