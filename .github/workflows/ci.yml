@@ -584,6 +584,9 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      image_id: ${{ steps.smoke.outputs.image_id }}
+      archive_sha256: ${{ steps.archive.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -650,6 +653,7 @@ jobs:
           bash .github/retry-registry-auth.sh docker build --target release --platform linux/arm64 \
             --provenance=false --sbom=false --file workbench/Dockerfile --tag sterling-workbench:arm64-ci .
       - name: Prove the exact ARM64 candidate starts and its native addons work
+        id: smoke
         env:
           VSIX_SHA256: ${{ needs.release-content.outputs.vsix_sha256 }}
         shell: bash
@@ -700,6 +704,125 @@ jobs:
           NODE
           printf '\nLinux ARM64 candidate `%s`, verified VSIX `%s`, passed loopback health and native addon checks.\n' \
             "$image" "$VSIX_SHA256" >> "$GITHUB_STEP_SUMMARY"
+          printf 'image_id=%s\n' "$image" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.1'
+      - name: Archive the tested ARM64 image and check backend egress
+        id: archive
+        working-directory: workbench
+        env:
+          IMAGE_ID: ${{ steps.smoke.outputs.image_id }}
+          NEAR_AI_TEST_REPORT: ${{ runner.temp }}/sterling-arm64-native/arm64-egress.ndjson
+        shell: bash
+        run: |
+          [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Id}}' "$IMAGE_ID")" == "linux/arm64 $IMAGE_ID" ]]
+          evidence="$RUNNER_TEMP/sterling-arm64-native"
+          mkdir -p "$evidence"
+          docker save "$IMAGE_ID" | gzip -1 > "$evidence/sterling-arm64-image.tar.gz"
+          hash="$(sha256sum < "$evidence/sterling-arm64-image.tar.gz")"
+
+          npm ci --ignore-scripts
+          node scripts/build.mjs
+          WORKBENCH_TEST_IMAGE="$IMAGE_ID" node ../scripts/run-tests.mjs --test-concurrency=1 \
+            --test-name-pattern='^(control:|a planted outbound call at start |on a network with no route out )' \
+            dist/test/container/egress.test.js
+          jq -es '
+            ["control: the hook refuses dns, fetch, net, tls and udp outside the allow list and lets an allowed local server through",
+              "a planted outbound call at start is caught and named by the check",
+              "on a network with no route out the workbench starts, serves a page, restarts and starts again with only loopback attempts"] as $expected
+            | [ .[] | select(.file == "dist/test/container/egress.test.js" and .status == "passed") | .name ]
+            | sort == ($expected | sort)
+          ' "$NEAR_AI_TEST_REPORT" >/dev/null
+
+          [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE_ID")" == "$IMAGE_ID" ]]
+          printf 'sha256=%s\n' "${hash%% *}" >> "$GITHUB_OUTPUT"
+          printf '\nArchive SHA-256 `%s` for `%s`. All three backend egress checks passed. Browser evidence pending. Release facts pending independently verified Phase 46-09 source.\n' \
+            "${hash%% *}" "$IMAGE_ID" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sterling-arm64-archive
+          path: ${{ runner.temp }}/sterling-arm64-native/
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+  workbench-arm64-scan:
+    name: scan the Workbench ARM64 candidate archive
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.workbench_arm64 && startsWith(github.ref_name, 'chore/workbench-arm64-eval-')
+    needs: workbench-arm64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sterling-arm64-archive
+          path: ${{ runner.temp }}/sterling-arm64-input
+      - name: Verify the tested ARM64 archive and record its scan
+        env:
+          ARCHIVE_SHA256: ${{ needs.workbench-arm64.outputs.archive_sha256 }}
+          IMAGE_ID: ${{ needs.workbench-arm64.outputs.image_id }}
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/sterling-arm64-input/sterling-arm64-image.tar.gz"
+          [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ && "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ -f "$archive" && ! -L "$archive" ]]
+          hash="$(sha256sum < "$archive")"
+          if [[ "${hash%% *}" != "$ARCHIVE_SHA256" ]]; then
+            echo '::error::The ARM64 archive differs from the one checked on the native runner.'
+            exit 1
+          fi
+          gzip -dc -- "$archive" > "$RUNNER_TEMP/sterling-arm64-image.tar"
+
+          tools="$RUNNER_TEMP/sterling-arm64-tools"
+          evidence="$RUNNER_TEMP/sterling-arm64-scan"
+          mkdir -p "$evidence"
+          sh compliance/ci/install-tool.sh syft "$tools"
+          sh compliance/ci/install-tool.sh grype "$tools"
+          sbom="$evidence/sterling-arm64-sbom.cdx.json"
+          "$tools/syft" scan "docker-archive:$RUNNER_TEMP/sterling-arm64-image.tar" --output "cyclonedx-json=$sbom"
+          jq -es 'length == 1 and (.[0] | .bomFormat == "CycloneDX" and (.components | type == "array" and length > 0))' "$sbom" >/dev/null
+
+          "$tools/grype" db update
+          "$tools/grype" db status -o json > "$evidence/grype-db.json"
+          db_built="$(jq -ers 'select(length == 1) | .[0] | select(.valid == true) | .built | select(type == "string" and length > 0)' "$evidence/grype-db.json")"
+          scan="$evidence/sterling-arm64-grype.json"
+          scan_status=0
+          GRYPE_DB_AUTO_UPDATE=false "$tools/grype" "sbom:$sbom" --only-fixed --fail-on high --output "json=$scan" || scan_status=$?
+          if (( scan_status != 0 && scan_status != 2 )); then
+            printf '::error::Grype failed with status %s.\n' "$scan_status"
+            exit 1
+          fi
+          high_matches="$(jq -ers --arg built "$db_built" '
+            select(length == 1) | .[0] | select(.descriptor.db.status.built == $built and (.source | type == "object"))
+            | .matches | select(type == "array" and all(.[];
+                .vulnerability.fix.state == "fixed" and
+                (.vulnerability.severity | ascii_downcase | test("^(unknown|negligible|low|medium|high|critical)$"))))
+            | map(select(.vulnerability.severity | ascii_downcase | test("^(high|critical)$"))) | length
+          ' "$scan")"
+          if (( (scan_status == 0 && high_matches != 0) || (scan_status == 2 && high_matches == 0) )); then
+            echo '::error::Grype reported a status inconsistent with the fixed high or critical findings.'
+            exit 1
+          fi
+          sbom_hash="$(sha256sum < "$sbom")"
+          jq -n --arg image "$IMAGE_ID" --arg archive_sha256 "$ARCHIVE_SHA256" --arg sbom_sha256 "${sbom_hash%% *}" \
+            --arg db_built "$db_built" --argjson fixed_high_or_critical "$high_matches" \
+            '{platform:"linux/arm64",image:$image,archive_sha256:$archive_sha256,sbom_sha256:$sbom_sha256,
+              db_built:$db_built,fixed_high_or_critical:$fixed_high_or_critical}' > "$evidence/scan-evidence.json"
+          printf '\nScanned the ARM64 archive `%s` for `%s`. Grype reported %s fixed high or critical findings.\n' \
+            "$ARCHIVE_SHA256" "$IMAGE_ID" "$high_matches" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sterling-arm64-scan
+          path: ${{ runner.temp }}/sterling-arm64-scan/
+          retention-days: 7
+          if-no-files-found: error
 
   relay-image-scan:
     name: relay image scan

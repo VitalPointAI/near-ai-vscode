@@ -621,7 +621,7 @@ test('the read-only ARM64 candidate builds and starts the exact verified VSIX on
   const job = all.get('workbench-arm64');
   assert.ok(job.startsWith(`    name: workbench ARM64 candidate\n    ${guard}\n`));
   assert.match(job, /needs: release-content\s+runs-on: ubuntu-24\.04-arm/);
-  assert.match(job, /permissions:\s*\n\s*contents: read\n\s*steps:/);
+  assert.equal(block(job, 'permissions', 4), '    permissions:\n      contents: read');
   assert.doesNotMatch(job, /continue-on-error:|environment:|secrets\.|id-token:|docker (?:login|push)|cosign|playwright/);
   assert.match(job, /persist-credentials: false/);
   const list = steps(job);
@@ -635,6 +635,22 @@ test('the read-only ARM64 candidate builds and starts the exact verified VSIX on
   assert.match(job, /docker run[\s\S]*127\.0\.0\.1::3000[\s\S]*\/healthz[\s\S]*process\.arch[\s\S]*drivelist[\s\S]*node-pty[\s\S]*exitCode/);
   assert.doesNotMatch(all.get('compliance'), /workbench-arm64/);
   assert.ok(!(await import('../lib/workflow.mjs')).CI_CHECKS.includes('workbench-arm64'));
+});
+
+test('the ARM64 release evidence scans the exact archive after backend egress succeeds', () => {
+  const all = jobs(read('ci.yml'));
+  const candidate = all.get('workbench-arm64');
+  const scan = all.get('workbench-arm64-scan');
+  assert.match(candidate, /archive_sha256: \$\{\{ steps\.archive\.outputs\.sha256 \}\}/);
+  assert.match(candidate, /steps\.smoke\.outputs\.image_id[\s\S]*docker save "\$IMAGE_ID"[\s\S]*test-name-pattern[\s\S]*status == "passed"[\s\S]*name: sterling-arm64-archive/);
+  assert.match(candidate, /Release facts pending/);
+  const guard = /^    if: .*inputs\.workbench_arm64.*$/m.exec(candidate)?.[0];
+  assert.ok(guard && scan.includes(guard));
+  assert.match(scan, /needs: workbench-arm64\s+runs-on: ubuntu-latest/);
+  assert.equal(block(scan, 'permissions', 4), '    permissions:\n      contents: read');
+  assert.match(scan, /name: sterling-arm64-archive[\s\S]*needs\.workbench-arm64\.outputs\.archive_sha256[\s\S]*sha256sum[\s\S]*gzip -dc[\s\S]*syft.*scan "docker-archive:/);
+  assert.match(scan, /grype.*--only-fixed --fail-on high[\s\S]*scan_status.*high_matches[\s\S]*name: sterling-arm64-scan/);
+  assert.doesNotMatch(scan, /continue-on-error:|environment:|secrets\.|id-token:|docker (?:run|load|pull|login|push)|cosign/);
 });
 
 test('the release image job writes the release image SBOM and hands publish a hash-checked cosign, read-only', () => {
