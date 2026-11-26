@@ -1,7 +1,7 @@
 # Sterling Sovereign AI
 
-**Private AI agents for the work you do in VS Code: code, research, proposals,
-writing, and data. You can see, steer, and afford them.**
+**Private AI agents in the Sterling workbench for code, research, proposals,
+writing, and data. Open the workbench in your browser.**
 
 Work with models running in NEAR AI Cloud's confidential (TEE) inference, with
 every model clearly labelled private or not. Agents plan and carry out whole
@@ -48,9 +48,8 @@ up in another project, without entering the key again.
   and the default (GLM 5.3) is one of them. Transcripts are encrypted on disk,
   credentials are kept out of the agent's shell, and nothing is sent as
   telemetry.
-- **It feels like part of VS Code.** A compact chat in the secondary side bar
-  uses your theme and fonts. Prefer the built-in Chat view? Type
-  `@nearai` there instead.
+- **Chat stays beside your work.** Open the SovAI chat drawer in the workbench
+  to see replies and manage approval requests while you edit.
 - **You always know the cost.** Every response shows the model, token count,
   and cost: estimated up front, then the actual amount when NEAR AI reports it.
   Each run has a cost budget and a daily spend limit you can adjust, and agents
@@ -1418,8 +1417,8 @@ copy of Open-GSD to a project that doesn't already have one.
 
 ## The Sterling workbench
 
-Each release also ships as the Sterling workbench, a container image you open in your
-browser. It carries Sterling Sovereign AI inside it, in the Canadian Defence Edition:
+The Sterling workbench runs as a container on your computer. Open it in your browser.
+The Eclipse Theia release image includes Sterling Sovereign AI Canadian Defence Edition:
 
 - **A right-hand rail** with Get Started, Portfolio, Chat, Team Studio, Agent Activity,
   Governance, Compliance and Documentation. Data Management and Model Factory are shown as
@@ -1439,26 +1438,21 @@ browser. It carries Sterling Sovereign AI inside it, in the Canadian Defence Edi
 The image runs as a non-root user, keeps telemetry off and contacts no outside server unless
 you configure one. It has no sign-in of its own, so run it on `127.0.0.1` only.
 
-## Get started in two minutes
+## Get started
 
-1. Install **Sterling Sovereign AI** and open a project folder. From 0.4.38 each release also ships
-   as the Sterling workbench container image on the GitHub Container Registry, recorded by digest
-   on the GitHub release (0.4.37's image is on the registry without one); the image has no
-   sign-in of its own, so run it on `127.0.0.1` only.
-2. Open the **SovAI** chat and choose **Set up a new profile** (or run
-   **SovAI: Set Up a New Profile** from the Command Palette). A profile is
-   your NEAR AI key or local runtime for this project; it is working once the
-   extension has checked that it connects. Until then the chat shows only
-   this step, because everything else needs a working profile.
-3. Choose where models run: **NEAR AI Cloud** (create a key at
-   [cloud.near.ai](https://cloud.near.ai/)), a **local runtime** (Ollama, LM
-   Studio, vLLM, or any OpenAI-compatible server), or **both**, picking a cloud
-   or local model for each chat.
-4. Once you are connected, the chat comes into view and suggests what to do
+1. Follow the [workbench setup guide](docs-site/content/using/getting-started.md) to start the
+   release image on your computer and open it in your browser. Open or create a project folder in
+   the workbench.
+2. Open **SovAI Chat** and choose **Set up a new profile**, or run
+   **SovAI: Set Up a New Profile** from the Command Palette.
+3. Choose a local runtime such as Ollama, LM Studio, or another compatible model server
+   that the container can reach. The local preview can use a server without an API key.
+   Profiles that require a saved key need a workbench with a secret store.
+4. Once the connection check passes, the chat comes into view and suggests what to do
    next. If the project has no team yet, it starts with setting up your
    project team. You can skip it and start chatting.
-5. Open the **SovAI** view in the secondary side bar and start chatting, or
-   type `/new-project` to plan something new.
+5. Open **Chat** on the workbench's right rail and start chatting, or type
+   `/new-project` to plan something new.
 
 ## Security and privacy
 
@@ -1580,8 +1574,9 @@ Read the full [security and trust report](SECURITY.md).
 
 ## Requirements
 
-- VS Code 1.101 or newer (it runs on Node 22 or later; Node 20 is end of life).
-- A NEAR AI Cloud API key, a local OpenAI-compatible runtime, or both.
+- Docker or a compatible container runtime that can run the released `linux/amd64`
+  workbench image, and a browser on the same computer.
+- An approved compatible model server reachable from the container for the first chat.
 - For Open-GSD workflows: npm access, so Open-GSD can be installed the first
   time you run one.
 
