@@ -306,11 +306,19 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       assert.ok(claimed);
       assert.equal(await handle.store.ackMessage('globex', claimed.messageId, T0 + 6), false);
       assert.equal((await handle.store.getMessage('acme', 'k1'))?.state, 'claimed');
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, 'body of k1');
       assert.equal(await handle.store.ackMessage('acme', claimed.messageId, T0 + 6), true);
       assert.equal((await handle.store.getMessage('acme', 'k1'))?.state, 'done');
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, '');
       assert.equal(await handle.store.queueDepth('acme'), 0);
       assert.equal(await handle.store.ackMessage('acme', claimed.messageId, T0 + 7), false);
       assert.equal(await handle.store.claimNext('acme', 'teams', 'c1', T0 + 8), undefined);
+      await handle.reopen();
+      const duplicate = await handle.store.acceptInbound(inbound('acme', 'k1', { payload: 'new text on retry' }), 'run-2');
+      assert.deepEqual(duplicate, { duplicate: true, messageId: claimed.messageId, runId: 'run-1' });
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, '');
+      assert.equal(await handle.store.getRun('acme', 'run-2'), undefined);
+      assert.equal(await handle.store.queueDepth('acme'), 0);
     }));
 
   test(`${name}: ackMessage refuses a messageId that is not a message id as invalid-record, naming the id and not a time`, () =>
@@ -337,6 +345,7 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await handle.store.putTenant(tenant('acme'));
       const accepted = await handle.store.acceptInbound(inbound('acme', 'k1'), 'run-1');
       assert.equal(await handle.store.ackMessage('acme', accepted.messageId, T0 + 1), false);
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, 'body of k1');
       assert.equal(await handle.store.queueDepth('acme'), 1);
     }));
 
@@ -349,8 +358,12 @@ export function relayStoreContract(name: string, factory: StoreFactory): void {
       await handle.reopen();
       assert.equal(await handle.store.queueDepth('acme'), 1);
       const again = await handle.store.claimNext('acme', 'teams', 'c1', T0 + 9);
-      assert.equal(again?.dedupeKey, 'k1');
-      assert.equal(again?.attempts, 2);
+      assert.ok(again);
+      assert.equal(again.dedupeKey, 'k1');
+      assert.equal(again.attempts, 2);
+      assert.equal(again.payload, 'body of k1');
+      assert.equal(await handle.store.ackMessage('acme', again.messageId, T0 + 10), true);
+      assert.equal((await handle.store.getMessage('acme', 'k1'))?.payload, '');
     }));
 
   test(`${name}: queued messages and their payloads survive a reopen exactly, multi-byte characters included`, () =>
