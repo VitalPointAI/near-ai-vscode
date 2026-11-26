@@ -897,19 +897,13 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
 
-test('managed removal stages continuity and Finish recovers the affected cell after reopening', async () => {
-  const at = install('managed-removal');
+async function seedManagedAccess(lead: Lead, cells: readonly string[]) {
+  const { p, at } = lead;
   at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
-  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
-    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
-  }));
-  const lead = { at, p, host: hostOf(p, at) };
-  const unaffected = await createCell(lead, LABEL_Z, [p.deviceWriter]);
-  const peer = await bringIn(lead, 'managed-removed-peer', 'Mo Analyst', OFFICIAL);
   assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
   const before = await head(p);
   const id = accessRevisionId(p.projectId, null, before.hash, 'cell.access.commit', {});
-  const manifests = [p.projectId, unaffected].sort().map((cell) => ({
+  const manifests = [...cells].sort().map((cell) => ({
     project: p.projectId, cell, epoch: 1, policy: null, excluded: [],
     grants: (before.roster.cells.cells.get(cell)?.grants ?? []).map((grant) => ({
       hash: grant.hash, pages: grant.grant.pages ?? [], recipients: [...grant.writers].sort()
@@ -924,6 +918,19 @@ test('managed removal stages continuity and Finish recovers the affected cell af
   const seed = await p.appendOwn('cell.access.commit', { accessRevision: id, accessRoot: commitment.root });
   assert.ok('ok' in seed);
   const receipts = manifests.map((evidence) => ({ ...commitment.cellProof(evidence.cell), entry: seed.hash, evidence }));
+  return { seed, receipts };
+}
+
+test('managed removal stages continuity and Finish recovers the affected cell after reopening', async () => {
+  const at = install('managed-removal');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  const lead = { at, p, host: hostOf(p, at) };
+  const unaffected = await createCell(lead, LABEL_Z, [p.deviceWriter]);
+  const peer = await bringIn(lead, 'managed-removed-peer', 'Mo Analyst', OFFICIAL);
+  const { seed, receipts } = await seedManagedAccess(lead, [p.projectId, unaffected]);
   assert.ok('ok' in await p.putGrants([], receipts.slice(0, 1)));
   const waiting = await removeFromProject(lead.host, { member: peer.member });
   assert.equal(waiting.ok, false);
@@ -972,6 +979,44 @@ test('managed removal stages continuity and Finish recovers the affected cell af
   assert.equal(await unfinishedRekeys(hostOf(recovered, at)), 0);
   assert.equal((await finishRekeys(hostOf(recovered, at))).reason, 'nothing-to-finish');
   assert.equal((await head(recovered)).hash, current.hash);
+});
+
+test('managed clearance reduction commits decisions using the lead’s custom scale mapping', async () => {
+  const lead = await founded('managed-clearance');
+  lead.host.scales = { ...DEMO_SCALES, allied: { name: 'Allied', levels: ['LOW', 'HIGH'] } };
+  lead.host.mappings = [{ from: { scale: 'allied', level: 'HIGH' }, covers: { scale: 'demo', level: 'SECRET' } }];
+  const clearance = { ...CLEARED_X, scale: 'allied', level: 'HIGH' };
+  const downgraded = { ...clearance, level: 'LOW' };
+  const affected = await createCell(lead, LABEL_X, [lead.p.deviceWriter]);
+  const unaffected = await createCell(lead, LABEL_Z, [lead.p.deviceWriter]);
+  const peer = await bringIn(lead, 'mapped-peer', 'Mo Analyst', clearance);
+  assert.ok(peer.p.keys.holds(affected, 1));
+  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, affected, unaffected]);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  const wrongPolicy = await updateMember({ project: lead.p, deps: lead.at.deps }, { member: peer.member, clearance: downgraded });
+  assert.equal(wrongPolicy.ok, false);
+  assert.equal((await head(lead.p)).hash, seed.hash);
+  const changed = await updateMember(lead.host, { member: peer.member, clearance: downgraded });
+  assert.equal(changed.ok, true, changed.message);
+
+  const viewer = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  const current = await head(viewer);
+  assert.deepEqual(memberAt(current.roster.members, peer.member, current.position)?.clearance, downgraded);
+  const pending = current.roster.accessGrants.get(affected);
+  assert.equal(pending?.decision, 'pending');
+  assert.deepEqual(pending.evidence.excluded, [peer.writer]);
+  assert.match(pending.evidence.policy ?? '', /^[0-9a-f]{64}$/);
+  assert.equal(current.roster.accessGrants.get(unaffected)?.decision, 'continues');
+  const slot = deviceAt(current.roster.members, viewer.deviceWriter, current.position)?.slot;
+  assert.ok(slot !== undefined);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const paused = await viewer.appendOwn('doc.client', data, { stream: affected });
+  assert.equal(isProjectRefused(paused) && paused.refused, 'rekey-pending');
+  assert.ok('ok' in await viewer.appendOwn('doc.client', data, { stream: unaffected }));
+  const finished = await finishRekeys({ ...lead.host, project: viewer });
+  assert.equal(finished.ok, true, finished.message);
+  assert.deepEqual(finished.rekeyed, [affected]);
+  assert.equal((await head(viewer)).roster.accessGrants.get(affected)?.evidence.policy, pending.evidence.policy);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
