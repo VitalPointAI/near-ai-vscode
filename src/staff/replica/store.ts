@@ -81,6 +81,8 @@ import type { RosterAnchor } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
 import { verifyEntry } from '../../domain/replica/verify';
+import { identityDir, loadDeviceIdentity } from '../../team/identity';
+import { readKeyHistory } from '../../team/keyHistory';
 import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from './frontierPolicy';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
@@ -1410,8 +1412,6 @@ export class ReplicaStore {
         const policy = await capture();
         if (policy === undefined) return false;
         const verifyBinding = async () => {
-          const signer = await this.deps.signer();
-          if (signer.publicKey !== this.own.publicKey || (await this.deps.keyStatus())(signer).state !== 'active') return undefined;
           await this.verifyAppendSnapshot(request.expectedSnapshot);
           const { pin, keys, stream } = request;
           const { grants } = await this.grants();
@@ -1454,6 +1454,15 @@ export class ReplicaStore {
           if (await this.deps.secrets.get(slot) !== reference) return undefined;
           await this.verifyAppendSnapshot(request.expectedSnapshot);
           if (this.mark?.rosterHead !== head || !await policy.recheck()) return undefined;
+
+          const expectedHead = policy.source.personalHistoryHead;
+          const history = await readKeyHistory(identityDir(request.policyStorage), this.deps.secrets);
+          if (!history.ok || history.head?.hash !== expectedHead.hash || history.head.seq !== expectedHead.seq) return undefined;
+          // The file-only store's signer is captured at open. Read the protected device again while ordered locks are held.
+          const device = await loadDeviceIdentity(this.deps.secrets);
+          if (device === undefined || device.publicKey !== reader.publicKey || writerIdOf(device.publicKey) !== this.own.writer ||
+            history.lookup(device).state !== 'active') return undefined;
+
           return sha256Hex(canonicalBytes(['private-frontier-stage/2', this.dir, pin.project, pin.genesisHash, stream,
             this.own.writer, requirement, access.entry, access.root, request.expectedSnapshot, sha256Hex(Buffer.from(reference))]));
         };
