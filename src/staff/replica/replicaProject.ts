@@ -41,7 +41,7 @@ import type { DecodeVerdict } from './decodeHost';
 import { DeviceKeyRing, loadOrCreateKemKeys, sameReadingKeys } from './keyring';
 import * as kemPublish from './kemPublish';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
-import type { CheckVerdict, ForeignCheck, IngestResult, StartedAgain, StoreRefusal, StoreRefused } from './store';
+import type { AppendResult, CheckVerdict, ForeignCheck, IngestResult, StartedAgain, StoreRefusal, StoreRefused } from './store';
 import { foldCheckpoints, trustedCheckpointsOf } from './foldCheckpoints';
 import type { SyncLocal } from './hubSync';
 import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGate';
@@ -460,25 +460,33 @@ export class ReplicaProject {
           matchesEntry = result.matches;
           return result.built;
         });
-        if (!('entry' in built)) return finish !== undefined && !finishCurrent() ? refuse('action-required') : built;
-        if (write.check !== undefined) {
+        if (!checked && !('entry' in built)) return finish !== undefined && !finishCurrent() ? refuse('action-required') : built;
+        let refused: R | undefined;
+        if ('entry' in built && write.check !== undefined) {
           const prior = this.foldState;
           if (prior === undefined) throw new Error('A checked write requires a current fold.');
           const ctx = built.blobs.length === 0 ? prior.ctx : { ...prior.ctx, blobs: (hash: string) => built.blobs.find((blob) => blob.hash === hash) ?? prior.ctx.blobs(hash) };
-          const refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
-          if (refused !== undefined) return refused;
+          refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
         }
-        const stage = write.options.stageAccess?.(built.hash);
-        if (write.options.stageAccess !== undefined && (!checked || !verifyManagedStage(built, stage, this.rosterInputs(state.roster)))) return refuse('rekey-pending');
-        const writer = built.entry.header.writer;
-        const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
-        const frozenStage = finish === undefined || stage === undefined ? undefined : canonicalBytes(stage);
-        const mayCommit = deadline === undefined && action === undefined && finish === undefined ? undefined : () =>
-          (deadline === undefined || Date.parse(deadline) > this.now().getTime()) &&
-          (action === undefined || managedActionCurrent(this.device.roster, write.options.action, action)) &&
-          (finish === undefined || (finishCurrent() && matchesEntry?.(built) === true && frozenStage?.equals(canonicalBytes(stage)) === true));
-        const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit, stage) : await this.storeSigned(built, expected, mayCommit, stage);
+        let result: AppendResult | IngestResult | StoreRefused;
+        if (!('entry' in built) || refused !== undefined) {
+          // Recheck refusals after signing, without persisting an entry or blob.
+          result = await this.store.appendOwn([], expected);
+        } else {
+          const stage = write.options.stageAccess?.(built.hash);
+          if (write.options.stageAccess !== undefined && (!checked || !verifyManagedStage(built, stage, this.rosterInputs(state.roster)))) return refuse('rekey-pending');
+          const writer = built.entry.header.writer;
+          const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
+          const frozenStage = finish === undefined || stage === undefined ? undefined : canonicalBytes(stage);
+          const mayCommit = deadline === undefined && action === undefined && finish === undefined ? undefined : () =>
+            (deadline === undefined || Date.parse(deadline) > this.now().getTime()) &&
+            (action === undefined || managedActionCurrent(this.device.roster, write.options.action, action)) &&
+            (finish === undefined || (finishCurrent() && matchesEntry?.(built) === true && frozenStage?.equals(canonicalBytes(stage)) === true));
+          result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit, stage) : await this.storeSigned(built, expected, mayCommit, stage);
+        }
         if ('ok' in result) {
+          if (!('entry' in built)) return finish !== undefined && !finishCurrent() ? refuse('action-required') : built;
+          if (refused !== undefined) return refused;
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
         }

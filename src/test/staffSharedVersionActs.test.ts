@@ -14,7 +14,6 @@ import { appendProductEntry, proposeVersion } from '../staff/replica/labelCells'
 import { updateMember } from '../staff/replica/membership';
 import { deviceKeys, storeDeps } from '../staff/replica/projectDevice';
 import { ReplicaProject } from '../staff/replica/replicaProject';
-import type { ProjectState } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
 import { productPath, StaffHost } from '../staff/staffHost';
 import { CHANGED_WHILE_DECIDING_TEXT, VERSION_ACT_WORDS, VersionActs } from '../staff/replica/versionActs';
@@ -88,13 +87,6 @@ async function hostedSessionOf(lead: Seat, beforeSigning?: () => Promise<string 
   return { deps, session };
 }
 
-type NativeVersionActs = VersionActs & {
-  submitForRosterRole?: VersionActs['submit'];
-  roomActions?: (state: ProjectState, product: string) => Array<{
-    hash: string; number: number; submitRoles: string[]; decision?: { stamp: string; settle: boolean };
-  }>;
-};
-
 test('native submission and a stamped approval use the session and person keys and converge across replicas', async () => {
   const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
   const guard = await bringIn(lead, 'guard', 'Guard Reviewer', orgClearance('Internal'));
@@ -105,11 +97,11 @@ test('native submission and a stamped approval use the session and person keys a
   let signatures = 0;
   const { deps, session } = await hostedSessionOf(lead, async () => { signatures += 1; return undefined; });
   const hosted = project(await ReplicaProject.open(lead.at.root, deps));
-  const acts: NativeVersionActs = new VersionActs(hosted, PERSON);
-  const guardActs: NativeVersionActs = new VersionActs(guard.p, PERSON);
+  const acts = new VersionActs(hosted, PERSON);
+  const guardActs = new VersionActs(guard.p, PERSON);
   const request = { product: PRODUCT, hash: version, decisionFor: 'commander' };
   const draft = streamEntries(lead.at, stream);
-  assert.equal((await acts.submitForRosterRole?.(request))?.ok, false, 'an unguarded version cannot be submitted');
+  assert.equal((await acts.submitForRosterRole(request)).ok, false, 'an unguarded version cannot be submitted');
   assert.deepEqual(streamEntries(lead.at, stream), draft);
   await syncTo(lead, guard, [stream]);
   const data = { product: PRODUCT, hash: version, gate: 'guard', verdict: 'CLEARED', reasons: ['Reviewed against the plan.'] } as const;
@@ -121,18 +113,18 @@ test('native submission and a stamped approval use the session and person keys a
   assert.equal(entry.hash, result.hash);
   await syncTo(guard, lead, [stream]);
   assert.equal((await versionFold(lead, stream)).product.versions[0]?.state, 'guard-checked');
-  assert.deepEqual(acts.roomActions?.(await hosted.state(), PRODUCT), [{ hash: version, number: 1, submitRoles: ['commander', 'deputy'] }]);
+  assert.deepEqual(acts.roomActions(await hosted.state(), PRODUCT), [{ hash: version, number: 1, submitRoles: ['commander', 'deputy'] }]);
   const cleared = streamEntries(lead.at, stream);
-  assert.equal((await guardActs.submitForRosterRole?.(request))?.ok, false, 'a role holder outside the owner side cannot submit');
+  assert.equal((await guardActs.submitForRosterRole(request)).ok, false, 'a role holder outside the owner side cannot submit');
   assert.deepEqual(streamEntries(guard.at, stream), cleared);
   ok(await updateMember(lead.host, { member: guard.member, roles: ['member'] }), 'remove the alternative decision role');
   for (const decisionFor of ['unknown', 'deputy', 'outside-cell']) {
-    assert.equal((await acts.submitForRosterRole?.({ ...request, decisionFor }))?.ok, false, `${decisionFor} is unavailable for this cell`);
+    assert.equal((await acts.submitForRosterRole({ ...request, decisionFor })).ok, false, `${decisionFor} is unavailable for this cell`);
   }
   assert.deepEqual(streamEntries(lead.at, stream), cleared);
-  assert.deepEqual(acts.roomActions?.(await hosted.state(), PRODUCT), [{ hash: version, number: 1, submitRoles: ['commander'] }]);
-  const submitted = await acts.submitForRosterRole?.(request);
-  assert.ok(submitted?.ok, submitted?.ok === false ? submitted.message : undefined);
+  assert.deepEqual(acts.roomActions(await hosted.state(), PRODUCT), [{ hash: version, number: 1, submitRoles: ['commander'] }]);
+  const submitted = await acts.submitForRosterRole(request);
+  assert.ok(submitted.ok, submitted.ok ? undefined : submitted.message);
   const awaiting = (await versionFold({ ...lead, p: hosted }, stream)).product;
   const submission = awaiting.records[0]?.acts.find((act) => act.kind === 'version.submit');
   assert.deepEqual(submission?.data, request);
@@ -140,20 +132,20 @@ test('native submission and a stamped approval use the session and person keys a
   assert.equal(submission?.entry, submitted.hash);
   assert.equal(submission?.writer, session.writer);
   const beforeDecision = streamEntries(lead.at, stream);
-  assert.equal((await acts.submitForRosterRole?.(request))?.ok, false, 'an awaiting version cannot be resubmitted');
+  assert.equal((await acts.submitForRosterRole(request)).ok, false, 'an awaiting version cannot be resubmitted');
   assert.deepEqual(streamEntries(lead.at, stream), beforeDecision);
   await syncTo(lead, guard, [stream]);
   assert.equal((await versionFold(guard, stream)).product.versions[0]?.state, 'awaiting-decision');
-  assert.deepEqual(guardActs.roomActions?.(await guard.p.state(), PRODUCT), []);
+  assert.deepEqual(guardActs.roomActions(await guard.p.state(), PRODUCT), []);
 
   const stamp = await acts.decisionStamp(request);
   assert.ok(stamp);
-  assert.deepEqual(acts.roomActions?.(await hosted.state(), PRODUCT), [{
+  assert.deepEqual(acts.roomActions(await hosted.state(), PRODUCT), [{
     hash: version, number: 1, submitRoles: [], decision: { stamp, settle: false }
   }]);
   const decision = { product: PRODUCT, hash: version, outcome: 'approve', reasons: ['Ready to proceed.'] } as const;
   ok(await updateMember(lead.host, { member: lead.member, roles: ['member', 'section_lead:j4'] }), 'withdraw the decision role while the dialog is open');
-  assert.deepEqual(acts.roomActions?.(await hosted.state(), PRODUCT), []);
+  assert.deepEqual(acts.roomActions(await hosted.state(), PRODUCT), []);
   const refused = await acts.decide({ ...decision, stamp });
   assert.equal(refused.ok ? undefined : refused.reason, 'not-decision-holder');
   assert.equal(signatures, 0, 'the old dialog did not ask the person key to sign');
@@ -356,8 +348,10 @@ test('ordinary decisions made offline can contest, and a stamped decision settle
   assert.equal(agent.ok ? undefined : agent.reason, 'agent-cannot-decide');
   assert.deepEqual(streamEntries(lead.at, stream), before);
 
-  const stamp = await first.decisionStamp(target);
-  assert.ok(stamp);
+  const [settlement] = first.roomActions(await lead.p.state(), PRODUCT);
+  assert.equal(settlement?.hash, target.hash);
+  assert.ok(settlement.decision?.settle);
+  const { stamp } = settlement.decision;
   assert.equal(stamp, await second.decisionStamp(target));
   const result = await first.decide({ ...target, outcome: 'approve', reasons: [], stamp, settle: true });
   assert.ok(result.ok, result.ok ? undefined : result.message);
