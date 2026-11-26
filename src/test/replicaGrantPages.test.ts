@@ -10,6 +10,7 @@ import { GRANT_PAGE_REFUSALS, MAX_WRAPS_PER_V2_PAGE, buildGrantPages, readGrantP
 import { canonicalBytes } from '../domain/team/canonical';
 import { payloadSigningInput, signPayload } from '../domain/team/signedPayload';
 import type { SignOptions, SignedPayload } from '../domain/team/signedPayload';
+import { accessPermitBytes, accessRevisionId } from '../domain/replica/rotationProof';
 import { REPLICA_SIGNED_AT } from '../domain/replica/entry';
 import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
 import { granteesAt } from '../domain/replica/rosterCells';
@@ -119,6 +120,51 @@ test('hosted Finish fixes the unpaged envelope and rejects an unrelated approval
   const reviewed = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => true);
   assert.equal(await reviewed.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
   assert.deepEqual(ids, ['reviewed-finish']);
+});
+
+test('hosted Finish permits are fixed by the verified grant hash and selected session bindings', async () => {
+  const grant = input(1, { wraps: wraps(1, v1Wrap) });
+  const writer = grant.wraps[0].writer;
+  const session = { writer: 'a'.repeat(64), device: writer, hash: '1'.repeat(64), sessionKey: LEAD.publicKey,
+    slot: 1, member: 'mbr-reader', notAfter: '2026-11-26T00:00:00.000Z', roster: ROSTER };
+  const priorRevision = '2'.repeat(64);
+  const context = {
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    priorRevision, oldEpoch: 2, reason: 'device-revoked' as const, evidence: 'e'.repeat(64), policy: null,
+    recipients: [{ writer, format: 1 as const }],
+    continuity: [{ cell: CELL, epoch: grant.epoch, devices: [writer], sessions: [session] }]
+  };
+  const intent = createFinishIntent(context, grant);
+  assert.ok(intent);
+  const [page] = buildGrantPages(LEAD.signer, grant);
+  const operation = { cell: grant.cell, epoch: grant.epoch, grant: grantHash(page), reason: context.reason };
+  const revision = accessRevisionId(CELL, priorRevision, ROSTER, 'cell.rekey', operation);
+  const direct = { project: CELL, revision, predecessor: ROSTER, cell: CELL, epoch: grant.epoch, authority: LEAD.writer, writer, device: writer, certificate: null };
+  const certified = { ...direct, writer: session.writer, certificate: session.hash };
+  const calls: string[] = [];
+  const signer = { ...LEAD.signer, canSignAction: (_id: string, bytes: Uint8Array) => intent.actionBytes().equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) { calls.push(options?.action ?? ''); return LEAD.signer.sign(bytes); } };
+  let current = true;
+  const scope = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => current);
+  const permit = (index: number) => scope.signerFor('permit' as 'founding', index);
+  const refuse = async (index: number, bytes: Buffer, count: number) => {
+    assert.equal(typeof await permit(index).sign(bytes), 'object');
+    assert.equal(calls.length, count);
+  };
+  await refuse(0, accessPermitBytes(direct), 0);
+  assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
+  await refuse(1, accessPermitBytes(certified), 1);
+  await refuse(0, accessPermitBytes({ ...direct, revision: ROSTER }), 1);
+  await refuse(0, accessPermitBytes({ ...direct, authority: writer }), 1);
+  assert.equal(await permit(0).sign(accessPermitBytes(direct)), LEAD.signer.sign(accessPermitBytes(direct)));
+  await refuse(0, accessPermitBytes(direct), 2);
+  await refuse(1, accessPermitBytes({ ...certified, certificate: ROSTER }), 2);
+  current = false;
+  await refuse(1, accessPermitBytes(certified), 2);
+  current = true;
+  assert.equal(await permit(1).sign(accessPermitBytes(certified)), LEAD.signer.sign(accessPermitBytes(certified)));
+  await refuse(1, accessPermitBytes(certified), 3);
+  assert.deepEqual(calls, ['reviewed-finish', 'reviewed-finish', 'reviewed-finish']);
 });
 
 test('tracer: 2,000 v2 wraps make four signed pages, each within GRANT_MAX_BYTES, and readGrantPages gives back all 2,000 and the label', () => {
