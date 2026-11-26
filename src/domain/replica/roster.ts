@@ -708,8 +708,14 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
     reads.push({ value, read });
   }
   const listed = new Set<string>();
-  for (const { read } of reads) for (const page of read.grant.pages ?? []) listed.add(page);
+  for (const { read } of reads) {
+    if (!requiresManagedGrant(state, read.grant)) for (const page of read.grant.pages ?? []) listed.add(page);
+  }
   for (const { value, read: first } of reads) {
+    if (requiresManagedGrant(state, first.grant)) {
+      state.held.push({ hash: first.hash, reason: 'cell-access-grant-pending' });
+      continue;
+    }
     if (listed.has(first.hash)) continue;
     let read: { grant: CellGrant; hash: string; signer: { writer: string } } = first;
     if ((first.grant.pages ?? []).length > 0) {
@@ -746,4 +752,22 @@ function placeGrants(state: RosterState, grants: readonly unknown[]): void {
     });
     if (outcome.status === 'refused') state.refused.push({ hash: read.hash, kind: 'grant', reason: outcome.reason });
   }
+}
+
+/** Raw grant bytes can arrive before their authority. After the switch they are only staging material. */
+export function requiresManagedGrant(state: RosterState, grant: Pick<CellGrant, 'roster' | 'cell' | 'epoch'>): boolean {
+  const since = state.requiredFrom.get(CELL_ACCESS_FEATURE);
+  if (since === undefined) return false;
+  const cited = state.positionOf.get(grant.roster);
+  const founded = state.cells.cells.get(grant.cell)?.epochs.find((epoch) => epoch.epoch === grant.epoch)?.from;
+  return cited === undefined || founded === undefined || cited >= since || founded > since;
+}
+
+/** Only legacy grants may bootstrap read keys through the legacy catching-up path. */
+export function legacyReadingGrants(state: RosterState, grants: readonly unknown[]): readonly unknown[] {
+  if (!state.requiredFrom.has(CELL_ACCESS_FEATURE)) return grants;
+  return grants.filter((signed) => {
+    const grant = readGrant(signed);
+    return grant.ok && !requiresManagedGrant(state, grant.grant);
+  });
 }

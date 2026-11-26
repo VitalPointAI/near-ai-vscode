@@ -870,11 +870,13 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.ok('ok' in await p.putGrants([staged]));
   const after = await head(p);
   assert.equal(after.roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash), false);
+  assert.ok(after.roster.held.some((item) => item.hash === hash && item.reason === 'cell-access-grant-pending'));
   assert.equal((await p.signedGrants()).some((grant) => grant.hash === hash), false);
   const welcome = await p.welcomeFor(p.deviceWriter, [p.projectId]);
   assert.equal(welcome.grants.some((grant) => grantHash(grant) === hash), false);
   const reopened = project(await ReplicaProject.open(at.root, at.deps));
   assert.equal((await reopened.signedGrants()).some((grant) => grant.hash === hash), false);
+  assert.ok(grantsOn(at).some((grant) => grantHash(grant) === hash));
 });
 
 /** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */

@@ -26,11 +26,11 @@ import type { DeviceIdentity } from '../../team/identity';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../../domain/team/signedPayload';
 import { SESSION_REFUSALS, isPersonKeyKind, requiresActionId } from '../../domain/replica/sessionKeys';
 import { isRecord } from '../../domain/team/validate';
-import { buildGrantAsync, newEpochKey, openLabel } from '../../domain/replica/cellKeys';
+import { buildGrantAsync, grantHash, newEpochKey, openLabel, readGrant } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
 import { signKemBinding } from '../../domain/replica/deviceKem';
 import { buildGrantPagesAsync, wrapsFor } from '../../domain/replica/grantPages';
-import { grantHash, readGrant } from '../../domain/replica/cellKeys';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, STREAM_ID_PATTERN, blobBytesHash, buildEntryAsync, entryHash, openBlob, openBody, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { Actor, BuiltEntry, Dep, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import { addEntries, createFoldState } from '../../domain/replica/fold';
@@ -38,7 +38,7 @@ import type { FoldResult, FoldState } from '../../domain/replica/fold';
 import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, managedWriteAllowed, rosterView } from '../../domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
@@ -633,7 +633,7 @@ export class ReplicaProject {
         const blob = this.blobCache.get(opened.blob) ?? await this.store.blob(opened.blob);
         if (blob !== undefined) blobs.set(blob.hash, blob);
       }
-      const { grants } = await this.store.grants();
+      const grants = (await this.foldNow()).roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? [] : (await this.store.grants()).grants;
       return buildWelcome({ genesis, roster, blobs: [...blobs.values()], grants: grants.map((grant) => grant.signed), writer, cells });
     });
   }
@@ -744,9 +744,9 @@ export class ReplicaProject {
     });
   }
 
-  /** Every signed cell grant stored, with its hash. */
+  /** Raw grants for legacy sync. Managed grants use a separate recipient-only delivery path. */
   public signedGrants(): Promise<Array<{ hash: string; signed: unknown }>> {
-    return this.exclusive(async () => (await this.store.grants()).grants.map((grant) => ({ hash: grant.hash, signed: grant.signed })));
+    return this.exclusive(async () => (await this.foldNow()).roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? [] : (await this.store.grants()).grants.map((grant) => ({ hash: grant.hash, signed: grant.signed })));
   }
 
   /** Stores a signed checkpoint as evidence (the store names it by its checkpoint hash). */
@@ -1014,7 +1014,7 @@ export class ReplicaProject {
     const unheld = new Set<number>();
     for (const entry of entries) if (entry.header.stream === project && !this.keys.holds(project, entry.header.epoch)) unheld.add(entry.header.epoch);
     if (unheld.size === 0) return keys;
-    const candidates = this.keys.readingCandidates(project, this.grantList).filter((candidate) => unheld.has(candidate.epoch));
+    const candidates = this.keys.readingCandidates(project, legacyReadingGrants(roster, this.grantList)).filter((candidate) => unheld.has(candidate.epoch));
     if (candidates.length === 0) return keys;
     const tried = new Set(candidates.map((candidate) => candidate.epoch));
     const holders = new Set<string>([this.anchor.lead.member]);
