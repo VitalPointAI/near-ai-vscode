@@ -6,6 +6,12 @@
 
 **What you need.** The new bundle, your organization's public key from the install media, the site file and site folder, the install state folder, and an OpenBao token file. Record the change in your organization's change log first (`maintenance.md`).
 
+## OpenSearch upgrade hold
+
+On an existing site, stop before applying a bundle that would upgrade OpenSearch unless the upgrade has been verified for that site and bundle. The general apply command below includes OpenSearch when it is enabled. Passing bundle and preflight checks verifies inputs and rendering. Upgrade verification also needs to cover the existing site's audit data and policies.
+
+Fresh full-site installs remain available through `site-install.md`.
+
 ## The steps
 
 1. **Check.** `node deploy/bundle/check.mjs --bundle <new bundle> --public-key <public key>`.
@@ -23,4 +29,4 @@
 
 ## Going back to the previous bundle
 
-Import the previous verified bundle (step 3) and apply again (step 5). The charts roll back to the previous versions. Never go back across an RKE2 minor version: RKE2 is never downgraded (`maintenance.md`). If a database schema moved forward in the update, restore from the backup taken before it (`backup-and-restore.md`).
+If applying the previous bundle includes OpenSearch, verify that rollback for the site before continuing. Import the previous verified bundle (step 3) and apply again (step 5). The charts roll back to the previous versions. Never go back across an RKE2 minor version: RKE2 is never downgraded (`maintenance.md`). If a database schema moved forward in the update, restore from the backup taken before it (`backup-and-restore.md`).
