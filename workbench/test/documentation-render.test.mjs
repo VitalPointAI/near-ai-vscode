@@ -150,12 +150,12 @@ test('the bundled architecture guide renders its illustration and searchable flo
   const overview = renderer.render(source, await readFile(path.join(repositoryRoot, source), 'utf8'));
   const illustration = overview.html.match(/<figure class="sterling-doc-figure"><img src="sterling-documentation\/([0-9a-f]{16}\.webp)" alt="Illustrated map of Sterling Sovereign AI[^"]*"/);
   assert.ok(illustration, 'the overview renders a same-origin illustrated figure');
-  assert.equal(renderer.assets.get(illustration[1]), path.join(repositoryRoot, 'docs-site/static/img/sovai-system-architecture.webp'));
+  assert.equal(renderer.assets.get(illustration[1]), path.join(repositoryRoot, 'docs-site/static/img/sovai-data-flows.webp'));
   const flow = [...overview.html.matchAll(/<table>[\s\S]*?<\/table>/g)]
     .map(([table]) => table)
     .find((table) => table.includes('Mission hub validates sealed changes'));
   assert.ok(flow, 'the overview renders the shared flow table');
-  assert.equal(flow.match(/<tbody>\s*([\s\S]*?)<\/tbody>/)?.[1].match(/<tr>/g)?.length, 7);
+  assert.equal(flow.match(/<tbody>\s*([\s\S]*?)<\/tbody>/)?.[1].match(/<tr>/g)?.length, 9);
   assert.match(overview.text, /Mission hub validates sealed changes/);
   assert.doesNotMatch(overview.html, /SystemArchitecture|The interactive part of this page/);
   assertNoRawSyntax(overview.html);

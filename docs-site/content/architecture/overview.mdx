@@ -13,7 +13,7 @@ The browser Workbench runs on a workstation today. Organization-hosted sessions 
 ## How the parts fit
 
 <SystemArchitectureMap>
-<img src="/img/sovai-system-architecture.webp" alt="Illustrated map of Sterling Sovereign AI showing the Workbench, trust and policy, sites and missions, governed data, the Model Factory, and release assurance." />
+<img src="/img/sovai-data-flows.webp" alt="Illustrated map of Sterling Sovereign AI showing nine directed transfers and the information that moves between systems. The same paths appear in the text table." />
 </SystemArchitectureMap>
 
 In the component descriptions, **Available** means the capability is part of the current
@@ -25,15 +25,17 @@ intended system. A single area can contain components at several of these stages
 
 <SystemArchitectureFlows>
 
-| Path | Starts with | Control or service | Outcome |
-| --- | --- | --- | --- |
-| Run a task | Staff workspace | Agent and policy gate | Permitted tool or model |
-| Share within a mission | Authorized workspace | Mission hub validates sealed changes | Eligible peer verifies and applies |
-| Discover data (planned) | Approved source or node | Mission catalogue filters visibility | Source rechecks access on use |
-| Release across domains (planned) | Authorized release package | Approved cross-domain transfer | Destination verifies and records acceptance |
-| Improve a model (planned) | Approved corpus and workload | Training and held-out evaluation | Passport and separate activation |
-| Deploy an update | Build and review | Approved digest or signed bundle | Workstation or verified site registry |
-| Review assurance | Tests, audits and site evidence | Compliance engine | Assessor and authorizing official |
+| Interaction | From | Moves → | Through | Moves → | To |
+| --- | --- | --- | --- | --- | --- |
+| Submit a task | Staff Workbench | Request and scoped context → | Agent and policy gate | Authorized tool or model input → | Approved tool or endpoint |
+| Return a result | Tool or model endpoint | Result and provenance → | Agent handles result under policy | Response and activity record → | Staff Workbench |
+| Share within a mission | Authorized workspace | Signed and sealed changes → | Mission hub validates sealed changes | Eligible replica updates → | Peers verify and apply |
+| Discover data (planned) | Approved source or node | Scoped inventory metadata → | Governed catalogue filters visibility | Permitted references → | Staff Workbench |
+| Open discovered data (planned) | Authorized staff workspace | Access request and scope → | Source validates current permission | Permitted content or denial → | Requesting workspace |
+| Release across domains (planned) | Authorized originator | Signed release package → | Approved cross-domain transfer | Verified handoff → | Destination verifies and records acceptance |
+| Improve a model (planned) | Model Factory | Approved corpus and workload → | Training and held-out evaluation | Artifact and evaluation evidence → | Registrar, passport and activation decision |
+| Deploy an update | Build and independent review | Release candidate and evidence → | Release approval and artifact verification | Approved digest or signed bundle → | Workstation or verified site registry |
+| Review assurance | Tests, audits and site evidence | Scoped evidence → | Compliance engine | Assessor package → | Assessor and authorizing official |
 
 </SystemArchitectureFlows>
 

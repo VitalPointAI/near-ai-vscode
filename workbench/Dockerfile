@@ -52,7 +52,7 @@ COPY docs/development-workflow.md docs/testing.md docs/staff-env-packs.md /repo/
 COPY docs/marketplace/near-ai-approval.png docs/marketplace/near-ai-chat.png docs/marketplace/near-ai-commands.png docs/marketplace/near-ai-workflow.png /repo/docs/marketplace/
 COPY docs-site/content/index.md /repo/docs-site/content/
 COPY docs-site/content/architecture/overview.mdx /repo/docs-site/content/architecture/
-COPY docs-site/static/img/sovai-system-architecture.webp /repo/docs-site/static/img/
+COPY docs-site/static/img/sovai-data-flows.webp /repo/docs-site/static/img/
 COPY docs-site/content/releases/versions.md /repo/docs-site/content/releases/
 COPY docs-site/content/security/trust-model.md /repo/docs-site/content/security/
 COPY docs-site/content/using/getting-started.md /repo/docs-site/content/using/

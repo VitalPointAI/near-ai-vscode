@@ -49,7 +49,7 @@ test('bundled figures and architecture flows render offline and remain usable ac
   const flows = article.locator('table').filter({ hasText: MISSION_HUB_STEP });
   await expect(illustration).toHaveCount(1);
   await expect(illustration).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
-  await expect(flows.locator('tbody tr')).toHaveCount(7);
+  await expect(flows.locator('tbody tr')).toHaveCount(9);
   await expectNoRawSyntax(page);
 
   for (const width of [1600, 640]) {

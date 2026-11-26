@@ -69,5 +69,10 @@ export default function SystemArchitectureMap() {
 }
 
 export function SystemArchitectureFlows({ children }) {
-  return <div className={styles.flowMap}>{children}</div>;
+  return (
+    <figure className={styles.flowMap}>
+      <figcaption>SovAI data flows and interactions</figcaption>
+      {children}
+    </figure>
+  );
 }

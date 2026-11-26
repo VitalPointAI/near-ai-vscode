@@ -92,13 +92,28 @@
 
 .flowMap {
   margin: 1.5rem 0 2rem;
+  padding: 1.05rem;
+  overflow-x: auto;
+  color: #f1f6ff;
+  background: #101e32;
+  border-radius: 0.9rem;
+}
+
+.flowMap figcaption {
+  margin: 0 0.45rem 0.7rem;
+  color: #f1f6ff;
+  font-size: 1.35rem;
+  font-weight: 700;
 }
 
 .flowMap table {
   display: table;
   width: 100%;
+  min-width: 43rem;
+  margin: 0;
+  color: #f1f6ff;
   border-collapse: separate;
-  border-spacing: 0.4rem;
+  border-spacing: 0.42rem 0.5rem;
 }
 
 .flowMap tr {
@@ -108,30 +123,31 @@
 
 .flowMap :is(th, td) {
   border: 0;
-  padding: 0.5rem;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.3;
   text-align: left;
   vertical-align: middle;
 }
 
+.flowMap th {
+  color: #cbd9ee;
+}
+
 .flowMap td:first-child {
-  font-weight: 650;
+  font-weight: 700;
 }
 
-.flowMap td:not(:first-child) {
-  border-radius: 0.3rem;
-  background: var(--ifm-color-emphasis-100);
+.flowMap td:is(:nth-child(2), :nth-child(4), :nth-child(6)) {
+  border-radius: 0.36rem;
+  background: #253853;
 }
 
-.flowMap td:nth-child(3) {
-  border-inline-start: 2px solid var(--ifm-color-primary);
+.flowMap td:nth-child(4) {
+  border-inline-start: 2px solid #80dcee;
 }
 
-@media (max-width: 620px) {
-  .flowMap {
-    overflow-x: auto;
-  }
-
-  .flowMap table {
-    min-width: 30rem;
-  }
+.flowMap td:is(:nth-child(3), :nth-child(5)) {
+  color: #aee6f1;
+  font-weight: 600;
 }
