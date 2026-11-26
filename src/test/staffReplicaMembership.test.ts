@@ -897,7 +897,7 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
 
-test('managed removal commits the exact withdrawal and keeps the unaffected cell writable after reopening', async () => {
+test('managed removal stages continuity and Finish recovers the affected cell after reopening', async () => {
   const at = install('managed-removal');
   at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
   const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
@@ -953,6 +953,25 @@ test('managed removal commits the exact withdrawal and keeps the unaffected cell
   const blocked = await reopened.appendOwn('doc.client', data);
   assert.equal(isProjectRefused(blocked) && blocked.refused, 'rekey-pending');
   assert.ok('ok' in await reopened.appendOwn('doc.client', data, { stream: unaffected }));
+  assert.equal(await unfinishedRekeys(hostOf(reopened, at)), 1);
+  const finished = await finishRekeys(hostOf(reopened, at));
+  assert.equal(finished.ok, true, finished.message);
+  assert.deepEqual(finished.rekeyed, [p.projectId]);
+
+  const recovered = project(await ReplicaProject.open(at.root, at.deps));
+  const current = await head(recovered);
+  const base = current.roster.accessGrants.get(p.projectId);
+  assert.equal(base?.decision, 'continues');
+  assert.equal(base.evidence.epoch, 2);
+  assert.deepEqual(base.evidence.excluded, [peer.writer]);
+  assert.deepEqual(base.evidence.grants[0]?.recipients, [p.deviceWriter]);
+  assert.equal(current.roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.founding && grant.hash === base.evidence.grants[0]?.hash), true);
+  assert.equal(current.roster.accessGrants.get(unaffected)?.evidence.epoch, 1);
+  assert.ok('ok' in await recovered.appendOwn('doc.client', data));
+  assert.ok('ok' in await recovered.appendOwn('doc.client', data, { stream: unaffected }));
+  assert.equal(await unfinishedRekeys(hostOf(recovered, at)), 0);
+  assert.equal((await finishRekeys(hostOf(recovered, at))).reason, 'nothing-to-finish');
+  assert.equal((await head(recovered)).hash, current.hash);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
