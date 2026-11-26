@@ -4,7 +4,7 @@
 // keep the roster whole through a split, a deputy and a handover.
 import assert from 'node:assert/strict';
 import { createHash, createPrivateKey, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test, { after, mock } from 'node:test';
@@ -1359,25 +1359,27 @@ test('private founding file waits through reopening for the matching signed rost
 
 test('a local managed inbox resumes only distinct unexpired handles across restart and bounded retries', async () => {
   const lead = await founded('managed-durable-inbox');
+  assert.equal(lead.p.managedHandoffInbox(), undefined);
   lead.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
-  type Inbox = Pick<ManagedSyncHandoffs, 'pending' | 'accepted' | 'superseded'> & { enqueue(handle: string, expiresAt: number): Promise<boolean> };
+  type Inbox = NonNullable<ReturnType<ReplicaProject['managedHandoffInbox']>>;
   const inboxOf = (p: ReplicaProject): Inbox => {
-    const open = Reflect.get(p, 'managedHandoffInbox') as (() => Inbox) | undefined;
-    if (open !== undefined) return open.call(p);
-    // Before durable inboxes a configured provider can only keep these requests in its own memory.
-    const held = new Set<string>();
-    return {
-      enqueue: async (handle) => { held.add(handle); return true; },
-      pending: async () => [...held],
-      accepted: async (handle) => { held.delete(handle); },
-      superseded: async (handle) => { held.delete(handle); }
-    };
+    const inbox = p.managedHandoffInbox();
+    assert.ok(inbox);
+    return inbox;
   };
   const enqueue = inboxOf(lead.p);
   const [ready, obsolete, waiting, expired] = Array.from({ length: 4 }, () => randomBytes(32).toString('hex'));
   const expiresAt = NOW.getTime() + 60 * 60 * 1000;
-  for (const handle of [ready, obsolete, waiting]) assert.equal(await enqueue.enqueue(handle, expiresAt), true);
+  for (const handle of [waiting, ready, obsolete]) assert.equal(await enqueue.enqueue(handle, expiresAt), true);
   assert.equal(await enqueue.enqueue(expired, NOW.getTime() + 500), true);
+  const folder = path.join(lead.at.root, REPLICA_DIR, 'managed-handoffs');
+  const [sidecar] = readdirSync(folder);
+  const file = path.join(folder, sidecar);
+  const contents = readFileSync(file, 'utf8');
+  assert.match(sidecar, /^[0-9a-f]{64}\.json$/);
+  if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal(contents.includes(lead.p.projectId), false);
+  assert.equal(contents.includes(lead.p.deviceWriter), false);
   lead.at.clock.now = new Date(NOW.getTime() + 1000);
   const reopen = async () => inboxOf(project(await ReplicaProject.open(lead.at.root, lead.at.deps)));
   const handoffs = (inbox: Inbox): ManagedSyncHandoffs => ({ ...inbox, offers: async () => [], published: async () => undefined });
@@ -1387,7 +1389,8 @@ test('a local managed inbox resumes only distinct unexpired handles across resta
     get: async (...handles: string[]) => {
       assert.equal(handles.length, 1);
       requests.push(handles[0]);
-      return handles[0] === waiting ? undefined : 'fictional ciphertext';
+      if (handles[0] === waiting) throw new Error('Fictional route unavailable for this packet');
+      return 'fictional ciphertext';
     }
   };
   const restored = handoffs(await reopen());

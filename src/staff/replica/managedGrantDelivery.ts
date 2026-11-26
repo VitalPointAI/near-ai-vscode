@@ -20,11 +20,11 @@ import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 import type { WrapCell } from './wrapPlan';
+import { MANAGED_HANDOFF_LIFETIME_MS } from './managedSync';
 import type { ManagedPacket } from './managedSync';
 
 const HANDLE = /^[0-9a-f]{64}$/;
 const B64 = /^[A-Za-z0-9_-]+$/;
-const DELIVERY_MS = 24 * 60 * 60 * 1000;
 const PADDING_BUCKET = 16 * 1024;
 const HEADER = 4;
 
@@ -136,7 +136,7 @@ export function sealManagedContinuityDelivery(roster: RosterState, recipient: st
 }
 
 function sealPayload(project: string, device: WrapDevice, format: 1 | 2, now: number, payload: object): { handle: string; packet: Packet } | undefined {
-  const bytes = canonicalBytes({ project, recipient: device.writer, expires: now + DELIVERY_MS, ...payload });
+  const bytes = canonicalBytes({ project, recipient: device.writer, expires: now + MANAGED_HANDOFF_LIFETIME_MS, ...payload });
   const size = Math.ceil((bytes.length + HEADER) / PADDING_BUCKET) * PADDING_BUCKET;
   if (size + SEALED_OVERHEAD > BLOB_MAX_BYTES) return undefined;
   const padded = Buffer.alloc(size);
@@ -170,7 +170,7 @@ function openPayload(project: string, device: DeliveryDevice, handle: string, pa
   let value: unknown;
   try { value = JSON.parse(plain.subarray(HEADER, HEADER + length).toString('utf8')) as unknown; } catch { return undefined; }
   if (!isRecord(value) || value.project !== project || value.recipient !== device.writer ||
-      typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + DELIVERY_MS) return undefined;
+      typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + MANAGED_HANDOFF_LIFETIME_MS) return undefined;
   const { project: _project, recipient: _recipient, expires: _expires, ...artifact } = value;
   return artifact;
 }

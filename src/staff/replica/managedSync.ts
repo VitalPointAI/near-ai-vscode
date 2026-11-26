@@ -9,7 +9,7 @@ export interface ManagedSyncRoute {
 /** Handoffs live on the confidential side. The opaque route is never given a cell or a recipient. */
 export interface ManagedSyncHandoffs {
   offers(): Promise<readonly ManagedHandoff[]>;
-  pending(): Promise<readonly string[]>;
+  pending(): Promise<readonly string[] | ManagedPendingBatch>;
   published(offer: ManagedHandoff, handle: string): Promise<void>;
   accepted(handle: string): Promise<void>;
   superseded?(handle: string): Promise<void>;
@@ -24,22 +24,35 @@ export interface ManagedSyncLocal {
 export interface ManagedPacket { handle: string; packet: unknown }
 export interface ManagedInbox { packets: readonly ManagedPacket[]; waiting: boolean }
 
-const MAX_MANAGED_BATCH = 16;
+export interface ManagedPendingBatch { handles: readonly string[]; waiting: boolean }
+
+export const MAX_MANAGED_BATCH = 16;
+export const MANAGED_HANDOFF_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 /** Fetch each opaque packet once; roster ingestion may pair an authenticated continuity receipt with its entry. */
 export async function fetchManaged(handoffs: ManagedSyncHandoffs, route: ManagedSyncRoute): Promise<ManagedInbox> {
   const packets: ManagedPacket[] = [];
   try {
-    const handles = [...new Set((await handoffs.pending()).filter((handle) => HASH_PATTERN.test(handle)))];
-    let waiting = handles.length > MAX_MANAGED_BATCH;
+    const pending = await handoffs.pending();
+    const batch = 'handles' in pending ? pending : { handles: pending, waiting: false };
+    const handles = [...new Set(batch.handles.filter((handle) => HASH_PATTERN.test(handle)))];
+    let waiting = batch.waiting || handles.length > MAX_MANAGED_BATCH;
     for (const handle of handles.slice(0, MAX_MANAGED_BATCH)) {
-      const packet = await route.get(handle);
+      const packet = await getManagedPacket(route, handle);
       if (packet === undefined) waiting = true;
       else packets.push({ handle, packet });
     }
     return { packets, waiting };
   } catch {
     return { packets, waiting: true };
+  }
+}
+
+async function getManagedPacket(route: ManagedSyncRoute, handle: string): Promise<unknown> {
+  try {
+    return await route.get(handle);
+  } catch {
+    return undefined;
   }
 }
 

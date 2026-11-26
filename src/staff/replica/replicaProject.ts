@@ -385,7 +385,7 @@ export class ReplicaProject {
     return this.anchor.project;
   }
 
-  /** Who signs this device's write of a kind (D-60): the person signer for a person-key kind when set, then the session key, then this device. */
+  /** D-60 uses the person signer for person-key entries, with session and device fallback. */
   public signerOf(kind: string): PayloadSigner | AsyncPayloadSigner {
     return (isPersonKeyKind(kind) ? this.deps.personSigner : undefined) ?? this.deps.sessionSigner ?? this.device.identity;
   }
@@ -394,17 +394,13 @@ export class ReplicaProject {
     return this.device.writer;
   }
 
-  /** This device's signer, for the pure builders (grants, invitations) a later flow writes with. */
   public get signer(): DeviceIdentity {
     return this.device.identity;
   }
-
-  /** What signs as the device the roster names: the person key in a hosted session (D-60, 33-27), this device's key otherwise. */
+  /** Hosted rosters name the person key (D-60, 33-27). */
   public get rosterSigner(): PayloadSigner | AsyncPayloadSigner {
     return this.device.roster;
   }
-
-  /** A cell grant signed by the device the roster names; throws ReplicaProjectError signer-refused when the person key refuses. */
   public signGrant(grant: CellGrant): Promise<SignedPayload<CellGrant>> {
     return settled(buildGrantAsync(this.device.roster, grant));
   }
@@ -573,6 +569,10 @@ export class ReplicaProject {
       if (folded !== undefined) return folded;
       return { ok: true as const, stored: read.length, opened: this.keys.size - before };
     });
+  }
+
+  public managedHandoffInbox() {
+    return this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) === true ? this.store.managedHandoffInbox(this.projectId, this.device.writer, () => this.now()) : undefined;
   }
 
   public sealManagedHandoff(input: ManagedHandoff) {

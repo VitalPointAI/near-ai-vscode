@@ -71,6 +71,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
+import { openManagedHandoffInbox } from './managedHandoffInbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
 
 /** The cross-window lock file inside the store folder. */
@@ -585,7 +586,6 @@ export class ReplicaStore {
   private readonly order: string[] = [];
   /** Entries from outside the decode check refused, with its reason. Never released once held. */
   private readonly held = new Map<string, string>();
-  /** Entries from outside no check has passed yet, with why. */
   private readonly waiting = new Map<string, WaitReason>();
   /** How many held entries each (stream, writer) file has, and how many in all, counting stored entries only (indexHeld). */
   private readonly heldBy = new Map<string, number>();
@@ -1217,6 +1217,11 @@ export class ReplicaStore {
       await this.syncMark();
       if (await this.appendSnapshot() !== expectedSnapshot) throw new Refusal('snapshot-changed');
       await this.writeAccessStage(evidence);
+    });
+  }
+  public managedHandoffInbox(project: string, recipient: string, now: () => Date) {
+    return openManagedHandoffInbox(this.dir, project, recipient, now, {
+      locked: (work) => this.locked(work), folder: () => ensureDir(this.dir, ['managed-handoffs']), writeAtomic
     });
   }
   public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
