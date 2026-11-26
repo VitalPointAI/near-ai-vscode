@@ -17,6 +17,7 @@ const emptyProxies = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP
   .flatMap((name) => [`${name}=`, `${name.toLowerCase()}=`]);
 
 function fixture(options = {}) {
+  const architecture = options.arch === 'arm64' ? 'arm64' : 'amd64';
   const imageConfig = {
     User: '10001:0', Entrypoint: ['node', '/app/bin/start.mjs'],
     Cmd: ['--session-preference', 'nearAi.autoInstallGsd=false'],
@@ -62,7 +63,7 @@ function fixture(options = {}) {
         assert.deepEqual(args.slice(2), ['version', '--format', '{{json .Server}}']);
         prerequisiteSteps.push('engine');
         return options.engineError ? { code: 1, stderr: options.engineError }
-          : ok(JSON.stringify({ Os: 'linux', Arch: options.engineArch ?? 'amd64', Version: options.engineVersion ?? '28.0.0' }));
+          : ok(JSON.stringify({ Os: 'linux', Arch: options.engineArch ?? architecture, Version: options.engineVersion ?? '28.0.0' }));
       }
       assert(!options.checkOnly, 'check mode cannot inspect or change images, containers or volumes');
       if (command === 'volume' && subcommand === 'inspect') {
@@ -76,12 +77,12 @@ function fixture(options = {}) {
       }
       if (command === 'image' && subcommand === 'inspect') {
         assert.equal(target, image);
-        return installed ? ok(JSON.stringify([{ Id: imageId, RepoDigests: options.wrongDigest ? [] : [image], Os: 'linux', Architecture: 'amd64', Config: imageConfig }]))
+        return installed ? ok(JSON.stringify([{ Id: imageId, RepoDigests: options.wrongDigest ? [] : [image], Os: 'linux', Architecture: options.imageArch ?? architecture, Config: imageConfig }]))
           : missing('image', image);
       }
       mutations.push(args.slice(2));
       if (command === 'pull') {
-        assert.deepEqual(args.slice(2), ['pull', image]);
+        assert.deepEqual(args.slice(2), ['pull', '--platform', `linux/${architecture}`, image]);
         installed = true;
         return ok();
       }
@@ -93,6 +94,7 @@ function fixture(options = {}) {
       }
       if (command === 'create') {
         assert(args.includes('--pull=never'));
+        assert.equal(args[args.indexOf('--platform') + 1], `linux/${architecture}`);
         assert(args.includes(`type=volume,source=${volumeName},target=${workspace}`));
         assert(args.includes('127.0.0.1::3000'));
         assert(args.includes(`${release}=${image}`));
@@ -147,8 +149,11 @@ function fixture(options = {}) {
 test('check reports workstation prerequisites in order and never reaches resources', async () => {
   const check = { check: true };
   const healthy = fixture({ checkOnly: true, installed: false });
-  assert.match(await launchLocalWorkbench(check, healthy.deps), /prerequisites.*ready/i);
+  assert.match(await launchLocalWorkbench(check, healthy.deps), /prerequisites.*ready.*linux\/amd64.*matching.*image/i);
   assert.deepEqual(healthy.prerequisiteSteps, ['client', 'socket', 'engine']);
+  const arm64 = fixture({ arch: 'arm64', checkOnly: true, installed: false });
+  assert.match(await launchLocalWorkbench(check, arm64.deps), /prerequisites.*ready.*linux\/arm64.*matching.*image/i);
+  assert.deepEqual(arm64.prerequisiteSteps, ['client', 'socket', 'engine']);
 
   for (const [options, expected, steps] of [
     [{ platform: 'darwin', arch: 'arm64' }, /darwin.*arm64.*Linux x86-64/i, []],
@@ -193,7 +198,7 @@ test('local Workbench preflights, uses the approved release, and retries its own
 
   await t.test('invalid host, daemon, or existing resources refuse before optional repair', async () => {
     const scenarios = [
-      [{ arch: 'arm64' }, /Linux.*(?:x86-64|amd64)/i],
+      [{ arch: 'arm' }, /Linux.*(?:x86-64|amd64)/i],
       [{ engineVersion: '27.5.1' }, /28\.0\.0/],
       [{ engineVersion: 'unknown' }, /28\.0\.0/],
       [{ env: { DOCKER_HOST: 'ssh://foreign.invalid' } }, /local Docker/i],
@@ -230,6 +235,21 @@ test('local Workbench preflights, uses the approved release, and retries its own
     const wrong = fixture({ installed: false, wrongDigest: true });
     await assert.rejects(launchLocalWorkbench({ image, repair: true }, wrong.deps), /image.*digest/i);
     assert.deepEqual(wrong.mutations.map(([command]) => command), ['pull']);
+  });
+
+  await t.test('Linux ARM64 starts and retries natively and refuses mismatched engines or images', async () => {
+    const workstation = fixture({ arch: 'arm64', installed: false });
+    assert.equal(await launchLocalWorkbench({ image, repair: true }, workstation.deps), launched);
+    assert.equal(await launchLocalWorkbench({ image }, workstation.deps), launched);
+    assert.deepEqual(workstation.mutations.map(([command]) => command), ['pull', 'volume', 'create', 'start']);
+
+    const wrongEngine = fixture({ arch: 'arm64', engineArch: 'amd64', installed: false });
+    await assert.rejects(launchLocalWorkbench({ image, repair: true }, wrongEngine.deps), /Linux arm64 Docker server/i);
+    assert.deepEqual(wrongEngine.mutations, []);
+
+    const wrongImage = fixture({ arch: 'arm64', imageArch: 'amd64' });
+    await assert.rejects(launchLocalWorkbench({ image, repair: true }, wrongImage.deps), /linux\/arm64/i);
+    assert.deepEqual(wrongImage.mutations, []);
   });
 
   await t.test('health on a port that changed during its probe never reports ready', async () => {

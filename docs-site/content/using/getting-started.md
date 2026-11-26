@@ -24,16 +24,18 @@ read the repository's packages.
 
 ### Use the local launcher
 
-This launcher supports Linux hosts with an x86-64 processor, Node.js 26.13.1 or newer in the
-Node.js 26 series, and a local Docker Engine 28 or newer. From a repository checkout, run the
-prerequisite check before downloading an image. The check reports what to fix and makes no Docker
-changes. If your shell says `node` is missing, install the supported Node.js version first.
+Run the launcher on a Linux x86-64 or ARM64 workstation with Node.js 26.13.1 or newer in the
+Node.js 26 series and a local Docker Engine 28 or newer. From a repository checkout, check the
+workstation before downloading an image. The check reports the required image platform and makes
+no Docker changes. If your shell says `node` is missing, install the supported Node.js version first.
 
 ```bash
 node scripts/launch-local-workbench.mjs --check
 ```
 
-To start the Workbench, pass the exact image reference from `sterling-image.txt`.
+To start the Workbench, pass the exact approved image reference for the platform the check reports.
+The current `sterling-image.txt` supplies the Linux x86-64 release. A signed Linux ARM64 release image
+is pending.
 
 ```bash
 IMAGE='ghcr.io/vitalpointai/near-ai-vscode@sha256:REPLACE_WITH_RELEASE_DIGEST'

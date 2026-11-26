@@ -30,7 +30,7 @@ const releaseSettings = {
 };
 const usage = 'Usage: node scripts/launch-local-workbench.mjs --image ghcr.io/vitalpointai/near-ai-vscode@sha256:<digest> [--repair]\n'
   + '       node scripts/launch-local-workbench.mjs --check\n'
-  + 'Requires Linux x86-64, Node 26.13.1 or later within Node 26, and a local Docker Engine 28.0.0 or later.\n'
+  + 'Requires Linux x86-64 or ARM64, Node 26.13.1 or later within Node 26, and a local Docker Engine 28.0.0 or later.\n'
   + 'If your shell reports that node was not found, install a supported Node version first.';
 
 function version(value) {
@@ -145,9 +145,10 @@ const host = {
 };
 
 async function checkPrerequisites(deps) {
-  if (deps.platform !== 'linux' || deps.arch !== 'x64') {
-    throw new Error(`Detected host ${deps.platform}/${deps.arch}. This Sterling release requires Linux x86-64 (amd64).`);
+  if (deps.platform !== 'linux' || (deps.arch !== 'x64' && deps.arch !== 'arm64')) {
+    throw new Error(`Detected host ${deps.platform}/${deps.arch}. The Workbench launcher requires Linux x86-64 or ARM64.`);
   }
+  const architecture = deps.arch === 'x64' ? 'amd64' : 'arm64';
   const node = version(deps.nodeVersion);
   if (!node || node[0] !== 26 || node[1] < 13 || (node[1] === 13 && node[2] < 1)) throw new Error(usage);
 
@@ -176,19 +177,22 @@ async function checkPrerequisites(deps) {
   }
   let engine;
   try { engine = JSON.parse(server.stdout); } catch { throw new Error('A readable Docker server version of 28.0.0 or later is required.'); }
-  if (engine?.Os !== 'linux' || engine.Arch !== 'amd64') throw new Error('This Sterling release requires a Linux amd64 Docker server.');
+  if (engine?.Os !== 'linux' || engine.Arch !== architecture) {
+    throw new Error(`This workstation requires a Linux ${architecture} Docker server.`);
+  }
   if ((version(engine.Version)?.[0] ?? 0) < 28) throw new Error('Docker server 28.0.0 or later is required for localhost port publication.');
 
-  return docker;
+  return { docker, architecture };
 }
 
 export async function launchLocalWorkbench({ image, repair = false, check = false }, deps = host) {
   if (check && (image !== undefined || repair)) throw new Error('Use --check on its own, without --image or --repair.');
   if (!check && (typeof image !== 'string' || !imagePattern.test(image))) {
-    throw new Error('Supply the exact Sterling release image digest from sterling-image.txt.');
+    throw new Error('Supply the exact approved Sterling release image digest for this workstation.');
   }
-  const docker = await checkPrerequisites(deps);
-  if (check) return 'Workbench prerequisites are ready.';
+  const { docker, architecture } = await checkPrerequisites(deps);
+  const platform = `linux/${architecture}`;
+  if (check) return `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`;
 
   async function checked(step, ...args) {
     const result = await docker(args, args[0] === 'pull' ? 300_000 : 30_000);
@@ -232,15 +236,15 @@ export async function launchLocalWorkbench({ image, repair = false, check = fals
   let { volume, container } = await preflight();
   let installed = await inspect('image', image, true);
   if (!installed && repair) {
-    await checked('Pulling the approved release image', 'pull', image);
+    await checked('Pulling the approved release image', 'pull', '--platform', platform, image);
     installed = await inspect('image', image, true);
     ({ volume, container } = await preflight());
   }
   if (!installed) throw new Error('The exact release image is missing. Load it locally or use --repair to pull that digest.');
   if (!imageIdPattern.test(installed.Id ?? '') || !Array.isArray(installed.RepoDigests) || !installed.RepoDigests.includes(image) ||
-      installed.Os !== 'linux' || installed.Architecture !== 'amd64' ||
+      installed.Os !== 'linux' || installed.Architecture !== architecture ||
       !usableReleaseConfig(installed.Config) || !Array.isArray(installed.Config.Env)) {
-    throw new Error('The local image does not match the exact release digest, platform or release configuration.');
+    throw new Error(`The local image does not match the exact release digest, ${platform} platform or release configuration.`);
   }
   if (container) validateContainer(container, image, installed);
   if (!volume) {
@@ -248,7 +252,7 @@ export async function launchLocalWorkbench({ image, repair = false, check = fals
     validateVolume(await inspect('volume', volumeName));
   }
   if (!container) {
-    const id = await checked('Creating the Workbench container', 'create', '--pull=never', '--name', containerName,
+    const id = await checked('Creating the Workbench container', 'create', '--pull=never', '--platform', platform, '--name', containerName,
       '--label', `${owner}=${ownerValue}`, '--label', `${release}=${image}`, '--network', 'bridge',
       '--mount', `type=volume,source=${volumeName},target=${workspace}`,
       ...runtimeEnv.flatMap((entry) => ['--env', entry]), '--publish', '127.0.0.1::3000', image);
