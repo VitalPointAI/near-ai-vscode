@@ -33,7 +33,7 @@ import { dominates } from '../../domain/gate/dominance';
 import type { DominanceContext } from '../../domain/gate/dominance';
 import { SCALE_PRESETS, parseClearance, parseLabel } from '../../domain/gate/labels';
 import type { Clearance, Label, ScaleMapping, ScaleTable } from '../../domain/gate/labels';
-import { REKEY_KEEP_TEXT, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
+import { REKEY_KEEP_TEXT, REKEY_PENDING_TEXT, REKEY_VERIFIED_TEXT, grantHash, newEpochKey, openLabel, planRekey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
 import type { RekeyPlan, RekeyReason } from '../../domain/replica/cellKeys';
 import { HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, entryHash, openBody, parseHeaderShape, writerIdOf } from '../../domain/replica/entry';
 import type { SealedEntry } from '../../domain/replica/entry';
@@ -1073,9 +1073,17 @@ export async function writeRekeys(shared: SharedProjectHost, plans: readonly Rek
 }
 
 function rekeyMessage(first: string, outcome: RekeyOutcome): string {
-  const moved = outcome.rekeyed.length === 0 ? '' : ` ${outcome.rekeyed.length === 1 ? 'One part of the project was' : `${outcome.rekeyed.length} parts of the project were`} moved to a new key.`;
+  const moved = outcome.rekeyed.length === 0 ? '' : ` ${outcome.rekeyed.length === 1 ? 'One part of the project was' : `${outcome.rekeyed.length} parts of the project were`} moved to a new key. ${REKEY_VERIFIED_TEXT}`;
   const left = outcome.skipped.length === 0 ? '' : ` Nobody else is on ${outcome.skipped.length === 1 ? 'one part' : `${outcome.skipped.length} parts`} of the project, so no new key was made for ${outcome.skipped.length === 1 ? 'it' : 'them'}.`;
   return `${first}${moved}${left} ${REKEY_KEEP_TEXT}`;
+}
+
+/** A key operation failed after the roster change was already recorded. Keep the underlying refusal scoped to that later step. */
+export function withPendingRekeyMessage(result: MembershipResult, recorded: string): MembershipResult {
+  const cause = result.message === MEMBERSHIP_REFUSALS['no-grant-key']
+    ? 'This computer does not hold every key needed to finish. Finish on the staff lead\'s computer that holds the project\'s keys.'
+    : result.message.replace(/, so nothing was changed\.|\. Nothing was changed\./g, '.');
+  return { ...result, message: `${recorded} A key change is still unfinished. ${REKEY_PENDING_TEXT} ${cause}` };
 }
 
 /**
@@ -1204,7 +1212,7 @@ export function removeFromProject(shared: SharedProjectHost, input: RemoveInput,
     const written = await append(shared, entry.kind, entry.data);
     if (isResult(written)) return written;
     const outcome = await writeRekeys(shared, planned.plans, planned.cells);
-    if (isResult(outcome)) return outcome;
+    if (isResult(outcome)) return withPendingRekeyMessage(outcome, 'The removal was recorded.');
     const first = 'writer' in input ? `That device of ${record.name} was removed from the project.` : `${record.name} was removed from the project.`;
     return done(`${finishedNote(finished)}${rekeyMessage(first, outcome)}`, { rekeyed: [...finished.rekeyed, ...outcome.rekeyed], member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
   });
@@ -1256,6 +1264,9 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
     if (isResult(raisedCheck)) return raisedCheck;
     const written = await append(shared, 'member.update', data);
     if (isResult(written)) return written;
+    const needsRotation = planned.plans.some((plan) => plan.recipients.length > 0);
+    const pendingFailure = (failure: MembershipResult) =>
+      needsRotation ? withPendingRekeyMessage(failure, 'The clearance change was recorded.') : failure;
     const granted = new Set<string>();
     if (changesClearance) {
       const updated = headOf(written.roster);
@@ -1264,14 +1275,14 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
       for (const device of devices) {
         const holding = (cell: string): boolean => (granteesAt(written.roster.cells, cell, updated.position, () => true) ?? []).includes(device.writer);
         const plans = grantPlans(shared, written.roster, { clearance: now2.clearance }, cells, gate, updated.position, holding);
-        if (isResult(plans)) return plans;
+        if (isResult(plans)) return pendingFailure(plans);
         const stored = await writeGrants(shared, written.roster, plans, { writer: device.writer }, written.hash);
-        if (stored !== undefined) return stored;
+        if (stored !== undefined) return pendingFailure(stored);
         for (const plan of plans) granted.add(plan.cell);
       }
     }
     const outcome = await writeRekeys(shared, planned.plans, planned.cells);
-    if (isResult(outcome)) return outcome;
+    if (isResult(outcome)) return pendingFailure(outcome);
     const first = `${input.name ?? record.name} was changed.`;
     const gave = granted.size === 0 ? '' : ` ${granted.size === 1 ? 'One part of the project was' : `${granted.size} parts of the project were`} shared with them.`;
     const message = outcome.rekeyed.length > 0 || outcome.skipped.length > 0 ? rekeyMessage(`${first}${gave}`, outcome) : `${first}${gave}`;

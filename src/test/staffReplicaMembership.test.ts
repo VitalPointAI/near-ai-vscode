@@ -549,6 +549,8 @@ test('removing a member writes member.remove and one cell.rekey for each cell it
   const removed = ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove');
   assert.equal(removed.ok, true);
   assert.ok(removed.message.endsWith(REKEY_KEEP_TEXT));
+  assert.ok(removed.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(removed.message, /anything new/);
   assert.match(removed.message, /\b2 parts\b/);
   assert.match(removed.message, /moved to a new key/);
   assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [base, t.x].sort());
@@ -581,6 +583,8 @@ test('revoking one device rekeys only that device\'s cells; the member\'s other 
   const revoked = ok(await removeFromProject(t.lead.host, { member: t.m.member, writer: second.writer }), 'revoke');
   assert.deepEqual([...(revoked.rekeyed ?? [])].sort(), [base, t.x].sort());
   assert.ok(revoked.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(revoked.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(revoked.message, /anything new/);
   const { roster, hash, position } = await head(t.lead.p);
   assert.ok(memberAt(roster.members, t.m.member, position) !== undefined, 'M stays a member');
   assert.equal(rosterView(roster).isAdmitted(second.writer, hash), false);
@@ -602,6 +606,8 @@ test('lowering N\'s clearance below X\'s label rekeys X without N, and leaves th
   const lowered = ok(await updateMember(t.lead.host, { member: t.n.member, clearance: OFFICIAL }), 'lower');
   assert.deepEqual(lowered.rekeyed, [t.x]);
   assert.ok(lowered.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(lowered.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(lowered.message, /anything new/);
   const { roster, hash, position } = await head(t.lead.p);
   assert.deepEqual(memberAt(roster.members, t.n.member, position)?.clearance, OFFICIAL);
   assert.deepEqual(rosterView(roster).cellGrantees?.(t.x, hash), [t.lead.p.deviceWriter, t.m.writer].sort());
@@ -616,11 +622,88 @@ test('lowering N\'s clearance below X\'s label rekeys X without N, and leaves th
   assert.equal((await updateMember(t.lead.host, { member: 'mbr-nobody', name: 'X' })).reason, 'member-unknown');
 });
 
+for (const failure of ['planning', 'storage'] as const) {
+  test(`a clearance update reports pending rotation if its later grant ${failure} fails`, async () => {
+    const t = await team({ nClearance: CLEARED_X });
+    const { p } = t.lead;
+    const target = { ...CLEARED_X, compartments: ['OSPREY'] };
+    const before = await head(p);
+    const key = newEpochKey();
+    const pages = newEpochPages(p.signer, before.roster, {
+      cell: t.z, epoch: 2, key, recipients: [p.deviceWriter], info: { base: false }, labelSealed: sealLabel(key, t.z, 2, LABEL_Z)
+    });
+    assert.ok(pages !== 'switch-first' && pages.length === 1);
+    const founding = grantHash(pages[0]);
+    await p.keys.addOwn(t.z, 2, key, founding);
+    assert.ok(!isProjectRefused(await p.putGrants(pages)));
+    assert.ok('ok' in await p.appendOwn('cell.rekey', { cell: t.z, epoch: 2, reason: 'scheduled', grant: founding }, { roster: before.hash }));
+
+    const append = p.appendOwn.bind(p);
+    const epochKey = p.keys.epochKey.bind(p.keys);
+    const putGrants = p.putGrants.bind(p);
+    let changed = false;
+    let grantStorageTried = false;
+    const appendMock = mock.method(p, 'appendOwn', async (...args: Parameters<typeof append>) => {
+      const result = await append(...args);
+      if (args[0] === 'member.update' && 'ok' in result) changed = true;
+      return result;
+    });
+    const keysMock = mock.method(p.keys, 'epochKey', (cell: string, epoch: number) =>
+      failure === 'planning' && changed && cell === t.z && epoch === 1 ? undefined : epochKey(cell, epoch));
+    const storageMock = mock.method(p, 'putGrants', async (...args: Parameters<typeof putGrants>) => {
+      if (!changed) return putGrants(...args);
+      grantStorageTried = true;
+      return { refused: 'store-refused', message: 'The test refused the newly granted key. Nothing was changed.' } as const;
+    });
+    const result = await updateMember(t.lead.host, { member: t.n.member, clearance: target }).finally(() => {
+      appendMock.mock.restore();
+      keysMock.mock.restore();
+      storageMock.mock.restore();
+    });
+    assert.equal(changed, true);
+    assert.equal(grantStorageTried, failure === 'storage');
+    const after = await head(p);
+    assert.deepEqual(memberAt(after.roster.members, t.n.member, after.position)?.clearance, target);
+    assert.equal(epochAt(after.roster.cells, t.x, after.position), 1);
+    assert.equal(await unfinishedRekeys(t.lead.host), 1);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, failure === 'planning' ? 'no-grant-key' : 'store-refused');
+    assert.ok(result.message.includes(failure === 'planning' ? 'This computer does not hold every key needed to finish.' : 'The test refused the newly granted key.'));
+    assert.match(result.message, /The clearance change was recorded/);
+    assert.ok(result.message.includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+    assert.doesNotMatch(result.message, /moved to a new key|anything new|nothing was changed/i);
+  });
+}
+
+test('removing a member who holds no keys does not claim earlier recovered rotations for that removal', async () => {
+  const t = await team();
+  const { p, host } = t.lead;
+  const name = 'Uma No Key';
+  const pending = install('no-key-member');
+  const invited = ok(await inviteToProject(host, { name, seat: 'j2-analyst', clearance: OFFICIAL }), 'invite');
+  const joined = ok(await joinFromInvite(pending.root, pending.deps, file(invited).text, { name }), 'join');
+  const blockedGrant = mock.method(p, 'putGrants', async () => ({ refused: 'store-refused', message: 'Fixture refused grant storage.' } as const));
+  const admission = await admitJoinRequest(host, file(joined).text, { codeMatched: true }).finally(() => blockedGrant.mock.restore());
+  assert.equal(admission.reason, 'store-refused');
+  const admitted = await head(p);
+  const member = [...admitted.roster.members.members.keys()].find((id) => memberAt(admitted.roster.members, id, admitted.position)?.name === name);
+  assert.ok(member);
+  assert.ok('ok' in await p.appendOwn('member.remove', { member: t.m.member }));
+  assert.equal(await unfinishedRekeys(host), 2);
+
+  const removed = ok(await removeFromProject(host, { member }), 'remove');
+  assert.deepEqual([...(removed.rekeyed ?? [])].sort(), [p.projectId, t.x].sort());
+  assert.match(removed.message, /left unfinished was finished first/);
+  const current = removed.message.slice(removed.message.indexOf(name));
+  assert.equal(current, `${name} was removed from the project. They keep what they already received.`);
+});
+
 test('raising a clearance writes grants for the newly cleared cells with every earlier epoch', async () => {
   const t = await team();
   // X gets a second epoch first: M is removed.
   ok(await removeFromProject(t.lead.host, { member: t.m.member }), 'remove M');
   const raised = ok(await updateMember(t.lead.host, { member: t.n.member, clearance: CLEARED_X }), 'raise');
+  assert.doesNotMatch(raised.message, /verified new keys|Devices excluded from the new keys/);
   assert.deepEqual(raised.granted, [t.x]);
   assert.deepEqual(raised.rekeyed, []);
   const { roster, hash } = await head(t.lead.p);
@@ -670,6 +753,8 @@ test('a cell nobody else is left on gets no rekey: the plan with no recipients i
   assert.match(removed.message, /Nobody else is on one part/);
   assert.match(removed.message, /no new key/);
   assert.ok(removed.message.endsWith(REKEY_KEEP_TEXT));
+  assert.ok(removed.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(removed.message, /anything new/);
   const { roster, position } = await head(t.lead.p);
   assert.equal(epochAt(roster.cells, y, position), 1, 'no cell.rekey was written for Y');
   assert.deepEqual(roster.refused, []);
@@ -747,6 +832,8 @@ test('with a deputy named, the deputy revokes the lead\'s only device (the lead\
   // The deputy cuts off the lead's only device; the cells it held move to new keys without it.
   const revoked = ok(await removeFromProject(d.host, { member: 'mbr-lead', writer: t.lead.p.deviceWriter }), 'deputy revokes');
   assert.ok(revoked.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(revoked.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(revoked.message, /anything new/);
   assert.ok((revoked.rekeyed ?? []).includes(t.lead.p.projectId));
   const cut = await head(d.p);
   assert.equal(rosterView(cut.roster).isAdmitted(t.lead.p.deviceWriter, cut.hash), false);
@@ -2039,6 +2126,10 @@ test('MJ-04: a rekey whose entry is not written leaves its key unused; the next 
     lead.p.appendOwn = appendOwn;
   }
   assert.equal(failed.ok, false, 'the removal reports the failed rekey');
+  assert.equal(failed.reason, 'store-refused');
+  assert.match(failed.message, /The test refused this write/);
+  assert.ok(failed.message.includes('Until the affected parts have verified new keys, devices that held the old keys may still read new work encrypted with them.'));
+  assert.doesNotMatch(failed.message, /moved to a new key|anything new/);
   const between = await head(lead.p);
   assert.equal(epochAt(between.roster.cells, base, between.position), 1, 'the base cell was not rekeyed');
   const staleGrants = grantsOn(lead.at).filter((signed) => { const read = readGrant(signed); return read.ok && read.grant.cell === base && read.grant.epoch === 2; });
@@ -2271,6 +2362,8 @@ test('MJ-03: a removal interrupted after member.remove is found from the roster 
   const finished = ok(await finishRekeys(t.lead.host), 'finish');
   assert.deepEqual([...(finished.rekeyed ?? [])].sort(), [base, t.x].sort());
   assert.ok(finished.message.includes(REKEY_KEEP_TEXT));
+  assert.ok(finished.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(finished.message, /anything new/);
   assert.deepEqual(finished.notices, multiUserNoticeLines());
   const after = await head(t.lead.p);
   assert.equal(epochAt(after.roster.cells, base, after.position), 2);

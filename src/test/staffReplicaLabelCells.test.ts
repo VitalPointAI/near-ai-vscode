@@ -402,6 +402,8 @@ test('legacy: naming a cleared deputy gives their device the legacy cell and say
   const finished = ok(await finishRekeys(lead.host), 'finish');
   assert.deepEqual(finished.rekeyed, [legacy]);
   assert.ok(finished.message.endsWith(REKEY_KEEP_TEXT));
+  assert.ok(finished.message.includes('Devices excluded from the new keys cannot read work encrypted with those keys.'));
+  assert.doesNotMatch(finished.message, /anything new/);
   const { roster, hash, position } = await head(lead.p);
   assert.equal(epochAt(roster.cells, legacy, position), 2);
   assert.deepEqual(rosterView(roster).cellGrantees?.(legacy, hash), [lead.writer], 'the new key went to the lead only');

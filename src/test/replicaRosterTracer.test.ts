@@ -229,16 +229,17 @@ test('every roster refusal reason is a plain sentence without an em-dash', () =>
   for (const kind of Object.keys(ROSTER_KIND_OWNER)) assert.ok(KIND_FAMILIES.has(kind), kind);
 });
 
-test('ROSTER_KIND_OWNER routes each of the 34 roster kinds and project.genesis to exactly one owner module', () => {
+test('ROSTER_KIND_OWNER routes each of the 35 roster kinds and project.genesis to exactly one owner module', () => {
   const rosterKinds = [...KIND_FAMILIES].filter(([, family]) => family === 'roster').map(([kind]) => kind);
-  assert.equal(rosterKinds.length, 34, 'roster.require (POST-01) and hub.readmit (D-42), Phase 33; 14 kinds of Phase 33.1');
+  assert.equal(rosterKinds.length, 35, 'includes the signed cell.access.commit roster transition');
   assert.deepEqual(Object.keys(ROSTER_KIND_OWNER).sort(), [...rosterKinds, 'project.genesis'].sort());
   for (const [kind, owner] of Object.entries(ROSTER_KIND_OWNER)) {
     const positions = /^(position|posting|authority)\./.test(kind) || kind === 'cell.rekey.staged' || kind === 'project.mode';
-    const expected = positions ? 'positions' : /^(member|device|hub|invite)\./.test(kind) ? 'members' : /^cell\./.test(kind) ? 'cells' : 'roster';
+    const expected = kind === 'cell.access.commit' ? 'roster' :
+      positions ? 'positions' : /^(member|device|hub|invite)\./.test(kind) ? 'members' : /^cell\./.test(kind) ? 'cells' : 'roster';
     assert.equal(owner, expected, kind);
   }
-  assert.deepEqual(Object.entries(ROSTER_KIND_OWNER).filter(([, owner]) => owner === 'roster').map(([kind]) => kind).sort(), ['deputy.name', 'lead.handover', 'project.genesis', 'roster.choose', 'roster.require'], 'roster.require, Phase 33 POST-01');
+  assert.deepEqual(Object.entries(ROSTER_KIND_OWNER).filter(([, owner]) => owner === 'roster').map(([kind]) => kind).sort(), ['cell.access.commit', 'deputy.name', 'lead.handover', 'project.genesis', 'roster.choose', 'roster.require']);
   assert.deepEqual(Object.entries(ROSTER_KIND_OWNER).filter(([, owner]) => owner === 'cells').map(([kind]) => kind).sort(), ['cell.create', 'cell.rekey']);
   assert.ok(Object.isFrozen(ROSTER_KIND_OWNER));
 });
