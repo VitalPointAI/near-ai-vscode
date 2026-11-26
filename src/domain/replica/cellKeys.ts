@@ -191,7 +191,7 @@ export type GrantRead =
   | { ok: true; grant: CellGrant; hash: string; signer: { publicKey: string; writer: string } }
   | { ok: false; reason: GrantRefusal };
 
-function grantProblem(value: unknown): string | undefined {
+export function grantProblem(value: unknown): string | undefined {
   if (!isRecord(value)) return 'not an object';
   const keys = Object.keys(value);
   const paged = keys.includes('pages');

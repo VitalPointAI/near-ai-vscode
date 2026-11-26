@@ -1,20 +1,22 @@
 import type { RoutingTable } from '../../domain/gate/routing';
 import { newEpochKey, readGrant, sealLabel } from '../../domain/replica/cellKeys';
 import { readGrantPages } from '../../domain/replica/grantPages';
-import { writerIdOf } from '../../domain/replica/entry';
+import { sha256Hex, writerIdOf } from '../../domain/replica/entry';
 import { isRosterWriterAt } from '../../domain/replica/roster';
 import type { RosterState } from '../../domain/replica/roster';
 import { deviceAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
-import { advanceGrantEvidence } from '../../domain/replica/rotationGrants';
+import { advanceGrantEvidence, grantEvidenceHash } from '../../domain/replica/rotationGrants';
 import type { OpenedGrantEvidence } from '../../domain/replica/rotationGrants';
 import { accessRevisionId } from '../../domain/replica/rotationProof';
-import { appendManagedAccess } from './managedWithdrawal';
+import { appendManagedAccess, managedPermitSubjects } from './managedWithdrawal';
 import type { AccessSnapshot, AuthoredRefusal } from './managedWithdrawal';
 import type { RekeyReason } from '../../domain/replica/cellKeys';
 import type { CellInfo, RekeyOutcome } from './membership';
 import { isProjectRefused } from './replicaProject';
 import type { ProjectRefused, ReplicaProject } from './replicaProject';
-import { newEpochGrant } from './wrapPlan';
+import { formatFor, formatForDevice, newEpochGrant, wrapDeviceAt } from './wrapPlan';
+import { canonicalBytes } from '../../domain/team/canonical';
+import { createFinishIntent } from './managedFinishSigning';
 
 type RecoveryRefusal = AuthoredRefusal | ProjectRefused | { ok: false; reason: 'switch-first' | 'rekey-awaiting-keys' };
 
@@ -41,25 +43,91 @@ export function managedRecipients(roster: RosterState, item: OpenedGrantEvidence
     !excluded.has(writer) && deviceAt(roster.members, writer, roster.positions.length - 1) !== undefined).sort();
 }
 
+function recoveryInputs(project: ReplicaProject, roster: RosterState, info: CellInfo) {
+  const authority = writerIdOf(project.rosterSigner.publicKey);
+  const snapshot = selectedManagedAccess(roster, authority);
+  const prior = snapshot?.cells.find(({ evidence }) => evidence.cell === info.cell);
+  if (snapshot === undefined || authority !== project.deviceWriter || prior?.decision !== 'pending' || !info.known || info.base !== (info.cell === project.projectId) || (!info.base && info.raw === undefined) ||
+      !project.keys.holds(info.cell, prior.evidence.epoch)) return { ok: false as const, reason: 'no-grant-key' as const };
+  const writers = managedRecipients(roster, prior);
+  if (!writers.includes(authority)) return { ok: false as const, reason: 'no-grant-key' as const };
+  const position = roster.positions.length - 1;
+  if (writers.some((writer) => x25519At(roster.members, writer, position) === undefined)) return { ok: false as const, reason: 'rekey-awaiting-keys' as const };
+  const epoch = prior.evidence.epoch + 1;
+  const excluded = new Set(prior.evidence.excluded);
+  const retired = prior.evidence.grants.flatMap((grant) => grant.recipients)
+    .filter((writer) => excluded.has(writer) && deviceAt(roster.members, writer, position) === undefined);
+  const reason = retired.length === 0 ? 'clearance-lowered' : leftReason(roster, retired, position);
+  return { ok: true, snapshot, prior, writers, position, epoch, reason } as const;
+}
+
+function recoverGrant(roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, epoch: number, writers: readonly string[]) {
+  const key = newEpochKey();
+  const grant = newEpochGrant(roster, { info, routing, cell: info.cell, epoch, key, recipients: writers,
+    labelSealed: info.base ? '' : sealLabel(key, info.cell, epoch, info.raw) });
+  if (grant === 'switch-first') return { ok: false as const, reason: grant };
+  if (grant === undefined || grant.wraps.length !== writers.length) return { ok: false as const, reason: 'rekey-awaiting-keys' as const };
+  return { ok: true as const, grant, key };
+}
+
+function finishContext(project: ReplicaProject, roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, now: Date) {
+  const plan = recoveryInputs(project, roster, info);
+  if (!plan.ok) return undefined;
+  const { snapshot, prior, writers, position, reason } = plan;
+  const choice = formatFor(roster, info, undefined, routing);
+  const hash = grantEvidenceHash(prior.evidence);
+  if (choice === 'switch-first' || hash === undefined || !Number.isFinite(now.getTime())) return undefined;
+  const continuity = snapshot.cells.flatMap((item) => {
+    if (item !== prior && item.decision !== 'continues') return [];
+    const eligible = item === prior ? writers : managedRecipients(roster, item);
+    return [{ cell: item.evidence.cell, ...managedPermitSubjects(roster, eligible, snapshot.predecessor, now) }];
+  });
+  const recipients = writers.map((writer) => {
+    const device = wrapDeviceAt(roster, writer, position);
+    return { ...device, format: formatForDevice(choice, device) };
+  });
+  if (recipients.some(({ format, kem }) => format === 2 && kem === undefined)) return undefined;
+  return { plan, context: { project: roster.anchor.project, writer: project.deviceWriter, predecessor: snapshot.predecessor,
+    accessEntry: snapshot.priorEntry, accessRoot: snapshot.priorRoot, oldEpoch: prior.evidence.epoch, reason, evidence: hash, policy: prior.evidence.policy,
+    ...(routing === undefined ? {} : { routing: sha256Hex(canonicalBytes(routing)) }),
+    ...(info.base ? {} : { label: sha256Hex(canonicalBytes(info.raw)) }), recipients, continuity } };
+}
+
+/** Prepare one private hosted review without signing or changing the store. */
+export function prepareHostedFinish(project: ReplicaProject, roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, now: Date) {
+  if (project.rosterSigner === project.signer) return undefined;
+  const selected = finishContext(project, roster, info, routing, now);
+  if (selected === undefined) return undefined;
+  const signer = project.rosterSigner;
+  const { plan: { epoch, writers }, context } = selected;
+  const next = recoverGrant(roster, info, routing, epoch, writers);
+  if (!next.ok) return undefined;
+  const intent = createFinishIntent(context, next.grant);
+  if (intent === undefined) return undefined;
+  const binding = intent.actionBytes();
+  const cell = info.cell;
+  return Object.freeze({
+    intent,
+    epochKey: () => Buffer.from(next.key),
+    matches(fresh: RosterState, part: CellInfo, rules: RoutingTable | undefined, time: Date): boolean {
+      if (project.rosterSigner !== signer || part.cell !== cell) return false;
+      const current = finishContext(project, fresh, part, rules, time);
+      return current !== undefined && createFinishIntent(current.context, intent.unsignedGrant())?.actionBytes().equals(binding) === true;
+    }
+  });
+}
+
 async function recoverCell(project: ReplicaProject, roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, now: Date):
   Promise<RecoveryRefusal | undefined> {
   const signer = project.rosterSigner;
   const authority = writerIdOf(signer.publicKey);
   if (signer !== project.signer) return { ok: false, reason: 'action-required' };
-  const snapshot = selectedManagedAccess(roster, authority);
-  const prior = snapshot?.cells.find(({ evidence }) => evidence.cell === info.cell);
-  if (snapshot === undefined || authority !== project.deviceWriter || prior?.decision !== 'pending' || !info.known || (!info.base && info.raw === undefined) ||
-      !project.keys.holds(info.cell, prior.evidence.epoch)) return { ok: false, reason: 'no-grant-key' };
-  const writers = managedRecipients(roster, prior);
-  if (!writers.includes(authority)) return { ok: false, reason: 'no-grant-key' };
-  const position = roster.positions.length - 1;
-  if (writers.some((writer) => x25519At(roster.members, writer, position) === undefined)) return { ok: false, reason: 'rekey-awaiting-keys' };
-  const epoch = prior.evidence.epoch + 1;
-  const key = newEpochKey();
-  const grant = newEpochGrant(roster, { info, routing, cell: info.cell, epoch, key, recipients: writers,
-    labelSealed: info.base ? '' : sealLabel(key, info.cell, epoch, info.raw) });
-  if (grant === 'switch-first') return { ok: false, reason: grant };
-  if (grant === undefined || grant.wraps.length !== writers.length) return { ok: false, reason: 'rekey-awaiting-keys' };
+  const selected = recoveryInputs(project, roster, info);
+  if (!selected.ok) return selected;
+  const { snapshot, prior, writers, epoch, reason } = selected;
+  const next = recoverGrant(roster, info, routing, epoch, writers);
+  if (!next.ok) return next;
+  const { grant, key } = next;
   const pages = await project.signGrantPages(grant);
   const [founding, ...rest] = pages;
   const parsed = rest.length === 0 ? readGrant(founding) : readGrantPages(founding, rest);
@@ -69,10 +137,6 @@ async function recoverCell(project: ReplicaProject, roster: RosterState, info: C
     hash: parsed.hash, pages: parsed.grant.pages ?? [], recipients: parsed.grant.wraps.map(({ writer }) => writer).sort()
   }], excluded: [] });
   if (evidence === undefined) return { ok: false, reason: 'change-not-applied' };
-  const excluded = new Set(prior.evidence.excluded);
-  const retired = prior.evidence.grants.flatMap((grant) => grant.recipients)
-    .filter((writer) => excluded.has(writer) && deviceAt(roster.members, writer, position) === undefined);
-  const reason = retired.length === 0 ? 'clearance-lowered' : leftReason(roster, retired, position);
   const operation = { cell: info.cell, epoch, reason, grant: parsed.hash };
   const kind = 'cell.rekey';
   const revision = accessRevisionId(roster.anchor.project, roster.accessRevision?.id ?? null, snapshot.predecessor, kind, operation);

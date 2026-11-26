@@ -47,19 +47,25 @@ export function managedActionCurrent(signer: PayloadSigner | AsyncPayloadSigner,
   return action !== undefined && payload !== undefined && 'canSignAction' in signer && signer.canSignAction?.(action, payload) === true;
 }
 
-function permitDrafts(roster: RosterState, planned: ManagedAccess, authority: string, now: Date): AccessPermit[] {
+/** Person devices and live certified sessions used by both confirmation and permit issuance. */
+export function managedPermitSubjects(roster: RosterState, recipients: readonly string[], predecessor: string, now: Date) {
   const position = roster.positions.length - 1;
   const view = rosterView(roster);
+  const devices = recipients.filter((writer) => deviceAt(roster.members, writer, position)?.kind === 'person').sort();
+  const sessions = [...roster.sessions.values()].filter((certificate) => devices.includes(certificate.device) &&
+    Date.parse(certificate.notAfter) > now.getTime() && certifiedWriter(view, certificate.writer, predecessor) !== undefined)
+    .sort((a, b) => a.writer < b.writer ? -1 : a.writer === b.writer ? 0 : 1);
+  return { devices, sessions };
+}
+
+function permitDrafts(roster: RosterState, planned: ManagedAccess, authority: string, now: Date): AccessPermit[] {
   return planned.cells.flatMap(({ evidence, decision, recipients }) => {
     if (decision !== 'continues') return [];
     const fields = { project: evidence.project, revision: planned.revision, predecessor: planned.predecessor,
       cell: evidence.cell, epoch: evidence.epoch, authority };
-    const devices = recipients.filter((writer) => deviceAt(roster.members, writer, position)?.kind === 'person');
-    const direct = devices.map((writer) => ({ ...fields, writer, device: writer, certificate: null }));
-    const sessions = [...roster.sessions.values()].filter((certificate) => devices.includes(certificate.device) &&
-      Date.parse(certificate.notAfter) > now.getTime() && certifiedWriter(view, certificate.writer, planned.predecessor) !== undefined)
-      .map((certificate) => ({ ...fields, writer: certificate.writer, device: certificate.device, certificate: certificate.hash }));
-    return [...direct, ...sessions];
+    const { devices, sessions } = managedPermitSubjects(roster, recipients, planned.predecessor, now);
+    return [...devices.map((writer) => ({ ...fields, writer, device: writer, certificate: null })),
+      ...sessions.map((certificate) => ({ ...fields, writer: certificate.writer, device: certificate.device, certificate: certificate.hash }))];
   });
 }
 
@@ -77,7 +83,8 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
   prepare: (fresh: RosterState) => AccessSnapshot | undefined, action?: string): Promise<AppendOwnResult | AuthoredRefusal> {
   const signer = project.rosterSigner;
   const authority = writerIdOf(signer.publicKey);
-  if (signer !== project.signer && !managedActionCurrent(signer, action, managedAccessActionBytes(roster, authority, plan.kind, plan.operation))) {
+  if (signer !== project.signer && (plan.kind === 'cell.rekey' ||
+      !managedActionCurrent(signer, action, managedAccessActionBytes(roster, authority, plan.kind, plan.operation)))) {
     return { ok: false, reason: 'action-required' };
   }
   if (authority !== project.deviceWriter) return { ok: false, reason: 'no-grant-key' };

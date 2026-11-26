@@ -424,12 +424,10 @@ export class ReplicaProject {
   public state(): Promise<ProjectState> {
     return this.exclusive(() => this.foldNow());
   }
-
   /** Sign and append using the cited roster and cell epoch, rebuilding when the store snapshot changes. */
   public appendOwn(kind: string, data: unknown, options: AppendOwnOptions = {}): Promise<AppendOwnResult> {
     return this.appendPlanned<never>(() => ({ kind, data, options }));
   }
-
   /** Plans and checks a signed write against the current fold, then rechecks it if the store changed. */
   public appendChecked<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
     kind: string; data: unknown; options: AppendOwnOptions; check: (fold: FoldResult, hash: string) => R | undefined
@@ -448,7 +446,9 @@ export class ReplicaProject {
         if (expected !== await this.store.appendSnapshot()) continue;
         const write = prepare(state);
         if ('ok' in write) return write;
-        const hostedStage = write.options.stageAccess !== undefined && this.device.roster !== this.device.identity;
+        const hosted = this.device.roster !== this.device.identity;
+        if (hosted && write.kind === 'cell.rekey' && state.roster.requiredFrom.has(CELL_ACCESS_FEATURE)) return refuse('action-required');
+        const hostedStage = write.options.stageAccess !== undefined && hosted;
         const action = hostedStage ? managedAccessActionBytes(state.roster, this.device.writer, write.kind, write.data) : undefined;
         if (hostedStage && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
         const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);

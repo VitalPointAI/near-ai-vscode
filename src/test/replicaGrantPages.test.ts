@@ -17,8 +17,7 @@ import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld, rosterDevice } from 
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import type { Written } from './helpers/replicaWorld';
 import { streamId } from './helpers/replicaWorld';
-
-
+import { createFinishGrantScope, createFinishIntent } from '../staff/replica/managedFinishSigning';
 
 const LEAD = rosterDevice('PAGES-LEAD', 'mbr-lead');
 const CELL = streamId('pages-cell');
@@ -37,13 +36,11 @@ type Page = SignedPayload<CellGrant>;
 const reasonOf = (result: { ok: boolean; reason?: string }): string => (result.ok ? 'ok' : (result.reason as string));
 
 test('hosted Finish forwards only the exact approved grant envelope in child and founding order', async () => {
-  const target = '../staff/replica/managedFinishSigning';
-  const { createFinishGrantScope, createFinishIntent } = await import(target);
   const draft = input(MAX_WRAPS_PER_V2_PAGE * 2 + 1);
   const context = {
     project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
     oldEpoch: 2, reason: 'clearance-lowered' as const, evidence: 'e'.repeat(64), policy: null,
-    recipients: draft.wraps.map(({ writer }) => ({ writer })), continuity: []
+    recipients: draft.wraps.map(({ writer }) => ({ writer, format: 2 as const })), continuity: []
   };
   const intent = createFinishIntent(context, draft);
   assert.ok(intent);
@@ -102,6 +99,26 @@ test('hosted Finish forwards only the exact approved grant envelope in child and
   assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(founding)), founding.sig);
   await rejected('founding', 0, payloadSigningInput(founding), 5);
   assert.deepEqual(ids, Array.from({ length: 5 }, () => action));
+});
+
+test('hosted Finish fixes the unpaged envelope and rejects an unrelated approval before dispatch', async () => {
+  const grant = input(1, { wraps: wraps(1, v1Wrap) });
+  const intent = createFinishIntent({
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    oldEpoch: 2, reason: 'device-revoked', evidence: 'e'.repeat(64), policy: null,
+    recipients: grant.wraps.map(({ writer }) => ({ writer, format: 1 })), continuity: []
+  }, grant);
+  assert.ok(intent);
+  const [page] = buildGrantPages(LEAD.signer, grant);
+  const ids: string[] = [];
+  const signer = { ...LEAD.signer, canSignAction: (id: string, bytes: Uint8Array) => id === 'reviewed-finish' && intent.actionBytes().equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) { ids.push(options?.action ?? ''); return LEAD.signer.sign(bytes); } };
+  const other = createFinishGrantScope(intent, signer, 'reviewed-removal', async () => true);
+  assert.equal(typeof await other.signerFor('founding', 0).sign(payloadSigningInput(page)), 'object');
+  assert.deepEqual(ids, []);
+  const reviewed = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => true);
+  assert.equal(await reviewed.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
+  assert.deepEqual(ids, ['reviewed-finish']);
 });
 
 test('tracer: 2,000 v2 wraps make four signed pages, each within GRANT_MAX_BYTES, and readGrantPages gives back all 2,000 and the label', () => {

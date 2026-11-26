@@ -43,7 +43,8 @@ import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { fixedSigner } from './helpers/replicaWorld';
-import { appendManagedWithdrawal, managedAccessActionBytes } from '../staff/replica/managedWithdrawal';
+import { managedRecipients, prepareHostedFinish, selectedManagedAccess } from '../staff/replica/managedRecovery';
+import { appendManagedAccess, appendManagedWithdrawal, managedAccessActionBytes } from '../staff/replica/managedWithdrawal';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -1031,6 +1032,9 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   const mismatched = await removeFromProject(host, { member: peer.member, writer: peer.writer }, confirmed);
   assert.equal(mismatched.reason, 'action-required');
   assert.deepEqual(signedActions, [], 'a confirmation for membership removal cannot sign a device revocation');
+  const unchecked = await hosted.appendOwn('cell.rekey', { cell: unaffected, epoch: 2, reason: 'clearance-lowered', grant: 'a'.repeat(64) }, { action: confirmed });
+  assert.equal(isProjectRefused(unchecked) && unchecked.refused, 'action-required');
+  assert.deepEqual(signedActions, [], 'ordinary append cannot send managed Finish signing bytes');
   let syncedStage = false;
   setFolderSyncProbe((dir) => {
     if (path.basename(dir) !== 'access-evidence') return;
@@ -1060,6 +1064,32 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   assert.equal(committed.roster.accessRevision?.predecessor, seed.hash);
   assert.equal(memberAt(committed.roster.members, peer.member, committed.position), undefined);
   assert.equal(committed.roster.accessGrants.get(lead.p.projectId)?.decision, 'pending');
+  const beforeDraft = signedActions.length;
+  const headsBeforeDraft = await hosted.heads();
+  const part = { cell: lead.p.projectId, base: true, known: true };
+  const draft = prepareHostedFinish(hosted, committed.roster, part, undefined, lead.at.clock.now);
+  assert.ok(draft);
+  const unsigned = draft.intent.unsignedGrant();
+  assert.equal(unsigned.roster, committed.hash);
+  assert.equal(unsigned.epoch, 2);
+  assert.deepEqual(unsigned.wraps.map(({ writer }) => writer), [hosted.deviceWriter]);
+  assert.equal(draft.matches(committed.roster, part, undefined, lead.at.clock.now), true);
+  assert.equal(draft.matches(committed.roster, part, undefined, new Date(cert.notAfter)), false, 'the reviewed session no longer qualifies for a permit');
+  assert.deepEqual(await hosted.heads(), headsBeforeDraft);
+  assert.equal(signedActions.length, beforeDraft, 'drafting the exact grant does not sign anything');
+  assert.equal(hosted.keys.holds(part.cell, 2), false);
+  const snapshot = selectedManagedAccess(committed.roster, hosted.deviceWriter);
+  assert.ok(snapshot);
+  const operation = { cell: part.cell, epoch: 2, reason: 'member-removed', grant: 'a'.repeat(64) };
+  approvedPayload = managedAccessActionBytes(committed.roster, hosted.deviceWriter, 'cell.rekey', operation);
+  const uncheckedFinish = await appendManagedAccess(hosted, committed.roster, {
+    ...snapshot, kind: 'cell.rekey', operation, revision: 'b'.repeat(64),
+    cells: snapshot.cells.map((item) => ({ ...item, recipients: managedRecipients(committed.roster, item) }))
+  }, lead.at.clock.now, (fresh) => selectedManagedAccess(fresh, hosted.deviceWriter), confirmed);
+  assert.deepEqual(uncheckedFinish, { ok: false, reason: 'action-required' });
+  assert.equal(signedActions.length, beforeDraft, 'an approval of the final grant hash cannot sign a permit');
+
+
   const written = await hosted.appendOwn('doc.client', {
     product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' }
   }, { stream: unaffected });
