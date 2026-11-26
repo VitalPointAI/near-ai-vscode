@@ -22,7 +22,7 @@
 // PATH), helm the bundled pin (HELM or PATH). Node built-ins only.
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import https from 'node:https';
 import { tmpdir } from 'node:os';
 import { isIP } from 'node:net';
@@ -68,7 +68,14 @@ export function readState(dir) {
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { installed: {}, importAllSigned: false, admissionDeny: false, bootstrapRemoved: false };
 }
 export function writeState(dir, state) {
-  writeFileSync(path.join(dir, STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  const scratch = mkdtempSync(path.join(dir, '.install-state-'));
+  try {
+    const file = path.join(scratch, STATE_FILE);
+    writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+    renameSync(file, path.join(dir, STATE_FILE));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 const writePrivate = (file, text) => { writeFileSync(file, text, { mode: 0o600 }); chmodSync(file, 0o600); };
 
@@ -432,42 +439,101 @@ export function configMapData(doc) {
 /** A curl config line value, quoted with curl's escapes. */
 const curlQuote = (text) => `"${String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`;
 
+/** The response version OpenSearch requires for updating either existing policy. */
+function policyVersionQuery(policy, what) {
+  if (!Number.isSafeInteger(policy._seq_no) || policy._seq_no < 0 ||
+      !Number.isSafeInteger(policy._primary_term) || policy._primary_term < 1) {
+    throw new Error(`OpenSearch ${what} returned no usable policy version.`);
+  }
+  return `?if_seq_no=${policy._seq_no}&if_primary_term=${policy._primary_term}`;
+}
+
 /**
- * Puts the OpenSearch objects the opensearch release renders (retention, snapshot repository, snapshot-management policy) through the
- * OpenSearch API, from inside the first OpenSearch pod with curl --config on stdin: the admin credential (Secret opensearch-admin, read into
- * memory) and each body never appear in an argv (T-47-110). A second run puts the same bodies again; the SM policy is updated when it exists.
+ * Applies the rendered OpenSearch settings from inside the first OpenSearch pod. Credentials and bodies are sent on stdin.
+ * Each retry reads the policy versions again, including when a previous request succeeded without delivering its response.
  */
 export function putOpenSearchObjects({ root = ROOT, site, siteDir, run = defaultRun, log = console.log, rendered }) {
   const yaml = rendered ?? renderRelease(root, 'opensearch', { site, siteDir });
   const docs = splitDocs(yaml).filter((doc) => /^kind:\s*ConfigMap\s*$/m.test(doc));
+  const objects = OPENSEARCH_OBJECTS.map((object) => {
+    const matches = docs.filter((doc) => new RegExp(`^\\s+name:\\s*${object.configMap}\\s*$`, 'm').test(doc));
+    let body;
+    let value;
+    try {
+      const values = matches.length === 1 ? Object.values(configMapData(matches[0])) : [];
+      if (values.length === 1) {
+        [body] = values;
+        value = JSON.parse(body);
+      }
+    } catch {
+      // Report the offending ConfigMap without printing the body.
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`OpenSearch requires one JSON object body for ${object.configMap}.`);
+    }
+    return { ...object, body };
+  });
+
   const kubectl = tool('KUBECTL', 'kubectl');
   const secret = kubectlJson(run, ['get', 'secret', 'opensearch-admin', '-n', 'sterling-logging'], 'get secret opensearch-admin');
   const user = Buffer.from(secret.data.username, 'base64').toString();
   const password = Buffer.from(secret.data.password, 'base64').toString();
   const pod = kubectlJson(run, ['get', 'pods', '-n', 'sterling-logging', '-l', 'app.kubernetes.io/name=opensearch'], 'get opensearch pods').items?.[0]?.metadata?.name;
   if (!pod) throw new Error('No OpenSearch pod was found in sterling-logging.');
+
+  const request = (method, target, body) => {
+    const input = [
+      `url = ${curlQuote(`https://localhost:9200/${target}`)}`, `request = ${curlQuote(method)}`,
+      `user = ${curlQuote(`${user}:${password}`)}`, `cacert = ${curlQuote('/usr/share/opensearch/config/certs/ca.crt')}`,
+      `write-out = ${curlQuote('\n%{http_code}')}`, 'silent', 'show-error',
+    ];
+    if (body !== undefined) input.push(`header = ${curlQuote('Content-Type: application/json')}`, `data-binary = ${curlQuote(body)}`);
+    const result = run(kubectl, ['exec', '-i', '-n', 'sterling-logging', pod, '--', 'curl', '--config', '-'], { input: input.join('\n') });
+    const what = `OpenSearch ${method} ${target}`;
+    if (result.error || result.status !== 0) throw new Error(`${what} did not complete.`);
+    const stdout = result.stdout ?? '';
+    const suffix = /\n([1-5]\d{2})$/.exec(stdout);
+    if (!suffix) throw new Error(`${what} returned no HTTP status.`);
+    const status = Number(suffix[1]);
+    let value;
+    try { value = JSON.parse(stdout.slice(0, suffix.index)); } catch { throw new Error(`${what} returned invalid JSON (HTTP ${status}).`); }
+    return { status, value };
+  };
+
   const put = [];
-  for (const object of OPENSEARCH_OBJECTS) {
-    const doc = docs.find((candidate) => new RegExp(`^\\s+name:\\s*${object.configMap}\\s*$`, 'm').test(candidate));
-    if (!doc) continue;
-    const body = Object.values(configMapData(doc))[0];
-    const send = (method, apiPath, query = '') => must(run(kubectl, ['exec', '-i', '-n', 'sterling-logging', pod, '--', 'curl', '--config', '-'], {
-      input: [`url = ${curlQuote(`https://localhost:9200/${apiPath}${query}`)}`, `request = ${curlQuote(method)}`, `user = ${curlQuote(`${user}:${password}`)}`,
-        `cacert = ${curlQuote('/usr/share/opensearch/config/certs/ca.crt')}`, `header = ${curlQuote('Content-Type: application/json')}`,
-        `data-binary = ${curlQuote(body)}`, 'fail-with-body', 'silent', 'show-error'].join('\n'),
-    }), `OpenSearch ${method} ${apiPath}`);
-    if (object.configMap === 'opensearch-snapshot-policy') {
-      // The SM API creates with POST and updates with PUT and the current seq_no and primary_term.
-      const current = run(kubectl, ['exec', '-i', '-n', 'sterling-logging', pod, '--', 'curl', '--config', '-'], {
-        input: [`url = ${curlQuote(`https://localhost:9200/${object.path}`)}`, `user = ${curlQuote(`${user}:${password}`)}`,
-          `cacert = ${curlQuote('/usr/share/opensearch/config/certs/ca.crt')}`, 'silent'].join('\n'),
-      });
-      let existing = null;
-      try { existing = JSON.parse(current.stdout || 'null'); } catch { existing = null; }
-      if (existing?._seq_no !== undefined) send('PUT', object.path, `?if_seq_no=${existing._seq_no}&if_primary_term=${existing._primary_term}`);
-      else send('POST', object.path);
-    } else {
-      send('PUT', object.path);
+  for (const object of objects) {
+    let target = object.path;
+    let method = 'PUT';
+    if (object.configMap === 'opensearch-retention-policy') {
+      // ISM returns the search hit count separately, including hits it could not parse as policies.
+      const { status, value } = request('GET', '_plugins/_ism/policies?queryString=%22sterling-retention%22&size=2');
+      const count = value?.total_policies;
+      const policies = value?.policies;
+      if (status !== 200 || (count !== 0 && count !== 1) || !Array.isArray(policies) || policies.length !== count) {
+        throw new Error(`OpenSearch retention policy lookup returned an unexpected result (HTTP ${status}).`);
+      }
+      if (count === 1) {
+        const [existing] = policies;
+        if (existing?._id !== 'sterling-retention' || existing.policy?.policy_id !== 'sterling-retention') {
+          throw new Error('OpenSearch retention policy lookup returned the wrong policy.');
+        }
+        target += policyVersionQuery(existing, 'retention policy lookup');
+      }
+    } else if (object.configMap === 'opensearch-snapshot-policy') {
+      const { status, value } = request('GET', target);
+      if (status === 200 && value?._id === 'sterling-audit-sm-policy' && value.sm_policy?.name === 'sterling-audit') {
+        target += policyVersionQuery(value, 'snapshot policy lookup');
+      } else if (status === 404 && value?.status === 404 && value.error?.type === 'status_exception' &&
+          ['Snapshot management config index not found', 'Snapshot management policy not found'].includes(value.error.reason)) {
+        method = 'POST';
+      } else {
+        throw new Error(`OpenSearch snapshot policy lookup returned an unexpected result (HTTP ${status}).`);
+      }
+    }
+    const { status, value } = request(method, target, object.body);
+    if (status !== 200 && status !== 201) throw new Error(`OpenSearch ${method} ${object.path} failed (HTTP ${status}).`);
+    if (object.configMap === 'opensearch-snapshot-repository' && value?.acknowledged !== true) {
+      throw new Error('OpenSearch did not acknowledge the snapshot repository.');
     }
     put.push(object.path);
     log(`apply: OpenSearch ${object.path} from ConfigMap ${object.configMap}`);
@@ -484,6 +550,9 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
   const state = readState(stateDir);
   const installed = [];
   const releases = listReleases(root).filter((release) => isEnabled(release, site) && release.order >= from && (!only || release.name === only));
+  if (state.openSearchPending && (!only || only === 'opensearch') && !releases.some(({ name }) => name === 'opensearch')) {
+    throw new Error('OpenSearch settings are pending. Resume apply from the OpenSearch release or earlier.');
+  }
   const stop = (release, runbook, message, where = 'before') => {
     writeState(stateDir, state);
     log(`apply: stopped ${where} ${release.name}. ${message} Follow ${runbook}, then run install.mjs apply --from ${release.order}.`);
@@ -500,6 +569,11 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
         delete state.installed['sterling-pki-bootstrap'];
       }
     }
+    if (release.name === 'opensearch') {
+      state.openSearchPending = true;
+      delete state.installed.opensearch;
+      writeState(stateDir, state);
+    }
     await ensureBootstrapSecrets({ root, site, release, run, log });
     if (release.name === 'sterling-keycloak-realm') {
       steps.keycloakRealm();
@@ -507,6 +581,10 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
       const sets = release.name === 'sterling-admission' ? [`admission.mode=${state.admissionDeny ? 'Deny' : 'Audit'}`] : [];
       // OpenBao's pods are Ready only once it is initialised and unsealed, so its install does not wait for readiness.
       installRelease({ root, release, site, siteDir, run, sets, wait: release.name !== 'openbao' });
+    }
+    if (release.name === 'opensearch') {
+      await steps.openSearchObjects();
+      delete state.openSearchPending;
     }
     state.installed[release.name] = release.order;
     installed.push(release.name);
@@ -519,7 +597,6 @@ export async function applySite({ root = ROOT, site, siteDir, state: stateDir, f
       // The static application secrets (and the bootstrap ones, into OpenBao) before the releases that use them.
       await steps.secrets();
     }
-    if (release.name === 'opensearch') steps.openSearchObjects();
   }
   // The admission switch comes last, and only when the import re-verified every image signature in the registry (D-48).
   if (!only && !state.admissionDeny) {

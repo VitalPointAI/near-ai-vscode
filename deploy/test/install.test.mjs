@@ -17,7 +17,7 @@ import { preflight } from '../bundle/lib/preflight.mjs';
 import { recordDigests } from '../bundle/record-digests.mjs';
 import { UNPUBLISHED_DIGEST, readImagesLock } from '../bundle/lib/locks.mjs';
 import { nameForSite, writeRegistryLayout } from '../bundle/lib/registry-images.mjs';
-import { isEnabled, listReleases, loadSite, renderRelease } from '../bundle/lib/render.mjs';
+import { isEnabled, listReleases, loadSite, renderRelease, splitDocs } from '../bundle/lib/render.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CI_FILE = path.join(ROOT, 'deploy/test/fixtures/site.ci.yaml');
@@ -323,31 +323,146 @@ test('retire-bootstrap waits for site-pki to serve openbao-tls and zot-tls, then
   assert.throws(() => statSync(path.join(state, 'bootstrap')), /ENOENT/, 'the bootstrap key files are gone');
 });
 
-test('apply puts the rendered OpenSearch objects through the API with the credential on stdin only, again on a second run', () => {
-  const rendered = renderRelease(ROOT, 'opensearch', { site: CI, siteDir: siteExample });
-  const present = OPENSEARCH_OBJECTS.filter((object) => rendered.includes(`name: ${object.configMap}`));
-  assert.ok(present.length >= 1, 'the retention policy renders (47-10)');
-  const password = 'opensearch-admin-password-not-real';
-  const answers = (command, args) => {
-    if (args[0] === 'get' && args[1] === 'secret') return { status: 0, stdout: JSON.stringify({ data: { username: Buffer.from('admin').toString('base64'), password: Buffer.from(password).toString('base64') } }), stderr: '' };
-    if (args[0] === 'get' && args[1] === 'pods') return { status: 0, stdout: JSON.stringify({ items: [{ metadata: { name: 'opensearch-cluster-master-0' } }] }), stderr: '' };
-    return { status: 0, stdout: '{}', stderr: '' };
-  };
-  for (let round = 0; round < 2; round += 1) {
-    const { run, calls } = fakeRun(answers);
-    const put = putOpenSearchObjects({ site: CI, siteDir: siteExample, run, log: () => {}, rendered });
-    assert.deepEqual(put, present.map((object) => object.path));
-    assert.ok(!argvText(calls).includes(password), 'the credential is never in an argv');
-    const puts = calls.filter((call) => call.args.includes('exec') && /request = "(PUT|POST)"/.test(call.input ?? ''));
-    assert.equal(puts.length, present.length);
-    for (const call of puts) {
-      assert.deepEqual(call.args.slice(0, 6), ['exec', '-i', '-n', 'sterling-logging', 'opensearch-cluster-master-0', '--']);
-      assert.match(call.input, new RegExp(`user = "admin:${password}"`));
+test('apply keeps OpenSearch pending until its objects finish and cannot resume past a failure', async () => {
+  const state = temp('state-');
+  const release = listReleases(ROOT).find(({ name }) => name === 'opensearch');
+  writeState(state, { ...readState(state), installed: { opensearch: release.order }, importAllSigned: true });
+  const logs = [];
+  const options = { site: CI, siteDir: siteExample, state, checks: ready, log: (line) => logs.push(line) };
+  const failed = fakeRun((_, args) => {
+    if (args[0] === 'upgrade' && args[2] === 'opensearch') {
+      assert.equal(readState(state).openSearchPending, true, 'the marker precedes Helm');
+      assert.equal(readState(state).installed.opensearch, undefined);
     }
-    const retention = puts.find((call) => call.input.includes('_plugins/_ism/policies/sterling-retention'));
-    assert.match(retention.input, /data-binary = "\{\\n {2}\\"policy\\": \{/);
+    return null;
+  });
+  const interrupted = { ...steps(), openSearchObjects: () => { throw new Error('snapshot repository write failed'); } };
+  await assert.rejects(applySite({ ...options, from: release.order, run: failed.run, steps: interrupted }), /snapshot repository write failed/);
+  assert.deepEqual(helmInstalls(failed.calls), ['opensearch']);
+  assert.equal(readState(state).openSearchPending, true);
+  assert.equal(readState(state).admissionDeny, false);
+  assert.ok(!logs.some((line) => line.includes('opensearch installed')));
+
+  const skipped = fakeRun();
+  await assert.rejects(applySite({ ...options, from: release.order + 1, run: skipped.run, steps: steps() }), /OpenSearch.*pending/i);
+  await assert.rejects(applySite({ ...options, only: 'opensearch', from: release.order + 1, run: skipped.run, steps: steps() }), /OpenSearch.*pending/i);
+  assert.deepEqual(skipped.calls, []);
+  await applySite({ ...options, only: 'prometheus', run: skipped.run, steps: steps() });
+  assert.deepEqual(helmInstalls(skipped.calls), ['prometheus']);
+  assert.equal(readState(state).openSearchPending, true);
+  assert.equal(readState(state).admissionDeny, false);
+
+  const retry = fakeRun();
+  const recovered = { ...steps(), openSearchObjects: async () => {
+    await Promise.resolve();
+    assert.equal(readState(state).openSearchPending, true);
+    assert.equal(readState(state).installed.opensearch, undefined);
+  } };
+  const applied = await applySite({ ...options, from: release.order, run: retry.run, steps: recovered });
+  assert.equal(applied.installed[0], 'opensearch');
+  assert.equal(readState(state).installed.opensearch, release.order);
+  assert.equal(readState(state).openSearchPending, undefined);
+  assert.equal(readState(state).admissionDeny, true);
+});
+
+const openSearchPassword = 'opensearch-admin-password-not-real';
+const http = (status, body) => ({ status: 0, stdout: JSON.stringify(body) + '\n' + status, stderr: '' });
+const missingSnapshot = (reason) => http(404, { error: { type: 'status_exception', reason }, status: 404 });
+const retentionPolicy = { _id: 'sterling-retention', _seq_no: 0, _primary_term: 1, policy: { policy_id: 'sterling-retention' } };
+const snapshotPolicy = { _id: 'sterling-audit-sm-policy', _seq_no: 5, _primary_term: 2, sm_policy: { name: 'sterling-audit' } };
+
+function fakeOpenSearch(answer) {
+  return fakeRun((_, args, { input }) => {
+    if (args[0] === 'get' && args[1] === 'secret') return { status: 0, stdout: JSON.stringify({ data: { username: Buffer.from('admin').toString('base64'), password: Buffer.from(openSearchPassword).toString('base64') } }), stderr: '' };
+    if (args[0] === 'get' && args[1] === 'pods') return { status: 0, stdout: JSON.stringify({ items: [{ metadata: { name: 'opensearch-cluster-master-0' } }] }), stderr: '' };
+    const target = /^url = "https:\/\/localhost:9200\/([^"]+)"/m.exec(input)?.[1];
+    const method = /^request = "([A-Z]+)"/m.exec(input)?.[1] ?? 'GET';
+    return answer(target, method);
+  });
+}
+
+test('a retry reconciles both OpenSearch policies after a write succeeds but its response is lost', () => {
+  const rendered = renderRelease(ROOT, 'opensearch', { site: CI, siteDir: siteExample });
+  assert.ok(OPENSEARCH_OBJECTS.every((object) => rendered.includes(`name: ${object.configMap}`)), 'all required objects render');
+  let retentionCreated = false;
+  let snapshotCreated = false;
+  const { run, calls } = fakeOpenSearch((target, method) => {
+    if (target.startsWith('_plugins/_ism/policies?') && method === 'GET') {
+      assert.match(target, /^_plugins\/_ism\/policies\?queryString=%22sterling-retention%22&size=2$/);
+      return http(200, { policies: retentionCreated ? [retentionPolicy] : [], total_policies: Number(retentionCreated) });
+    }
+    if (target.startsWith('_plugins/_ism/policies/sterling-retention') && method === 'PUT') {
+      assert.equal(target, '_plugins/_ism/policies/sterling-retention' + (retentionCreated ? '?if_seq_no=0&if_primary_term=1' : ''));
+      retentionCreated = true;
+      return http(201, retentionPolicy);
+    }
+    if (target === '_snapshot/sterling-snapshots' && method === 'PUT') return http(200, { acknowledged: true });
+    if (target === '_plugins/_sm/policies/sterling-audit' && method === 'GET') {
+      return snapshotCreated ? http(200, snapshotPolicy) : missingSnapshot('Snapshot management policy not found');
+    }
+    if (target === '_plugins/_sm/policies/sterling-audit' && method === 'POST' && !snapshotCreated) {
+      snapshotCreated = true;
+      return { status: 1, stdout: '', stderr: 'connection closed' };
+    }
+    assert.equal(target, '_plugins/_sm/policies/sterling-audit?if_seq_no=5&if_primary_term=2');
+    assert.equal(method, 'PUT');
+    return http(200, snapshotPolicy);
+  });
+  const options = { site: CI, siteDir: siteExample, run, log: () => {}, rendered };
+  assert.throws(() => putOpenSearchObjects(options), /OpenSearch POST/);
+  assert.equal(retentionCreated, true);
+  assert.equal(snapshotCreated, true);
+  assert.deepEqual(putOpenSearchObjects(options), OPENSEARCH_OBJECTS.map(({ path }) => path));
+  assert.ok(!argvText(calls).includes(openSearchPassword), 'the credential is never in an argv');
+  const writes = calls.filter((call) => call.args.includes('exec') && /request = "(PUT|POST)"/.test(call.input ?? ''));
+  assert.equal(writes.length, OPENSEARCH_OBJECTS.length * 2);
+  for (const call of writes) {
+    assert.deepEqual(call.args.slice(0, 6), ['exec', '-i', '-n', 'sterling-logging', 'opensearch-cluster-master-0', '--']);
+    assert.match(call.input, new RegExp(`user = "admin:${openSearchPassword}"`));
   }
+  const retention = writes.find((call) => call.input.includes('_plugins/_ism/policies/sterling-retention'));
+  assert.match(retention.input, /data-binary = "\{\\n {2}\\"policy\\": \{/);
   assert.equal(configMapData('kind: ConfigMap\ndata:\n  a: |\n    {"x": 1}\n  b: "two"\n').a, '{"x": 1}\n');
+});
+
+test('OpenSearch stops on ambiguous policy lookups and unacknowledged writes', () => {
+  const rendered = renderRelease(ROOT, 'opensearch', { site: CI, siteDir: siteExample });
+  const snapshotMap = /name: opensearch-snapshot-policy$/m;
+  const incomplete = splitDocs(rendered).filter((doc) => !snapshotMap.test(doc)).join('\n---\n');
+  const malformed = `${incomplete}\n---\nkind: ConfigMap\nmetadata:\n  name: opensearch-snapshot-policy\ndata:\n  policy.json: broken\n`;
+  const noAccess = fakeRun();
+  for (const invalid of [incomplete, malformed]) {
+    assert.throws(() => putOpenSearchObjects({ site: CI, siteDir: siteExample, run: noAccess.run, rendered: invalid }), /JSON object body for opensearch-snapshot-policy/);
+  }
+  assert.deepEqual(noAccess.calls, [], 'validate all required objects before contacting the site');
+
+  const cases = [
+    ['retention', http(200, { policies: [], total_policies: 1 }), /retention|ISM/i],
+    ['repository', http(200, { acknowledged: false }), /snapshot repository|sterling-snapshots/i],
+    ['repository', http(302, { acknowledged: true }), /sterling-snapshots/i],
+    ['snapshot', http(404, { error: 'no handler found', status: 404 }), /snapshot|sterling-audit/i],
+    ['snapshot', http(401, { error: openSearchPassword }), /snapshot|sterling-audit/i],
+    ['snapshot', { status: 7, stdout: '', stderr: openSearchPassword }, /snapshot|sterling-audit/i],
+    ['snapshot', http(200, { ...snapshotPolicy, _primary_term: undefined }), /snapshot|sterling-audit/i],
+  ];
+  for (const [boundary, response, summary] of cases) {
+    const { run, calls } = fakeOpenSearch((target, method) => {
+      if (target.startsWith('_plugins/_ism/policies?')) {
+        return boundary === 'retention' ? response : http(200, { policies: [], total_policies: 0 });
+      }
+      if (target === '_plugins/_ism/policies/sterling-retention') return http(201, retentionPolicy);
+      if (target === '_snapshot/sterling-snapshots') return boundary === 'repository' ? response : http(200, { acknowledged: true });
+      assert.equal(method, 'GET');
+      return response;
+    });
+    assert.throws(() => putOpenSearchObjects({ site: CI, siteDir: siteExample, run, log: () => {}, rendered }), (error) => {
+      assert.match(error.message, summary);
+      assert.ok(!error.message.includes(openSearchPassword));
+      return true;
+    });
+    const writes = calls.filter((call) => /request = "(PUT|POST)"/.test(call.input ?? ''));
+    assert.equal(writes.length, boundary === 'retention' ? 0 : 2, boundary);
+  }
 });
 
 test('ConfigMap values decode YAML quoting exactly, backslashes included', () => {
