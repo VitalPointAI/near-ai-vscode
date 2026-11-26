@@ -9,10 +9,11 @@ import { buildGrant, grantHash, sealLabel } from '../domain/replica/cellKeys';
 import { buildEntry, sha256Hex } from '../domain/replica/entry';
 import type { SealedEntry } from '../domain/replica/entry';
 import { CELL_ACCESS_FEATURE } from '../domain/replica/features';
-import { isRosterWriterAt } from '../domain/replica/roster';
+import { foldRoster, isRosterWriterAt } from '../domain/replica/roster';
 import { accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
 import { buildEnrolment, buildOrganizationLayer } from '../domain/gate/enrolment';
 import { bundleHash } from '../domain/gate/bundle';
+import { canonicalBytes } from '../domain/team/canonical';
 import { gateDir, POLICY_BUNDLE_FILE } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, writeLastValid } from '../gate/clockMarker';
 import { ENROLMENT_RECORD_FILE, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, OrganizationStore } from '../gate/organizationStore';
@@ -116,10 +117,14 @@ async function preparationWorld(secrets = new MemorySecrets(), withDeputy = fals
   const head = world.rosterEntry(world.lead, 'cell.create', { cell: stream, epoch: 1, grant: grantHash(labelled) }, predecessor);
   const root = await mkdtemp(path.join(tmpdir(), 'fp-prep-'));
   const clock = { now: FIXED_NOW };
+  const identity = { available: true };
   let signatures = 0;
   const signer = { ...world.lead.signer, sign: (bytes: Buffer) => { signatures += 1; return world.lead.signer.sign(bytes); } };
   const open = async () => {
-    const store = await ReplicaStore.open(root, { secrets, signer: async () => signer,
+    const store = await ReplicaStore.open(root, { secrets, signer: async () => {
+      if (!identity.available) throw new Error('fixture device unavailable');
+      return signer;
+    },
       keyStatus: async () => () => ({ state: 'active' }), now: () => new Date(clock.now) });
     assert.ok(store instanceof ReplicaStore);
     return store;
@@ -134,7 +139,7 @@ async function preparationWorld(secrets = new MemorySecrets(), withDeputy = fals
     assert.ok('ok' in await store.putGrant(stream, 1, labelled));
     return { ...request, snapshot: await store.appendSnapshot() };
   };
-  return { store, open, world, head, deputy, labelled, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key, clock };
+  return { store, open, world, head, deputy, labelled, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key, clock, identity };
 }
 
 test('scoped prospective preparation proves the signed fence in memory and returns only a Boolean', async () => {
@@ -158,9 +163,10 @@ test('scoped prospective preparation proves the signed fence in memory and retur
 
 const CAPTURE_SLOT = 'nearAi.staff.frontierPolicyCapture.';
 
-test('an inert V2 fixture requires the frozen custodian and selected applied fence', async () => {
+async function appliedV2World() {
   const secrets = new MemorySecrets();
-  const { store, open, world, head, deputy, labelled, addGrants } = await preparationWorld(secrets, true);
+  const fixture = await preparationWorld(secrets, true);
+  const { store, world, head, deputy, labelled, addGrants } = fixture;
   const roster = world.foldRoster();
   assert.equal(roster.positions.at(-1), head.hash);
   assert.equal(isRosterWriterAt(roster, deputy.writer, roster.positions.length - 1), true);
@@ -204,6 +210,12 @@ test('an inert V2 fixture requires the frozen custodian and selected applied fen
   assert.ok('ok' in await store.recordRosterHead(applied.hash));
   const expectedSnapshot = await store.appendSnapshot();
   const selected = { ...request, opening, expectedSnapshot };
+  return { ...fixture, secrets, request, pointer, payload, archive, sign, id, cells, opening, applied, commitment, selected, expectedSnapshot };
+}
+
+test('an inert V2 fixture requires the frozen custodian and selected applied fence', async () => {
+  const { secrets, pointer, store, open, world, head, deputy, labelled, request, payload, archive, sign, id, cells, selected, expectedSnapshot } =
+    await appliedV2World();
   const before = [...secrets.values.entries()];
   const directories = await readdir(store.dir);
   assert.equal(await store['checkFrontierV2Fixture'](archive, selected), true);
@@ -240,6 +252,102 @@ test('an inert V2 fixture requires the frozen custodian and selected applied fen
   await rename(founding, `${founding}.preserved`);
   assert.equal(await store['checkFrontierV2Fixture'](archive, { ...selected, expectedSnapshot: await store.appendSnapshot() }), false);
 });
+
+const STAGING_DIR = 'accepted-frontiers-v2-staged';
+
+test('exact V2 bytes stay unselectable across restart when authority expires just after installation', async () => {
+  const { store, open, clock, world, secrets, payload, archive, pointer, selected, expectedSnapshot, applied, commitment } = await appliedV2World();
+  const bytes = Buffer.from(JSON.stringify(archive, null, 2) + '\n');
+  const stageScope = sha256Hex(canonicalBytes(['private-frontier-stage/2', store.dir, world.project, payload.genesis, payload.stream, world.lead.writer,
+    payload.requirement, applied.hash, commitment.root, expectedSnapshot, sha256Hex(Buffer.from(pointer[1]))]));
+  const handle = sha256Hex(canonicalBytes([stageScope, sha256Hex(bytes)]));
+  const dir = path.join(store.dir, STAGING_DIR);
+  const candidate = path.join(dir, `${handle}.json`);
+  const protectedBefore = [...secrets.values.entries()];
+
+  let stagedAtBoundary = false;
+  setFolderSyncProbe(async (folder) => {
+    if (folder !== dir) return;
+    stagedAtBoundary = (await readFile(candidate)).equals(bytes);
+    clock.now = Date.parse('2027-11-20T00:00:00.000Z');
+  });
+  try {
+    assert.equal(await store['stageFrontierV2Fixture'](bytes, selected), false);
+    assert.equal(stagedAtBoundary, true);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.deepEqual(await readFile(candidate), bytes);
+  const reopened = await open();
+  assert.equal(await reopened['stageFrontierV2Fixture'](bytes, selected), false);
+  const roster = foldRoster({ anchor: selected.pin, entries: reopened.rosterEntries(), grants: world.grants,
+    keys: selected.keys, blobs: () => undefined, now: new Date(FIXED_NOW + 20) });
+  assert.equal(roster.accessRevision?.entry, applied.hash);
+  const legacyRequest = { pin: { project: world.project, genesis: payload.genesis }, stream: payload.stream, reader: world.lead.writer,
+    expectedSnapshot, accessEntry: applied.hash, opening: selected.opening, roster,
+    historicalKey: selected.keys, historicalPolicyAt: () => undefined };
+  assert.equal((await reopened.openStoredAcceptedFrontier(handle, legacyRequest)).status, 'refused');
+  assert.equal((await reopened.putAcceptedFrontier(bytes, legacyRequest)).status, 'refused');
+  assert.ok(!(await readdir(store.dir)).includes('accepted-frontiers'));
+  assert.deepEqual([...secrets.values.entries()], protectedBefore);
+  assert.equal(await reopened.appendSnapshot(), expectedSnapshot);
+});
+
+test('private V2 staging preserves exact immutable bytes and rechecks both trust and content after I/O', async () => {
+  const { store, open, identity, secrets, archive, selected, expectedSnapshot } = await appliedV2World();
+  const bytes = canonicalBytes(archive);
+  const candidateDir = path.join(store.dir, STAGING_DIR);
+  const before = [...secrets.values.entries()];
+  assert.equal(await store['stageFrontierV2Fixture'](bytes, { ...selected, expectedSnapshot: 'b'.repeat(64) }), false);
+  assert.ok(!(await readdir(store.dir)).includes(STAGING_DIR));
+
+  setFolderSyncProbe((folder) => {
+    if (folder === candidateDir) identity.available = false;
+  });
+  try {
+    assert.equal(await store['stageFrontierV2Fixture'](bytes, selected), false);
+  } finally {
+    setFolderSyncProbe(undefined);
+    identity.available = true;
+  }
+  const original = await readdir(candidateDir);
+  assert.equal(original.length, 1);
+  const candidate = path.join(candidateDir, original[0]);
+  const reopened = await open();
+  assert.equal(await reopened['stageFrontierV2Fixture'](bytes, selected), true, 'fresh full verification can repeat an inert stage');
+  assert.deepEqual(await readdir(candidateDir), original);
+  assert.deepEqual(await readFile(candidate), bytes);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(candidateDir)).mode & 0o777, 0o700);
+    assert.equal((await stat(candidate)).mode & 0o777, 0o600);
+  }
+
+  setFolderSyncProbe((folder) => {
+    if (folder === candidateDir) throw new Error('fixture interrupts before parent directory sync and final verification');
+  });
+  try {
+    assert.equal(await reopened['stageFrontierV2Fixture'](bytes, selected), false);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.deepEqual(await readFile(candidate), bytes);
+
+  const changed = Buffer.concat([bytes, Buffer.from('\n')]);
+  setFolderSyncProbe(async (folder) => {
+    if (folder === candidateDir) await writeFile(candidate, changed);
+  });
+  try {
+    assert.equal(await reopened['stageFrontierV2Fixture'](bytes, selected), false);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  const afterInterruption = await open();
+  assert.equal(await afterInterruption['stageFrontierV2Fixture'](bytes, selected), false);
+  assert.deepEqual(await readFile(candidate), changed, 'a mismatched existing file is preserved and refused');
+  assert.deepEqual([...secrets.values.entries()], before);
+  assert.equal(await afterInterruption.appendSnapshot(), expectedSnapshot);
+});
+
 class AmbiguousCaptureSecrets extends MemorySecrets {
   public fault: 'none' | 'read-unavailable' = 'none';
   private didWrite = false;

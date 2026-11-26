@@ -50,10 +50,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Hash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
+import { privateFileProblem } from '../../services/stateHome';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { withRegisterLock } from '../registerLock';
 import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
@@ -91,9 +92,11 @@ export const REPLICA_LOCK_FILE = 'replica.lock';
 export const STORE_GITIGNORE = '*\n!.gitignore\n';
 
 const ACCEPTED_FRONTIER_DIR = 'accepted-frontiers';
+const FRONTIER_STAGE_DIR = 'accepted-frontiers-v2-staged';
 const FRONTIER_POLICY_DIR = 'frontier-policy-captures';
 const FRONTIER_POLICY_SLOT = 'nearAi.staff.frontierPolicyCapture.';
 type FrontierPreparationRequest = { policyStorage: string; pin: RosterAnchor; stream: string; keys: KeyRing; snapshot: string };
+type FrontierV2FixtureRequest = FrontierPreparationRequest & { expectedSnapshot: string; opening: unknown };
 type FrontierPreparationVerdict = 'ready' | 'refused' | 'unavailable';
 const MAX_ACCEPTED_FRONTIER_BYTES = 32 * 1024 * 1024;
 const FRONTIER_REFUSED = { status: 'refused' } as const;
@@ -383,8 +386,10 @@ async function ensureDir(base: string, parts: readonly string[]): Promise<string
   return dir;
 }
 
-/** Writes bytes to a temporary file beside `file`, syncs it, then renames it into place. */
-async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644, beforePublish?: () => Promise<void>): Promise<void> {
+/** Syncs bytes in a temporary file before installing them atomically. Exclusive installation never replaces an existing file. */
+async function writeAtomic(
+  file: string, bytes: Buffer | string, mode = 0o644, beforePublish?: () => Promise<void>, install: 'replace' | 'exclusive' = 'replace'
+): Promise<void> {
   const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, mode);
   try {
@@ -398,7 +403,12 @@ async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644, b
   await handle.close();
   try {
     await beforePublish?.();
-    await rename(temporary, file);
+    if (install === 'exclusive') {
+      await link(temporary, file);
+      await rm(temporary);
+    } else {
+      await rename(temporary, file);
+    }
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
@@ -1375,59 +1385,102 @@ export class ReplicaStore {
       request.stream, this.own.writer, predecessor, request.snapshot]));
   }
 
-  /** Test fixture only. Check the exact protected capture and signed frontier and return an inert assertion. */
-  private async checkFrontierV2Fixture(
-    file: unknown, request: FrontierPreparationRequest & { expectedSnapshot: string; opening: unknown }
-  ): Promise<boolean> {
+  /** Test fixture only. The Boolean conveys no archive or write authority. */
+  private checkFrontierV2Fixture(file: unknown, request: FrontierV2FixtureRequest): Promise<boolean> {
+    return this.frontierV2Fixture(file, request);
+  }
+
+  /** Test fixture only. Checks immutable private bytes without making them selectable or returning their name. */
+  private async stageFrontierV2Fixture(input: Buffer, request: FrontierV2FixtureRequest): Promise<boolean> {
+    if (input.length > MAX_ACCEPTED_FRONTIER_BYTES) return false;
+    const bytes = Buffer.from(input);
+    const text = bytes.toString('utf8');
+    if (!Buffer.from(text, 'utf8').equals(bytes)) return false;
+    try {
+      return await this.frontierV2Fixture(JSON.parse(text) as unknown, request, bytes);
+    } catch {
+      return false;
+    }
+  }
+
+  private async frontierV2Fixture(file: unknown, request: FrontierV2FixtureRequest, stagedBytes?: Buffer): Promise<boolean> {
     if (!STREAM_ID_PATTERN.test(request.stream) || !HASH_PATTERN.test(request.snapshot)) return false;
     const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
       (capture) => this.locked(async () => {
-        await this.verifyAppendSnapshot(request.expectedSnapshot);
         const policy = await capture();
         if (policy === undefined) return false;
-        const { pin, keys, stream } = request;
-        const { grants } = await this.grants();
-        const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed),
-          keys, blobs: () => undefined, now: new Date(policy.source.instant) });
-        const head = roster.positions.at(-1);
-        const fence = roster.requiredFrom.get(CELL_ACCESS_FEATURE);
-        if (head === undefined || head !== this.mark?.rosterHead || fence === undefined || roster.pending.length !== 0) return false;
-        const predecessor = roster.positions[fence - 1];
-        const requirement = roster.positions[fence];
-        const access = roster.accessRevision;
-        const reader = deviceAt(roster.members, this.own.writer, roster.positions.length - 1);
-        if (predecessor === undefined || requirement === undefined || access === undefined || reader?.publicKey !== this.own.publicKey ||
-          ![pin.genesisHash, predecessor, requirement, access.entry, head].every((hash) =>
-            this.byHash.get(hash)?.header.stream === pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return false;
+        const verifyBinding = async () => {
+          const signer = await this.deps.signer();
+          if (signer.publicKey !== this.own.publicKey || (await this.deps.keyStatus())(signer).state !== 'active') return undefined;
+          await this.verifyAppendSnapshot(request.expectedSnapshot);
+          const { pin, keys, stream } = request;
+          const { grants } = await this.grants();
+          const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed),
+            keys, blobs: () => undefined, now: new Date(policy.source.instant) });
+          const head = roster.positions.at(-1);
+          const fence = roster.requiredFrom.get(CELL_ACCESS_FEATURE);
+          if (head === undefined || head !== this.mark?.rosterHead || fence === undefined || roster.pending.length !== 0) return undefined;
+          const predecessor = roster.positions[fence - 1];
+          const requirement = roster.positions[fence];
+          const access = roster.accessRevision;
+          const reader = deviceAt(roster.members, this.own.writer, roster.positions.length - 1);
+          if (predecessor === undefined || requirement === undefined || access === undefined || reader?.publicKey !== this.own.publicKey ||
+            ![pin.genesisHash, predecessor, requirement, access.entry, head].every((hash) =>
+              this.byHash.get(hash)?.header.stream === pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return undefined;
 
-        const scope = this.frontierCaptureScope(request, predecessor);
-        const slot = FRONTIER_POLICY_SLOT + scope;
-        const reference = await this.deps.secrets.get(slot);
-        if (reference === undefined) return false;
-        const saved = await this.readFrontierPolicyCapture(scope, reference);
-        if (saved === undefined || saved.requirement !== requirement ||
-          !canonicalBytes(saved.entry).equals(canonicalBytes(this.byHash.get(requirement)))) return false;
-        const historical = await reopenFrontierPolicy(saved.policy, policy.source, request.policyStorage, this.deps.secrets);
-        if (historical === undefined) return false;
-        const verified = verifyEntry(saved.entry, { roster: rosterView(roster), keys, blobs: () => undefined, now: new Date(historical.instant) });
-        if (verified.status !== 'verified' || verified.entry.keep !== undefined || verified.entry.hash !== requirement ||
-          verified.entry.header.writer !== this.own.writer || verified.entry.body.kind !== 'roster.require' ||
-          verified.entry.body.actor.kind !== 'person' || verified.entry.body.roster !== predecessor ||
-          verified.entry.body.at !== new Date(historical.instant).toISOString() ||
-          !isRecord(verified.entry.data) || verified.entry.data.rosterPrev !== predecessor ||
-          !Array.isArray(verified.entry.data.features) || verified.entry.data.features.length !== 1 ||
-          verified.entry.data.features[0] !== CELL_ACCESS_FEATURE) return false;
-        const custody = frontierCustody(roster, stream, this.own.writer, keys, historical, fence - 1);
-        if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return false;
-        if (!checksFrontierV2Fixture(file, { roster, accessEntry: access.entry, pin: { project: pin.project, genesis: pin.genesisHash },
-          opening: request.opening, historicalKey: keys, expectedStream: stream,
-          capture: { digest: frontierV2CaptureCommitment(saved.salt, saved.hash), writer: this.own.writer, before: predecessor, requirement } })) return false;
+          const scope = this.frontierCaptureScope(request, predecessor);
+          const slot = FRONTIER_POLICY_SLOT + scope;
+          const reference = await this.deps.secrets.get(slot);
+          if (reference === undefined) return undefined;
+          const saved = await this.readFrontierPolicyCapture(scope, reference);
+          if (saved === undefined || saved.requirement !== requirement ||
+            !canonicalBytes(saved.entry).equals(canonicalBytes(this.byHash.get(requirement)))) return undefined;
+          const historical = await reopenFrontierPolicy(saved.policy, policy.source, request.policyStorage, this.deps.secrets);
+          if (historical === undefined) return undefined;
+          const verified = verifyEntry(saved.entry, { roster: rosterView(roster), keys, blobs: () => undefined, now: new Date(historical.instant) });
+          if (verified.status !== 'verified' || verified.entry.keep !== undefined || verified.entry.hash !== requirement ||
+            verified.entry.header.writer !== this.own.writer || verified.entry.body.kind !== 'roster.require' ||
+            verified.entry.body.actor.kind !== 'person' || verified.entry.body.roster !== predecessor ||
+            verified.entry.body.at !== new Date(historical.instant).toISOString() ||
+            !isRecord(verified.entry.data) || verified.entry.data.rosterPrev !== predecessor ||
+            !Array.isArray(verified.entry.data.features) || verified.entry.data.features.length !== 1 ||
+            verified.entry.data.features[0] !== CELL_ACCESS_FEATURE) return undefined;
+          const custody = frontierCustody(roster, stream, this.own.writer, keys, historical, fence - 1);
+          if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return undefined;
+          if (!checksFrontierV2Fixture(file, { roster, accessEntry: access.entry, pin: { project: pin.project, genesis: pin.genesisHash },
+            opening: request.opening, historicalKey: keys, expectedStream: stream,
+            capture: { digest: frontierV2CaptureCommitment(saved.salt, saved.hash), writer: this.own.writer, before: predecessor, requirement } })) return undefined;
 
-        if (await this.deps.secrets.get(slot) !== reference) return false;
-        await this.verifyAppendSnapshot(request.expectedSnapshot);
-        return this.mark?.rosterHead === head && await policy.recheck();
-      }, 'read-only'));
+          if (await this.deps.secrets.get(slot) !== reference) return undefined;
+          await this.verifyAppendSnapshot(request.expectedSnapshot);
+          if (this.mark?.rosterHead !== head || !await policy.recheck()) return undefined;
+          return sha256Hex(canonicalBytes(['private-frontier-stage/2', this.dir, pin.project, pin.genesisHash, stream,
+            this.own.writer, requirement, access.entry, access.root, request.expectedSnapshot, sha256Hex(Buffer.from(reference))]));
+        };
+        const binding = await verifyBinding();
+        if (binding === undefined) return false;
+        if (stagedBytes === undefined) return true;
+        if (!await this.writeFrontierV2Stage(binding, stagedBytes)) return false;
+        return await verifyBinding() === binding;
+      }, 'existing'));
     return result === true;
+  }
+
+  private async writeFrontierV2Stage(binding: string, bytes: Buffer): Promise<boolean> {
+    if (await checkPath(this.root, [...this.parts, FRONTIER_STAGE_DIR])) return false;
+    const dir = path.join(this.dir, FRONTIER_STAGE_DIR);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const info = await lstat(dir);
+    const uid = process.getuid?.();
+    if (!info.isDirectory() || (uid !== undefined && (info.uid !== uid || (info.mode & 0o077) !== 0))) return false;
+
+    const file = path.join(dir, `${frontierFileHandle(binding, bytes)}.json`);
+    const existing = await readFrontierFile(file);
+    if (existing === undefined) await writeAtomic(file, bytes, 0o600, undefined, 'exclusive');
+    else if (!existing.equals(bytes)) return false;
+    await syncFolder(dir);
+    await syncFolder(this.dir);
+    return await privateFileProblem(file) === undefined && (await readFrontierFile(file))?.equals(bytes) === true;
   }
 
   private async readFrontierPolicyCapture(scope: string, reference: string) {
@@ -1560,17 +1613,17 @@ export class ReplicaStore {
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
   /** Take non-reentrant Start Again, register and cross-window locks in order and require the live store (32 D-03). */
-  private locked<T>(work: () => Promise<T>, mode: 'write' | 'read-only' = 'write'): Promise<T> {
+  private locked<T>(work: () => Promise<T>, mode: 'write' | 'existing' = 'write'): Promise<T> {
     return withStartAgainLock(this.root, async () => {
       if (await intentPresent(this.root)) {
-        if (mode === 'read-only') throw new Refusal('start-again-unfinished');
+        if (mode === 'existing') throw new Refusal('start-again-unfinished');
         await ReplicaStore.rollForward(this.root, this.deps, this.own);
       }
       return withRegisterLock(this.dir, async () => {
         const problem = await checkPath(this.root, this.parts);
         if (problem) throw new Refusal(problem);
         const missing = (await kindAt(this.dir)) === 'none';
-        if (missing && (mode === 'read-only' || await this.historyGone())) throw new Refusal('rolled-back');
+        if (missing && (mode === 'existing' || await this.historyGone())) throw new Refusal('rolled-back');
         if (mode === 'write') await mkdir(this.dir, { recursive: true });
         return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
           const again = await checkPath(this.root, this.parts);
