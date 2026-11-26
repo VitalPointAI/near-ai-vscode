@@ -16,9 +16,41 @@ includes a terminal, so anyone who can reach its port gets a shell inside the co
 it on `127.0.0.1` only. The internal listen address used below requires
 `STERLING_PREVIEW_NO_SIGN_IN=accept`.
 
-You need Docker, or another tool that runs container images, on a 64-bit Intel or AMD (`linux/amd64`)
-computer. If the registry asks you to sign in, run `docker login ghcr.io` with a GitHub account
-that can read the repository's packages.
+The current Workbench release is a Linux x86-64 container image. Docker calls this platform
+`linux/amd64`, which covers 64-bit Intel and AMD processors. The Workbench connects to the
+compatible model server you configure. That server can run on a separate machine.
+If the registry asks you to sign in, run `docker login ghcr.io` with a GitHub account that can
+read the repository's packages.
+
+### Use the local launcher
+
+This launcher supports Linux hosts with an x86-64 processor, Node.js 26.13.1 or newer in the
+Node.js 26 series, and a local Docker Engine 28 or newer. From a repository checkout, run the
+prerequisite check before downloading an image. The check reports what to fix and makes no Docker
+changes. If your shell says `node` is missing, install the supported Node.js version first.
+
+```bash
+node scripts/launch-local-workbench.mjs --check
+```
+
+To start the Workbench, pass the exact image reference from `sterling-image.txt`.
+
+```bash
+IMAGE='ghcr.io/vitalpointai/near-ai-vscode@sha256:REPLACE_WITH_RELEASE_DIGEST'
+node scripts/launch-local-workbench.mjs --image "$IMAGE"
+```
+
+The launcher checks the host architecture, runtime and image before starting a container. The image
+must already be local. Add `--repair` to allow it to fetch that exact digest if it is missing. If the
+launcher reports a Docker install, upgrade or access requirement, resolve it through your host's
+administrator or software manager. Use the URL it prints after the health check succeeds. Running
+the command again with the same digest keeps the same container and workspace volume.
+
+### Start manually
+
+Use Docker Engine 28 or newer for the loopback publishing example below. Older Docker engines can
+expose a port published to localhost to machines on the same network segment.
+[Docker port publishing guidance](https://docs.docker.com/engine/network/port-publishing/)
 
 1. On the [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases), open the version
    you want and copy the image reference from `sterling-image.txt`. It looks like

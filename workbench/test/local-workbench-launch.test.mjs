@@ -1,0 +1,247 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { launchLocalWorkbench } from '../../scripts/launch-local-workbench.mjs';
+
+const image = `ghcr.io/vitalpointai/near-ai-vscode@sha256:${'1'.repeat(64)}`;
+const imageId = `sha256:${'2'.repeat(64)}`;
+const containerId = '3'.repeat(64);
+const owner = 'com.vitalpointai.sterling.launcher';
+const release = 'com.vitalpointai.sterling.release';
+const containerName = 'sterling-local-workbench';
+const volumeName = 'sterling-local-workspace';
+const workspace = '/home/sterling/workspace';
+const binding = { HostIp: '127.0.0.1', HostPort: '43112' };
+const launched = 'http://localhost:43112/';
+const endpoint = 'http://127.0.0.1:43112/healthz';
+const emptyProxies = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY']
+  .flatMap((name) => [`${name}=`, `${name.toLowerCase()}=`]);
+
+function fixture(options = {}) {
+  const imageConfig = {
+    User: '10001:0', Entrypoint: ['node', '/app/bin/start.mjs'],
+    Cmd: ['--session-preference', 'nearAi.autoInstallGsd=false'],
+    Env: ['HOME=/home/sterling', 'THEIA_DEFAULT_PLUGINS=local-dir:///plugins'],
+  };
+  const mutations = [];
+  const prerequisiteSteps = [];
+  const probes = [];
+  const postHealthTimeouts = [];
+  let installed = options.installed ?? true;
+  let namedVolume = options.volume;
+  let namedContainer = options.container;
+  let now = 0;
+  let healthAnswered = false;
+  const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
+  const missing = (kind, target) => ({
+    code: 1, stdout: options.missStdout ?? '[]',
+    stderr: kind === 'volume' ? `Error response from daemon: get ${target}: no such volume`
+      : `Error response from daemon: No such ${kind}: ${target}`,
+  });
+  const deps = {
+    platform: options.platform ?? 'linux',
+    arch: options.arch ?? 'x64',
+    nodeVersion: options.nodeVersion ?? '26.13.1',
+    env: options.env ?? {},
+    async statSocket(socket) {
+      assert.equal(socket, '/var/run/docker.sock');
+      prerequisiteSteps.push('socket');
+      if (options.socketDenied) throw Object.assign(new Error('untrusted detail'), { code: 'EACCES' });
+      return !options.noSocket;
+    },
+    async docker(args, env, timeout) {
+      assert.deepEqual(args.slice(0, 2), ['--host', 'unix:///var/run/docker.sock']);
+      assert.equal(env.DOCKER_CONTEXT, undefined);
+      assert.equal(env.DOCKER_HOST, undefined);
+      const [command, subcommand, target] = args.slice(2);
+      if (command === '--version') {
+        assert.deepEqual(args.slice(2), ['--version']);
+        prerequisiteSteps.push('client');
+        return options.clientError ? { code: options.clientError, stderr: 'untrusted detail' } : ok('Docker version 28.0.0');
+      }
+      if (command === 'version') {
+        assert.deepEqual(args.slice(2), ['version', '--format', '{{json .Server}}']);
+        prerequisiteSteps.push('engine');
+        return options.engineError ? { code: 1, stderr: options.engineError }
+          : ok(JSON.stringify({ Os: 'linux', Arch: options.engineArch ?? 'amd64', Version: options.engineVersion ?? '28.0.0' }));
+      }
+      assert(!options.checkOnly, 'check mode cannot inspect or change images, containers or volumes');
+      if (command === 'volume' && subcommand === 'inspect') {
+        assert.equal(target, volumeName);
+        return namedVolume ? ok(JSON.stringify([namedVolume])) : missing('volume', volumeName);
+      }
+      if (command === 'container' && subcommand === 'inspect') {
+        assert([containerId, containerName].includes(target));
+        if (healthAnswered) postHealthTimeouts.push(timeout);
+        return namedContainer ? ok(JSON.stringify([namedContainer])) : missing('container', target);
+      }
+      if (command === 'image' && subcommand === 'inspect') {
+        assert.equal(target, image);
+        return installed ? ok(JSON.stringify([{ Id: imageId, RepoDigests: options.wrongDigest ? [] : [image], Os: 'linux', Architecture: 'amd64', Config: imageConfig }]))
+          : missing('image', image);
+      }
+      mutations.push(args.slice(2));
+      if (command === 'pull') {
+        assert.deepEqual(args.slice(2), ['pull', image]);
+        installed = true;
+        return ok();
+      }
+      if (command === 'volume' && subcommand === 'create') {
+        assert(args.includes(`${owner}=local-workbench-v1`));
+        assert.equal(args.at(-1), volumeName);
+        namedVolume = { Name: volumeName, Driver: 'local', Options: null, Labels: { [owner]: 'local-workbench-v1' } };
+        return ok(volumeName);
+      }
+      if (command === 'create') {
+        assert(args.includes('--pull=never'));
+        assert(args.includes(`type=volume,source=${volumeName},target=${workspace}`));
+        assert(args.includes('127.0.0.1::3000'));
+        assert(args.includes(`${release}=${image}`));
+        for (const variable of emptyProxies) assert(args.includes(variable), `explicitly clear ${variable}`);
+        assert.equal(args.at(-1), image);
+        namedContainer = {
+          Id: containerId, Name: `/${containerName}`, Image: imageId,
+          Config: { ...imageConfig, Image: image, Labels: { [owner]: 'local-workbench-v1', [release]: image },
+            Env: [...imageConfig.Env, 'STERLING_LISTEN_HOST=0.0.0.0', 'STERLING_PREVIEW_NO_SIGN_IN=accept', ...emptyProxies] },
+          Mounts: [{ Type: 'volume', Name: volumeName, Destination: workspace, RW: true }],
+          HostConfig: { Privileged: false, NetworkMode: 'bridge', PortBindings: { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }] } },
+          NetworkSettings: { Networks: { bridge: {} }, Ports: null },
+          State: { Running: false, Status: 'created' },
+        };
+        return ok(containerId);
+      }
+      if (command === 'start') {
+        assert.equal(subcommand, containerId);
+        namedContainer.State = { Running: true, Status: 'running' };
+        namedContainer.NetworkSettings.Ports = { '3000/tcp': [binding] };
+        return ok(containerId);
+      }
+      assert.fail(`unexpected Docker command: ${args.join(' ')}`);
+    },
+    async probe(url, timeout) {
+      assert(!options.checkOnly, 'check mode cannot probe application health');
+      assert.equal(url, endpoint);
+      assert(timeout > 0 && timeout <= 3000);
+      probes.push(url);
+      if (options.changedPort) namedContainer.NetworkSettings.Ports = { '3000/tcp': [{ ...binding, HostPort: '43113' }] };
+      if (probes.length === 1 && !options.changedPort) return { status: 503, body: 'starting' };
+      healthAnswered = true;
+      if (options.healthAnsweredAt !== undefined) now = options.healthAnsweredAt;
+      return { status: 200, body: 'ok' };
+    },
+    now: () => now,
+    async sleep(ms) { now += ms; },
+  };
+  return {
+    deps, mutations, probes, postHealthTimeouts, prerequisiteSteps,
+    preventReuse(changes) {
+      Object.assign(namedContainer.HostConfig, changes);
+      installed = false;
+    },
+    stop() {
+      namedContainer.State = { Running: false, Status: 'exited' };
+      namedContainer.NetworkSettings.Ports = null;
+    },
+  };
+}
+
+test('check reports workstation prerequisites in order and never reaches resources', async () => {
+  const check = { check: true };
+  const healthy = fixture({ checkOnly: true, installed: false });
+  assert.match(await launchLocalWorkbench(check, healthy.deps), /prerequisites.*ready/i);
+  assert.deepEqual(healthy.prerequisiteSteps, ['client', 'socket', 'engine']);
+
+  for (const [options, expected, steps] of [
+    [{ platform: 'darwin', arch: 'arm64' }, /darwin.*arm64.*Linux x86-64/i, []],
+    [{ nodeVersion: '24.22.2' }, /Node 26\.13\.1/i, []],
+    [{ env: { DOCKER_CONTEXT: 'remote' } }, /local Docker/i, []],
+    [{ clientError: 'ENOENT' }, /Docker CLI.*missing/i, ['client']],
+    [{ clientError: 1 }, /Docker CLI.*could not run/i, ['client']],
+    [{ noSocket: true }, /install.*start.*Docker/i, ['client', 'socket']],
+    [{ socketDenied: true }, /socket.*access.*denied|access.*socket.*denied/i, ['client', 'socket']],
+    [{ engineError: 'permission denied: untrusted detail' }, /socket.*access.*denied|access.*socket.*denied/i, ['client', 'socket', 'engine']],
+    [{ engineError: 'untrusted detail' }, /Docker daemon.*unavailable/i, ['client', 'socket', 'engine']],
+    [{ engineVersion: '27.9.1' }, /Docker server 28\.0\.0/i, ['client', 'socket', 'engine']],
+    [{ engineArch: 'arm64' }, /Linux amd64 Docker server/i, ['client', 'socket', 'engine']],
+  ]) {
+    const f = fixture({ ...options, checkOnly: true });
+    await assert.rejects(launchLocalWorkbench(check, f.deps), (error) => {
+      assert.match(error.message, expected);
+      assert.doesNotMatch(error.message, /untrusted detail/);
+      return true;
+    });
+    assert.deepEqual(f.prerequisiteSteps, steps);
+  }
+  for (const flags of [{ image }, { repair: true }]) {
+    const f = fixture({ checkOnly: true });
+    await assert.rejects(launchLocalWorkbench({ ...check, ...flags }, f.deps), /--check.*--image.*--repair/);
+    assert.deepEqual(f.prerequisiteSteps, []);
+  }
+});
+
+test('local Workbench preflights, uses the approved release, and retries its own workspace', async (t) => {
+  await t.test('first launch, healthy retry and stopped-container retry preserve identity and storage', async () => {
+    const f = fixture();
+    assert.equal(await launchLocalWorkbench({ image }, f.deps), launched);
+    assert.deepEqual(f.probes, [endpoint, endpoint]);
+    assert.deepEqual(f.prerequisiteSteps, ['client', 'socket', 'engine']);
+    assert.equal(await launchLocalWorkbench({ image }, f.deps), launched);
+    assert.deepEqual(f.mutations.map(([command]) => command), ['volume', 'create', 'start']);
+    f.stop();
+    assert.equal(await launchLocalWorkbench({ image }, f.deps), launched);
+    assert.deepEqual(f.mutations.map(([command]) => command), ['volume', 'create', 'start', 'start']);
+  });
+
+  await t.test('invalid host, daemon, or existing resources refuse before optional repair', async () => {
+    const scenarios = [
+      [{ arch: 'arm64' }, /Linux.*(?:x86-64|amd64)/i],
+      [{ engineVersion: '27.5.1' }, /28\.0\.0/],
+      [{ engineVersion: 'unknown' }, /28\.0\.0/],
+      [{ env: { DOCKER_HOST: 'ssh://foreign.invalid' } }, /local Docker/i],
+      [{ volume: { Name: volumeName, Driver: 'local', Labels: {} } }, /volume/i],
+      [{ container: { Name: `/${containerName}`, Config: { Image: 'unowned:tag', Labels: {} } } }, /container/i],
+      [{ missStdout: '[{"Id":"unexpected"}]' }, /inspect/i],
+    ];
+    for (const [options, error] of scenarios) {
+      const f = fixture({ ...options, installed: false });
+      await assert.rejects(launchLocalWorkbench({ image, repair: true }, f.deps), error);
+      assert.deepEqual(f.mutations, []);
+    }
+    for (const capability of [
+      { PidMode: 'host' }, { IpcMode: 'host' }, { UTSMode: 'host' }, { UsernsMode: 'host' },
+      { Devices: [{ PathOnHost: '/dev/test' }] }, { DeviceRequests: [{}] }, { CapAdd: ['SYS_ADMIN'] },
+      { SecurityOpt: ['seccomp=unconfined'] }, { Binds: [`${volumeName}:${workspace}`] },
+    ]) {
+      const f = fixture();
+      await launchLocalWorkbench({ image }, f.deps);
+      const previous = f.mutations.length;
+      f.preventReuse(capability);
+      await assert.rejects(launchLocalWorkbench({ image, repair: true }, f.deps), /container/i);
+      assert.equal(f.mutations.length, previous);
+    }
+  });
+
+  await t.test('only an explicit exact-digest repair can acquire a missing image', async () => {
+    const absent = fixture({ installed: false });
+    await assert.rejects(launchLocalWorkbench({ image }, absent.deps), /image.*missing/i);
+    assert.deepEqual(absent.mutations, []);
+    const repair = fixture({ installed: false });
+    assert.equal(await launchLocalWorkbench({ image, repair: true }, repair.deps), launched);
+    assert.deepEqual(repair.mutations.map(([command]) => command), ['pull', 'volume', 'create', 'start']);
+    const wrong = fixture({ installed: false, wrongDigest: true });
+    await assert.rejects(launchLocalWorkbench({ image, repair: true }, wrong.deps), /image.*digest/i);
+    assert.deepEqual(wrong.mutations.map(([command]) => command), ['pull']);
+  });
+
+  await t.test('health on a port that changed during its probe never reports ready', async () => {
+    const f = fixture({ changedPort: true });
+    await assert.rejects(launchLocalWorkbench({ image }, f.deps), /publication.*changed/i);
+    assert.equal(f.probes.length, 1);
+    assert.deepEqual(f.mutations.map(([command]) => command), ['volume', 'create', 'start']);
+    const nearDeadline = fixture({ healthAnsweredAt: 119_995 });
+    assert.equal(await launchLocalWorkbench({ image }, nearDeadline.deps), launched);
+    assert.deepEqual(nearDeadline.postHealthTimeouts, [5]);
+    const expired = fixture({ healthAnsweredAt: 120_000 });
+    await assert.rejects(launchLocalWorkbench({ image }, expired.deps), /health.*time/i);
+    assert.deepEqual(expired.postHealthTimeouts, []);
+  });
+});
