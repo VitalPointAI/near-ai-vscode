@@ -817,6 +817,7 @@ test('a signed clearance transition pauses the affected cell and its verified un
   }));
   const lead = { at, p, host: hostOf(p, at) };
   const affected = await createCell(lead, LABEL_X, [p.deviceWriter]);
+  const secondUnaffected = await createCell(lead, LABEL_Z, [p.deviceWriter]);
   const member = await bringIn(lead, 'managed-analyst', 'Mo Analyst', CLEARED_X);
   assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
   const { hash: predecessor } = await head(p);
@@ -829,7 +830,7 @@ test('a signed clearance transition pauses the affected cell and its verified un
   const revision = accessRevisionId(p.projectId, null, predecessor, 'member.update', operation);
   const permit = { project: p.projectId, cell: p.projectId, epoch: 1, revision, predecessor,
     device: p.deviceWriter, writer: p.deviceWriter, authority: p.deviceWriter, certificate: null };
-  const commitment = buildAccessCommitment(revision, [affected, p.projectId].sort().map((cell) => ({
+  const commitment = buildAccessCommitment(revision, [affected, p.projectId, secondUnaffected].sort().map((cell) => ({
     cell, previousEpoch: 1, epoch: 1, decision: cell === affected ? 'pending' : 'continues',
     salt: randomBytes(32).toString('hex'), evidence: randomBytes(32).toString('hex')
   })), [{ permit, signature: p.signer.sign(accessPermitBytes(permit)) }]);
@@ -865,18 +866,22 @@ test('a signed clearance transition pauses the affected cell and its verified un
   const afterNote = await head(reopened);
   const nextId = accessRevisionId(p.projectId, revision, afterNote.hash, 'cell.access.commit', {});
   const carried = { ...permit, revision: nextId, predecessor: afterNote.hash };
-  const next = buildAccessCommitment(nextId, [affected, p.projectId].sort().map((cell) => ({
+  const transportPermits = [carried, { ...carried, cell: secondUnaffected }];
+  const next = buildAccessCommitment(nextId, [affected, p.projectId, secondUnaffected].sort().map((cell) => ({
     cell, previousEpoch: 1, epoch: 1, decision: cell === affected ? 'pending' : 'continues',
     salt: randomBytes(32).toString('hex'), evidence: randomBytes(32).toString('hex')
-  })), [{ permit: carried, signature: p.signer.sign(accessPermitBytes(carried)) }]);
+  })), transportPermits.map((item) => ({ permit: item, signature: p.signer.sign(accessPermitBytes(item)) })));
   assert.ok(next);
-  assert.ok('ok' in await reopened.appendOwn('cell.access.commit', { accessRevision: nextId, accessRoot: next.root }));
+  const promoted = await reopened.appendOwn('cell.access.commit', { accessRevision: nextId, accessRoot: next.root });
+  assert.ok('ok' in promoted);
   const blockedByRevision = await reopened.appendOwn('doc.client', data);
   assert.equal(isProjectRefused(blockedByRevision) && blockedByRevision.refused, 'rekey-pending');
   const continuity = next.proof(p.projectId, p.deviceWriter);
-  assert.ok(continuity);
-  assert.ok('ok' in await reopened.putGrants([], [continuity]));
+  const secondContinuity = next.proof(secondUnaffected, p.deviceWriter);
+  assert.ok(continuity && secondContinuity);
+  assert.ok('ok' in await reopened.putGrants([], [{ entry: promoted.hash, accessProofs: [continuity, secondContinuity] }]));
   assert.ok('ok' in await reopened.appendOwn('doc.client', data));
+  assert.ok('ok' in await reopened.appendOwn('doc.client', data, { stream: secondUnaffected }));
   const stillPending = await reopened.appendOwn('doc.client', data, { stream: affected });
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
