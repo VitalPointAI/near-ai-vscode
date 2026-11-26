@@ -922,7 +922,9 @@ test('a durable handover resumes only the protected exact signed enrollment and 
     assert.deepEqual(await readFile(layerFile(world)), exactLayer);
     const selected = await world.secrets.get(ORGANIZATION_ISSUER_SECRET);
     await rename(record, `${record}.fixture-kept`);
-    assert.equal((await reopened.load(at + 2)).state, 'failed');
+    assert.equal((await reopened.load(at + 2)).state, 'valid', 'the exact committed layer still supplies ordinary policy');
+    await writeFile(record, 'malformed retained record');
+    assert.equal((await reopened.load(at + 2)).state, 'valid');
     assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), selected);
   });
 });
@@ -930,6 +932,7 @@ test('a durable handover resumes only the protected exact signed enrollment and 
 class AmbiguousRotationSecrets extends MemorySecrets {
   public fault: 'exact' | 'unavailable' | 'competing' | undefined;
   public commits = 0;
+  public afterCommit?: () => Promise<void>;
   private unreadable = false;
   constructor(private readonly target: string) { super(); }
   override async get(key: string): Promise<string | undefined> {
@@ -947,6 +950,7 @@ class AmbiguousRotationSecrets extends MemorySecrets {
     } else {
       await super.store(key, value);
     }
+    await this.afterCommit?.();
     if (this.fault === 'unavailable') this.unreadable = true;
     if (this.fault !== undefined) throw new Error('fixture acknowledges neither outcome');
   }
@@ -984,4 +988,92 @@ test('the handover writer reconciles an exact commit and preserves unresolved or
       assert.equal(await secrets.get(ORGANIZATION_ISSUER_SECRET), exact);
     });
   }
+});
+
+test('the exact confirmed pending handover can finish before either write or with either one file staged', async () => {
+  for (const staged of ['neither', 'layer', 'record'] as const) {
+    await withWorld(async (world) => {
+      const old = issuerKey(`partial-old-${staged}`);
+      const fresh = issuerKey(`partial-new-${staged}`);
+      const store = new OrganizationStore(world.storage, world.secrets);
+      const original = enrolmentTextFor(old);
+      await store.accept(original, { wordsConfirmed: true }, FIXED_NOW);
+      const at = FIXED_NOW + DAY_MS;
+      const layer = buildOrganizationLayer(fresh, organizationSections(), { now: at, days: 90 });
+      const handover = (now: number) => JSON.stringify(buildEnrolment(fresh, {
+        organization: EXAMPLE_ORGANIZATION, layer, now, days: 30, serial: 2, rotation: old
+      }));
+      const exact = handover(at);
+      const record = path.join(organizationFolder(world), ENROLMENT_RECORD_FILE);
+      setOrganizationWriteProbe((step, kind) => { if (step === 'pin-pending' && kind === 'rotate') throw new Error('fixture stopped before staging'); });
+      await assert.rejects(store.accept(exact, { wordsConfirmed: true }, at), /fixture stopped before staging/);
+      setOrganizationWriteProbe(undefined);
+      const protectedPending = await world.secrets.get(ORGANIZATION_ISSUER_SECRET);
+      if (staged === 'layer') await writeFile(layerFile(world), JSON.stringify(layer));
+      if (staged === 'record') await writeFile(record, exact);
+      const layerBefore = await readFile(layerFile(world));
+      const recordBefore = await readFile(record);
+      const reopened = new OrganizationStore(world.storage, world.secrets);
+      const ordinary = await reopened.load(at + 1);
+      if (staged === 'layer') assert.equal(ordinary.state, 'failed');
+      else {
+        assert.equal(ordinary.state, 'valid');
+        if (ordinary.state === 'valid') assert.equal(ordinary.issuerPublicKey, old.publicKey);
+      }
+      await assert.rejects(reopened.accept(handover(at + 1), { wordsConfirmed: true }, at + 2), OrganizationStoreError);
+      await assert.rejects(reopened.accept(original, {}, at + 2), OrganizationStoreError);
+      const sameIssuerUpdate = rulesTextFor(old, sectionsWith('org/Public', 'local-only'), { now: at + 1 });
+      await assert.rejects(reopened.accept(sameIssuerUpdate, {}, at + 2), OrganizationStoreError);
+      assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), protectedPending);
+      assert.deepEqual(await readFile(layerFile(world)), layerBefore);
+      assert.deepEqual(await readFile(record), recordBefore);
+      const accepted = await reopened.accept(exact, {}, at + 2);
+      assert.equal(accepted.kind, 'rotate', 'the protected confirmation already covers this exact envelope');
+      assert.equal(pinOf(world)?.publicKey, fresh.publicKey);
+      assert.ok(pinOf(world)?.acceptedHandover);
+      assert.deepEqual(JSON.parse(await readFile(record, 'utf8')), JSON.parse(exact));
+    });
+  }
+});
+
+test('a confirmed retry refuses when the other staged slot was substituted', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('partial-conflict-old');
+    const fresh = issuerKey('partial-conflict-new');
+    const store = new OrganizationStore(world.storage, world.secrets);
+    await store.accept(enrolmentTextFor(old), { wordsConfirmed: true }, FIXED_NOW);
+    const at = FIXED_NOW + DAY_MS;
+    const exact = rotationTextFor(old, fresh, { now: at });
+    setOrganizationWriteProbe((step, kind) => { if (step === 'pin-pending' && kind === 'rotate') throw new Error('fixture stopped'); });
+    await assert.rejects(store.accept(exact, { wordsConfirmed: true }, at), /fixture stopped/);
+    setOrganizationWriteProbe(undefined);
+    const pending = await world.secrets.get(ORGANIZATION_ISSUER_SECRET);
+    const originalLayer = await readFile(layerFile(world));
+    const record = path.join(organizationFolder(world), ENROLMENT_RECORD_FILE);
+    const unrelated = enrolmentTextFor(old, { serial: 9, now: at });
+    await writeFile(record, unrelated);
+    await assert.rejects(store.accept(exact, {}, at + 1), OrganizationStoreError);
+    assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), pending);
+    assert.deepEqual(await readFile(layerFile(world)), originalLayer);
+    assert.equal(await readFile(record, 'utf8'), unrelated);
+  });
+});
+
+test('exact attempted-transition readback requires both files even though ordinary committed policy does not', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('readback-old');
+    const fresh = issuerKey('readback-new');
+    const secrets = new AmbiguousRotationSecrets(fresh.publicKey);
+    const store = new OrganizationStore(world.storage, secrets);
+    await store.accept(enrolmentTextFor(old), { wordsConfirmed: true }, FIXED_NOW);
+    const at = FIXED_NOW + DAY_MS;
+    const record = path.join(organizationFolder(world), ENROLMENT_RECORD_FILE);
+    secrets.afterCommit = () => rename(record, `${record}.fixture-kept`);
+    await assert.rejects(store.accept(rotationTextFor(old, fresh, { now: at }), { wordsConfirmed: true }, at), OrganizationStoreError);
+    const selected = await secrets.get(ORGANIZATION_ISSUER_SECRET);
+    assert.equal(JSON.parse(selected ?? '{}').publicKey, fresh.publicKey);
+    assert.equal((await store.load(at + 1)).state, 'valid');
+    assert.equal(await secrets.get(ORGANIZATION_ISSUER_SECRET), selected);
+    assert.equal(secrets.commits, 1);
+  });
 });
