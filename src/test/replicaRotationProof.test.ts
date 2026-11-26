@@ -149,4 +149,10 @@ test('the fold releases a staged managed grant only with exact cell evidence und
   assert.equal(placed([{ ...opening, entry: genesis }]), false);
   assert.equal(placed([{ ...opening, evidence: { ...evidence, grants: [] } }]), false);
   assert.equal(placed([opening]), true);
+  const delivered = { opening, grants: [grant] };
+  const withoutRaw = { ...input, grants: input.grants.filter((item) => grantHash(item) !== hash), grantEvidence: [delivered] };
+  const stagedBeforeRoot = foldRoster({ ...withoutRaw, entries: world.entries.slice(0, -1) });
+  assert.equal(stagedBeforeRoot.cells.cells.get(world.project)?.grants.some((item) => item.hash === hash), false);
+  const promoted = foldRoster(withoutRaw);
+  assert.equal(promoted.cells.cells.get(world.project)?.grants.some((item) => item.hash === hash), true);
 });
