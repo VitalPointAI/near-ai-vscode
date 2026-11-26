@@ -529,6 +529,55 @@ test('managed Workbench Finish reviews one private draft and never falls back on
   assert.equal(synced, 1);
 });
 
+test('Share file save and open stay bound to the selected project and exact recipient', async () => {
+  const root = '/fictional-managed-files';
+  const projectId = 'd'.repeat(32);
+  const part = 'a'.repeat(32);
+  const recipient = 'b'.repeat(64);
+  const repeat = 'c'.repeat(64);
+  const text = '{"handle":"fictional","packet":"ciphertext-only"}';
+  const calls: string[] = [];
+  let lead = true;
+  const project = { projectId, deviceWriter: 'e'.repeat(64), state: async () => ({
+    roster: { positions: ['selected'], required: ['cell-access@1'], members: {} }, fold: {}
+  }) };
+  const live = { projects: () => [{ root, project: projectId }], project: () => project,
+    shareContext: () => ({ deps: {}, secrets: new MemorySecrets(), globalStorageDir: root }), syncNow: () => undefined };
+  const service = new StaffShareService({
+    live: () => live as never, root: async () => root,
+    engine: { ...engine, isRosterWriterAt: () => lead,
+      exportWorkbenchManagedFile: async (_host: never, cell: string, target: string, prior?: string) => {
+        calls.push('save');
+        if (cell !== part || target !== recipient || (prior !== undefined && prior !== repeat)) return undefined;
+        return { name: 'shared-keys.near-staff-keys', text, repeat };
+      },
+      openWorkbenchManagedFile: async (_host: never, file: string) => {
+        calls.push('open');
+        return file === text ? { ok: true, message: 'Fictional private file checked.', notices: [] } :
+          { ok: false, message: 'Fictional file refused.', notices: [] };
+      }
+    } as never
+  });
+  const call = (name: string, input: object): Promise<ServiceResult<ShareOutcome>> => {
+    const method = Reflect.get(service, name);
+    return method === undefined ? Promise.resolve({ kind: 'refused', reason: 'No private file service' }) :
+      Reflect.apply(method, service, [input]) as Promise<ServiceResult<ShareOutcome>>;
+  };
+  assert.equal((await call('saveManagedKeys', { project: 'wrong', cell: part, recipient })).kind, 'refused');
+  assert.equal((await call('openManagedKeys', { project: 'wrong', text })).kind, 'refused');
+  assert.deepEqual(calls, []);
+  const saved = value(await call('saveManagedKeys', { project: projectId, cell: part, recipient }), 'save exact managed file');
+  assert.deepEqual(saved.file, { name: 'shared-keys.near-staff-keys', text });
+  const again = value(await call('saveManagedKeys', { project: projectId, cell: part, recipient, repeat }), 'repeat exact file');
+  assert.deepEqual(again.file, saved.file);
+  assert.equal((await call('saveManagedKeys', { project: projectId, cell: part, recipient: 'f'.repeat(64), repeat })).kind, 'refused');
+  lead = false;
+  assert.equal((await call('saveManagedKeys', { project: projectId, cell: part, recipient })).kind, 'refused');
+  assert.equal((await call('openManagedKeys', { project: projectId, text })).kind, 'ok');
+  assert.equal((await call('openManagedKeys', { project: projectId, text: '{}' })).kind, 'refused');
+  assert.deepEqual(calls, ['save', 'save', 'save', 'open', 'open']);
+});
+
 test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {
   const lead = await person('stale', { hosted: true, staff: true });
   try {

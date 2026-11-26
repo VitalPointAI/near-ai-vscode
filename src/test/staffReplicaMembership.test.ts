@@ -1530,6 +1530,42 @@ test('private founding file waits through reopening for the matching signed rost
   assert.equal(reopened.keys.holds(cell, 1), false);
 });
 
+test('a managed file repeats identical private bytes across reopening and refuses a stale repeat', async () => {
+  const { lead, peer, withdrawn, cell, selected } = await foundingHandoffFixture();
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const save = async (p: ReplicaProject, offer: typeof request, repeat?: string): Promise<{ name: string; text: string; repeat: string } | undefined> => {
+    const method = Reflect.get(p, 'sealManagedHandoffFile');
+    if (method !== undefined) return await Reflect.apply(method, p, [offer, repeat]) as { name: string; text: string; repeat: string } | undefined;
+    const sealed = await p.sealManagedHandoff(offer);
+    return sealed === undefined ? undefined : { name: 'shared-keys.near-staff-keys', text: JSON.stringify(sealed), repeat: sealed.handle };
+  };
+  const first = await save(lead.p, request);
+  assert.ok(first);
+  assert.equal(first.name, 'shared-keys.near-staff-keys');
+  const sender = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  const repeated = await save(sender, request, first.repeat);
+  assert.ok(repeated);
+  assert.equal(repeated.text === first.text, true, 'reopening can save the exact original private file');
+  assert.equal(await save(sender, { ...request, recipient: withdrawn.writer }, first.repeat), undefined);
+  assert.equal(await save(sender, request, '0'.repeat(64)), undefined);
+  const automatic = await sender.sealManagedHandoff(request, true);
+  assert.ok(automatic?.state === 'queued');
+  assert.notEqual(automatic.handle, first.repeat);
+  const root = await stageManagedPredecessors(lead, peer, selected.hash);
+  assert.ok('ok' in await peer.p.ingestForeign([root], []));
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(JSON.parse(first.text)));
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(JSON.parse(repeated.text)));
+  assert.equal(peer.p.keys.holds(cell, 2), true);
+
+  lead.at.clock.now = new Date(NOW.getTime() + DAY_MS);
+  assert.equal(await save(sender, request, first.repeat), undefined);
+  const fresh = await save(sender, request);
+  assert.ok(fresh && fresh.repeat !== first.repeat, 'an explicit fresh export may issue after the original expired');
+  assert.ok('ok' in await removeFromProject(lead.host, { member: peer.member }));
+  assert.equal(await save(sender, request, fresh.repeat), undefined);
+  assert.equal(await save(sender, request), undefined);
+});
+
 test('an admitted recipient cannot promote a staged signed delivery after its sealed deadline', async () => {
   const { lead, peer, cell, selected } = await foundingHandoffFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
