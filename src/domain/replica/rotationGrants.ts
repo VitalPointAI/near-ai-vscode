@@ -141,11 +141,18 @@ export function readContinuityReceipt(value: unknown): { entry: string; accessPr
 }
 
 /** A local stage becomes authoritative only when its entry and proofs are selected. */
-export function readAuthoredAccessStage(value: unknown): { entry: string; openings: readonly unknown[]; accessProofs: readonly unknown[] } | undefined {
-  if (!isRecord(value) || Object.keys(value).length !== 3 || !isHash(value.entry) ||
-      !Array.isArray(value.openings) || !Array.isArray(value.accessProofs)) return undefined;
-  return value.openings.every((opening) => isRecord(opening) && opening.entry === value.entry) ?
-    { entry: value.entry, openings: value.openings, accessProofs: value.accessProofs } : undefined;
+export function readAuthoredAccessStage(value: unknown): { entry: string; openings: readonly unknown[]; accessProofs: readonly unknown[];
+  founding?: NonNullable<ReturnType<typeof readGrantDelivery>> } | undefined {
+  if (!isRecord(value) || !isHash(value.entry) || !Array.isArray(value.openings) || !Array.isArray(value.accessProofs) ||
+      !value.openings.every((opening) => isRecord(opening) && opening.entry === value.entry)) return undefined;
+  const { entry, openings, accessProofs } = value;
+  if (!Object.hasOwn(value, 'founding')) return Object.keys(value).length === 3 ? { entry, openings, accessProofs } : undefined;
+  if (Object.keys(value).length !== 4 || !isRecord(value.founding) || Object.keys(value.founding).length !== 2 ||
+      typeof value.founding.cell !== 'string' || !CELL.test(value.founding.cell)) return undefined;
+  const { cell, grants } = value.founding;
+  const opening = openings.find((item) => isRecord(item) && isRecord(item.evidence) && item.evidence.cell === cell);
+  const founding = readGrantDelivery({ opening, grants });
+  return founding === undefined ? undefined : { entry, openings, accessProofs, founding };
 }
 
 /** Collect private permit candidates for the selected entry. Each candidate still needs append-time verification. */

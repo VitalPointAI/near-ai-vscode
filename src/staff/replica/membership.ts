@@ -47,6 +47,7 @@ import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt 
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { appendManagedWithdrawal } from './managedWithdrawal';
+import { finishManagedRekeys, leftReason } from './managedRecovery';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
@@ -1086,17 +1087,6 @@ function rekeyMessage(first: string, outcome: RekeyOutcome): string {
   return `${first}${moved}${left} ${REKEY_KEEP_TEXT}`;
 }
 
-/** The kind of rekey a cell needs because of the devices that left it: a removed member, a revoked device, or a revoked hub device. */
-function leftReason(roster: RosterState, gone: readonly string[], position: number): RekeyReason {
-  const reasons = gone.map((writer): RekeyReason => {
-    const versions = roster.members.devices.get(writer);
-    const last = versions?.[versions.length - 1];
-    if (last?.kind === 'hub') return 'hub-revoked';
-    return last !== undefined && memberAt(roster.members, last.member, position) !== undefined ? 'device-revoked' : 'member-removed';
-  });
-  return (['member-removed', 'device-revoked', 'hub-revoked'] as const).find((reason) => reasons.includes(reason)) ?? 'member-removed';
-}
-
 /**
  * The cells that still need a new key, computed from the roster at the head (MJ-03): a cell whose current key is held by a device that is no longer
  * admitted, or by a person device whose member is no longer cleared for it (by the host's clearance check, as at write time, D-22), and on which
@@ -1142,27 +1132,34 @@ function finishedNote(outcome: RekeyOutcome): string {
 export async function unfinishedRekeys(shared: SharedProjectHost): Promise<number> {
   try {
     const { roster } = await shared.project.state();
-    return writerProblem(shared, roster) === undefined ? pendingRekeys(shared, roster, gateOf(shared)).plans.length : 0;
+    if (writerProblem(shared, roster) !== undefined) return 0;
+    return roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? [...roster.accessGrants.values()].filter(({ decision }) => decision === 'pending').length :
+      pendingRekeys(shared, roster, gateOf(shared)).plans.length;
   } catch (error) {
     if (error instanceof ReplicaProjectError) return 0;
     throw error;
   }
 }
 
-/**
- * Finishes a removal, a device revocation or a lowered clearance whose rekeys were interrupted (MJ-03): every cell still on a key a removed device or
- * a member no longer cleared holds moves to a new key for the devices still cleared (D-23). Refused nothing-to-finish when nothing is left, and
- * not-a-roster-writer or roster-split as every roster change is.
- */
+/** Finish an interrupted key change from its selected managed state or the legacy roster. */
 export function finishRekeys(shared: SharedProjectHost): Promise<MembershipResult> {
   return guarded(async () => {
     const { roster } = await shared.project.state();
     const problem = writerProblem(shared, roster);
     if (problem !== undefined) return problem;
-    const pending = pendingRekeys(shared, roster, gateOf(shared));
-    if (pending.plans.length === 0) return refuse('nothing-to-finish');
-    const outcome = await writeRekeys(shared, pending.plans, pending.cells);
-    if (isResult(outcome)) return outcome;
+    const outcome = roster.requiredFrom.has(CELL_ACCESS_FEATURE) ?
+      await finishManagedRekeys(shared.project, roster, (fresh, cell) => cellsAt(fresh, shared.project.keys, headOf(fresh).position, gateOf(shared).scales)
+        .find((info) => info.cell === cell), shared.routing, () => now(shared.deps)) :
+      await finishPending(shared, roster);
+    if (isProjectRefused(outcome)) return fromProject(outcome);
+    if ('ok' in outcome) {
+      if ('message' in outcome) return outcome;
+      if (outcome.reason === 'switch-first') return refused(outcome.reason, SWITCH_FIRST_TEXT);
+      if (outcome.reason === 'change-not-applied') return refused(outcome.reason, 'The shared history changed while the key change was prepared. Try again.');
+      return Object.hasOwn(PROJECT_REFUSALS_HOST, outcome.reason) ?
+        refused(outcome.reason, PROJECT_REFUSALS_HOST[outcome.reason as keyof typeof PROJECT_REFUSALS_HOST]) : refuse(outcome.reason as MembershipRefusal);
+    }
+    if (outcome.rekeyed.length + outcome.skipped.length === 0) return refuse('nothing-to-finish');
     return done(rekeyMessage('The removal or clearance change left unfinished is now finished.', outcome), { rekeyed: outcome.rekeyed });
   });
 }

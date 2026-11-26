@@ -710,11 +710,15 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
 // its own hash; a listed page is never placed alone. A grant whose pages have not all arrived waits, held missing-blob under its hash like an entry
 // whose blob has not arrived (33-07), and is placed when they come.
 function placeGrants(state: RosterState, grants: readonly unknown[], openings: readonly unknown[]): void {
-  const evidence = openings.flatMap((candidate) => (readAuthoredAccessStage(candidate)?.openings ?? [candidate])
-    .flatMap((opening) => openGrantEvidence(state.anchor.project, state.accessHistory, opening) ?? []));
+  const evidence: OpenedGrantEvidence[] = [];
   const delivered: unknown[] = [];
   for (const candidate of openings) {
-    const item = readGrantDelivery(candidate);
+    const stage = readAuthoredAccessStage(candidate);
+    for (const opening of stage?.openings ?? [candidate]) {
+      const bound = openGrantEvidence(state.anchor.project, state.accessHistory, opening);
+      if (bound !== undefined) evidence.push(bound);
+    }
+    const item = stage?.founding ?? readGrantDelivery(candidate);
     if (item === undefined) continue;
     const bound = openGrantEvidence(state.anchor.project, state.accessHistory, item.opening);
     if (bound === undefined) continue;
