@@ -7,11 +7,12 @@ import type { KemPrivateKeys } from '../../domain/replica/cellWrapV2';
 import { BLOB_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, openBlob, sealBlob, sha256Hex } from '../../domain/replica/entry';
 import type { SealedBlob } from '../../domain/replica/entry';
 import { readGrantPages, wrapsFor } from '../../domain/replica/grantPages';
+import type { WrapDevice } from '../../domain/replica/grantPages';
 import { managedWriteAllowed } from '../../domain/replica/roster';
 import type { RosterState } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
-import { matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from '../../domain/replica/rotationGrants';
+import { matchesGrantEvidence, openGrantEvidence, readContinuityReceipt, readGrantDelivery } from '../../domain/replica/rotationGrants';
 import { readAccessWriteProof } from '../../domain/replica/rotationProof';
 import type { AccessWriteProof } from '../../domain/replica/rotationProof';
 import { canonicalBytes } from '../../domain/team/canonical';
@@ -70,9 +71,33 @@ export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGran
   const original = wrapFormatOf(verified.grant.wraps.find(({ writer }) => writer === recipient)?.wrap ?? '');
   if (!original.ok) return undefined;
   const format = original.format === 2 ? 2 : formatForDevice(choice, device);
+  return sealPayload(roster.anchor.project, device, format, now, {
+    grants: [grant, ...pages], opening, ...(proof === undefined ? {} : { accessProof: proof })
+  });
+}
 
-  const bytes = canonicalBytes({ project: roster.anchor.project, recipient, expires: now + DELIVERY_MS,
-    grants: [grant, ...pages], opening, ...(proof === undefined ? {} : { accessProof: proof }) });
+/** Carry one exact writer's continuity proofs under one private handoff and one selected roster entry. */
+export function sealManagedContinuityDelivery(roster: RosterState, recipient: string, input: unknown, now: Date): { handle: string; packet: Packet } | undefined {
+  const receipt = readContinuityReceipt(input);
+  const head = roster.positions.length - 1;
+  if (receipt === undefined || receipt.entry !== roster.accessRevision?.entry || !Number.isFinite(now.getTime())) return undefined;
+  const device = wrapDeviceAt(roster, recipient, head);
+  let format: 1 | 2 = 1;
+  for (const proof of receipt.accessProofs) {
+    const { cell, epoch, writer, device: target } = proof.signed.permit;
+    if (target !== recipient || managedWriteAllowed(roster, cell, epoch, writer, head, now, proof) !== true) return undefined;
+    const founded = roster.cells.cells.get(cell)?.epochs.find((record) => record.epoch === epoch)?.from;
+    if (founded === undefined) return undefined;
+    // A private cell without a label visible to this helper uses the existing most restrictive wrap choice.
+    const choice = formatFor(roster, { base: cell === roster.anchor.project }, founded);
+    if (choice === 'switch-first') return undefined;
+    if (formatForDevice(choice, device) === 2) format = 2;
+  }
+  return sealPayload(roster.anchor.project, device, format, now.getTime(), receipt);
+}
+
+function sealPayload(project: string, device: WrapDevice, format: 1 | 2, now: number, payload: object): { handle: string; packet: Packet } | undefined {
+  const bytes = canonicalBytes({ project, recipient: device.writer, expires: now + DELIVERY_MS, ...payload });
   const size = Math.ceil((bytes.length + HEADER) / PADDING_BUCKET) * PADDING_BUCKET;
   if (size + SEALED_OVERHEAD > BLOB_MAX_BYTES) return undefined;
   const padded = Buffer.alloc(size);
@@ -93,9 +118,7 @@ function deliveryPacket(value: unknown): value is Packet {
   return true;
 }
 
-/** Open using only admitted device keys. The caller stages the returned grant and opening for selected-root verification. */
-export function openManagedGrantDelivery(project: string, device: DeliveryDevice, handle: string, packet: unknown, now: Date):
-  { grants: readonly unknown[]; opening: unknown; accessProof?: AccessWriteProof } | undefined {
+function openPayload(project: string, device: DeliveryDevice, handle: string, packet: unknown, now: Date): Record<string, unknown> | undefined {
   const time = now.getTime();
   if (!HANDLE.test(handle) || !Number.isFinite(time) || !deliveryPacket(packet) || blobBytesHash(packet.body) !== packet.body.hash) return undefined;
   const stream = address(handle);
@@ -108,18 +131,30 @@ export function openManagedGrantDelivery(project: string, device: DeliveryDevice
   let value: unknown;
   try { value = JSON.parse(plain.subarray(HEADER, HEADER + length).toString('utf8')) as unknown; } catch { return undefined; }
   if (!isRecord(value) || value.project !== project || value.recipient !== device.writer ||
-      typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + DELIVERY_MS ||
-      !Array.isArray(value.grants) || value.grants.length < 1 || value.grants.length > MAX_GRANT_PAGES + 1 ||
-      !isRecord(value.opening)) return undefined;
+      typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + DELIVERY_MS) return undefined;
   const { project: _project, recipient: _recipient, expires: _expires, ...artifact } = value;
+  return artifact;
+}
+
+/** Open using only admitted device keys. The caller stages the returned grant and opening for selected-root verification. */
+export function openManagedGrantDelivery(project: string, device: DeliveryDevice, handle: string, packet: unknown, now: Date):
+  { grants: readonly unknown[]; opening: unknown; accessProof?: AccessWriteProof } | undefined {
+  return grantForRecipient(project, device.writer, openPayload(project, device, handle, packet, now));
+}
+
+function grantForRecipient(project: string, recipient: string, artifact: unknown) {
   const delivery = readGrantDelivery(artifact);
-  if (delivery?.project !== project || !delivery.recipients.includes(device.writer)) return undefined;
+  if (delivery?.project !== project || !delivery.recipients.includes(recipient)) return undefined;
   const { grants, opening, accessProof } = delivery;
-  if (accessProof !== undefined && accessProof.signed.permit.device !== device.writer) return undefined;
+  if (accessProof !== undefined && accessProof.signed.permit.device !== recipient) return undefined;
   return { grants, opening, ...(accessProof === undefined ? {} : { accessProof }) };
 }
 
 export function openManagedGrantArtifact(project: string, device: DeliveryDevice, value: unknown, now: Date) {
-  return isRecord(value) && Object.keys(value).length === 2 && typeof value.handle === 'string'
-    ? openManagedGrantDelivery(project, device, value.handle, value.packet, now) : undefined;
+  if (!isRecord(value) || Object.keys(value).length !== 2 || typeof value.handle !== 'string') return undefined;
+  const artifact = openPayload(project, device, value.handle, value.packet, now);
+  const receipt = readContinuityReceipt(artifact);
+  if (receipt === undefined) return grantForRecipient(project, device.writer, artifact);
+  const target = receipt.accessProofs[0].signed.permit;
+  return target.project === project && target.device === device.writer ? receipt : undefined;
 }

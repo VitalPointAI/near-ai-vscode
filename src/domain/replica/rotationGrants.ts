@@ -4,7 +4,7 @@ import { isRecord } from '../team/validate';
 import { MAX_GRANT_PAGES, MAX_GRANT_WRAPS, readGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
 import { readAccessWriteProof, verifiedCellAccess } from './rotationProof';
-import type { AccessRevision } from './rotationProof';
+import type { AccessRevision, AccessWriteProof } from './rotationProof';
 
 const HASH = /^[0-9a-f]{64}$/;
 const CELL = /^[0-9a-f]{32}$/;
@@ -113,10 +113,34 @@ export function readGrantDelivery(value: unknown) {
       ...(accessProof === undefined ? {} : { accessProof }) } : undefined;
 }
 
-/** Only unwrap a delivered permit for the selected roster entry. The append guard still verifies it. */
-export function storedAccessProof(value: unknown, selectedEntry: string | undefined): unknown {
-  if (!isRecord(value) || !Object.hasOwn(value, 'accessProof')) return value;
-  return selectedEntry !== undefined && isRecord(value.opening) && value.opening.entry === selectedEntry ? value.accessProof : undefined;
+/** Decode one device and exact writer's continuity for distinct cells. Authority is checked by the roster. */
+export function readContinuityReceipt(value: unknown): { entry: string; accessProofs: AccessWriteProof[] } | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 2 || !isHash(value.entry) ||
+      !Array.isArray(value.accessProofs) || value.accessProofs.length === 0) return undefined;
+  const first = readAccessWriteProof(value.accessProofs[0]);
+  if (first === undefined) return undefined;
+  const target = first.signed.permit;
+  const cells = new Set<string>();
+  const accessProofs: AccessWriteProof[] = [];
+  for (const item of value.accessProofs) {
+    const proof = readAccessWriteProof(item);
+    if (proof === undefined) return undefined;
+    const permit = proof.signed.permit;
+    if (cells.has(permit.cell) || permit.project !== target.project || permit.device !== target.device || permit.writer !== target.writer ||
+        permit.certificate !== target.certificate || permit.revision !== target.revision || permit.predecessor !== target.predecessor) return undefined;
+    cells.add(permit.cell);
+    accessProofs.push(proof);
+  }
+  return { entry: value.entry, accessProofs };
+}
+
+/** Collect private permit candidates for the selected entry. Each candidate still needs append-time verification. */
+export function storedAccessProofs(value: unknown, selectedEntry: string | undefined): readonly unknown[] {
+  if (selectedEntry === undefined) return [];
+  if (isRecord(value) && Object.hasOwn(value, 'accessProofs')) return value.entry === selectedEntry && Array.isArray(value.accessProofs)
+    ? value.accessProofs : [];
+  if (!isRecord(value) || !Object.hasOwn(value, 'accessProof')) return [value];
+  return isRecord(value.opening) && value.opening.entry === selectedEntry ? [value.accessProof] : [];
 }
 
 export interface GrantEvidenceDelta {

@@ -33,7 +33,7 @@ import {
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
-import { openManagedGrantDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
+import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -879,9 +879,19 @@ test('a signed clearance transition pauses the affected cell and its verified un
   const continuity = next.proof(p.projectId, p.deviceWriter);
   const secondContinuity = next.proof(secondUnaffected, p.deviceWriter);
   assert.ok(continuity && secondContinuity);
-  assert.ok('ok' in await reopened.putGrants([], [{ entry: promoted.hash, accessProofs: [continuity, secondContinuity] }]));
+  const receipt = { entry: promoted.hash, accessProofs: [continuity, secondContinuity] };
+  const selected = (await head(reopened)).roster;
+  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, entry: afterNote.hash }, NOW) === undefined, true);
+  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, accessProofs: [continuity, continuity] }, NOW) === undefined, true);
+  assert.equal(sealManagedContinuityDelivery(selected, member.writer, receipt, NOW) === undefined, true);
+  const delivery = sealManagedContinuityDelivery(selected, p.deviceWriter, receipt, NOW);
+  assert.ok(delivery);
+  assert.equal(JSON.stringify(delivery).includes(secondContinuity.signed.signature), false);
+  assert.ok('ok' in await reopened.ingestManagedGrantDelivery(delivery));
   assert.ok('ok' in await reopened.appendOwn('doc.client', data));
   assert.ok('ok' in await reopened.appendOwn('doc.client', data, { stream: secondUnaffected }));
+  const restored = project(await ReplicaProject.open(at.root, at.deps));
+  assert.ok('ok' in await restored.appendOwn('doc.client', data, { stream: secondUnaffected }));
   const stillPending = await reopened.appendOwn('doc.client', data, { stream: affected });
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });

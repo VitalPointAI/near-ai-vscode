@@ -39,7 +39,7 @@ import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replic
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterSignature, rosterView } from '../../domain/replica/roster';
-import { storedAccessProof } from '../../domain/replica/rotationGrants';
+import { storedAccessProofs } from '../../domain/replica/rotationGrants';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
@@ -1130,7 +1130,7 @@ export class ReplicaProject {
       (Object.hasOwn(ROSTER_KIND_OWNER, kind) || kind === 'device.kem' || kind === 'session.certify');
     const chosen = options.signer ?? this.signerOf(kind);
     if (!rosterControl && !(managedWriteAllowed(roster, stream, epoch, writerIdOf(chosen.publicKey), position, this.now(),
-      options.accessProof, this.evidence.map(({ value }) => storedAccessProof(value, roster.accessRevision?.entry))) ??
+      options.accessProof, this.evidence.flatMap(({ value }) => storedAccessProofs(value, roster.accessRevision?.entry))) ??
       canWriteCurrentEpoch(roster, stream, epoch))) return refuse('rekey-pending');
     // 33.1 D-09: in a hosted project only the person signer signs a person-key kind, and a kind outside Phase 33's list only under its action.
     const person = this.deps.personSigner;
