@@ -1074,6 +1074,7 @@ export class ReplicaStore {
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
+          if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
           await this.appendLines(toWrite.map(({ entry }) => entry));
           await this.writeOwnMark();
         }

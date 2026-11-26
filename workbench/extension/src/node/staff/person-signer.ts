@@ -46,11 +46,13 @@ export interface PersonSigner {
   /** The raw Ed25519 public key, base64url. */
   readonly publicKey: string;
   sign(bytes: Buffer, options?: PersonSignOptions): Promise<string | PersonSignRefused>;
+  canSignAction?(action: string, payload: Uint8Array): boolean;
 }
 
 /** What the signer asks before it signs for an action: may this action id sign now? */
 export interface ActionGate {
   authorize(action: string): boolean;
+  authorizePayload?(action: string, payload: Uint8Array): boolean;
 }
 
 /** One value the person confirms, labelled. A date is formatted by the backend; every value is shown quoted. */
@@ -77,6 +79,7 @@ export interface StepUpToken {
 }
 
 export interface PendingActions extends ActionGate {
+  authorizePayload(action: string, payload: Uint8Array): boolean;
   /** A new pending action: the request id goes to the browser, the nonce into the step-up address only. */
   beginAction(payload: Uint8Array, summary: ActionSummary): { requestId: string; nonce: string };
   /** The summary of a pending, unexpired action, for its page; undefined otherwise. */
@@ -136,6 +139,11 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
     return undefined;
   };
 
+  const resumed = (action: string): ActionRecord | undefined => {
+    const record = find((item) => item.id === action && item.state === 'resumed');
+    return record !== undefined && record.authTime === options.latestAuthTime() ? record : undefined;
+  };
+
   return {
     beginAction(payload, summary) {
       prune();
@@ -165,10 +173,8 @@ export function createPendingActions(options: PendingActionOptions): PendingActi
       record.state = 'resumed';
       return record.id;
     },
-    authorize(action) {
-      const record = find((item) => item.id === action && item.state === 'resumed');
-      return record !== undefined && record.authTime === options.latestAuthTime();
-    },
+    authorize: (action) => resumed(action) !== undefined,
+    authorizePayload: (action, payload) => resumed(action)?.payload === payloadHash(payload),
   };
 }
 
@@ -264,5 +270,5 @@ export function personSigner(keyService: Pick<KeyService, 'sign'>, publicKey: st
     return matches ? signature.toString('base64url') : { refused: PERSON_SIGNER_TEXT.mismatch };
   }
 
-  return { fingerprint: signerFingerprint(publicKey), publicKey, sign };
+  return { fingerprint: signerFingerprint(publicKey), publicKey, sign, canSignAction: (action, payload) => actions?.authorizePayload?.(action, payload) === true };
 }

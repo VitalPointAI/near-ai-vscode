@@ -1157,12 +1157,12 @@ export function finishRekeys(shared: SharedProjectHost): Promise<MembershipResul
 
 export type RemoveInput = { member: string } | { member: string; writer: string };
 
-export function removeFromProject(shared: SharedProjectHost, input: RemoveInput): Promise<MembershipResult> {
+export function removeFromProject(shared: SharedProjectHost, input: RemoveInput, action?: string): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
     const initial = (await project.state()).roster;
     if (initial.requiredFrom.has(CELL_ACCESS_FEATURE)) {
-      const result = await appendManagedWithdrawal(project, initial, input, now(shared.deps));
+      const result = await appendManagedWithdrawal(project, initial, input, now(shared.deps), action);
       if (isProjectRefused(result)) return fromProject(result);
       if (!result.ok) return refused(result.reason, result.reason === 'no-grant-key' ? MEMBERSHIP_REFUSALS['no-grant-key'] :
         result.reason === 'change-not-applied' ? 'The shared history changed while this removal was prepared. Try again.' : PROJECT_REFUSALS_HOST[result.reason]);

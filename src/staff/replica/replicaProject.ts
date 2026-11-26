@@ -49,7 +49,7 @@ import { canWriteCurrentEpoch } from './wrapPlan';
 import { openManagedGrantArtifact, previewManagedContinuity, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
 import type { ManagedPacket } from './managedSync';
-import { verifyManagedStage } from './managedWithdrawal';
+import { managedAccessActionBytes, managedActionCurrent, verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
 export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
@@ -457,6 +457,9 @@ export class ReplicaProject {
         if (expected !== await this.store.appendSnapshot()) continue;
         const write = prepare(state);
         if ('ok' in write) return write;
+        const hostedStage = write.options.stageAccess !== undefined && this.device.roster !== this.device.identity;
+        const action = hostedStage ? managedAccessActionBytes(state.roster, write.kind, write.data) : undefined;
+        if (hostedStage && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
         const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
         if (!('entry' in built)) return built;
         if (write.check !== undefined) {
@@ -470,13 +473,16 @@ export class ReplicaProject {
         if (write.options.stageAccess !== undefined && (!checked || !verifyManagedStage(built, stage, this.rosterInputs(state.roster)))) return refuse('rekey-pending');
         const writer = built.entry.header.writer;
         const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
-        const mayCommit = deadline === undefined ? undefined : () => Date.parse(deadline) > this.now().getTime();
+        const mayCommit = deadline === undefined && action === undefined ? undefined : () =>
+          (deadline === undefined || Date.parse(deadline) > this.now().getTime()) &&
+          (action === undefined || managedActionCurrent(this.device.roster, write.options.action, action));
         const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit, stage) : await this.storeSigned(built, expected, mayCommit, stage);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
         }
         if (result.refused !== 'out-of-order' && result.refused !== 'snapshot-changed') return storeRefused(result);
+        if (action !== undefined && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
         race = result;
       }
       if (checked) return storeRefused(race ?? { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });

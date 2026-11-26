@@ -41,7 +41,7 @@ import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { fixedSigner } from './helpers/replicaWorld';
-import { appendManagedWithdrawal } from '../staff/replica/managedWithdrawal';
+import { appendManagedWithdrawal, managedAccessActionBytes } from '../staff/replica/managedWithdrawal';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -1003,13 +1003,18 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   assert.ok('ok' in await lead.p.putGrants([], receipts));
   const encoding = await loadOrCreateEncryptionKey(lead.at.secrets, { identityDir: identityDir(lead.at.global), identity: lead.p.signer });
   const kem = await loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) });
-  const expires = NOW.getTime() + 1000;
-  const confirmed = 'fictional-confirmed-managed-action';
+  let expires = NOW.getTime() + 1000;
+  let confirmed = 'fictional-confirmed-managed-action';
+  let approvedPayload: Buffer | undefined;
   const authorized = (id: string) => id === confirmed && lead.at.clock.now.getTime() < expires;
+  const signedActions: string[] = [];
   const signer = {
-    fingerprint: lead.p.signer.fingerprint, publicKey: lead.p.signer.publicKey, canSignAction: authorized,
+    fingerprint: lead.p.signer.fingerprint, publicKey: lead.p.signer.publicKey,
+    canSignAction: (id: string, payload: Uint8Array) => authorized(id) && approvedPayload?.equals(payload) === true,
     async sign(bytes: Buffer, options?: SignOptions) {
-      return options?.action !== undefined && authorized(options.action) ? lead.p.signer.sign(bytes) : { refused: 'Confirm this test action first.' };
+      if (options?.action === undefined || !authorized(options.action)) return { refused: 'Confirm this test action first.' };
+      signedActions.push(options.action);
+      return lead.p.signer.sign(bytes);
     }
   };
   const deps: ReplicaProjectDeps = { ...lead.at.deps, secrets: new MemorySecrets(), sessionSigner: session.signer, personSigner: signer,
@@ -1018,23 +1023,46 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   const before = await head(hosted);
   assert.equal(before.hash, seed.hash);
   assert.ok(before.roster.sessions.has(writerIdOf(session.publicKey)));
+  approvedPayload = managedAccessActionBytes(before.roster, 'member.remove', { member: peer.member });
+  assert.ok(approvedPayload);
+  const host = { ...lead.host, project: hosted, deps };
+  const mismatched = await removeFromProject(host, { member: peer.member, writer: peer.writer }, confirmed);
+  assert.equal(mismatched.reason, 'action-required');
+  assert.deepEqual(signedActions, [], 'a confirmation for membership removal cannot sign a device revocation');
   let syncedStage = false;
   setFolderSyncProbe((dir) => {
     if (path.basename(dir) !== 'access-evidence') return;
     syncedStage = true;
     lead.at.clock.now = new Date(expires);
   });
-  let result: Awaited<ReturnType<typeof appendManagedWithdrawal>>;
+  let result: MembershipResult;
   try {
-    result = await appendManagedWithdrawal(hosted, before.roster, { member: peer.member }, NOW, confirmed);
+    result = await removeFromProject(host, { member: peer.member }, confirmed);
   } finally {
     setFolderSyncProbe(undefined);
   }
   assert.equal(syncedStage, true);
-  assert.equal(isProjectRefused(result) ? result.refused : result.ok ? 'written' : result.reason, 'action-required');
+  assert.equal(result.reason, 'action-required');
   const unchanged = await head(hosted);
   assert.equal(unchanged.hash, seed.hash);
   assert.ok(memberAt(unchanged.roster.members, peer.member, unchanged.position));
+  assert.ok(signedActions.length > 1 && signedActions.every((action) => action === confirmed));
+  const signedBeforeRetry = signedActions.length;
+  assert.equal((await removeFromProject(host, { member: peer.member }, confirmed)).reason, 'action-required');
+  assert.equal(signedActions.length, signedBeforeRetry, 'the expired action cannot sign again');
+
+  confirmed = 'fictional-new-managed-action';
+  expires += 1000;
+  assert.equal((await removeFromProject(host, { member: peer.member }, confirmed)).ok, true);
+  const committed = await head(hosted);
+  assert.equal(committed.roster.accessRevision?.predecessor, seed.hash);
+  assert.equal(memberAt(committed.roster.members, peer.member, committed.position), undefined);
+  assert.equal(committed.roster.accessGrants.get(lead.p.projectId)?.decision, 'pending');
+  const written = await hosted.appendOwn('doc.client', {
+    product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' }
+  }, { stream: unaffected });
+  assert.ok('ok' in written);
+  assert.equal(written.built.entry.header.writer, writerIdOf(session.publicKey));
 });
 
 test('managed clearance reduction commits decisions using the lead’s custom scale mapping', async () => {

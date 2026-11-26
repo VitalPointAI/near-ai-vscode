@@ -133,6 +133,11 @@ test('tracer: one pending action, its summary page, the step-up round trip with 
   assert.equal(stepUpReturn(w, nonce), 200);
   const action = w.actions.resumeAction(requestId, ORDER_PAYLOAD);
   assert.equal(typeof action, 'string');
+  assert.equal(w.signer.canSignAction?.(action as string, ORDER_PAYLOAD), true);
+  assert.equal(w.signer.canSignAction?.(action as string, payloadOf('another operation')), false);
+  assert.equal(w.signer.canSignAction?.('not-this-action', ORDER_PAYLOAD), false);
+  const idOnly = personSigner(createKeyService(w.identity, w.clock), personPublic, { actions: { authorize: () => true } });
+  assert.equal(idOnly.canSignAction?.(action as string, ORDER_PAYLOAD), false, 'an id-only gate cannot confirm payload authority');
   const entry = payloadOf('the signed header of the order entry');
   const signature = await w.signer.sign(entry, { action: action as string });
   assert.ok(verifies(entry, signature), 'signed by the person key through KeyService');

@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { readGrant } from '../../domain/replica/cellKeys';
 import { writerIdOf } from '../../domain/replica/entry';
+import { canonicalBytes } from '../../domain/team/canonical';
+import type { AsyncPayloadSigner, PayloadSigner } from '../../domain/team/signedPayload';
+import { isRecord } from '../../domain/team/validate';
 import type { BuiltEntry } from '../../domain/replica/entry';
 import { accessPermitBytes, buildAccessCommitment, readAccessWriteProof } from '../../domain/replica/rotationProof';
 import type { AccessPermit, SignedAccessPermit } from '../../domain/replica/rotationProof';
@@ -23,6 +26,19 @@ interface ManagedAccess extends AccessSnapshot {
   cells: ReadonlyArray<Pick<OpenedGrantEvidence, 'evidence' | 'decision'> & { recipients: readonly string[]; previousEpoch?: number }>;
   founding?: { cell: string; grants: readonly unknown[] };
   supplemental?: { cell: string; grants: readonly unknown[] };
+}
+
+/** Exact operation presented for step-up, bound to its selected roster and private access root. */
+export function managedAccessActionBytes(roster: RosterState, kind: string, data: unknown): Buffer | undefined {
+  const revision = roster.accessRevision;
+  if (revision === undefined || !isRecord(data)) return undefined;
+  const { accessRevision: _revision, accessRoot: _root, rosterPrev: _roster, ...operation } = data;
+  return canonicalBytes({ purpose: 'near-ai/cell-access/1/hosted-action', project: roster.anchor.project,
+    roster: roster.positions.at(-1), entry: revision.entry, root: revision.root, kind, operation });
+}
+
+export function managedActionCurrent(signer: PayloadSigner | AsyncPayloadSigner, action: string | undefined, payload: Uint8Array | undefined): boolean {
+  return action !== undefined && payload !== undefined && 'canSignAction' in signer && signer.canSignAction?.(action, payload) === true;
 }
 
 function permitDrafts(roster: RosterState, planned: ManagedAccess, authority: string, now: Date): AccessPermit[] {
@@ -55,7 +71,9 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
   prepare: (fresh: RosterState) => AccessSnapshot | undefined, action?: string): Promise<AppendOwnResult | AuthoredRefusal> {
   const signer = project.rosterSigner;
   const authority = writerIdOf(signer.publicKey);
-  if (signer !== project.signer && action === undefined) return { ok: false, reason: 'action-required' };
+  if (signer !== project.signer && !managedActionCurrent(signer, action, managedAccessActionBytes(roster, plan.kind, plan.operation))) {
+    return { ok: false, reason: 'action-required' };
+  }
   if (authority !== project.deviceWriter) return { ok: false, reason: 'no-grant-key' };
   const permits: SignedAccessPermit[] = [];
   for (const permit of permitDrafts(roster, plan, authority, now)) {
