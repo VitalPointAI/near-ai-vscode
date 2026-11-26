@@ -15,6 +15,28 @@ The owner's model provenance decisions of 2026-11-19 change this document. The d
 - **Promotion is a signed person decision** with an expiry. The opportunity agent only proposes; auto-promotion (D9) no longer applies above T0.
 - **Crowdsourced optimization** only on a Western base, with security scoring in the score.
 
+## Amendment (2026-11-26): Select an approved training target for each workload
+
+The Model Factory owns training and fine-tuning for the planned classification and protection
+adviser. It selects suitable organization-controlled hardware from the training targets
+listed in your organization's signed policy and available on the network. The Strix Halo work in Phase 85 establishes a reference configuration
+and measured evidence. Other eligible accelerators can run later workloads.
+
+- During planning, show which approved targets match the dataset's handling restrictions,
+  pinned trainer and base model, accelerator backend, memory and storage needs. The proposal
+  shows the selected target, expected cost and the reason for the choice.
+- Proposal approval permits the dataset builder to start. Once it seals the dataset manifest,
+  verify that the job's exact target, dataset and artifact digests match the approved scope.
+  Check the target's eligibility and capacity again before starting. If it is busy, show why
+  the job is queued. A target or workload outside the approved scope returns to proposal
+  approval before the Model Factory moves the job or its input data.
+- The Model Factory can coordinate approved targets over the network. The training process
+  makes no off-host network calls. Any teacher inference is a separate policy-routed operation.
+- The adviser recommends sensitivity, protections, usefulness over time, retention review
+  and when to reassess. Its fictional evaluation fixture is preparation. Model promotion
+  still requires evaluation of the exact artifact, a signed passport and a separate activation
+  decision.
+
 **Confidence legend.** HIGH means read directly in this repository or confirmed by a primary source (vendor docs, model card, paper) plus a second source. MEDIUM means a primary source or several agreeing secondary sources. LOW means one secondary source, a community report, or my own estimate. The project's confidence seam rates every single web source LOW by default; findings below are raised to MEDIUM or HIGH only where the reason is stated. Nothing LOW should be read as settled.
 
 ---
@@ -74,7 +96,7 @@ A useful model factory is buildable today on a single 128 GB Strix Halo box, but
 |-----------|----------------|----------|--------------------------|
 | Signal collector | Aggregates per-task metadata: calls, tokens, cost, latency, model, team, role, tool sequence, approvals, undo/edit events | Spend ledger, activity store, run report, approval service | `SpendTag` (kind, runId, agentId, conversationId, projectId); activity history; run report |
 | Task clusterer | Groups repeated work into candidate "tasks" | Signal collector; later a small local embedding model over sealed content | Team and role identity from Team Studio |
-| Scorer | Estimates monthly value, feasibility, risk | Clusterer, model directory prices, host profile | NEAR price data already used for spend estimates |
+| Scorer | Estimates monthly value, feasibility, risk | Clusterer, model directory prices, approved training target profiles | NEAR price data already used for spend estimates |
 | Proposal card | Plain-language card with value, data, label, licence, cost and an Approve button | Approval service, gate | Approval card patterns, Team Studio cards |
 | Dataset builder | Builds train/dev/test splits with lineage and labels | Thread store, org data platform, PII scrubber, gate | Gate labels, `raiseMark`, sealed storage |
 | Teacher distiller | Generates or improves targets with a larger model | NEAR AI Cloud TEE models or a large local model | Privacy routing (`tee`/`local` only for labelled data) |
@@ -94,7 +116,7 @@ Every specialist moves through one explicit state machine. Each state has an own
 | `proposed` | Card shown to someone with enough clearance and the approver role | `approved`, `dismissed`, `snoozed` | Card names who can approve; if nobody can, it says so instead of waiting |
 | `approved` | One click by an approver whose clearance dominates the projected dataset label | `building-dataset` | Budget and host checked at approval time |
 | `building-dataset` | Builder starts | `dataset-ready`, `infeasible` | `infeasible` names the gate that failed (too few examples, label too high, licence) |
-| `dataset-ready` | Splits sealed, manifest hashed | `training` | Waits for host capacity with a visible queue position |
+| `dataset-ready` | Splits sealed, manifest hashed | `training` | Shows queue position for the approved target. A replacement target requires a new approval. |
 | `training` | Worker picks the job | `evaluating`, `failed`, `paused` | Heartbeat every minute; `paused` when host is offline or memory guard trips, with resume |
 | `evaluating` | Adapter written | `shadow`, `rejected` | `rejected` shows the scores against the gate |
 | `shadow` | Gates pass | `canary`, `rolled-back` | Fixed sample window (for example 200 tasks or 7 days) |
