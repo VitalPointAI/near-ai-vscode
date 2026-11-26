@@ -1147,6 +1147,29 @@ test('normal managed peer sync adopts the recipient package only after pulling i
   assert.deepEqual(peer.p.keys.epochKey(cell, 1), lead.p.keys.epochKey(cell, 1));
 });
 
+test('normal managed peer delivery offers the exact founding epoch committed by Finish', async () => {
+  const lead = await founded('managed-founding-handoff');
+  const peer = await bringIn(lead, 'late-founding-recipient', 'Mo Analyst', CLEARED_X);
+  const withdrawn = await bringIn(lead, 'founding-excluded-recipient', 'Nell Planner', CLEARED_X);
+  assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
+  const cell = await createCell(lead, LABEL_X, [lead.p.deviceWriter, peer.writer, withdrawn.writer]);
+  const { receipts } = await seedManagedAccess(lead, [lead.p.projectId, cell]);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  assert.equal(peer.p.keys.holds(cell, 1), false, 'the late device has no earlier private cell key');
+  ok(await updateMember(lead.host, { member: withdrawn.member, clearance: OFFICIAL }), 'record clearance withdrawal');
+  const pending = await head(lead.p);
+  assert.equal(pending.roster.accessGrants.get(cell)?.decision, 'pending');
+  assert.deepEqual(ok(await finishRekeys(lead.host), 'finish').rekeyed, [cell]);
+  const selected = await head(lead.p);
+  assert.equal(selected.roster.accessRevision?.predecessor, pending.hash);
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const sender = syncLocalOf(project(await ReplicaProject.open(lead.at.root, lead.at.deps))).managed;
+  assert.ok(sender);
+  assert.equal(await sender.seal({ ...request, recipient: withdrawn.writer }), undefined);
+  const offered = await sender.seal(request);
+  assert.ok(offered, 'the normal sync sender can offer the committed founding grant');
+});
+
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
   const at = install('managed-grant-staging');
   at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
