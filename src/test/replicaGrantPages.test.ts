@@ -8,8 +8,8 @@ import type { CellGrant, GrantWrap } from '../domain/replica/cellKeys';
 import { WRAP_V2_BYTES } from '../domain/replica/cellWrapV2';
 import { GRANT_PAGE_REFUSALS, MAX_WRAPS_PER_V2_PAGE, buildGrantPages, readGrantPages } from '../domain/replica/grantPages';
 import { canonicalBytes } from '../domain/team/canonical';
-import { signPayload } from '../domain/team/signedPayload';
-import type { SignedPayload } from '../domain/team/signedPayload';
+import { payloadSigningInput, signPayload } from '../domain/team/signedPayload';
+import type { SignOptions, SignedPayload } from '../domain/team/signedPayload';
 import { REPLICA_SIGNED_AT } from '../domain/replica/entry';
 import { joinSecretHash, newJoinSecret } from '../domain/replica/invite';
 import { granteesAt } from '../domain/replica/rosterCells';
@@ -17,6 +17,8 @@ import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld, rosterDevice } from 
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import type { Written } from './helpers/replicaWorld';
 import { streamId } from './helpers/replicaWorld';
+
+
 
 const LEAD = rosterDevice('PAGES-LEAD', 'mbr-lead');
 const CELL = streamId('pages-cell');
@@ -33,6 +35,74 @@ const wraps = (count: number, make: (index: number) => string = v2Wrap): GrantWr
 const input = (count: number, overrides: Partial<CellGrant> = {}): CellGrant => ({ cell: CELL, epoch: 3, roster: ROSTER, labelSealed: LABEL, wraps: wraps(count), ...overrides });
 type Page = SignedPayload<CellGrant>;
 const reasonOf = (result: { ok: boolean; reason?: string }): string => (result.ok ? 'ok' : (result.reason as string));
+
+test('hosted Finish forwards only the exact approved grant envelope in child and founding order', async () => {
+  const target = '../staff/replica/managedFinishSigning';
+  const { createFinishGrantScope, createFinishIntent } = await import(target);
+  const draft = input(MAX_WRAPS_PER_V2_PAGE * 2 + 1);
+  const context = {
+    project: CELL, writer: LEAD.writer, predecessor: ROSTER, accessEntry: 'c'.repeat(64), accessRoot: 'd'.repeat(64),
+    oldEpoch: 2, reason: 'clearance-lowered' as const, evidence: 'e'.repeat(64), policy: null,
+    recipients: draft.wraps.map(({ writer }) => ({ writer })), continuity: []
+  };
+  const intent = createFinishIntent(context, draft);
+  assert.ok(intent);
+  const approved = intent.actionBytes();
+  const altered = createFinishIntent(context, { ...draft, labelSealed: 'M'.repeat(64) });
+  assert.ok(altered && !altered.actionBytes().equals(approved));
+  draft.wraps[0].wrap = v2Wrap(90);
+  assert.equal(intent.actionBytes().equals(approved), true);
+
+  const [founding, ...children] = buildGrantPages(LEAD.signer, input(MAX_WRAPS_PER_V2_PAGE * 2 + 1));
+  const exact = payloadSigningInput(children[0]);
+  const ids: string[] = [];
+  let current = true;
+  let valid = true;
+  let invalidateAfterReply = false;
+  let badSignature = false;
+  const action = 'fictional-finish-action';
+  const signer = {
+    ...LEAD.signer,
+    canSignAction: (id: string, bytes: Uint8Array) => valid && id === action && approved.equals(bytes),
+    async sign(bytes: Buffer, options?: SignOptions) {
+      ids.push(options?.action ?? '');
+      const result = badSignature ? LEAD.signer.sign(Buffer.from('different bytes')) : LEAD.signer.sign(bytes);
+      bytes.fill(0);
+      if (invalidateAfterReply) valid = false;
+      return result;
+    }
+  };
+  const scope = createFinishGrantScope(intent, signer, action, async () => current);
+  const rejected = async (role: 'child' | 'founding', index: number, bytes: Buffer, count: number) => {
+    assert.equal(typeof await scope.signerFor(role, index).sign(bytes), 'object');
+    assert.equal(ids.length, count);
+  };
+  await rejected('founding', 0, payloadSigningInput(founding), 0);
+  await rejected('child', 1, payloadSigningInput(children[1]), 0);
+  await rejected('child', 0, payloadSigningInput({ ...children[0], purpose: 'staff-invite' }), 0);
+  current = false;
+  await rejected('child', 0, exact, 0);
+  current = true;
+  valid = false;
+  await rejected('child', 0, exact, 0);
+  valid = true;
+  assert.equal(await scope.signerFor('child', 0).sign(exact), children[0].sig);
+  assert.equal(exact.equals(payloadSigningInput(children[0])), true, 'the signer received a private copy');
+  await rejected('child', 0, exact, 1);
+  await rejected('child', 1, exact, 1);
+  invalidateAfterReply = true;
+  await rejected('child', 1, payloadSigningInput(children[1]), 2);
+  invalidateAfterReply = false;
+  valid = true;
+  badSignature = true;
+  await rejected('child', 1, payloadSigningInput(children[1]), 3);
+  badSignature = false;
+  assert.equal(await scope.signerFor('child', 1).sign(payloadSigningInput(children[1])), children[1].sig);
+  await rejected('founding', 0, payloadSigningInput({ ...founding, payload: { ...founding.payload, pages: [] } }), 4);
+  assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(founding)), founding.sig);
+  await rejected('founding', 0, payloadSigningInput(founding), 5);
+  assert.deepEqual(ids, Array.from({ length: 5 }, () => action));
+});
 
 test('tracer: 2,000 v2 wraps make four signed pages, each within GRANT_MAX_BYTES, and readGrantPages gives back all 2,000 and the label', () => {
   const pages = buildGrantPages(LEAD.signer, input(2000));
