@@ -1341,6 +1341,57 @@ test('normal managed peer delivery offers the exact founding epoch committed by 
 
 });
 
+test('managed sender retries the exact staged opaque packet across restart and remembers upload and publication', async () => {
+  const { lead, peer, withdrawn, cell } = await foundingHandoffFixture();
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const sent: { handle: string; bytes: Buffer }[] = [];
+  const notifications: string[] = [];
+  let putSucceeds = false;
+  let notifySucceeds = false;
+  const route = {
+    get: async () => undefined,
+    put: async (...args: [string, unknown]) => {
+      assert.equal(args.length, 2);
+      const [handle, packet] = args;
+      sent.push({ handle, bytes: canonicalBytes(packet) });
+      return putSucceeds;
+    }
+  };
+  let offers = [request];
+  const exchange = async () => {
+    const reopened = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+    return exchangeManaged({
+      offers: async () => offers, pending: async () => [], accepted: async () => undefined,
+      published: async (_offer, handle) => {
+        notifications.push(handle);
+        if (!notifySucceeds) throw new Error('Fictional confidential handoff failed');
+      }
+    }, syncLocalOf(reopened).managed, route, { packets: [], waiting: false }, new Set());
+  };
+  assert.equal(await exchange(), 'waiting');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(notifications, []);
+  putSucceeds = true;
+  lead.at.clock.now = new Date(NOW.getTime() + 180_000);
+  assert.equal(await exchange(), 'waiting');
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1], sent[0], 'a restart uses the exact staged address and ciphertext');
+  assert.deepEqual(notifications, [sent[0].handle]);
+
+  notifySucceeds = true;
+  lead.at.clock.now = new Date(NOW.getTime() + 360_000);
+  assert.equal(await exchange(), 'complete');
+  assert.equal(sent.length, 2, 'a persisted successful upload needs only confidential publication');
+  assert.deepEqual(notifications, [sent[0].handle, sent[0].handle]);
+  assert.equal(await exchange(), 'complete');
+  assert.equal(sent.length, 2);
+  assert.equal(notifications.length, 2);
+
+  offers = [{ ...request, recipient: withdrawn.writer }];
+  assert.equal(await exchange(), 'waiting');
+  assert.equal(sent.length, 2, 'the configured route receives no offer for an unauthorized recipient');
+});
+
 test('private founding file waits through reopening for the matching signed roster', async () => {
   const { lead, peer, cell, selected } = await foundingHandoffFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
