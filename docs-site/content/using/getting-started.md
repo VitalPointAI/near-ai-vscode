@@ -121,6 +121,47 @@ See the [hub operator guide](https://github.com/VitalPointAI/near-ai-vscode/blob
 The hosted site deployment in the repository includes a
 [Helm definition for the hub](https://github.com/VitalPointAI/near-ai-vscode/tree/main/deploy/hub).
 
+### Run the Workbench and hub on the same development machine
+
+On Linux x86-64, [start the Workbench with the local launcher](#use-the-local-launcher) and the
+exact approved image digest. The browser address it prints after the health check is ready for
+use. You can open a project and chat while the hub is stopped.
+
+To run a local development hub alongside it, prepare an approved hub image on the same Docker
+engine under a dedicated local tag. Prepare a separate directory with the four files described in
+[Secret files](https://github.com/VitalPointAI/near-ai-vscode/blob/main/relay/README.md#secret-files).
+Use a new Compose project name, an available loopback port and the absolute path to that secret
+directory. Set those values and the local image tag in this block, then run it from the repository
+root.
+
+```bash
+(
+  unset DOCKER_CONTEXT DOCKER_HOST DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH \
+    DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM
+  export NEAR_AI_HUB_IMAGE='near-ai-hub:sterling-dev'
+  export NEAR_AI_HUB_SECRETS_DIR='/absolute/path/to/dev-hub-secrets'
+  export NEAR_AI_HUB_PUBLISH_ADDRESS='127.0.0.1'
+  export NEAR_AI_HUB_PUBLISH_PORT='8443'
+  export NEAR_AI_HUB_PUBLIC_ADDRESS=''
+
+  hub_compose() {
+    docker --host unix:///var/run/docker.sock compose -f relay/compose.yaml \
+      -p sterling-dev-hub --profile hub "$@"
+  }
+
+  hub_compose up -d --no-build --pull never hub && hub_compose ps hub
+)
+```
+
+The start command uses the prepared image. The hub is ready when `ps hub` reports it healthy.
+To check status later, use the same block with `hub_compose ps hub` as its last command. To stop
+the hub, use `hub_compose stop hub` there. Run the original block to restart it with the same
+settings.
+
+The hub keeps its database in the Compose project's volume. The Workbench keeps its project
+files in the launcher's workspace volume. These are independent services. Project pairing and
+enrollment are outside this development setup.
+
 ## More help
 
 For what each feature does and every setting, see [Features and settings](./features.synced.md).
