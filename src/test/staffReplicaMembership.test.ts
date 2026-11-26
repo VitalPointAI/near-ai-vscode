@@ -12,15 +12,17 @@ import type { ScaleTable } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { entryHash, sealBlob, writerIdOf } from '../domain/replica/entry';
+import { readGrantPages } from '../domain/replica/grantPages';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
-import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, rosterView } from '../domain/replica/roster';
+import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, managedWriteAllowed, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { accessPermitBytes, accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
 import { sessionCertifyData } from '../domain/replica/sessionKeys';
 import type { SignOptions } from '../domain/team/signedPayload';
-import { grantEvidenceHash } from '../domain/replica/rotationGrants';
+import { grantEvidenceHash, readGrantDelivery, storedAccessProofs } from '../domain/replica/rotationGrants';
+import { verifyEntry } from '../domain/replica/verify';
 import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
@@ -159,9 +161,8 @@ function foundingFor(lead: { p: ReplicaProject }, roster: RosterState, input: { 
   return pages[0];
 }
 
-async function createCell(lead: Lead, label: unknown, to: readonly string[]): Promise<string> {
+async function createCell(lead: Lead, label: unknown, to: readonly string[], cell = randomBytes(16).toString('hex')): Promise<string> {
   const at = await head(lead.p);
-  const cell = randomBytes(16).toString('hex');
   const key = newEpochKey();
   const founding = foundingFor(lead, at.roster, { cell, key, to, labelSealed: sealLabel(key, cell, 1, label) });
   await lead.p.keys.addOwn(cell, 1, key, grantHash(founding));
@@ -1117,7 +1118,7 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
 
-async function seedManagedAccess(lead: Lead, cells: readonly string[]) {
+async function seedManagedAccess(lead: Lead, cells: readonly string[], permitRecipient?: string) {
   const { p, at } = lead;
   at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
   assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
@@ -1129,16 +1130,22 @@ async function seedManagedAccess(lead: Lead, cells: readonly string[]) {
       hash: grant.hash, pages: grant.grant.pages ?? [], recipients: [...grant.writers].sort()
     })).sort((a, b) => a.hash < b.hash ? -1 : 1)
   }));
+  const permits = permitRecipient === undefined ? [] : manifests.filter(({ grants }) => grants.some(({ recipients }) => recipients.includes(permitRecipient)))
+    .map(({ cell }) => {
+      const permit = { project: p.projectId, cell, epoch: 1, revision: id, predecessor: before.hash,
+        device: permitRecipient, writer: permitRecipient, authority: p.deviceWriter, certificate: null };
+      return { permit, signature: p.signer.sign(accessPermitBytes(permit)) };
+    });
   const commitment = buildAccessCommitment(id, manifests.map((manifest) => {
     const evidence = grantEvidenceHash(manifest);
     assert.ok(evidence);
     return { cell: manifest.cell, previousEpoch: 1, epoch: 1, decision: 'continues', salt: randomBytes(32).toString('hex'), evidence };
-  }), []);
+  }), permits);
   assert.ok(commitment);
   const seed = await p.appendOwn('cell.access.commit', { accessRevision: id, accessRoot: commitment.root });
   assert.ok('ok' in seed);
   const receipts = manifests.map((evidence) => ({ ...commitment.cellProof(evidence.cell), entry: seed.hash, evidence }));
-  return { seed, receipts };
+  return { seed, receipts, commitment };
 }
 
 test('managed removal stages continuity and Finish recovers the affected cell after reopening', async () => {
@@ -1651,6 +1658,225 @@ test('normal managed peer delivery offers the exact founding epoch committed by 
   assert.ok('ok' in written);
   assert.equal(written.built.entry.header.epoch, 2);
 
+});
+
+test('Keep the unaffected cell writable while the selected founding grant waits for a signed child', async () => {
+  const lead = await founded('managed-partial-sync');
+  const clearance = { ...CLEARED_X, compartments: ['KESTREL', 'OSPREY'] };
+  ok(await updateMember(lead.host, { member: 'mbr-lead', clearance }), 'declare lead clearance');
+  const peer = await bringIn(lead, 'partial-sync-survivor', 'Mo Analyst', clearance);
+  const withdrawn = await bringIn(lead, 'partial-sync-withdrawn', 'Nell Planner', CLEARED_X);
+  const base = lead.p.projectId;
+  const target = '0'.repeat(32);
+  assert.ok(target < base, 'Finish must rotate the labelled cell before the base cell');
+  const survivors = [lead.p.deviceWriter, peer.writer].sort();
+  assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
+  await createCell(lead, LABEL_X, survivors, target);
+  const control = await createCell(lead, LABEL_Z, survivors);
+
+  const { seed, receipts, commitment } = await seedManagedAccess(lead, [base, target, control], peer.writer);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  const initial = await head(lead.p);
+  assert.ok(initial.roster.accessGrants.get(base)?.evidence.grants.some(({ recipients }) => recipients.includes(withdrawn.writer)));
+  const oldRoot = await stageManagedPredecessors(lead, peer, seed.hash);
+  assert.ok('ok' in await peer.p.ingestForeign([oldRoot], []));
+  const issuer = { authority: lead.p.deviceWriter, signer: lead.p.signer };
+  for (const [cell, label] of [[target, LABEL_X], [control, LABEL_Z]] as const) {
+    const hash = committedGrant(initial.roster.cells, cell, 1);
+    const founding = grantsOn(lead.at).find((grant) => grantHash(grant) === hash);
+    const opening = receipts.find(({ evidence }) => evidence.cell === cell);
+    assert.ok(founding && opening && !peer.p.keys.holds(cell, 1));
+    const delivery = sealManagedGrantDelivery(initial.roster, {
+      recipient: peer.writer, opening, grant: founding, pages: [], accessProof: commitment.proof(cell, peer.writer),
+      info: { base: false, label }, now: NOW
+    }, issuer);
+    assert.ok(delivery);
+    assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(delivery));
+  }
+  const old = await head(peer.p);
+  assert.equal(old.hash, seed.hash);
+  const oldKey = peer.p.keys.epochKey(target, 1);
+  const oldProof = commitment.proof(target, peer.writer);
+  const slot = deviceAt(old.roster.members, peer.writer, old.position)?.slot;
+  assert.ok(oldKey && oldProof && slot !== undefined);
+  assert.deepEqual(oldKey, lead.p.keys.epochKey(target, 1));
+  assert.equal(managedWriteAllowed(old.roster, target, 1, peer.writer, old.position, NOW, oldProof), true);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const formerWrite = await peer.p.appendOwn('doc.client', data, { stream: target });
+  assert.ok('ok' in formerWrite);
+  assert.equal(formerWrite.built.entry.header.epoch, 1);
+
+  const placed = await ensureLabelCell(lead.host, LABEL_X);
+  assert.ok(placed.ok && placed.cell === target);
+  assert.deepEqual(placed.granted, [withdrawn.writer]);
+  const before = await head(lead.p);
+  const supplemental = before.roster.accessGrants.get(target)?.evidence.grants.find(({ recipients }) => recipients.includes(withdrawn.writer));
+  assert.ok(supplemental);
+  assert.deepEqual(supplemental.recipients, [withdrawn.writer]);
+  assert.equal(before.roster.accessGrants.get(target)?.evidence.epoch, 1);
+  const evidenceDir = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
+  const evidenceOnDisk = (): unknown[] => readdirSync(evidenceDir).map((name) => JSON.parse(readFileSync(path.join(evidenceDir, name), 'utf8')) as unknown);
+  const noSupplementalGrant = () => {
+    assert.equal(grantsOn(peer.at).some((grant) => grantHash(grant) === supplemental.hash), false);
+    assert.equal(evidenceOnDisk().some((item) => readGrantDelivery(item)?.grants.some((grant) => grantHash(grant) === supplemental.hash)), false);
+  };
+  noSupplementalGrant();
+  ok(await removeFromProject(lead.host, { member: withdrawn.member, writer: withdrawn.writer }), 'record device revocation');
+  const pending = await head(lead.p);
+  assert.equal(deviceAt(pending.roster.members, withdrawn.writer, pending.position), undefined);
+  for (const cell of [target, base]) {
+    assert.equal(pending.roster.accessGrants.get(cell)?.decision, 'pending');
+    assert.deepEqual(pending.roster.accessGrants.get(cell)?.evidence.excluded, [withdrawn.writer]);
+  }
+  assert.equal(pending.roster.accessGrants.get(control)?.decision, 'continues');
+
+
+  const revokedRoute = await managedPeerRoute(lead, peer, pending.hash);
+  const pendingContinuity = await lead.p.sealManagedHandoff({ recipient: peer.writer, continuity: [control] });
+  assert.ok(pendingContinuity && revokedRoute.transport.managedRoute);
+  assert.equal(await revokedRoute.transport.managedRoute.put(pendingContinuity.handle, pendingContinuity.packet), true);
+  revokedRoute.reveal();
+  const pendingAccepted: string[] = [];
+  const revoked = await syncOnce(revokedRoute.transport, syncLocalOf(peer.p), hubMemoryOf(new MemorySecrets()), { now: () => NOW, managed: {
+    offers: async () => [],
+    pending: async () => [pendingContinuity.handle],
+    published: async () => { throw new Error('The survivor has no outgoing handoff.'); },
+    accepted: async (handle) => { pendingAccepted.push(handle); }
+  } });
+  assert.equal(revoked.pulled, 1);
+  assert.equal(revoked.managed, 'complete');
+  assert.deepEqual(pendingAccepted, [pendingContinuity.handle]);
+  const paused = await head(peer.p);
+  assert.equal(paused.hash, pending.hash);
+  assert.equal(epochAt(paused.roster.cells, target, paused.position), 1);
+  assert.deepEqual(peer.p.keys.epochKey(target, 1), oldKey);
+  assert.ok(evidenceOnDisk().some((item) => storedAccessProofs(item, seed.hash)
+    .some((proof) => canonicalBytes(proof).equals(canonicalBytes(oldProof)))));
+  const preFinishWrite = await peer.p.appendOwn('doc.client', data, { stream: target });
+  assert.equal(isProjectRefused(preFinishWrite) && preFinishWrite.refused, 'rekey-pending');
+  const controlDuringRevocation = await peer.p.appendOwn('doc.client', data, { stream: control });
+  assert.ok('ok' in controlDuringRevocation);
+  assert.equal(controlDuringRevocation.built.entry.header.epoch, 1);
+  assert.deepEqual((await peer.p.entriesAfter(target, peer.writer, -1)).map(({ header }) => entryHash(header)), [formerWrite.hash]);
+  noSupplementalGrant();
+
+  const signPages = lead.p.signGrantPages.bind(lead.p);
+  const partition = mock.method(lead.p, 'signGrantPages', async (grant: Parameters<typeof signPages>[0]) => {
+    if (grant.cell !== target || grant.epoch !== 2) return signPages(grant);
+    assert.equal(grant.wraps.length, 2);
+    const child = await lead.p.signGrant({ ...grant, labelSealed: '', wraps: grant.wraps.slice(1), pages: [] });
+    return [await lead.p.signGrant({ ...grant, wraps: grant.wraps.slice(0, 1), pages: [grantHash(child)] }), child];
+  });
+  const finished = await finishRekeys(lead.host).finally(() => partition.mock.restore());
+  assert.deepEqual(ok(finished, 'finish the affected cells').rekeyed, [target, base]);
+  const selected = await head(lead.p);
+  const changes = selected.roster.positions.slice(before.position + 1);
+  const entries = await lead.p.entriesAfter(base, lead.p.deviceWriter, -1);
+  const verified = changes.map((hash) => {
+    const checked = verifyEntry(entries.find(({ header }) => entryHash(header) === hash), lead.p.context());
+    assert.ok(checked.status === 'verified');
+    return checked.entry;
+  });
+  assert.deepEqual(verified.map(({ body: { kind } }) => kind), ['device.revoke', 'cell.rekey', 'cell.rekey']);
+  assert.equal((verified[0].data as { writer: string }).writer, withdrawn.writer);
+  assert.deepEqual(verified.slice(1).map(({ data }) => (data as { cell: string }).cell), [target, base]);
+  const targetGrant = selected.roster.accessGrants.get(target);
+  assert.ok(targetGrant && targetGrant.entry === selected.hash && targetGrant.evidence.epoch === 2);
+  assert.deepEqual(targetGrant.evidence.excluded, [withdrawn.writer]);
+  assert.equal(selected.roster.accessGrants.get(control)?.evidence.epoch, 1);
+
+  const request = { cell: target, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const offered = await lead.p.sealManagedHandoff(request);
+  const continuity = await lead.p.sealManagedHandoff({ recipient: peer.writer, continuity: [control] });
+  assert.ok(offered && continuity);
+  const receiverKeys = await loadOrCreateKemKeys(peer.at.secrets, { identityDir: identityDir(peer.at.global) });
+  const openedGrant = openManagedGrantDelivery(base, { writer: peer.writer, kem: receiverKeys.privateKeys }, offered.handle, offered.packet, NOW);
+  assert.ok(openedGrant?.accessProof);
+  const [founding, ...pages] = openedGrant.grants;
+  const completePages = readGrantPages(founding, pages);
+  assert.ok(completePages.ok && pages.length === 1);
+  assert.deepEqual(completePages.pageHashes, pages.map(grantHash));
+  assert.deepEqual(targetGrant.evidence.grants, [{ hash: completePages.hash, pages: completePages.pageHashes, recipients: survivors }]);
+  assert.deepEqual(completePages.grant.wraps.map(({ writer }) => writer).sort(), survivors);
+  const recipientWrap = completePages.grant.wraps.find(({ writer }) => writer === peer.writer);
+  assert.ok(recipientWrap);
+  const expectedKey = unwrapForDevice({ cell: target, epoch: 2, writer: peer.writer, kem: receiverKeys.privateKeys, wrap: recipientWrap.wrap });
+  assert.ok(expectedKey && !expectedKey.equals(oldKey), 'the selected signed pages wrap a distinct new key for the survivor');
+  assert.equal(openedGrant.accessProof.signed.permit.revision, selected.roster.accessRevision?.id);
+  assert.equal(openedGrant.accessProof.signed.permit.epoch, 2);
+  assert.equal(sealManagedGrantDelivery(selected.roster, {
+    ...request, now: NOW, opening: openedGrant.opening, accessProof: openedGrant.accessProof, grant: founding, pages: []
+  }, issuer), undefined, 'the sender refuses the exact selected founding grant without its signed child');
+
+  const { transport, reveal, attempts } = await managedPeerRoute(lead, peer, selected.hash);
+  const route = transport.managedRoute;
+  assert.ok(route);
+  assert.equal(await route.put(continuity.handle, continuity.packet), true);
+  reveal();
+  const accepted: string[] = [];
+  const memory = hubMemoryOf(new MemorySecrets());
+  const exchange = (replica: ReplicaProject) => syncOnce(transport, syncLocalOf(replica), memory, { now: () => NOW, managed: {
+    offers: async () => [],
+    pending: async () => [offered.handle, continuity.handle].filter((handle) => !accepted.includes(handle)),
+    published: async () => { throw new Error('The survivor has no outgoing handoff.'); },
+    accepted: async (handle) => { accepted.push(handle); }
+  } });
+  const assertPending = async (replica: ReplicaProject) => {
+    const current = await head(replica);
+    assert.equal(current.hash, selected.hash);
+    assert.equal(replica.keys.holds(target, 2), false);
+    assert.deepEqual(replica.keys.epochKey(target, 1), oldKey);
+    assert.ok(evidenceOnDisk().some((item) => storedAccessProofs(item, seed.hash)
+      .some((proof) => canonicalBytes(proof).equals(canonicalBytes(oldProof)))));
+    assert.equal(managedWriteAllowed(current.roster, target, 1, peer.writer, current.position, NOW, oldProof), false);
+    assert.equal(current.roster.cells.cells.get(target)?.grants.some(({ hash }) => hash === completePages.hash), false);
+    const blocked = await replica.appendOwn('doc.client', data, { stream: target });
+    assert.equal(isProjectRefused(blocked) && blocked.refused, 'no-key');
+    const write = await replica.appendOwn('doc.client', data, { stream: control });
+    assert.ok('ok' in write);
+    assert.equal(write.built.entry.header.epoch, 1);
+    assert.deepEqual((await replica.entriesAfter(target, peer.writer, -1)).map(({ header }) => [entryHash(header), header.epoch]),
+      [[formerWrite.hash, 1]]);
+    assert.deepEqual(accepted, [continuity.handle]);
+    noSupplementalGrant();
+  };
+  const partial = await exchange(peer.p);
+  assert.equal(partial.pulled, 1);
+  assert.equal(partial.grants, 0);
+  assert.equal(partial.managed, 'waiting');
+  assert.equal(attempts.get(offered.handle), 1);
+  await assertPending(peer.p);
+  const waiting = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.equal((await exchange(waiting)).managed, 'waiting');
+  assert.equal(attempts.get(offered.handle), 2);
+  await assertPending(waiting);
+
+  assert.equal(await route.put(offered.handle, offered.packet), true);
+  assert.equal((await exchange(waiting)).managed, 'complete');
+  assert.deepEqual(accepted, [continuity.handle, offered.handle]);
+  assert.equal(attempts.get(offered.handle), 3);
+  const assertRecovered = async (replica: ReplicaProject) => {
+    const current = await head(replica);
+    assert.equal(current.hash, selected.hash);
+    assert.equal(committedGrant(current.roster.cells, target, 2), completePages.hash);
+    assert.ok(evidenceOnDisk().some((item) => {
+      const delivery = readGrantDelivery(item);
+      return delivery !== undefined && delivery.grants.map(grantHash).join() === [completePages.hash, ...completePages.pageHashes].join();
+    }));
+    assert.ok(replica.keys.epochKey(target, 2)?.equals(expectedKey), 'the stored key matches the survivor’s exact signed wrap');
+    noSupplementalGrant();
+  };
+  await assertRecovered(waiting);
+  const resumed = await waiting.appendOwn('doc.client', data, { stream: target });
+  assert.ok('ok' in resumed);
+  assert.equal(resumed.built.entry.header.epoch, 2);
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  await assertRecovered(reopened);
+  assert.equal((await exchange(reopened)).managed, 'complete');
+  assert.equal(attempts.get(offered.handle), 3);
+  assert.deepEqual(accepted, [continuity.handle, offered.handle]);
+  assert.deepEqual((await reopened.entriesAfter(target, peer.writer, -1)).map(({ header }) => [entryHash(header), header.epoch]),
+    [[formerWrite.hash, 1], [resumed.hash, 2]]);
 });
 
 test('managed sender retries the exact staged opaque packet across restart and remembers upload and publication', async () => {
