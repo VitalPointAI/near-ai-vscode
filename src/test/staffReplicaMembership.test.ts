@@ -854,6 +854,29 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(written.built.entry.header.epoch, 1);
 });
 
+test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
+  const at = install('managed-grant-staging');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  assert.ok((await p.signedGrants()).length > 0);
+  assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
+  const { roster } = await head(p);
+  const key = p.keys.epochKey(p.projectId, 1);
+  assert.ok(key);
+  const staged = foundingFor({ p }, roster, { cell: p.projectId, key, to: [p.deviceWriter], labelSealed: '' });
+  const hash = grantHash(staged);
+  assert.ok('ok' in await p.putGrants([staged]));
+  const after = await head(p);
+  assert.equal(after.roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash), false);
+  assert.equal((await p.signedGrants()).some((grant) => grant.hash === hash), false);
+  const welcome = await p.welcomeFor(p.deviceWriter, [p.projectId]);
+  assert.equal(welcome.grants.some((grant) => grantHash(grant) === hash), false);
+  const reopened = project(await ReplicaProject.open(at.root, at.deps));
+  assert.equal((await reopened.signedGrants()).some((grant) => grant.hash === hash), false);
+});
+
 /** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */
 async function reads(reader: ReplicaProject, written: { hash: string; entry: unknown; blobs: Array<{ hash: string; bytes: string }> }): Promise<boolean> {
   assert.ok(!isProjectRefused(await reader.ingestForeign([written.entry], written.blobs)));
