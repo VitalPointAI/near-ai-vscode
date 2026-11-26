@@ -412,7 +412,8 @@ export function revokeHub(shared: SharedProjectHost, input: { hub?: string } = {
       if (!finished.ok) return finished;
       earlier = finished.rekeyed ?? [];
     }
-    const written = await append(shared, 'hub.revoke', { hub: hub.hub });
+    const written = await append(shared, 'hub.revoke', { hub: hub.hub }, undefined,
+      roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? undefined : 'report-saved');
     if (isResult(written)) return written;
     const held = cellsHeldByHub(written.roster, hub.writer);
     const finished = await finishRekeys(shared);

@@ -38,7 +38,8 @@ import { exchangeManaged, fetchManaged } from '../staff/replica/managedSync';
 import type { ManagedSyncHandoffs } from '../staff/replica/managedSync';
 import { hubMemoryOf, syncOnce } from '../staff/replica/hubSync';
 import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
-import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
+import { ReplicaProject, ReplicaProjectError, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
+import { STORE_REFUSALS } from '../staff/replica/store';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { managedIssuanceCurrent, prepareManagedIssuance, readManagedIssuance } from '../staff/replica/managedIssuance';
 import { openManagedGrantDelivery, readManagedKeyFile, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
@@ -543,6 +544,91 @@ test('only the lead or the deputy writes the roster: a member\'s invite, void, r
 
 // ---- Task 3: remove, revoke, change clearance: rekey ----------------------------------------------------------------------------------------------
 
+for (const { kind, failure } of [
+  { kind: 'member.remove', failure: 'pre-write' },
+  { kind: 'member.remove', failure: 'confirmation' },
+  { kind: 'device.revoke', failure: 'confirmation' },
+  { kind: 'member.update', failure: 'confirmation' },
+  { kind: 'member.remove', failure: 'rotation refresh' },
+  { kind: 'member.remove', failure: 'rotation signature' },
+  { kind: 'member.remove', failure: 'rotation confirmation' }
+] as const) {
+  test(`${kind} reports the verified stage when the project refuses ${failure}`, async () => {
+    const { lead, n, x } = await team({ nClearance: CLEARED_X });
+    const { p } = lead;
+    const before = await head(p);
+    const refusal = new ReplicaProjectError({ refused: 'store-refused', message: STORE_REFUSALS.unreadable, store: 'unreadable' });
+    const append = p.appendOwn.bind(p);
+    const state = p.state.bind(p);
+    const signGrantPages = p.signGrantPages.bind(p);
+    const writes: string[] = [];
+    let saved: string | undefined;
+    let rekeySaved: string | undefined;
+    let readsAfterSave = 0;
+    const appendMock = mock.method(p, 'appendOwn', async (...args: Parameters<typeof append>) => {
+      writes.push(args[0]);
+      if (failure === 'pre-write') throw refusal;
+      const result = await append(...args);
+      if ('ok' in result && args[0] === kind) saved = result.hash;
+      if ('ok' in result && args[0] === 'cell.rekey') rekeySaved = result.hash;
+      return result;
+    });
+    const stateMock = mock.method(p, 'state', async () => {
+      if (saved !== undefined) readsAfterSave += 1;
+      if ((failure === 'confirmation' && readsAfterSave === 1) ||
+        (failure === 'rotation refresh' && readsAfterSave === 2) ||
+        (failure === 'rotation confirmation' && rekeySaved !== undefined)) throw refusal;
+      return state();
+    });
+    const signMock = mock.method(p, 'signGrantPages', async (...args: Parameters<typeof signGrantPages>) => {
+      if (failure === 'rotation signature') throw refusal;
+      return signGrantPages(...args);
+    });
+    const result = await (kind === 'member.update'
+      ? updateMember(lead.host, { member: n.member, clearance: OFFICIAL })
+      : removeFromProject(lead.host, kind === 'device.revoke' ? { member: n.member, writer: n.writer } : { member: n.member })
+    ).finally(() => {
+      appendMock.mock.restore();
+      stateMock.mock.restore();
+      signMock.mock.restore();
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'store-refused');
+    assert.deepEqual(writes, failure === 'rotation confirmation' ? [kind, 'cell.rekey'] : [kind]);
+    const after = await head(p);
+    if (failure === 'pre-write') {
+      assert.equal(saved, undefined);
+      assert.equal(after.hash, before.hash);
+      assert.equal(result.message, STORE_REFUSALS.unreadable);
+      return;
+    }
+    assert.ok(saved);
+    assert.equal(after.roster.positions[before.position + 1], saved);
+    if (kind === 'member.update') assert.deepEqual(memberAt(after.roster.members, n.member, after.position)?.clearance, OFFICIAL);
+    else if (kind === 'device.revoke') assert.equal(deviceAt(after.roster.members, n.writer, after.position), undefined);
+    else assert.equal(memberAt(after.roster.members, n.member, after.position), undefined);
+    assert.match(result.message, /Part of the shared history in this project folder could not be read/);
+    assert.match(result.message, /Check that the folder and its files can be read by your user account/);
+    assert.doesNotMatch(result.message, /Nothing was changed|moved to a new key|will stay read only/);
+    if (failure === 'confirmation') {
+      assert.equal(readsAfterSave, 1);
+      assert.match(result.message, /^The signed change was saved\. This computer could not confirm whether it applied to the roster\./);
+      assert.doesNotMatch(result.message, /was recorded|is still unfinished|may still read|Devices excluded/);
+    } else {
+      assert.match(result.message, /^The removal was recorded\. This computer could not verify all the required new keys\./);
+      assert.match(result.message, /may still read new work encrypted with them/);
+    }
+    if (failure === 'rotation confirmation') {
+      assert.ok(rekeySaved);
+      assert.equal(after.hash, rekeySaved);
+      assert.equal(after.position, before.position + 2);
+    } else {
+      assert.equal(after.hash, saved);
+      assert.equal(epochAt(after.roster.cells, x, after.position), 1);
+    }
+  });
+}
+
 test('removing a member writes member.remove and one cell.rekey for each cell it held, each wrapped only to the devices still cleared; it keeps epoch 1 of X and never opens epoch 2', async () => {
   const t = await team();
   const base = t.lead.p.projectId;
@@ -622,7 +708,7 @@ test('lowering N\'s clearance below X\'s label rekeys X without N, and leaves th
   assert.equal((await updateMember(t.lead.host, { member: 'mbr-nobody', name: 'X' })).reason, 'member-unknown');
 });
 
-for (const failure of ['planning', 'storage'] as const) {
+for (const failure of ['planning', 'storage', 'thrown storage'] as const) {
   test(`a clearance update reports pending rotation if its later grant ${failure} fails`, async () => {
     const t = await team({ nClearance: CLEARED_X });
     const { p } = t.lead;
@@ -653,7 +739,9 @@ for (const failure of ['planning', 'storage'] as const) {
     const storageMock = mock.method(p, 'putGrants', async (...args: Parameters<typeof putGrants>) => {
       if (!changed) return putGrants(...args);
       grantStorageTried = true;
-      return { refused: 'store-refused', message: 'The test refused the newly granted key. Nothing was changed.' } as const;
+      const refusal = { refused: 'store-refused', message: 'The test refused the newly granted key. Nothing was changed.' } as const;
+      if (failure === 'thrown storage') throw new ReplicaProjectError(refusal);
+      return refusal;
     });
     const result = await updateMember(t.lead.host, { member: t.n.member, clearance: target }).finally(() => {
       appendMock.mock.restore();
@@ -661,7 +749,7 @@ for (const failure of ['planning', 'storage'] as const) {
       storageMock.mock.restore();
     });
     assert.equal(changed, true);
-    assert.equal(grantStorageTried, failure === 'storage');
+    assert.equal(grantStorageTried, failure !== 'planning');
     const after = await head(p);
     assert.deepEqual(memberAt(after.roster.members, t.n.member, after.position)?.clearance, target);
     assert.equal(epochAt(after.roster.cells, t.x, after.position), 1);
@@ -674,6 +762,31 @@ for (const failure of ['planning', 'storage'] as const) {
     assert.doesNotMatch(result.message, /moved to a new key|anything new|nothing was changed/i);
   });
 }
+
+test('a typed grant refusal after a clearance gain with no required rotation keeps its diagnostic', async () => {
+  const t = await team();
+  const refusal = { refused: 'store-refused', message: 'The test refused grant storage.' } as const;
+  const storage = mock.method(t.lead.p, 'putGrants', async () => { throw new ReplicaProjectError(refusal); });
+  const result = await updateMember(t.lead.host, { member: t.n.member, clearance: CLEARED_X }).finally(() => storage.mock.restore());
+  assert.equal(result.reason, refusal.refused);
+  assert.equal(result.message, refusal.message);
+  const after = await head(t.lead.p);
+  assert.deepEqual(memberAt(after.roster.members, t.n.member, after.position)?.clearance, CLEARED_X);
+  assert.equal(await unfinishedRekeys(t.lead.host), 0);
+});
+
+test('retrying an absent member reports other completed key changes separately', async () => {
+  const t = await team();
+  ok(await removeFromProject(t.lead.host, { member: t.n.member }), 'remove N');
+  assert.ok('ok' in await t.lead.p.appendOwn('member.remove', { member: t.m.member }));
+  const originalRemovals = await t.lead.p.findOwnAll('member.remove', () => true);
+  const result = ok(await removeFromProject(t.lead.host, { member: t.n.member }), 'recover separately');
+  assert.deepEqual([...(result.rekeyed ?? [])].sort(), [t.lead.p.projectId, t.x].sort());
+  assert.match(result.message, /requested member is already absent/);
+  assert.match(result.message, /key change left unfinished is now finished/);
+  assert.doesNotMatch(result.message, /moved to a new key|Devices excluded|was removed/);
+  assert.deepEqual(await t.lead.p.findOwnAll('member.remove', () => true), originalRemovals);
+});
 
 test('removing a member who holds no keys does not claim earlier recovered rotations for that removal', async () => {
   const t = await team();
@@ -2399,6 +2512,8 @@ test('MJ-03: the next roster flow finishes an interrupted removal first: an admi
   const removedAgain = ok(await removeFromProject(u.lead.host, { member: u.n.member }), 'remove again');
   assert.deepEqual(removedAgain.rekeyed, [u.lead.p.projectId]);
   assert.match(removedAgain.message, /left unfinished is now finished/);
+  assert.match(removedAgain.message, /requested member is already absent/);
+  assert.doesNotMatch(removedAgain.message, /Devices excluded|was removed/);
   assert.equal((await removeFromProject(u.lead.host, { member: u.n.member })).reason, 'member-unknown', 'with nothing left, the member is unknown as before');
 });
 
