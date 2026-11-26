@@ -2,6 +2,7 @@
 // bulk sessions report activity, measure, start a burst on top, measure it, stop the burst and move on. Everything it touches is injected: the
 // session driver (service.ts), the measure (measure.ts) and the clock, so the tests run it against fakes.
 import type { StageResult, StartTimes, Window } from './runfile.ts';
+import type { HubSmoke } from './hub.ts';
 
 export interface Clock {
   readonly now: () => number;
@@ -62,6 +63,7 @@ export interface RunStagesInput {
   readonly measure: StageMeasure;
   readonly clock: Clock;
   readonly signal?: AbortSignal;
+  readonly hubs?: (signal?: AbortSignal) => Promise<HubSmoke>;
 }
 
 export interface StagesOutcome {
@@ -215,6 +217,8 @@ export async function runStages(input: RunStagesInput): Promise<StagesOutcome> {
         await hold(input, bulk);
         const holdEnd = clock.now();
         const steady = await measure.steady({ sessions: bulk, active: [], window: { start: holdStart, end: holdEnd } });
+        const hub = input.hubs ? await input.hubs(signal) : undefined;
+        if (input.hubs) checkSignal(signal);
 
         // The burst uses the next identities without consuming them: its sessions are stopped before the next stage ramps.
         const burstStart = clock.now();
@@ -246,7 +250,8 @@ export async function runStages(input: RunStagesInput): Promise<StagesOutcome> {
             size: plan.burst, reached: burstReason === null, reason: burstReason ?? '', peakConcurrency, window: burstWindow,
             start: { ...counted(burstUsers.length, burst), ...burstStarts }, reconcilesPer10s: reconciles
           },
-          ...steady
+          ...steady,
+          ...(hub === undefined ? {} : { hubs: [hub] })
         });
       } catch (error) {
         if (!(error instanceof Interrupted) && !signal?.aborted) throw error;

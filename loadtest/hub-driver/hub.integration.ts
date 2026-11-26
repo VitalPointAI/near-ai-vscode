@@ -3,7 +3,7 @@ import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { createServer, type AddressInfo, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -18,6 +18,8 @@ import { makeRun, stage } from '../test/fixtures/run.ts';
 
 type WorkerMessage = { type: 'ready' | 'stalled' | 'pin-refused' | 'failed' } | { type: 'result'; result: unknown };
 
+assert.deepEqual(Object.keys(networkInterfaces()), ['lo'], 'hub fixture requires loopback-only isolation');
+
 function worker(input: object) {
   const child = fork(fileURLToPath(new URL('./hub-worker.mjs', import.meta.url)), [], {
     execPath: process.execPath, execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
@@ -26,10 +28,11 @@ function worker(input: object) {
   let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   const reports: WorkerMessage[] = [];
   child.once('error', () => reports.push({ type: 'failed' }));
-  child.once('close', (code, signal) => { exited = { code, signal }; });
+  child.once('exit', (code, signal) => { exited = { code, signal }; });
   child.on('message', (message) => reports.push(message as WorkerMessage));
   child.send(input, (error) => { if (error) reports.push({ type: 'failed' }); });
-  return { child, reports, exit: () => exited };
+  // Explicitly disconnecting the parent's channel does not reliably emit the combined close event.
+  return { child, reports, exit: () => child.connected ? undefined : exited };
 }
 
 async function within<T>(value: () => T | undefined, ms: number): Promise<T | undefined> {
@@ -99,7 +102,8 @@ for (const shutdown of ['signals', 'disconnect'] as const) {
       await listening;
       const { port } = peer.address() as AddressInfo;
       run = worker({ mode: 'stall', port, pin: certPinOf(cert.certDer) });
-      assert.ok(await within(() => accepted, 10000), 'the private peer accepted the pending handshake');
+      const running = run;
+      assert.ok(await within(() => running.reports[0]?.type === 'stalled' ? accepted : undefined, 10000), 'the private peer accepted the pending handshake');
       assert.deepEqual(run.reports, [{ type: 'stalled' }]);
       assert.equal(run.exit(), undefined);
       if (shutdown === 'disconnect') run.child.disconnect();
