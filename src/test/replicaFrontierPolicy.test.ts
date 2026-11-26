@@ -290,6 +290,10 @@ test('exact V2 bytes stay unselectable across restart when authority expires jus
   assert.ok(!(await readdir(store.dir)).includes('accepted-frontiers'));
   assert.deepEqual([...secrets.values.entries()], protectedBefore);
   assert.equal(await reopened.appendSnapshot(), expectedSnapshot);
+  for (const method of ['putAcceptedFrontier', 'openStoredAcceptedFrontier']) {
+    assert.equal(Object.hasOwn(Object.getPrototypeOf(reopened), method), false, method);
+    assert.equal(method in reopened, false, method);
+  }
 });
 
 test('private V2 staging preserves exact immutable bytes and rechecks content after I/O', async () => {
