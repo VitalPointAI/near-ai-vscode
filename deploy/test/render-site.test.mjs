@@ -2,7 +2,9 @@
 // rest, Fluent Bit ships to the site's own OpenSearch only, Prometheus writes nowhere else, and Harbor is behind site TLS with no internet
 // scanner. Renders every release with the CI site (all releases, whatever enabledWhen says). Needs helm ($HELM or PATH).
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -199,4 +201,54 @@ test('the lab template requires its own public key and renders the offline lab c
   const theia = renderRelease(ROOT, 'theia-cloud', options);
   for (const prefix of ['sessions', 'sessions-api', 'ws']) assert.ok(theia.includes(`${prefix}.${site.domain}`), prefix);
   assert.ok(theia.includes(site.storageClass), 'Theia requests the lab static storage class');
+});
+
+test('the lab preview CLI validates every selected release and keeps its staging private and temporary', (t) => {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-lab-preview-test-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const staging = path.join(scratch, 'staging');
+  mkdirSync(staging);
+  const preview = (key, helm = HELM) => spawnSync(process.execPath, [
+    path.join(ROOT, 'deploy/lab/render.mjs'), '--public-key', key,
+  ], { encoding: 'utf8', env: { ...process.env, HELM: helm, TMPDIR: staging } });
+
+  const publicFile = path.join(scratch, 'public.pem');
+  writeFileSync(publicFile, SITE.organizationPublicKey);
+  const result = preview(publicFile);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.ok(!result.stdout.includes(SITE.organizationPublicKey.split('\n')[1]), 'the report omits the input key');
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.preview, 'lab-core');
+  assert.equal(report.registry, 'registry.lab.sterling.test:30500');
+  assert.deepEqual(report.releases, [
+    'zot', 'sterling-network', 'kyverno', 'sterling-admission', 'cert-manager', 'sterling-pki-bootstrap',
+    'kubernetes-ingress', 'openbao', 'sterling-pki', 'sterling-postgres', 'sterling-keycloak-theme', 'keycloakx',
+    'sterling-keycloak-realm', 'theia-cloud-crds', 'theia-cloud-base', 'theia-cloud', 'sterling-sessions', 'sterling-hub',
+  ]);
+  assert.equal(report.unpublishedImages.includes('sterling/openbao'),
+    resolveImage(readImagesLock(ROOT), 'sterling/openbao', report.registry).unpublished);
+  assert.match(report.unverified.join('\n'), /signed lab-only OpenBao/i);
+  assert.match(report.unverified.join('\n'), /VM storage capacity/i);
+  assert.match(report.unverified.join('\n'), /live install/i);
+  assert.deepEqual(readdirSync(staging), [], 'successful preview removes its staging');
+
+  const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  for (const pem of [privatePem, 'fixture text that must stay private', SITE.organizationPublicKey.repeat(2)]) {
+    const refusedFile = path.join(scratch, 'refused.pem');
+    writeFileSync(refusedFile, pem, { mode: 0o600 });
+    const refused = preview(refusedFile);
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, /one valid public PEM/i);
+    for (const line of pem.trim().split('\n')) assert.ok(!refused.stderr.includes(line));
+    assert.deepEqual(readdirSync(staging), [], 'invalid input leaves no staging');
+  }
+
+  const failedRender = preview(publicFile, path.join(scratch, 'missing-helm'));
+  assert.equal(failedRender.status, 1);
+  assert.equal(failedRender.stdout, '');
+  assert.match(failedRender.stderr, /helm was not found/i);
+  assert.deepEqual(readdirSync(staging), [], 'render failure removes its staging');
 });
