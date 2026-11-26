@@ -16,7 +16,8 @@ because they own or review handoffs in that same blueprint.
 
 The product has four organizational tiers, with separate L1 and L0 choices
 within the joint tier. A G prefix alone does not distinguish a brigade from a
-division. Display names follow the organization and national profile. They
+division. See the [joint tier crosswalk](102-JOINT-TIER-CROSSWALK.md) for
+L1/L0 institutional responsibilities and acceptance. Display names follow the organization and national profile. They
 neither grant authority nor imply every section is staffed.
 
 U.S. Army doctrine uses G for general-officer staffs and J for joint staffs.
