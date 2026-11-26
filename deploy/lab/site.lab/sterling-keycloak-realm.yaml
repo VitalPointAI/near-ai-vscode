@@ -1,0 +1,16 @@
+{
+  "eventsExpirationSeconds": 7776000,
+  "smtp": {
+    "host": "mail.invalid",
+    "port": 587,
+    "from": "sterling@mail.invalid"
+  },
+  "redirectUris": [
+    "https://*.ws.${site.domain}/oauth2/callback",
+    "https://sessions.${site.domain}/*"
+  ],
+  "systemUseNotice": {
+    "en": "This is a restricted system. Use it only if you are authorized, and only for purposes your organization's policies allow. Sign-in and activity on this system are recorded and may be monitored and audited, and records may be disclosed to authorized investigators as the law allows. Unauthorized use may lead to disciplinary or legal action. Personal information collected here is used to manage access and is handled under your organization's privacy notice.",
+    "fr": "Ce système est à accès restreint. Utilisez-le seulement si vous y êtes autorisé, et uniquement aux fins permises par les politiques de votre organisation. Les connexions et l'activité sur ce système sont enregistrées et peuvent être surveillées et vérifiées, et les enregistrements peuvent être communiqués aux enquêteurs autorisés dans les limites permises par la loi. Toute utilisation non autorisée peut entraîner des mesures disciplinaires ou judiciaires. Les renseignements personnels recueillis ici servent à gérer l'accès et sont traités conformément à l'avis de confidentialité de votre organisation."
+  }
+}
