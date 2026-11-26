@@ -57,7 +57,7 @@ import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { withRegisterLock } from '../registerLock';
 import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
-import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, entryHash, parseHeaderShape, sha256Hex, verifyHeader, writerIdOf } from '../../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, HEADER_MAX_BYTES, INLINE_BODY_MAX_BYTES, SEALED_OVERHEAD, STREAM_ID_PATTERN, buildEntry, entryHash, parseHeaderShape, sha256Hex, verifyHeader, writerIdOf } from '../../domain/replica/entry';
 import type { BuiltEntry, SealedBlob, SealedEntry } from '../../domain/replica/entry';
 import type { KeyStatusLookup } from '../../domain/team/keyStatus';
 import type { PayloadSigner } from '../../domain/team/signedPayload';
@@ -74,6 +74,12 @@ import * as startAgainCheck from './startAgainCheck';
 import { openAcceptedFrontier } from '../../domain/replica/acceptedFrontier';
 import type { FrontierArchiveResult, FrontierCustodyContext } from '../../domain/replica/acceptedFrontier';
 import type { KeyRing } from '../../domain/replica/rosterView';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
+import { foldRoster, rosterView } from '../../domain/replica/roster';
+import type { RosterAnchor } from '../../domain/replica/roster';
+import { epochAt } from '../../domain/replica/rosterCells';
+import { verifyEntry } from '../../domain/replica/verify';
+import { hasFrontierCustody, withFrontierPolicySource } from './frontierPolicy';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
@@ -1263,6 +1269,49 @@ export class ReplicaStore {
       await this.writeAccessStage(evidence);
     });
   }
+  /** Synthetic preparation check. The signed candidate stays in this scope and only the Boolean leaves it. */
+  private async checkFrontierPreparation(request: { policyStorage: string; pin: RosterAnchor; stream: string; keys: KeyRing; snapshot: string }): Promise<boolean> {
+    const signer = await this.deps.signer().catch(() => undefined);
+    if (signer === undefined || signer.publicKey !== this.own.publicKey || !STREAM_ID_PATTERN.test(request.stream)) return false;
+    const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
+      (capture) => this.locked(async () => {
+        await this.verifyAppendSnapshot(request.snapshot);
+        const { grants } = await this.grants();
+        const { pin, keys } = request;
+        const policy = await capture();
+        if (policy === undefined) return false;
+        const { source } = policy;
+        const now = new Date(source.instant);
+        const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed), keys,
+          blobs: () => undefined, now });
+        const predecessor = roster.positions.at(-1);
+        if (predecessor === undefined || predecessor !== this.mark?.rosterHead || !this.byHash.has(pin.genesisHash) ||
+          roster.pending.length !== 0 || roster.requiredFrom.has(CELL_ACCESS_FEATURE) ||
+          !hasFrontierCustody(roster, request.stream, this.own.writer, keys, source)) return false;
+
+        const epoch = epochAt(roster.cells, pin.project, roster.positions.length - 1);
+        const key = epoch === undefined ? undefined : keys(pin.project, epoch);
+        const head = this.head(pin.project, this.own.writer);
+        if (epoch === undefined || key === undefined || head === undefined ||
+          this.files.get(fileId(pin.project, this.own.writer))?.bySeq.get(head.seq)?.length !== 1) return false;
+        const ctx = { roster: rosterView(roster), keys, blobs: () => undefined, now };
+        const previous = verifyEntry(this.byHash.get(head.hash), ctx);
+        if (previous.status !== 'verified' || previous.entry.keep !== undefined) return false;
+        const at = now.toISOString();
+        const built = buildEntry({ signer, key, stream: pin.project, epoch, seq: head.seq + 1, prev: head.hash,
+          body: { deps: [], roster: predecessor, lamport: previous.entry.body.lamport + 1, at, actor: { kind: 'person' },
+            kind: 'roster.require', data: { rosterPrev: predecessor, features: [CELL_ACCESS_FEATURE] } } });
+        const checked = verifyEntry(built.entry, ctx);
+        if (checked.status !== 'verified' || checked.entry.keep !== undefined || checked.entry.hash !== built.hash ||
+          checked.entry.header.writer !== this.own.writer || checked.entry.body.kind !== 'roster.require' ||
+          checked.entry.body.at !== at || checked.entry.body.roster !== predecessor) return false;
+        if (!await policy.recheck()) return false;
+        await this.verifyAppendSnapshot(request.snapshot);
+        return this.mark?.rosterHead === predecessor;
+      }));
+    return result === true;
+  }
+
   /** Keeps immutable verified history outside the live log, blob and grant namespaces. */
   public async putAcceptedFrontier(input: Buffer, request: FrontierStoreRequest): Promise<FrontierStoreResult> {
     if (input.length > MAX_ACCEPTED_FRONTIER_BYTES) return FRONTIER_REFUSED;

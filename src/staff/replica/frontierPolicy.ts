@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
 import { effectiveNow } from '../../domain/gate/bundle';
+import { dominates } from '../../domain/gate/dominance';
+import { parseClearance, parseLabel } from '../../domain/gate/labels';
+import { openLabel } from '../../domain/replica/cellKeys';
+import { isRosterWriterAt } from '../../domain/replica/roster';
+import type { RosterState } from '../../domain/replica/roster';
+import { committedGrant, epochAt } from '../../domain/replica/rosterCells';
+import { deviceAt, memberAt } from '../../domain/replica/rosterMembers';
+import type { KeyRing } from '../../domain/replica/rosterView';
+import { isRecord } from '../../domain/team/validate';
 import { composeLayers } from '../../domain/gate/layers';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { BUNDLE_LOCK_FILE, gateDir, readCommittedFrontierPersonal } from '../../gate/bundleStore';
@@ -76,4 +85,28 @@ export async function withFrontierPolicySource<T>(
   } catch {
     return undefined;
   }
+}
+
+
+/** Checks just the signed founding label and exact custodian's placed wrap at the selected fence. */
+export function hasFrontierCustody(
+  roster: RosterState, stream: string, writer: string, keys: KeyRing, source: PolicySource
+): boolean {
+  const position = roster.positions.length - 1;
+  if (stream === roster.anchor.project || !isRosterWriterAt(roster, writer, position)) return false;
+  const device = deviceAt(roster.members, writer, position);
+  const epoch = epochAt(roster.cells, stream, position);
+  if (device === undefined || epoch === undefined) return false;
+  const foundingHash = committedGrant(roster.cells, stream, epoch);
+  const founding = roster.cells.cells.get(stream)?.grants.find((grant) =>
+    grant.founding && grant.epoch === epoch && grant.hash === foundingHash && grant.from <= position);
+  if (founding === undefined || founding.grant.pages !== undefined || !founding.writers.includes(writer)) return false;
+  const key = keys(stream, epoch);
+  const clearanceData = memberAt(roster.members, device.member, position)?.clearance;
+  if (key === undefined || !isRecord(clearanceData)) return false;
+  const { scales, mappings } = source.effective.labels;
+  const { handling: _handling, ...declared } = clearanceData;
+  const clearance = parseClearance(declared, scales);
+  const label = parseLabel(openLabel(key, stream, epoch, founding.grant.labelSealed), scales);
+  return label.ok && clearance.ok && dominates(clearance.value, label.value, { scales, mappings, now: source.instant });
 }
