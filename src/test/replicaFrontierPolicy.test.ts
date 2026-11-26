@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rename, stat, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { buildFrontierMembership, frontierSigningBytes, frontierV2CaptureCommitment, frontierV2Root, frontierV2SigningBytes } from '../domain/replica/acceptedFrontier';
+import { buildFrontierMembership, frontierV2CaptureCommitment, frontierV2Root, frontierV2SigningBytes } from '../domain/replica/acceptedFrontier';
 import type { FrontierV2Statement } from '../domain/replica/acceptedFrontier';
 import { buildGrant, grantHash, sealLabel } from '../domain/replica/cellKeys';
 import { buildEntry, sha256Hex } from '../domain/replica/entry';
@@ -27,6 +27,7 @@ import { appendKeyRecord, KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, readKeyHist
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rulesTextFor } from './helpers/enrolmentFixtures';
 import { DAY_MS, deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
 import { createRosterWorld, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
+import { frontierSigningBytes, openStoredAcceptedFrontier, putAcceptedFrontier } from './helpers/acceptedFrontierV1';
 import { MemorySecrets } from './helpers/teamHarness';
 
 async function installedPolicy(secrets = new MemorySecrets(), key = deviceKey()) {
@@ -221,8 +222,16 @@ test('an inert V2 fixture requires the frozen custodian and selected applied fen
 
   assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: sign(deputy) }, selected), false);
   const { capture: _capture, ...legacy } = payload;
-  const legacySignature = world.lead.signer.sign(frontierSigningBytes({ ...legacy, version: 1 }, world.lead.writer));
+  const legacyPayload = { ...legacy, version: 1 } as const;
+  const legacySignature = world.lead.signer.sign(frontierSigningBytes(legacyPayload, world.lead.writer));
   assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: { ...archive.signed, signature: legacySignature } }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture']({
+    ...archive, signed: { ...archive.signed, payload: legacyPayload, signature: legacySignature }
+  }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture']({
+    ...archive, signed: { ...archive.signed, payload: { ...payload, version: 3 } }
+  }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, selected), true);
   assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: sign(world.lead, { ...payload, capture: '0'.repeat(64) }) }, selected), false);
   assert.equal(await store['checkFrontierV2Fixture']({ ...archive, entries: [] }, selected), false);
   assert.equal(await store['checkFrontierV2Fixture'](archive, { ...selected, snapshot: expectedSnapshot }), false);
@@ -285,8 +294,8 @@ test('exact V2 bytes stay unselectable across restart when authority expires jus
   const legacyRequest = { pin: { project: world.project, genesis: payload.genesis }, stream: payload.stream, reader: world.lead.writer,
     expectedSnapshot, accessEntry: applied.hash, opening: selected.opening, roster,
     historicalKey: selected.keys, historicalPolicyAt: () => undefined };
-  assert.equal((await reopened.openStoredAcceptedFrontier(handle, legacyRequest)).status, 'refused');
-  assert.equal((await reopened.putAcceptedFrontier(bytes, legacyRequest)).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(reopened, handle, legacyRequest)).status, 'refused');
+  assert.equal((await putAcceptedFrontier(reopened, bytes, legacyRequest)).status, 'refused');
   assert.ok(!(await readdir(store.dir)).includes('accepted-frontiers'));
   assert.deepEqual([...secrets.values.entries()], protectedBefore);
   assert.equal(await reopened.appendSnapshot(), expectedSnapshot);

@@ -72,8 +72,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
-import { checksFrontierV2Fixture, frontierV2CaptureCommitment, openAcceptedFrontier } from '../../domain/replica/acceptedFrontier';
-import type { FrontierArchiveResult, FrontierCustodyContext } from '../../domain/replica/acceptedFrontier';
+import { checksFrontierV2Fixture, frontierV2CaptureCommitment } from '../../domain/replica/acceptedFrontier';
 import type { KeyRing } from '../../domain/replica/rosterView';
 import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { foldRoster, rosterView } from '../../domain/replica/roster';
@@ -93,7 +92,6 @@ export const REPLICA_LOCK_FILE = 'replica.lock';
 /** The exact text of the store's own ignore file. */
 export const STORE_GITIGNORE = '*\n!.gitignore\n';
 
-const ACCEPTED_FRONTIER_DIR = 'accepted-frontiers';
 const FRONTIER_STAGE_DIR = 'accepted-frontiers-v2-staged';
 const FRONTIER_POLICY_DIR = 'frontier-policy-captures';
 const FRONTIER_POLICY_SLOT = 'nearAi.staff.frontierPolicyCapture.';
@@ -101,17 +99,6 @@ type FrontierPreparationRequest = { policyStorage: string; pin: RosterAnchor; st
 type FrontierV2FixtureRequest = FrontierPreparationRequest & { expectedSnapshot: string; opening: unknown };
 type FrontierPreparationVerdict = 'ready' | 'refused' | 'unavailable';
 const MAX_ACCEPTED_FRONTIER_BYTES = 32 * 1024 * 1024;
-const FRONTIER_REFUSED = { status: 'refused' } as const;
-
-interface FrontierStoreRequest extends FrontierCustodyContext {
-  stream: string;
-  reader: string;
-  expectedSnapshot: string;
-  historicalKey: KeyRing;
-}
-
-type FrontierStoreResult = { status: 'ready'; handle: string } | { status: 'waiting' | 'refused' };
-
 // The longest body a well-formed entry can carry, as base64url: an inline body is at most INLINE_BODY_MAX_BYTES plus sealing.
 const MAX_BODY_CHARS = Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD + 3) * 4) / 3);
 // A line longer than this cannot be an entry; it is skipped as damaged without being held in memory whole.
@@ -1508,64 +1495,6 @@ export class ReplicaStore {
       !canonicalBytes(value).equals(bytes)) return undefined;
     return { entry: value.entry, requirement: pointer.requirement, policy: value.policy, custody: value.custody,
       salt: value.salt, hash: sha256Hex(bytes) };
-  }
-
-  /** Keeps immutable verified history outside the live log, blob and grant namespaces. */
-  public async putAcceptedFrontier(input: Buffer, request: FrontierStoreRequest): Promise<FrontierStoreResult> {
-    if (input.length > MAX_ACCEPTED_FRONTIER_BYTES) return FRONTIER_REFUSED;
-    const bytes = Buffer.from(input);
-    try {
-      const value: unknown = JSON.parse(bytes.toString('utf8'));
-      return await this.locked(async (): Promise<FrontierStoreResult> => {
-        const scope = await this.frontierScope(request);
-        if (scope === undefined) return FRONTIER_REFUSED;
-        const verified = openAcceptedFrontier(value, { ...request, expectedStream: request.stream });
-        if (verified.status !== 'ready') return verified;
-        const handle = frontierFileHandle(scope, bytes);
-        const dir = await ensureDir(this.dir, [ACCEPTED_FRONTIER_DIR]);
-        const file = path.join(dir, `${handle}.json`);
-        const existing = await readFrontierFile(file);
-        if (existing !== undefined) return existing.equals(bytes) ? { status: 'ready', handle } : FRONTIER_REFUSED;
-
-        await syncFolder(dir);
-        await syncFolder(this.dir);
-        await writeAtomic(file, bytes, 0o600, async () => {
-          if (await this.frontierScope(request) !== scope ||
-            openAcceptedFrontier(value, { ...request, expectedStream: request.stream }).status !== 'ready') throw new Refusal('snapshot-changed');
-        });
-        await syncFolder(dir);
-        return { status: 'ready', handle };
-      });
-    } catch {
-      return FRONTIER_REFUSED;
-    }
-  }
-
-  /** Re-verifies the same bytes and signed selection under the replica lock after a restart. */
-  public async openStoredAcceptedFrontier(handle: string, request: FrontierStoreRequest): Promise<FrontierArchiveResult> {
-    if (!HASH_PATTERN.test(handle)) return FRONTIER_REFUSED;
-    try {
-      return await this.locked(async () => {
-        const scope = await this.frontierScope(request);
-        if (scope === undefined || await checkPath(this.root, [...this.parts, ACCEPTED_FRONTIER_DIR])) return FRONTIER_REFUSED;
-        const bytes = await readFrontierFile(path.join(this.dir, ACCEPTED_FRONTIER_DIR, `${handle}.json`));
-        if (bytes === undefined || frontierFileHandle(scope, bytes) !== handle || await this.frontierScope(request) !== scope) return FRONTIER_REFUSED;
-        return openAcceptedFrontier(JSON.parse(bytes.toString('utf8')), { ...request, expectedStream: request.stream });
-      });
-    } catch {
-      return FRONTIER_REFUSED;
-    }
-  }
-
-  private async frontierScope(request: FrontierStoreRequest): Promise<string | undefined> {
-    if (request.reader !== this.own.writer || !STREAM_ID_PATTERN.test(request.stream)) return undefined;
-    await this.verifyAppendSnapshot(request.expectedSnapshot);
-    const head = request.roster.positions.at(-1);
-    const selected = request.roster.accessRevision;
-    if (head === undefined || head !== this.mark?.rosterHead || selected?.entry !== request.accessEntry) return undefined;
-    const stored = [head, request.pin.genesis, selected.entry];
-    if (!stored.every((hash) => this.byHash.get(hash)?.header.stream === request.pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return undefined;
-    return sha256Hex(canonicalBytes(['accepted-frontier-store/1', request.pin.project, request.pin.genesis, head, selected.entry, selected.root, request.stream, request.reader]));
   }
 
   public managedHandoffs(project: string, writer: string, now: () => Date) {

@@ -1,8 +1,5 @@
 // Accepted-frontier evidence is private and read-only. These checks confer no grants or write authority.
 import { createHash } from 'node:crypto';
-import { dominates } from '../gate/dominance';
-import type { DominanceContext } from '../gate/dominance';
-import { parseClearance, parseLabel } from '../gate/labels';
 import { canonicalBytes, verifySignature } from '../team/canonical';
 import { isRecord } from '../team/validate';
 import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, SEALED_OVERHEAD, STREAM_ID_PATTERN, blobBytesHash, entryHash, openBlob } from './entry';
@@ -12,8 +9,7 @@ import { MAX_STATE_BYTES } from './kindSchemas/doc';
 import { CELL_ACCESS_FEATURE } from './features';
 import { isRosterWriterAt, rosterView } from './roster';
 import type { RosterState } from './roster';
-import { epochAt, granteesAt } from './rosterCells';
-import { deviceAt, memberAt } from './rosterMembers';
+import { deviceAt } from './rosterMembers';
 import { verifiedCellAccess } from './rotationProof';
 import type { KeyRing, ReplicaContext } from './rosterView';
 import { sealedBlobWithin } from './updateGuard';
@@ -28,8 +24,7 @@ export type FrontierLeaf = ({ kind: 'entry' } & EntryHead) | { kind: 'blob'; ent
 export interface FrontierMembership { entries: number; blobs: number; root: string }
 export interface FrontierProof { index: number; siblings: readonly string[] }
 
-export interface FrontierStatement {
-  version: 1;
+export interface FrontierStatementFields {
   project: string;
   genesis: string;
   stream: string;
@@ -39,19 +34,13 @@ export interface FrontierStatement {
   membership: FrontierMembership;
 }
 
-export type FrontierV2Statement = Omit<FrontierStatement, 'version'> & { version: 2; capture: string };
-type Statement = FrontierStatement | FrontierV2Statement;
+export type FrontierV2Statement = FrontierStatementFields & { version: 2; capture: string };
 
-interface FrontierSelection {
+export interface FrontierSelection {
   pin: { project: string; genesis: string };
   roster: RosterState;
   accessEntry: string;
   opening: unknown;
-}
-
-export interface FrontierCustodyContext extends FrontierSelection {
-  // Only independently verified private evidence for this project and exact historical position may cross this seam.
-  historicalPolicyAt: (stream: string, roster: string, epoch: number) => { label: unknown; context: DominanceContext } | undefined;
 }
 
 function closed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -159,13 +148,8 @@ export function verifiesFrontierMembership(commitment: unknown, leaf: unknown, p
   return membershipRoot(entries, blobs, hash) === root;
 }
 
-function validStatement(value: unknown, version: 1): value is FrontierStatement;
-function validStatement(value: unknown, version: 2): value is FrontierV2Statement;
-function validStatement(value: unknown, version: 1 | 2): value is Statement {
-  const fields = ['version', 'project', 'genesis', 'stream', 'before', 'requirement', 'heads', 'membership'];
-  if (!closed(value, version === 1 ? fields : [...fields, 'capture']) ||
-    value.version !== version || (version === 2 && !isHash(value.capture)) ||
-    !isStream(value.project) || !isStream(value.stream) || value.stream === value.project ||
+export function validFrontierStatementFields(value: Record<string, unknown>): value is Record<string, unknown> & FrontierStatementFields {
+  if (!isStream(value.project) || !isStream(value.stream) || value.stream === value.project ||
     !isHash(value.genesis) || !isHash(value.before) || !isHash(value.requirement) || !validMembership(value.membership) ||
     !Array.isArray(value.heads) || value.heads.length > value.membership.entries) return false;
   let prev = '';
@@ -179,12 +163,9 @@ function validStatement(value: unknown, version: 1 | 2): value is Statement {
   return entries === value.membership.entries;
 }
 
-export function frontierRoot(value: unknown): string | undefined {
-  return validStatement(value, 1) ? digest('statement-root', value) : undefined;
-}
-
-export function frontierSigningBytes(statement: FrontierStatement, writer: string): Buffer {
-  return domainBytes('custodian-attestation', [statement, writer]);
+function validV2Statement(value: unknown): value is FrontierV2Statement {
+  return closed(value, ['version', 'project', 'genesis', 'stream', 'before', 'requirement', 'heads', 'membership', 'capture']) &&
+    value.version === 2 && isHash(value.capture) && validFrontierStatementFields(value);
 }
 
 export function frontierV2CaptureCommitment(salt: string, captureHash: string): string {
@@ -192,14 +173,15 @@ export function frontierV2CaptureCommitment(salt: string, captureHash: string): 
 }
 
 export function frontierV2Root(value: unknown): string | undefined {
-  return validStatement(value, 2) ? digest('statement-root', value, 2) : undefined;
+  return validV2Statement(value) ? digest('statement-root', value, 2) : undefined;
 }
 
 export function frontierV2SigningBytes(statement: FrontierV2Statement, writer: string): Buffer {
   return domainBytes('custodian-attestation', [statement, writer], 2);
 }
 
-function selectedFrontierFence(payload: Statement, context: FrontierSelection): number | undefined {
+/** Checks the selected roster fence against a statement root derived by the caller's version-specific verifier. */
+export function selectedFrontierFence(payload: FrontierStatementFields, context: FrontierSelection, statementRoot: string): number | undefined {
   const { roster, pin, opening } = context;
   if (pin.project !== payload.project || pin.genesis !== payload.genesis ||
     roster.anchor.project !== pin.project || roster.anchor.genesisHash !== pin.genesis || roster.pending.length !== 0) return undefined;
@@ -210,39 +192,10 @@ function selectedFrontierFence(payload: Statement, context: FrontierSelection): 
     roster.accessHistory.get(access.entry) !== access ||
     (roster.positionOf.get(access.predecessor) ?? -1) < fence ||
     !closed(opening, ['commitment', 'cell']) || !isRecord(opening.commitment) ||
-    opening.commitment.frontierRoot !== digest('statement-root', payload, payload.version) ||
+    opening.commitment.frontierRoot !== statementRoot ||
     verifiedCellAccess(access, opening.commitment, opening.cell, payload.stream) === undefined) return undefined;
   return fence;
 }
-
-export function verifiesFrontierCustody(value: unknown, context: FrontierCustodyContext): boolean {
-  if (!closed(value, ['payload', 'writer', 'signature']) || !validStatement(value.payload, 1) ||
-    !isHash(value.writer) || typeof value.signature !== 'string') return false;
-  const { payload, writer, signature } = value;
-  const { roster } = context;
-  const fence = selectedFrontierFence(payload, context);
-  if (fence === undefined) return false;
-  const before = fence - 1;
-  const device = deviceAt(roster.members, writer, before);
-  const epoch = epochAt(roster.cells, payload.stream, before);
-  if (device === undefined || epoch === undefined || !isRosterWriterAt(roster, writer, before) ||
-    granteesAt(roster.cells, payload.stream, before, (candidate) => deviceAt(roster.members, candidate, before) !== undefined)?.includes(writer) !== true ||
-    !verifySignature(frontierSigningBytes(payload, writer), signature, device.publicKey)) return false;
-  const declared = memberAt(roster.members, device.member, before)?.clearance;
-  const historical = context.historicalPolicyAt(payload.stream, payload.before, epoch);
-  if (!isRecord(declared) || historical === undefined || !Number.isFinite(historical.context.now)) return false;
-  const { handling: _handling, ...fields } = declared;
-  const clearance = parseClearance(fields, historical.context.scales);
-  const label = parseLabel(historical.label, historical.context.scales);
-  return clearance.ok && label.ok && dominates(clearance.value, label.value, historical.context);
-}
-
-export type FrontierArchiveResult =
-  | { status: 'waiting' | 'refused' }
-  | { status: 'ready'; entries: readonly SealedEntry[]; blobs: readonly SealedBlob[] };
-
-const WAITING = Object.freeze({ status: 'waiting' } as const);
-const REFUSED = Object.freeze({ status: 'refused' } as const);
 
 function archivedBlob(value: unknown): SealedBlob | undefined {
   if (!closed(value, ['hash', 'bytes'])) return undefined;
@@ -294,14 +247,6 @@ function completeChain(entries: readonly SealedEntry[], heads: readonly EntryHea
   return offset === ordered.length;
 }
 
-/** Opens private historical objects from an independently authenticated, selected file. No live store or key-settlement path is involved. */
-export function openAcceptedFrontier(file: unknown, context: FrontierCustodyContext & { historicalKey: KeyRing; expectedStream?: string }): FrontierArchiveResult {
-  if (!closed(file, ['signed', 'entries', 'blobs', 'proofs']) || !isRecord(file.signed) ||
-    !validStatement(file.signed.payload, 1) ||
-    !verifiesFrontierCustody(file.signed, context)) return REFUSED;
-  return openFrontierInventory(file, file.signed.payload, context);
-}
-
 /** Pure fixture assertion. The caller must independently check the protected evidence. */
 export function checksFrontierV2Fixture(file: unknown, context: FrontierSelection & {
   expectedStream: string;
@@ -309,73 +254,74 @@ export function checksFrontierV2Fixture(file: unknown, context: FrontierSelectio
   capture: { digest: string; writer: string; before: string; requirement: string };
 }): boolean {
   if (!closed(file, ['signed', 'entries', 'blobs', 'proofs']) || !closed(file.signed, ['payload', 'writer', 'signature']) ||
-    !validStatement(file.signed.payload, 2) || !isHash(file.signed.writer) || typeof file.signed.signature !== 'string') return false;
+    !validV2Statement(file.signed.payload) || !isHash(file.signed.writer) || typeof file.signed.signature !== 'string') return false;
   const { payload, writer, signature } = file.signed;
   const { capture, roster } = context;
   if (writer !== capture.writer || payload.capture !== capture.digest ||
     payload.before !== capture.before || payload.requirement !== capture.requirement) return false;
-  const fence = selectedFrontierFence(payload, context);
+  const fence = selectedFrontierFence(payload, context, digest('statement-root', payload, 2));
   if (fence === undefined) return false;
   const device = deviceAt(roster.members, writer, fence - 1);
   return device !== undefined && isRosterWriterAt(roster, writer, fence - 1) &&
     verifySignature(frontierV2SigningBytes(payload, writer), signature, device.publicKey) &&
-    openFrontierInventory(file, payload, context).status === 'ready';
+    validateFrontierInventory(file, payload, context) === 'valid';
 }
 
-function openFrontierInventory(file: Record<string, unknown>, statement: Statement, context: {
+/** Checks structural and cryptographic consistency. This result supplies neither custody nor selection. */
+export function validateFrontierInventory(file: Record<string, unknown>, statement: FrontierStatementFields, context: {
   roster: RosterState; historicalKey: KeyRing; expectedStream?: string;
-}): FrontierArchiveResult {
-  if (!Array.isArray(file.entries) || !Array.isArray(file.blobs) || !Array.isArray(file.proofs)) return REFUSED;
+}): 'missing' | 'invalid' | 'valid' {
+  if (!Array.isArray(file.entries) || !Array.isArray(file.blobs) || !Array.isArray(file.proofs)) return 'invalid';
   const { membership, heads, stream, before } = statement;
-  if (context.expectedStream !== undefined && stream !== context.expectedStream) return REFUSED;
+  if (context.expectedStream !== undefined && stream !== context.expectedStream) return 'invalid';
   if (file.entries.length > membership.entries || file.blobs.length > membership.blobs ||
-    file.proofs.length > membership.entries + membership.blobs) return REFUSED;
-  if (file.entries.length < membership.entries || file.proofs.length < membership.entries + membership.blobs) return WAITING;
+    file.proofs.length > membership.entries + membership.blobs) return 'invalid';
+  if (file.entries.length < membership.entries || file.proofs.length < membership.entries + membership.blobs) return 'missing';
 
   const proofs = new Set<string>();
   const leaves: FrontierLeaf[] = [];
   for (const row of file.proofs) {
-    if (!closed(row, ['leaf', 'proof']) || !validLeaf(row.leaf) || !verifiesFrontierMembership(membership, row.leaf, row.proof)) return REFUSED;
+    if (!closed(row, ['leaf', 'proof']) || !validLeaf(row.leaf) || !verifiesFrontierMembership(membership, row.leaf, row.proof)) return 'invalid';
     const hash = leafDigest(row.leaf);
-    if (proofs.has(hash)) return REFUSED;
+    if (proofs.has(hash)) return 'invalid';
     proofs.add(hash);
     leaves.push(row.leaf);
   }
   const canonical = buildFrontierMembership(leaves);
-  if (canonical?.commitment.root !== membership.root) return REFUSED;
+  if (canonical?.commitment.root !== membership.root) return 'invalid';
 
   const blobs = new Map<string, SealedBlob>();
   for (const value of file.blobs) {
     const blob = archivedBlob(value);
-    if (blob === undefined || blobs.has(blob.hash)) return REFUSED;
+    if (blob === undefined || blobs.has(blob.hash)) return 'invalid';
     blobs.set(blob.hash, blob);
   }
   const ctx: ReplicaContext = { roster: rosterView(context.roster), keys: context.historicalKey, blobs: (hash) => blobs.get(hash), now: new Date(0) };
   const foundBlobs = new Set<string>();
   const entries: SealedEntry[] = [];
   const prefixPosition = ctx.roster.rosterPosition(before);
-  if (prefixPosition === undefined) return REFUSED;
+  if (prefixPosition === undefined) return 'invalid';
   for (const value of file.entries) {
-    if (!closed(value, ['header', 'body']) || typeof value.body !== 'string') return REFUSED;
+    if (!closed(value, ['header', 'body']) || typeof value.body !== 'string') return 'invalid';
     const checked = verifyEntry(value, ctx);
-    if (checked.status === 'held') return checked.reason === 'missing-blob' || checked.reason === 'missing-key' ? WAITING : REFUSED;
-    if (checked.status !== 'verified' || checked.entry.keep !== undefined) return REFUSED;
+    if (checked.status === 'held') return checked.reason === 'missing-blob' || checked.reason === 'missing-key' ? 'missing' : 'invalid';
+    if (checked.status !== 'verified' || checked.entry.keep !== undefined) return 'invalid';
     const { header, hash, body } = checked.entry;
     if (header.stream !== stream || (ctx.roster.rosterPosition(body.roster) ?? Infinity) > prefixPosition ||
-      !proofs.delete(leafDigest({ kind: 'entry', writer: header.writer, sequence: header.seq, hash }))) return REFUSED;
+      !proofs.delete(leafDigest({ kind: 'entry', writer: header.writer, sequence: header.seq, hash }))) return 'invalid';
 
     const nested = nestedReference(checked.entry);
-    if (nested === 'unsupported') return REFUSED;
+    if (nested === 'unsupported') return 'invalid';
     const referred = new Set([body.blob, nested?.hash]);
     for (const ref of referred) {
       if (ref === undefined) continue;
-      if (!proofs.delete(leafDigest({ kind: 'blob', entry: hash, hash: ref }))) return REFUSED;
-      if (!blobs.has(ref)) return WAITING;
+      if (!proofs.delete(leafDigest({ kind: 'blob', entry: hash, hash: ref }))) return 'invalid';
+      if (!blobs.has(ref)) return 'missing';
       foundBlobs.add(ref);
     }
-    if (nested !== undefined && !validNested(nested, checked.entry, ctx)) return REFUSED;
-    entries.push(Object.freeze({ header: Object.freeze({ ...header, body: Object.freeze({ ...header.body }) }), body: value.body }));
+    if (nested !== undefined && !validNested(nested, checked.entry, ctx)) return 'invalid';
+    entries.push({ header, body: value.body });
   }
-  if (proofs.size !== 0 || foundBlobs.size !== blobs.size || !completeChain(entries, heads)) return REFUSED;
-  return Object.freeze({ status: 'ready', entries: Object.freeze(entries), blobs: Object.freeze([...blobs.values()]) });
+  if (proofs.size !== 0 || foundBlobs.size !== blobs.size || !completeChain(entries, heads)) return 'invalid';
+  return 'valid';
 }

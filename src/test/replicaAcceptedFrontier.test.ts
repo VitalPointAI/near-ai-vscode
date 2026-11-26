@@ -3,10 +3,10 @@ import { mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { buildFrontierMembership, frontierRoot, frontierSigningBytes, verifiesFrontierCustody, verifiesFrontierMembership } from '../domain/replica/acceptedFrontier';
-import type { FrontierLeaf, FrontierStatement } from '../domain/replica/acceptedFrontier';
-
-import { openAcceptedFrontier } from '../domain/replica/acceptedFrontier';
+import { buildFrontierMembership, verifiesFrontierMembership } from '../domain/replica/acceptedFrontier';
+import type { FrontierLeaf } from '../domain/replica/acceptedFrontier';
+import { frontierRoot, frontierSigningBytes, openAcceptedFrontier, openStoredAcceptedFrontier, putAcceptedFrontier, verifiesFrontierCustody } from './helpers/acceptedFrontierV1';
+import type { FrontierStatement } from './helpers/acceptedFrontierV1';
 import { sealBlob } from '../domain/replica/entry';
 import { grantHash } from '../domain/replica/cellKeys';
 import { accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
@@ -178,51 +178,51 @@ test('a durable archive is private, exact and tied to the verified current signe
   assert.ok('ok' in await store.recordRosterHead(after.hash));
   const request = { ...complete, stream: cell, reader: world.lead.writer, expectedSnapshot: await store.appendSnapshot() };
   const bytes = Buffer.from(JSON.stringify(file, null, 2) + '\n');
-  assert.equal((await store.putAcceptedFrontier(bytes, { ...request, historicalKey: () => undefined })).status, 'waiting');
-  assert.equal((await store.putAcceptedFrontier(bytes, { ...request, reader: incoming.writer })).status, 'refused');
+  assert.equal((await putAcceptedFrontier(store, bytes, { ...request, historicalKey: () => undefined })).status, 'waiting');
+  assert.equal((await putAcceptedFrontier(store, bytes, { ...request, reader: incoming.writer })).status, 'refused');
   const privateDir = path.join(store.dir, 'accepted-frontiers');
   setFolderSyncProbe((dir) => {
     if (dir === privateDir) throw new Error('fixture interrupts before publication');
   });
   try {
-    assert.equal((await store.putAcceptedFrontier(bytes, request)).status, 'refused');
+    assert.equal((await putAcceptedFrontier(store, bytes, request)).status, 'refused');
   } finally {
     setFolderSyncProbe(undefined);
   }
   assert.deepEqual((await readdir(privateDir)).filter((name) => name.endsWith('.json')), []);
 
-  const written = await store.putAcceptedFrontier(bytes, request);
+  const written = await putAcceptedFrontier(store, bytes, request);
   assert.equal(written.status, 'ready');
   if (written.status !== 'ready') return;
-  assert.deepEqual(await store.putAcceptedFrontier(bytes, request), written);
+  assert.deepEqual(await putAcceptedFrontier(store, bytes, request), written);
   const target = path.join(privateDir, `${written.handle}.json`);
   assert.deepEqual(await readFile(target), bytes);
   if (process.platform !== 'win32') assert.equal((await stat(target)).mode & 0o777, 0o600);
   const reopened = await ReplicaStore.open(root, deps);
   assert.ok(reopened instanceof ReplicaStore);
-  const read = await reopened.openStoredAcceptedFrontier(written.handle, request);
+  const read = await openStoredAcceptedFrontier(reopened, written.handle, request);
   assert.equal(read.status, 'ready');
   assert.ok(reopened.entries().every((entry) => entry.header.stream !== cell));
   for (const blob of file.blobs) assert.equal(await reopened.blob(blob.hash), undefined);
 
   const other = await ReplicaStore.open(root, { ...deps, signer: async () => incoming.signer });
   assert.ok(other instanceof ReplicaStore);
-  assert.equal((await other.openStoredAcceptedFrontier(written.handle, request)).status, 'refused');
-  assert.equal((await other.openStoredAcceptedFrontier(written.handle, { ...request, reader: incoming.writer })).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(other, written.handle, request)).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(other, written.handle, { ...request, reader: incoming.writer })).status, 'refused');
 
   const next = world.rosterEntry(incoming, 'lead.handover', { to: world.lead.member, reason: 'planned' }, after.hash);
   assert.ok('ok' in await reopened.ingestForeign([next.entry], [], async () => ({ ok: true })));
   assert.ok('ok' in await reopened.recordRosterHead(next.hash));
-  assert.equal((await store.putAcceptedFrontier(bytes, request)).status, 'refused');
-  assert.equal((await reopened.openStoredAcceptedFrontier(written.handle, request)).status, 'refused');
+  assert.equal((await putAcceptedFrontier(store, bytes, request)).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(reopened, written.handle, request)).status, 'refused');
   const selectedAgain = { ...request, roster: world.foldRoster(), expectedSnapshot: await reopened.appendSnapshot() };
-  assert.equal((await reopened.openStoredAcceptedFrontier(written.handle, selectedAgain)).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(reopened, written.handle, selectedAgain)).status, 'refused');
 
-  const stagedAgain = await reopened.putAcceptedFrontier(bytes, selectedAgain);
+  const stagedAgain = await putAcceptedFrontier(reopened, bytes, selectedAgain);
   assert.equal(stagedAgain.status, 'ready');
   if (stagedAgain.status !== 'ready') return;
   assert.notEqual(stagedAgain.handle, written.handle);
   await writeFile(path.join(privateDir, `${stagedAgain.handle}.json`), JSON.stringify(file));
-  assert.equal((await reopened.openStoredAcceptedFrontier(stagedAgain.handle, selectedAgain)).status, 'refused');
-  assert.equal((await reopened.putAcceptedFrontier(bytes, selectedAgain)).status, 'refused');
+  assert.equal((await openStoredAcceptedFrontier(reopened, stagedAgain.handle, selectedAgain)).status, 'refused');
+  assert.equal((await putAcceptedFrontier(reopened, bytes, selectedAgain)).status, 'refused');
 });
