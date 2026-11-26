@@ -41,30 +41,40 @@ const areas = [
   },
 ];
 
-export default function SystemArchitectureMap() {
+export default function SystemArchitectureMap({ children }) {
   const artwork = useBaseUrl('/img/sovai-system-architecture.webp');
+  const blueprint = React.Children.only(children);
+  const imageUrl = useBaseUrl(blueprint.props.src);
   return (
-    <figure className={styles.map}>
-      <figcaption>Choose an area to see its components and responsibilities.</figcaption>
-      <ul className={styles.areas}>
-        {areas.map(({ id, title, description, position }) => (
-          <li key={id}>
-            <a className={styles.area} href={`#${id}`}>
-              {/* The adjacent text supplies the accessible name and purpose. */}
-              <span
-                aria-hidden="true"
-                className={styles.illustration}
-                style={{ backgroundImage: `url("${artwork}")`, backgroundPosition: position }}
-              />
-              <span className={styles.copy}>
-                <strong>{title}</strong>
-                <span>{description}</span>
-              </span>
-            </a>
-          </li>
-        ))}
-      </ul>
-    </figure>
+    <div className={styles.map}>
+      <figure className={styles.blueprint}>
+        <a href={imageUrl} aria-label="Open the system blueprint at full resolution">
+          {React.cloneElement(blueprint, { src: imageUrl, width: 3500, height: 2280 })}
+        </a>
+        <figcaption>Open the blueprint for full resolution.</figcaption>
+      </figure>
+      <figure className={styles.navigation}>
+        <figcaption>Choose an area to see its components and responsibilities.</figcaption>
+        <ul className={styles.areas}>
+          {areas.map(({ id, title, description, position }) => (
+            <li key={id}>
+              <a className={styles.area} href={`#${id}`}>
+                {/* The adjacent text supplies the accessible name and purpose. */}
+                <span
+                  aria-hidden="true"
+                  className={styles.illustration}
+                  style={{ backgroundImage: `url("${artwork}")`, backgroundPosition: position }}
+                />
+                <span className={styles.copy}>
+                  <strong>{title}</strong>
+                  <span>{description}</span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </figure>
+    </div>
   );
 }
 

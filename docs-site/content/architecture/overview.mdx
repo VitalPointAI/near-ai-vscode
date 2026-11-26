@@ -13,7 +13,7 @@ The browser Workbench runs on a workstation today. Organization-hosted sessions 
 ## How the parts fit
 
 <SystemArchitectureMap>
-<img src="/img/sovai-data-flows.webp" alt="Illustrated map of Sterling Sovereign AI showing nine directed transfers and the information that moves between systems. The same paths appear in the text table." />
+<img src="/img/sovai-data-flows.webp" alt="System blueprint of Sterling Sovereign AI. It maps named components inside nine system boundaries, with arrows for operational and planned exchanges. The sections below describe each component and flow." />
 </SystemArchitectureMap>
 
 In the component descriptions, **Available** means the capability is part of the current
@@ -202,8 +202,9 @@ describe model trust and the proposed workflow.
 | Open acceptance and release conditions | [Road to production](../security/road-to-production.md) |
 
 Update the component descriptions and their source references when the roadmap changes.
-The illustrated areas link directly to these sections. Update their artwork only when the
-set of areas changes. The generated component catalogue continues to track individual
+The illustrated areas link directly to these sections. Update the blueprint source at
+`docs-site/scripts/draw-system-blueprint.py` when the component boundaries or flow
+directions change. Regenerate the bundled image with Python, Pillow and Lato. The generated component catalogue continues to track individual
 third-party dependencies and their pins.
 
 ## Decision records

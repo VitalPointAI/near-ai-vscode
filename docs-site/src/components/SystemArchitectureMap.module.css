@@ -6,6 +6,31 @@
   margin-bottom: 0.75rem;
 }
 
+.blueprint,
+.navigation {
+  margin: 0;
+}
+
+.blueprint {
+  margin-bottom: 1.3rem;
+}
+
+.blueprint img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.8rem;
+}
+
+.blueprint figcaption {
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.blueprint a {
+  display: block;
+}
+
 .areas {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

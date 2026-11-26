@@ -45,7 +45,7 @@ test('bundled figures and architecture flows render offline and remain usable ac
 
   await openTopic(page, 'Architecture overview');
   const article = page.locator('.sterling-documentation article');
-  const illustration = article.getByRole('img', { name: /^Illustrated map of Sterling Sovereign AI/ });
+  const illustration = article.getByRole('img', { name: /^System blueprint of Sterling Sovereign AI/ });
   const flows = article.locator('table').filter({ hasText: MISSION_HUB_STEP });
   await expect(illustration).toHaveCount(1);
   await expect(illustration).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
