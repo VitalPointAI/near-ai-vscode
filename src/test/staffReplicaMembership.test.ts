@@ -34,6 +34,8 @@ import {
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
 import { ensureLabelCell } from '../staff/replica/labelCells';
+import { exchangeManaged, fetchManaged } from '../staff/replica/managedSync';
+import type { ManagedSyncHandoffs } from '../staff/replica/managedSync';
 import { hubMemoryOf, syncOnce } from '../staff/replica/hubSync';
 import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
@@ -1353,6 +1355,69 @@ test('private founding file waits through reopening for the matching signed rost
   assert.equal(committedGrant(received.roster.cells, cell, 2), committedGrant(selected.roster.cells, cell, 2));
   assert.deepEqual(reopened.keys.epochKey(cell, 2), lead.p.keys.epochKey(cell, 2));
   assert.equal(reopened.keys.holds(cell, 1), false);
+});
+
+test('a local managed inbox resumes only distinct unexpired handles across restart and bounded retries', async () => {
+  const lead = await founded('managed-durable-inbox');
+  lead.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  type Inbox = Pick<ManagedSyncHandoffs, 'pending' | 'accepted' | 'superseded'> & { enqueue(handle: string, expiresAt: number): Promise<boolean> };
+  const inboxOf = (p: ReplicaProject): Inbox => {
+    const open = Reflect.get(p, 'managedHandoffInbox') as (() => Inbox) | undefined;
+    if (open !== undefined) return open.call(p);
+    // Before durable inboxes a configured provider can only keep these requests in its own memory.
+    const held = new Set<string>();
+    return {
+      enqueue: async (handle) => { held.add(handle); return true; },
+      pending: async () => [...held],
+      accepted: async (handle) => { held.delete(handle); },
+      superseded: async (handle) => { held.delete(handle); }
+    };
+  };
+  const enqueue = inboxOf(lead.p);
+  const [ready, obsolete, waiting, expired] = Array.from({ length: 4 }, () => randomBytes(32).toString('hex'));
+  const expiresAt = NOW.getTime() + 60 * 60 * 1000;
+  for (const handle of [ready, obsolete, waiting]) assert.equal(await enqueue.enqueue(handle, expiresAt), true);
+  assert.equal(await enqueue.enqueue(expired, NOW.getTime() + 500), true);
+  lead.at.clock.now = new Date(NOW.getTime() + 1000);
+  const reopen = async () => inboxOf(project(await ReplicaProject.open(lead.at.root, lead.at.deps)));
+  const handoffs = (inbox: Inbox): ManagedSyncHandoffs => ({ ...inbox, offers: async () => [], published: async () => undefined });
+  const requests: string[] = [];
+  const route = {
+    put: async () => false,
+    get: async (...handles: string[]) => {
+      assert.equal(handles.length, 1);
+      requests.push(handles[0]);
+      return handles[0] === waiting ? undefined : 'fictional ciphertext';
+    }
+  };
+  const restored = handoffs(await reopen());
+  const fetched = await fetchManaged(restored, route);
+  assert.deepEqual([...requests].sort(), [ready, obsolete, waiting].sort(), 'the reopened inbox asks for live opaque handles only');
+  const local = {
+    seal: async () => undefined,
+    stage: async (value: unknown) => (value as { handle: string }).handle === ready,
+    superseded: async (value: unknown) => (value as { handle: string }).handle === obsolete
+  };
+  assert.equal(await exchangeManaged(restored, local, route, fetched, new Set()), 'waiting');
+
+  const again = await reopen();
+  for (const handle of [ready, obsolete]) assert.equal(await again.enqueue(handle, expiresAt), true);
+  assert.equal(await again.enqueue(ready, expiresAt + 1000), false, 'an acknowledgment cannot be revived with a longer expiry');
+  const delayed = await fetchManaged(handoffs(again), route);
+  assert.equal(delayed.waiting, true);
+  assert.equal(requests.length, 3, 'backoff survives a reopen');
+
+  lead.at.clock.now = new Date(lead.at.clock.now.getTime() + 180_000);
+  const other = handoffs(await reopen());
+  await Promise.all([fetchManaged(handoffs(again), route), fetchManaged(other, route)]);
+  assert.equal(requests.filter((handle) => handle === waiting).length, 2, 'two windows reserve one due retry');
+  for (let retry = 0; retry < 8; retry += 1) {
+    lead.at.clock.now = new Date(lead.at.clock.now.getTime() + 180_000);
+    await fetchManaged(other, route);
+  }
+  assert.equal(requests.filter((handle) => handle === waiting).length, 6);
+  assert.equal(requests.includes(expired), false);
+  assert.equal(requests.filter((handle) => handle === ready || handle === obsolete).length, 2);
 });
 
 test('normal managed catch-up keeps an unaffected cell writable with matching proofs and resumes after a delay', async () => {
