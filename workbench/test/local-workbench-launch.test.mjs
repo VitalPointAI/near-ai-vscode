@@ -65,6 +65,13 @@ function fixture(options = {}) {
         return options.engineError ? { code: 1, stderr: options.engineError }
           : ok(JSON.stringify({ Os: 'linux', Arch: options.engineArch ?? architecture, Version: options.engineVersion ?? '28.0.0' }));
       }
+      if (command === 'info') {
+        assert(options.checkOnly, 'capacity is observed only in check mode');
+        assert.deepEqual(args.slice(2), ['info', '--format', '{{.NCPU}} {{.MemTotal}}']);
+        assert.equal(timeout, 3000);
+        prerequisiteSteps.push('capacity');
+        return options.capacityResult ?? ok('8 17179869184\n');
+      }
       assert(!options.checkOnly, 'check mode cannot inspect or change images, containers or volumes');
       if (command === 'volume' && subcommand === 'inspect') {
         assert.equal(target, volumeName);
@@ -148,12 +155,24 @@ function fixture(options = {}) {
 
 test('check reports workstation prerequisites in order and never reaches resources', async () => {
   const check = { check: true };
-  const healthy = fixture({ checkOnly: true, installed: false });
-  assert.match(await launchLocalWorkbench(check, healthy.deps), /prerequisites.*ready.*linux\/amd64.*matching.*image/i);
-  assert.deepEqual(healthy.prerequisiteSteps, ['client', 'socket', 'engine']);
-  const arm64 = fixture({ arch: 'arm64', checkOnly: true, installed: false });
-  assert.match(await launchLocalWorkbench(check, arm64.deps), /prerequisites.*ready.*linux\/arm64.*matching.*image/i);
-  assert.deepEqual(arm64.prerequisiteSteps, ['client', 'socket', 'engine']);
+  for (const [arch, platform] of [['x64', 'linux/amd64'], ['arm64', 'linux/arm64']]) {
+    const f = fixture({ arch, checkOnly: true, installed: false });
+    const [prerequisites, capacity] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    assert.equal(prerequisites, `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`);
+    assert.equal(capacity, 'Docker reports 8 logical CPUs and 16 GiB total memory.');
+    assert.deepEqual(f.prerequisiteSteps, ['client', 'socket', 'engine', 'capacity']);
+  }
+
+  for (const capacityResult of [
+    { code: 1, stdout: '8 17179869184', stderr: 'untrusted detail' },
+    ...['', '0 17179869184', '8 9007199254740992', '8 17179869184 untrusted detail']
+      .map((stdout) => ({ code: 0, stdout, stderr: '' })),
+  ]) {
+    const f = fixture({ checkOnly: true, capacityResult });
+    const [prerequisites, capacity] = (await launchLocalWorkbench(check, f.deps)).split('\n');
+    assert.match(prerequisites, /prerequisites.*ready.*linux\/amd64.*matching.*image/i);
+    assert.equal(capacity, 'Docker CPU and memory readings are unavailable.');
+  }
 
   for (const [options, expected, steps] of [
     [{ platform: 'darwin', arch: 'arm64' }, /darwin.*arm64.*Linux x86-64/i, []],
