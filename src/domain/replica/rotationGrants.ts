@@ -3,7 +3,7 @@ import { canonicalBytes } from '../team/canonical';
 import { isRecord } from '../team/validate';
 import { MAX_GRANT_PAGES, MAX_GRANT_WRAPS, readGrant } from './cellKeys';
 import { readGrantPages } from './grantPages';
-import { verifiedCellAccess } from './rotationProof';
+import { readAccessWriteProof, verifiedCellAccess } from './rotationProof';
 import type { AccessRevision } from './rotationProof';
 
 const HASH = /^[0-9a-f]{64}$/;
@@ -93,7 +93,9 @@ export function openGrantEvidence(project: string, revisions: ReadonlyMap<string
 
 /** Verify the grant and its pages before staging a confidential handoff. The signed roster may still be in transit. */
 export function readGrantDelivery(value: unknown) {
-  if (!isRecord(value) || Object.keys(value).length !== 2 || !isRecord(value.opening) || !evidenceShape(value.opening.evidence) ||
+  if (!isRecord(value)) return undefined;
+  const hasPermit = Object.hasOwn(value, 'accessProof');
+  if (Object.keys(value).length !== (hasPermit ? 3 : 2) || !isRecord(value.opening) || !evidenceShape(value.opening.evidence) ||
       !Array.isArray(value.grants) || value.grants.length === 0 || value.grants.length > MAX_GRANT_PAGES + 1) return undefined;
   const [head, ...pages]: unknown[] = value.grants;
   const read = pages.length === 0 ? readGrant(head) : readGrantPages(head, pages);
@@ -101,9 +103,20 @@ export function readGrantDelivery(value: unknown) {
   const { cell, epoch } = read.grant;
   const evidence = value.opening.evidence;
   const recipients = read.grant.wraps.map(({ writer }) => writer).sort();
+  const accessProof = hasPermit ? readAccessWriteProof(value.accessProof) : undefined;
+  const permit = accessProof?.signed.permit;
+  if (hasPermit && (permit === undefined || permit.project !== evidence.project || permit.cell !== cell || permit.epoch !== epoch ||
+      !recipients.includes(permit.device) || evidence.excluded.includes(permit.device))) return undefined;
   return cell === evidence.cell && epoch === evidence.epoch &&
     matchesGrantEvidence(evidence, { hash: read.hash, pages: read.grant.pages ?? [], recipients })
-    ? { opening: value.opening, grants: value.grants as readonly unknown[], project: evidence.project, recipients } : undefined;
+    ? { opening: value.opening, grants: value.grants as readonly unknown[], project: evidence.project, recipients,
+      ...(accessProof === undefined ? {} : { accessProof }) } : undefined;
+}
+
+/** Only unwrap a delivered permit for the selected roster entry. The append guard still verifies it. */
+export function storedAccessProof(value: unknown, selectedEntry: string | undefined): unknown {
+  if (!isRecord(value) || !Object.hasOwn(value, 'accessProof')) return value;
+  return selectedEntry !== undefined && isRecord(value.opening) && value.opening.entry === selectedEntry ? value.accessProof : undefined;
 }
 
 export interface GrantEvidenceDelta {

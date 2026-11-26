@@ -933,7 +933,7 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.equal(prepare((await head(p)).roster), undefined, 'delivery waits for the grant and proof to be placed');
   assert.ok('ok' in await p.putGrants([], [opening]));
   assert.ok((await head(p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
-  assert.equal(prepare((await head(p)).roster, wrongWriter), undefined);
+  assert.equal(prepare((await head(p)).roster, wrongWriter) === undefined, true);
   const sealed = prepare((await head(p)).roster);
   assert.ok(sealed);
   const rival = prepare((await head(p)).roster);
@@ -967,7 +967,16 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.equal((await peer.p.signedGrants()).some((grant) => grant.hash === hash), false);
   assert.equal((await head(peer.p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash), false);
   const update = await p.welcomeFor(peer.writer, []);
-  assert.ok('ok' in await peer.p.ingestForeign([update.genesis, ...update.roster], update.blobs));
+  const root = update.roster.find((entry) => entryHash(entry.header) === bound.hash);
+  assert.ok(root);
+  assert.ok('ok' in await peer.p.ingestForeign([update.genesis, ...update.roster.filter((entry) => entry !== root)], update.blobs));
+  const stagedAt = await head(peer.p);
+  const receiverSlot = deviceAt(stagedAt.roster.members, peer.writer, stagedAt.position)?.slot;
+  assert.ok(receiverSlot !== undefined);
+  const pending = await peer.p.appendOwn('doc.client',
+    { product: 'intel-estimate', clientId: clientIdOf(receiverSlot, 0), actor: { kind: 'person' } });
+  assert.equal(isProjectRefused(pending) && pending.refused, 'rekey-pending');
+  assert.ok('ok' in await peer.p.ingestForeign([root], []));
   assert.ok((await head(peer.p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
   assert.equal((await writeInBase(peer.p)).epoch, 1);
   assert.equal(grantsOn(peer.at).some((grant) => grantHash(grant) === hash), false);

@@ -7,10 +7,13 @@ import type { KemPrivateKeys } from '../../domain/replica/cellWrapV2';
 import { BLOB_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, openBlob, sealBlob, sha256Hex } from '../../domain/replica/entry';
 import type { SealedBlob } from '../../domain/replica/entry';
 import { readGrantPages, wrapsFor } from '../../domain/replica/grantPages';
+import { managedWriteAllowed } from '../../domain/replica/roster';
 import type { RosterState } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
 import { matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from '../../domain/replica/rotationGrants';
+import { readAccessWriteProof } from '../../domain/replica/rotationProof';
+import type { AccessWriteProof } from '../../domain/replica/rotationProof';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
@@ -28,6 +31,7 @@ interface ManagedGrantDelivery {
   opening: unknown;
   grant: unknown;
   pages: readonly unknown[];
+  accessProof?: unknown;
   info: WrapCell;
   routing?: RoutingTable;
   now: Date;
@@ -57,6 +61,9 @@ export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGran
   const record = roster.cells.cells.get(cell);
   const founded = record?.epochs.find((item) => item.epoch === epoch)?.from;
   if (founded === undefined || !record?.grants.some((item) => item.hash === verified.hash)) return undefined;
+  const proof = readAccessWriteProof(input.accessProof);
+  if (input.accessProof !== undefined && (proof?.signed.permit.device !== recipient ||
+      managedWriteAllowed(roster, cell, epoch, proof.signed.permit.writer, head, input.now, proof) !== true)) return undefined;
   const device = wrapDeviceAt(roster, recipient, head);
   const choice = formatFor(roster, info, founded, routing);
   if (choice === 'switch-first') return undefined;
@@ -64,7 +71,8 @@ export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGran
   if (!original.ok) return undefined;
   const format = original.format === 2 ? 2 : formatForDevice(choice, device);
 
-  const bytes = canonicalBytes({ project: roster.anchor.project, recipient, expires: now + DELIVERY_MS, grants: [grant, ...pages], opening });
+  const bytes = canonicalBytes({ project: roster.anchor.project, recipient, expires: now + DELIVERY_MS,
+    grants: [grant, ...pages], opening, ...(proof === undefined ? {} : { accessProof: proof }) });
   const size = Math.ceil((bytes.length + HEADER) / PADDING_BUCKET) * PADDING_BUCKET;
   if (size + SEALED_OVERHEAD > BLOB_MAX_BYTES) return undefined;
   const padded = Buffer.alloc(size);
@@ -87,7 +95,7 @@ function deliveryPacket(value: unknown): value is Packet {
 
 /** Open using only admitted device keys. The caller stages the returned grant and opening for selected-root verification. */
 export function openManagedGrantDelivery(project: string, device: DeliveryDevice, handle: string, packet: unknown, now: Date):
-  { grants: readonly unknown[]; opening: unknown } | undefined {
+  { grants: readonly unknown[]; opening: unknown; accessProof?: AccessWriteProof } | undefined {
   const time = now.getTime();
   if (!HANDLE.test(handle) || !Number.isFinite(time) || !deliveryPacket(packet) || blobBytesHash(packet.body) !== packet.body.hash) return undefined;
   const stream = address(handle);
@@ -99,13 +107,16 @@ export function openManagedGrantDelivery(project: string, device: DeliveryDevice
   if (length < 1 || length > plain.length - HEADER) return undefined;
   let value: unknown;
   try { value = JSON.parse(plain.subarray(HEADER, HEADER + length).toString('utf8')) as unknown; } catch { return undefined; }
-  if (!isRecord(value) || Object.keys(value).length !== 5 || value.project !== project || value.recipient !== device.writer ||
+  if (!isRecord(value) || value.project !== project || value.recipient !== device.writer ||
       typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + DELIVERY_MS ||
       !Array.isArray(value.grants) || value.grants.length < 1 || value.grants.length > MAX_GRANT_PAGES + 1 ||
       !isRecord(value.opening)) return undefined;
-  const delivery = readGrantDelivery({ grants: value.grants, opening: value.opening });
-  return delivery?.project === project && delivery.recipients.includes(device.writer)
-    ? { grants: delivery.grants, opening: delivery.opening } : undefined;
+  const { project: _project, recipient: _recipient, expires: _expires, ...artifact } = value;
+  const delivery = readGrantDelivery(artifact);
+  if (delivery?.project !== project || !delivery.recipients.includes(device.writer)) return undefined;
+  const { grants, opening, accessProof } = delivery;
+  if (accessProof !== undefined && accessProof.signed.permit.device !== device.writer) return undefined;
+  return { grants, opening, ...(accessProof === undefined ? {} : { accessProof }) };
 }
 
 export function openManagedGrantArtifact(project: string, device: DeliveryDevice, value: unknown, now: Date) {

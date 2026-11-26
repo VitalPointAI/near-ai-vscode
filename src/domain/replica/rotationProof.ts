@@ -167,6 +167,14 @@ function validPermit({ permit, signature }: SignedAccessPermit): boolean {
     (permit.certificate === null || isHash(permit.certificate)) && typeof signature === 'string' && SIGNATURE.test(signature);
 }
 
+/** Decode only the proof shape. This does not establish authority before its roster root is selected. */
+export function readAccessWriteProof(value: unknown): AccessWriteProof | undefined {
+  if (!hasProofShape(value) || !validPermit(value.signed) || !validDecision(value.cell.decision) ||
+      !hashes(value.permitSiblings, PERMIT_DEPTH) || !Array.isArray(value.cell.siblings) ||
+      value.cell.siblings.length > Math.ceil(Math.log2(MAX_CELLS)) || !hashes(value.cell.siblings, value.cell.siblings.length)) return undefined;
+  return value;
+}
+
 function validCommitment(commitment: AccessCommitment): boolean {
   return isHash(commitment.cellRoot) && isHash(commitment.permitRoot) &&
     (commitment.frontierRoot === null || isHash(commitment.frontierRoot));
