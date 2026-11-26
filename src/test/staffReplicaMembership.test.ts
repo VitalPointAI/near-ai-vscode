@@ -763,16 +763,25 @@ for (const failure of ['planning', 'storage', 'thrown storage'] as const) {
   });
 }
 
-test('a typed grant refusal after a clearance gain with no required rotation keeps its diagnostic', async () => {
+test('a grant refusal after a clearance gain reports the recorded change and unfinished grant', async () => {
   const t = await team();
-  const refusal = { refused: 'store-refused', message: 'The test refused grant storage.' } as const;
+  const before = await head(t.lead.p);
+  const grants = grantsOn(t.lead.at);
+  const refusal = { refused: 'store-refused', message: STORE_REFUSALS.unreadable, store: 'unreadable' } as const;
   const storage = mock.method(t.lead.p, 'putGrants', async () => { throw new ReplicaProjectError(refusal); });
   const result = await updateMember(t.lead.host, { member: t.n.member, clearance: CLEARED_X }).finally(() => storage.mock.restore());
+  assert.equal(result.ok, false);
   assert.equal(result.reason, refusal.refused);
-  assert.equal(result.message, refusal.message);
+  assert.equal(result.message, 'The clearance change was recorded. This computer could not finish giving keys for the newly cleared parts. ' +
+    'Part of the shared history in this project folder could not be read, so it was not opened. Check that the folder and its files can be read by your user account.');
+  assert.equal(result.granted, undefined);
+  assert.equal(result.rekeyed, undefined);
+  assert.equal(storage.mock.callCount(), 1);
   const after = await head(t.lead.p);
+  assert.equal(after.position, before.position + 1);
   assert.deepEqual(memberAt(after.roster.members, t.n.member, after.position)?.clearance, CLEARED_X);
   assert.equal(await unfinishedRekeys(t.lead.host), 0);
+  assert.deepEqual(grantsOn(t.lead.at), grants);
 });
 
 test('retrying an absent member reports other completed key changes separately', async () => {

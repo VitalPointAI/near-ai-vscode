@@ -1296,7 +1296,12 @@ export function updateMember(shared: SharedProjectHost, input: UpdateMemberInput
       }
       return writeRekeys(shared, planned.plans, planned.cells);
     });
-    if (isResult(outcome)) return needsRotation ? withPendingRekeyMessage(outcome, 'The clearance change was recorded.') : outcome;
+    if (isResult(outcome)) {
+      if (!changesClearance) return outcome;
+      const recorded = 'The clearance change was recorded.';
+      if (needsRotation) return withPendingRekeyMessage(outcome, recorded);
+      return { ...outcome, message: `${recorded} This computer could not finish giving keys for the newly cleared parts. ${diagnosticAfterWrite(outcome.message)}` };
+    }
     const first = `${input.name ?? record.name} was changed.`;
     const gave = granted.size === 0 ? '' : ` ${granted.size === 1 ? 'One part of the project was' : `${granted.size} parts of the project were`} shared with them.`;
     const message = outcome.rekeyed.length > 0 || outcome.skipped.length > 0 ? rekeyMessage(`${first}${gave}`, outcome) : `${first}${gave}`;
