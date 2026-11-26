@@ -896,6 +896,55 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
 
+test('managed removal commits the exact withdrawal and keeps the unaffected cell writable after reopening', async () => {
+  const at = install('managed-removal');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  const lead = { at, p, host: hostOf(p, at) };
+  const unaffected = await createCell(lead, LABEL_Z, [p.deviceWriter]);
+  const peer = await bringIn(lead, 'managed-removed-peer', 'Mo Analyst', OFFICIAL);
+  assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
+  const before = await head(p);
+  const id = accessRevisionId(p.projectId, null, before.hash, 'cell.access.commit', {});
+  const manifests = [p.projectId, unaffected].sort().map((cell) => ({
+    project: p.projectId, cell, epoch: 1, policy: null, excluded: [],
+    grants: (before.roster.cells.cells.get(cell)?.grants ?? []).map((grant) => ({
+      hash: grant.hash, pages: grant.grant.pages ?? [], recipients: [...grant.writers].sort()
+    })).sort((a, b) => a.hash < b.hash ? -1 : 1)
+  }));
+  const commitment = buildAccessCommitment(id, manifests.map((manifest) => {
+    const evidence = grantEvidenceHash(manifest);
+    assert.ok(evidence);
+    return { cell: manifest.cell, previousEpoch: 1, epoch: 1, decision: 'continues', salt: randomBytes(32).toString('hex'), evidence };
+  }), []);
+  assert.ok(commitment);
+  const seed = await p.appendOwn('cell.access.commit', { accessRevision: id, accessRoot: commitment.root });
+  assert.ok('ok' in seed);
+  const receipts = manifests.map((evidence) => ({ ...commitment.cellProof(evidence.cell), entry: seed.hash, evidence }));
+  assert.ok('ok' in await p.putGrants([], receipts.slice(0, 1)));
+  const waiting = await removeFromProject(lead.host, { member: peer.member });
+  assert.equal(waiting.ok, false);
+  assert.equal((await head(p)).hash, seed.hash);
+  assert.ok('ok' in await p.putGrants([], receipts.slice(1)));
+  const removed = await removeFromProject(lead.host, { member: peer.member });
+  assert.equal(removed.ok, true, removed.message);
+  const reopened = project(await ReplicaProject.open(at.root, at.deps));
+  const after = await head(reopened);
+  assert.equal(memberAt(after.roster.members, peer.member, after.position), undefined);
+  assert.equal(after.roster.accessRevision?.predecessor, seed.hash);
+  assert.equal(after.roster.accessGrants.get(p.projectId)?.decision, 'pending');
+  assert.deepEqual(after.roster.accessGrants.get(p.projectId)?.evidence.excluded, [peer.writer]);
+  assert.equal(after.roster.accessGrants.get(unaffected)?.decision, 'continues');
+  const slot = deviceAt(after.roster.members, p.deviceWriter, after.position)?.slot;
+  assert.ok(slot !== undefined);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const blocked = await reopened.appendOwn('doc.client', data);
+  assert.equal(isProjectRefused(blocked) && blocked.refused, 'rekey-pending');
+  assert.ok('ok' in await reopened.appendOwn('doc.client', data, { stream: unaffected }));
+});
+
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
   const at = install('managed-grant-staging');
   at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
