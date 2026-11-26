@@ -31,6 +31,7 @@ import {
   openWelcome, pendingInvitationsDir, remakeWelcome, removeFromProject, reviewJoinRequest, unfinishedRekeys, updateMember, voidInvite
 } from '../staff/replica/membership';
 import type { MembershipResult, SharedProjectHost } from '../staff/replica/membership';
+import { ensureLabelCell } from '../staff/replica/labelCells';
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
@@ -1021,6 +1022,32 @@ test('managed clearance reduction commits decisions using the lead’s custom sc
   const expanded = await updateMember({ ...lead.host, project: viewer }, { member: peer.member, clearance });
   assert.equal(expanded.reason, 'clearance-grants-pending');
   assert.equal((await head(viewer)).hash, recovered.hash);
+});
+
+test('managed Give keys authorizes the current epoch before a private handoff', async () => {
+  const lead = await founded('managed-give');
+  ok(await updateMember(lead.host, { member: 'mbr-lead', clearance: CLEARED_X }), 'declare lead clearance');
+  const peer = await bringIn(lead, 'new-cell-recipient', 'Mo Analyst', CLEARED_X);
+  assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
+  const cell = await createCell(lead, LABEL_X, [lead.p.deviceWriter]);
+  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, cell]);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  assert.equal(peer.p.keys.holds(cell, 1), false);
+
+  const ensured = await ensureLabelCell(lead.host, LABEL_X);
+  assert.equal(ensured.ok, true, ensured.ok ? undefined : ensured.message);
+  assert.equal(ensured.cell, cell);
+  const after = await head(lead.p);
+  assert.notEqual(after.hash, seed.hash, 'Give keys must select a new signed access commitment');
+  assert.equal(after.roster.accessRevision?.predecessor, seed.hash);
+  const manifest = after.roster.accessGrants.get(cell);
+  const issued = manifest?.evidence.grants.find((grant) => grant.recipients.includes(peer.writer));
+  assert.ok(issued);
+  assert.deepEqual(issued.recipients, [peer.writer]);
+  assert.equal(manifest?.evidence.epoch, 1);
+  assert.equal((await lead.p.signedGrants()).some((grant) => grant.hash === issued.hash), false);
+  assert.equal(grantsOn(lead.at).some((grant) => grantHash(grant) === issued.hash), false);
+  assert.equal((await writeInBase(lead.p)).epoch, 1);
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
