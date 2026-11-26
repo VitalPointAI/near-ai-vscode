@@ -192,7 +192,19 @@ export async function launchLocalWorkbench({ image, repair = false, check = fals
   }
   const { docker, architecture } = await checkPrerequisites(deps);
   const platform = `linux/${architecture}`;
-  if (check) return `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`;
+  if (check) {
+    const prerequisites = `Workbench prerequisites are ready for ${platform}. A matching approved image is required to start.`;
+    const result = await docker(['info', '--format', '{{.NCPU}} {{.MemTotal}}'], 3000);
+    const fields = result.code === 0 && /^([1-9]\d{0,15}) ([1-9]\d{0,15})$/.exec(result.stdout.trim());
+    const cpuCount = Number(fields?.[1]);
+    const memoryBytes = Number(fields?.[2]);
+    if (!Number.isSafeInteger(cpuCount) || !Number.isSafeInteger(memoryBytes)) {
+      return `${prerequisites}\nDocker CPU and memory readings are unavailable.`;
+    }
+    const memory = new Intl.NumberFormat('en', { maximumSignificantDigits: 3 }).format(memoryBytes / 2 ** 30);
+    const cpus = cpuCount === 1 ? 'CPU' : 'CPUs';
+    return `${prerequisites}\nDocker reports ${cpuCount} logical ${cpus} and ${memory} GiB total memory.`;
+  }
 
   async function checked(step, ...args) {
     const result = await docker(args, args[0] === 'pull' ? 300_000 : 30_000);
