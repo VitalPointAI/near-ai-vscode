@@ -49,8 +49,18 @@ Open the URL the launcher prints after the health check succeeds, then
 [set up your first project](#set-up-your-first-project). If the launcher reports a Docker install,
 upgrade or access requirement, resolve it through your administrator or software manager.
 
-To stop the Workbench, run `docker stop sterling-local-workbench`. To restart it or launch with an
-image that is already available locally, set `IMAGE` to the same approved reference and run
+Stop the Workbench on the same local Docker engine the launcher uses.
+
+```bash
+(
+  unset DOCKER_CONTEXT DOCKER_HOST DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH \
+    DOCKER_API_VERSION DOCKER_DEFAULT_PLATFORM
+  docker --host unix:///var/run/docker.sock stop sterling-local-workbench
+)
+```
+
+To restart it or launch with an image that is already available locally, set `IMAGE` to the same
+approved reference and run
 `node scripts/launch-local-workbench.mjs --image "$IMAGE"`. The launcher reuses the container and
 its workspace volume when they already exist.
 
