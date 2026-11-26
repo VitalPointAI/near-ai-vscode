@@ -1,20 +1,26 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import test from 'node:test';
 import { clientIdOf } from '../domain/replica/clientIds';
 import { createLocalDoc, docText, localInsert, snapshotOf } from '../domain/replica/doc';
+import { entryHash } from '../domain/replica/entry';
 import type { Actor, BuiltEntry } from '../domain/replica/entry';
+import { sessionCertifyData } from '../domain/replica/sessionKeys';
 import { replicaVersionHash } from '../domain/replica/versions';
 import type { ProductVersions } from '../domain/replica/versions';
+import { REPLICA_DIR } from '../domain/staff/multiUser';
 import { appendProductEntry, proposeVersion } from '../staff/replica/labelCells';
 import { updateMember } from '../staff/replica/membership';
+import { deviceKeys, storeDeps } from '../staff/replica/projectDevice';
 import { ReplicaProject } from '../staff/replica/replicaProject';
 import { ReplicaStore } from '../staff/replica/store';
 import { productPath, StaffHost } from '../staff/staffHost';
 import { CHANGED_WHILE_DECIDING_TEXT, VERSION_ACT_WORDS, VersionActs } from '../staff/replica/versionActs';
-import { bringIn, hostOf, leadWith, ok, orgClearance, project, streamEntries, syncTo } from './helpers/labelCellWorld';
+import { STEP_UP_TEXT } from './helpers/hostedWorld';
+import { bringIn, hostOf, leadWith, MemorySecrets, ok, orgClearance, project, streamEntries, syncTo } from './helpers/labelCellWorld';
 import type { Seat } from './helpers/labelCellWorld';
+import { fixedSigner } from './helpers/replicaWorld';
 import { trusting } from './helpers/staffFixtures';
 
 const PRODUCT = 'logistics-estimate';
@@ -348,6 +354,105 @@ test('the checked append rechecks a decision stamp after an incoming entry lands
   assert.deepEqual(await lead.p.findOwnAll('version.decide', () => true), []);
   assert.equal((await versionFold(lead, stream)).product.versions[0]?.state, 'approved');
 });
+
+for (const { scenario, remoteDecides, signerRefuses } of [
+  { scenario: 'a hosted signature after a competing decision', remoteDecides: true, signerRefuses: false },
+  { scenario: 'a hosted step-up refusal after a competing decision', remoteDecides: true, signerRefuses: true },
+  { scenario: 'a hosted step-up refusal with an unchanged decision', remoteDecides: false, signerRefuses: true }
+]) {
+  test(scenario, async () => {
+    const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
+    const alternate = await bringIn(lead, 'hosted-race', 'Alternate Commander', orgClearance('Internal'));
+    ok(await updateMember(lead.host, { member: alternate.member, roles: ['member', 'decision_for:commander'] }), 'authorize alternate');
+    const { stream, target } = await awaitingVersion(lead);
+    const session = fixedSigner('hosted-decision-session');
+    const { roster } = await lead.p.state();
+    const slot = roster.members.devices.get(lead.writer)?.find((device) => device.slot !== undefined)?.slot;
+    assert.ok(slot !== undefined);
+    const notAfter = new Date(lead.at.clock.now.getTime() + 60 * 60 * 1000).toISOString();
+    assert.ok('ok' in await lead.p.appendOwn('session.certify', sessionCertifyData({
+      project: lead.p.projectId, member: lead.member, device: lead.writer, sessionKey: session.publicKey, slot, notAfter
+    }, (bytes) => session.signer.sign(bytes))));
+    await syncTo(lead, alternate, [stream]);
+
+    const approved = await new VersionActs(alternate.p, PERSON).decide({ ...target, outcome: 'approve', reasons: [] });
+    assert.ok(approved.ok, approved.ok ? undefined : approved.message);
+    const incoming = streamEntries(alternate.at, stream).find((entry) => entryHash(entry.header) === approved.hash);
+    assert.ok(incoming);
+
+    const { identity, encryption, kem, kemPrivate } = await deviceKeys(lead.at.deps);
+    const secrets = new MemorySecrets();
+    let requests = 0;
+    const deps = {
+      ...lead.at.deps, secrets, keyStatus: async () => trusting(session.signer),
+      sessionSigner: session.signer,
+      hosted: {
+        personPublicKey: identity.publicKey, encryption,
+        kem: kem === undefined || kemPrivate === undefined ? undefined : { publicKeys: kem, privateKeys: kemPrivate }
+      },
+      personSigner: {
+        fingerprint: identity.fingerprint, publicKey: identity.publicKey,
+        sign: async (bytes: Buffer) => {
+          requests += 1;
+          // This independent handle advances the same store before the person signer answers.
+          if (remoteDecides) {
+            const ingested = await other.ingestForeign([incoming], []);
+            assert.ok('ok' in ingested, 'ok' in ingested ? undefined : ingested.message);
+            assert.equal(ingested.added, 1);
+            assert.deepEqual(ingested.held, []);
+            assert.deepEqual(ingested.waiting, []);
+          }
+          return signerRefuses ? { refused: STEP_UP_TEXT } : identity.sign(bytes);
+        }
+      }
+    };
+    const other = project(await ReplicaProject.open(lead.at.root, deps));
+    const baseline = await versionFold({ ...lead, p: other }, stream);
+    assert.equal(baseline.product.versions.find((version) => version.hash === target.hash)?.state, 'awaiting-decision');
+    const hosted = project(await ReplicaProject.open(lead.at.root, deps));
+    assert.equal(hosted.signer.publicKey, session.publicKey);
+    assert.equal(hosted.signerOf('version.decide').publicKey, identity.publicKey);
+    assert.notEqual(session.writer, lead.writer);
+    const local = new VersionActs(hosted, PERSON);
+    const stamp = await local.decisionStamp(target);
+    assert.ok(stamp);
+    const before = streamEntries(lead.at, stream);
+    const blobDir = path.join(lead.at.root, REPLICA_DIR, 'blobs');
+    const blobNames = (): string[] => existsSync(blobDir) ? readdirSync(blobDir).sort() : [];
+    const blobsBefore = blobNames();
+    // Escaped reason text makes the rejected decision large enough to use a sealed blob.
+    const reasons = Array.from({ length: 20 }, () => '"'.repeat(500));
+    const stale = await local.decide({ ...target, outcome: 'reject', reasons, stamp });
+
+    assert.equal(requests, 1);
+    const store = await ReplicaStore.open(lead.at.root, storeDeps(deps, session.signer));
+    assert.ok(store instanceof ReplicaStore);
+    const { product } = await versionFold({ ...lead, p: hosted }, stream);
+    const folded = product.versions.find((version) => version.hash === target.hash);
+    assert.ok(folded);
+    const after = streamEntries(lead.at, stream);
+    assert.deepEqual({
+      result: stale.ok ? { ok: true } : stale,
+      appended: after.filter((entry) => !before.some((previous) => entryHash(previous.header) === entryHash(entry.header)))
+        .map((entry) => entry.header.writer),
+      blobs: blobNames().filter((blob) => !blobsBefore.includes(blob)),
+      held: store.heldForCheck(),
+      waiting: store.waitingForCheck(),
+      state: folded.state,
+      effective: folded.decision.effective
+    }, {
+      result: remoteDecides
+        ? { ok: false, reason: 'changed-while-deciding', message: CHANGED_WHILE_DECIDING_TEXT }
+        : { ok: false, reason: 'signer-refused', message: STEP_UP_TEXT },
+      appended: remoteDecides ? [alternate.writer] : [],
+      blobs: [],
+      held: [],
+      waiting: [],
+      state: remoteDecides ? 'approved' : 'awaiting-decision',
+      effective: remoteDecides ? [approved.hash] : []
+    });
+  });
+}
 
 test('a different decision holder can release an approved version and both replicas agree', async () => {
   const lead = await leadWith({ roles: LEAD_DECISION_ROLES });
