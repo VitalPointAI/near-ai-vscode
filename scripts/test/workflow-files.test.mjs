@@ -643,7 +643,7 @@ test('the ARM64 release evidence scans the exact archive after backend egress su
   const scan = all.get('workbench-arm64-scan');
   assert.match(candidate, /archive_sha256: \$\{\{ steps\.archive\.outputs\.sha256 \}\}/);
   assert.match(candidate, /steps\.smoke\.outputs\.image_id[\s\S]*docker save "\$IMAGE_ID"[\s\S]*test-name-pattern[\s\S]*status == "passed"[\s\S]*name: sterling-arm64-archive/);
-  assert.match(candidate, /Release facts pending/);
+  assert.match(candidate, /Baked release facts matched the Phase 46-09 writer/);
   const guard = /^    if: .*inputs\.workbench_arm64.*$/m.exec(candidate)?.[0];
   assert.ok(guard && scan.includes(guard));
   assert.match(scan, /needs: workbench-arm64\s+runs-on: ubuntu-latest/);
@@ -671,6 +671,17 @@ test('the opt-in ARM64 browser evidence uses only the checked archive and approv
   assert.match(helper, /WORKBENCH_ARM64_BROWSER_EVIDENCE[\s\S]*1\.65\.0[\s\S]*run\(process\.execPath,[\s\S]*cli\.js[\s\S]*return run\('npx'/);
   const config = readFileSync(new URL('../../workbench/test/e2e/playwright.config.ts', import.meta.url), 'utf8');
   assert.match(config, /WORKBENCH_ARM64_BROWSER_EVIDENCE[\s\S]*PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH[\s\S]*launchOptions[\s\S]*video: 'off'/);
+});
+
+test('the isolated ARM64 facts evidence checks the native smoke container before uploading its same-image archive', () => {
+  const candidate = jobs(read('ci.yml')).get('workbench-arm64');
+  const list = steps(candidate);
+  const smoke = list.find((step) => /id: smoke/.test(step));
+  assert.match(smoke, /docker inspect --format '\{\{\.Image\}\}' "\$container"[\s\S]*docker exec -i "\$container" node - > "\$baked"/);
+  assert.match(smoke, /process\.getuid\(\), 10001[\s\S]*\/opt\/sterling\/release\.json[\s\S]*O_NOFOLLOW[\s\S]*fstatSync[\s\S]*isFile\(\)[\s\S]*0o644[\s\S]*readFileSync\(fd\)/);
+  const archive = list.find((step) => /id: archive/.test(step));
+  assert.match(archive, /steps\.smoke\.outputs\.image_id[\s\S]*node scripts\/build\.mjs[\s\S]*node tools\/release-facts\.mjs > "\$expected"[\s\S]*cmp -s "\$baked" "\$expected"[\s\S]*facts_hash[\s\S]*sha256=%s/);
+  assert.ok(list.findIndex((step) => /name: sterling-arm64-archive/.test(step)) > list.indexOf(archive));
 });
 
 test('the release image job writes the release image SBOM and hands publish a hash-checked cosign, read-only', () => {

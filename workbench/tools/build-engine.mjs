@@ -8,6 +8,7 @@
 // - staff.cjs: tools/staff-engine-entry.ts, the staff backend's engine (Phase 33 D-51): session keys, the keyring, the replica project and the live
 //   replicator. Loaded lazily by extension/src/node/staff/staff-engine.ts.
 // - decodeWorker.js: the replica's memory-capped decode worker, which decodeHost.ts starts from beside the bundle that holds it (staff.cjs).
+// - release-facts.cjs: the compiled feature and version constants written to the image by release-facts.mjs (D-44).
 // - vendor/yjs: the repository's vendored Yjs build (vendor/yjs/yjs.cjs, written by scripts/vendor-libs.mjs, `npm run compile`), copied only when
 //   its SHA-256 is the one scripts/crdt-vendor.json pins, with its LICENSES.txt. doc.ts loads it from beside the bundle: the one path expression in
 //   doc.ts is rewritten for the bundle, and the build stops if that expression is not found exactly once.
@@ -41,6 +42,7 @@ const bundles = [
   { entry: 'tools/identity-entry.ts', outfile: 'engine/identity.cjs' },
   { entry: 'tools/compliance-entry.ts', outfile: 'engine/compliance.cjs' },
   { entry: 'tools/staff-engine-entry.ts', outfile: 'engine/staff.cjs' },
+  { entry: 'tools/release-facts-entry.ts', outfile: 'engine/release-facts.cjs' },
   { entry: '../src/staff/replica/decodeWorker.ts', outfile: 'engine/decodeWorker.js' },
 ];
 

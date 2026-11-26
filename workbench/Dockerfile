@@ -42,6 +42,7 @@ RUN JOBS=2 npm_config_build_from_source=true npm_config_nodedir=/usr/local npm r
 # 48.2-08: only engine/compliance.cjs reaches the runtime stage), and copies the vendored Yjs build after checking it against its pin (Phase 33
 # D-51; run `node scripts/vendor-libs.mjs` before the image build); the documentation tool reads the published guides.
 COPY src /repo/src
+COPY package.json /repo/package.json
 COPY compliance/src /repo/compliance/src
 COPY compliance/hosted/exchanges.json /repo/compliance/hosted/exchanges.json
 COPY scripts/crdt-vendor.json /repo/scripts/crdt-vendor.json
@@ -62,7 +63,8 @@ COPY workbench/extension/tsconfig.json ./extension/tsconfig.json
 COPY workbench/extension/src ./extension/src
 COPY workbench/extension/fixtures ./extension/fixtures
 COPY workbench/extension/assets ./extension/assets
-RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build
+RUN NODE_OPTIONS=--max-old-space-size=1536 npm run build \
+    && node tools/release-facts.mjs > /repo/release.json
 # The runtime holds only the built app and its production dependencies: no @theia/cli, esbuild, puppeteer or Playwright (typescript
 # stays: @theia/filesystem needs it at run time through opfs-worker). Prune leaves emptied scope folders behind; remove those too.
 # @theia/core lists @types/* packages (express, ws, ...) as dependencies, so prune keeps @types/node with them; they hold only type
@@ -80,12 +82,14 @@ RUN microdnf -y --nodocs --setopt=install_weak_deps=0 install libatomic procps-n
     && microdnf clean all \
     && rm -rf /var/cache/dnf /var/cache/yum /var/lib/dnf/repos /var/log/dnf* /var/log/yum* \
     && echo 'sterling:x:10001:0:Sterling:/home/sterling:/bin/bash' >> /etc/passwd \
+    && mkdir -m 0755 -p /opt/sterling \
     && mkdir -p /home/sterling/workspace \
     && chown -R 10001:0 /home/sterling \
     && chmod -R g=u /home/sterling
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 # The app tree is owned by root and read-only for the workbench user; only its home and workspace are writable (arbitrary-UID friendly).
 COPY --from=build /repo/workbench /app
+COPY --from=build --chown=0:0 --chmod=0644 /repo/release.json /opt/sterling/release.json
 ENV HOME=/home/sterling
 USER 10001:0
 WORKDIR /home/sterling

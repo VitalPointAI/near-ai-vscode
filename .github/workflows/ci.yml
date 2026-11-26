@@ -706,6 +706,24 @@ jobs:
             process.exitCode = 0;
           });
           NODE
+          baked="$RUNNER_TEMP/sterling-arm64-baked-facts.json"
+          timeout 20 docker exec -i "$container" node - > "$baked" <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          assert.equal(process.getuid(), 10001);
+          const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
+          const fd = fs.openSync('/opt/sterling/release.json', O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+          try {
+            const stat = fs.fstatSync(fd);
+            assert.ok(stat.isFile() && stat.size > 0 && stat.size <= 65536);
+            assert.equal(stat.uid, 0);
+            assert.equal(stat.gid, 0);
+            assert.equal(stat.mode & 0o7777, 0o644);
+            process.stdout.write(fs.readFileSync(fd));
+          } finally {
+            fs.closeSync(fd);
+          }
+          NODE
           printf '\nLinux ARM64 candidate `%s`, verified VSIX `%s`, passed loopback health and native addon checks.\n' \
             "$image" "$VSIX_SHA256" >> "$GITHUB_STEP_SUMMARY"
           printf 'image_id=%s\n' "$image" >> "$GITHUB_OUTPUT"
@@ -717,10 +735,11 @@ jobs:
         working-directory: workbench
         env:
           IMAGE_ID: ${{ steps.smoke.outputs.image_id }}
+          VSIX_SHA256: ${{ needs.release-content.outputs.vsix_sha256 }}
           NEAR_AI_TEST_REPORT: ${{ runner.temp }}/sterling-arm64-native/arm64-egress.ndjson
         shell: bash
         run: |
-          [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$VSIX_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Id}}' "$IMAGE_ID")" == "linux/arm64 $IMAGE_ID" ]]
           evidence="$RUNNER_TEMP/sterling-arm64-native"
           mkdir -p "$evidence"
@@ -729,6 +748,14 @@ jobs:
 
           npm ci --ignore-scripts
           node scripts/build.mjs
+          baked="$RUNNER_TEMP/sterling-arm64-baked-facts.json"
+          expected="$RUNNER_TEMP/sterling-arm64-expected-facts.json"
+          node tools/release-facts.mjs > "$expected"
+          if [[ ! -s "$baked" || ! -s "$expected" ]] || ! cmp -s "$baked" "$expected"; then
+            echo '::error::The baked ARM64 release facts differ from the reviewed writer output.'
+            exit 1
+          fi
+
           WORKBENCH_TEST_IMAGE="$IMAGE_ID" node ../scripts/run-tests.mjs --test-concurrency=1 \
             --test-name-pattern='^(control:|a planted outbound call at start |on a network with no route out )' \
             dist/test/container/egress.test.js
@@ -741,9 +768,13 @@ jobs:
           ' "$NEAR_AI_TEST_REPORT" >/dev/null
 
           [[ "$(docker image inspect --format '{{.Id}}' "$IMAGE_ID")" == "$IMAGE_ID" ]]
+          cp -- "$baked" "$evidence/sterling-arm64-release-facts.json"
+          facts_hash="$(sha256sum < "$evidence/sterling-arm64-release-facts.json")"
           printf 'sha256=%s\n' "${hash%% *}" >> "$GITHUB_OUTPUT"
-          printf '\nArchive SHA-256 `%s` for `%s`. All three backend egress checks passed. Browser evidence pending. Release facts pending independently verified Phase 46-09 source.\n' \
+          printf '\nArchive SHA-256 `%s` for `%s`. All three backend egress checks passed.\n' \
             "${hash%% *}" "$IMAGE_ID" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nBaked release facts matched the Phase 46-09 writer (`8fe9cf7a59527aca1a7171548235a0b50a0dae1b`). Facts SHA-256 `%s`, verified VSIX `%s`. UID 10001 read the regular file owned by 0:0 with mode 0644.\n' \
+            "${facts_hash%% *}" "$VSIX_SHA256" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sterling-arm64-archive
