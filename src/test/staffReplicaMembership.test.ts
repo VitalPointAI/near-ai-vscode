@@ -857,7 +857,9 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.equal(written.built.entry.header.epoch, 1);
   const reopened = project(await ReplicaProject.open(at.root, at.deps));
   assert.ok('ok' in await reopened.appendOwn('doc.client', data));
-  assert.ok('ok' in await reopened.appendOwn('member.update', { member: member.member, name: 'Mo Analyst' }));
+  const rename = await reopened.appendOwn('member.update', { member: member.member, name: 'Morgan Analyst' });
+  assert.ok('ok' in rename);
+  assert.equal((await head(reopened)).hash, rename.hash);
   assert.ok('ok' in await reopened.appendOwn('doc.client', data), 'an ordinary roster edit leaves the permit current');
 
   const afterNote = await head(reopened);

@@ -201,9 +201,9 @@ export function verifiedCellAccess(revision: AccessRevision, commitment: unknown
 export function verifiesAccessWrite(revision: AccessRevision, proof: unknown, context: AccessWriteContext): boolean {
   if (!hasProofShape(proof)) return false;
   const { commitment, cell, signed, permitSiblings } = proof;
+  if (!validPermit(signed) || !permitContextMatches(signed.permit, revision, context)) return false;
   const decision = verifiedCellAccess(revision, commitment, cell, context.cell);
   if (decision?.decision !== 'continues' || decision.epoch !== context.epoch) return false;
-  if (!validPermit(signed) || !permitContextMatches(signed.permit, revision, context)) return false;
   if (!hashes(permitSiblings, PERMIT_DEPTH)) return false;
   const authority = context.authorityKey(signed.permit.authority);
   return authority !== undefined && verifySignature(accessPermitBytes(signed.permit), signed.signature, authority) &&

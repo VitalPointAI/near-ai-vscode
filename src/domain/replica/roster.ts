@@ -215,7 +215,7 @@ export function isRosterWriterAt(state: RosterState, writer: string, position: n
 }
 
 /** Undefined delegates to the existing guard on a project which has not enabled managed access. */
-export function managedWriteAllowed(state: RosterState, stream: string, epoch: number, writer: string, cited: number, now: Date, proof: unknown): boolean | undefined {
+export function managedWriteAllowed(state: RosterState, stream: string, epoch: number, writer: string, cited: number, now: Date, proof: unknown, storedProofs: readonly unknown[] = []): boolean | undefined {
   const since = state.requiredFrom.get(CELL_ACCESS_FEATURE);
   if (since === undefined) return undefined;
   const revision = state.accessRevision;
@@ -233,10 +233,11 @@ export function managedWriteAllowed(state: RosterState, stream: string, epoch: n
     if (certifiedWriter(rosterView(state), writer, state.positions[head]) === undefined || !(Date.parse(certificate.notAfter) > now.getTime())) return false;
     device = certificate.device;
   } else if (deviceAt(state.members, writer, head) === undefined) return false;
-  return verifiesAccessWrite(revision, proof, {
+  const verifies = (candidate: unknown): boolean => verifiesAccessWrite(revision, candidate, {
     project: state.anchor.project, cell: stream, epoch, device, writer, certificate: certificate?.hash ?? null,
     authorityKey: (authority) => isRosterWriterAt(state, authority, predecessor) ? deviceKeyOf(state.members, authority)?.publicKey : undefined
   });
+  return proof === undefined ? storedProofs.some(verifies) : verifies(proof);
 }
 
 /** The parts of an entry the position write rule reads: the same from a verified entry (the fold) and an opened base-stream body (the hub). */
