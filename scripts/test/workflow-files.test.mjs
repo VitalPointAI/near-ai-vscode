@@ -653,6 +653,26 @@ test('the ARM64 release evidence scans the exact archive after backend egress su
   assert.doesNotMatch(scan, /continue-on-error:|environment:|secrets\.|id-token:|docker (?:run|load|pull|login|push)|cosign/);
 });
 
+test('the opt-in ARM64 browser evidence uses only the checked archive and approved local Headless Shell', () => {
+  const ci = read('ci.yml');
+  const dispatch = block(block(ci, 'on'), 'workflow_dispatch', 2);
+  assert.match(dispatch, /workbench_arm64_browser:[\s\S]*type: boolean\s+default: false/);
+  const all = jobs(ci);
+  const browser = all.get('workbench-arm64-browser');
+  const guard = /^    if: .*inputs\.workbench_arm64.*$/m.exec(all.get('workbench-arm64'))?.[0];
+  assert.ok(guard && browser.includes(`${guard} && inputs.workbench_arm64_browser\n`));
+  assert.match(browser, /needs: \[release-content, workbench-arm64, workbench-arm64-scan\]\s+runs-on: ubuntu-24\.04-arm/);
+  assert.equal(block(browser, 'permissions', 4), '    permissions:\n      contents: read');
+  assert.match(browser, /name: sterling-arm64-archive[\s\S]*name: sterling-arm64-scan[\s\S]*needs\.workbench-arm64\.outputs\.archive_sha256[\s\S]*sha256sum[\s\S]*\.archive_sha256 == \$archive[\s\S]*docker load/);
+  assert.match(browser, /chrome-headless-shell-linux-arm64\.zip\?generation=1793763032023285[\s\S]*b136462898353d94c7fab50f9cdaa6d8f0d4c190153916936aa0a03353a26bf2[\s\S]*sha256sum[\s\S]*unzip -q/);
+  assert.match(browser, /docker image inspect[\s\S]*PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH[\s\S]*test-name-pattern[\s\S]*status == "passed"/);
+  assert.doesNotMatch(browser, /continue-on-error:|environment:|secrets\.|id-token:|npx|playwright install|docker (?:build|pull|login|push)|cosign/);
+  const helper = readFileSync(new URL('../../workbench/test/helpers/docker.ts', import.meta.url), 'utf8');
+  assert.match(helper, /WORKBENCH_ARM64_BROWSER_EVIDENCE[\s\S]*1\.65\.0[\s\S]*run\(process\.execPath,[\s\S]*cli\.js[\s\S]*return run\('npx'/);
+  const config = readFileSync(new URL('../../workbench/test/e2e/playwright.config.ts', import.meta.url), 'utf8');
+  assert.match(config, /WORKBENCH_ARM64_BROWSER_EVIDENCE[\s\S]*PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH[\s\S]*launchOptions[\s\S]*video: 'off'/);
+});
+
 test('the release image job writes the release image SBOM and hands publish a hash-checked cosign, read-only', () => {
   const image = jobs(read('release.yml')).get('image');
   const list = steps(image);

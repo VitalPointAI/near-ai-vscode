@@ -158,8 +158,10 @@ test('on a network with no route out the workbench starts, serves a page, restar
 test('in the browser smoke, with the NEAR AI chat open on the release image and no model servers set, nothing calls out', async () => {
   const name = 'browser';
   const port = await freePort();
+  const arm64Evidence = process.env.WORKBENCH_ARM64_BROWSER_EVIDENCE === '1';
+  const pull = arm64Evidence ? ['--pull=never'] : [];
   // STERLING_MODEL_SERVERS is left unset (no model servers), so the backend allow list and the hook's both hold only loopback.
-  const started = await runContainer(name, ['-d', '-p', `127.0.0.1:${port}:3000`, ...hooked(),
+  const started = await runContainer(name, ['-d', ...pull, '-p', `127.0.0.1:${port}:3000`, ...hooked(),
     '-e', 'STERLING_LISTEN_HOST=0.0.0.0', '-e', 'STERLING_PREVIEW_NO_SIGN_IN=accept', image]);
   assert.equal(started.code, 0, started.stderr);
   await waitHealthy(name, `http://127.0.0.1:${port}`);
@@ -167,12 +169,24 @@ test('in the browser smoke, with the NEAR AI chat open on the release image and 
   // started that many and, when there are any, opens the NEAR AI chat. The development target has no /plugins.
   const plugins = await mustRun('docker', ['exec', containerName(name), 'node', '-e',
     "const fs = require('fs'); console.log(fs.existsSync('/plugins') ? fs.readdirSync('/plugins').filter((entry) => !entry.startsWith('.')).length : 0)"]);
+  if (arm64Evidence) {
+    assert.match(plugins.stdout.trim(), /^[1-9][0-9]*$/, 'ARM64 browser evidence requires a bundled extension');
+    await mustRun('docker', ['exec', containerName(name), 'test', '-s', '/plugins/extension/package.json']);
+  }
   // At 127.0.0.1, as the owner opens it, and at localhost, as the README also allows; the chat's webview origin is
   // <uuid>.webview.localhost on the same port either way (published on 127.0.0.1 only).
   for (const host of ['127.0.0.1', 'localhost']) {
     const result = await runPlaywright('egress.spec.ts', { WORKBENCH_URL: `http://${host}:${port}`, STERLING_EXPECT_PLUGINS: plugins.stdout.trim() });
     assert.equal(result.code, 0, `Playwright at ${host} failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
     assert.match(result.stdout, /\b1 passed\b/);
+  }
+  if (arm64Evidence) {
+    const title = 'Get Started shows the setup actions, and each work-area card opens its own page';
+    const result = await runPlaywright('get-started.spec.ts', { WORKBENCH_URL: `http://127.0.0.1:${port}` },
+      ['--grep', `${title}$`, '--reporter=json']);
+    assert.equal(result.code, 0, `Playwright Get Started failed:\n${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`);
+    const { expected, unexpected, flaky, skipped } = JSON.parse(result.stdout).stats;
+    assert.deepEqual({ expected, unexpected, flaky, skipped }, { expected: 1, unexpected: 0, flaky: 0, skipped: 0 }, title);
   }
   // One loopback call through the hook, so an empty or missing log cannot pass for a quiet one.
   await healthyInside(name);

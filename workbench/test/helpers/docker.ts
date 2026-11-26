@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,8 +62,11 @@ async function requireDocker(): Promise<void> {
 /** The image under test: WORKBENCH_TEST_IMAGE when set, otherwise sterling-workbench:test-<suffix>, built once from the repository root. */
 export function testImage(): Promise<string> {
   image ??= (async () => {
-    await requireDocker();
     const given = process.env.WORKBENCH_TEST_IMAGE?.trim();
+    if (process.env.WORKBENCH_ARM64_BROWSER_EVIDENCE === '1') {
+      assert.match(given ?? '', /^sha256:[0-9a-f]{64}$/, 'ARM64 browser evidence requires the image ID from the verified archive');
+    }
+    await requireDocker();
     if (given) {
       await mustRun('docker', ['image', 'inspect', given]);
       return given;
@@ -104,7 +108,15 @@ export async function waitHealthy(name: string, url: string, timeoutMs = 120_000
 
 /** Runs one Playwright spec against the started workbench (WORKBENCH_URL), from workbench/; `args` adds options such as `--grep`. */
 export function runPlaywright(spec: string, env: NodeJS.ProcessEnv, args: string[] = []): Promise<Result> {
-  return run('npx', ['playwright', 'test', '-c', 'test/e2e/playwright.config.ts', spec, ...args], { cwd: workbenchRoot, env: { ...process.env, ...env } });
+  const options = { cwd: workbenchRoot, env: { ...process.env, ...env } };
+  const testArgs = ['test', '-c', 'test/e2e/playwright.config.ts', spec, ...args];
+  if (options.env.WORKBENCH_ARM64_BROWSER_EVIDENCE === '1') {
+    const playwright = path.join(workbenchRoot, 'node_modules', 'playwright');
+    const { version } = JSON.parse(readFileSync(path.join(playwright, 'package.json'), 'utf8'));
+    assert.equal(version, '1.65.0', 'ARM64 browser evidence requires the pinned local Playwright CLI');
+    return run(process.execPath, [path.join(playwright, 'cli.js'), ...testArgs], options);
+  }
+  return run('npx', ['playwright', ...testArgs], options);
 }
 
 /** Removes the containers this suite started and the image it built; never anything else. */

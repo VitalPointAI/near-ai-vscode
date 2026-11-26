@@ -15,6 +15,10 @@ on:
         description: Verify the Workbench on a dedicated ARM64 evaluation branch
         type: boolean
         default: false
+      workbench_arm64_browser:
+        description: Include the approved browser checks in the ARM64 evaluation
+        type: boolean
+        default: false
 
 # A newer push to the same PR cancels the run it supersedes. Every other run (pushes to main, runs
 # started by hand) gets a group of its own, so it is never cancelled or replaced while queued and
@@ -821,6 +825,123 @@ jobs:
         with:
           name: sterling-arm64-scan
           path: ${{ runner.temp }}/sterling-arm64-scan/
+          retention-days: 7
+          if-no-files-found: error
+
+  workbench-arm64-browser:
+    name: check the Workbench ARM64 candidate in a browser
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.workbench_arm64 && startsWith(github.ref_name, 'chore/workbench-arm64-eval-') && inputs.workbench_arm64_browser
+    needs: [release-content, workbench-arm64, workbench-arm64-scan]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sterling-arm64-archive
+          path: ${{ runner.temp }}/sterling-arm64-browser-archive
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sterling-arm64-scan
+          path: ${{ runner.temp }}/sterling-arm64-browser-scan
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix-${{ github.sha }}
+          path: ${{ runner.temp }}/sterling-arm64-browser-vsix
+      - name: Verify the scan, archive and approved browser before use
+        env:
+          ARCHIVE_SHA256: ${{ needs.workbench-arm64.outputs.archive_sha256 }}
+          IMAGE_ID: ${{ needs.workbench-arm64.outputs.image_id }}
+          VSIX_SHA256: ${{ needs.release-content.outputs.vsix_sha256 }}
+        shell: bash
+        run: |
+          [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ && "$IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$VSIX_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          archive="$RUNNER_TEMP/sterling-arm64-browser-archive/sterling-arm64-image.tar.gz"
+          scan="$RUNNER_TEMP/sterling-arm64-browser-scan/scan-evidence.json"
+          sbom="$RUNNER_TEMP/sterling-arm64-browser-scan/sterling-arm64-sbom.cdx.json"
+          shopt -s nullglob
+          vsixes=("$RUNNER_TEMP/sterling-arm64-browser-vsix"/*.vsix)
+          [[ ${#vsixes[@]} == 1 ]]
+          for input in "$archive" "$scan" "$sbom" "${vsixes[0]}"; do
+            [[ -f "$input" && ! -L "$input" ]]
+          done
+          archive_hash="$(sha256sum < "$archive")"
+          sbom_hash="$(sha256sum < "$sbom")"
+          vsix_hash="$(sha256sum < "${vsixes[0]}")"
+          [[ "${archive_hash%% *}" == "$ARCHIVE_SHA256" && "${vsix_hash%% *}" == "$VSIX_SHA256" ]]
+          jq -es --arg archive "$ARCHIVE_SHA256" --arg id "$IMAGE_ID" --arg sbom "${sbom_hash%% *}" '
+            length == 1 and (.[0] | .platform == "linux/arm64" and .archive_sha256 == $archive
+              and .image == $id and .sbom_sha256 == $sbom
+              and (.db_built | type == "string" and length > 0)
+              and (.fixed_high_or_critical | type == "number" and . >= 0 and . == floor))
+          ' "$scan" >/dev/null
+
+          [[ "$(uname -m)" == aarch64 ]]
+          [[ "$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')" == linux/arm64 ]]
+          version="$(docker version --format '{{.Server.Version}}')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || (( 10#${version%%.*} < 28 )); then
+            echo '::error::The ARM64 browser evaluation requires Docker Engine 28 or later.'
+            exit 1
+          fi
+
+          runtime="$RUNNER_TEMP/sterling-arm64-browser-runtime"
+          mkdir "$runtime"
+          zip="$runtime/chrome-headless-shell-linux-arm64.zip"
+          url='https://storage.googleapis.com/chrome-for-testing-public/158.0.8127.18/linux-arm64/chrome-headless-shell-linux-arm64.zip?generation=1793763032023285'
+          browser_hash='b136462898353d94c7fab50f9cdaa6d8f0d4c190153916936aa0a03353a26bf2'
+          curl -q --fail --silent --show-error --proto '=https' --max-time 180 --max-filesize 129936972 --output "$zip" "$url"
+          [[ "$(wc -c < "$zip")" == 129936972 ]]
+          zip_hash="$(sha256sum < "$zip")"
+          [[ "${zip_hash%% *}" == "$browser_hash" ]]
+          unzip -q "$zip" 'chrome-headless-shell-linux-arm64/*' -d "$runtime"
+          executable="$runtime/chrome-headless-shell-linux-arm64/chrome-headless-shell"
+          [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]]
+          LC_ALL=C readelf -h "$executable" | grep -E '^[[:space:]]*Machine:[[:space:]]*AArch64$' >/dev/null
+          ldd "$executable" > "$runtime/headless-shell-libraries.txt"
+          if grep -q 'not found' "$runtime/headless-shell-libraries.txt"; then
+            cat "$runtime/headless-shell-libraries.txt"
+            exit 1
+          fi
+          mkdir "$runtime/empty-browser-cache"
+
+          docker load --input "$archive"
+          [[ "$(docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}} {{.Config.User}}' "$IMAGE_ID")" == "$IMAGE_ID linux/arm64 10001:0" ]]
+          mkdir -p vendor/yjs
+          unzip -p "${vsixes[0]}" extension/vendor/yjs/yjs.cjs > vendor/yjs/yjs.cjs
+          unzip -p "${vsixes[0]}" extension/vendor/yjs/LICENSES.txt > vendor/yjs/LICENSES.txt
+          printf '\nChecked ARM64 archive `%s`, image `%s` and Headless Shell ZIP `%s`.\n' \
+            "$ARCHIVE_SHA256" "$IMAGE_ID" "$browser_hash" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.1'
+      - name: Check both browser origins and the Get Started setup actions
+        working-directory: workbench
+        env:
+          WORKBENCH_TEST_IMAGE: ${{ needs.workbench-arm64.outputs.image_id }}
+          WORKBENCH_ARM64_BROWSER_EVIDENCE: '1'
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ${{ runner.temp }}/sterling-arm64-browser-runtime/chrome-headless-shell-linux-arm64/chrome-headless-shell
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sterling-arm64-browser-runtime/empty-browser-cache
+          NEAR_AI_TEST_REPORT: ${{ runner.temp }}/sterling-arm64-browser-runtime/browser-evidence.ndjson
+        shell: bash
+        run: |
+          npm ci --ignore-scripts
+          node scripts/build.mjs
+          leaf='in the browser smoke, with the NEAR AI chat open on the release image and no model servers set, nothing calls out'
+          env -u PW_TEST_CONNECT_WS_ENDPOINT -u SELENIUM_REMOTE_URL \
+            node ../scripts/run-tests.mjs --test-concurrency=1 --test-name-pattern="^$leaf\$" dist/test/container/egress.test.js
+          jq -es --arg name "$leaf" '
+            [ .[] | select(.file == "dist/test/container/egress.test.js" and .status == "passed") | .name ] == [$name]
+          ' "$NEAR_AI_TEST_REPORT" >/dev/null
+          printf '\nBrowser egress passed at 127.0.0.1 and localhost. Get Started shows the setup actions, and each work-area card opens its own page.\n' \
+            >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sterling-arm64-browser-evidence
+          path: ${{ runner.temp }}/sterling-arm64-browser-runtime/browser-evidence.ndjson
           retention-days: 7
           if-no-files-found: error
 

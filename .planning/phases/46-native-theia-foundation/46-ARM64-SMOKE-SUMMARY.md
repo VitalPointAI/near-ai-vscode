@@ -22,4 +22,4 @@ Independent review passed CI blob `708770cc` and test blob `3627bd3d`. The local
 
 ## Open conditions
 
-None within the native build and startup proof.
+None.
