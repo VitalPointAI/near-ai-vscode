@@ -82,18 +82,38 @@ default routes, passed both type checks, and passed 40 focused tests
 and four synthetic loopback hub tests with no skips. The browser
 executables were invoked only to read their version.
 
+## Task 3A local activity profile
+
+Tests-first `996bce85` reproduced four missing-loader failures after the
+type check passed. Implementation `12f26985` passed the type check and all
+51 local load-test unit cases with zero skips under the shared cap. The
+v1 profile loads three synthetic files, edits one, names one fixed fixture
+terminal action and includes an idle step. Its 20 percent idle share and
+one-second wait are fixture inputs. The canonical profile identity is
+`sha256:345ea21f7d79350b414e09b4c797e0827dd3e6a022b01f0e72e940d1d69aee57`.
+The existing run CLI's raw-byte profile hash and all stage accounting stay
+outside this checkpoint. [Activity profile](../../../loadtest/profiles/activity-v1.json)
+
+The complete Workbench lockfile also installed from the existing read-only
+package cache with lifecycle scripts disabled. The run installed 885 packages
+on Node 26.13.1 in a process namespace containing only loopback. The lockfile
+SHA-256 was `aa97b95f83b72c140e5a373ac4a7d3e6800ed7a38a271985f08bf25ed0e65044`.
+This verifies the locked dependencies. Task 3B still needs a digest-identified
+image built from the exact Workbench context and proof that the service and
+browser share an isolated loopback namespace.
+
 ## Self-Check: PASSED
 
 The two measured Task 1 commits and their files are present on the
 execution branch. The measured execution metadata above records Task 1.
-The Task 2 checkpoint changes only this record.
+The Task 2 checkpoint changes only this record. Task 3A is ready for
+independent review, with no browser or stage execution.
 
 ## Open conditions
 
 - **G322.** Hosted target-scale and active-browser measurements still need
-  authorized site work. Task 3 still requires evidence of the full locked
-  workbench install with `--ignore-scripts` in its execution environment
-  and a local image built from `workbench/Dockerfile` for the approved
-  test scope. No browser session or rig activity ran.
+  authorized site work. Task 3B requires a verified local image built from
+  `workbench/Dockerfile` and the shared private loopback fixture. No browser
+  session or rig activity ran.
 - **G323.** Representative hub load and resource measurements on the rig
   remain pending. The local experiment supplies no capacity figure.
