@@ -1,0 +1,38 @@
+{
+  "note": "Offline lab-core template. Supply the separate lab bundle signing public key in the run directory. The node CIDR is the VM's restricted QEMU user network. The lab run must provide encrypted static volumes.",
+  "siteName": "lab-core",
+  "domain": "lab.sterling.test",
+  "rpId": "lab.sterling.test",
+  "registry": "registry.lab.sterling.test",
+  "registryKind": "zot",
+  "clusterCidrs": {
+    "pod": "10.42.0.0/16",
+    "service": "10.43.0.0/16",
+    "nodes": "10.0.2.0/24"
+  },
+  "alertRecipients": "lab-operators@notifications.invalid",
+  "egressAllow": [],
+  "storageProvider": "lab-static",
+  "storageClass": "lab-static",
+  "storageEncryptionAtRest": "LUKS-encrypted VM disk",
+  "requestedStorage": "1Gi",
+  "sessionTimeoutMinutes": 3,
+  "signInKeys": "passkeys",
+  "acceptableAaguids": [],
+  "organizationPublicKey": "",
+  "stepUpAcr": "webauthn-fresh",
+  "stepUpMaxAgeSeconds": 300,
+  "hubs": [
+    { "name": "lab", "publicAddress": "hub.lab.sterling.test:30843", "nodePort": 30843, "storage": "1Gi" }
+  ],
+  "time": {
+    "servers": [],
+    "refclocks": ["PHC /dev/ptp0 poll 2"],
+    "nts": false,
+    "maxClockErrorMs": 1000
+  },
+  "recovery": {
+    "rtoMinutes": 480,
+    "rpoMinutes": 1440
+  }
+}
