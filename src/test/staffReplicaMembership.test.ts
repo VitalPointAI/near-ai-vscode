@@ -1357,7 +1357,7 @@ test('private founding file waits through reopening for the matching signed rost
 
 test('normal managed catch-up keeps an unaffected cell writable with matching proofs and resumes after a delay', async () => {
   const lead = await founded('managed-catchup');
-  const compartments = ['KESTREL', 'OSPREY', 'RAVEN', 'LARK'];
+  const compartments = ['KESTREL', 'OSPREY', 'RAVEN', 'LARK', 'TERN', 'WREN'];
   const clearance = { ...CLEARED_X, compartments: [...compartments].sort() };
   ok(await updateMember(lead.host, { member: 'mbr-lead', clearance }), 'declare lead clearance');
   const peer = await bringIn(lead, 'continuity-peer', 'Mo Analyst', clearance);
@@ -1392,6 +1392,8 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
   const packets = new Map([[first.handle, first.packet], [second.handle, second.packet]]);
   const attempted = new Map<string, number>();
   const taken = new Set<string>();
+  const retired = new Set<string>();
+  let coalesced = false;
   const handles = [first.handle, second.handle];
   const transport: SyncTransport = {
     project: base, hub: lead.p.deviceWriter,
@@ -1402,10 +1404,12 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
       ] }] };
     },
     entries: async (stream, writer, from) => {
-      const item = served.find(({ entry }) => entry.header.seq === from);
-      assert.ok(item);
-      return { project: base, stream, writer, entries: [item.entry], more: item !== served[served.length - 1],
-        head: { writer, seq: item.entry.header.seq, hash: item.hash } };
+      const index = served.findIndex(({ entry }) => entry.header.seq === from);
+      assert.ok(index >= 0);
+      const page = coalesced ? served.slice(index) : [served[index]];
+      const last = page[page.length - 1];
+      return { project: base, stream, writer, entries: page.map(({ entry }) => entry), more: last !== served[served.length - 1],
+        head: { writer, seq: last.entry.header.seq, hash: last.hash } };
     },
     append: async (batch) => ({ project: base, accepted: batch.entries.map(({ header }) => entryHash(header)), refused: [],
       grantsRefused: [], rosterHead: served[served.length - 1].hash, blobsPut: false }),
@@ -1418,9 +1422,10 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
     }
   };
   const options = { now: () => NOW, managed: {
-    offers: async () => [], pending: async () => handles.filter((handle) => !taken.has(handle)),
+    offers: async () => [], pending: async () => handles.filter((handle) => !taken.has(handle) && !retired.has(handle)),
     published: async () => { throw new Error('The recipient has no outgoing offer.'); },
-    accepted: async (handle: string) => { taken.add(handle); }
+    accepted: async (handle: string) => { taken.add(handle); },
+    superseded: async (handle: string) => { retired.add(handle); }
   } };
   const memory = hubMemoryOf(new MemorySecrets());
   const local = syncLocalOf(peer.p);
@@ -1457,6 +1462,28 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
   assert.equal(attempted.get(later.handle), 2);
   const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
   assert.equal((await writeInBase(reopened)).epoch, 1);
+
+  const superseded = await revise(labels[4]);
+  const latest = await revise(labels[5]);
+  for (const item of [superseded, latest]) {
+    served.push(item);
+    handles.push(item.handle);
+    packets.set(item.handle, item.packet);
+  }
+  coalesced = true;
+  const caughtUp = await syncOnce(transport, probe, memory, options);
+  assert.equal(caughtUp.pulled, 2);
+  assert.equal(caughtUp.managed, 'complete', 'the authentic superseded receipt does not keep a healthy exchange waiting');
+  assert.equal(acceptedAt.at(-1), latest.hash);
+  assert.equal(observed.at(-1), true);
+  assert.deepEqual([...retired], [superseded.handle]);
+  assert.equal(taken.has(superseded.handle), false);
+  assert.equal(taken.has(latest.handle), true);
+  const directory = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
+  const entries = readdirSync(directory).map((name) => JSON.parse(readFileSync(path.join(directory, name), 'utf8')) as { entry?: string });
+  assert.equal(entries.some(({ entry }) => entry === superseded.hash), false, 'retirement must not store an obsolete proof');
+  await syncOnce(transport, probe, memory, options);
+  assert.equal(attempted.get(superseded.handle), 1, 'the confidential callback retires the old handle without another fetch');
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
