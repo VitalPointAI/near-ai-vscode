@@ -7,7 +7,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
-import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, sha256Hex } from '../domain/replica/entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, buildEntry, entryHash, prepareEntrySigning, sha256Hex } from '../domain/replica/entry';
 import type { BuiltEntry, SealedEntry } from '../domain/replica/entry';
 import { REPLICA_DIR } from '../domain/staff/multiUser';
 import type { KeyStatusLookup } from '../domain/team/keyStatus';
@@ -449,24 +449,37 @@ for (const writer of ['device', 'hosted'] as const) {
     const store = await opened(root, depsFor(lead));
     const expected = await store.appendSnapshot();
     const signer = writer === 'device' ? lead : fixedSigner('staged-expiry-person');
-    const [candidate] = chain(signer, 1, { big: true });
+    const frozen = prepareEntrySigning({ signer: signer.signer, key: epochKey('store'), stream: STREAM, seq: 0, prev: GENESIS_PREV, epoch: 0,
+      body: { deps: [], roster: ROSTER, lamport: 1, at: AT, actor: { kind: 'person' }, kind: 'cell.rekey', data: { text: 'x'.repeat(20_000) } } });
+    const candidate = frozen.finish(signer.signer.sign(frozen.signingBytes()));
+    assert.ok(candidate);
     assert.equal(candidate.blobs.length, 1);
-    const sidecar = { entry: candidate.hash, checked: true };
     let current = true;
     let synced = false;
+    const submit = (entry: BuiltEntry, snapshot: string) => {
+      const authorize = () => current && frozen.matches(entry);
+      const sidecar = { entry: entry.hash, checked: true };
+      return writer === 'device' ? store.appendOwn([entry], snapshot, authorize, sidecar) :
+        store.ingestForeign([entry.entry], entry.blobs, async () => ({ ok: true } as const), snapshot,
+          authorize, { root: entry.hash, evidence: [sidecar] });
+    };
+    const refused = { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] };
+    const [replacement] = chain(signer, 1, { big: true });
+    assert.deepEqual(await submit(replacement, expected), refused);
+    assert.equal(await store.blob(replacement.blobs[0].hash) === undefined, true);
+    assert.deepEqual(await submit(candidate, '0'.repeat(64)), refused);
+    assert.deepEqual(await store.accessEvidence(), []);
     setFolderSyncProbe((folder) => {
       if (path.basename(folder) !== 'access-evidence') return;
       current = false;
       synced = true;
     });
     try {
-      const result = writer === 'device' ? await store.appendOwn([candidate], expected, () => current, sidecar) :
-        await store.ingestForeign([candidate.entry], candidate.blobs, async () => ({ ok: true } as const), expected,
-          () => current, { root: candidate.hash, evidence: [sidecar] });
+      assert.deepEqual(await submit(candidate, expected), refused);
       assert.equal(synced, true);
       assert.equal(store.has(candidate.hash), false);
-      assert.equal(await store.blob(candidate.blobs[0].hash), undefined);
-      assert.deepEqual(result, { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+      assert.equal(await store.blob(candidate.blobs[0].hash) === undefined, true);
+      assert.equal((await store.accessEvidence()).length, 1, 'the sidecar remains dormant');
     } finally {
       setFolderSyncProbe(undefined);
     }

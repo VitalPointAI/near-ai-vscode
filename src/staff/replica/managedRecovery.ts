@@ -80,7 +80,7 @@ function finishContext(project: ReplicaProject, roster: RosterState, info: CellI
   const continuity = snapshot.cells.flatMap((item) => {
     if (item !== prior && item.decision !== 'continues') return [];
     const eligible = item === prior ? writers : managedRecipients(roster, item);
-    return [{ cell: item.evidence.cell, ...managedPermitSubjects(roster, eligible, snapshot.predecessor, now) }];
+    return [{ cell: item.evidence.cell, epoch: item === prior ? plan.epoch : item.evidence.epoch, ...managedPermitSubjects(roster, eligible, snapshot.predecessor, now) }];
   });
   const recipients = writers.map((writer) => {
     const device = wrapDeviceAt(roster, writer, position);
@@ -88,7 +88,7 @@ function finishContext(project: ReplicaProject, roster: RosterState, info: CellI
   });
   if (recipients.some(({ format, kem }) => format === 2 && kem === undefined)) return undefined;
   return { plan, context: { project: roster.anchor.project, writer: project.deviceWriter, predecessor: snapshot.predecessor,
-    accessEntry: snapshot.priorEntry, accessRoot: snapshot.priorRoot, oldEpoch: prior.evidence.epoch, reason, evidence: hash, policy: prior.evidence.policy,
+    accessEntry: snapshot.priorEntry, accessRoot: snapshot.priorRoot, priorRevision: roster.accessRevision?.id ?? null, oldEpoch: prior.evidence.epoch, reason, evidence: hash, policy: prior.evidence.policy,
     ...(routing === undefined ? {} : { routing: sha256Hex(canonicalBytes(routing)) }),
     ...(info.base ? {} : { label: sha256Hex(canonicalBytes(info.raw)) }), recipients, continuity } };
 }

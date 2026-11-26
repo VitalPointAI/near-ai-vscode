@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto';
 import { canonicalBytes, fingerprintOf, isStrictBase64url } from '../team/canonical';
 import type { KeyStatusLookup } from '../team/keyStatus';
-import { signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
+import { payloadSigningInput, signPayload, signPayloadAsync, verifyPayload } from '../team/signedPayload';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused } from '../team/signedPayload';
 import { isRecord, isSafeIntegerInRange } from '../team/validate';
 import { IV_BYTES, KEY_BYTES, TAG_BYTES, openRaw, sealRaw } from '../state/keys';
@@ -198,6 +198,35 @@ export async function buildEntryAsync(input: Omit<BuildEntryInput, 'signer'> & {
   const sealed = sealEntry(input);
   const header = await signHeaderAsync(input.signer, sealed.unsigned);
   return 'refused' in header ? header : builtOf(header, sealed);
+}
+
+export interface PreparedEntrySigning {
+  signingBytes(): Buffer;
+  finish(signature: string): BuiltEntry | undefined;
+  matches(candidate: BuiltEntry): boolean;
+}
+
+/** Seal once. A checked signer sees the bytes of exactly this header and cannot change the entry or its blobs. */
+export function prepareEntrySigning(input: Omit<BuildEntryInput, 'signer'> & { signer: Pick<PayloadSigner, 'publicKey' | 'fingerprint'> }): PreparedEntrySigning {
+  const { fingerprint, publicKey } = input.signer;
+  const sealed = sealEntry(input);
+  const expected = payloadSigningInput({ v: 1, purpose: 'staff-replica', signer: { fingerprint, publicKey }, signedAt: REPLICA_SIGNED_AT, payload: sealed.unsigned });
+  let signed: Buffer | undefined;
+  return Object.freeze({
+    signingBytes: () => Buffer.from(expected),
+    finish(signature: string) {
+      const header = { ...sealed.unsigned, sig: signature };
+      if (!verifyHeader(header, publicKey)) return undefined;
+      const built = builtOf(header, sealed);
+      const bytes = canonicalBytes(built);
+      if (signed !== undefined && !signed.equals(bytes)) return undefined;
+      signed = bytes;
+      return JSON.parse(bytes.toString('utf8')) as BuiltEntry;
+    },
+    matches(candidate: BuiltEntry): boolean {
+      try { return signed?.equals(canonicalBytes(candidate)) === true; } catch { return false; }
+    }
+  });
 }
 
 interface SealedParts { unsigned: UnsignedHeader; body: string; blobs: SealedBlob[] }

@@ -17,7 +17,7 @@ import { granteesAt } from '../domain/replica/rosterCells';
 import { DEMO_CLEARANCE, INVITE_EXPIRES, createRosterWorld, rosterDevice } from './helpers/replicaRosterWorld';
 import type { RosterDevice, RosterWorld } from './helpers/replicaRosterWorld';
 import type { Written } from './helpers/replicaWorld';
-import { streamId } from './helpers/replicaWorld';
+import { fixedSigner, streamId } from './helpers/replicaWorld';
 import { createFinishGrantScope, createFinishIntent } from '../staff/replica/managedFinishSigning';
 
 const LEAD = rosterDevice('PAGES-LEAD', 'mbr-lead');
@@ -125,7 +125,8 @@ test('hosted Finish fixes the unpaged envelope and rejects an unrelated approval
 test('hosted Finish permits are fixed by the verified grant hash and selected session bindings', async () => {
   const grant = input(1, { wraps: wraps(1, v1Wrap) });
   const writer = grant.wraps[0].writer;
-  const session = { writer: 'a'.repeat(64), device: writer, hash: '1'.repeat(64), sessionKey: LEAD.publicKey,
+  const sessionKey = fixedSigner('hosted-finish-permit-session');
+  const session = { writer: sessionKey.writer, device: writer, hash: '1'.repeat(64), sessionKey: sessionKey.publicKey,
     slot: 1, member: 'mbr-reader', notAfter: '2026-11-26T00:00:00.000Z', roster: ROSTER };
   const priorRevision = '2'.repeat(64);
   const context = {
@@ -146,13 +147,16 @@ test('hosted Finish permits are fixed by the verified grant hash and selected se
     async sign(bytes: Buffer, options?: SignOptions) { calls.push(options?.action ?? ''); return LEAD.signer.sign(bytes); } };
   let current = true;
   const scope = createFinishGrantScope(intent, signer, 'reviewed-finish', async () => current);
-  const permit = (index: number) => scope.signerFor('permit' as 'founding', index);
+  const permit = (index: number) => scope.signerFor('permit', index);
   const refuse = async (index: number, bytes: Buffer, count: number) => {
     assert.equal(typeof await permit(index).sign(bytes), 'object');
     assert.equal(calls.length, count);
   };
   await refuse(0, accessPermitBytes(direct), 0);
+  assert.equal(scope.permitDrafts(), undefined);
   assert.equal(await scope.signerFor('founding', 0).sign(payloadSigningInput(page)), page.sig);
+  assert.deepEqual(scope.permitDrafts(), [direct, certified]);
+  assert.equal(scope.verifiedRekey(), undefined);
   await refuse(1, accessPermitBytes(certified), 1);
   await refuse(0, accessPermitBytes({ ...direct, revision: ROSTER }), 1);
   await refuse(0, accessPermitBytes({ ...direct, authority: writer }), 1);
@@ -165,6 +169,8 @@ test('hosted Finish permits are fixed by the verified grant hash and selected se
   assert.equal(await permit(1).sign(accessPermitBytes(certified)), LEAD.signer.sign(accessPermitBytes(certified)));
   await refuse(1, accessPermitBytes(certified), 3);
   assert.deepEqual(calls, ['reviewed-finish', 'reviewed-finish', 'reviewed-finish']);
+  assert.deepEqual(scope.verifiedRekey()?.operation, operation);
+  assert.equal(scope.verifiedRekey()?.revision, revision);
 });
 
 test('tracer: 2,000 v2 wraps make four signed pages, each within GRANT_MAX_BYTES, and readGrantPages gives back all 2,000 and the label', () => {

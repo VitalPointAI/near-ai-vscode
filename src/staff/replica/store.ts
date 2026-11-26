@@ -988,6 +988,7 @@ export class ReplicaStore {
         }
         if (fresh.length === 0) return { ok: true, written: 0 };
         if (stage !== undefined) await this.writeAccessStage(stage);
+        if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
         for (const [hash, wire] of blobs) await this.putBlobBytes(hash, wire);
         await this.appendLines(fresh);
         await this.writeOwnMark();
@@ -998,7 +999,6 @@ export class ReplicaStore {
       throw error;
     }
   }
-
   /** Check foreign entries and stage valid blobs. Bound waiting and held entries and defer flooded writers (D-14). */
   public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: { root: string; evidence: readonly unknown[] }): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
@@ -1068,10 +1068,10 @@ export class ReplicaStore {
           toWrite.push(item);
         }
         for (const artifact of stage?.evidence ?? []) await this.writeAccessStage(artifact);
+        if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
-          if (stage !== undefined && mayCommit?.() === false) return refusal('snapshot-changed');
           await this.appendLines(toWrite.map(({ entry }) => entry));
           await this.writeOwnMark();
         }

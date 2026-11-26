@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalBytes } from '../domain/team/canonical';
-import { GENESIS_PREV, INLINE_BODY_MAX_BYTES, buildEntry, entryHash, headerAad, openBody, sealBody, sha256Hex, signHeader, verifyHeader } from '../domain/replica/entry';
+import { GENESIS_PREV, INLINE_BODY_MAX_BYTES, buildEntry, entryHash, headerAad, openBody, prepareEntrySigning, sealBody, sha256Hex, signHeader, verifyHeader } from '../domain/replica/entry';
 import type { BuildEntryInput, EntryHeader, SealedBlob, SealedEntry, UnsignedHeader } from '../domain/replica/entry';
 import { foldEntries } from '../domain/replica/fold';
 import type { FoldResult } from '../domain/replica/fold';
@@ -50,9 +50,7 @@ function productsOf(result: FoldResult): ProductTextOutput[] {
   return result.families.doc as ProductTextOutput[];
 }
 
-test('prepared roster signing fixes one sealed body and blob and rejects any different artifact at commit', async () => {
-  const target = '../domain/replica/entry';
-  const { prepareEntrySigning } = await import(target);
+test('prepared roster signing fixes one sealed body and blob and rejects a different artifact', () => {
   const world = twoWriters();
   const signer = world.signerOf('A').signer;
   const data = { cell: world.stream, epoch: 2, grant: HASH_A, reason: 'device-revoked', detail: 'X'.repeat(INLINE_BODY_MAX_BYTES) };
@@ -72,7 +70,9 @@ test('prepared roster signing fixes one sealed body and blob and rejects any dif
   assert.equal(verifyHeader(built.entry.header, signer.publicKey), true);
   assert.equal(built.blobs.length, 1);
   assert.equal(candidate.matches(built), true);
-  assert.equal(candidate.matches({ ...built, entry: { ...built.entry, body: wrong.finish(signer.sign(wrong.signingBytes())).entry.body } }), false);
+  const replacement = wrong.finish(signer.sign(wrong.signingBytes()));
+  assert.ok(replacement);
+  assert.equal(candidate.matches({ ...built, entry: { ...built.entry, body: replacement.entry.body } }), false);
   assert.equal(candidate.matches({ ...built, blobs: [{ ...built.blobs[0], bytes: 'changed' }] }), false);
 });
 
