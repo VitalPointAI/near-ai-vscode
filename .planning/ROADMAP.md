@@ -1893,11 +1893,12 @@ Plans:
   5. With your organization's opt-in for a scale, a person sees only that an item exists, its steward and a request-access button, and only for items whose discovery description a person approved; with it off (the default), nothing shows. (KB-15)
   6. The right-side Context Graph action opens the same native landing in English and French. With a governed workspace data source, people can explore the authorized graph by strategic, operational or tactical detail, then narrow it by area of interest, activity, responsibility and time. Citations reopen the source version and span the reader can access.
 **Research flags**: Mosaic and Splink licences and dependency trees; pgvector recall at low clearance.
-**Plans:** 0 plans
+**Plans:** 1 local synthetic preparation plan. Production plans follow Phase 93.
 **UI hint**: yes
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 96 to break down)
+- [x] 96-01-PLAN.md — Fictional graph and exact citation acceptance fixture
+- [ ] Governed store, search, entity views and answer acceptance
 
 ### Phase 97: Analytics, reports, insights and views
 **Goal**: Dashboards, reports and suggested insights appear without setup, with every number computed under the viewer's clearance.
