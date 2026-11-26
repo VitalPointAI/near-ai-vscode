@@ -157,7 +157,7 @@ const ok = (batch: AppendBatch): AppendAnswer => ({ project: PROJECT, accepted: 
 test('normal sync passes only opaque managed addresses to an explicitly configured private route', async () => {
   const outgoing = 'a'.repeat(64);
   const incoming = 'b'.repeat(64);
-  const descriptor = { cell: PROJECT, recipient: ME.writer, info: { base: true } };
+  const descriptor = { cell: PROJECT, recipient: WRITER.writer, info: { base: true } };
   const uploaded: unknown[] = [];
   const received: unknown[] = [];
   const secretHandoffs: string[] = [];
