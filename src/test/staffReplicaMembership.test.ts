@@ -851,9 +851,32 @@ test('a signed clearance transition pauses the affected cell and its verified un
   const blocked = await p.appendOwn('doc.client', data, { stream: affected, accessProof, contentBlob });
   assert.equal(isProjectRefused(blocked) && blocked.refused, 'rekey-pending');
   assert.equal(existsSync(path.join(at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
-  const written = await p.appendOwn('doc.client', data, { accessProof });
+  assert.ok('ok' in await p.putGrants([], [accessProof]));
+  const written = await p.appendOwn('doc.client', data);
   assert.ok('ok' in written);
   assert.equal(written.built.entry.header.epoch, 1);
+  const reopened = project(await ReplicaProject.open(at.root, at.deps));
+  assert.ok('ok' in await reopened.appendOwn('doc.client', data));
+  assert.ok('ok' in await reopened.appendOwn('member.update', { member: member.member, name: 'Mo Analyst' }));
+  assert.ok('ok' in await reopened.appendOwn('doc.client', data), 'an ordinary roster edit leaves the permit current');
+
+  const afterNote = await head(reopened);
+  const nextId = accessRevisionId(p.projectId, revision, afterNote.hash, 'cell.access.commit', {});
+  const carried = { ...permit, revision: nextId, predecessor: afterNote.hash };
+  const next = buildAccessCommitment(nextId, [affected, p.projectId].sort().map((cell) => ({
+    cell, previousEpoch: 1, epoch: 1, decision: cell === affected ? 'pending' : 'continues',
+    salt: randomBytes(32).toString('hex'), evidence: randomBytes(32).toString('hex')
+  })), [{ permit: carried, signature: p.signer.sign(accessPermitBytes(carried)) }]);
+  assert.ok(next);
+  assert.ok('ok' in await reopened.appendOwn('cell.access.commit', { accessRevision: nextId, accessRoot: next.root }));
+  const blockedByRevision = await reopened.appendOwn('doc.client', data);
+  assert.equal(isProjectRefused(blockedByRevision) && blockedByRevision.refused, 'rekey-pending');
+  const continuity = next.proof(p.projectId, p.deviceWriter);
+  assert.ok(continuity);
+  assert.ok('ok' in await reopened.putGrants([], [continuity]));
+  assert.ok('ok' in await reopened.appendOwn('doc.client', data));
+  const stillPending = await reopened.appendOwn('doc.client', data, { stream: affected });
+  assert.equal(isProjectRefused(stillPending) && stillPending.refused, 'rekey-pending');
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {
