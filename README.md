@@ -1451,8 +1451,8 @@ you configure one. It has no sign-in of its own, so run it on `127.0.0.1` only.
 4. Once the connection check passes, the chat comes into view and suggests what to do
    next. If the project has no team yet, it starts with setting up your
    project team. You can skip it and start chatting.
-5. Open the **SovAI** view in the secondary side bar and start chatting, or
-   type `/new-project` to plan something new.
+5. Open **Chat** on the workbench's right rail and start chatting, or type
+   `/new-project` to plan something new.
 
 ## Security and privacy
 
