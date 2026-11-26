@@ -147,10 +147,13 @@ acceptance require the owner-approved disposable target and a distinct reviewer.
   3. Nothing is deleted at once: items move to a recoverable quarantine with a manifest, a Restore command brings them back, and a purge happens only after a retention window of about 7 days. (CLEAN-03)
   4. A dry-run list comes first, and the person confirms anything not on the known-disposable list, anything large or of unknown origin, and every permanent purge. (CLEAN-04)
   5. The cleanup member gets only CleanUp and read-only tools (no Bash, no Write), and a disaster test proves each never-touch rule. (CLEAN-05)
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 29 to break down)
+- [ ] 29-01-PLAN.md — Register the cleanup member and preview artifacts with verified provenance.
+- [ ] 29-02-PLAN.md — Enforce never-touch rules and record recoverable quarantine.
+- [ ] 29-03-PLAN.md — Restore artifacts and require separate human approval for permanent purge.
+- [ ] 29-04-PLAN.md — Verify a managed artifact producer and cleanup lifecycle in the built Workbench.
 
 ### Staff collaboration: multi-user staff workspaces (Phases 30 to 35, added 2026-11-19)
 
