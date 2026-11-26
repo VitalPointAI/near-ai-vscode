@@ -126,7 +126,7 @@ Profiles that need a saved API key cannot finish setup here. The planned hosted 
 your organization's secret store.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
-and not yet released. See [Hosting for many people](../architecture/overview.md#hosting-for-many-people-planned-not-yet-released).
+and not yet released. See [Hosting for many people](../architecture/overview.mdx#hosting-for-many-people-planned-not-yet-released).
 
 ## Optional hub for shared staff projects
 

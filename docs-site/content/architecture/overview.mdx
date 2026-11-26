@@ -1,8 +1,6 @@
 ---
 sidebar_label: Overview
 sidebar_position: 1
-mdx:
-  format: mdx
 ---
 
 import SystemArchitectureMap, { SystemArchitectureFlows } from '@site/src/components/SystemArchitectureMap';
@@ -14,7 +12,9 @@ The browser Workbench runs on a workstation today. Organization-hosted sessions 
 
 ## How the parts fit
 
-<SystemArchitectureMap />
+<SystemArchitectureMap>
+<img src="/img/sovai-system-architecture.webp" alt="Illustrated map of Sterling Sovereign AI showing the Workbench, trust and policy, sites and missions, governed data, the Model Factory, and release assurance." />
+</SystemArchitectureMap>
 
 In the component descriptions, **Available** means the capability is part of the current
 product or operator release. **Implemented** means the repository contains the component or
@@ -23,7 +23,19 @@ intended system. A single area can contain components at several of these stages
 
 ### Paths through the system
 
-<SystemArchitectureFlows />
+<SystemArchitectureFlows>
+
+| Path | Starts with | Control or service | Outcome |
+| --- | --- | --- | --- |
+| Run a task | Staff workspace | Agent and policy gate | Permitted tool or model |
+| Share within a mission | Authorized workspace | Mission hub validates sealed changes | Eligible peer verifies and applies |
+| Discover data (planned) | Approved source or node | Mission catalogue filters visibility | Source rechecks access on use |
+| Release across domains (planned) | Authorized release package | Approved cross-domain transfer | Destination verifies and records acceptance |
+| Improve a model (planned) | Approved corpus and workload | Training and held-out evaluation | Passport and separate activation |
+| Deploy an update | Build and review | Approved digest or signed bundle | Workstation or verified site registry |
+| Review assurance | Tests, audits and site evidence | Compliance engine | Assessor and authorizing official |
+
+</SystemArchitectureFlows>
 
 ## Workbench and agents
 

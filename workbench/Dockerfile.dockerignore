@@ -46,7 +46,10 @@
 !docs-site/content/
 !docs-site/content/index.md
 !docs-site/content/architecture/
-!docs-site/content/architecture/overview.md
+!docs-site/content/architecture/overview.mdx
+!docs-site/static/
+!docs-site/static/img/
+!docs-site/static/img/sovai-system-architecture.webp
 !docs-site/content/releases/
 !docs-site/content/releases/versions.md
 !docs-site/content/security/

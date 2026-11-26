@@ -91,92 +91,47 @@
 }
 
 .flowMap {
-  border-block: 1px solid var(--ifm-color-emphasis-300);
   margin: 1.5rem 0 2rem;
 }
 
-.flow {
-  display: grid;
-  grid-template-columns: minmax(7rem, 1fr) minmax(0, 3fr);
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.7rem 0.15rem;
-}
-
-.flow + .flow {
-  border-top: 1px solid var(--ifm-color-emphasis-200);
-}
-
-.flowLabel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  line-height: 1.25;
-}
-
-.flowLabel > span {
-  font-size: 0.76rem;
-}
-
-.steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.4rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.steps > li,
-.steps > li + li {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0;
-}
-
-.step {
-  display: grid;
-  align-items: center;
-  min-height: 3.3rem;
+.flowMap table {
+  display: table;
   width: 100%;
-  min-width: 0;
-  padding: 0.4rem 0.5rem;
-  border-left: 2px solid var(--ifm-color-primary);
-  border-radius: 0.2rem;
+  border-collapse: separate;
+  border-spacing: 0.4rem;
+}
+
+.flowMap tr {
+  background: transparent;
+  border: 0;
+}
+
+.flowMap :is(th, td) {
+  border: 0;
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.flowMap td:first-child {
+  font-weight: 650;
+}
+
+.flowMap td:not(:first-child) {
+  border-radius: 0.3rem;
   background: var(--ifm-color-emphasis-100);
-  font-size: 0.8rem;
-  line-height: 1.3;
 }
 
-.arrow {
-  flex: 0 0 auto;
-  color: var(--ifm-color-primary);
+.flowMap td:nth-child(3) {
+  border-inline-start: 2px solid var(--ifm-color-primary);
 }
 
-@media (max-width: 760px) {
-  .flow {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-  }
-}
-
-@media (max-width: 380px) {
-  .steps {
-    grid-template-columns: minmax(0, 1fr);
-    padding-left: 1rem;
+@media (max-width: 620px) {
+  .flowMap {
+    overflow-x: auto;
   }
 
-  .steps li + li {
-    margin-left: -1rem;
-  }
-
-  .arrow {
-    width: 0.65rem;
-    transform: rotate(90deg);
-  }
-
-  .step {
-    min-height: 0;
+  .flowMap table {
+    min-width: 30rem;
   }
 }

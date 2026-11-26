@@ -79,6 +79,11 @@ test('a mermaid diagram is drawn to an inline SVG that follows the theme and loa
     '```',
   ].join('\n'));
   assert.match(html, /<figure class="sterling-doc-diagram" style="--sterling-diagram-width:\d+px"><svg [^>]*role="img" aria-label="Diagram: How a request flows"/);
+  const geometry = html.match(/<figure class="sterling-doc-diagram" style="--sterling-diagram-width:(\d+)px"><svg [^>]*?viewBox="0 0 ([\d.]+) [\d.]+" width="([\d.]+)"/);
+  assert.ok(geometry, 'the SVG keeps its drawn width and viewBox');
+  const [, boxWidth, viewBoxWidth, drawnWidth] = geometry;
+  assert.equal(Number(boxWidth), Math.ceil(Number(drawnWidth)));
+  assert.equal(Number(viewBoxWidth), Number(drawnWidth));
   assert.match(html, /--bg:var\(--sterling-diagram-bg\);--fg:var\(--sterling-diagram-fg\)/);
   assert.match(html, /--_line:/, 'the derived colour variables move onto the SVG');
   assert.doesNotMatch(html, /fonts\.googleapis|@import|<style/);
@@ -138,18 +143,21 @@ test('a raw HTML block keeps its picture and text but never its scripts, handler
   assertNoRawSyntax(html);
 });
 
-test('the bundled guides with figures render them: three diagrams in the architecture overview, four screenshots in the README', async () => {
+test('the bundled architecture guide renders its illustration and searchable flows, and the README retains its screenshots', async () => {
   const renderer = createDocumentationRenderer({ root: repositoryRoot });
   const { readFile } = await import('node:fs/promises');
-  const overview = renderer.render('docs-site/content/architecture/overview.md', await readFile(path.join(repositoryRoot, 'docs-site/content/architecture/overview.md'), 'utf8'));
-  // Each diagram carries its drawn width, so the view can shrink it only as far as its labels stay readable and scroll the rest
-  // (sterling-documentation.css); the SVG keeps its viewBox, so it scales with its aspect ratio.
-  const diagrams = [...overview.html.matchAll(/<figure class="sterling-doc-diagram" style="--sterling-diagram-width:(\d+)px"><svg [^>]*?viewBox="0 0 ([\d.]+) [\d.]+" width="([\d.]+)"/g)];
-  assert.equal(diagrams.length, 3, 'three diagrams, each with its drawn width and a viewBox');
-  for (const [, box, viewBox, drawn] of diagrams) {
-    assert.equal(Number(box), Math.ceil(Number(drawn)));
-    assert.equal(Number(viewBox), Number(drawn));
-  }
+  const source = 'docs-site/content/architecture/overview.mdx';
+  const overview = renderer.render(source, await readFile(path.join(repositoryRoot, source), 'utf8'));
+  const illustration = overview.html.match(/<figure class="sterling-doc-figure"><img src="sterling-documentation\/([0-9a-f]{16}\.webp)" alt="Illustrated map of Sterling Sovereign AI[^"]*"/);
+  assert.ok(illustration, 'the overview renders a same-origin illustrated figure');
+  assert.equal(renderer.assets.get(illustration[1]), path.join(repositoryRoot, 'docs-site/static/img/sovai-system-architecture.webp'));
+  const flow = [...overview.html.matchAll(/<table>[\s\S]*?<\/table>/g)]
+    .map(([table]) => table)
+    .find((table) => table.includes('Mission hub validates sealed changes'));
+  assert.ok(flow, 'the overview renders the shared flow table');
+  assert.equal(flow.match(/<tbody>\s*([\s\S]*?)<\/tbody>/)?.[1].match(/<tr>/g)?.length, 7);
+  assert.match(overview.text, /Mission hub validates sealed changes/);
+  assert.doesNotMatch(overview.html, /SystemArchitecture|The interactive part of this page/);
   assertNoRawSyntax(overview.html);
   const readme = renderer.render('README.md', await readFile(path.join(repositoryRoot, 'README.md'), 'utf8'));
   assert.equal(readme.html.match(/<img src="sterling-documentation\/[0-9a-f]{16}\.png"/g)?.length, 4);
