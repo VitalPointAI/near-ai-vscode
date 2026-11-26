@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import { bundleHash } from '../domain/gate/bundle';
 import { gateDir, POLICY_BUNDLE_FILE } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, writeLastValid } from '../gate/clockMarker';
 import { ORGANIZATION_ISSUER_SECRET, OrganizationStore } from '../gate/organizationStore';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { ReplicaStore } from '../staff/replica/store';
 import { withFrontierPolicySource } from '../staff/replica/frontierPolicy';
 import { identityDir } from '../team/identity';
@@ -18,9 +19,8 @@ import { deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer }
 import { createRosterWorld } from './helpers/replicaRosterWorld';
 import { MemorySecrets } from './helpers/teamHarness';
 
-async function installedPolicy() {
+async function installedPolicy(secrets = new MemorySecrets()) {
   const storage = await mkdtemp(path.join(tmpdir(), 'fp-'));
-  const secrets = new MemorySecrets();
   const key = deviceKey();
   const history = await appendKeyRecord(identityDir(storage), secrets, key, { kind: 'created', key }, { now: () => new Date(FIXED_NOW) });
   assert.ok(history.ok && history.head !== undefined);
@@ -85,8 +85,8 @@ test('frontier policy refuses authentic but unselected personal rules and an unc
   assert.equal(await useSource(), undefined);
 });
 
-test('scoped prospective preparation proves the signed fence in memory and returns only a Boolean', async () => {
-  const { storage, secrets } = await installedPolicy();
+async function preparationWorld(secrets = new MemorySecrets()) {
+  const { storage, key } = await installedPolicy(secrets);
   const world = createRosterWorld();
   const genesis = world.genesis().entry.hash;
   const clearance = { scale: 'org', level: 'Restricted', compartments: [], releasability: [] };
@@ -98,18 +98,33 @@ test('scoped prospective preparation proves the signed fence in memory and retur
   world.grants.push(labelled);
   const head = world.rosterEntry(world.lead, 'cell.create', { cell: stream, epoch: 1, grant: grantHash(labelled) }, cleared.hash);
   const root = await mkdtemp(path.join(tmpdir(), 'fp-prep-'));
-  const store = await ReplicaStore.open(root, { secrets, signer: async () => world.lead.signer,
-    keyStatus: async () => () => ({ state: 'active' }), now: () => new Date(FIXED_NOW) });
-  assert.ok(store instanceof ReplicaStore);
+  let signatures = 0;
+  const signer = { ...world.lead.signer, sign: (bytes: Buffer) => { signatures += 1; return world.lead.signer.sign(bytes); } };
+  const open = async () => {
+    const store = await ReplicaStore.open(root, { secrets, signer: async () => signer,
+      keyStatus: async () => () => ({ state: 'active' }), now: () => new Date(FIXED_NOW) });
+    assert.ok(store instanceof ReplicaStore);
+    return store;
+  };
+  const store = await open();
   assert.ok('ok' in await store.ingestForeign(world.entries, [], async () => ({ ok: true })));
   assert.ok('ok' in await store.recordRosterHead(head.hash));
   const beforeGrant = await store.appendSnapshot();
   const request = { policyStorage: storage, pin: world.anchor(), stream, keys: world.epochKeyOf, snapshot: beforeGrant };
+  const addGrants = async () => {
+    assert.ok('ok' in await store.putGrant(world.project, 1, world.grants[0]));
+    assert.ok('ok' in await store.putGrant(stream, 1, labelled));
+    return { ...request, snapshot: await store.appendSnapshot() };
+  };
+  return { store, open, world, head, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key };
+}
+
+test('scoped prospective preparation proves the signed fence in memory and returns only a Boolean', async () => {
+  const secrets = new MemorySecrets();
+  const { store, world, head, request, addGrants } = await preparationWorld(secrets);
   assert.equal(await store['checkFrontierPreparation'](request), false, 'a grant in a test world alone is not a stored founding grant');
-  assert.ok('ok' in await store.putGrant(world.project, 1, world.grants[0]));
-  assert.ok('ok' in await store.putGrant(stream, 1, labelled));
+  const { snapshot } = await addGrants();
   assert.equal(await store['checkFrontierPreparation'](request), false, 'a changed replica snapshot is refused');
-  const snapshot = await store.appendSnapshot();
   const before = [...secrets.values.entries()];
   assert.equal(await store['checkFrontierPreparation']({ ...request, snapshot, keys: () => undefined }), false);
   assert.equal(await store['checkFrontierPreparation']({ ...request, snapshot }), true);
@@ -121,4 +136,99 @@ test('scoped prospective preparation proves the signed fence in memory and retur
   const folded = world.rosterEntry(world.lead, 'roster.require', { features: [CELL_ACCESS_FEATURE] }, head.hash, { at: new Date(FIXED_NOW + 10).toISOString() });
   assert.equal(world.foldRoster().positions.at(-1), folded.hash);
   assert.equal(store.has(folded.hash), false);
+});
+
+const CAPTURE_SLOT = 'nearAi.staff.frontierPolicyCapture.';
+class AmbiguousCaptureSecrets extends MemorySecrets {
+  public fault: 'none' | 'read-unavailable' = 'none';
+  private didWrite = false;
+  override async store(key: string, value: string): Promise<void> {
+    await super.store(key, value);
+    if (key.startsWith(CAPTURE_SLOT)) {
+      this.didWrite = true;
+      if (this.fault !== 'none') throw new Error('fixture write outcome is uncertain');
+    }
+  }
+  override async get(key: string): Promise<string | undefined> {
+    if (key.startsWith(CAPTURE_SLOT) && this.didWrite && this.fault === 'read-unavailable') throw new Error('fixture cannot confirm the protected write');
+    return super.get(key);
+  }
+}
+
+test('prospective policy restart does not select a staged file when directory durability was interrupted', async () => {
+  const secrets = new AmbiguousCaptureSecrets();
+  const { store, open, addGrants, replicaSignatures } = await preparationWorld(secrets);
+  const request = await addGrants();
+  const directory = path.join(store.dir, 'frontier-policy-captures');
+  setFolderSyncProbe((dir) => {
+    if (dir === directory) throw new Error('fixture interrupts directory durability');
+  });
+  try {
+    assert.equal(await store['frontierPreparation'](request, 'capture'), 'unavailable');
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.ok((await readdir(directory)).some((file) => file.endsWith('.json')));
+  assert.ok([...secrets.values.keys()].every((key) => !key.startsWith(CAPTURE_SLOT)));
+  const reopened = await open();
+  const signatures = replicaSignatures();
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  assert.equal(replicaSignatures(), signatures);
+  assert.equal(await reopened.appendSnapshot(), request.snapshot);
+});
+
+test('prospective policy reconciles an uncertain committed write exactly and refuses later trust or byte changes', async () => {
+  const secrets = new AmbiguousCaptureSecrets();
+  const { store, open, addGrants, replicaSignatures, storage, policyKey } = await preparationWorld(secrets);
+  const request = await addGrants();
+  secrets.fault = 'read-unavailable';
+  assert.equal(await store['frontierPreparation'](request, 'capture'), 'unavailable');
+  secrets.fault = 'none';
+  const protectedEntry = [...secrets.values.entries()].find(([key]) => key.startsWith(CAPTURE_SLOT));
+  assert.ok(protectedEntry);
+  const [slot, exact] = protectedEntry;
+  const pointer = JSON.parse(exact) as { artifact: string };
+  const target = path.join(store.dir, 'frontier-policy-captures', `${pointer.artifact}.json`);
+  const bytes = await readFile(target);
+  if (process.platform !== 'win32') assert.equal((await stat(target)).mode & 0o777, 0o600);
+  const reopened = await open();
+  const signatures = replicaSignatures();
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'ready');
+  assert.equal(await reopened['frontierPreparation'](request, 'capture'), 'ready');
+  assert.equal(replicaSignatures(), signatures);
+  assert.deepEqual(await readFile(target), bytes);
+  assert.equal(await reopened.appendSnapshot(), request.snapshot);
+
+  await secrets.store(slot, JSON.stringify({ ...pointer, artifact: 'a'.repeat(64) }));
+  assert.equal(await reopened['frontierPreparation'](request, 'capture'), 'refused');
+  assert.equal(replicaSignatures(), signatures);
+  await secrets.store(slot, exact);
+  await writeFile(target, Buffer.concat([bytes, Buffer.from('\n')]));
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  await writeFile(target, bytes);
+
+  const newerPolicy = policyDocumentFor({ key: policyKey, now: FIXED_NOW + 1 });
+  await writeFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), JSON.stringify(signPersonalLayer(newerPolicy, policyKey)));
+  await writeLastValid(secrets, { hash: bundleHash(newerPolicy), at: FIXED_NOW + 10 });
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'ready');
+
+  const next = deviceKey('next-policy-identity');
+  await appendKeyRecord(identityDir(storage), secrets, policyKey, { kind: 'rotated', key: policyKey, next }, { now: () => new Date(FIXED_NOW + 5) });
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  assert.equal(await reopened.appendSnapshot(), request.snapshot);
+});
+
+test('prospective policy does not reopen after an authenticated organization issuer handover in this tranche', async () => {
+  const secrets = new MemorySecrets();
+  const { store, open, addGrants, storage, replicaSignatures } = await preparationWorld(secrets);
+  const request = await addGrants();
+  assert.equal(await store['frontierPreparation'](request, 'capture'), 'ready');
+  const successor = issuerKey('successor');
+  const handover = enrolmentTextFor(successor, { serial: 2, rotation: issuerKey(), now: FIXED_NOW + 1 });
+  const changed = await new OrganizationStore(storage, secrets).accept(handover, { wordsConfirmed: true }, FIXED_NOW + 10);
+  assert.equal(changed.kind, 'rotate');
+  const reopened = await open();
+  const signatures = replicaSignatures();
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  assert.equal(replicaSignatures(), signatures);
 });

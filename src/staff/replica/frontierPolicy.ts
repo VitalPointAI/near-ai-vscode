@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { verifyOrganizationLayer } from '../../domain/gate/enrolment';
+import { verifyPolicyLayer } from '../../domain/gate/policyDocument';
 import { effectiveNow } from '../../domain/gate/bundle';
 import { dominates } from '../../domain/gate/dominance';
 import { parseClearance, parseLabel } from '../../domain/gate/labels';
@@ -89,24 +91,54 @@ export async function withFrontierPolicySource<T>(
 
 
 /** Checks just the signed founding label and exact custodian's placed wrap at the selected fence. */
-export function hasFrontierCustody(
-  roster: RosterState, stream: string, writer: string, keys: KeyRing, source: PolicySource
-): boolean {
+export function frontierCustody(
+  roster: RosterState, stream: string, writer: string, keys: KeyRing, source: Pick<PolicySource, 'effective' | 'instant'>
+): { epoch: number; grant: string; label: string } | undefined {
   const position = roster.positions.length - 1;
-  if (stream === roster.anchor.project || !isRosterWriterAt(roster, writer, position)) return false;
+  if (stream === roster.anchor.project || !isRosterWriterAt(roster, writer, position)) return undefined;
   const device = deviceAt(roster.members, writer, position);
   const epoch = epochAt(roster.cells, stream, position);
-  if (device === undefined || epoch === undefined) return false;
+  if (device === undefined || epoch === undefined) return undefined;
   const foundingHash = committedGrant(roster.cells, stream, epoch);
   const founding = roster.cells.cells.get(stream)?.grants.find((grant) =>
     grant.founding && grant.epoch === epoch && grant.hash === foundingHash && grant.from <= position);
-  if (founding === undefined || founding.grant.pages !== undefined || !founding.writers.includes(writer)) return false;
+  if (founding === undefined || founding.grant.pages !== undefined || !founding.writers.includes(writer)) return undefined;
   const key = keys(stream, epoch);
   const clearanceData = memberAt(roster.members, device.member, position)?.clearance;
-  if (key === undefined || !isRecord(clearanceData)) return false;
+  if (key === undefined || !isRecord(clearanceData)) return undefined;
   const { scales, mappings } = source.effective.labels;
   const { handling: _handling, ...declared } = clearanceData;
   const clearance = parseClearance(declared, scales);
   const label = parseLabel(openLabel(key, stream, epoch, founding.grant.labelSealed), scales);
-  return label.ok && clearance.ok && dominates(clearance.value, label.value, { scales, mappings, now: source.instant });
+  if (!label.ok || !clearance.ok || !dominates(clearance.value, label.value, { scales, mappings, now: source.instant })) return undefined;
+  return { epoch, grant: founding.hash, label: createHash('sha256').update(founding.grant.labelSealed).digest('hex') };
+}
+
+
+/** Re-verifies the exact retained envelopes. This tranche accepts only unchanged protected trust identities. */
+export async function reopenFrontierPolicy(
+  saved: unknown, current: PolicySource, storage: string, secrets: SecretStorageLike
+) {
+  if (!isRecord(saved) || !isRecord(saved.personalHistoryHead) || !isRecord(saved.organizationPin) ||
+    typeof saved.instant !== 'number' || !Number.isSafeInteger(saved.instant) || saved.instant < 0) return undefined;
+  const history = await readKeyHistory(identityDir(storage), secrets);
+  if (!history.ok || history.head === undefined || history.head.hash !== saved.personalHistoryHead.hash ||
+    history.head.seq !== saved.personalHistoryHead.seq || history.head.hash !== current.personalHistoryHead.hash ||
+    history.head.seq !== current.personalHistoryHead.seq) return undefined;
+  const pin = saved.organizationPin;
+  const trusted = current.organizationPin;
+  if (pin.publicKey !== trusted.publicKey || pin.serial !== trusted.serial || pin.enrolledAt !== trusted.enrolledAt ||
+    typeof pin.lastIssuedAt !== 'string' || pin.pending !== undefined) return undefined;
+  const personal = verifyPolicyLayer(saved.personalEnvelope, { purpose: 'policy-bundle', status: history.lookup, now: saved.instant });
+  const organization = verifyOrganizationLayer(saved.organizationEnvelope, {
+    issuerPublicKey: trusted.publicKey, lastIssuedAt: pin.lastIssuedAt, now: saved.instant
+  });
+  if (personal.state !== 'valid' || personal.wireVersion !== 2 || !isRecord(saved.personalSigner) || !isRecord(saved.personalSignerStatus) ||
+    !canonicalBytes(personal.signer).equals(canonicalBytes(saved.personalSigner)) ||
+    !canonicalBytes(history.lookup(personal.signer)).equals(canonicalBytes(saved.personalSignerStatus)) || !organization.ok ||
+    organization.hash !== pin.layerHash || organization.issuedAt !== pin.lastIssuedAt) return undefined;
+  return {
+    instant: saved.instant,
+    effective: composeLayers({ personal: personal.document, organization: organization.document }).effective
+  };
 }

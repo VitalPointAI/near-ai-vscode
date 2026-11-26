@@ -79,7 +79,7 @@ import { foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
 import { verifyEntry } from '../../domain/replica/verify';
-import { hasFrontierCustody, withFrontierPolicySource } from './frontierPolicy';
+import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from './frontierPolicy';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
@@ -90,6 +90,10 @@ export const REPLICA_LOCK_FILE = 'replica.lock';
 export const STORE_GITIGNORE = '*\n!.gitignore\n';
 
 const ACCEPTED_FRONTIER_DIR = 'accepted-frontiers';
+const FRONTIER_POLICY_DIR = 'frontier-policy-captures';
+const FRONTIER_POLICY_SLOT = 'nearAi.staff.frontierPolicyCapture.';
+type FrontierPreparationRequest = { policyStorage: string; pin: RosterAnchor; stream: string; keys: KeyRing; snapshot: string };
+type FrontierPreparationVerdict = 'ready' | 'refused' | 'unavailable';
 const MAX_ACCEPTED_FRONTIER_BYTES = 32 * 1024 * 1024;
 const FRONTIER_REFUSED = { status: 'refused' } as const;
 
@@ -1269,47 +1273,118 @@ export class ReplicaStore {
       await this.writeAccessStage(evidence);
     });
   }
-  /** Synthetic preparation check. The signed candidate stays in this scope and only the Boolean leaves it. */
-  private async checkFrontierPreparation(request: { policyStorage: string; pin: RosterAnchor; stream: string; keys: KeyRing; snapshot: string }): Promise<boolean> {
+  /** The synthetic check never selects or persists the private candidate. */
+  private async checkFrontierPreparation(request: FrontierPreparationRequest): Promise<boolean> {
+    return await this.frontierPreparation(request, 'check') === 'ready';
+  }
+
+  /** Fixture-only preparation and prospective durability. Only an inert verdict leaves the checked scope. */
+  private async frontierPreparation(request: FrontierPreparationRequest, mode: 'check' | 'capture' | 'reopen'): Promise<FrontierPreparationVerdict> {
     const signer = await this.deps.signer().catch(() => undefined);
-    if (signer === undefined || signer.publicKey !== this.own.publicKey || !STREAM_ID_PATTERN.test(request.stream)) return false;
+    if (signer === undefined || signer.publicKey !== this.own.publicKey || !STREAM_ID_PATTERN.test(request.stream)) return 'refused';
     const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
-      (capture) => this.locked(async () => {
+      (capture) => this.locked(async (): Promise<FrontierPreparationVerdict> => {
         await this.verifyAppendSnapshot(request.snapshot);
         const { grants } = await this.grants();
         const { pin, keys } = request;
         const policy = await capture();
-        if (policy === undefined) return false;
+        if (policy === undefined) return 'refused';
         const { source } = policy;
         const now = new Date(source.instant);
         const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed), keys,
           blobs: () => undefined, now });
         const predecessor = roster.positions.at(-1);
         if (predecessor === undefined || predecessor !== this.mark?.rosterHead || !this.byHash.has(pin.genesisHash) ||
-          roster.pending.length !== 0 || roster.requiredFrom.has(CELL_ACCESS_FEATURE) ||
-          !hasFrontierCustody(roster, request.stream, this.own.writer, keys, source)) return false;
-
+          roster.pending.length !== 0 || roster.requiredFrom.has(CELL_ACCESS_FEATURE)) return 'refused';
         const epoch = epochAt(roster.cells, pin.project, roster.positions.length - 1);
         const key = epoch === undefined ? undefined : keys(pin.project, epoch);
         const head = this.head(pin.project, this.own.writer);
         if (epoch === undefined || key === undefined || head === undefined ||
-          this.files.get(fileId(pin.project, this.own.writer))?.bySeq.get(head.seq)?.length !== 1) return false;
+          this.files.get(fileId(pin.project, this.own.writer))?.bySeq.get(head.seq)?.length !== 1) return 'refused';
         const ctx = { roster: rosterView(roster), keys, blobs: () => undefined, now };
         const previous = verifyEntry(this.byHash.get(head.hash), ctx);
-        if (previous.status !== 'verified' || previous.entry.keep !== undefined) return false;
+        if (previous.status !== 'verified' || previous.entry.keep !== undefined) return 'refused';
+        const lamport = previous.entry.body.lamport + 1;
+        const matches = (entry: unknown, requirement: string, instant: number) => {
+          const checked = verifyEntry(entry, { ...ctx, now: new Date(instant) });
+          if (checked.status !== 'verified' || checked.entry.keep !== undefined || checked.entry.hash !== requirement) return false;
+          const { writer, stream, seq, prev, epoch: signedEpoch } = checked.entry.header;
+          const { body, data } = checked.entry;
+          return writer === this.own.writer && stream === pin.project && seq === head.seq + 1 && prev === head.hash && signedEpoch === epoch &&
+            body.kind === 'roster.require' && body.actor.kind === 'person' && body.at === new Date(instant).toISOString() &&
+            body.roster === predecessor && body.lamport === lamport && body.deps.length === 0 && isRecord(data) &&
+            data.rosterPrev === predecessor && Array.isArray(data.features) && data.features.length === 1 && data.features[0] === CELL_ACCESS_FEATURE;
+        };
+        const current = async () => {
+          if (!await policy.recheck()) return false;
+          await this.verifyAppendSnapshot(request.snapshot);
+          return this.mark?.rosterHead === predecessor;
+        };
+        const scope = sha256Hex(canonicalBytes(['private-frontier-policy-capture/1', this.dir, pin.project, pin.genesisHash,
+          request.stream, this.own.writer, predecessor, request.snapshot]));
+        const slot = FRONTIER_POLICY_SLOT + scope;
+        const reference = mode === 'check' ? undefined : await this.deps.secrets.get(slot);
+        if (reference !== undefined) {
+          const saved = await this.readFrontierPolicyCapture(scope, reference);
+          if (saved === undefined) return 'refused';
+          const historical = await reopenFrontierPolicy(saved.policy, source, request.policyStorage, this.deps.secrets);
+          if (historical === undefined || !matches(saved.entry, saved.requirement, historical.instant)) return 'refused';
+          const custody = frontierCustody(roster, request.stream, this.own.writer, keys, historical);
+          if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return 'refused';
+          return await current() ? 'ready' : 'refused';
+        }
+        if (mode === 'reopen') return 'refused';
+        const custody = frontierCustody(roster, request.stream, this.own.writer, keys, source);
+        if (custody === undefined) return 'refused';
+
         const at = now.toISOString();
         const built = buildEntry({ signer, key, stream: pin.project, epoch, seq: head.seq + 1, prev: head.hash,
-          body: { deps: [], roster: predecessor, lamport: previous.entry.body.lamport + 1, at, actor: { kind: 'person' },
+          body: { deps: [], roster: predecessor, lamport, at, actor: { kind: 'person' },
             kind: 'roster.require', data: { rosterPrev: predecessor, features: [CELL_ACCESS_FEATURE] } } });
-        const checked = verifyEntry(built.entry, ctx);
-        if (checked.status !== 'verified' || checked.entry.keep !== undefined || checked.entry.hash !== built.hash ||
-          checked.entry.header.writer !== this.own.writer || checked.entry.body.kind !== 'roster.require' ||
-          checked.entry.body.at !== at || checked.entry.body.roster !== predecessor) return false;
-        if (!await policy.recheck()) return false;
-        await this.verifyAppendSnapshot(request.snapshot);
-        return this.mark?.rosterHead === predecessor;
+        if (!matches(built.entry, built.hash, source.instant) || !await current()) return 'refused';
+        if (mode === 'check') return 'ready';
+
+        const bytes = canonicalBytes({ v: 1, scope, requirement: built.hash, entry: built.entry, custody, salt: randomBytes(32).toString('hex'),
+          policy: { instant: source.instant, personalEnvelope: source.personalEnvelope, personalHistoryHead: source.personalHistoryHead,
+            personalSigner: source.personalSigner, personalSignerStatus: source.personalSignerStatus,
+            organizationEnvelope: source.organizationEnvelope, organizationPin: source.organizationPin } });
+        const artifact = frontierFileHandle(scope, bytes);
+        const directory = await ensureDir(this.dir, [FRONTIER_POLICY_DIR]);
+        const file = `${artifact}.json`;
+        await this.writeSigned([FRONTIER_POLICY_DIR], file, bytes, 0o600);
+        await syncFolder(directory);
+        await syncFolder(this.dir);
+        const durable = await readFrontierFile(path.join(directory, file));
+        if (durable === undefined || !durable.equals(bytes) || !await current() || await this.deps.secrets.get(slot) !== undefined) return 'refused';
+        const expected = canonicalBytes({ v: 1, scope, requirement: built.hash, artifact }).toString('utf8');
+        try {
+          await this.deps.secrets.store(slot, expected);
+        } catch {
+          // An error from store does not prove that the protected write failed. Confirm its result without re-signing.
+        }
+        const back = await this.deps.secrets.get(slot);
+        if (back === undefined) return 'unavailable';
+        if (back !== expected || await this.readFrontierPolicyCapture(scope, back) === undefined || !await current()) return 'refused';
+        return 'ready';
       }));
-    return result === true;
+    return result ?? 'unavailable';
+  }
+
+  private async readFrontierPolicyCapture(scope: string, reference: string) {
+    let pointer: unknown;
+    try { pointer = JSON.parse(reference) as unknown; } catch { return undefined; }
+    if (!isRecord(pointer) || Object.keys(pointer).length !== 4 || pointer.v !== 1 || pointer.scope !== scope ||
+      typeof pointer.artifact !== 'string' || !HASH_PATTERN.test(pointer.artifact) ||
+      typeof pointer.requirement !== 'string' || !HASH_PATTERN.test(pointer.requirement) ||
+      canonicalBytes(pointer).toString('utf8') !== reference ||
+      await checkPath(this.root, [...this.parts, FRONTIER_POLICY_DIR])) return undefined;
+    const bytes = await readFrontierFile(path.join(this.dir, FRONTIER_POLICY_DIR, `${pointer.artifact}.json`));
+    if (bytes === undefined || frontierFileHandle(scope, bytes) !== pointer.artifact) return undefined;
+    const value: unknown = JSON.parse(bytes.toString('utf8'));
+    if (!isRecord(value) || Object.keys(value).length !== 7 || value.v !== 1 || value.scope !== scope ||
+      value.requirement !== pointer.requirement || typeof value.salt !== 'string' || !HASH_PATTERN.test(value.salt) ||
+      !canonicalBytes(value).equals(bytes)) return undefined;
+    return { entry: value.entry, requirement: pointer.requirement, policy: value.policy, custody: value.custody };
   }
 
   /** Keeps immutable verified history outside the live log, blob and grant namespaces. */
