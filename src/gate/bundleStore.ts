@@ -152,7 +152,7 @@ function verifyEnvelope(envelope: unknown, status: KeyStatusLookup, nowMs: numbe
 }
 
 // Reads the file and verifies it. Every cause the person can fix is its own reason; nothing is guessed and nothing is written.
-async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, nowMs: number, marker: LastValid): Promise<Disk> {
+async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, nowMs: number, marker: LastValid, pinnedStatus?: KeyStatusLookup): Promise<Disk> {
   const file = bundleFile(globalStorageDir);
   let text: string;
   try {
@@ -169,7 +169,7 @@ async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, 
   } catch {
     return { state: failedClosed('unparseable') };
   }
-  const status = await localKeyStatus(identityDir(globalStorageDir), secrets);
+  const status = pinnedStatus ?? await localKeyStatus(identityDir(globalStorageDir), secrets);
   const lastValidAt = marker.present ? marker.at : undefined;
   // The status is this install's own key history, so a policy that verifies but cannot be read is the person's own (Show Policy may offer Reset for it).
   const read = verifyEnvelope(envelope, status, nowMs, lastValidAt, true);
@@ -180,6 +180,18 @@ async function verifyDisk(globalStorageDir: string, secrets: SecretStorageLike, 
     return { state: failedClosed('replaced'), envelope };
   }
   return read.stored === undefined ? { state, envelope } : { state, envelope, stored: read.stored };
+}
+
+/** Reads the exact committed V2 personal envelope. The frontier host holds the bundle and key-history locks. */
+export async function readCommittedFrontierPersonal(
+  globalStorageDir: string, secrets: SecretStorageLike, instant: number, marker: LastValid, historyStatus: KeyStatusLookup
+) {
+  if (!marker.present || marker.at === undefined || marker.hash === undefined || marker.pending !== undefined) return undefined;
+  const disk = await verifyDisk(globalStorageDir, secrets, instant, marker, historyStatus);
+  if (disk.state.state !== 'valid' || disk.state.hash !== marker.hash || !isLayerEnvelope(disk.envelope)) return undefined;
+  const document = parsePolicyDocument(disk.stored);
+  if (!document.ok) return undefined;
+  return { envelope: disk.envelope, document: document.value, signer: disk.state.signer, status: historyStatus(disk.state.signer) };
 }
 
 function lastValidAtOf(marker: LastValid): number | undefined {

@@ -574,6 +574,17 @@ export class OrganizationStore {
     }
   }
 
+  /** Reads only the exact committed envelope for an already locked frontier capture. */
+  public async readCommittedFrontierLayer(instant: number) {
+    const read = await readOrganizationPin(this.secrets);
+    if (read.state !== 'pinned' || read.pin.pending !== undefined) return undefined;
+    const raw = await this.readLayer();
+    if (raw.state !== 'ok' || !isRecord(raw.value)) return undefined;
+    const checked = verifyOrganizationLayer(raw.value, { issuerPublicKey: read.pin.publicKey, now: instant, lastIssuedAt: read.pin.lastIssuedAt });
+    if (!checked.ok || checked.hash !== read.pin.layerHash || checked.issuedAt !== read.pin.lastIssuedAt) return undefined;
+    return { envelope: raw.value, document: checked.document, pin: read.pin };
+  }
+
   private async loadAt(effective: number): Promise<OrganizationLoad> {
     const read = await readOrganizationPin(this.secrets);
     // A first enrolment that did not commit is no organization layer, whatever files it wrote (D-13, D-57): its pending pin is the evidence.
