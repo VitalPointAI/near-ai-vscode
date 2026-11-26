@@ -71,6 +71,9 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
+import { openAcceptedFrontier } from '../../domain/replica/acceptedFrontier';
+import type { FrontierArchiveResult, FrontierCustodyContext } from '../../domain/replica/acceptedFrontier';
+import type { KeyRing } from '../../domain/replica/rosterView';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
@@ -79,6 +82,19 @@ import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
 export const REPLICA_LOCK_FILE = 'replica.lock';
 /** The exact text of the store's own ignore file. */
 export const STORE_GITIGNORE = '*\n!.gitignore\n';
+
+const ACCEPTED_FRONTIER_DIR = 'accepted-frontiers';
+const MAX_ACCEPTED_FRONTIER_BYTES = 32 * 1024 * 1024;
+const FRONTIER_REFUSED = { status: 'refused' } as const;
+
+interface FrontierStoreRequest extends FrontierCustodyContext {
+  stream: string;
+  reader: string;
+  expectedSnapshot: string;
+  historicalKey: KeyRing;
+}
+
+type FrontierStoreResult = { status: 'ready'; handle: string } | { status: 'waiting' | 'refused' };
 
 // The longest body a well-formed entry can carry, as base64url: an inline body is at most INLINE_BODY_MAX_BYTES plus sealing.
 const MAX_BODY_CHARS = Math.ceil(((INLINE_BODY_MAX_BYTES + SEALED_OVERHEAD + 3) * 4) / 3);
@@ -357,7 +373,7 @@ async function ensureDir(base: string, parts: readonly string[]): Promise<string
 }
 
 /** Writes bytes to a temporary file beside `file`, syncs it, then renames it into place. */
-async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644): Promise<void> {
+async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644, beforePublish?: () => Promise<void>): Promise<void> {
   const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, mode);
   try {
@@ -370,10 +386,42 @@ async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644): 
   }
   await handle.close();
   try {
+    await beforePublish?.();
     await rename(temporary, file);
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
+  }
+}
+
+function frontierFileHandle(scope: string, bytes: Buffer): string {
+  return sha256Hex(canonicalBytes([scope, sha256Hex(bytes)]));
+}
+
+/** Reads bounded exact bytes without following links or an unbounded file growth. */
+async function readFrontierFile(file: string): Promise<Buffer | undefined> {
+  let handle: FileHandle;
+  try {
+    handle = await open(file, constants.O_RDONLY | NOFOLLOW);
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return undefined;
+    throw error;
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_ACCEPTED_FRONTIER_BYTES) throw new Refusal('unreadable');
+    const bytes = Buffer.alloc(info.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) throw new Refusal('unreadable');
+      offset += bytesRead;
+    }
+    const extra = await handle.read(Buffer.alloc(1), 0, 1, offset);
+    if (extra.bytesRead !== 0) throw new Refusal('unreadable');
+    return bytes;
+  } finally {
+    await handle.close();
   }
 }
 
@@ -1215,6 +1263,64 @@ export class ReplicaStore {
       await this.writeAccessStage(evidence);
     });
   }
+  /** Keeps immutable verified history outside the live log, blob and grant namespaces. */
+  public async putAcceptedFrontier(input: Buffer, request: FrontierStoreRequest): Promise<FrontierStoreResult> {
+    if (input.length > MAX_ACCEPTED_FRONTIER_BYTES) return FRONTIER_REFUSED;
+    const bytes = Buffer.from(input);
+    try {
+      const value: unknown = JSON.parse(bytes.toString('utf8'));
+      return await this.locked(async (): Promise<FrontierStoreResult> => {
+        const scope = await this.frontierScope(request);
+        if (scope === undefined) return FRONTIER_REFUSED;
+        const verified = openAcceptedFrontier(value, { ...request, expectedStream: request.stream });
+        if (verified.status !== 'ready') return verified;
+        const handle = frontierFileHandle(scope, bytes);
+        const dir = await ensureDir(this.dir, [ACCEPTED_FRONTIER_DIR]);
+        const file = path.join(dir, `${handle}.json`);
+        const existing = await readFrontierFile(file);
+        if (existing !== undefined) return existing.equals(bytes) ? { status: 'ready', handle } : FRONTIER_REFUSED;
+
+        await syncFolder(dir);
+        await syncFolder(this.dir);
+        await writeAtomic(file, bytes, 0o600, async () => {
+          if (await this.frontierScope(request) !== scope ||
+            openAcceptedFrontier(value, { ...request, expectedStream: request.stream }).status !== 'ready') throw new Refusal('snapshot-changed');
+        });
+        await syncFolder(dir);
+        return { status: 'ready', handle };
+      });
+    } catch {
+      return FRONTIER_REFUSED;
+    }
+  }
+
+  /** Re-verifies the same bytes and signed selection under the replica lock after a restart. */
+  public async openStoredAcceptedFrontier(handle: string, request: FrontierStoreRequest): Promise<FrontierArchiveResult> {
+    if (!HASH_PATTERN.test(handle)) return FRONTIER_REFUSED;
+    try {
+      return await this.locked(async () => {
+        const scope = await this.frontierScope(request);
+        if (scope === undefined || await checkPath(this.root, [...this.parts, ACCEPTED_FRONTIER_DIR])) return FRONTIER_REFUSED;
+        const bytes = await readFrontierFile(path.join(this.dir, ACCEPTED_FRONTIER_DIR, `${handle}.json`));
+        if (bytes === undefined || frontierFileHandle(scope, bytes) !== handle || await this.frontierScope(request) !== scope) return FRONTIER_REFUSED;
+        return openAcceptedFrontier(JSON.parse(bytes.toString('utf8')), { ...request, expectedStream: request.stream });
+      });
+    } catch {
+      return FRONTIER_REFUSED;
+    }
+  }
+
+  private async frontierScope(request: FrontierStoreRequest): Promise<string | undefined> {
+    if (request.reader !== this.own.writer || !STREAM_ID_PATTERN.test(request.stream)) return undefined;
+    await this.verifyAppendSnapshot(request.expectedSnapshot);
+    const head = request.roster.positions.at(-1);
+    const selected = request.roster.accessRevision;
+    if (head === undefined || head !== this.mark?.rosterHead || selected?.entry !== request.accessEntry) return undefined;
+    const stored = [head, request.pin.genesis, selected.entry];
+    if (!stored.every((hash) => this.byHash.get(hash)?.header.stream === request.pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return undefined;
+    return sha256Hex(canonicalBytes(['accepted-frontier-store/1', request.pin.project, request.pin.genesis, head, selected.entry, selected.root, request.stream, request.reader]));
+  }
+
   public managedHandoffs(project: string, writer: string, now: () => Date) {
     return openManagedHandoffs(this.dir, project, writer, now, {
       locked: (work) => this.locked(work), folder: () => ensureDir(this.dir, ['managed-handoffs']), writeAtomic

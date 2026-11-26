@@ -39,7 +39,7 @@ export interface FrontierStatement {
   membership: FrontierMembership;
 }
 
-interface FrontierCustodyContext {
+export interface FrontierCustodyContext {
   pin: { project: string; genesis: string };
   roster: RosterState;
   accessEntry: string;
@@ -208,7 +208,7 @@ export function verifiesFrontierCustody(value: unknown, context: FrontierCustody
   return clearance.ok && label.ok && dominates(clearance.value, label.value, historical.context);
 }
 
-type FrontierArchiveResult =
+export type FrontierArchiveResult =
   | { status: 'waiting' | 'refused' }
   | { status: 'ready'; entries: readonly SealedEntry[]; blobs: readonly SealedBlob[] };
 
@@ -266,11 +266,12 @@ function completeChain(entries: readonly SealedEntry[], heads: readonly EntryHea
 }
 
 /** Opens private historical objects from an independently authenticated, selected file. No live store or key-settlement path is involved. */
-export function openAcceptedFrontier(file: unknown, context: FrontierCustodyContext & { historicalKey: KeyRing }): FrontierArchiveResult {
+export function openAcceptedFrontier(file: unknown, context: FrontierCustodyContext & { historicalKey: KeyRing; expectedStream?: string }): FrontierArchiveResult {
   if (!closed(file, ['signed', 'entries', 'blobs', 'proofs']) || !isRecord(file.signed) ||
     !validStatement(file.signed.payload) || !Array.isArray(file.entries) || !Array.isArray(file.blobs) || !Array.isArray(file.proofs) ||
     !verifiesFrontierCustody(file.signed, context)) return REFUSED;
   const { membership, heads, stream, before } = file.signed.payload;
+  if (context.expectedStream !== undefined && stream !== context.expectedStream) return REFUSED;
   if (file.entries.length > membership.entries || file.blobs.length > membership.blobs ||
     file.proofs.length > membership.entries + membership.blobs) return REFUSED;
   if (file.entries.length < membership.entries || file.proofs.length < membership.entries + membership.blobs) return WAITING;
