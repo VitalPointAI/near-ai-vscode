@@ -48,4 +48,3 @@ test('D-13: without a gate host every caller is decided with the default route, 
     assert.equal(withSessionRoute(route, () => routeFactsFor(INPUT).use), 'T1');
   }
 });
-

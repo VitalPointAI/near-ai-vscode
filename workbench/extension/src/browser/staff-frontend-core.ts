@@ -44,4 +44,3 @@ export function createStaffFrontendModule(parts: StaffFrontendParts): ContainerM
     parts.status(bind);
   });
 }
-
