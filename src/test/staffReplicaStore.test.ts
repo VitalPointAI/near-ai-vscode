@@ -20,6 +20,7 @@ import { MARK_LISTS_DIR, MARK_VERSION, MAX_MARK_LISTED, MAX_MARK_WAITING, REPLIC
 import type { ReplicaMark } from '../staff/replica/marks';
 import { FLOODED_REASON, FLOODED_TEXT, MAX_REFUSED_PER_WRITER, ReplicaStore, START_AGAIN_COMMAND_TITLE, STORE_GITIGNORE, STORE_REFUSALS } from '../staff/replica/store';
 import type { ForeignCheck, IngestResult, ReplicaStoreDeps, StoreRefused } from '../staff/replica/store';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { FileSecrets } from './helpers/replicaStoreChild';
 import type { StoreChildMessage } from './helpers/replicaStoreChild';
 import { epochKey, fixedSigner, streamId } from './helpers/replicaWorld';
@@ -440,6 +441,37 @@ test('both local signed write paths revalidate expiring authority before persist
     assert.equal(await store.blob(entry.blobs[0].hash), undefined);
   }
 });
+
+for (const writer of ['device', 'hosted'] as const) {
+  test(`a staged ${writer} write that expires during sidecar sync makes no entry or content blob live`, async () => {
+    const root = project();
+    const lead = fixedSigner('staged-expiry-device');
+    const store = await opened(root, depsFor(lead));
+    const expected = await store.appendSnapshot();
+    const signer = writer === 'device' ? lead : fixedSigner('staged-expiry-person');
+    const [candidate] = chain(signer, 1, { big: true });
+    assert.equal(candidate.blobs.length, 1);
+    const sidecar = { entry: candidate.hash, checked: true };
+    let current = true;
+    let synced = false;
+    setFolderSyncProbe((folder) => {
+      if (path.basename(folder) !== 'access-evidence') return;
+      current = false;
+      synced = true;
+    });
+    try {
+      const result = writer === 'device' ? await store.appendOwn([candidate], expected, () => current, sidecar) :
+        await store.ingestForeign([candidate.entry], candidate.blobs, async () => ({ ok: true } as const), expected,
+          () => current, { root: candidate.hash, evidence: [sidecar] });
+      assert.equal(synced, true);
+      assert.equal(store.has(candidate.hash), false);
+      assert.equal(await store.blob(candidate.blobs[0].hash), undefined);
+      assert.deepEqual(result, { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+    } finally {
+      setFolderSyncProbe(undefined);
+    }
+  });
+}
 
 test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
   const { root, lead, secrets, built } = await threeAppended();
