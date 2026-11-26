@@ -46,9 +46,9 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { isSupersededManagedContinuity, openManagedGrantArtifact, previewManagedContinuity, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
+import { isSupersededManagedContinuity, openManagedGrantArtifact, previewManagedContinuity, preparePlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
-import type { ManagedPacket } from './managedSync';
+import type { ManagedPacket, ManagedStagedSend } from './managedSync';
 import { managedAccessActionBytes, managedActionCurrent, verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -570,19 +570,20 @@ export class ReplicaProject {
       return { ok: true as const, stored: read.length, opened: this.keys.size - before };
     });
   }
-
   public managedHandoffInbox() {
-    return this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) === true ? this.store.managedHandoffInbox(this.projectId, this.device.writer, () => this.now()) : undefined;
+    return this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) === true ? this.store.managedHandoffs(this.projectId, this.device.writer, () => this.now()).inbox() : undefined;
   }
-
-  public sealManagedHandoff(input: ManagedHandoff) {
+  public sealManagedHandoff(input: ManagedHandoff): Promise<ManagedPacket | undefined>;
+  public sealManagedHandoff(input: ManagedHandoff, durable: true): Promise<ManagedStagedSend | undefined>;
+  public sealManagedHandoff(input: ManagedHandoff, durable = false): Promise<ManagedPacket | ManagedStagedSend | undefined> {
     return this.exclusive(async () => {
       const { roster } = await this.foldNow();
       if (!isRosterWriterAt(roster, this.device.writer, roster.positions.length - 1)) return undefined;
-      return sealPlacedManagedHandoff(roster, this.evidence.map(({ value }) => value), input, this.now());
+      const prepared = preparePlacedManagedHandoff(roster, this.evidence.map(({ value }) => value), input, this.now());
+      if (!durable || prepared === undefined) return prepared?.seal();
+      return this.store.managedHandoffs(this.projectId, this.device.writer, () => this.now()).stage(prepared, await this.store.appendSnapshot());
     });
   }
-
   public supersededManagedContinuity(value: unknown): Promise<boolean> {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return false;
@@ -590,7 +591,6 @@ export class ReplicaProject {
       return isSupersededManagedContinuity((await this.foldNow()).roster, { writer, x25519, kem }, value, this.now());
     });
   }
-
   public ingestManagedGrantDelivery(file: unknown, source: 'file' | 'peer' = 'file'): Promise<{ ok: true } | ProjectRefused> {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
@@ -1176,7 +1176,7 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
     blobsCitedBy: (hashes) => project.blobsCitedBy(hashes),
     grants: () => project.signedGrants(),
     managed: {
-      seal: (offer) => project.sealManagedHandoff(offer),
+      seal: (offer) => project.sealManagedHandoff(offer), prepare: (offer) => project.sealManagedHandoff(offer, true),
       stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer')),
       superseded: (value) => project.supersededManagedContinuity(value)
     },

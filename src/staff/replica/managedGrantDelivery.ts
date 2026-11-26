@@ -29,6 +29,12 @@ const PADDING_BUCKET = 16 * 1024;
 const HEADER = 4;
 
 interface Packet { v: 1; wrapped: string; body: SealedBlob }
+interface SealedDelivery { handle: string; packet: Packet }
+export interface PreparedManagedHandoff {
+  id: string;
+  expiresAt: number;
+  seal(): SealedDelivery | undefined;
+}
 interface ManagedGrantDelivery {
   recipient: string;
   opening: unknown;
@@ -46,7 +52,11 @@ function address(handle: string): string {
 }
 
 /** Seal a placed grant and its private authorization for exactly one admitted recipient. */
-export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGrantDelivery): { handle: string; packet: Packet } | undefined {
+export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGrantDelivery): SealedDelivery | undefined {
+  return prepareGrantDelivery(roster, input)?.seal();
+}
+
+function prepareGrantDelivery(roster: RosterState, input: ManagedGrantDelivery): PreparedManagedHandoff | undefined {
   const { recipient, opening, grant, pages, info, routing } = input;
   const now = input.now.getTime();
   const revision = roster.accessRevision;
@@ -73,7 +83,7 @@ export function sealManagedGrantDelivery(roster: RosterState, input: ManagedGran
   const original = wrapFormatOf(verified.grant.wraps.find(({ writer }) => writer === recipient)?.wrap ?? '');
   if (!original.ok) return undefined;
   const format = original.format === 2 ? 2 : formatForDevice(choice, device);
-  return sealPayload(roster.anchor.project, device, format, now, {
+  return preparePayload(roster.anchor.project, device, format, now, {
     grants: [grant, ...pages], opening, ...(proof === undefined ? {} : { accessProof: proof })
   });
 }
@@ -82,7 +92,7 @@ interface ManagedGrantHandoff { cell: string; recipient: string; info: WrapCell;
 export type ManagedHandoff = ManagedGrantHandoff | { recipient: string; continuity: readonly string[] };
 
 /** Offer only the exact current proof and a placed grant from selected history; continuity can travel independently. */
-export function sealPlacedManagedHandoff(roster: RosterState, evidence: readonly unknown[], input: ManagedHandoff, now: Date) {
+export function preparePlacedManagedHandoff(roster: RosterState, evidence: readonly unknown[], input: ManagedHandoff, now: Date): PreparedManagedHandoff | undefined {
   const revision = roster.accessRevision;
   const head = roster.positions.length - 1;
   if (revision === undefined || roster.pending.length > 0 || deviceAt(roster.members, input.recipient, head)?.kind !== 'person') return undefined;
@@ -99,7 +109,7 @@ export function sealPlacedManagedHandoff(roster: RosterState, evidence: readonly
     const requested = new Set(input.continuity);
     if (requested.size === 0 || requested.size !== input.continuity.length || requested.size > revision.cells.length) return undefined;
     const accessProofs = [...proofs].filter(([cell]) => requested.has(cell)).map(([, proof]) => proof);
-    return accessProofs.length === requested.size ? sealManagedContinuityDelivery(roster, input.recipient, { entry: revision.entry, accessProofs }, now) : undefined;
+    return accessProofs.length === requested.size ? prepareContinuityDelivery(roster, input.recipient, { entry: revision.entry, accessProofs }, now) : undefined;
   }
   const opening = current.flatMap((stage) => stage.openings).find((value) =>
     openGrantEvidence(roster.anchor.project, roster.accessHistory, value)?.evidence.cell === input.cell);
@@ -109,14 +119,18 @@ export function sealPlacedManagedHandoff(roster: RosterState, evidence: readonly
     const issued = stage.founding ?? stage.supplemental;
     if (issued?.recipients.includes(input.recipient) !== true) continue;
     const [grant, ...pages] = issued.grants;
-    const sealed = sealManagedGrantDelivery(roster, { ...input, now, accessProof, opening, grant, pages });
-    if (sealed !== undefined) return sealed;
+    const plan = prepareGrantDelivery(roster, { ...input, now, accessProof, opening, grant, pages });
+    if (plan !== undefined) return plan;
   }
   return undefined;
 }
 
 /** Carry one exact writer's continuity proofs under one private handoff and one selected roster entry. */
-export function sealManagedContinuityDelivery(roster: RosterState, recipient: string, input: unknown, now: Date): { handle: string; packet: Packet } | undefined {
+export function sealManagedContinuityDelivery(roster: RosterState, recipient: string, input: unknown, now: Date): SealedDelivery | undefined {
+  return prepareContinuityDelivery(roster, recipient, input, now)?.seal();
+}
+
+function prepareContinuityDelivery(roster: RosterState, recipient: string, input: unknown, now: Date): PreparedManagedHandoff | undefined {
   const receipt = readContinuityReceipt(input);
   const head = roster.positions.length - 1;
   if (receipt === undefined || receipt.entry !== roster.accessRevision?.entry || !Number.isFinite(now.getTime())) return undefined;
@@ -132,17 +146,23 @@ export function sealManagedContinuityDelivery(roster: RosterState, recipient: st
     if (choice === 'switch-first') return undefined;
     if (formatForDevice(choice, device) === 2) format = 2;
   }
-  return sealPayload(roster.anchor.project, device, format, now.getTime(), receipt);
+  return preparePayload(roster.anchor.project, device, format, now.getTime(), receipt);
 }
 
-function sealPayload(project: string, device: WrapDevice, format: 1 | 2, now: number, payload: object): { handle: string; packet: Packet } | undefined {
-  const bytes = canonicalBytes({ project, recipient: device.writer, expires: now + MANAGED_HANDOFF_LIFETIME_MS, ...payload });
+function preparePayload(project: string, device: WrapDevice, format: 1 | 2, now: number, payload: object): PreparedManagedHandoff | undefined {
+  if (format === 1 ? device.x25519 === undefined : device.kem === undefined) return undefined;
+  const expiresAt = now + MANAGED_HANDOFF_LIFETIME_MS;
+  const bytes = canonicalBytes({ project, recipient: device.writer, expires: expiresAt, ...payload });
   const size = Math.ceil((bytes.length + HEADER) / PADDING_BUCKET) * PADDING_BUCKET;
   if (size + SEALED_OVERHEAD > BLOB_MAX_BYTES) return undefined;
+  const id = sha256Hex(Buffer.concat([canonicalBytes(['near-ai/managed-send/1', project, device, format]), canonicalBytes(payload)]));
+  return { id, expiresAt, seal: () => sealPrepared(device, format, size, bytes) };
+}
+
+function sealPrepared(device: WrapDevice, format: 1 | 2, size: number, bytes: Buffer): SealedDelivery | undefined {
   const padded = Buffer.alloc(size);
   padded.writeUInt32BE(bytes.length);
   bytes.copy(padded, HEADER);
-
   const handle = randomBytes(32).toString('hex');
   const stream = address(handle);
   const key = newEpochKey();
@@ -150,7 +170,7 @@ function sealPayload(project: string, device: WrapDevice, format: 1 | 2, now: nu
   return wrapped === undefined ? undefined : { handle, packet: { v: 1, wrapped, body: sealBlob(key, stream, 1, padded) } };
 }
 
-function deliveryPacket(value: unknown): value is Packet {
+export function deliveryPacket(value: unknown): value is Packet {
   if (!isRecord(value) || Object.keys(value).length !== 3 || value.v !== 1 || typeof value.wrapped !== 'string' || value.wrapped.length > 2048 ||
       !isRecord(value.body) || Object.keys(value.body).length !== 2 || typeof value.body.hash !== 'string' || !HANDLE.test(value.body.hash) ||
       typeof value.body.bytes !== 'string' || value.body.bytes.length > Math.ceil(BLOB_MAX_BYTES * 4 / 3) || !B64.test(value.body.bytes)) return false;

@@ -1348,12 +1348,25 @@ test('managed sender retries the exact staged opaque packet across restart and r
   const notifications: string[] = [];
   let putSucceeds = false;
   let notifySucceeds = false;
+  let stagedBeforeUpload = 0;
   const route = {
     get: async () => undefined,
     put: async (...args: [string, unknown]) => {
       assert.equal(args.length, 2);
       const [handle, packet] = args;
-      sent.push({ handle, bytes: canonicalBytes(packet) });
+      sent.push({ handle, bytes: Buffer.from(JSON.stringify(packet)) });
+      const folder = path.join(lead.at.root, REPLICA_DIR, 'managed-handoffs');
+      if (existsSync(folder)) {
+        const [sidecar] = readdirSync(folder);
+        const file = path.join(folder, sidecar);
+        const contents = readFileSync(file, 'utf8');
+        if (process.platform !== 'win32') assert.equal(statSync(file).mode & 0o777, 0o600);
+        const stored = JSON.parse(contents) as { rows: { handle: string; packet: unknown }[] };
+        assert.equal(JSON.stringify(stored.rows.find((row) => row.handle === handle)?.packet), JSON.stringify(packet));
+        const metadata = JSON.stringify(stored.rows.map(({ packet: _packet, ...row }) => row));
+        for (const value of [lead.p.projectId, cell, peer.writer, LABEL_X.level]) assert.equal(metadata.includes(value), false);
+        stagedBeforeUpload += 1;
+      }
       return putSucceeds;
     }
   };
@@ -1375,7 +1388,9 @@ test('managed sender retries the exact staged opaque packet across restart and r
   lead.at.clock.now = new Date(NOW.getTime() + 180_000);
   assert.equal(await exchange(), 'waiting');
   assert.equal(sent.length, 2);
-  assert.deepEqual(sent[1], sent[0], 'a restart uses the exact staged address and ciphertext');
+  assert.equal(sent[1].handle, sent[0].handle, 'a restart uses the exact staged address');
+  assert.equal(sent[1].bytes.equals(sent[0].bytes), true, 'a restart uses the exact staged ciphertext');
+  assert.equal(stagedBeforeUpload, 2, 'the exact opaque packet is durable before each route call');
   assert.deepEqual(notifications, [sent[0].handle]);
 
   notifySucceeds = true;
@@ -1387,6 +1402,9 @@ test('managed sender retries the exact staged opaque packet across restart and r
   assert.equal(sent.length, 2);
   assert.equal(notifications.length, 2);
 
+  lead.at.clock.now = new Date(NOW.getTime() + DAY_MS);
+  assert.equal(await exchange(), 'waiting');
+  assert.equal(sent.length, 2, 'an expired offer is not silently resealed');
   offers = [{ ...request, recipient: withdrawn.writer }];
   assert.equal(await exchange(), 'waiting');
   assert.equal(sent.length, 2, 'the configured route receives no offer for an unauthorized recipient');

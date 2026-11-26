@@ -71,7 +71,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
-import { openManagedHandoffInbox } from './managedHandoffInbox';
+import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
 
 /** The cross-window lock file inside the store folder. */
@@ -584,17 +584,14 @@ export class ReplicaStore {
   private readonly files = new Map<string, StreamFile>();
   private readonly byHash = new Map<string, SealedEntry>();
   private readonly order: string[] = [];
-  /** Entries from outside the decode check refused, with its reason. Never released once held. */
   private readonly held = new Map<string, string>();
   private readonly waiting = new Map<string, WaitReason>();
   /** How many held entries each (stream, writer) file has, and how many in all, counting stored entries only (indexHeld). */
   private readonly heldBy = new Map<string, number>();
   private heldCount = 0;
-  /** The files whose flooded line is held (D-14): none of their entries from outside is written again. */
   private readonly floodedFiles = new Map<string, { stream: string; writer: string }>();
   private damaged = 0;
   private waitingAdded = 0;
-  /** The mark last read or written, and its exact text, so a mark nobody changed is not compared again. */
   private mark: ReplicaMark | undefined;
   private markText: string | undefined;
 
@@ -1213,16 +1210,19 @@ export class ReplicaStore {
     if (bytes.length > BLOB_MAX_BYTES) return refusal('blob-too-large');
     const hash = sha256Hex(bytes);
     return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash, expectedSnapshot === undefined ? undefined : async () => {
-      await this.catchUp();
-      await this.syncMark();
-      if (await this.appendSnapshot() !== expectedSnapshot) throw new Refusal('snapshot-changed');
+      await this.verifyAppendSnapshot(expectedSnapshot);
       await this.writeAccessStage(evidence);
     });
   }
-  public managedHandoffInbox(project: string, recipient: string, now: () => Date) {
-    return openManagedHandoffInbox(this.dir, project, recipient, now, {
+  public managedHandoffs(project: string, writer: string, now: () => Date) {
+    return openManagedHandoffs(this.dir, project, writer, now, {
       locked: (work) => this.locked(work), folder: () => ensureDir(this.dir, ['managed-handoffs']), writeAtomic
-    });
+    }, (expected) => this.verifyAppendSnapshot(expected));
+  }
+  private async verifyAppendSnapshot(expected: string): Promise<void> {
+    await this.catchUp();
+    await this.syncMark();
+    if (await this.appendSnapshot() !== expected) throw new Refusal('snapshot-changed');
   }
   public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
     return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), BLOB_MAX_BYTES);

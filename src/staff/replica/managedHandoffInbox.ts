@@ -10,7 +10,7 @@ import { readStoredArtifact } from './storeArtifacts';
 
 const MAX_ROWS = 256;
 const MAX_BYTES = 64 * 1024;
-const MAX_ATTEMPTS = 6;
+export const MAX_HANDOFF_ATTEMPTS = 6;
 const INITIAL_RETRY_MS = 5000;
 
 type Disposition = 'pending' | 'accepted' | 'superseded';
@@ -29,20 +29,20 @@ export interface ManagedHandoffInbox {
   superseded(handle: string): Promise<void>;
 }
 
-interface StoreFiles {
+export interface ManagedHandoffFiles {
   locked<T>(work: () => Promise<T>): Promise<T>;
   folder(): Promise<string>;
   writeAtomic(file: string, bytes: Buffer, mode: number): Promise<void>;
 }
 
-function validTime(time: unknown): time is number {
+export function validTime(time: unknown): time is number {
   return typeof time === 'number' && Number.isSafeInteger(time) && time >= 0;
 }
 
 function isRow(value: unknown): value is Row {
   return isRecord(value) && Object.keys(value).length === 5 && typeof value.handle === 'string' && HASH_PATTERN.test(value.handle) &&
     validTime(value.expiresAt) && validTime(value.nextAt) && value.nextAt <= value.expiresAt &&
-    validTime(value.attempts) && value.attempts <= MAX_ATTEMPTS &&
+    validTime(value.attempts) && value.attempts <= MAX_HANDOFF_ATTEMPTS &&
     (value.state === 'pending' || value.state === 'accepted' || value.state === 'superseded');
 }
 
@@ -53,42 +53,56 @@ function readRows(value: unknown): Row[] | undefined {
   return new Set(rows.map(({ handle }) => handle)).size === rows.length ? rows : undefined;
 }
 
-async function readInbox(file: string): Promise<Row[]> {
+async function readRowsFile<Row>(file: string, maxBytes: number, parse: (value: unknown) => Row[] | undefined): Promise<Row[]> {
   try {
     if ((await lstat(file)).isFile()) {
-      const stored = await readStoredArtifact(file, MAX_BYTES, () => true);
-      const rows = 'value' in stored ? readRows(stored.value) : undefined;
+      const stored = await readStoredArtifact(file, maxBytes, () => true);
+      const rows = 'value' in stored ? parse(stored.value) : undefined;
       if (rows !== undefined) return rows;
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
   }
-  throw new Error('The local private handoff queue is unreadable.');
+  throw new Error('The local private handoff state is unreadable.');
 }
 
-/** Persist recipient-side opaque addresses under the private replica store lock. */
-export function openManagedHandoffInbox(
-  store: string, project: string, recipient: string, clock: () => Date, files: StoreFiles
-): ManagedHandoffInbox {
-  const scope = sha256Hex(canonicalBytes(['near-ai/managed-handoff-inbox/1', project, recipient]));
-  function update<T>(operation: (rows: Row[], now: number) => T): Promise<T> {
+export function managedHandoffFile<Row extends { expiresAt: number }>(
+  store: string, project: string, writer: string, clock: () => Date, files: ManagedHandoffFiles,
+  name: 'inbox' | 'outbox', maxBytes: number, parse: (value: unknown) => Row[] | undefined
+) {
+  const scope = sha256Hex(canonicalBytes([name === 'inbox' ? 'near-ai/managed-handoff-inbox/1' : 'near-ai/managed-handoff-outbox/1', project, writer]));
+  return function update<T>(operation: (rows: Row[], now: number) => T, check?: () => Promise<void>): Promise<T> {
     return files.locked(async () => {
+      await check?.();
       const folder = await files.folder();
       const file = path.join(folder, `${scope}.json`);
-      const original = await readInbox(file);
+      const original = await readRowsFile(file, maxBytes, parse);
       const now = clock().getTime();
       if (!validTime(now) || !Number.isSafeInteger(now + MANAGED_HANDOFF_LIFETIME_MS)) throw new Error('The local private handoff clock is invalid.');
       // Keep tombstones until the sealed packet's maximum lifetime has passed.
       const rows = original.filter(({ expiresAt }) => expiresAt > now - MANAGED_HANDOFF_LIFETIME_MS);
       const result = operation(rows, now);
       if (rows.length !== original.length || rows.some((row, index) => row !== original[index])) {
-        await files.writeAtomic(file, canonicalBytes({ v: 1, rows }), 0o600);
+        const bytes = canonicalBytes({ v: 1, rows });
+        if (bytes.length > maxBytes) throw new Error('The local private handoff queue is full.');
+        await files.writeAtomic(file, bytes, 0o600);
         await syncFolder(folder);
         await syncFolder(store);
       }
       return result;
     });
-  }
+  };
+}
+
+export function nextHandoffRetry(expiresAt: number, attempts: number, now: number): number {
+  return Math.min(expiresAt, now + INITIAL_RETRY_MS * 2 ** attempts);
+}
+
+/** Persist recipient-side opaque addresses under the private replica store lock. */
+export function openManagedHandoffInbox(
+  store: string, project: string, recipient: string, clock: () => Date, files: ManagedHandoffFiles
+): ManagedHandoffInbox {
+  const update = managedHandoffFile(store, project, recipient, clock, files, 'inbox', MAX_BYTES, readRows);
 
   function settle(handle: string, state: 'accepted' | 'superseded'): Promise<void> {
     return update((rows, now) => {
@@ -108,10 +122,10 @@ export function openManagedHandoffInbox(
     }),
     pending: () => update((rows, now) => {
       const active = rows.map((row, index) => ({ row, index })).filter(({ row }) => row.state === 'pending' && row.expiresAt > now);
-      const due = active.filter(({ row }) => row.attempts < MAX_ATTEMPTS && row.nextAt <= now)
+      const due = active.filter(({ row }) => row.attempts < MAX_HANDOFF_ATTEMPTS && row.nextAt <= now)
         .sort((left, right) => left.row.nextAt - right.row.nextAt).slice(0, MAX_MANAGED_BATCH);
       for (const { row, index } of due) {
-        const nextAt = Math.min(row.expiresAt, now + INITIAL_RETRY_MS * 2 ** row.attempts);
+        const nextAt = nextHandoffRetry(row.expiresAt, row.attempts, now);
         rows[index] = { ...row, nextAt, attempts: row.attempts + 1 };
       }
       return { handles: due.map(({ row }) => row.handle), waiting: active.length > due.length };

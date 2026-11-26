@@ -17,9 +17,15 @@ export interface ManagedSyncHandoffs {
 
 export interface ManagedSyncLocal {
   seal(offer: ManagedHandoff): Promise<{ handle: string; packet: unknown } | undefined>;
+  prepare?(offer: ManagedHandoff): Promise<ManagedStagedSend | undefined>;
   stage(value: unknown): Promise<boolean>;
   superseded?(value: unknown): Promise<boolean>;
 }
+
+export type ManagedStagedSend =
+  | { handle: string; state: 'published' }
+  | { handle: string; state: 'uploaded'; published(): Promise<void> }
+  | { handle: string; state: 'queued'; packet: unknown; uploaded(): Promise<boolean>; published(): Promise<void> };
 
 export interface ManagedPacket { handle: string; packet: unknown }
 export interface ManagedInbox { packets: readonly ManagedPacket[]; waiting: boolean }
@@ -63,12 +69,7 @@ export async function exchangeManaged(handoffs: ManagedSyncHandoffs, local: Mana
     const offers = await handoffs.offers();
     let waiting = inbox.waiting || offers.length > MAX_MANAGED_BATCH;
     for (const offer of offers.slice(0, MAX_MANAGED_BATCH)) {
-      const sealed = await local.seal(offer);
-      if (sealed === undefined || !HASH_PATTERN.test(sealed.handle) || !await route.put(sealed.handle, sealed.packet)) {
-        waiting = true;
-        continue;
-      }
-      await handoffs.published(offer, sealed.handle);
+      if (!await offerManaged(handoffs, local, route, offer)) waiting = true;
     }
     for (const packet of inbox.packets) {
       if (paired.has(packet.handle) || await local.stage(packet)) await handoffs.accepted(packet.handle);
@@ -79,5 +80,28 @@ export async function exchangeManaged(handoffs: ManagedSyncHandoffs, local: Mana
   } catch {
     // A route or provider failure leaves the handoff queued without exposing its metadata in the sync report.
     return 'waiting';
+  }
+}
+
+async function offerManaged(handoffs: ManagedSyncHandoffs, local: ManagedSyncLocal, route: ManagedSyncRoute, offer: ManagedHandoff): Promise<boolean> {
+  try {
+    if (local.prepare === undefined) {
+      const sealed = await local.seal(offer);
+      if (sealed === undefined || !HASH_PATTERN.test(sealed.handle) || !await route.put(sealed.handle, sealed.packet)) return false;
+      await handoffs.published(offer, sealed.handle);
+      return true;
+    }
+    const staged = await local.prepare(offer);
+    if (staged === undefined || !HASH_PATTERN.test(staged.handle)) return false;
+    if (staged.state === 'published') return true;
+    if (staged.state === 'queued') {
+      if (!await route.put(staged.handle, staged.packet)) return false;
+      if (!await staged.uploaded()) return false;
+    }
+    await handoffs.published(offer, staged.handle);
+    await staged.published();
+    return true;
+  } catch {
+    return false;
   }
 }
