@@ -10,6 +10,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      workbench_arm64:
+        description: Verify the Workbench on a dedicated ARM64 evaluation branch
+        type: boolean
+        default: false
 
 # A newer push to the same PR cancels the run it supersedes. Every other run (pushes to main, runs
 # started by hand) gets a group of its own, so it is never cancelled or replaced while queued and
@@ -118,6 +123,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      vsix_sha256: ${{ steps.vsix.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,6 +146,19 @@ jobs:
           if [ -n "$base" ]; then echo "NEAR_AI_BASE_VSIX=$base" >> "$GITHUB_ENV"; fi
       - name: Package the VSIX and check what it contains
         run: npm run verify:release
+      - name: Record the verified VSIX hash
+        id: vsix
+        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.workbench_arm64 && startsWith(github.ref_name, 'chore/workbench-arm64-eval-')
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(*.vsix)
+          if [[ ${#files[@]} != 1 || ! -f "${files[0]}" || -L "${files[0]}" ]]; then
+            echo '::error::Expected one verified VSIX in the checkout root.'
+            exit 1
+          fi
+          hash="$(sha256sum < "${files[0]}")"
+          printf 'sha256=%s\n' "${hash%% *}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vsix-${{ github.sha }}
@@ -554,6 +574,132 @@ jobs:
         env:
           WORKBENCH_TEST_IMAGE: sterling-workbench:ci
         run: npm run test:container
+
+  # Candidate evidence only. The existing Workbench and Release jobs own browser, egress and publication checks.
+  workbench-arm64:
+    name: workbench ARM64 candidate
+    if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.workbench_arm64 && startsWith(github.ref_name, 'chore/workbench-arm64-eval-')
+    needs: release-content
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check that this commit has the workbench
+        shell: bash
+        run: |
+          if [[ ! -f workbench/package.json ]]; then
+            echo '::error::The ARM64 evaluation branch must include the Workbench.'
+            exit 1
+          fi
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: vsix-${{ github.sha }}
+          path: ${{ runner.temp }}/verified-arm64-vsix
+      - name: Verify and stage the same-run VSIX
+        env:
+          VSIX_DIR: ${{ runner.temp }}/verified-arm64-vsix
+          VSIX_SHA256: ${{ needs.release-content.outputs.vsix_sha256 }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=("$VSIX_DIR"/*.vsix)
+          if [[ ${#files[@]} != 1 || ! -f "${files[0]}" || -L "${files[0]}" || ! "$VSIX_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo '::error::Expected one VSIX and a valid hash from the same CI run.'
+            exit 1
+          fi
+          hash="$(sha256sum < "${files[0]}")"
+          if [[ "${hash%% *}" != "$VSIX_SHA256" ]]; then
+            echo '::error::The downloaded VSIX differs from the verified VSIX.'
+            exit 1
+          fi
+          mkdir -p release-input vendor/yjs
+          cp -- "${files[0]}" release-input/sterling.vsix
+          unzip -p release-input/sterling.vsix extension/vendor/yjs/yjs.cjs > vendor/yjs/yjs.cjs
+          unzip -p release-input/sterling.vsix extension/vendor/yjs/LICENSES.txt > vendor/yjs/LICENSES.txt
+      - name: Verify the pinned ARM64 bases and build the candidate
+        shell: bash
+        run: |
+          [[ "$(uname -m)" == aarch64 ]]
+          [[ "$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')" == linux/arm64 ]]
+          version="$(docker version --format '{{.Server.Version}}')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || (( 10#${version%%.*} < 28 )); then
+            echo '::error::The ARM64 preview requires Docker Engine 28 or later for loopback publishing.'
+            exit 1
+          fi
+
+          check_base() {
+            local stage="$1" repository="$2" ref child
+            ref="$(awk -v stage="$stage" '$1 == "FROM" && $3 == "AS" && $4 == stage { print $2 }' workbench/Dockerfile)"
+            [[ "$ref" == "$repository":* && "${ref#"$repository":}" =~ ^[a-zA-Z0-9_.-]+@sha256:[0-9a-f]{64}$ ]] || return 1
+            child="$(docker buildx imagetools inspect --raw "$ref" | jq -er '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64")]
+              | select(length == 1) | .[0]
+              | select((.platform.variant // "v8") == "v8")
+              | select(.mediaType == "application/vnd.oci.image.manifest.v1+json" or .mediaType == "application/vnd.docker.distribution.manifest.v2+json")
+              | .digest | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))
+            ')" || return 1
+            printf -- '- Base `%s` selected `%s`.\n' "$ref" "$child" >> "$GITHUB_STEP_SUMMARY"
+          }
+          check_base node docker.io/library/node
+          check_base build registry.access.redhat.com/ubi9/ubi-minimal
+          check_base runtime registry.access.redhat.com/ubi9/ubi-minimal
+          bash .github/retry-registry-auth.sh docker build --target release --platform linux/arm64 \
+            --provenance=false --sbom=false --file workbench/Dockerfile --tag sterling-workbench:arm64-ci .
+      - name: Prove the exact ARM64 candidate starts and its native addons work
+        env:
+          VSIX_SHA256: ${{ needs.release-content.outputs.vsix_sha256 }}
+        shell: bash
+        run: |
+          candidate=sterling-workbench:arm64-ci
+          [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' "$candidate")" == 'linux/arm64 10001:0' ]]
+          image="$(docker image inspect --format '{{.Id}}' "$candidate")"
+          [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]]
+          container="$(docker run --detach --pull=never -e STERLING_LISTEN_HOST=0.0.0.0 \
+            -e STERLING_PREVIEW_NO_SIGN_IN=accept -p 127.0.0.1::3000 "$image")"
+          [[ "$container" =~ ^[0-9a-f]{64}$ ]]
+          trap 'docker logs "$container"; docker stop "$container" >/dev/null' EXIT
+          [[ "$(docker inspect --format '{{.Image}}' "$container")" == "$image" ]]
+          port="$(docker inspect --format '{{json .NetworkSettings.Ports}}' "$container" | jq -er '
+            to_entries | select(length == 1) | .[0] | select(.key == "3000/tcp")
+            | .value | select(length == 1) | .[0] | select(.HostIp == "127.0.0.1") | .HostPort
+          ')"
+          if [[ ! "$port" =~ ^[1-9][0-9]{0,4}$ ]] || (( port > 65535 )); then
+            echo '::error::The candidate did not publish a single valid loopback port.'
+            exit 1
+          fi
+          timeout 120 bash -c '
+            while true; do
+              if status="$(curl -q --noproxy "*" --max-time 3 --silent --output "$2" --write-out "%{http_code}" "$1")" \
+                && [[ "$status" == 200 ]] && cmp -s "$2" <(printf ok); then
+                exit 0
+              fi
+              sleep 1
+            done
+          ' bash "http://127.0.0.1:$port/healthz" "$RUNNER_TEMP/arm64-health-response"
+          docker exec "$container" test -s /plugins/extension/package.json
+          timeout 20 docker exec -i -w /app "$container" node - <<'NODE'
+          const assert = require('node:assert/strict');
+          assert.equal(process.arch, 'arm64');
+          assert.match(process.version, /^v26\./);
+          assert.equal(process.getuid(), 10001);
+          assert.equal(typeof require('drivelist').list, 'function');
+          process.exitCode = 1;
+          const pty = require('node-pty').spawn('/bin/sh', ['-c', 'printf "STERLING-PTY-OK-%s\\n" "$((40 + 2))"'], {});
+          let output = '';
+          pty.onData((data) => { output += data; });
+          pty.onExit(({ exitCode, signal }) => {
+            assert.equal(exitCode, 0);
+            assert.equal(signal ?? 0, 0);
+            assert.equal(output.replaceAll('\r\n', '\n'), 'STERLING-PTY-OK-42\n');
+            process.exitCode = 0;
+          });
+          NODE
+          printf '\nLinux ARM64 candidate `%s`, verified VSIX `%s`, passed loopback health and native addon checks.\n' \
+            "$image" "$VSIX_SHA256" >> "$GITHUB_STEP_SUMMARY"
 
   relay-image-scan:
     name: relay image scan

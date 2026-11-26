@@ -607,6 +607,36 @@ test('the workbench job records the SBOM, scan and digest of the image it tested
   assert.doesNotMatch(job, /cosign|docker push|docker login|packages:\s*write|id-token|secrets\./, 'CI never publishes or signs the workbench image');
 });
 
+test('the read-only ARM64 candidate builds and starts the exact verified VSIX on a native runner', async () => {
+  const ci = read('ci.yml');
+  const dispatch = block(block(ci, 'on'), 'workflow_dispatch', 2);
+  assert.match(dispatch, /workbench_arm64:[\s\S]*type: boolean\s+default: false/);
+  const guard = "if: github.event_name == 'workflow_dispatch' && github.ref_type == 'branch' && inputs.workbench_arm64 && startsWith(github.ref_name, 'chore/workbench-arm64-eval-')";
+  const all = jobs(ci);
+  const producer = all.get('release-content');
+  assert.match(producer, /vsix_sha256: \$\{\{ steps\.vsix\.outputs\.sha256 \}\}/);
+  assert.match(producer, /npm run verify:release[\s\S]*id: vsix[\s\S]*sha256sum[\s\S]*name: vsix-\$\{\{ github\.sha \}\}/);
+  assert.ok(steps(producer).find((step) => /id: vsix/.test(step)).includes(guard));
+
+  const job = all.get('workbench-arm64');
+  assert.ok(job.startsWith(`    name: workbench ARM64 candidate\n    ${guard}\n`));
+  assert.match(job, /needs: release-content\s+runs-on: ubuntu-24\.04-arm/);
+  assert.match(job, /permissions:\s*\n\s*contents: read\n\s*steps:/);
+  assert.doesNotMatch(job, /continue-on-error:|environment:|secrets\.|id-token:|docker (?:login|push)|cosign|playwright/);
+  assert.match(job, /persist-credentials: false/);
+  const list = steps(job);
+  const presence = list.findIndex((step) => /\[\[ ! -f workbench\/package\.json \]\]/.test(step));
+  assert.ok(presence > 0);
+  assert.match(list[presence], /exit 1/);
+  assert.match(list[presence + 1], /actions\/download-artifact@[0-9a-f]{40}[\s\S]*name: vsix-\$\{\{ github\.sha \}\}/);
+  assert.doesNotMatch(list[presence + 1], /github-token:|run-id:|repository:/);
+  assert.match(job, /\$\{\{ needs\.release-content\.outputs\.vsix_sha256 \}\}[\s\S]*sha256sum[\s\S]*\[\[.*\$VSIX_SHA256.*\]\][\s\S]*unzip -p[\s\S]*docker build --target release --platform linux\/arm64/);
+  assert.match(job, /imagetools inspect --raw[\s\S]*docker build --target release --platform linux\/arm64/);
+  assert.match(job, /docker run[\s\S]*127\.0\.0\.1::3000[\s\S]*\/healthz[\s\S]*process\.arch[\s\S]*drivelist[\s\S]*node-pty[\s\S]*exitCode/);
+  assert.doesNotMatch(all.get('compliance'), /workbench-arm64/);
+  assert.ok(!(await import('../lib/workflow.mjs')).CI_CHECKS.includes('workbench-arm64'));
+});
+
 test('the release image job writes the release image SBOM and hands publish a hash-checked cosign, read-only', () => {
   const image = jobs(read('release.yml')).get('image');
   const list = steps(image);
