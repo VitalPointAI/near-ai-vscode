@@ -1226,7 +1226,7 @@ export class ReplicaStore {
 
   public async putAccessEvidence(evidence: unknown): Promise<{ ok: true; hash: string } | StoreRefused> {
     const bytes = canonicalBytes(evidence);
-    if (bytes.length > SIGNED_FILE_MAX_BYTES) return refusal('blob-too-large');
+    if (bytes.length > BLOB_MAX_BYTES) return refusal('blob-too-large');
     const hash = sha256Hex(bytes);
     return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash);
   }
@@ -1235,13 +1235,13 @@ export class ReplicaStore {
     for (const name of await this.listDir(['access-evidence'], [])) {
       const hash = /^([0-9a-f]{64})\.json$/.exec(name)?.[1];
       if (hash === undefined) continue;
-      const read = await this.readSigned(`access-evidence/${name}`, (value) => sha256Hex(canonicalBytes(value)) === hash);
+      const read = await this.readSigned(`access-evidence/${name}`, (value) => sha256Hex(canonicalBytes(value)) === hash, BLOB_MAX_BYTES);
       if ('value' in read) rows.push({ hash, value: read.value });
     }
     return rows;
   }
-  private readSigned(relative: string, matches: (value: unknown) => boolean): Promise<{ value: unknown } | { reason: string }> {
-    return readStoredArtifact(path.join(this.dir, relative), SIGNED_FILE_MAX_BYTES, matches);
+  private readSigned(relative: string, matches: (value: unknown) => boolean, maxBytes = SIGNED_FILE_MAX_BYTES): Promise<{ value: unknown } | { reason: string }> {
+    return readStoredArtifact(path.join(this.dir, relative), maxBytes, matches);
   }
 
   private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {

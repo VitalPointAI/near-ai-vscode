@@ -10,7 +10,7 @@ import { readGrantPages, wrapsFor } from '../../domain/replica/grantPages';
 import type { RosterState } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
-import { matchesGrantEvidence, openGrantEvidence } from '../../domain/replica/rotationGrants';
+import { matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from '../../domain/replica/rotationGrants';
 import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
@@ -103,5 +103,12 @@ export function openManagedGrantDelivery(project: string, device: DeliveryDevice
       typeof value.expires !== 'number' || !Number.isSafeInteger(value.expires) || value.expires <= time || value.expires > time + DELIVERY_MS ||
       !Array.isArray(value.grants) || value.grants.length < 1 || value.grants.length > MAX_GRANT_PAGES + 1 ||
       !isRecord(value.opening)) return undefined;
-  return { grants: value.grants, opening: value.opening };
+  const delivery = readGrantDelivery({ grants: value.grants, opening: value.opening });
+  return delivery?.project === project && delivery.recipients.includes(device.writer)
+    ? { grants: delivery.grants, opening: delivery.opening } : undefined;
+}
+
+export function openManagedGrantArtifact(project: string, device: DeliveryDevice, value: unknown, now: Date) {
+  return isRecord(value) && Object.keys(value).length === 2 && typeof value.handle === 'string'
+    ? openManagedGrantDelivery(project, device, value.handle, value.packet, now) : undefined;
 }

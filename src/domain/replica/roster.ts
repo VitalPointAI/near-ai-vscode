@@ -35,7 +35,7 @@ import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
 import { CELL_ACCESS_FEATURE } from './features';
 import { accessRevisionId, verifiesAccessWrite } from './rotationProof';
 import type { AccessRevision } from './rotationProof';
-import { matchesGrantEvidence, openGrantEvidence } from './rotationGrants';
+import { matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from './rotationGrants';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
 import { slotOfClientId } from './clientIds';
@@ -707,10 +707,19 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
 // whose blob has not arrived (33-07), and is placed when they come.
 function placeGrants(state: RosterState, grants: readonly unknown[], openings: readonly unknown[]): void {
   const evidence = openings.flatMap((opening) => openGrantEvidence(state.anchor.project, state.accessHistory, opening) ?? []);
+  const delivered: unknown[] = [];
+  for (const candidate of openings) {
+    const item = readGrantDelivery(candidate);
+    if (item === undefined) continue;
+    const bound = openGrantEvidence(state.anchor.project, state.accessHistory, item.opening);
+    if (bound === undefined) continue;
+    evidence.push(bound);
+    delivered.push(...item.grants);
+  }
   const approved = new Set(evidence.flatMap(({ evidence: item }) => item.grants.map((grant) => grant.hash)));
   const reads: Array<{ value: unknown; read: Extract<ReturnType<typeof readGrant>, { ok: true }> }> = [];
   const byHash = new Map<string, unknown>();
-  for (const value of grants) {
+  for (const value of [...grants, ...delivered]) {
     const read = readGrant(value);
     if (!read.ok) {
       state.refused.push({ hash: '', kind: 'grant', reason: read.reason });
@@ -791,4 +800,11 @@ export function legacyReadingGrants(state: RosterState, grants: readonly unknown
     const grant = readGrant(signed);
     return grant.ok && !requiresManagedGrant(state, grant.grant);
   });
+}
+
+/** What can change the cached roster view used by the main fold. */
+export function rosterSignature(roster: RosterState): string {
+  let grants = 0;
+  for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
+  return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants), String(roster.sessions.size)].join('|');
 }

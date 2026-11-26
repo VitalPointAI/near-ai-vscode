@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { canonicalBytes } from '../team/canonical';
 import { isRecord } from '../team/validate';
-import { MAX_GRANT_PAGES, MAX_GRANT_WRAPS } from './cellKeys';
+import { MAX_GRANT_PAGES, MAX_GRANT_WRAPS, readGrant } from './cellKeys';
+import { readGrantPages } from './grantPages';
 import { verifiedCellAccess } from './rotationProof';
 import type { AccessRevision } from './rotationProof';
 
@@ -88,6 +89,21 @@ export function openGrantEvidence(project: string, revisions: ReadonlyMap<string
   if (decision?.decision === 'continues' && value.evidence.grants.some((grant) => grant.recipients.some((writer) => excluded.has(writer)))) return undefined;
   return decision !== undefined && decision.epoch === value.evidence.epoch && decision.evidence === grantEvidenceHash(value.evidence)
     ? { entry: value.entry, evidence: value.evidence } : undefined;
+}
+
+/** Verify the grant and its pages before staging a confidential handoff. The signed roster may still be in transit. */
+export function readGrantDelivery(value: unknown) {
+  if (!isRecord(value) || Object.keys(value).length !== 2 || !isRecord(value.opening) || !evidenceShape(value.opening.evidence) ||
+      !Array.isArray(value.grants) || value.grants.length === 0 || value.grants.length > MAX_GRANT_PAGES + 1) return undefined;
+  const [head, ...pages]: unknown[] = value.grants;
+  const read = pages.length === 0 ? readGrant(head) : readGrantPages(head, pages);
+  if (!read.ok || (read.grant.pages?.length ?? 0) !== pages.length) return undefined;
+  const { cell, epoch } = read.grant;
+  const evidence = value.opening.evidence;
+  const recipients = read.grant.wraps.map(({ writer }) => writer).sort();
+  return cell === evidence.cell && epoch === evidence.epoch &&
+    matchesGrantEvidence(evidence, { hash: read.hash, pages: read.grant.pages ?? [], recipients })
+    ? { opening: value.opening, grants: value.grants as readonly unknown[], project: evidence.project, recipients } : undefined;
 }
 
 export interface GrantEvidenceDelta {

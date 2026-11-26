@@ -38,7 +38,7 @@ import type { FoldResult, FoldState } from '../../domain/replica/fold';
 import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterView } from '../../domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterSignature, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
@@ -60,6 +60,7 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
+import { openManagedGrantArtifact } from './managedGrantDelivery';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
 export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
@@ -560,12 +561,7 @@ export class ReplicaProject {
     });
   }
 
-  /**
-   * Stores signed cell grants (every one must read), then folds the roster, so the key ring takes the keys of the grants the roster placed. A grant the
-   * roster does not place (a signer who may not change the roster, an epoch it has not founded) is stored and never opened (CR-01). opened is how many
-   * epoch keys the ring answers for that it did not before. A hosted session stores no grant its session key signed (D-60, 33-27): the roster checks
-   * grants against the person key, which signs it again.
-   */
+  /** Stage signed grants and evidence, then open only what the roster places. Hosted grants use the person key. */
   public putGrants(grants: readonly unknown[], evidence: readonly unknown[] = []): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
     return this.exclusive(async () => {
       const own: unknown[] = [];
@@ -593,7 +589,17 @@ export class ReplicaProject {
     });
   }
 
-  /** Takes a welcome file for this project (for example a second one after the lead gave this device another cell): same checks as a join. */
+  public ingestManagedGrantDelivery(file: unknown): Promise<{ ok: true } | ProjectRefused> {
+    return this.exclusive(async () => {
+      if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
+      const { writer, privateKey: x25519, kem } = ringDevice(this.device);
+      const delivery = openManagedGrantArtifact(this.projectId, { writer, x25519, kem }, file, this.now());
+      if (delivery === undefined) return refuse('welcome-refused');
+      const staged = await this.store.putAccessEvidence(delivery);
+      return 'ok' in staged ? await this.settledFold() ?? { ok: true as const } : storeRefused(staged);
+    });
+  }
+
   public ingestWelcome(welcome: unknown): Promise<WelcomeResult> {
     return this.exclusive(async () => {
       const read = readWelcome(welcome, { genesisHash: this.anchor.genesisHash, writer: this.device.writer });
@@ -1151,13 +1157,6 @@ export class ReplicaProject {
     }
     return built;
   }
-}
-
-/** What the main fold's roster view answers from: the applied line, the splits and choices, and the grants placed. */
-function rosterSignature(roster: RosterState): string {
-  let grants = 0;
-  for (const cell of roster.cells.cells.values()) grants += cell.grants.length;
-  return [roster.positions.join(','), roster.pending.map((split) => `${split.at}:${split.branches.join('+')}`).join(';'), roster.choices.map((choice) => choice.choose).join(';'), String(roster.notChosen.size), String(grants), String(roster.sessions.size)].join('|');
 }
 
 /**

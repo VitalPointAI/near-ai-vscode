@@ -862,24 +862,25 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
     name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
   }));
+  const peer = await bringIn({ at, p, host: hostOf(p, at) }, 'file-receiver', 'Mo Analyst', OFFICIAL);
   assert.ok((await p.signedGrants()).length > 0);
   assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
   const { roster } = await head(p);
   const key = p.keys.epochKey(p.projectId, 1);
   assert.ok(key);
-  const staged = foundingFor({ p }, roster, { cell: p.projectId, key, to: [p.deviceWriter], labelSealed: '' });
+  const staged = foundingFor({ p }, roster, { cell: p.projectId, key, to: [peer.writer], labelSealed: '' });
   const hash = grantHash(staged);
   assert.ok('ok' in await p.putGrants([staged]));
   const after = await head(p);
   assert.equal(after.roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash), false);
   assert.ok(after.roster.held.some((item) => item.hash === hash && item.reason === 'cell-access-grant-pending'));
   assert.equal((await p.signedGrants()).some((grant) => grant.hash === hash), false);
-  const welcome = await p.welcomeFor(p.deviceWriter, [p.projectId]);
+  const welcome = await p.welcomeFor(peer.writer, [p.projectId]);
   assert.equal(welcome.grants.some((grant) => grantHash(grant) === hash), false);
   const predecessor = after.hash;
   const id = accessRevisionId(p.projectId, null, predecessor, 'cell.access.commit', {});
   const evidence = { project: p.projectId, cell: p.projectId, epoch: 1, policy: null,
-    grants: [{ hash, pages: [], recipients: [p.deviceWriter] }], excluded: [] };
+    grants: [{ hash, pages: [], recipients: [peer.writer] }], excluded: [] };
   const digest = grantEvidenceHash(evidence);
   assert.ok(digest);
   const committed = buildAccessCommitment(id, [{
@@ -892,7 +893,7 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.ok('ok' in bound);
   const opening = { ...proof, entry: bound.hash, evidence };
   const prepare = (roster: RosterState) => sealManagedGrantDelivery(roster, {
-    recipient: p.deviceWriter, opening, grant: staged, pages: [], info: { base: true }, now: NOW
+    recipient: peer.writer, opening, grant: staged, pages: [], info: { base: true }, now: NOW
   });
   assert.equal(prepare((await head(p)).roster), undefined, 'delivery waits for the grant and proof to be placed');
   assert.ok('ok' in await p.putGrants([], [opening]));
@@ -903,11 +904,11 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.ok(rival);
   assert.notEqual(rival.handle, sealed.handle);
   const relayView = JSON.stringify(sealed);
-  for (const privateValue of [p.projectId, p.deviceWriter, evidence.grants[0].hash, proof.cell.decision.salt, proof.cell.decision.evidence]) {
+  for (const privateValue of [p.projectId, peer.writer, evidence.grants[0].hash, proof.cell.decision.salt, proof.cell.decision.evidence]) {
     assert.equal(relayView.includes(privateValue), false);
   }
-  const keys = await loadOrCreateKemKeys(at.secrets, { identityDir: identityDir(at.global) });
-  const device = { writer: p.deviceWriter, kem: keys.privateKeys };
+  const keys = await loadOrCreateKemKeys(peer.at.secrets, { identityDir: identityDir(peer.at.global) });
+  const device = { writer: peer.writer, kem: keys.privateKeys };
   assert.equal(openManagedGrantDelivery(p.projectId, device, rival.handle, sealed.packet, NOW), undefined);
   const changedHandle = sealed.handle.slice(0, -1) + (sealed.handle.endsWith('0') ? '1' : '0');
   assert.equal(openManagedGrantDelivery(p.projectId, device, changedHandle, sealed.packet, NOW), undefined);
@@ -918,8 +919,17 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.ok(delivered);
   assert.deepEqual(delivered.grants.map(grantHash), [hash]);
   assert.deepEqual(delivered.opening, opening);
-  const reopened = project(await ReplicaProject.open(at.root, at.deps));
-  assert.ok('ok' in await reopened.putGrants(delivered.grants, [delivered.opening]));
+  const unsupported = await peer.p.ingestManagedGrantDelivery(sealed);
+  assert.equal(isProjectRefused(unsupported) && unsupported.refused, 'needs-update');
+  peer.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(sealed));
+  assert.equal((await peer.p.signedGrants()).some((grant) => grant.hash === hash), false);
+  assert.equal((await head(peer.p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash), false);
+  const update = await p.welcomeFor(peer.writer, []);
+  assert.ok('ok' in await peer.p.ingestForeign([update.genesis, ...update.roster], update.blobs));
+  assert.ok((await head(peer.p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
+  assert.equal(grantsOn(peer.at).some((grant) => grantHash(grant) === hash), false);
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
   assert.equal((await reopened.signedGrants()).some((grant) => grant.hash === hash), false);
   assert.ok((await head(reopened)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
   assert.ok(grantsOn(at).some((grant) => grantHash(grant) === hash));
