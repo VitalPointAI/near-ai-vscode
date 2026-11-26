@@ -38,7 +38,7 @@ import type { FoldResult, FoldState } from '../../domain/replica/fold';
 import { buildWelcome, readWelcome, welcomeProjectOf } from '../../domain/replica/invite';
 import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
-import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterSignature, rosterView } from '../../domain/replica/roster';
+import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, isRosterWriterAt, legacyReadingGrants, managedWriteAllowed, rosterSignature, rosterView } from '../../domain/replica/roster';
 import { storedAccessProofs } from '../../domain/replica/rotationGrants';
 import type { RosterAnchor, RosterFoldInput, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
@@ -61,7 +61,8 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { openManagedGrantArtifact } from './managedGrantDelivery';
+import { openManagedGrantArtifact, sealPlacedSupplemental } from './managedGrantDelivery';
+import type { SupplementalHandoff } from './managedGrantDelivery';
 import { verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -163,15 +164,12 @@ export interface CreateSharedInput {
 }
 
 export interface AppendOwnOptions {
-  /** The stream (a cell id); the project's base cell when absent. */
   stream?: string;
-  /** Entries this one depends on, by hash; each must be in the store. */
   deps?: readonly string[];
   /** A blob already sealed to the cited cell and epoch, stored with this entry after the write check. */
   contentBlob?: SealedBlob;
   accessProof?: unknown;
   stageAccess?: (entry: string) => unknown;
-  /** The roster cited; the roster head when absent. */
   roster?: string;
   actor?: Actor;
   at?: string;
@@ -594,6 +592,14 @@ export class ReplicaProject {
     });
   }
 
+  public sealManagedSupplemental(input: SupplementalHandoff) {
+    return this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      if (!isRosterWriterAt(roster, this.device.writer, roster.positions.length - 1)) return undefined;
+      return sealPlacedSupplemental(roster, this.evidence.map(({ value }) => value), input, this.now());
+    });
+  }
+
   public ingestManagedGrantDelivery(file: unknown): Promise<{ ok: true } | ProjectRefused> {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
@@ -613,12 +619,7 @@ export class ReplicaProject {
     });
   }
 
-  /**
-   * Takes entries and blobs from outside this machine (a transport, later). Each new entry passes the decode check first (D-05): the body of a
-   * doc.update or doc.compact this device can open is handed to the memory-capped decode worker, and one it refuses is kept, held and listed by
-   * heldForCheck(), never folded. An entry this device cannot check yet (its epoch key or its blob is not here) waits out of the fold, and the next
-   * state() after the key or the blob arrives runs the check again (31-REVIEW MJ-07).
-   */
+  /** Check and ingest remote entries and their separately supplied blobs. */
   public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[]): Promise<IngestResult | ProjectRefused> {
     return this.exclusive(async () => {
       const result = await this.store.ingestForeign(entries, blobs, this.foreignCheck(blobs));

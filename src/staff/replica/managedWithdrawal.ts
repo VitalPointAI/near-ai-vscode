@@ -16,12 +16,13 @@ export type AuthoredRefusal = { ok: false; reason: 'no-grant-key' | 'action-requ
 type Target = { member: string; writer?: string };
 export interface AccessSnapshot { predecessor: string; priorEntry: string; priorRoot: string }
 interface ManagedAccess extends AccessSnapshot {
-  kind: 'member.remove' | 'device.revoke' | 'cell.rekey' | 'member.update';
+  kind: 'member.remove' | 'device.revoke' | 'cell.rekey' | 'member.update' | 'cell.access.commit';
   operation: object;
   revision: string;
   at?: string;
   cells: ReadonlyArray<Pick<OpenedGrantEvidence, 'evidence' | 'decision'> & { recipients: readonly string[]; previousEpoch?: number }>;
   founding?: { cell: string; grants: readonly unknown[] };
+  supplemental?: { cell: string; grants: readonly unknown[] };
 }
 
 function permitDrafts(roster: RosterState, planned: ManagedAccess, authority: string, now: Date): AccessPermit[] {
@@ -79,7 +80,8 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
         entry,
         openings: plan.cells.map(({ evidence }) => ({ ...commitment.cellProof(evidence.cell), entry, evidence })),
         accessProofs: permits.map(({ permit }) => commitment.proof(permit.cell, permit.writer)),
-        ...(plan.founding === undefined ? {} : { founding: plan.founding })
+        ...(plan.founding === undefined ? {} : { founding: plan.founding }),
+        ...(plan.supplemental === undefined ? {} : { supplemental: plan.supplemental })
       }) },
       check: () => undefined
     };
@@ -104,6 +106,11 @@ export function verifyManagedStage(built: BuiltEntry, raw: unknown, input: Roste
   const position = preview.positions.length - 1;
   const founded = [...preview.cells.cells.values()].filter(({ epochs }) => epochs.at(-1)?.from === position);
   if (stage.founding === undefined ? founded.length > 0 : founded.length !== 1 || !foundingPlaced(stage.founding.grants, founded[0])) return false;
+  if (stage.supplemental !== undefined) {
+    const grant = readGrant(stage.supplemental.grants[0]);
+    if (!grant.ok || grant.grant.roster !== selection.predecessor ||
+        !preview.cells.cells.get(grant.grant.cell)?.grants.some((record) => !record.founding && record.hash === grant.hash)) return false;
+  }
   return stage.accessProofs.every((value) => {
     const permit = readAccessWriteProof(value)?.signed.permit;
     return permit !== undefined && managedWriteAllowed(preview, permit.cell, permit.epoch, permit.writer, position, input.now, value) === true;

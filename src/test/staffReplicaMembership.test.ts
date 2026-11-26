@@ -1034,6 +1034,8 @@ test('managed Give keys authorizes the current epoch before a private handoff', 
   assert.ok('ok' in await lead.p.putGrants([], receipts));
   assert.equal(peer.p.keys.holds(cell, 1), false);
 
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  assert.equal(await lead.p.sealManagedSupplemental(request), undefined);
   const ensured = await ensureLabelCell(lead.host, LABEL_X);
   assert.equal(ensured.ok, true, ensured.ok ? undefined : ensured.message);
   assert.equal(ensured.cell, cell);
@@ -1048,6 +1050,32 @@ test('managed Give keys authorizes the current epoch before a private handoff', 
   assert.equal((await lead.p.signedGrants()).some((grant) => grant.hash === issued.hash), false);
   assert.equal(grantsOn(lead.at).some((grant) => grantHash(grant) === issued.hash), false);
   assert.equal((await writeInBase(lead.p)).epoch, 1);
+  const reopened = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
+  const repeated = await ensureLabelCell({ ...lead.host, project: reopened }, LABEL_X);
+  assert.ok(repeated.ok);
+  assert.deepEqual(repeated.granted, []);
+  assert.equal((await head(reopened)).hash, after.hash);
+  assert.equal(await reopened.sealManagedSupplemental({ ...request, recipient: lead.p.deviceWriter }), undefined);
+  const delivery = await reopened.sealManagedSupplemental(request);
+  assert.ok(delivery);
+  const wire = JSON.stringify(delivery);
+  for (const value of [cell, peer.writer, issued.hash]) assert.equal(wire.includes(value), false);
+  peer.at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(delivery));
+  const update = await reopened.welcomeFor(peer.writer, []);
+  const committed = update.roster.find((entry) => entryHash(entry.header) === after.hash);
+  assert.ok(committed);
+  assert.ok('ok' in await peer.p.ingestForeign([update.genesis, ...update.roster.filter((entry) => entry !== committed)], update.blobs));
+  assert.equal(peer.p.keys.holds(cell, 1), false, 'a private package waits for its selected access root');
+  assert.ok('ok' in await peer.p.ingestForeign([committed], []));
+  const receiving = await head(peer.p);
+  assert.ok(lead.p.keys.epochKey(cell, 1) !== undefined);
+  assert.deepEqual(peer.p.keys.epochKey(cell, 1), lead.p.keys.epochKey(cell, 1));
+  const slot = deviceAt(receiving.roster.members, peer.writer, receiving.position)?.slot;
+  assert.ok(slot !== undefined);
+  assert.ok('ok' in await peer.p.appendOwn('doc.client',
+    { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } }, { stream: cell }));
+
 });
 
 test('a managed supplemental wrap stays staged and outside grant delivery before authorization', async () => {

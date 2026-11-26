@@ -142,17 +142,19 @@ export function readContinuityReceipt(value: unknown): { entry: string; accessPr
 
 /** A local stage becomes authoritative only when its entry and proofs are selected. */
 export function readAuthoredAccessStage(value: unknown): { entry: string; openings: readonly unknown[]; accessProofs: readonly unknown[];
-  founding?: NonNullable<ReturnType<typeof readGrantDelivery>> } | undefined {
+  founding?: NonNullable<ReturnType<typeof readGrantDelivery>>; supplemental?: NonNullable<ReturnType<typeof readGrantDelivery>> } | undefined {
   if (!isRecord(value) || !isHash(value.entry) || !Array.isArray(value.openings) || !Array.isArray(value.accessProofs) ||
       !value.openings.every((opening) => isRecord(opening) && opening.entry === value.entry)) return undefined;
   const { entry, openings, accessProofs } = value;
-  if (!Object.hasOwn(value, 'founding')) return Object.keys(value).length === 3 ? { entry, openings, accessProofs } : undefined;
-  if (Object.keys(value).length !== 4 || !isRecord(value.founding) || Object.keys(value.founding).length !== 2 ||
-      typeof value.founding.cell !== 'string' || !CELL.test(value.founding.cell)) return undefined;
-  const { cell, grants } = value.founding;
+  const kind = Object.hasOwn(value, 'founding') ? 'founding' : Object.hasOwn(value, 'supplemental') ? 'supplemental' : undefined;
+  if (kind === undefined) return Object.keys(value).length === 3 ? { entry, openings, accessProofs } : undefined;
+  const bundle = value[kind];
+  if (Object.keys(value).length !== 4 || !isRecord(bundle) || Object.keys(bundle).length !== 2 ||
+      typeof bundle.cell !== 'string' || !CELL.test(bundle.cell)) return undefined;
+  const { cell, grants } = bundle;
   const opening = openings.find((item) => isRecord(item) && isRecord(item.evidence) && item.evidence.cell === cell);
-  const founding = readGrantDelivery({ opening, grants });
-  return founding === undefined ? undefined : { entry, openings, accessProofs, founding };
+  const delivery = readGrantDelivery({ opening, grants });
+  return delivery === undefined ? undefined : { entry, openings, accessProofs, [kind]: delivery };
 }
 
 /** Collect private permit candidates for the selected entry. Each candidate still needs append-time verification. */

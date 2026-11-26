@@ -718,7 +718,7 @@ function placeGrants(state: RosterState, grants: readonly unknown[], openings: r
       const bound = openGrantEvidence(state.anchor.project, state.accessHistory, opening);
       if (bound !== undefined) evidence.push(bound);
     }
-    const item = stage?.founding ?? readGrantDelivery(candidate);
+    const item = stage?.founding ?? stage?.supplemental ?? readGrantDelivery(candidate);
     if (item === undefined) continue;
     const bound = openGrantEvidence(state.anchor.project, state.accessHistory, item.opening);
     if (bound === undefined) continue;
