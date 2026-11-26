@@ -1,0 +1,12 @@
+hosts:
+  configuration:
+    landing: sessions
+    service: sessions-api
+    instance: ws
+sterling:
+  trustedProxyIps:
+    - "${site.clusterCidrs.pod}"
+landingPage:
+  infoTitle: "Sterling lab"
+  infoText: "Sign in with your passkey to open a lab session."
+  loadingText: "Starting your lab session..."
