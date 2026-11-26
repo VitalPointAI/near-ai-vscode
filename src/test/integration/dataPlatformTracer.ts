@@ -31,7 +31,15 @@ function query(sql: string): string[] {
     'psql', '-X', '-qAt', '--no-password', '--host=/fixture/socket', '--port=5432', '--username=fixture_admin',
     '--dbname=fixture_catalogue', '--set=ON_ERROR_STOP=1'], { input: sql, encoding: 'utf8', timeout: 10_000 });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, (result.stderr ?? '').replaceAll(key, '[fixture key]'));
+  // PostgreSQL may echo input values in a diagnostic. Emit only fixed fixture outcomes.
+  const primary = /^ERROR:[ \t]+(.+)$/m.exec(result.stderr ?? '')?.[1];
+  let reason = 'The synthetic catalogue query failed.';
+  if (primary === 'Invalid observation or signed fact binding' || primary === 'Observation has no verified write scope') {
+    reason = primary;
+  } else if (primary === 'permission denied' || primary?.startsWith('permission denied ')) {
+    reason = 'permission denied';
+  }
+  assert.equal(result.status, 0, reason);
   return (result.stdout ?? '').trim().split('\n');
 }
 

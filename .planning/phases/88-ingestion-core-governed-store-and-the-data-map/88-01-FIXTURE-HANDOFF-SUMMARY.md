@@ -6,21 +6,24 @@ completed: 2026-11-26
 
 # Synthetic Data Map fixture handoff
 
-The synthetic catalogue and panel trial now live in the repository's test tree. The SQL is
-byte-identical to the original independently reviewed trial at `306e13a8a`. The host, tracer,
-panel and type files change only imports and the path to the SQL fixture. The portable tests
-exercise loading authorized inventory as plain text, disconnected and empty results, retries,
-and discarding stale responses when the mission changes. The registration check confirms the
-trial's command is absent from the shipping manifest.
+The portable tests exercise inventory, disconnected and empty results, retries, and discarding
+stale responses when the mission changes. They exercise the trial's registration through an
+injected callback. A separate check verifies the shipping manifest omits the trial command.
 
-The tests-first compile at `5b1368b1a` found the absent fixture modules. The completed compile,
-four portable checks and normal release verifier passed after the port. Inspection of the actual
-VSIX checked its manifest, extension entry point and archive inventory. The resulting package
-has 3,175 entries and SHA-256
-`f45ddc552e2a8a809c49d1f01236835881a4476599c10bba27ca8b4f29900a5c`.
-Independent source review passed. The original disposable PostgreSQL and HTTP trial supplied two
-passing integration cases on the same SQL and logic. This handoff reran the portable checks and
-confirmed that invoking the explicit tracer without the approved fixture is refused.
+## Verification scope
+
+The tests-first compile at `5b1368b1a` found the absent fixture modules. Local verification uses
+`npm run compile && node --test dist/test/dataMapPanel.test.js` for the portable checks
+and `npm run verify:release` for the extension archive. The ordinary `npm test` entry point selects
+`dist/test/*.test.js` and `scripts/test/*.test.mjs`. The opt-in PostgreSQL tracer under integration
+requires the prior approval's exact disposable fixture and an explicit test invocation.
+
+The existing release-content job runs the normal release verifier and uploads the VSIX for that
+run. The verifier rejects both source and compiled test files in the archive. The packaged
+`extension/package.json` can also be inspected for trial command contributions and activation.
+The earlier isolated PostgreSQL and HTTP trials are historical evidence. This handoff records
+local packaging and portable verification, and the exact revision's CI and independent approval
+are recorded on the PR. Live Data Map acceptance remains with its roadmap phases.
 
 ## Open conditions
 
