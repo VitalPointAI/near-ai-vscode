@@ -11,19 +11,21 @@ import test, { after, mock } from 'node:test';
 import type { ScaleTable } from '../domain/gate/labels';
 import { REKEY_KEEP_TEXT, buildGrant, grantHash, newEpochKey, readGrant, sealLabel, unwrapEpochKey, wrapEpochKey } from '../domain/replica/cellKeys';
 import { clientIdOf } from '../domain/replica/clientIds';
-import { entryHash, sealBlob } from '../domain/replica/entry';
+import { entryHash, sealBlob, writerIdOf } from '../domain/replica/entry';
 import { INVITE_FILE_EXTENSION, JOIN_REQUEST_FILE_EXTENSION, WELCOME_FILE_EXTENSION, buildInvite, buildJoinRequest, inviteSafetyCode, joinSecretHash, newJoinSecret, readInvite } from '../domain/replica/invite';
 import { MEMBER_REFUSALS, deviceAt, inviteAt, memberAt, x25519At } from '../domain/replica/rosterMembers';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt, rosterView } from '../domain/replica/roster';
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { accessPermitBytes, accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
+import { sessionCertifyData } from '../domain/replica/sessionKeys';
+import type { SignOptions } from '../domain/team/signedPayload';
 import { grantEvidenceHash } from '../domain/replica/rotationGrants';
 import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
 import type { SecretStorageLike } from '../services/auth';
-import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX, loadOrCreateKemKeys } from '../staff/replica/keyring';
+import { ENCRYPTION_KEY_SECRET, JOIN_SECRET_PREFIX, loadOrCreateEncryptionKey, loadOrCreateKemKeys } from '../staff/replica/keyring';
 import { unwrapForDevice } from '../domain/replica/cellWrapV2';
 import { identityDir } from '../team/identity';
 import {
@@ -37,6 +39,8 @@ import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
+import { setFolderSyncProbe } from '../staff/staffFiles';
+import { fixedSigner } from './helpers/replicaWorld';
 import { appendManagedWithdrawal } from '../staff/replica/managedWithdrawal';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
@@ -982,6 +986,55 @@ test('managed removal stages continuity and Finish recovers the affected cell af
   assert.equal(await unfinishedRekeys(hostOf(recovered, at)), 0);
   assert.equal((await finishRekeys(hostOf(recovered, at))).reason, 'nothing-to-finish');
   assert.equal((await head(recovered)).hash, current.hash);
+});
+
+test('hosted managed withdrawal refuses an action that expires at the locked commit boundary', async () => {
+  const lead = await founded('hosted-access-expiry');
+  const peer = await bringIn(lead, 'hosted-removed-peer', 'Mo Analyst', OFFICIAL);
+  const unaffected = await createCell(lead, LABEL_Z, [lead.p.deviceWriter]);
+  const session = fixedSigner('managed-withdrawal-session');
+  const initial = await head(lead.p);
+  const slot = deviceAt(initial.roster.members, lead.p.deviceWriter, initial.position)?.slot;
+  assert.ok(slot !== undefined);
+  const cert = sessionCertifyData({ project: lead.p.projectId, member: 'mbr-lead', device: lead.p.deviceWriter,
+    sessionKey: session.publicKey, slot, notAfter: new Date(NOW.getTime() + DAY_MS).toISOString() }, (bytes) => session.signer.sign(bytes));
+  assert.ok('ok' in await lead.p.appendOwn('session.certify', cert));
+  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, unaffected]);
+  assert.ok('ok' in await lead.p.putGrants([], receipts));
+  const encoding = await loadOrCreateEncryptionKey(lead.at.secrets, { identityDir: identityDir(lead.at.global), identity: lead.p.signer });
+  const kem = await loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) });
+  const expires = NOW.getTime() + 1000;
+  const confirmed = 'fictional-confirmed-managed-action';
+  const authorized = (id: string) => id === confirmed && lead.at.clock.now.getTime() < expires;
+  const signer = {
+    fingerprint: lead.p.signer.fingerprint, publicKey: lead.p.signer.publicKey, canSignAction: authorized,
+    async sign(bytes: Buffer, options?: SignOptions) {
+      return options?.action !== undefined && authorized(options.action) ? lead.p.signer.sign(bytes) : { refused: 'Confirm this test action first.' };
+    }
+  };
+  const deps: ReplicaProjectDeps = { ...lead.at.deps, secrets: new MemorySecrets(), sessionSigner: session.signer, personSigner: signer,
+    keyStatus: async () => () => ({ state: 'active' }), hosted: { personPublicKey: signer.publicKey, encryption: encoding, kem } };
+  const hosted = project(await ReplicaProject.open(lead.at.root, deps));
+  const before = await head(hosted);
+  assert.equal(before.hash, seed.hash);
+  assert.ok(before.roster.sessions.has(writerIdOf(session.publicKey)));
+  let syncedStage = false;
+  setFolderSyncProbe((dir) => {
+    if (path.basename(dir) !== 'access-evidence') return;
+    syncedStage = true;
+    lead.at.clock.now = new Date(expires);
+  });
+  let result: Awaited<ReturnType<typeof appendManagedWithdrawal>>;
+  try {
+    result = await appendManagedWithdrawal(hosted, before.roster, { member: peer.member }, NOW, confirmed);
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.equal(syncedStage, true);
+  assert.equal(isProjectRefused(result) ? result.refused : result.ok ? 'written' : result.reason, 'action-required');
+  const unchanged = await head(hosted);
+  assert.equal(unchanged.hash, seed.hash);
+  assert.ok(memberAt(unchanged.roster.members, peer.member, unchanged.position));
 });
 
 test('managed clearance reduction commits decisions using the lead’s custom scale mapping', async () => {
