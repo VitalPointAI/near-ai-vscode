@@ -1528,6 +1528,22 @@ test('private founding file waits through reopening for the matching signed rost
   assert.equal(reopened.keys.holds(cell, 1), false);
 });
 
+test('an admitted recipient cannot promote a staged signed delivery after its sealed deadline', async () => {
+  const { lead, peer, cell, selected } = await foundingHandoffFixture();
+  const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
+  const file = await lead.p.sealManagedHandoff(request);
+  assert.ok(file);
+  const root = await stageManagedPredecessors(lead, peer, selected.hash);
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(file));
+  peer.at.clock.now = new Date(NOW.getTime() + DAY_MS);
+  const reopened = project(await ReplicaProject.open(peer.at.root, peer.at.deps));
+  assert.ok('ok' in await reopened.ingestForeign([root], []));
+  const received = await head(reopened);
+  assert.equal(received.hash, selected.hash);
+  assert.equal(reopened.keys.holds(cell, 2), false, 'the selected roster cannot revive a delivery whose deadline passed');
+  assert.equal(isProjectRefused(await reopened.ingestManagedGrantDelivery(file)), true);
+});
+
 test('a local managed inbox resumes only distinct unexpired handles across restart and bounded retries', async () => {
   const lead = await founded('managed-durable-inbox');
   assert.equal(lead.p.managedHandoffInbox(), undefined);
