@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { buildGrant, grantHash, sealLabel } from '../domain/replica/cellKeys';
 import { CELL_ACCESS_FEATURE } from '../domain/replica/features';
+import { buildEnrolment, buildOrganizationLayer } from '../domain/gate/enrolment';
 import { bundleHash } from '../domain/gate/bundle';
 import { gateDir, POLICY_BUNDLE_FILE } from '../gate/bundleStore';
 import { LAST_VALID_SECRET, writeLastValid } from '../gate/clockMarker';
-import { ORGANIZATION_ISSUER_SECRET, OrganizationStore } from '../gate/organizationStore';
+import { ENROLMENT_RECORD_FILE, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, OrganizationStore } from '../gate/organizationStore';
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { ReplicaStore } from '../staff/replica/store';
 import { withFrontierPolicySource } from '../staff/replica/frontierPolicy';
 import { identityDir } from '../team/identity';
 import { appendKeyRecord, KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
-import { enrolmentTextFor } from './helpers/enrolmentFixtures';
-import { deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
+import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rulesTextFor } from './helpers/enrolmentFixtures';
+import { DAY_MS, deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
 import { createRosterWorld } from './helpers/replicaRosterWorld';
 import { MemorySecrets } from './helpers/teamHarness';
 
@@ -98,11 +99,12 @@ async function preparationWorld(secrets = new MemorySecrets()) {
   world.grants.push(labelled);
   const head = world.rosterEntry(world.lead, 'cell.create', { cell: stream, epoch: 1, grant: grantHash(labelled) }, cleared.hash);
   const root = await mkdtemp(path.join(tmpdir(), 'fp-prep-'));
+  const clock = { now: FIXED_NOW };
   let signatures = 0;
   const signer = { ...world.lead.signer, sign: (bytes: Buffer) => { signatures += 1; return world.lead.signer.sign(bytes); } };
   const open = async () => {
     const store = await ReplicaStore.open(root, { secrets, signer: async () => signer,
-      keyStatus: async () => () => ({ state: 'active' }), now: () => new Date(FIXED_NOW) });
+      keyStatus: async () => () => ({ state: 'active' }), now: () => new Date(clock.now) });
     assert.ok(store instanceof ReplicaStore);
     return store;
   };
@@ -116,7 +118,7 @@ async function preparationWorld(secrets = new MemorySecrets()) {
     assert.ok('ok' in await store.putGrant(stream, 1, labelled));
     return { ...request, snapshot: await store.appendSnapshot() };
   };
-  return { store, open, world, head, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key };
+  return { store, open, world, head, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key, clock };
 }
 
 test('scoped prospective preparation proves the signed fence in memory and returns only a Boolean', async () => {
@@ -230,7 +232,7 @@ test('prospective policy reconciles an uncertain committed write exactly and ref
   assert.equal(await reopened.appendSnapshot(), request.snapshot);
 });
 
-test('prospective policy does not reopen after an authenticated organization issuer handover in this tranche', async () => {
+test('prospective policy refuses an accepted organization handover issued before the historical capture', async () => {
   const secrets = new MemorySecrets();
   const { store, open, addGrants, storage, replicaSignatures } = await preparationWorld(secrets);
   const request = await addGrants();
@@ -264,4 +266,61 @@ test('prospective policy refuses a healthy current personal history whose signed
   const signatures = replicaSignatures();
   assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
   assert.equal(replicaSignatures(), signatures);
+});
+
+test('private reopen requires the exact protected accepted one-hop handover and does not write', async () => {
+  const secrets = new MemorySecrets();
+  const { store, open, addGrants, storage, replicaSignatures, clock } = await preparationWorld(secrets);
+  const request = await addGrants();
+  assert.equal(await store['frontierPreparation'](request, 'capture'), 'ready');
+  const old = issuerKey();
+  const next = issuerKey('exact-protected-successor');
+  const at = FIXED_NOW + DAY_MS;
+  const layer = buildOrganizationLayer(next, organizationSections(), { now: at, days: 90 });
+  const signed = (now: number) => JSON.stringify(buildEnrolment(next, { layer, now, serial: 2, days: 1, rotation: old, organization: EXAMPLE_ORGANIZATION }));
+  const exact = signed(at);
+  const sibling = signed(at + 1);
+  const organization = new OrganizationStore(storage, secrets);
+  assert.equal((await organization.accept(exact, { wordsConfirmed: true }, at)).kind, 'rotate');
+  clock.now = at + 2 * DAY_MS;
+  const reopened = await open();
+  const marker = await secrets.get(ORGANIZATION_ISSUER_SECRET);
+  assert.ok(marker);
+  const pinned = JSON.parse(marker) as Record<string, unknown>;
+  assert.ok(pinned.acceptedHandover);
+  const record = path.join(gateDir(storage), ORGANIZATION_DIR_NAME, ENROLMENT_RECORD_FILE);
+  const retained = await readFile(record);
+  const signatures = replicaSignatures();
+  const protectedBefore = [...secrets.values.entries()];
+  const captureDir = path.join(store.dir, 'frontier-policy-captures');
+  const captureFiles = await readdir(captureDir);
+  const captureBytes = await Promise.all(captureFiles.map((file) => readFile(path.join(captureDir, file))));
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'ready', 'the accepted record is checked at authentic issue time');
+  assert.equal(replicaSignatures(), signatures);
+  assert.deepEqual([...secrets.values.entries()], protectedBefore);
+  assert.deepEqual(await readdir(captureDir), captureFiles);
+  assert.deepEqual(await Promise.all(captureFiles.map((file) => readFile(path.join(captureDir, file)))), captureBytes);
+  assert.deepEqual(await readFile(record), retained);
+
+  await writeFile(record, sibling);
+  assert.equal((await organization.load(clock.now)).state, 'valid', 'ordinary current policy still verifies');
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused', 'an authentic sibling with the same pinned layer is not the accepted edge');
+
+  await writeFile(record, retained);
+  await rename(record, `${record}.fixture-kept`);
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  await rename(`${record}.fixture-kept`, record);
+  const { acceptedHandover: _proof, ...legacy } = pinned;
+  await secrets.store(ORGANIZATION_ISSUER_SECRET, JSON.stringify(legacy));
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  const mismatchedRoot = { ...pinned, acceptedHandover: { ...(pinned.acceptedHandover as object), previousLayer: 'f'.repeat(64) } };
+  await secrets.store(ORGANIZATION_ISSUER_SECRET, JSON.stringify(mismatchedRoot));
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  await secrets.store(ORGANIZATION_ISSUER_SECRET, marker);
+
+  clock.now += 1;
+  assert.equal((await organization.accept(rulesTextFor(next, organizationSections(), { now: clock.now }), {}, clock.now)).kind, 'update');
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  assert.equal(replicaSignatures(), signatures);
+  assert.equal(await reopened.appendSnapshot(), request.snapshot);
 });

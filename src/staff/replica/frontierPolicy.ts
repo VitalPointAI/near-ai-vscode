@@ -115,7 +115,7 @@ export function frontierCustody(
 }
 
 
-/** Re-verifies the exact retained envelopes against verified personal continuity and the continuing organization issuer. */
+/** Re-verifies the exact retained envelopes against verified personal continuity and the current organization pin. */
 export async function reopenFrontierPolicy(
   saved: unknown, current: PolicySource, storage: string, secrets: SecretStorageLike
 ) {
@@ -128,15 +128,21 @@ export async function reopenFrontierPolicy(
     history.current.head.seq !== current.personalHistoryHead.seq) return undefined;
   const pin = saved.organizationPin;
   const trusted = current.organizationPin;
-  if (pin.publicKey !== trusted.publicKey || typeof pin.serial !== 'number' || !Number.isSafeInteger(pin.serial) || pin.serial < 1 ||
-    trusted.serial < pin.serial || pin.enrolledAt !== trusted.enrolledAt || typeof pin.lastIssuedAt !== 'string' || pin.pending !== undefined) return undefined;
+  if (typeof pin.publicKey !== 'string' || typeof pin.serial !== 'number' || !Number.isSafeInteger(pin.serial) || pin.serial < 1 ||
+    trusted.serial < pin.serial || pin.enrolledAt !== trusted.enrolledAt || typeof pin.lastIssuedAt !== 'string' ||
+    typeof pin.layerHash !== 'string' || pin.pending !== undefined) return undefined;
   const originalIssue = Date.parse(pin.lastIssuedAt);
   const trustedIssue = Date.parse(trusted.lastIssuedAt);
+  const sameIssuer = pin.publicKey === trusted.publicKey;
   if (!Number.isFinite(originalIssue) || trustedIssue < originalIssue ||
-    (trustedIssue === originalIssue && trusted.layerHash !== pin.layerHash)) return undefined;
+    (sameIssuer && trustedIssue === originalIssue && trusted.layerHash !== pin.layerHash)) return undefined;
+  if (!sameIssuer) {
+    const source = { publicKey: pin.publicKey, serial: pin.serial, layerHash: pin.layerHash, lastIssuedAt: pin.lastIssuedAt, enrolledAt: pin.enrolledAt };
+    if (!await new OrganizationStore(storage, secrets).verifiesAcceptedHandover(source, trusted, saved.instant, current.instant)) return undefined;
+  }
   const personal = verifyPolicyLayer(saved.personalEnvelope, { purpose: 'policy-bundle', status: history.current.lookup, now: saved.instant });
   const organization = verifyOrganizationLayer(saved.organizationEnvelope, {
-    issuerPublicKey: trusted.publicKey, lastIssuedAt: pin.lastIssuedAt, now: saved.instant
+    issuerPublicKey: pin.publicKey, lastIssuedAt: pin.lastIssuedAt, now: saved.instant
   });
   if (personal.state !== 'valid' || personal.wireVersion !== 2 || !isRecord(saved.personalSigner) || !isRecord(saved.personalSignerStatus) ||
     !canonicalBytes(personal.signer).equals(canonicalBytes(saved.personalSigner)) ||

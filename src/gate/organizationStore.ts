@@ -841,6 +841,27 @@ export class OrganizationStore {
     return { layer, record: { name: enrollment.enrolment.organization.name, contacts: enrollment.enrolment.organization.contacts } };
   }
 
+  /** Read-only fixture evidence check. The caller holds the existing bundle lock. */
+  public async verifiesAcceptedHandover(
+    source: Pick<OrganizationPin, 'publicKey' | 'serial' | 'layerHash' | 'lastIssuedAt' | 'enrolledAt'>,
+    target: OrganizationPin, capturedAt: number, effective: number
+  ): Promise<boolean> {
+    const proof = target.acceptedHandover;
+    if (target.pending !== undefined || proof === undefined || source.publicKey === target.publicKey ||
+      proof.previousKey !== source.publicKey || proof.previousSerial !== source.serial ||
+      proof.previousLayer !== source.layerHash || proof.previousIssue !== source.lastIssuedAt ||
+      proof.enrolledAt !== source.enrolledAt || target.enrolledAt !== source.enrolledAt ||
+      !(timeOf(proof.edgeIssue) > capturedAt && timeOf(proof.edgeIssue) <= effective)) return false;
+    try {
+      await this.requireExactProtectedPin(target);
+      await this.verifyHandoverFiles(target, effective);
+      await this.requireExactProtectedPin(target);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async prepareHandoverCommit(found: OrganizationPin, effective: number) {
     const next = found.pending;
     const proof = next?.handover;
