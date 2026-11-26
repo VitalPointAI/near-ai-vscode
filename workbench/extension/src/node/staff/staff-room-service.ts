@@ -4,7 +4,7 @@
  * cards, changes since, decisions waiting for your organization's server), the roster (who can see what, roster splits, the lead's device) and the
  * people list, and sends it to every tab when anything changes.
  *
- * Decisions (D-24, D-60): beginDecision takes the decision stamp of the version on screen (versionActs.decisionStamp) and keeps it here for the
+ * Decisions (D-24, D-60): beginDecision takes the stamp of an eligible version and keeps it here for the
  * step-up window only; decide writes version.decide with that stamp, signed by the person key (the project's signer for the kind). A decision on
  * that version that folded meanwhile refuses with CHANGED_WHILE_DECIDING_TEXT and writes nothing. A confirmation that is too old answers with the
  * link that confirms it; the stamp stays, so the same decision finishes when the person comes back. Only a person decides: the acts run as a person.
@@ -48,10 +48,17 @@ export interface RoomPerson {
 }
 
 type ActResult = { readonly ok: true; readonly hash: string } | { readonly ok: false; readonly reason: string; readonly message: string };
+type ProjectState = Awaited<ReturnType<EngineProject['state']>>;
 
-/** The version acts a decision uses (versionActs.ts VersionActs). */
-export interface RoomActs {
-  decisionStamp(input: { product: string; hash: string }): Promise<string | undefined>;
+/** The room's view of the bundled VersionActs. */
+interface RoomActs {
+  roomActions(state: ProjectState, product: string): ReadonlyArray<{
+    readonly hash: string;
+    readonly number: number;
+    readonly submitRoles: readonly string[];
+    readonly decision?: { readonly stamp: string; readonly settle: boolean };
+  }>;
+  submitForRosterRole(input: { product: string; hash: string; decisionFor: string }): Promise<ActResult>;
   decide(input: { product: string; hash: string; outcome: 'approve' | 'reject'; reasons: readonly string[]; stamp?: string; settle?: boolean }): Promise<ActResult>;
   propose(input: { product: string }): Promise<ActResult>;
 }
@@ -64,20 +71,23 @@ export interface StaffRoomServiceOptions {
   readonly stepUpAcr?: () => string | undefined;
   /** The other people of a shared work (33-12's LivePresence); by default the live engine's presence (33-29). */
   readonly people?: (project: string) => readonly RoomPerson[] | undefined;
-  /** The acts of one shared work; by default the engine's VersionActs as a person. */
-  readonly actsFor?: (shared: { project: EngineProject; deps: object }) => RoomActs;
   readonly now?: () => number;
   readonly log?: (line: string) => void;
 }
 
 interface Ticket extends StaffPendingDecision {
   readonly project: string;
+  readonly session: RoomLiveSource;
+  readonly person: string;
   readonly stamp: string;
   readonly expires: number;
 }
 
 /** The fold's versions family, as far as the room reads it. */
-interface VersionsProduct { readonly stream: string; readonly product: string }
+interface VersionsProduct { readonly stream: string; readonly product: string; readonly versions: readonly { readonly hash: string }[] }
+
+const versionsOf = (fold: unknown): readonly VersionsProduct[] =>
+  (fold as { families: { versions?: readonly VersionsProduct[] } }).families.versions ?? [];
 
 export class StaffRoomService implements StaffRoomServer {
   private readonly clients = new Set<StaffRoomClient>();
@@ -103,20 +113,28 @@ export class StaffRoomService implements StaffRoomServer {
       const room = await this.room(live, row).catch(() => undefined);
       if (room !== undefined) out.push(room);
     }
-    return out;
+    return this.options.live() === live ? out : [];
   }
 
   public async beginDecision(project: string, product: string, hash: string, settle: boolean): Promise<ServiceResult<StaffPendingDecision>> {
-    const shared = this.options.live()?.shared(project);
-    if (shared === undefined) return refused(STAFF_ROOM_TEXT.notOpen);
-    const stamp = await this.acts(shared).decisionStamp({ product, hash });
-    if (stamp === undefined) return refused(STAFF_ROOM_TEXT.notVersion);
-    const { fold } = await shared.project.state();
-    const number = ((fold as { families: Record<string, unknown> }).families.versions as Array<VersionsProduct & { versions: Array<{ hash: string; number: number }> }> | undefined ?? [])
-      .find((item) => item.product === product)?.versions.find((version) => version.hash === hash)?.number ?? 0;
+    const live = this.options.live();
+    const shared = live?.shared(project);
+    if (live === undefined || shared === undefined) return refused(STAFF_ROOM_TEXT.notOpen);
+    const state = await shared.project.state();
+    const action = this.acts(shared).roomActions(state, product).find((item) => item.hash === hash);
+    if (action?.decision === undefined || action.decision.settle !== settle) {
+      const known = versionsOf(state.fold).some((item) => item.product === product && item.stream !== project &&
+        item.versions.some((version) => version.hash === hash));
+      return refused(known ? STAFF_ROOM_TEXT.decisionUnavailable : STAFF_ROOM_TEXT.notVersion);
+    }
+    if (this.options.live() !== live || live.shared(project)?.project !== shared.project) return refused(STAFF_ROOM_TEXT.notOpen);
     // One decision at a time per shared work: a new begin replaces the one before.
     for (const [ticket, item] of this.tickets) if (item.project === project) this.tickets.delete(ticket);
-    const ticket: Ticket = { ticket: randomUUID(), project, product, hash, number, settle, title: `v${number} of ${product}`, stamp, expires: this.now() + DECISION_WINDOW_MS };
+    const { number, decision: { stamp } } = action;
+    const ticket: Ticket = {
+      ticket: randomUUID(), project, session: live, person: shared.project.deviceWriter, product, hash, number, settle,
+      title: `v${number} of ${product}`, stamp, expires: this.now() + DECISION_WINDOW_MS,
+    };
     this.tickets.set(ticket.ticket, ticket);
     void this.push(project);
     return ok(this.pendingOf(ticket));
@@ -124,17 +142,25 @@ export class StaffRoomService implements StaffRoomServer {
 
   public async decide(ticketId: string, outcome: 'approve' | 'reject', reasons: readonly string[], returnTo: string): Promise<StaffDecisionResult> {
     const ticket = this.ticket(ticketId);
-    const shared = ticket === undefined ? undefined : this.options.live()?.shared(ticket.project);
-    if (ticket === undefined || shared === undefined) return refused(STAFF_ROOM_TEXT.decisionGone);
+    const live = this.options.live();
+    const shared = ticket === undefined ? undefined : live?.shared(ticket.project);
+    if (ticket === undefined || live === undefined || shared === undefined || !this.ownsTicket(ticket, live, shared.project)) {
+      return refused(STAFF_ROOM_TEXT.decisionGone);
+    }
     const result = await this.acts(shared).decide({ product: ticket.product, hash: ticket.hash, outcome, reasons: [...reasons], stamp: ticket.stamp, settle: ticket.settle });
     if (result.ok) {
       this.tickets.delete(ticketId);
-      this.options.live()?.localAppended(ticket.project);
+      live.localAppended(ticket.project);
       void this.push(ticket.project);
       return ok({ hash: result.hash });
     }
     // The stamp stays for the trip to confirm: the same decision finishes when the person comes back (Pitfall N8.4).
-    if (isStepUp(result)) return this.stepUp(result.message, returnTo);
+    if (isStepUp(result)) {
+      if (this.ticket(ticketId) !== ticket || this.options.live() !== live || live.shared(ticket.project)?.project !== shared.project) {
+        return refused(STAFF_ROOM_TEXT.decisionGone);
+      }
+      return this.stepUp(result.message, returnTo);
+    }
     this.tickets.delete(ticketId);
     void this.push(ticket.project);
     this.log(`staff: a decision was not written (${result.reason})`);
@@ -142,8 +168,10 @@ export class StaffRoomService implements StaffRoomServer {
   }
 
   public async cancelDecision(ticketId: string): Promise<void> {
-    const ticket = this.tickets.get(ticketId);
-    if (ticket === undefined) return;
+    const ticket = this.ticket(ticketId);
+    const live = this.options.live();
+    const shared = ticket === undefined ? undefined : live?.shared(ticket.project);
+    if (ticket === undefined || live === undefined || shared === undefined || !this.ownsTicket(ticket, live, shared.project)) return;
     this.tickets.delete(ticketId);
     void this.push(ticket.project);
   }
@@ -173,6 +201,17 @@ export class StaffRoomService implements StaffRoomServer {
     void this.push(project);
     if (!result.ok) return refused(result.message);
     this.options.live()?.localAppended(project);
+    return ok(result.hash);
+  }
+
+  public async submit(project: string, product: string, hash: string, decisionFor: string): Promise<ServiceResult<string>> {
+    const live = this.options.live();
+    const shared = live?.shared(project);
+    if (live === undefined || shared === undefined) return refused(STAFF_ROOM_TEXT.notOpen);
+    const result = await this.acts(shared).submitForRosterRole({ product, hash, decisionFor });
+    if (!result.ok) return refused(result.message);
+    live.localAppended(project);
+    void this.push(project);
     return ok(result.hash);
   }
 
@@ -219,9 +258,12 @@ export class StaffRoomService implements StaffRoomServer {
   }
 
   private acts(shared: { project: EngineProject; deps: object }): RoomActs {
-    if (this.options.actsFor !== undefined) return this.options.actsFor(shared);
     const Acts = this.options.engine.VersionActs as unknown as new (project: never, actor: { kind: 'person' }, context: object) => RoomActs;
     return new Acts(shared.project as never, { kind: 'person' }, { deps: shared.deps });
+  }
+
+  private ownsTicket(ticket: Ticket, live: RoomLiveSource, project: EngineProject): boolean {
+    return ticket.session === live && ticket.person === project.deviceWriter && ticket.project === project.projectId;
   }
 
   private ticket(id: string): Ticket | undefined {
@@ -257,7 +299,7 @@ export class StaffRoomService implements StaffRoomServer {
     const row = live?.projects().find((item) => item.project === project);
     if (live === undefined || row === undefined || this.clients.size === 0) return;
     const room = await this.room(live, row).catch(() => undefined);
-    if (room === undefined) return;
+    if (room === undefined || this.options.live() !== live) return;
     for (const client of [...this.clients]) client.onRoom(room);
   }
 
@@ -266,8 +308,9 @@ export class StaffRoomService implements StaffRoomServer {
     if (shared === undefined) return undefined;
     const { engine } = this.options;
     const { project } = shared;
-    const { fold, roster } = await project.state() as unknown as { fold: { families: Record<string, unknown> }; roster: RosterLike };
-    const versions = (fold.families.versions as VersionsProduct[] | undefined) ?? [];
+    const state = await project.state();
+    const roster = state.roster as unknown as RosterLike;
+    const versions = versionsOf(state.fold);
     const head = roster.positions.length - 1;
     const me = [...(roster.members.devices.get(project.deviceWriter) ?? [])].reverse()[0]?.member;
     const myRecord = me === undefined ? undefined : [...(roster.members.members.get(me) ?? [])].reverse()[0];
@@ -308,8 +351,19 @@ export class StaffRoomService implements StaffRoomServer {
       dismissed: [...(this.dismissed.get(row.project) ?? [])],
       wrapCards: await live.wrapCards(row.project).catch(() => []),
     } as never) as StaffRoomLiveView;
-    const pending = [...this.tickets.values()].find((ticket) => ticket.project === row.project && ticket.expires > this.now());
-    return { project: row.project, root: row.root, view, ...(pending === undefined ? {} : { pending: this.pendingOf(pending) }) };
+    const acts = this.acts(shared);
+    const actions = new Map(view.rows.map(({ product }) => [product, acts.roomActions(state, product)]));
+    const rows = view.rows.map((row) => {
+      const versionActions = actions.get(row.product)?.filter(({ submitRoles, decision }) => submitRoles.length > 0 || decision?.settle === false)
+        .map(({ hash, number, submitRoles, decision }) => ({ hash, number, submitRoles, ...(decision?.settle === false ? { decide: true as const } : {}) }));
+      return versionActions === undefined || versionActions.length === 0 ? row : { ...row, versionActions };
+    });
+    const cards = view.cards.map((card) => card.kind !== 'contested' ? card : {
+      ...card, actions: card.actions.filter(({ product, hash }) =>
+        product !== undefined && actions.get(product)?.some((item) => item.hash === hash && item.decision?.settle === true) === true),
+    });
+    const pending = [...this.tickets.values()].find((ticket) => this.ownsTicket(ticket, live, project) && ticket.expires > this.now());
+    return { project: row.project, root: row.root, view: { ...view, rows, cards }, ...(pending === undefined ? {} : { pending: this.pendingOf(pending) }) };
   }
 
   private async splits(shared: { project: EngineProject; deps: object }, roster: RosterLike): Promise<Array<{ at: string; text: string; branches: Array<{ hash: string; text: string }> }>> {

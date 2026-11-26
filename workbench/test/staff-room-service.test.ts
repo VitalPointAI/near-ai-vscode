@@ -2,8 +2,11 @@
 // version is one card; beginDecision keeps the version's decision stamp in the backend, and decide writes the decision with it as a person, signed
 // by the project's signer for the kind (the person key in a hosted session). A decision that folds meanwhile refuses with the D-24 sentence and
 // nothing is written; a confirmation that is too old answers with the step-up link and the same stamp finishes later. Fictional exercise data only.
+import 'reflect-metadata';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
+import { staffRoomView } from '../extension/src/browser/staff/staff-room-view.ts';
 import type { StaffEngine } from '../extension/src/node/staff/staff-engine.ts';
 import { StaffLiveEngine, type HostedSessionKeys } from '../extension/src/node/staff/staff-live-engine.ts';
 import { StaffRoomService } from '../extension/src/node/staff/staff-room-service.ts';
@@ -114,37 +117,43 @@ async function hostedRoomOf(seat: Seat) {
 const versionsOf = async (seat: Seat) =>
   ((await seat.p.state()).fold.families.versions as ProductVersions[]).find((product) => product.product === PRODUCT)?.versions ?? [];
 
+const renderer = createRequire(import.meta.url)('@theia/core/shared/react-dom/server') as { renderToStaticMarkup(element: unknown): string };
+const markupOf = (room: StaffRoom): string => renderer.renderToStaticMarkup(staffRoomView([room], {
+  act: () => undefined, decide: () => undefined, cancel: () => undefined,
+}));
+
 test('the Staff Room submits and decides the exact version even after a newer proposal', async () => {
   const { lead, alternate, stream, target, typeMore } = await awaiting('guard-checked');
   const owner = await hostedRoomOf(lead);
   const viewer = await roomOf(alternate);
-  // The optional signature keeps the tests runnable before the native RPC is implemented.
-  type RoomWithSubmit = StaffRoomService & { submit?: (project: string, product: string, hash: string, role: string) => Promise<{ kind: string; value?: string }> };
-  const ownerRpc: RoomWithSubmit = owner.service;
-  const viewerRpc: RoomWithSubmit = viewer.service;
   const actions = async (room: typeof viewer.room) => {
     const row = (await room()).view.rows.find((item) => item.product === PRODUCT);
     assert.ok(row);
-    return (row as typeof row & { versionActions?: unknown }).versionActions;
+    return row.versionActions;
   };
   try {
     const before = streamEntries(lead.at, stream);
-    assert.equal((await ownerRpc.submit?.(owner.project, PRODUCT, target.hash, 'unassigned'))?.kind, 'refused');
-    assert.equal((await ownerRpc.submit?.('0'.repeat(32), PRODUCT, target.hash, 'commander'))?.kind, 'refused');
-    assert.equal((await ownerRpc.submit?.(owner.project, 'other-product', target.hash, 'commander'))?.kind, 'refused');
-    assert.equal((await ownerRpc.submit?.(owner.project, PRODUCT, 'f'.repeat(64), 'commander'))?.kind, 'refused');
-    assert.equal((await viewerRpc.submit?.(viewer.project, PRODUCT, target.hash, 'commander'))?.kind, 'refused');
+    assert.equal((await owner.service.submit(owner.project, PRODUCT, target.hash, 'unassigned')).kind, 'refused');
+    assert.equal((await owner.service.submit('0'.repeat(32), PRODUCT, target.hash, 'commander')).kind, 'refused');
+    assert.equal((await owner.service.submit(owner.project, 'other-product', target.hash, 'commander')).kind, 'refused');
+    assert.equal((await owner.service.submit(owner.project, PRODUCT, 'f'.repeat(64), 'commander')).kind, 'refused');
+    assert.equal((await viewer.service.submit(viewer.project, PRODUCT, target.hash, 'commander')).kind, 'refused');
     assert.equal((await owner.service.beginDecision(owner.project, PRODUCT, target.hash, false)).kind, 'refused');
     assert.deepEqual(streamEntries(lead.at, stream), before);
     assert.deepEqual(streamEntries(alternate.at, stream), before);
     assert.deepEqual(await actions(owner.room), [{ hash: target.hash, number: 1, submitRoles: ['commander'] }]);
     assert.equal(await actions(viewer.room), undefined);
+    const form = markupOf(await owner.room());
+    const roleField = /<label for="([^"]+)">Decision role for v1 of [^<]+<\/label><select id="\1"/;
+    assert.match(form, roleField);
+    assert.match(form, /<button type="submit"[^>]*aria-label="Submit v1 of [^"]+"/);
 
-    const submitted = await ownerRpc.submit?.(owner.project, PRODUCT, target.hash, 'commander');
-    assert.equal(submitted?.kind, 'ok');
+    const submitted = await owner.service.submit(owner.project, PRODUCT, target.hash, 'commander');
+    assert.equal(submitted.kind, 'ok');
     assert.equal(streamEntries(lead.at, stream).find((entry) => entryHash(entry.header) === submitted.value)?.header.writer, owner.sessionWriter);
     assert.equal(owner.replicator().appended, 1);
-    assert.equal((await ownerRpc.submit?.(owner.project, PRODUCT, target.hash, 'commander'))?.kind, 'refused');
+    assert.equal((await owner.service.submit(owner.project, PRODUCT, target.hash, 'commander')).kind, 'refused');
+    assert.equal((await versionsOf(lead))[0]?.state, 'awaiting-decision');
     await syncTo(lead, alternate, [stream]);
     assert.deepEqual(await actions(owner.room), [{ hash: target.hash, number: 1, submitRoles: [], decide: true }]);
     assert.deepEqual(await actions(viewer.room), await actions(owner.room));
@@ -156,6 +165,9 @@ test('the Staff Room submits and decides the exact version even after a newer pr
     await typeMore(' Water for four.');
     assert.equal((await owner.service.propose(owner.project, PRODUCT)).kind, 'ok');
     assert.deepEqual(await actions(owner.room), [{ hash: target.hash, number: 1, submitRoles: [], decide: true }]);
+    const afterProposal = markupOf(await owner.room());
+    assert.match(afterProposal, /aria-label="Decide v1 of [^"]+"/);
+    assert.doesNotMatch(afterProposal, /aria-label="Decide v2 of /);
     const beforeDecision = streamEntries(lead.at, stream).length;
     assert.deepEqual(await owner.service.decide('unknown-ticket', 'approve', [], '/'), { kind: 'refused', reason: STAFF_ROOM_TEXT.decisionGone });
     const decided = await owner.service.decide(begun.value.ticket, 'approve', ['Ready.'], '/');
@@ -184,7 +196,13 @@ test('a decision ticket cannot follow the room into a different person’s sessi
     assert.equal((await service.rooms())[0]?.pending, undefined);
     const before = streamEntries(alternate.at, stream);
     assert.deepEqual(await service.decide(begun.value.ticket, 'approve', [], '/'), { kind: 'refused', reason: STAFF_ROOM_TEXT.decisionGone });
+    await service.cancelDecision(begun.value.ticket);
     assert.deepEqual(streamEntries(alternate.at, stream), before);
+    current = owner.live;
+    assert.equal((await service.rooms())[0]?.pending?.ticket, begun.value.ticket);
+    await service.cancelDecision(begun.value.ticket);
+    assert.equal((await service.rooms())[0]?.pending, undefined);
+    assert.deepEqual(await service.decide(begun.value.ticket, 'approve', [], '/'), { kind: 'refused', reason: STAFF_ROOM_TEXT.decisionGone });
   } finally {
     await owner.live.stop();
     await viewer.live.stop();
@@ -239,8 +257,11 @@ test('a competing approval during hosted signing closes the ticket even when the
 });
 
 test('a contested version gives one card with both names, both reasons and the two actions', async () => {
-  const { lead } = await contested();
+  const { lead, stream, target } = await contested();
+  const observer = await bringIn(lead, 'observer', 'Staff Observer', orgClearance('Internal'));
+  await syncTo(lead, observer, [stream]);
   const { live, room } = await roomOf(lead);
+  const observed = await roomOf(observer);
   try {
     const cards = (await room()).view.cards.filter((card) => card.kind === 'contested');
     assert.equal(cards.length, 1);
@@ -248,8 +269,13 @@ test('a contested version gives one card with both names, both reasons and the t
     assert.match(cards[0].text, /^Contested: .+ (approved|rejected) v1 and .+ (approved|rejected) it at the same time\. Neither applies\. A new decision is needed\.$/);
     assert.deepEqual(cards[0].decisions?.map((item) => item.reasons[0]).sort(), ['Fuel figures check out.', 'Water is missing.']);
     assert.deepEqual(cards[0].actions.map((action) => action.label), ['Approve v1', 'Reject v1']);
+    const other = (await observed.room()).view.cards.find((card) => card.kind === 'contested');
+    assert.deepEqual(other?.decisions, cards[0].decisions);
+    assert.deepEqual(other?.actions, []);
+    assert.equal((await observed.service.beginDecision(observed.project, PRODUCT, target.hash, true)).kind, 'refused');
   } finally {
     await live.stop();
+    await observed.live.stop();
   }
 });
 
