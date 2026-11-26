@@ -1826,7 +1826,7 @@ Plans:
   2. A session below the model's label cannot route to it, and requests fall back to the incumbent while the host is down. (FAC-08)
   3. One click takes a specialist to shadow and a second to canary (auto-promotion off by default), and a rollback restores the previous model in one click with a recorded reason. (FAC-06)
   4. No training job calls any network destination outside the machine it runs on. (FAC-01)
-  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts, and teacher calls follow the label's routing. (FAC-02, FAC-09)
+  5. A training job that names a machine outside your organization's listed training targets, or a base whose licence is blocked, is refused before it starts. If no approved target fits the workload, the proposal shows why it is infeasible. Teacher calls follow the label's routing. (FAC-02, FAC-09)
 **Research flags**: Phase 85 measures the reference ROCm and PyTorch pairing. Check the chosen target's backend, capacity and approval for each workload.
 **Plans:** 0 plans
 **UI hint**: yes

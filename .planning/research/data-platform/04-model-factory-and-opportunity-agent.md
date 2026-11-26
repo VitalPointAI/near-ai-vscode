@@ -24,11 +24,14 @@ and measured evidence. Other eligible accelerators can run later workloads.
 
 - During planning, show which approved targets match the dataset's handling restrictions,
   pinned trainer and base model, accelerator backend, memory and storage needs. The proposal
-  shows the selected target, expected cost and the reason for the choice.
+  shows the selected target, expected cost and the reason for the choice. If no eligible target
+  meets the workload's requirements, mark it infeasible, show the unmet requirements and leave
+  it out of the training queue.
 - Proposal approval permits the dataset builder to start. Once it seals the dataset manifest,
   verify that the job's exact target, dataset and artifact digests match the approved scope.
-  Check the target's eligibility and capacity again before starting. If it is busy, show why
-  the job is queued. A target or workload outside the approved scope returns to proposal
+  Check the target's eligibility and capacity again before starting. If the approved target
+  remains eligible and is busy, explain why the job is queued. If no eligible target remains,
+  mark the job infeasible. A target or workload outside the approved scope returns to proposal
   approval before the Model Factory moves the job or its input data.
 - The Model Factory can coordinate approved targets over the network. The training process
   makes no off-host network calls. Any teacher inference is a separate policy-routed operation.
@@ -112,11 +115,12 @@ Every specialist moves through one explicit state machine. Each state has an own
 
 | State | Entered when | Leaves to | Stuck-state guard |
 |-------|--------------|-----------|-------------------|
-| `candidate` | Scorer finds a cluster above threshold | `proposed`, `dismissed` | Re-scored weekly; expires after 30 days |
+| `candidate` | Scorer finds a cluster above threshold | `proposed`, `dismissed`, `infeasible` | Re-scored weekly. Expires after 30 days. Show unmet requirements if no eligible target fits. |
 | `proposed` | Card shown to someone with enough clearance and the approver role | `approved`, `dismissed`, `snoozed` | Card names who can approve; if nobody can, it says so instead of waiting |
-| `approved` | One click by an approver whose clearance dominates the projected dataset label | `building-dataset` | Budget and host checked at approval time |
-| `building-dataset` | Builder starts | `dataset-ready`, `infeasible` | `infeasible` names the gate that failed (too few examples, label too high, licence) |
-| `dataset-ready` | Splits sealed, manifest hashed | `training` | Shows queue position for the approved target. A replacement target requires a new approval. |
+| `approved` | One click by an approver whose clearance dominates the projected dataset label | `building-dataset` | Check budget and selected target eligibility at approval. Recheck the exact job after dataset sealing. |
+| `building-dataset` | Builder starts | `dataset-ready`, `infeasible` | Show which requirement failed, such as sample count, label or licence. |
+| `dataset-ready` | Splits sealed, manifest hashed | `training`, `proposed`, `infeasible` | Show queue position while the approved target is eligible and busy. If a replacement falls outside the approved scope, return to proposal approval. If no eligible target remains, show why. |
+| `infeasible` | A required gate fails, including a workload with no eligible target | `proposed`, `dismissed` | Only revisit after the workload or supporting evidence changes. Show the updated feasibility result and require proposal approval before running. |
 | `training` | Worker picks the job | `evaluating`, `failed`, `paused` | Heartbeat every minute; `paused` when host is offline or memory guard trips, with resume |
 | `evaluating` | Adapter written | `shadow`, `rejected` | `rejected` shows the scores against the gate |
 | `shadow` | Gates pass | `canary`, `rolled-back` | Fixed sample window (for example 200 tasks or 7 days) |
