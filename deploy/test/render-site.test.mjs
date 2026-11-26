@@ -252,3 +252,84 @@ test('the lab preview CLI validates every selected release and keeps its staging
   assert.match(failedRender.stderr, /helm was not found/i);
   assert.deepEqual(readdirSync(staging), [], 'render failure removes its staging');
 });
+
+function labStorageFixture(t) {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'sterling-lab-storage-test-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const publicFile = path.join(scratch, 'public.pem');
+  const budgetFile = path.join(scratch, 'budget.json');
+  writeFileSync(publicFile, SITE.organizationPublicKey);
+  const budget = {
+    usableMiB: 136,
+    reserveMiB: 20,
+    volumesMiB: {
+      registry: 11, secrets: 12, secretSnapshots: 13, secretTokens: 14,
+      identity: 15, identityDumps: 16, hub: 17, workspace: 18,
+    },
+  };
+  const run = (value = budget, helm = HELM) => {
+    writeFileSync(budgetFile, JSON.stringify(value));
+    return spawnSync(process.execPath, [
+      path.join(ROOT, 'deploy/lab/render.mjs'), '--public-key', publicFile, '--storage-plan', budgetFile,
+    ], { encoding: 'utf8', env: { ...process.env, HELM: helm } });
+  };
+  return { budget, run, scratch };
+}
+
+test('the lab storage preview accounts for rendered requests and manual reservations at the budget boundary', (t) => {
+  const { run } = labStorageFixture(t);
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.storage, {
+    usableMiB: 136, reserveMiB: 20, volumeMiB: 116, unallocatedMiB: 0,
+    allocations: [
+      { id: 'registry', namespace: 'sterling-registry', claim: 'zot-pvc-zot-0', miB: 11, source: 'rendered' },
+      { id: 'secrets', namespace: 'sterling-openbao', claim: 'data-openbao-0', miB: 12, source: 'rendered' },
+      { id: 'secretSnapshots', namespace: 'sterling-openbao', claim: 'openbao-snapshots', miB: 13, source: 'rendered' },
+      { id: 'secretTokens', namespace: 'sterling-openbao', claim: 'openbao-lab-tokens', miB: 14, source: 'manual' },
+      { id: 'identity', namespace: 'sterling-identity', claim: 'data-sterling-postgres-0', miB: 15, source: 'rendered' },
+      { id: 'identityDumps', namespace: 'sterling-identity', claim: 'sterling-postgres-dumps', miB: 16, source: 'rendered' },
+      { id: 'hub', namespace: 'sterling-hubs', claim: 'state-hub-lab-0', miB: 17, source: 'rendered' },
+    ],
+    reservation: { id: 'workspace', namespace: 'theia-cloud', miB: 18, retainedWorkspaces: 1 },
+  });
+  assert.match(report.unverified.join('\n'), /VM storage capacity/i);
+  assert.match(report.unverified.join('\n'), /volume binding/i);
+});
+
+test('the lab storage preview refuses incomplete, oversized and underfunded plans before invoking Helm', (t) => {
+  const { budget, run, scratch } = labStorageFixture(t);
+  const noHelm = path.join(scratch, 'missing-helm');
+  const { secretTokens, ...incomplete } = budget.volumesMiB;
+  assert.equal(secretTokens, 14);
+  for (const [value, message] of [
+    [{ ...budget, volumesMiB: incomplete }, /storage plan.*volumesMiB/i],
+    [{ ...budget, volumesMiB: { ...budget.volumesMiB, registry: 2 ** 43 } }, /storage plan.*registry/i],
+    [{ ...budget, usableMiB: 135 }, /storage plan.*exceeds.*usable/i],
+  ]) {
+    const refused = run(value, noHelm);
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, message);
+    assert.doesNotMatch(refused.stderr, /helm was not found/i);
+  }
+});
+
+test('the lab storage preview refuses an unexpected rendered PVC reference', (t) => {
+  const { run, scratch } = labStorageFixture(t);
+  const fixtureHelm = path.join(scratch, 'fixture-helm');
+  writeFileSync(fixtureHelm, [
+    `#!${process.execPath}`,
+    "const { spawnSync } = require('node:child_process');",
+    `const result = spawnSync(${JSON.stringify(HELM)}, process.argv.slice(2), { encoding: 'utf8' });`,
+    "process.stdout.write(result.stdout.replace('claimName: openbao-lab-tokens', 'claimName: unbudgeted-test-volume'));",
+    "process.stderr.write(result.stderr);",
+    "process.exitCode = result.status;",
+  ].join('\n'), { mode: 0o700 });
+  const refused = run(undefined, fixtureHelm);
+  assert.equal(refused.status, 1);
+  assert.equal(refused.stdout, '');
+  assert.match(refused.stderr, /unbudgeted-test-volume/);
+});
