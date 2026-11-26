@@ -121,7 +121,7 @@ export async function addOrganizationRules(host: GateHost, deps: AddRulesDeps): 
   const name = preview.name ?? NAME_FALLBACK;
   // An update, or the rules in use written again over a missing or replaced copy, is signed by the key in use: no words to compare (WR-01).
   const pinnedKey = preview.kind === 'update' || preview.kind === 'repair';
-  if (!pinnedKey) {
+  if (!pinnedKey && preview.kind !== 'resume') {
     // A new key or a handover: the words are compared aloud first (D-12, D-14). A file that gives no words is never taken without them.
     if (preview.words === undefined) return refuse(ORGANIZATION_LAYER_REFUSALS.malformed, 'malformed');
     const question = preview.kind === 'rotate' ? `${ROTATION_WORDS_LEAD} ${issuerWordsQuestion(name)}` : issuerWordsQuestion(name);
@@ -130,14 +130,15 @@ export async function addOrganizationRules(host: GateHost, deps: AddRulesDeps): 
     if (answer !== ISSUER_WORDS_MATCH) return 'declined';
   }
   try {
-    const state = await host.acceptOrganizationFile(text, pinnedKey ? {} : { wordsConfirmed: true });
+    const confirmation = preview.kind === 'resume' ? { expectedPending: preview.expectedPending } : pinnedKey ? {} : { wordsConfirmed: true };
+    const state = await host.acceptOrganizationFile(text, confirmation);
     if (state.state !== 'valid') warn(state.sentence);
   } catch (error) {
     // The host recorded a refused file already; a change that could not be written is said in its own words.
     warn(error instanceof OrganizationStoreError ? error.message : RULES_NOT_USED_TEXT);
     return 'refused';
   }
-  const outcome: AddRulesOutcome = preview.kind === 'enrol' ? 'enrolled' : preview.kind === 'rotate' ? 'rotated' : 'updated';
+  const outcome: AddRulesOutcome = preview.kind === 'enrol' ? 'enrolled' : (preview.kind === 'rotate' || preview.kind === 'resume') ? 'rotated' : 'updated';
   inform(outcome === 'enrolled' ? enrolledText(name) : outcome === 'rotated' ? rotatedText(name) : updatedText(preview.issuedAt.slice(0, 10)));
   await tellIgnored(host, deps.tell, deps.memento, true);
   return outcome;

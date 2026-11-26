@@ -18,7 +18,7 @@ import type { SecretStorageLike } from '../services/auth';
 import { BundleStoreError, applyPolicyDraft, loadPersonalLayer, resetPolicyToDefaults } from './bundleStore';
 import type { BundleEvent, BundleResult, PolicyEditResult } from './bundleStore';
 import { OrganizationStore, OrganizationStoreError, loadLayeredPolicy, recompose } from './organizationStore';
-import type { LayeredPolicy, OrganizationEvent, PolicyLayersView } from './organizationStore';
+import type { LayeredPolicy, OrganizationConfirmation, OrganizationEvent, PolicyLayersView } from './organizationStore';
 import { readLastValid } from './clockMarker';
 import { isModelRequestRecord } from '../domain/gate/record';
 import { DecisionLog, INSTALL_LOG_KEY, projectLogKey } from './decisionLog';
@@ -232,7 +232,7 @@ export class GateHost {
    * key handover need `wordsConfirmed` (the twelve words were compared aloud). Every decision reads the composed policy from the next one on. A file that
    * is refused is recorded as policy.organization-refused, and the plain OrganizationStoreError is thrown with nothing changed.
    */
-  public async acceptOrganizationFile(text: string, confirmation: { readonly wordsConfirmed?: boolean }): Promise<BundleState> {
+  public async acceptOrganizationFile(text: string, confirmation: OrganizationConfirmation): Promise<BundleState> {
     await this.start();
     let accepted;
     try {

@@ -21,12 +21,12 @@ import { POLICY_BUNDLE_FILE, POLICY_DRAFT_BASE_FILE, POLICY_DRAFT_FILE, STALE_DR
 import { writeLastValid } from '../gate/clockMarker';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import type { GateHost } from '../gate/host';
-import { ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, migrationNoticeText, previewOrganizationFile } from '../gate/organizationStore';
+import { ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRET, ORGANIZATION_LAYER_FILE, OrganizationStore, migrationNoticeText, previewOrganizationFile, setOrganizationWriteProbe } from '../gate/organizationStore';
 import type { PolicyLayersView } from '../gate/organizationStore';
 import type { PolicyChange } from '../services/policyEditor';
 import { loadDeviceIdentity } from '../team/identity';
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rotationTextFor, rulesTextFor } from './helpers/enrolmentFixtures';
-import { FIXED_NOW, issuerKey } from './helpers/policyFixtures';
+import { DAY_MS, FIXED_NOW, issuerKey } from './helpers/policyFixtures';
 import { autoApplyPolicyEditor, recordingPolicyEditor } from './helpers/policyEditorFake';
 import { MemorySecrets } from './helpers/teamHarness';
 import { createFakeContext, createVscodeStub, installVscodeStub } from './helpers/vscodeStub';
@@ -651,4 +651,29 @@ test('D-37: nearAi.privacyMode keeps its id and values, and says what it does in
   const words = [setting.description, ...(setting.enumDescriptions ?? [])].join(' ');
   assert.ok(words.includes('Only verified private hardware or this computer'));
   assert.doesNotMatch(words, /TEE|\btiers?\b|Team Mode/i);
+});
+
+test('ordinary import resumes the exact confirmed handover after its invitation expires without asking for words again', async () => {
+  const pc = await computer();
+  await enrolledWindow(pc);
+  const next = issuerKey('command-resume-issuer');
+  const at = pc.clock.now;
+  const handover = rotationTextFor(issuerKey(), next, { now: at, days: 1, layerDays: 5 });
+  const store = new OrganizationStore(pc.storage, pc.secrets);
+  setOrganizationWriteProbe((step, kind) => {
+    if (step === 'pin-pending' && kind === 'rotate') throw new Error('fixture stops before staging');
+  });
+  try {
+    await assert.rejects(store.accept(handover, { wordsConfirmed: true }, at), /fixture stops before staging/);
+  } finally {
+    setOrganizationWriteProbe(undefined);
+  }
+  pc.clock.now += 2 * DAY_MS;
+  await windowOf(pc);
+  assert.equal(await addRules(await fileWith(enrolmentTextFor(issuerKey()))), 'refused');
+  assert.equal(stub.messageOptions.some((entry) => entry.modal === true), false);
+  assert.equal(await addRules(await fileWith(handover)), 'rotated');
+  assert.equal(stub.messageOptions.some((entry) => entry.modal === true), false);
+  assert.equal(pinOf(pc)?.publicKey, next.publicKey);
+  assert.equal(pinOf(pc)?.pending, undefined);
 });

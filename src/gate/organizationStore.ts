@@ -219,6 +219,16 @@ function handoverDigest(envelope: unknown, proof: Omit<ProtectedHandover, 'diges
   ])).digest('hex');
 }
 
+function pendingFingerprint(pin: OrganizationPin): string {
+  return createHash('sha256').update(canonicalBytes(['near-ai/organization-handover-preview/1', pin])).digest('hex');
+}
+
+function pendingHandoverChanged(): OrganizationStoreError {
+  return new OrganizationStoreError('Nothing was changed. This file does not match the confirmed pending organization handover.', {
+    reason: 'pending-handover-changed', refused: true
+  });
+}
+
 function samePin(a: OrganizationPin, b: OrganizationPin): boolean {
   return canonicalBytes(a).equals(canonicalBytes(b));
 }
@@ -370,18 +380,25 @@ export interface OrganizationAcceptResult {
   readonly event?: OrganizationEvent;
 }
 
+export interface OrganizationConfirmation {
+  readonly wordsConfirmed?: boolean;
+  /** Comparison only. A fingerprint can never replace the protected pending confirmation. */
+  readonly expectedPending?: string;
+}
+
+interface OrganizationPreviewDetails {
+  readonly name?: string;
+  readonly contacts: readonly PolicyContact[];
+  readonly words?: readonly string[];
+  readonly fingerprintHex: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+}
+
 /** What a file would do on this computer, for the confirmation step (41-14). Never throws. */
 export type OrganizationFilePreview =
-  | {
-    readonly kind: OrganizationFileKind;
-    readonly name?: string;
-    readonly contacts: readonly PolicyContact[];
-    /** The twelve words, for an enrolment file. */
-    readonly words?: readonly string[];
-    readonly fingerprintHex: string;
-    readonly issuedAt: string;
-    readonly expiresAt: string;
-  }
+  | (OrganizationPreviewDetails & { readonly kind: OrganizationFileKind })
+  | (OrganizationPreviewDetails & { readonly kind: 'resume'; readonly expectedPending: string })
   | { readonly kind: 'refused'; readonly reason: string; readonly sentence: string };
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------
@@ -878,7 +895,7 @@ export class OrganizationStore {
    * old files and the old pin and throws OrganizationStoreError ("Nothing was changed ..."). The file in use whose copy on this computer is missing or
    * replaced is written again without moving the pin (`repair`, WR-01). Returns the event to record, none when the file is the one in use and intact.
    */
-  public async accept(text: string, confirmation: { readonly wordsConfirmed?: boolean }, nowMs: number): Promise<OrganizationAcceptResult> {
+  public async accept(text: string, confirmation: OrganizationConfirmation, nowMs: number): Promise<OrganizationAcceptResult> {
     if (!Number.isFinite(nowMs)) throw new OrganizationStoreError('Nothing was changed: the clock gave no valid time.', { reason: 'clock' });
     const dir = gateDir(this.globalStorageDir);
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -889,9 +906,12 @@ export class OrganizationStore {
       } catch (error) {
         throw new OrganizationStoreError(`Nothing was changed. ${SECRET_UNREADABLE_TEXT}`, { reason: 'unavailable', cause: error });
       }
-      if (context.pin.state === 'pinned' && context.pin.pin.pending?.handover !== undefined) {
-        return this.resumeProtectedHandover(text, context.pin.pin, effectiveNow(nowMs, context.lastValidAt));
+      const pin = context.pin.state === 'pinned' ? context.pin.pin : undefined;
+      const pending = pin?.pending?.handover !== undefined ? pin : undefined;
+      if (confirmation.expectedPending !== undefined && (pending === undefined || pendingFingerprint(pending) !== confirmation.expectedPending)) {
+        throw pendingHandoverChanged();
       }
+      if (pending !== undefined) return this.resumeProtectedHandover(text, pending, effectiveNow(nowMs, context.lastValidAt));
       const reading = readOrganizationFile(text, context);
       if (!reading.ok) {
         const message = reading.sentence.includes('Nothing was changed') ? reading.sentence : `Nothing was changed. ${reading.sentence}`;
@@ -923,6 +943,22 @@ export class OrganizationStore {
       await this.write({ ...facts, kind: facts.kind }, context, nowMs, recovering);
       const event: OrganizationEventId = facts.kind === 'enrol' ? 'policy.enrolled' : 'policy.organization-updated';
       return { kind: facts.kind, event: { event, detail: changeDetail(facts.issuedAt, facts.publicKey) } };
+    });
+  }
+
+  /** Read-only confirmation of the same protected pending handover this preview observed before taking the lock. */
+  public async previewPendingHandover(text: string, observed: OrganizationPin, nowMs: number): Promise<OrganizationFilePreview> {
+    return withFileLock(gateDir(this.globalStorageDir), BUNDLE_LOCK_FILE, async () => {
+      const context = await this.readContext(nowMs);
+      if (context.pin.state !== 'pinned' || !samePin(context.pin.pin, observed)) throw pendingHandoverChanged();
+      const pin = context.pin.pin;
+      const checked = await this.checkPendingHandover(text, pin, effectiveNow(nowMs, context.lastValidAt));
+      const { enrollment, layer } = checked;
+      return {
+        kind: 'resume', expectedPending: pendingFingerprint(pin), name: enrollment.organization.name,
+        contacts: contactsOfDocument(layer.document) ?? enrollment.organization.contacts,
+        fingerprintHex: issuerFingerprintHex(enrollment.issuer.publicKey), issuedAt: layer.issuedAt, expiresAt: layer.expiresAt
+      };
     });
   }
 
@@ -984,7 +1020,7 @@ export class OrganizationStore {
     }
   }
 
-  private async stageHandover(pending: OrganizationPin, enrollment: unknown, layer: unknown, effective: number): Promise<void> {
+  private async handoverWrites(pending: OrganizationPin, enrollment: unknown, layer: unknown): Promise<FileToWrite[]> {
     const prior = pending.pending?.priorFiles;
     const inputs = [
       { file: this.layerFile, target: layer, limit: MAX_ORGANIZATION_LAYER_BYTES, before: prior?.layer },
@@ -999,7 +1035,11 @@ export class OrganizationStore {
       }
       writes.push({ file, text: layerTextOf(target) });
     }
-    // Classify both slots before changing either, and never replace the protected pending state on retry.
+    return writes;
+  }
+
+  private async stageHandover(pending: OrganizationPin, writes: readonly FileToWrite[], effective: number): Promise<void> {
+    // Both slots were classified under this lock. The protected pending state must still be exact.
     await this.requireExactProtectedPin(pending);
     await this.writeKeepingOld(writes, effective, [], 'rotate');
     await probeStep('layer-written', 'rotate');
@@ -1008,7 +1048,7 @@ export class OrganizationStore {
     await probeStep('pin-committed', 'rotate');
   }
 
-  private async resumeProtectedHandover(text: string, pending: OrganizationPin, effective: number): Promise<OrganizationAcceptResult> {
+  private async checkPendingHandover(text: string, pending: OrganizationPin, effective: number) {
     const next = pending.pending;
     const proof = next?.handover;
     if (next === undefined || proof === undefined) throw new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable' });
@@ -1028,13 +1068,20 @@ export class OrganizationStore {
     if (!requirementMapsOnlyTighten(pending.requirements, layer.document.credentials?.requiredBySensitivity)) {
       throw new OrganizationStoreError(`Nothing was changed. ${CREDENTIALS_LOOSENED_TEXT}`, { reason: 'credentials-loosened', refused: true });
     }
+    const writes = await this.handoverWrites(pending, envelope, signed.enrolment.layer);
+    await this.requireExactProtectedPin(pending);
+    return { enrollment: signed.enrolment, layer, writes };
+  }
+
+  private async resumeProtectedHandover(text: string, pending: OrganizationPin, effective: number): Promise<OrganizationAcceptResult> {
+    const checked = await this.checkPendingHandover(text, pending, effective);
     try {
-      await this.stageHandover(pending, envelope, signed.enrolment.layer, effective);
+      await this.stageHandover(pending, checked.writes, effective);
     } catch (error) {
       if (error instanceof StoppedByProbe) throw error.cause;
       throw error instanceof OrganizationStoreError ? error : new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable', cause: error });
     }
-    return { kind: 'rotate', event: { event: 'policy.organization-updated', detail: changeDetail(next.issuedAt, next.publicKey) } };
+    return { kind: 'rotate', event: { event: 'policy.organization-updated', detail: changeDetail(checked.layer.issuedAt, checked.enrollment.issuer.publicKey) } };
   }
 
   private async writeProtectedHandover(facts: FileFacts, old: OrganizationPin, effective: number): Promise<void> {
@@ -1063,7 +1110,7 @@ export class OrganizationStore {
       await this.requireExactProtectedPin(old);
       await this.writeExactProtectedPin(pending);
       await probeStep('pin-pending', 'rotate');
-      await this.stageHandover(pending, envelope, facts.layer, effective);
+      await this.stageHandover(pending, await this.handoverWrites(pending, envelope, facts.layer), effective);
     } catch (error) {
       // Retain the actual protected state and files. Only the same verified transition may finish after interruption.
       if (error instanceof StoppedByProbe) throw error.cause;
@@ -1236,6 +1283,9 @@ export async function previewOrganizationFile(globalStorageDir: string, secrets:
   try {
     const store = new OrganizationStore(globalStorageDir, secrets);
     const context = await store.readContext(nowMs);
+    if (context.pin.state === 'pinned' && context.pin.pin.pending?.handover !== undefined) {
+      return await store.previewPendingHandover(text, context.pin.pin, nowMs);
+    }
     const reading = readOrganizationFile(text, context);
     if (!reading.ok) return { kind: 'refused', reason: reading.reason, sentence: reading.sentence };
     const facts = reading.facts;
@@ -1250,7 +1300,8 @@ export async function previewOrganizationFile(globalStorageDir: string, secrets:
       issuedAt: facts.issuedAt,
       expiresAt: facts.expiresAt
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof OrganizationStoreError && error.refused) return { kind: 'refused', reason: error.reason, sentence: error.message };
     return { kind: 'refused', reason: 'unavailable', sentence: SECRET_UNREADABLE_TEXT };
   }
 }
