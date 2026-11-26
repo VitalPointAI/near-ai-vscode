@@ -20,7 +20,7 @@ import { ENROLMENT_RECORD_FILE, ORGANIZATION_DIR_NAME, ORGANIZATION_ISSUER_SECRE
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { storeDeps } from '../staff/replica/projectDevice';
 import { ReplicaStore } from '../staff/replica/store';
-import { withFrontierPolicySource } from '../staff/replica/frontierPolicy';
+import { withFrontierPolicySource } from '../gate/frontierPolicy';
 import { createDeviceIdentity, DEVICE_KEY_SECRET, identityDir } from '../team/identity';
 import type { DeviceIdentity } from '../team/identity';
 import { appendKeyRecord, KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET, readKeyHistory } from '../team/keyHistory';

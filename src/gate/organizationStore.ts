@@ -44,7 +44,7 @@ import { migrateLocalHosts } from '../domain/gate/endpoints';
 import type { MigrationChange } from '../domain/gate/endpoints';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import { canonicalBytes } from '../domain/team/canonical';
-import { syncFolder } from '../staff/staffFiles';
+import { syncFolder } from '../team/fileSafety';
 import { verifyPayload } from '../domain/team/signedPayload';
 import { loadDeviceIdentity } from '../team/identity';
 import { writeFileAtomic } from '../team/teamFile';

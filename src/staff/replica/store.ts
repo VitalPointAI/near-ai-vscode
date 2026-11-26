@@ -54,7 +54,7 @@ import { link, lstat, mkdir, open, readdir, readFile, rename, rm } from 'node:fs
 import type { FileHandle } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../../services/auth';
-import { privateFileProblem } from '../../services/stateHome';
+import { privateFileProblem } from '../../team/fileSafety';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { withRegisterLock } from '../registerLock';
 import { REPLICA_DIR, REPLICA_PROJECT_FILE } from '../../domain/staff/multiUser';
@@ -82,7 +82,7 @@ import { deviceAt } from '../../domain/replica/rosterMembers';
 import { verifyEntry } from '../../domain/replica/verify';
 import { identityDir, loadDeviceIdentity } from '../../team/identity';
 import { readKeyHistory } from '../../team/keyHistory';
-import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from './frontierPolicy';
+import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from '../../gate/frontierPolicy';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
