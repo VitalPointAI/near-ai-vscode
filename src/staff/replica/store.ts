@@ -71,6 +71,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
+import { readStoredArtifact } from './storeArtifacts';
 
 /** The cross-window lock file inside the store folder. */
 export const REPLICA_LOCK_FILE = 'replica.lock';
@@ -945,16 +946,17 @@ export class ReplicaStore {
     }
   }
 
-  /** Identifies the loaded history, remembered roster head, and immutable grant files. */
+  /** Identifies the loaded history, remembered roster head, grants and immutable access evidence. */
   public async appendSnapshot(): Promise<string> {
     const unreadable: UnreadableFile[] = [];
     const cells = (await this.listDir(['grants'], unreadable)).filter((cell) => STREAM_ID_PATTERN.test(cell));
     const grants = await Promise.all(cells.map(async (cell) => [cell, await this.listDir(['grants', cell], unreadable)]));
-    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null,
+    const evidence = await this.listDir(['access-evidence'], unreadable);
+    return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null, evidence,
       [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort(), grants, unreadable.map(({ file }) => file).sort()]));
   }
   /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
-  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string): Promise<AppendResult> {
+  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string, mayCommit?: () => boolean): Promise<AppendResult> {
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
       if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
@@ -973,7 +975,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        if (expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
+        if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
         const heads = new Map<string, { seq: number; hashes: readonly string[] }>();
         const fresh: SealedEntry[] = [];
         const planned = new Set<string>();
@@ -1013,7 +1015,7 @@ export class ReplicaStore {
    * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
    * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
    */
-  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string): Promise<IngestResult | StoreRefused> {
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
     const seen = new Set<string>();
@@ -1050,7 +1052,7 @@ export class ReplicaStore {
       return await this.locked(async () => {
         await this.catchUp();
         await this.syncMark();
-        if (expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) return refusal('snapshot-changed');
+        if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
@@ -1222,24 +1224,24 @@ export class ReplicaStore {
     }
   }
 
-  private async readSigned(relative: string, matches: (value: unknown) => boolean): Promise<{ value: unknown } | { reason: string }> {
-    const file = path.join(this.dir, relative);
-    try {
-      if ((await lstat(file)).isSymbolicLink()) return { reason: 'it is a symbolic link' };
-    } catch {
-      return { reason: 'it could not be opened' };
+  public async putAccessEvidence(evidence: unknown): Promise<{ ok: true; hash: string } | StoreRefused> {
+    const bytes = canonicalBytes(evidence);
+    if (bytes.length > SIGNED_FILE_MAX_BYTES) return refusal('blob-too-large');
+    const hash = sha256Hex(bytes);
+    return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash);
+  }
+  public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
+    const rows: Array<{ hash: string; value: unknown }> = [];
+    for (const name of await this.listDir(['access-evidence'], [])) {
+      const hash = /^([0-9a-f]{64})\.json$/.exec(name)?.[1];
+      if (hash === undefined) continue;
+      const read = await this.readSigned(`access-evidence/${name}`, (value) => sha256Hex(canonicalBytes(value)) === hash);
+      if ('value' in read) rows.push({ hash, value: read.value });
     }
-    const read = await readWhole(file, SIGNED_FILE_MAX_BYTES);
-    if (read.kind === 'missing') return { reason: 'it is gone' };
-    if (read.kind === 'unreadable') return { reason: read.reason };
-    let value: unknown;
-    try { value = JSON.parse(read.text) as unknown; } catch { return { reason: 'it is not readable JSON' }; }
-    try {
-      if (!matches(value)) return { reason: 'its content does not match its name' };
-    } catch {
-      return { reason: 'its content does not match its name' };
-    }
-    return { value };
+    return rows;
+  }
+  private readSigned(relative: string, matches: (value: unknown) => boolean): Promise<{ value: unknown } | { reason: string }> {
+    return readStoredArtifact(path.join(this.dir, relative), SIGNED_FILE_MAX_BYTES, matches);
   }
 
   private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {
@@ -1266,8 +1268,7 @@ export class ReplicaStore {
 
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
-  /** Take the Start Again, register and cross-window locks in order. Refuse a missing live store (32 D-03).
-   * The locks are not re-entrant. */
+  /** Take non-reentrant Start Again, register and cross-window locks in order and require the live store (32 D-03). */
   private locked<T>(work: () => Promise<T>): Promise<T> {
     return withStartAgainLock(this.root, async () => {
       if (await intentPresent(this.root)) await ReplicaStore.rollForward(this.root, this.deps, this.own);

@@ -420,6 +420,23 @@ test('guarded local writes retry when another window stores a cell key grant bef
   }
 });
 
+test('both local signed write paths revalidate expiring authority before persisting the entry or blob', async () => {
+  const { root, lead, secrets, built } = await threeAppended();
+  const store = await opened(root, depsFor(lead, secrets));
+  const expected = await store.appendSnapshot();
+  const [device] = chain(lead, 1, { from: { seq: 2, hash: built[2].hash }, big: true });
+  const [hosted] = chain(fixedSigner('managed-hosted-expiry'), 1, { big: true });
+  const expired = (): boolean => false;
+  assert.deepEqual(await store.appendOwn([device], expected, expired),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  assert.deepEqual(await store.ingestForeign([hosted.entry], hosted.blobs, async () => ({ ok: true } as const), expected, expired),
+    { refused: 'snapshot-changed', message: STORE_REFUSALS['snapshot-changed'] });
+  for (const entry of [device, hosted]) {
+    assert.equal(store.has(entry.hash), false);
+    assert.equal(await store.blob(entry.blobs[0].hash), undefined);
+  }
+});
+
 test('only the first of two guarded same-device appends from one snapshot writes its signed entry', async () => {
   const { root, lead, secrets, built } = await threeAppended();
   const first = await opened(root, depsFor(lead, secrets));

@@ -18,6 +18,7 @@ import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt,
 import type { RosterState } from '../domain/replica/roster';
 import { committedGrant, epochAt } from '../domain/replica/rosterCells';
 import { accessPermitBytes, accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
+import { grantEvidenceHash } from '../domain/replica/rotationGrants';
 import { clientReplicaFeatures } from '../staff/replica/requireGate';
 import { REPLICA_DIR, multiUserNoticeLines } from '../domain/staff/multiUser';
 import { canonicalBytes } from '../domain/team/canonical';
@@ -874,9 +875,75 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.equal((await p.signedGrants()).some((grant) => grant.hash === hash), false);
   const welcome = await p.welcomeFor(p.deviceWriter, [p.projectId]);
   assert.equal(welcome.grants.some((grant) => grantHash(grant) === hash), false);
+  const predecessor = after.hash;
+  const id = accessRevisionId(p.projectId, null, predecessor, 'cell.access.commit', {});
+  const evidence = { project: p.projectId, cell: p.projectId, epoch: 1, policy: null,
+    grants: [{ hash, pages: [], recipients: [p.deviceWriter] }], excluded: [] };
+  const digest = grantEvidenceHash(evidence);
+  assert.ok(digest);
+  const committed = buildAccessCommitment(id, [{
+    cell: p.projectId, epoch: 1, previousEpoch: 1, decision: 'continues', salt: randomBytes(32).toString('hex'), evidence: digest
+  }], []);
+  assert.ok(committed);
+  const proof = committed.cellProof(p.projectId);
+  assert.ok(proof);
+  const bound = await p.appendOwn('cell.access.commit', { accessRevision: id, accessRoot: committed.root });
+  assert.ok('ok' in bound);
+  assert.ok('ok' in await p.putGrants([], [{ ...proof, entry: bound.hash, evidence }]));
+  assert.ok((await head(p)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
   const reopened = project(await ReplicaProject.open(at.root, at.deps));
   assert.equal((await reopened.signedGrants()).some((grant) => grant.hash === hash), false);
+  assert.ok((await head(reopened)).roster.cells.cells.get(p.projectId)?.grants.some((grant) => grant.hash === hash));
   assert.ok(grantsOn(at).some((grant) => grantHash(grant) === hash));
+});
+
+test('a committed new-epoch permit waits for its authenticated founding grant before local writes resume', async () => {
+  const at = install('managed-founding-resume');
+  at.deps.knownFeatures = [...clientReplicaFeatures(), 'cell-access@1'];
+  const p = project(await ReplicaProject.createSharedProject(at.root, at.deps, {
+    name: 'Exercise Northwind', profile: 'j2', level: 'official', labelMapHash: 'c'.repeat(64), lead: { member: 'mbr-lead' }
+  }));
+  assert.ok('ok' in await p.appendOwn('roster.require', { features: ['cell-access@1'] }));
+  const { roster, hash: predecessor } = await head(p);
+  const cell = p.projectId;
+  const key = newEpochKey();
+  const pages = newEpochPages(p.signer, roster, {
+    cell, info: { base: true }, epoch: 2, key, recipients: [p.deviceWriter], labelSealed: ''
+  });
+  assert.ok(Array.isArray(pages) && pages.length === 1);
+  const hash = grantHash(pages[0]);
+  await p.keys.addOwn(cell, 2, key, hash);
+  assert.ok('ok' in await p.putGrants(pages));
+
+  const operation = { cell, epoch: 2, grant: hash, reason: 'scheduled' };
+  const id = accessRevisionId(p.projectId, null, predecessor, 'cell.rekey', operation);
+  const evidence = { project: p.projectId, cell, epoch: 2, policy: null, grants: [{ hash, pages: [], recipients: [p.deviceWriter] }], excluded: [] };
+  const digest = grantEvidenceHash(evidence);
+  assert.ok(digest);
+  const permit = { project: p.projectId, cell, epoch: 2, revision: id, predecessor,
+    device: p.deviceWriter, writer: p.deviceWriter, authority: p.deviceWriter, certificate: null };
+  const commitment = buildAccessCommitment(id, [{
+    cell, epoch: 2, previousEpoch: 1, decision: 'continues', salt: randomBytes(32).toString('hex'), evidence: digest
+  }], [{ permit, signature: p.signer.sign(accessPermitBytes(permit)) }]);
+  assert.ok(commitment);
+  const transitioned = await p.appendOwn('cell.rekey', { ...operation, accessRevision: id, accessRoot: commitment.root });
+  assert.ok('ok' in transitioned);
+  const current = await head(p);
+  assert.equal(current.hash, transitioned.hash);
+  const slot = deviceAt(current.roster.members, p.deviceWriter, current.position)?.slot;
+  assert.ok(slot !== undefined);
+  const accessProof = commitment.proof(cell, p.deviceWriter);
+  const opening = commitment.cellProof(cell);
+  assert.ok(accessProof && opening);
+  const data = { product: 'intel-estimate', clientId: clientIdOf(slot, 0), actor: { kind: 'person' } };
+  const contentBlob = sealBlob(key, cell, 2, Buffer.from('fictional resumed draft'));
+  const paused = await p.appendOwn('doc.client', data, { accessProof, contentBlob });
+  assert.equal(isProjectRefused(paused) && paused.refused, 'rekey-pending');
+  assert.equal(existsSync(path.join(at.root, REPLICA_DIR, 'blobs', contentBlob.hash)), false);
+  assert.ok('ok' in await p.putGrants([], [{ ...opening, entry: transitioned.hash, evidence }]));
+  const resumed = await p.appendOwn('doc.client', data, { accessProof, contentBlob });
+  assert.ok('ok' in resumed);
+  assert.equal(resumed.built.entry.header.epoch, 2);
 });
 
 /** Whether `reader` applies the entry once it has it: it opened the body with its own key for that epoch. */

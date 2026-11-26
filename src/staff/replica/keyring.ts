@@ -387,3 +387,9 @@ export async function joinSecret(secrets: SecretStorageLike, invite: string): Pr
 export async function forgetJoinSecret(secrets: SecretStorageLike, invite: string): Promise<void> {
   await secrets.delete(joinSecretName(invite));
 }
+/** Compare candidate roster-reading keys without making either map authoritative. */
+export function sameReadingKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [epoch, key] of a) if (b.get(epoch)?.equals(key) !== true) return false;
+  return true;
+}

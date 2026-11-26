@@ -96,9 +96,12 @@ export interface CellAccessOpening {
   siblings: readonly string[];
 }
 
-export interface AccessWriteProof {
+export interface AccessCellProof {
   commitment: AccessCommitment;
   cell: CellAccessOpening;
+}
+
+export interface AccessWriteProof extends AccessCellProof {
   signed: SignedAccessPermit;
   permitSiblings: readonly string[];
 }
@@ -175,21 +178,31 @@ function permitContextMatches(permit: AccessPermit, revision: AccessRevision, co
     permit.writer === context.writer && permit.certificate === context.certificate;
 }
 
-/** Verifies exact writer authority against the root of the already selected roster entry. */
-export function verifiesAccessWrite(revision: AccessRevision, proof: unknown, context: AccessWriteContext): boolean {
-  if (!hasProofShape(proof) || revision.cells.length === 0 || revision.cells.length > MAX_CELLS) return false;
-  const { commitment, cell, signed, permitSiblings } = proof;
-  if (!validCommitment(commitment) || rootOf(revision.id, revision.cells.length, commitment) !== revision.root) return false;
-  const slot = revision.cells.indexOf(context.cell);
+/** Returns only the private leaf authenticated by the selected roster root and the cell's canonical slot. */
+export function verifiedCellAccess(revision: AccessRevision, commitment: unknown, opening: unknown, cell: string): CellAccessDecision | undefined {
+  if (revision.cells.length === 0 || revision.cells.length > MAX_CELLS ||
+    !closed(commitment, ['cellRoot', 'permitRoot', 'frontierRoot']) || !closed(opening, ['decision', 'count', 'index', 'siblings']) ||
+    !closed(opening.decision, ['cell', 'previousEpoch', 'epoch', 'decision', 'salt', 'evidence'])) return undefined;
+  const roots = commitment as unknown as AccessCommitment;
+  if (!validCommitment(roots) || rootOf(revision.id, revision.cells.length, roots) !== revision.root) return undefined;
+  const slot = revision.cells.indexOf(cell);
   const depth = Math.ceil(Math.log2(revision.cells.length));
-  if (slot < 0 || cell.index !== slot || cell.count !== revision.cells.length || !hashes(cell.siblings, depth)) return false;
-  const { decision } = cell;
-  if (!validDecision(decision) || decision.cell !== context.cell || decision.decision !== 'continues' || decision.epoch !== context.epoch) return false;
+  if (slot < 0 || opening.index !== slot || opening.count !== revision.cells.length || !hashes(opening.siblings, depth)) return undefined;
+  const decision = opening.decision as unknown as CellAccessDecision;
+  if (!validDecision(decision) || decision.cell !== cell) return undefined;
   for (let height = 0; height < depth; height += 1) {
     const siblingStart = ((slot >> height) ^ 1) << height;
-    if (siblingStart >= revision.cells.length && cell.siblings[height] !== paddingNode(revision.id, siblingStart, height)) return false;
+    if (siblingStart >= revision.cells.length && opening.siblings[height] !== paddingNode(revision.id, siblingStart, height)) return undefined;
   }
-  if (openBranch('cell', cellLeaf(revision.id, slot, decision), BigInt(slot), cell.siblings) !== commitment.cellRoot) return false;
+  return openBranch('cell', cellLeaf(revision.id, slot, decision), BigInt(slot), opening.siblings) === roots.cellRoot ? decision : undefined;
+}
+
+/** Verifies exact writer authority against the root of the already selected roster entry. */
+export function verifiesAccessWrite(revision: AccessRevision, proof: unknown, context: AccessWriteContext): boolean {
+  if (!hasProofShape(proof)) return false;
+  const { commitment, cell, signed, permitSiblings } = proof;
+  const decision = verifiedCellAccess(revision, commitment, cell, context.cell);
+  if (decision?.decision !== 'continues' || decision.epoch !== context.epoch) return false;
   if (!validPermit(signed) || !permitContextMatches(signed.permit, revision, context)) return false;
   if (!hashes(permitSiblings, PERMIT_DEPTH)) return false;
   const authority = context.authorityKey(signed.permit.authority);
@@ -240,7 +253,7 @@ function permitLayers(permits: readonly SignedAccessPermit[]): Array<Map<bigint,
 }
 
 export function buildAccessCommitment(revision: string, cells: readonly CellAccessDecision[], permits: readonly SignedAccessPermit[], frontierRoot: string | null = null):
-  { root: string; proof(cell: string, writer: string): AccessWriteProof | undefined } | undefined {
+  { root: string; cellProof(cell: string): AccessCellProof | undefined; proof(cell: string, writer: string): AccessWriteProof | undefined } | undefined {
   if (!HASH.test(revision) || cells.length === 0 || cells.length > MAX_CELLS || cells.some((cell, index) => !validDecision(cell) || (index > 0 && cells[index - 1].cell >= cell.cell))) return undefined;
   const permitTree = permitLayers(permits);
   if (permitTree === undefined || permits.some(({ permit }) => permit.revision !== revision || !cells.some((cell) =>
@@ -248,16 +261,22 @@ export function buildAccessCommitment(revision: string, cells: readonly CellAcce
   const cellTree = cellLayers(revision, cells);
   const commitment = { cellRoot: cellTree.at(-1)![0], permitRoot: permitTree.at(-1)!.get(0n) ?? permitEmpty[PERMIT_DEPTH], frontierRoot };
   if (!validCommitment(commitment)) return undefined;
+  const cellProof = (cell: string): AccessCellProof | undefined => {
+    const index = cells.findIndex((item) => item.cell === cell);
+    if (index < 0) return undefined;
+    const siblings = cellTree.slice(0, -1).map((layer, height) => layer[(index >> height) ^ 1]);
+    return { commitment, cell: { decision: cells[index], count: cells.length, index, siblings } };
+  };
   return {
     root: rootOf(revision, cells.length, commitment),
+    cellProof,
     proof(cell, writer) {
-      const index = cells.findIndex((item) => item.cell === cell);
+      const opening = cellProof(cell);
       const signed = permits.find((item) => item.permit.cell === cell && item.permit.writer === writer);
-      if (index < 0 || signed === undefined) return undefined;
-      const siblings = cellTree.slice(0, -1).map((layer, height) => layer[(index >> height) ^ 1]);
+      if (opening === undefined || signed === undefined) return undefined;
       const key = permitKey(signed.permit);
       const permitSiblings = permitTree.slice(0, -1).map((layer, height) => layer.get((key >> BigInt(height)) ^ 1n) ?? permitEmpty[height]);
-      return { commitment, cell: { decision: cells[index], count: cells.length, index, siblings }, signed, permitSiblings };
+      return { ...opening, signed, permitSiblings };
     }
   };
 }

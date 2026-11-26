@@ -50,7 +50,7 @@ import type { HeadSet } from '../../domain/replica/transport';
 import { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, readAnchorFile, sameAnchor, writeAnchorFile } from './anchorFile';
 import { DecodeHost } from './decodeHost';
 import type { DecodeVerdict } from './decodeHost';
-import { DeviceKeyRing, loadOrCreateKemKeys } from './keyring';
+import { DeviceKeyRing, loadOrCreateKemKeys, sameReadingKeys } from './keyring';
 import * as kemPublish from './kemPublish';
 import { ReplicaStore, START_AGAIN_INTENT_FILE, STORE_REFUSALS, finishStartAgain, sharedHistoryMissing } from './store';
 import type { CheckVerdict, ForeignCheck, IngestResult, StartedAgain, StoreRefusal, StoreRefused } from './store';
@@ -188,6 +188,7 @@ export class ReplicaProject {
   private readonly blobCache = new Map<string, SealedBlob>();
   private readonly grantHashes = new Set<string>();
   private readonly grantList: unknown[] = [];
+  private evidence: Array<{ hash: string; value: unknown }> = [];
   private readonly lamports = new Map<string, number>();
   private foldState: FoldState | undefined;
   // The checkpoints the fold uses (foldCheckpoints.ts): what each hub's witness trusts, seeded once from the witness memory, kept by each exchange.
@@ -480,8 +481,10 @@ export class ReplicaProject {
           const refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
           if (refused !== undefined) return refused;
         }
-        // Another key's entry (a session or person key, D-60) is stored as received; it is this device's own only when this device signed it.
-        const result = built.entry.header.writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected) : await this.storeSigned(built, expected);
+        const writer = built.entry.header.writer;
+        const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
+        const mayCommit = deadline === undefined ? undefined : () => Date.parse(deadline) > this.now().getTime();
+        const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit) : await this.storeSigned(built, expected, mayCommit);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
@@ -563,7 +566,7 @@ export class ReplicaProject {
    * epoch keys the ring answers for that it did not before. A hosted session stores no grant its session key signed (D-60, 33-27): the roster checks
    * grants against the person key, which signs it again.
    */
-  public putGrants(grants: readonly unknown[]): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
+  public putGrants(grants: readonly unknown[], evidence: readonly unknown[] = []): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
     return this.exclusive(async () => {
       const own: unknown[] = [];
       for (const signed of grants) {
@@ -577,6 +580,10 @@ export class ReplicaProject {
       });
       for (const item of read) {
         const stored = await this.store.putGrant(item.grant.cell, item.grant.epoch, item.signed);
+        if (!('ok' in stored)) return storeRefused(stored);
+      }
+      for (const opening of evidence) {
+        const stored = await this.store.putAccessEvidence(opening);
         if (!('ok' in stored)) return storeRefused(stored);
       }
       const before = this.keys.size;
@@ -763,7 +770,6 @@ export class ReplicaProject {
     (this.trusted ??= new Map()).set(hub, newest);
   }
 
-  /** Every stored checkpoint that reads back. */
   public checkpoints(): Promise<SignedCheckpoint[]> {
     return this.exclusive(async () => (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint));
   }
@@ -897,11 +903,10 @@ export class ReplicaProject {
     await this.loadGrants();
     await this.loadBlobs();
     await this.recheckWaiting();
-    // The roster fold reads the entries still waiting for the decode check too: a roster entry waits awaiting-key until the keys the roster settles
-    // arrive, and those come only from the roster fold (CR-01). Once it settled them, the waiting entries are checked again, and only what passed
-    // reaches the main fold (31-REVIEW MJ-07).
+    // The roster fold reads awaiting-key entries to settle the keys (CR-01). The main fold only takes entries that pass the retry (MJ-07).
     const rosterEntries = this.store.rosterEntries();
-    const rosterKey = (): string => `${rosterEntries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}`;
+    const evidenceKey = this.evidence.map(({ hash }) => hash).join(',');
+    const rosterKey = (): string => `${rosterEntries.length}|${this.grantHashes.size}|${this.keys.version}|${this.blobCache.size}|${evidenceKey}`;
     if (this.rosterState === undefined || rosterKey() !== this.rosterKey) {
       this.rosterState = await this.foldRosterAndKeys(rosterEntries);
       this.rosterKey = rosterKey();
@@ -911,7 +916,7 @@ export class ReplicaProject {
     await this.recheckWaiting();
     const entries = this.store.entries();
     const roster = this.rosterState;
-    const ctxKey = `${rosterSignature(roster)}|${this.keys.version}|${this.blobCache.size}`;
+    const ctxKey = `${rosterSignature(roster)}|${this.keys.version}|${this.blobCache.size}|${evidenceKey}`;
     if (this.ctx === undefined || ctxKey !== this.ctxKey) {
       this.ctx = this.buildContext(roster);
       this.ctxKey = ctxKey;
@@ -988,14 +993,14 @@ export class ReplicaProject {
     const project = this.anchor.project;
     let reading = new Map<number, Buffer>();
     const keys = (stream: string, epoch: number): Buffer | undefined => this.keys.epochKey(stream, epoch) ?? (stream === project ? reading.get(epoch) : undefined);
-    const fold = (): RosterState => foldRoster({ entries, anchor: this.anchor, keys, blobs: (hash) => this.blobCache.get(hash), grants: this.grantList, now: this.now() });
+    const fold = (): RosterState => foldRoster({ entries, anchor: this.anchor, keys, blobs: (hash) => this.blobCache.get(hash), grants: this.grantList, grantEvidence: this.evidence.map(({ value }) => value), now: this.now() });
     let roster = fold();
     // Each turn reaches at least one more base epoch or ends the loop, so the bound only stops a roster that keeps changing its mind.
     const epochs = new Set(entries.filter((entry) => entry.header.stream === project).map((entry) => entry.header.epoch)).size;
     for (let turn = 0; turn < 2 * epochs + 2; turn += 1) {
       const settled = await this.keys.settle(roster.cells);
       const next = this.readingKeys(roster, entries);
-      if (settled === 0 && sameKeys(next, reading)) break;
+      if (settled === 0 && sameReadingKeys(next, reading)) break;
       reading = next;
       roster = fold();
     }
@@ -1041,6 +1046,7 @@ export class ReplicaProject {
   /** Grants new on disk since the last look, kept for the roster fold. Only the grants the fold places are opened into the key ring (settle). */
   private async loadGrants(): Promise<void> {
     const { grants } = await this.store.grants();
+    this.evidence = await this.store.accessEvidence();
     for (const grant of grants) {
       if (this.grantHashes.has(grant.hash)) continue;
       this.grantHashes.add(grant.hash);
@@ -1097,8 +1103,8 @@ export class ReplicaProject {
     return body.lamport as number;
   }
 
-  private async storeSigned(built: BuiltEntry, expected: string): Promise<IngestResult | StoreRefused> {
-    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected);
+  private async storeSigned(built: BuiltEntry, expected: string, mayCommit?: () => boolean): Promise<IngestResult | StoreRefused> {
+    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit);
     // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
     if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
     return result;
@@ -1145,12 +1151,6 @@ export class ReplicaProject {
     }
     return built;
   }
-}
-
-function sameKeys(a: ReadonlyMap<number, Buffer>, b: ReadonlyMap<number, Buffer>): boolean {
-  if (a.size !== b.size) return false;
-  for (const [epoch, key] of a) if (b.get(epoch)?.equals(key) !== true) return false;
-  return true;
 }
 
 /** What the main fold's roster view answers from: the applied line, the splits and choices, and the grants placed. */

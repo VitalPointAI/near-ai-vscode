@@ -37,6 +37,7 @@ export const HUB_SIDE: readonly string[] = [
   'domain/replica/rosterMembers',
   'domain/replica/rosterCells',
   'domain/replica/rotationProof',
+  'domain/replica/rotationGrants',
   // Positions and postings (Phase 33.1): folded with the roster, so the hub judges posting writes with the same rule.
   'domain/replica/rosterPositions',
   'domain/replica/cellKeys',

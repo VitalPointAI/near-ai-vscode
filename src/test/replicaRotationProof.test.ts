@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { accessPermitBytes, accessRevisionId, buildAccessCommitment, verifiesAccessWrite } from '../domain/replica/rotationProof';
 import type { AccessPermit, AccessWriteContext, CellAccessDecision } from '../domain/replica/rotationProof';
+import { advanceGrantEvidence, grantEvidenceHash, matchesGrantEvidence } from '../domain/replica/rotationGrants';
+import type { GrantEvidence } from '../domain/replica/rotationGrants';
+import { grantHash } from '../domain/replica/cellKeys';
+import { foldRoster } from '../domain/replica/roster';
 import { isPersonKeyKind, requiresActionId } from '../domain/replica/sessionKeys';
 import { fixedSigner } from './helpers/replicaWorld';
 import { createRosterWorld } from './helpers/replicaRosterWorld';
@@ -86,4 +90,63 @@ test('a verified roster choice selects the root without treating a shared revisi
   assert.equal(chosen.accessRevision?.entry, selected.hash);
   assert.equal(chosen.accessRevision?.id, id);
   assert.equal(chosen.accessRevision?.root, 'b'.repeat(64));
+});
+
+test('managed grant evidence requires the exact page set and recipient union', () => {
+  const grant = { hash: '1'.repeat(64), pages: ['2'.repeat(64), '3'.repeat(64)], recipients: [lead.writer, writer.writer].sort() };
+  const evidence: GrantEvidence = { project, cell, epoch: 1, policy: '4'.repeat(64), grants: [grant], excluded: [] };
+  assert.ok(grantEvidenceHash(evidence));
+  assert.equal(matchesGrantEvidence(evidence, grant), true);
+  assert.equal(matchesGrantEvidence(evidence, { ...grant, pages: grant.pages.slice(1) }), false);
+  assert.equal(matchesGrantEvidence(evidence, { ...grant, recipients: [lead.writer] }), false);
+  assert.equal(matchesGrantEvidence(evidence, { ...grant, hash: '5'.repeat(64) }), false);
+  assert.notEqual(grantEvidenceHash(evidence), grantEvidenceHash({ ...evidence, policy: '6'.repeat(64) }));
+  assert.equal(grantEvidenceHash({ ...evidence, grants: [grant, grant] }), undefined);
+});
+
+test('interrupted managed rotations retain earlier recipients and overlapping exclusions until a safe next epoch', () => {
+  const grant = { hash: '1'.repeat(64), pages: [], recipients: [lead.writer, writer.writer, other.writer].sort() };
+  const evidence: GrantEvidence = { project, cell, epoch: 1, policy: null, grants: [grant], excluded: [] };
+  const interrupted = advanceGrantEvidence(evidence, { epoch: 1, grants: [], excluded: [writer.writer] });
+  assert.ok(interrupted);
+  const resumed = advanceGrantEvidence(interrupted, { epoch: 1, grants: [], excluded: [other.writer] });
+  assert.ok(resumed);
+  assert.deepEqual(resumed.excluded, [writer.writer, other.writer].sort());
+  assert.deepEqual(resumed.grants, [grant]);
+  const later = { hash: '2'.repeat(64), pages: [], recipients: [writer.writer] };
+  assert.equal(advanceGrantEvidence(resumed, { epoch: 1, grants: [later], excluded: [] }), undefined);
+  assert.equal(advanceGrantEvidence(resumed, { epoch: 2, grants: [later], excluded: [] }), undefined);
+  const next = { ...later, recipients: [lead.writer] };
+  const committed = advanceGrantEvidence(resumed, { epoch: 2, grants: [next], excluded: [] });
+  assert.ok(committed);
+  assert.deepEqual(committed.grants, [next]);
+  const additional = { ...next, hash: '7'.repeat(64) };
+  assert.deepEqual(advanceGrantEvidence(committed, { epoch: 2, grants: [additional], excluded: [] })?.grants, [next, additional]);
+});
+
+test('the fold releases a staged managed grant only with exact cell evidence under its selected roster root', () => {
+  const world = createRosterWorld();
+  const genesis = world.genesis().entry.hash;
+  const arm = world.rosterEntry(world.lead, 'roster.require', { features: ['cell-access@1'] }, genesis);
+  const grant = world.grant(world.lead, { roster: arm.hash, to: [world.lead] });
+  const hash = grantHash(grant);
+  const evidence = { project: world.project, cell: world.project, epoch: 1, policy: null,
+    grants: [{ hash, pages: [], recipients: [world.lead.writer] }], excluded: [] };
+  const digest = grantEvidenceHash(evidence);
+  assert.ok(digest);
+  const id = accessRevisionId(world.project, null, arm.hash, 'cell.access.commit', {});
+  const committed = buildAccessCommitment(id, [{ ...decision, cell: world.project, evidence: digest }], []);
+  assert.ok(committed);
+  const binding = world.rosterEntry(world.lead, 'cell.access.commit', { accessRevision: id, accessRoot: committed.root }, arm.hash);
+  const proof = committed.cellProof(world.project);
+  assert.ok(proof);
+  const input = { entries: world.entries, anchor: world.anchor(), keys: world.ringFor(world.lead),
+    blobs: (blob: string) => world.blobs.get(blob), grants: world.grants, now: new Date('2026-11-19T12:00:00.000Z') };
+  const placed = (openings: readonly unknown[]): boolean | undefined => foldRoster({ ...input, grantEvidence: openings })
+    .cells.cells.get(world.project)?.grants.some((item) => item.hash === hash);
+  const opening = { ...proof, entry: binding.hash, evidence };
+  assert.equal(placed([]), false);
+  assert.equal(placed([{ ...opening, entry: genesis }]), false);
+  assert.equal(placed([{ ...opening, evidence: { ...evidence, grants: [] } }]), false);
+  assert.equal(placed([opening]), true);
 });
