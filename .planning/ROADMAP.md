@@ -2239,8 +2239,8 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 
 **Goal**: Provision the institutional joint staff teams in Workbench with
 branch-specific skills, constrained tools and clear human ownership for all
-149 duties in the reviewed blueprint. Support unit, brigade and division
-profiles for the US, NATO and Canada.
+149 duties in the reviewed blueprint. Support unit L4, brigade L3, division
+L2 and joint L1/L0 profiles for the US, NATO and Canada.
 
 **Depends on**: The staff product and Team Studio foundations, plus publication
 of the reviewed institutional blueprint. Local synthetic development can use

@@ -4,6 +4,32 @@ The owner requested working J1 through J9 teams, with the skills and tools from 
 reviewed institutional blueprint. Command Group and Special Staff are included
 because they own or review handoffs in that same blueprint.
 
+## Organizational levels
+
+| SovAI tier | Level | Default staff designation |
+| --- | --- | --- |
+| Unit | L4 | S |
+| Brigade | L3 | G for the Canadian brigade profile. Use S for a typical US Army brigade. |
+| Division | L2 | G for an Army division headquarters |
+| Joint | L1 | J for a joint headquarters |
+| Joint strategic | L0 | J for a strategic joint headquarters |
+
+The product has four organizational tiers, with separate L1 and L0 choices
+within the joint tier. A G prefix alone does not distinguish a brigade from a
+division. Display names follow the organization and national profile. They
+neither grant authority nor imply every section is staffed.
+
+U.S. Army doctrine uses G for general-officer staffs and J for joint staffs.
+Canadian and NATO publications independently use G for divisional staff.
+[U.S. Army FM 1](https://rdl.train.army.mil/catalog-ws/view/100.ATSC/DDCD9C3D-8DBE-4593-9720-E79BE22342F8-1747333985126/FM1.pdf)
+· [Canadian divisional G1](https://www.canada.ca/en/army/corporate/3-canadian-division/2026/10/awards-october-2026.html)
+· [NATO divisional G3](https://www.nato.int/en/about-us/organization/who-we-are/director-generals-of-ims/lieutenant-general-janusz-adamczak1)
+
+Canada also uses G at brigade. The typical US Army brigade follows the S
+designation. Preserve authorized local variations in each profile.
+[Canadian brigade G3](https://www.canada.ca/en/army/corporate/senior-leaders/3-canadian-division.html)
+· [U.S. Army staff organization reference](https://rdl.train.army.mil/catalog-ws/view/100.ATSC/AA1BF22B-024D-49DA-9A42-03B00DB47FD6-1300769171598/stp46-46qz14-sm-tg.pdf)
+
 ## Implementation scope
 
 Use the four-pass blueprint and its three inventory files as the source for
@@ -49,10 +75,11 @@ using synthetic sources for initial acceptance.
    source and organizational approvals.
 4. Validate the 149 duty IDs against the blueprint. Each must have a staff
    role, accountable human, typed or structured output, required skill, explicit
-   tool effect, route limits and traceable acceptance coverage. Validate unit,
-   brigade and division renderings for US, NATO and the Canadian NATO-aligned
-   profile. Use the blueprint's 34 core and seven echelon scenarios to test
-   meaningful boundaries and cross-branch handoffs.
+   tool effect, route limits and traceable acceptance coverage. Validate all five level
+   selections across the four tiers for the applicable US, NATO and Canadian
+   NATO-aligned profiles. Use the blueprint's 34 core and seven existing
+   echelon scenarios. Add institutional L1/L0 duties, designators and
+   handoff scenarios before claiming joint tier coverage.
 
 The [joint staff blueprint](../../research/staff-teams/12-JOINT-STAFF-SUPPORT-BLUEPRINT.md)
 defines the institutional charter and build order. The
