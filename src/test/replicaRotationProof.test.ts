@@ -155,4 +155,6 @@ test('the fold releases a staged managed grant only with exact cell evidence und
   assert.equal(stagedBeforeRoot.cells.cells.get(world.project)?.grants.some((item) => item.hash === hash), false);
   const promoted = foldRoster(withoutRaw);
   assert.equal(promoted.cells.cells.get(world.project)?.grants.some((item) => item.hash === hash), true);
+  assert.ok('accessGrants' in promoted && promoted.accessGrants instanceof Map);
+  assert.equal(promoted.accessGrants.get(world.project)?.entry, binding.hash);
 });
