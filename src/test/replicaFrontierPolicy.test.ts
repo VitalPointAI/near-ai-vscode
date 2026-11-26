@@ -13,7 +13,7 @@ import { setFolderSyncProbe } from '../staff/staffFiles';
 import { ReplicaStore } from '../staff/replica/store';
 import { withFrontierPolicySource } from '../staff/replica/frontierPolicy';
 import { identityDir } from '../team/identity';
-import { appendKeyRecord } from '../team/keyHistory';
+import { appendKeyRecord, KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
 import { enrolmentTextFor } from './helpers/enrolmentFixtures';
 import { deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
 import { createRosterWorld } from './helpers/replicaRosterWorld';
@@ -214,6 +214,18 @@ test('prospective policy reconciles an uncertain committed write exactly and ref
 
   const next = deviceKey('next-policy-identity');
   await appendKeyRecord(identityDir(storage), secrets, policyKey, { kind: 'rotated', key: policyKey, next }, { now: () => new Date(FIXED_NOW + 5) });
+  const currentPersonal = policyDocumentFor({ key: next, now: FIXED_NOW + 6 });
+  await writeFile(path.join(gateDir(storage), POLICY_BUNDLE_FILE), JSON.stringify(signPersonalLayer(currentPersonal, next)));
+  await writeLastValid(secrets, { hash: bundleHash(currentPersonal), at: FIXED_NOW + 10 });
+  const sameIssuerUpdate = enrolmentTextFor(issuerKey(), { serial: 2, now: FIXED_NOW + 7 });
+  const updated = await new OrganizationStore(storage, secrets).accept(sameIssuerUpdate, { wordsConfirmed: true }, FIXED_NOW + 10);
+  assert.equal(updated.kind, 'update');
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'ready');
+  assert.deepEqual(await readFile(target), bytes);
+  assert.equal(replicaSignatures(), signatures);
+
+  await appendKeyRecord(identityDir(storage), secrets, next, { kind: 'revoked', key: policyKey }, { now: () => new Date(FIXED_NOW + 8) });
+  assert.equal(await withFrontierPolicySource(storage, secrets, () => new Date(FIXED_NOW + 10), async (capture) => (await capture()) !== undefined), true);
   assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
   assert.equal(await reopened.appendSnapshot(), request.snapshot);
 });
@@ -227,6 +239,27 @@ test('prospective policy does not reopen after an authenticated organization iss
   const handover = enrolmentTextFor(successor, { serial: 2, rotation: issuerKey(), now: FIXED_NOW + 1 });
   const changed = await new OrganizationStore(storage, secrets).accept(handover, { wordsConfirmed: true }, FIXED_NOW + 10);
   assert.equal(changed.kind, 'rotate');
+  const reopened = await open();
+  const signatures = replicaSignatures();
+  assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');
+  assert.equal(replicaSignatures(), signatures);
+});
+
+test('prospective policy refuses a healthy current personal history whose signed prefix differs', async () => {
+  const secrets = new MemorySecrets();
+  const { store, open, addGrants, storage, policyKey, replicaSignatures } = await preparationWorld(secrets);
+  const request = await addGrants();
+  assert.equal(await store['frontierPreparation'](request, 'capture'), 'ready');
+  const otherSecrets = new MemorySecrets();
+  const other = await mkdtemp(path.join(tmpdir(), 'fp-history-'));
+  await appendKeyRecord(other, otherSecrets, policyKey, { kind: 'created', key: policyKey }, { now: () => new Date(FIXED_NOW + 1) });
+  const next = deviceKey('different-history-successor');
+  await appendKeyRecord(other, otherSecrets, policyKey, { kind: 'rotated', key: policyKey, next }, { now: () => new Date(FIXED_NOW + 5) });
+  const otherHead = await otherSecrets.get(KEY_HISTORY_HEAD_SECRET);
+  assert.ok(otherHead);
+  await writeFile(path.join(identityDir(storage), KEY_HISTORY_FILE), await readFile(path.join(other, KEY_HISTORY_FILE)));
+  await secrets.store(KEY_HISTORY_HEAD_SECRET, otherHead);
+  assert.equal(await withFrontierPolicySource(storage, secrets, () => new Date(FIXED_NOW + 10), async (capture) => (await capture()) !== undefined), true);
   const reopened = await open();
   const signatures = replicaSignatures();
   assert.equal(await reopened['frontierPreparation'](request, 'reopen'), 'refused');

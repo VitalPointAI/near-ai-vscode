@@ -102,6 +102,21 @@ export async function readKeyHistory(identityDir: string, secrets: SecretStorage
   return replayKeyHistory(result.loaded.file, result.loaded.head);
 }
 
+/** Compares a captured head with the exact prefix of the one current protected replay. The caller holds KEY_HISTORY_LOCK_FILE. */
+export async function readKeyHistoryPrefix(identityDir: string, secrets: SecretStorageLike, head: KeyHistoryHead) {
+  if (!Number.isSafeInteger(head.seq) || head.seq < 1) return undefined;
+  const result = await load(identityDir, secrets);
+  if (!result.ok) return undefined;
+  const current = replayKeyHistory(result.loaded.file, result.loaded.head);
+  if (!current.ok || current.head === undefined || head.seq > current.head.seq) return undefined;
+  if (head.seq === current.head.seq) return head.hash === current.head.hash ? { current, captured: current } : undefined;
+  // The full replay authenticated every record in this parsed file. Replaying the prefix compares its exact final hash
+  // to the captured head and recovers the original signer dispositions without trusting a second disk read.
+  const file = result.loaded.file as KeyHistoryFile;
+  const captured = replayKeyHistory({ version: file.version, records: file.records.slice(0, head.seq) }, head);
+  return captured.ok ? { current, captured } : undefined;
+}
+
 // The status source for a solo payload: keys this person's own history knows, and unknown for everything else (also when the history is broken).
 export async function localKeyStatus(identityDir: string, secrets: SecretStorageLike): Promise<KeyStatusLookup> {
   return (await readKeyHistory(identityDir, secrets)).lookup;

@@ -19,7 +19,7 @@ import { OrganizationStore } from '../../gate/organizationStore';
 import type { SecretStorageLike } from '../../services/auth';
 import { withFileLock } from '../../services/stateMirrorLock';
 import { identityDir } from '../../team/identity';
-import { KEY_HISTORY_LOCK_FILE, readKeyHistory } from '../../team/keyHistory';
+import { KEY_HISTORY_LOCK_FILE, readKeyHistory, readKeyHistoryPrefix } from '../../team/keyHistory';
 
 async function readSource(storage: string, secrets: SecretStorageLike, now: () => Date) {
   const marker = await readLastValid(secrets);
@@ -115,27 +115,32 @@ export function frontierCustody(
 }
 
 
-/** Re-verifies the exact retained envelopes. This tranche accepts only unchanged protected trust identities. */
+/** Re-verifies the exact retained envelopes against verified personal continuity and the continuing organization issuer. */
 export async function reopenFrontierPolicy(
   saved: unknown, current: PolicySource, storage: string, secrets: SecretStorageLike
 ) {
   if (!isRecord(saved) || !isRecord(saved.personalHistoryHead) || !isRecord(saved.organizationPin) ||
     typeof saved.instant !== 'number' || !Number.isSafeInteger(saved.instant) || saved.instant < 0) return undefined;
-  const history = await readKeyHistory(identityDir(storage), secrets);
-  if (!history.ok || history.head === undefined || history.head.hash !== saved.personalHistoryHead.hash ||
-    history.head.seq !== saved.personalHistoryHead.seq || history.head.hash !== current.personalHistoryHead.hash ||
-    history.head.seq !== current.personalHistoryHead.seq) return undefined;
+  const { seq, hash } = saved.personalHistoryHead;
+  if (typeof seq !== 'number' || typeof hash !== 'string') return undefined;
+  const history = await readKeyHistoryPrefix(identityDir(storage), secrets, { seq, hash });
+  if (history === undefined || history.current.head?.hash !== current.personalHistoryHead.hash ||
+    history.current.head.seq !== current.personalHistoryHead.seq) return undefined;
   const pin = saved.organizationPin;
   const trusted = current.organizationPin;
-  if (pin.publicKey !== trusted.publicKey || pin.serial !== trusted.serial || pin.enrolledAt !== trusted.enrolledAt ||
-    typeof pin.lastIssuedAt !== 'string' || pin.pending !== undefined) return undefined;
-  const personal = verifyPolicyLayer(saved.personalEnvelope, { purpose: 'policy-bundle', status: history.lookup, now: saved.instant });
+  if (pin.publicKey !== trusted.publicKey || typeof pin.serial !== 'number' || !Number.isSafeInteger(pin.serial) || pin.serial < 1 ||
+    trusted.serial < pin.serial || pin.enrolledAt !== trusted.enrolledAt || typeof pin.lastIssuedAt !== 'string' || pin.pending !== undefined) return undefined;
+  const originalIssue = Date.parse(pin.lastIssuedAt);
+  const trustedIssue = Date.parse(trusted.lastIssuedAt);
+  if (!Number.isFinite(originalIssue) || trustedIssue < originalIssue ||
+    (trustedIssue === originalIssue && trusted.layerHash !== pin.layerHash)) return undefined;
+  const personal = verifyPolicyLayer(saved.personalEnvelope, { purpose: 'policy-bundle', status: history.current.lookup, now: saved.instant });
   const organization = verifyOrganizationLayer(saved.organizationEnvelope, {
     issuerPublicKey: trusted.publicKey, lastIssuedAt: pin.lastIssuedAt, now: saved.instant
   });
   if (personal.state !== 'valid' || personal.wireVersion !== 2 || !isRecord(saved.personalSigner) || !isRecord(saved.personalSignerStatus) ||
     !canonicalBytes(personal.signer).equals(canonicalBytes(saved.personalSigner)) ||
-    !canonicalBytes(history.lookup(personal.signer)).equals(canonicalBytes(saved.personalSignerStatus)) || !organization.ok ||
+    !canonicalBytes(history.captured.lookup(personal.signer)).equals(canonicalBytes(saved.personalSignerStatus)) || !organization.ok ||
     organization.hash !== pin.layerHash || organization.issuedAt !== pin.lastIssuedAt) return undefined;
   return {
     instant: saved.instant,
