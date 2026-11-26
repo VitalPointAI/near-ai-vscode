@@ -40,7 +40,7 @@ import type { WelcomeFile } from '../../domain/replica/invite';
 import { validateProjectData } from '../../domain/replica/kindSchemas/project';
 import { ORIGIN_ROSTER, ROSTER_KIND_OWNER, foldRoster, legacyReadingGrants, managedWriteAllowed, rosterSignature, rosterView } from '../../domain/replica/roster';
 import { storedAccessProofs } from '../../domain/replica/rotationGrants';
-import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
+import type { RosterAnchor, RosterFoldInput, RosterState } from '../../domain/replica/roster';
 import { epochAt, epochsAt } from '../../domain/replica/rosterCells';
 import { deviceKeyOf, hubCellsAt } from '../../domain/replica/rosterMembers';
 import type { ReplicaContext } from '../../domain/replica/rosterView';
@@ -62,6 +62,7 @@ import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDe
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
 import { openManagedGrantArtifact } from './managedGrantDelivery';
+import { verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
 export { GENESIS_PIN_FILE, GENESIS_PIN_FOLDER, anchorOf, genesisPinFile, projectFile, sameAnchor };
@@ -169,6 +170,7 @@ export interface AppendOwnOptions {
   /** A blob already sealed to the cited cell and epoch, stored with this entry after the write check. */
   contentBlob?: SealedBlob;
   accessProof?: unknown;
+  stageAccess?: (entry: string) => unknown;
   /** The roster cited; the roster head when absent. */
   roster?: string;
   actor?: Actor;
@@ -483,10 +485,12 @@ export class ReplicaProject {
           const refused = write.check(addEntries(prior, [built.entry], ctx).result, built.hash);
           if (refused !== undefined) return refused;
         }
+        const stage = write.options.stageAccess?.(built.hash);
+        if (write.options.stageAccess !== undefined && (!checked || !verifyManagedStage(built, stage, this.rosterInputs(state.roster)))) return refuse('rekey-pending');
         const writer = built.entry.header.writer;
         const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
         const mayCommit = deadline === undefined ? undefined : () => Date.parse(deadline) > this.now().getTime();
-        const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit) : await this.storeSigned(built, expected, mayCommit);
+        const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit, stage) : await this.storeSigned(built, expected, mayCommit, stage);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
@@ -990,17 +994,17 @@ export class ReplicaProject {
     }
   }
 
-  /**
-   * Folds the roster and settles the key ring in turns until neither changes (CR-01, D-44). The ring takes a key only from what the fold placed, and
-   * the roster stream is sealed under the base cell's epoch keys, so a fold places the grants of the epochs it reached, settle takes their keys, and
-   * the next fold reads the roster entries sealed under them. While the ring does not answer a base epoch a roster entry is sealed under, the fold
-   * may also read with a reading key (readingKeys), which is never written with and never kept.
-   */
+  private rosterInputs(roster?: RosterState, entries: readonly SealedEntry[] = this.store.rosterEntries(), reading = roster && this.readingKeys(roster, entries)): RosterFoldInput {
+    return { entries, anchor: this.anchor, grants: this.grantList, grantEvidence: this.evidence.map(({ value }) => value), now: this.now(),
+      keys: (stream, epoch) => this.keys.epochKey(stream, epoch) ?? (stream === this.anchor.project ? reading?.get(epoch) : undefined),
+      blobs: (hash) => this.blobCache.get(hash) };
+  }
+
+  /** Settle the roster and its placed keys in turns (CR-01, D-44). Temporary reading keys are never used for writes. */
   private async foldRosterAndKeys(entries: readonly SealedEntry[]): Promise<RosterState> {
     const project = this.anchor.project;
     let reading = new Map<number, Buffer>();
-    const keys = (stream: string, epoch: number): Buffer | undefined => this.keys.epochKey(stream, epoch) ?? (stream === project ? reading.get(epoch) : undefined);
-    const fold = (): RosterState => foldRoster({ entries, anchor: this.anchor, keys, blobs: (hash) => this.blobCache.get(hash), grants: this.grantList, grantEvidence: this.evidence.map(({ value }) => value), now: this.now() });
+    const fold = (): RosterState => foldRoster(this.rosterInputs(undefined, entries, reading));
     let roster = fold();
     // Each turn reaches at least one more base epoch or ends the loop, so the bound only stops a roster that keeps changing its mind.
     const epochs = new Set(entries.filter((entry) => entry.header.stream === project).map((entry) => entry.header.epoch)).size;
@@ -1014,12 +1018,7 @@ export class ReplicaProject {
     return roster;
   }
 
-  /**
-   * Base cell keys to read the roster with while this device catches up (a device admitted after a rekey of the base cell gets the earlier epochs in
-   * grants placed only at its admission, D-45). For each base epoch the ring does not answer, the first of the ring's reading candidates that opens a
-   * roster entry of that epoch signed by a device of someone who has held the lead or deputy role on this roster (the pinned lead from the start).
-   * A key from a grant planted by anyone else opens no such entry, so it is never used; and no reading key is ever written with or kept.
-   */
+  /** Temporary base-epoch keys for historical reads (D-45) must open an entry signed by a roster authority. */
   private readingKeys(roster: RosterState, entries: readonly SealedEntry[]): Map<number, Buffer> {
     const project = this.anchor.project;
     const keys = new Map<number, Buffer>();
@@ -1110,8 +1109,8 @@ export class ReplicaProject {
     return body.lamport as number;
   }
 
-  private async storeSigned(built: BuiltEntry, expected: string, mayCommit?: () => boolean): Promise<IngestResult | StoreRefused> {
-    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit);
+  private async storeSigned(built: BuiltEntry, expected: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
+    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit, stage);
     // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
     if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
     return result;

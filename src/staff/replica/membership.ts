@@ -21,11 +21,9 @@
 // The join secret lives in this computer's secret storage from the invitation until a roster entry records its outcome (used or voided), and is then
 // forgotten (P-31-28). Nothing else is ever deleted.
 //
-// The rekey flows use the roster to find interrupted rotations before handing out keys (MJ-03).
-// The writing host opens the cell's label and checks clearance with its clock and scales (D-22). The signed grant is the fold's authority.
+// Rekey uses the roster to find interrupted rotations (MJ-03) and checks clearance against the private labels (D-22).
 //
-// No result, message, file name or error holds a join secret, a MAC or a key (P-31-23). The invitation file holds the secret by design, inside its
-// signed payload, and the join request file holds the MAC by design; nothing else does.
+// No status or error holds a join secret, MAC or key (P-31-23). Only the invitation contains the join secret and only the join request contains the MAC.
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename } from 'node:fs/promises';
@@ -47,6 +45,8 @@ import type { InviteLead, InvitePayload, InviteRefusal, JoinRequestPayload } fro
 import type { ProjectOutput } from '../../domain/replica/projectFold';
 import { ROSTER_REFUSALS, ROSTER_SPLIT_TEXT, deputyAt, isRosterWriterAt, leadAt } from '../../domain/replica/roster';
 import type { RosterAnchor, RosterState } from '../../domain/replica/roster';
+import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
+import { appendManagedWithdrawal } from './managedWithdrawal';
 import { readLegacyCellLabel } from '../../domain/replica/productCells';
 import { CELL_REFUSALS, epochAt, epochsAt, granteesAt } from '../../domain/replica/rosterCells';
 import { MEMBER_REFUSALS, deviceAt, devicesOfMemberAt, hubCellsAt, inviteAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
@@ -1124,9 +1124,8 @@ function pendingRekeys(shared: SharedProjectHost, roster: RosterState, gate: Gat
   return { plans, cells: new Map(infos.map((info) => [info.cell, info])) };
 }
 
-/** Finishes the rekeys an interrupted removal or clearance change left (MJ-03). Nothing to do is an empty outcome. */
-async function finishPending(shared: SharedProjectHost): Promise<RekeyOutcome | MembershipResult> {
-  const { roster } = await shared.project.state();
+async function finishPending(shared: SharedProjectHost, initial?: RosterState): Promise<RekeyOutcome | MembershipResult> {
+  const roster = initial ?? (await shared.project.state()).roster;
   const problem = writerProblem(shared, roster);
   if (problem !== undefined) return problem;
   const pending = pendingRekeys(shared, roster, gateOf(shared));
@@ -1134,14 +1133,12 @@ async function finishPending(shared: SharedProjectHost): Promise<RekeyOutcome | 
   return writeRekeys(shared, pending.plans, pending.cells);
 }
 
-/** The sentence a flow puts first when it finished an earlier change before its own. */
 function finishedNote(outcome: RekeyOutcome): string {
   const count = outcome.rekeyed.length;
   if (count === 0) return '';
   return `A removal or clearance change left unfinished was finished first: ${count === 1 ? 'one part of the project was' : `${count} parts of the project were`} moved to a new key. `;
 }
 
-/** How many cells an interrupted removal or clearance change left on an old key; 0 when this device cannot change the roster now. Writes nothing. */
 export async function unfinishedRekeys(shared: SharedProjectHost): Promise<number> {
   try {
     const { roster } = await shared.project.state();
@@ -1172,15 +1169,18 @@ export function finishRekeys(shared: SharedProjectHost): Promise<MembershipResul
 
 export type RemoveInput = { member: string } | { member: string; writer: string };
 
-/**
- * Removes a member (member.remove) or one of a member's devices (device.revoke), then moves every cell the removed devices held to a new key wrapped
- * only to the devices still cleared (D-23). The lead cannot be removed, and the lead's last device can be revoked only by the deputy (D-09, D-48);
- * both are refused with the roster's own sentence.
- */
 export function removeFromProject(shared: SharedProjectHost, input: RemoveInput): Promise<MembershipResult> {
   return guarded(async () => {
     const { project } = shared;
-    const finished = await finishPending(shared);
+    const initial = (await project.state()).roster;
+    if (initial.requiredFrom.has(CELL_ACCESS_FEATURE)) {
+      const result = await appendManagedWithdrawal(project, initial, input, now(shared.deps));
+      if (isProjectRefused(result)) return fromProject(result);
+      if (!result.ok) return refused(result.reason, result.reason === 'no-grant-key' ? MEMBERSHIP_REFUSALS['no-grant-key'] :
+        result.reason === 'change-not-applied' ? 'The shared history changed while this removal was prepared. Try again.' : PROJECT_REFUSALS_HOST[result.reason]);
+      return done('Access was withdrawn. Parts awaiting a new key will stay read only.', { member: input.member, ...('writer' in input ? { writer: input.writer } : {}) });
+    }
+    const finished = await finishPending(shared, initial);
     if (isResult(finished)) return finished;
     const { roster } = await project.state();
     const problem = writerProblem(shared, roster);

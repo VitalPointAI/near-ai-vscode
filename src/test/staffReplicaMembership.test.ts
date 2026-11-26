@@ -34,6 +34,7 @@ import type { MembershipResult, SharedProjectHost } from '../staff/replica/membe
 import { ReplicaProject, genesisPinFile, isProjectRefused } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
+import { appendManagedWithdrawal } from '../staff/replica/managedWithdrawal';
 import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
@@ -928,12 +929,21 @@ test('managed removal commits the exact withdrawal and keeps the unaffected cell
   assert.equal(waiting.ok, false);
   assert.equal((await head(p)).hash, seed.hash);
   assert.ok('ok' in await p.putGrants([], receipts.slice(1)));
+  const prepared = await head(p);
+  const amended = await p.appendOwn('member.update', { member: peer.member, name: 'Morgan Analyst' });
+  assert.ok('ok' in amended);
+  const evidenceFolder = path.join(at.root, REPLICA_DIR, 'access-evidence');
+  const beforeStale = readdirSync(evidenceFolder).sort();
+  const stale = await appendManagedWithdrawal(p, prepared.roster, { member: peer.member }, NOW);
+  assert.deepEqual(stale, { ok: false, reason: 'change-not-applied' });
+  assert.deepEqual(readdirSync(evidenceFolder).sort(), beforeStale);
+  assert.equal((await head(p)).hash, amended.hash);
   const removed = await removeFromProject(lead.host, { member: peer.member });
   assert.equal(removed.ok, true, removed.message);
   const reopened = project(await ReplicaProject.open(at.root, at.deps));
   const after = await head(reopened);
   assert.equal(memberAt(after.roster.members, peer.member, after.position), undefined);
-  assert.equal(after.roster.accessRevision?.predecessor, seed.hash);
+  assert.equal(after.roster.accessRevision?.predecessor, amended.hash);
   assert.equal(after.roster.accessGrants.get(p.projectId)?.decision, 'pending');
   assert.deepEqual(after.roster.accessGrants.get(p.projectId)?.evidence.excluded, [peer.writer]);
   assert.equal(after.roster.accessGrants.get(unaffected)?.decision, 'continues');

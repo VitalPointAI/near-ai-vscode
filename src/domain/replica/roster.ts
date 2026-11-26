@@ -35,7 +35,7 @@ import { WRAP_FEATURE, wrapFormatProblem } from './wrapFormat';
 import { CELL_ACCESS_FEATURE } from './features';
 import { accessRevisionId, verifiesAccessWrite } from './rotationProof';
 import type { AccessRevision } from './rotationProof';
-import { advanceGrantEvidence, matchesGrantEvidence, openGrantEvidence, readGrantDelivery } from './rotationGrants';
+import { advanceGrantEvidence, matchesGrantEvidence, openGrantEvidence, readAuthoredAccessStage, readGrantDelivery } from './rotationGrants';
 import type { GrantEvidence, OpenedGrantEvidence } from './rotationGrants';
 import { deviceKemContext, placeDeviceKems } from './deviceKem';
 import type { KemRecord } from './deviceKem';
@@ -710,7 +710,8 @@ function markNotChosen(state: RosterState, unapplied: readonly VerifiedEntry[]):
 // its own hash; a listed page is never placed alone. A grant whose pages have not all arrived waits, held missing-blob under its hash like an entry
 // whose blob has not arrived (33-07), and is placed when they come.
 function placeGrants(state: RosterState, grants: readonly unknown[], openings: readonly unknown[]): void {
-  const evidence = openings.flatMap((opening) => openGrantEvidence(state.anchor.project, state.accessHistory, opening) ?? []);
+  const evidence = openings.flatMap((candidate) => (readAuthoredAccessStage(candidate)?.openings ?? [candidate])
+    .flatMap((opening) => openGrantEvidence(state.anchor.project, state.accessHistory, opening) ?? []));
   const delivered: unknown[] = [];
   for (const candidate of openings) {
     const item = readGrantDelivery(candidate);

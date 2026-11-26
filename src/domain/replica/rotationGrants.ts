@@ -140,6 +140,14 @@ export function readContinuityReceipt(value: unknown): { entry: string; accessPr
   return { entry: value.entry, accessProofs };
 }
 
+/** A local stage becomes authoritative only when its entry and proofs are selected. */
+export function readAuthoredAccessStage(value: unknown): { entry: string; openings: readonly unknown[]; accessProofs: readonly unknown[] } | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 3 || !isHash(value.entry) ||
+      !Array.isArray(value.openings) || !Array.isArray(value.accessProofs)) return undefined;
+  return value.openings.every((opening) => isRecord(opening) && opening.entry === value.entry) ?
+    { entry: value.entry, openings: value.openings, accessProofs: value.accessProofs } : undefined;
+}
+
 /** Collect private permit candidates for the selected entry. Each candidate still needs append-time verification. */
 export function storedAccessProofs(value: unknown, selectedEntry: string | undefined): readonly unknown[] {
   if (selectedEntry === undefined) return [];

@@ -71,7 +71,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
-import { readStoredArtifact } from './storeArtifacts';
+import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
 
 /** The cross-window lock file inside the store folder. */
 export const REPLICA_LOCK_FILE = 'replica.lock';
@@ -355,9 +355,9 @@ async function ensureDir(base: string, parts: readonly string[]): Promise<string
 }
 
 /** Writes bytes to a temporary file beside `file`, syncs it, then renames it into place. */
-async function writeAtomic(file: string, bytes: Buffer | string): Promise<void> {
+async function writeAtomic(file: string, bytes: Buffer | string, mode = 0o644): Promise<void> {
   const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o644);
+  const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, mode);
   try {
     await handle.writeFile(bytes);
     await handle.sync();
@@ -946,7 +946,6 @@ export class ReplicaStore {
     }
   }
 
-  /** Identifies the loaded history, remembered roster head, grants and immutable access evidence. */
   public async appendSnapshot(): Promise<string> {
     const unreadable: UnreadableFile[] = [];
     const cells = (await this.listDir(['grants'], unreadable)).filter((cell) => STREAM_ID_PATTERN.test(cell));
@@ -955,8 +954,7 @@ export class ReplicaStore {
     return sha256Hex(canonicalBytes([this.mark?.rosterHead ?? null, evidence,
       [...this.byHash.keys()].sort(), [...this.held.keys()].sort(), [...this.waiting.keys()].sort(), grants, unreadable.map(({ file }) => file).sort()]));
   }
-  /** Appends this device's signed entries in writer order, writing blobs first and skipping stored entries on retry. */
-  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string, mayCommit?: () => boolean): Promise<AppendResult> {
+  public async appendOwn(built: readonly BuiltEntry[], expectedSnapshot?: string, mayCommit?: () => boolean, stage?: unknown): Promise<AppendResult> {
     const entries = built.map((item) => {
       const entry = parseSealed(item.entry);
       if (!entry || entry.header.writer !== this.own.writer || !verifyHeader(entry.header, this.own.publicKey)) throw new Error('Nothing was written: appendOwn takes only entries this device built and signed.');
@@ -992,6 +990,7 @@ export class ReplicaStore {
           fresh.push(entry);
         }
         if (fresh.length === 0) return { ok: true, written: 0 };
+        if (stage !== undefined) await this.writeAccessStage(stage);
         for (const [hash, wire] of blobs) await this.putBlobBytes(hash, wire);
         await this.appendLines(fresh);
         await this.writeOwnMark();
@@ -1015,7 +1014,7 @@ export class ReplicaStore {
    * that fills the held list (MAX_MARK_LISTED) is its writer's flooded line too, and past that a refused entry is neither written nor recorded
    * (counted in `flooded`) while every other entry still is. An entry that would wait while the waiting list is full is not written (`deferred`).
    */
-  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean): Promise<IngestResult | StoreRefused> {
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
     const seen = new Set<string>();
@@ -1053,6 +1052,8 @@ export class ReplicaStore {
         await this.catchUp();
         await this.syncMark();
         if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
+        if (stage !== undefined && (fresh.length !== 1 || verdicts.get(fresh[0].hash)?.kind !== 'pass' ||
+          this.byHash.has(fresh[0].hash) || this.floodedFiles.has(fileId(fresh[0].entry.header.stream, fresh[0].entry.header.writer)))) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
@@ -1080,6 +1081,7 @@ export class ReplicaStore {
           }
           toWrite.push(item);
         }
+        if (stage !== undefined) await this.writeAccessStage(stage);
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
@@ -1094,15 +1096,7 @@ export class ReplicaStore {
     }
   }
 
-  /**
-   * Runs `check` again on every entry still waiting (never checked, or waiting for its key or blob). One that passes reaches entries(); one that is
-   * refused is held; one that still cannot be checked keeps waiting. The outcome is recorded in the signed mark. An entry another window decided in
-   * the meantime keeps that window's verdict.
-   *
-   * The bounds of ingestForeign hold here too (D-14): a refusal that reaches its writer's bound, or fills the held list, is held as the writer's
-   * flooded line; a refused entry the held list has no room for keeps waiting. A flooded writer's waiting entries stay out of the fold and are not
-   * checked again.
-   */
+  /** Retry waiting entries under the ingest limits (D-14), preserving outcomes already decided in another window. */
   public async recheck(check: ForeignCheck): Promise<RecheckResult | StoreRefused> {
     const verdicts = new Map<string, Awaited<ReturnType<typeof runCheck>>>();
     const refusedHere = new Map<string, number>();
@@ -1231,35 +1225,41 @@ export class ReplicaStore {
     return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash);
   }
   public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
-    const rows: Array<{ hash: string; value: unknown }> = [];
-    for (const name of await this.listDir(['access-evidence'], [])) {
-      const hash = /^([0-9a-f]{64})\.json$/.exec(name)?.[1];
-      if (hash === undefined) continue;
-      const read = await this.readSigned(`access-evidence/${name}`, (value) => sha256Hex(canonicalBytes(value)) === hash, BLOB_MAX_BYTES);
-      if ('value' in read) rows.push({ hash, value: read.value });
-    }
-    return rows;
+    return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), BLOB_MAX_BYTES);
   }
   private readSigned(relative: string, matches: (value: unknown) => boolean, maxBytes = SIGNED_FILE_MAX_BYTES): Promise<{ value: unknown } | { reason: string }> {
     return readStoredArtifact(path.join(this.dir, relative), maxBytes, matches);
   }
 
+  private async writeAccessStage(stage: unknown): Promise<void> {
+    const bytes = canonicalBytes(stage);
+    if (bytes.length > BLOB_MAX_BYTES) throw new Refusal('blob-too-large');
+    const hash = sha256Hex(bytes);
+    const file = `${hash}.json`;
+    await this.writeSigned(['access-evidence'], file, bytes, 0o600);
+    const stored = await this.readSigned(`access-evidence/${file}`, (value) => sha256Hex(canonicalBytes(value)) === hash, BLOB_MAX_BYTES);
+    if (!('value' in stored)) throw new Refusal('unreadable');
+    await syncFolder(path.join(this.dir, 'access-evidence'));
+    await syncFolder(this.dir);
+  }
+
+  private async writeSigned(parts: readonly string[], name: string, bytes: Buffer, mode?: number): Promise<void> {
+    const file = path.join(await ensureDir(this.dir, parts), name);
+    try {
+      const info = await lstat(file);
+      if (info.isSymbolicLink()) throw new Refusal('symlink');
+      if (info.isFile()) return;
+    } catch (error) {
+      if (error instanceof Refusal) throw error;
+      if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
+    }
+    await writeAtomic(file, bytes, mode);
+  }
+
   private async putSigned(parts: readonly string[], name: string, bytes: Buffer, hash: string): Promise<{ ok: true; hash: string } | StoreRefused> {
     try {
-      return await this.locked(async () => {
-        const dir = await ensureDir(this.dir, parts);
-        const file = path.join(dir, name);
-        try {
-          const info = await lstat(file);
-          if (info.isSymbolicLink()) throw new Refusal('symlink');
-          if (info.isFile()) return { ok: true as const, hash };
-        } catch (error) {
-          if (error instanceof Refusal) throw error;
-          if (errorCode(error) !== 'ENOENT') throw new Refusal('unreadable');
-        }
-        await writeAtomic(file, bytes);
-        return { ok: true as const, hash };
-      });
+      await this.locked(() => this.writeSigned(parts, name, bytes));
+      return { ok: true, hash };
     } catch (error) {
       if (error instanceof Refusal) return refusal(error.reason);
       throw error;

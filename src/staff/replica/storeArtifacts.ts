@@ -1,3 +1,6 @@
+import * as path from 'node:path';
+import { sha256Hex } from '../../domain/replica/entry';
+import { canonicalBytes } from '../../domain/team/canonical';
 import { lstat } from 'node:fs/promises';
 import { readWhole } from '../staffFiles';
 
@@ -18,4 +21,15 @@ export async function readStoredArtifact(file: string, maxBytes: number, matches
   } catch {
     return { reason: 'its content does not match its name' };
   }
+}
+
+export async function readHashedArtifacts(dir: string, names: readonly string[], maxBytes: number): Promise<Array<{ hash: string; value: unknown }>> {
+  const rows: Array<{ hash: string; value: unknown }> = [];
+  for (const name of names) {
+    const hash = /^([0-9a-f]{64})\.json$/.exec(name)?.[1];
+    if (hash === undefined) continue;
+    const read = await readStoredArtifact(path.join(dir, name), maxBytes, (value) => sha256Hex(canonicalBytes(value)) === hash);
+    if ('value' in read) rows.push({ hash, value: read.value });
+  }
+  return rows;
 }
