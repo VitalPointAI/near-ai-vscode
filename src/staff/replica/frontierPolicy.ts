@@ -92,9 +92,9 @@ export async function withFrontierPolicySource<T>(
 
 /** Checks just the signed founding label and exact custodian's placed wrap at the selected fence. */
 export function frontierCustody(
-  roster: RosterState, stream: string, writer: string, keys: KeyRing, source: Pick<PolicySource, 'effective' | 'instant'>
+  roster: RosterState, stream: string, writer: string, keys: KeyRing, source: Pick<PolicySource, 'effective' | 'instant'>,
+  position = roster.positions.length - 1
 ): { epoch: number; grant: string; label: string } | undefined {
-  const position = roster.positions.length - 1;
   if (stream === roster.anchor.project || !isRosterWriterAt(roster, writer, position)) return undefined;
   const device = deviceAt(roster.members, writer, position);
   const epoch = epochAt(roster.cells, stream, position);

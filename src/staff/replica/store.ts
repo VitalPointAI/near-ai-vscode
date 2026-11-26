@@ -71,13 +71,14 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
-import { openAcceptedFrontier } from '../../domain/replica/acceptedFrontier';
+import { checksFrontierV2Fixture, frontierV2CaptureCommitment, openAcceptedFrontier } from '../../domain/replica/acceptedFrontier';
 import type { FrontierArchiveResult, FrontierCustodyContext } from '../../domain/replica/acceptedFrontier';
 import type { KeyRing } from '../../domain/replica/rosterView';
 import { CELL_ACCESS_FEATURE } from '../../domain/replica/features';
 import { foldRoster, rosterView } from '../../domain/replica/roster';
 import type { RosterAnchor } from '../../domain/replica/roster';
 import { epochAt } from '../../domain/replica/rosterCells';
+import { deviceAt } from '../../domain/replica/rosterMembers';
 import { verifyEntry } from '../../domain/replica/verify';
 import { frontierCustody, reopenFrontierPolicy, withFrontierPolicySource } from './frontierPolicy';
 import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
@@ -1320,8 +1321,7 @@ export class ReplicaStore {
           await this.verifyAppendSnapshot(request.snapshot);
           return this.mark?.rosterHead === predecessor;
         };
-        const scope = sha256Hex(canonicalBytes(['private-frontier-policy-capture/1', this.dir, pin.project, pin.genesisHash,
-          request.stream, this.own.writer, predecessor, request.snapshot]));
+        const scope = this.frontierCaptureScope(request, predecessor);
         const slot = FRONTIER_POLICY_SLOT + scope;
         const reference = mode === 'check' ? undefined : await this.deps.secrets.get(slot);
         if (reference !== undefined) {
@@ -1370,6 +1370,66 @@ export class ReplicaStore {
     return result ?? 'unavailable';
   }
 
+  private frontierCaptureScope(request: FrontierPreparationRequest, predecessor: string): string {
+    return sha256Hex(canonicalBytes(['private-frontier-policy-capture/1', this.dir, request.pin.project, request.pin.genesisHash,
+      request.stream, this.own.writer, predecessor, request.snapshot]));
+  }
+
+  /** Test fixture only. Check the exact protected capture and signed frontier and return an inert assertion. */
+  private async checkFrontierV2Fixture(
+    file: unknown, request: FrontierPreparationRequest & { expectedSnapshot: string; opening: unknown }
+  ): Promise<boolean> {
+    if (!STREAM_ID_PATTERN.test(request.stream) || !HASH_PATTERN.test(request.snapshot)) return false;
+    const result = await withFrontierPolicySource(request.policyStorage, this.deps.secrets, this.deps.now ?? (() => new Date()),
+      (capture) => this.locked(async () => {
+        await this.verifyAppendSnapshot(request.expectedSnapshot);
+        const policy = await capture();
+        if (policy === undefined) return false;
+        const { pin, keys, stream } = request;
+        const { grants } = await this.grants();
+        const roster = foldRoster({ anchor: pin, entries: this.rosterEntries(), grants: grants.map(({ signed }) => signed),
+          keys, blobs: () => undefined, now: new Date(policy.source.instant) });
+        const head = roster.positions.at(-1);
+        const fence = roster.requiredFrom.get(CELL_ACCESS_FEATURE);
+        if (head === undefined || head !== this.mark?.rosterHead || fence === undefined || roster.pending.length !== 0) return false;
+        const predecessor = roster.positions[fence - 1];
+        const requirement = roster.positions[fence];
+        const access = roster.accessRevision;
+        const reader = deviceAt(roster.members, this.own.writer, roster.positions.length - 1);
+        if (predecessor === undefined || requirement === undefined || access === undefined || reader?.publicKey !== this.own.publicKey ||
+          ![pin.genesisHash, predecessor, requirement, access.entry, head].every((hash) =>
+            this.byHash.get(hash)?.header.stream === pin.project && !this.held.has(hash) && !this.waiting.has(hash))) return false;
+
+        const scope = this.frontierCaptureScope(request, predecessor);
+        const slot = FRONTIER_POLICY_SLOT + scope;
+        const reference = await this.deps.secrets.get(slot);
+        if (reference === undefined) return false;
+        const saved = await this.readFrontierPolicyCapture(scope, reference);
+        if (saved === undefined || saved.requirement !== requirement ||
+          !canonicalBytes(saved.entry).equals(canonicalBytes(this.byHash.get(requirement)))) return false;
+        const historical = await reopenFrontierPolicy(saved.policy, policy.source, request.policyStorage, this.deps.secrets);
+        if (historical === undefined) return false;
+        const verified = verifyEntry(saved.entry, { roster: rosterView(roster), keys, blobs: () => undefined, now: new Date(historical.instant) });
+        if (verified.status !== 'verified' || verified.entry.keep !== undefined || verified.entry.hash !== requirement ||
+          verified.entry.header.writer !== this.own.writer || verified.entry.body.kind !== 'roster.require' ||
+          verified.entry.body.actor.kind !== 'person' || verified.entry.body.roster !== predecessor ||
+          verified.entry.body.at !== new Date(historical.instant).toISOString() ||
+          !isRecord(verified.entry.data) || verified.entry.data.rosterPrev !== predecessor ||
+          !Array.isArray(verified.entry.data.features) || verified.entry.data.features.length !== 1 ||
+          verified.entry.data.features[0] !== CELL_ACCESS_FEATURE) return false;
+        const custody = frontierCustody(roster, stream, this.own.writer, keys, historical, fence - 1);
+        if (custody === undefined || !canonicalBytes(custody).equals(canonicalBytes(saved.custody))) return false;
+        if (!checksFrontierV2Fixture(file, { roster, accessEntry: access.entry, pin: { project: pin.project, genesis: pin.genesisHash },
+          opening: request.opening, historicalKey: keys, expectedStream: stream,
+          capture: { digest: frontierV2CaptureCommitment(saved.salt, saved.hash), writer: this.own.writer, before: predecessor, requirement } })) return false;
+
+        if (await this.deps.secrets.get(slot) !== reference) return false;
+        await this.verifyAppendSnapshot(request.expectedSnapshot);
+        return this.mark?.rosterHead === head && await policy.recheck();
+      }, 'read-only'));
+    return result === true;
+  }
+
   private async readFrontierPolicyCapture(scope: string, reference: string) {
     let pointer: unknown;
     try { pointer = JSON.parse(reference) as unknown; } catch { return undefined; }
@@ -1384,7 +1444,8 @@ export class ReplicaStore {
     if (!isRecord(value) || Object.keys(value).length !== 7 || value.v !== 1 || value.scope !== scope ||
       value.requirement !== pointer.requirement || typeof value.salt !== 'string' || !HASH_PATTERN.test(value.salt) ||
       !canonicalBytes(value).equals(bytes)) return undefined;
-    return { entry: value.entry, requirement: pointer.requirement, policy: value.policy, custody: value.custody };
+    return { entry: value.entry, requirement: pointer.requirement, policy: value.policy, custody: value.custody,
+      salt: value.salt, hash: sha256Hex(bytes) };
   }
 
   /** Keeps immutable verified history outside the live log, blob and grant namespaces. */
@@ -1499,22 +1560,26 @@ export class ReplicaStore {
   // ---- inside the lock ----------------------------------------------------------------------------------------------------------------------
 
   /** Take non-reentrant Start Again, register and cross-window locks in order and require the live store (32 D-03). */
-  private locked<T>(work: () => Promise<T>): Promise<T> {
+  private locked<T>(work: () => Promise<T>, mode: 'write' | 'read-only' = 'write'): Promise<T> {
     return withStartAgainLock(this.root, async () => {
-      if (await intentPresent(this.root)) await ReplicaStore.rollForward(this.root, this.deps, this.own);
+      if (await intentPresent(this.root)) {
+        if (mode === 'read-only') throw new Refusal('start-again-unfinished');
+        await ReplicaStore.rollForward(this.root, this.deps, this.own);
+      }
       return withRegisterLock(this.dir, async () => {
         const problem = await checkPath(this.root, this.parts);
         if (problem) throw new Refusal(problem);
-        if ((await kindAt(this.dir)) === 'none' && (await this.historyGone())) throw new Refusal('rolled-back');
-        await mkdir(this.dir, { recursive: true });
+        const missing = (await kindAt(this.dir)) === 'none';
+        if (missing && (mode === 'read-only' || await this.historyGone())) throw new Refusal('rolled-back');
+        if (mode === 'write') await mkdir(this.dir, { recursive: true });
         return withFileLock(this.dir, REPLICA_LOCK_FILE, async () => {
           const again = await checkPath(this.root, this.parts);
           if (again) throw new Refusal(again);
-          await this.ensureIgnore();
+          if (mode === 'write') await this.ensureIgnore();
           return work();
         });
       });
-    }, true);
+    }, mode === 'write');
   }
 
   /** Was there a shared history here that is gone: this device's mark for this store remains, or a folder beside it holds project.json? */

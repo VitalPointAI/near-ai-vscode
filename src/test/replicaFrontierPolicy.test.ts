@@ -3,8 +3,14 @@ import { mkdtemp, readFile, readdir, rename, stat, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
+import { buildFrontierMembership, frontierSigningBytes, frontierV2CaptureCommitment, frontierV2Root, frontierV2SigningBytes } from '../domain/replica/acceptedFrontier';
+import type { FrontierV2Statement } from '../domain/replica/acceptedFrontier';
 import { buildGrant, grantHash, sealLabel } from '../domain/replica/cellKeys';
+import { buildEntry, sha256Hex } from '../domain/replica/entry';
+import type { SealedEntry } from '../domain/replica/entry';
 import { CELL_ACCESS_FEATURE } from '../domain/replica/features';
+import { isRosterWriterAt } from '../domain/replica/roster';
+import { accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
 import { buildEnrolment, buildOrganizationLayer } from '../domain/gate/enrolment';
 import { bundleHash } from '../domain/gate/bundle';
 import { gateDir, POLICY_BUNDLE_FILE } from '../gate/bundleStore';
@@ -17,7 +23,7 @@ import { identityDir } from '../team/identity';
 import { appendKeyRecord, KEY_HISTORY_FILE, KEY_HISTORY_HEAD_SECRET } from '../team/keyHistory';
 import { EXAMPLE_ORGANIZATION, enrolmentTextFor, organizationSections, rulesTextFor } from './helpers/enrolmentFixtures';
 import { DAY_MS, deviceKey, FIXED_NOW, issuerKey, policyDocumentFor, signPersonalLayer } from './helpers/policyFixtures';
-import { createRosterWorld } from './helpers/replicaRosterWorld';
+import { createRosterWorld, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 import { MemorySecrets } from './helpers/teamHarness';
 
 async function installedPolicy(secrets = new MemorySecrets()) {
@@ -86,7 +92,7 @@ test('frontier policy refuses authentic but unselected personal rules and an unc
   assert.equal(await useSource(), undefined);
 });
 
-async function preparationWorld(secrets = new MemorySecrets()) {
+async function preparationWorld(secrets = new MemorySecrets(), withDeputy = false) {
   const { storage, key } = await installedPolicy(secrets);
   const world = createRosterWorld();
   const genesis = world.genesis().entry.hash;
@@ -94,10 +100,20 @@ async function preparationWorld(secrets = new MemorySecrets()) {
   const cleared = world.rosterEntry(world.lead, 'member.update', { member: world.lead.member, clearance }, genesis);
   const stream = '2'.repeat(32);
   const label = { ...clearance, level: 'Confidential', handling: [] };
-  const unlabelled = world.grant(world.lead, { cell: stream, roster: cleared.hash, to: [world.lead] });
+  const deputy = world.device('frontier-deputy', 'mbr-deputy');
+  let predecessor = cleared.hash;
+  if (withDeputy) {
+    const member = { invite: 'deputy-invite', name: 'Deputy', seat: 'j2-chief', roles: ['member'], clearance };
+    const invite = world.rosterEntry(world.lead, 'member.invite',
+      { ...member, expiresAt: INVITE_EXPIRES, secretHash: 'a'.repeat(64) }, predecessor);
+    const admitted = world.rosterEntry(world.lead, 'member.admit',
+      { ...member, member: deputy.member, device: deputy.descriptor(2), agentSeats: [] }, invite.hash);
+    predecessor = world.rosterEntry(world.lead, 'deputy.name', { member: deputy.member }, admitted.hash).hash;
+  }
+  const unlabelled = world.grant(world.lead, { cell: stream, roster: predecessor, to: withDeputy ? [world.lead, deputy] : [world.lead] });
   const labelled = buildGrant(world.lead.signer, { ...unlabelled.payload, labelSealed: sealLabel(world.epochKeyOf(stream, 1), stream, 1, label) });
   world.grants.push(labelled);
-  const head = world.rosterEntry(world.lead, 'cell.create', { cell: stream, epoch: 1, grant: grantHash(labelled) }, cleared.hash);
+  const head = world.rosterEntry(world.lead, 'cell.create', { cell: stream, epoch: 1, grant: grantHash(labelled) }, predecessor);
   const root = await mkdtemp(path.join(tmpdir(), 'fp-prep-'));
   const clock = { now: FIXED_NOW };
   let signatures = 0;
@@ -118,7 +134,7 @@ async function preparationWorld(secrets = new MemorySecrets()) {
     assert.ok('ok' in await store.putGrant(stream, 1, labelled));
     return { ...request, snapshot: await store.appendSnapshot() };
   };
-  return { store, open, world, head, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key, clock };
+  return { store, open, world, head, deputy, labelled, request, addGrants, replicaSignatures: () => signatures, storage, policyKey: key, clock };
 }
 
 test('scoped prospective preparation proves the signed fence in memory and returns only a Boolean', async () => {
@@ -141,6 +157,89 @@ test('scoped prospective preparation proves the signed fence in memory and retur
 });
 
 const CAPTURE_SLOT = 'nearAi.staff.frontierPolicyCapture.';
+
+test('an inert V2 fixture requires the frozen custodian and selected applied fence', async () => {
+  const secrets = new MemorySecrets();
+  const { store, open, world, head, deputy, labelled, addGrants } = await preparationWorld(secrets, true);
+  const roster = world.foldRoster();
+  assert.equal(roster.positions.at(-1), head.hash);
+  assert.equal(isRosterWriterAt(roster, deputy.writer, roster.positions.length - 1), true);
+  assert.ok(labelled.payload.wraps.some((wrap) => wrap.writer === deputy.writer));
+  const request = await addGrants();
+  assert.equal(await store['frontierPreparation'](request, 'capture'), 'ready');
+
+  const pointer = [...secrets.values.entries()].find(([key]) => key.startsWith(CAPTURE_SLOT));
+  assert.ok(pointer);
+  const { artifact } = JSON.parse(pointer[1]) as { artifact: string };
+  const bytes = await readFile(path.join(store.dir, 'frontier-policy-captures', `${artifact}.json`));
+  const saved = JSON.parse(bytes.toString('utf8')) as { salt: string; entry: SealedEntry; requirement: string };
+  const history = world.write(world.lead, { stream: request.stream, roster: head.hash, kind: 'product.create',
+    data: { product: 'archived-product', section: 'j2', title: 'Archived product',
+      roles: { owner: 'j2-chief', sectionLead: 'j2-lead', releaseGuard: 'release-guard' } } });
+  const leaf = { kind: 'entry' as const, writer: history.writer, sequence: history.seq, hash: history.hash };
+  const membership = buildFrontierMembership([leaf]);
+  assert.ok(membership);
+  const payload: FrontierV2Statement = { version: 2, project: world.project, genesis: request.pin.genesisHash,
+    before: head.hash, requirement: saved.requirement, stream: request.stream,
+    capture: frontierV2CaptureCommitment(saved.salt, sha256Hex(bytes)), heads: [{ writer: leaf.writer, sequence: leaf.sequence, hash: leaf.hash }],
+    membership: membership.commitment };
+  const root = frontierV2Root(payload);
+  const sign = (writer = world.lead, statement = payload) => ({
+    payload: statement, writer: writer.writer, signature: writer.signer.sign(frontierV2SigningBytes(statement, writer.writer))
+  });
+  const archive = { signed: sign(), entries: [history.entry], blobs: [], proofs: [{ leaf, proof: membership.proof(leaf) }] };
+  assert.equal(await store['checkFrontierV2Fixture'](archive, { ...request, expectedSnapshot: request.snapshot, opening: undefined }), false);
+
+  const id = accessRevisionId(world.project, null, saved.requirement, 'cell.access.commit', {});
+  const cells = [world.project, request.stream].sort().map((cell) =>
+    ({ cell, previousEpoch: 1, epoch: 1, decision: 'pending' as const, salt: 'b'.repeat(64), evidence: 'c'.repeat(64) }));
+  const commitment = buildAccessCommitment(id, cells, [], root);
+  const opening = commitment?.cellProof(request.stream);
+  assert.ok(root && commitment && opening);
+  const applied = buildEntry({ signer: world.lead.signer, stream: world.project, epoch: 1, key: world.epochKeyOf(world.project, 1),
+    prev: saved.requirement, seq: saved.entry.header.seq + 1, body: { deps: [], roster: saved.requirement, lamport: head.lamport + 2,
+      at: new Date(FIXED_NOW + 11).toISOString(), actor: { kind: 'person' }, kind: 'cell.access.commit',
+      data: { rosterPrev: saved.requirement, accessRevision: id, accessRoot: commitment.root } } });
+  assert.ok('ok' in await store.ingestForeign([saved.entry, applied.entry], [], async () => ({ ok: true })));
+  assert.ok('ok' in await store.recordRosterHead(applied.hash));
+  const expectedSnapshot = await store.appendSnapshot();
+  const selected = { ...request, opening, expectedSnapshot };
+  const before = [...secrets.values.entries()];
+  const directories = await readdir(store.dir);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, selected), true);
+
+  assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: sign(deputy) }, selected), false);
+  const { capture: _capture, ...legacy } = payload;
+  const legacySignature = world.lead.signer.sign(frontierSigningBytes({ ...legacy, version: 1 }, world.lead.writer));
+  assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: { ...archive.signed, signature: legacySignature } }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: sign(world.lead, { ...payload, capture: '0'.repeat(64) }) }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture']({ ...archive, entries: [] }, selected), false);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, { ...selected, snapshot: expectedSnapshot }), false);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, { ...selected, opening: buildAccessCommitment(id, cells, [], 'd'.repeat(64))?.cellProof(request.stream) }), false);
+  const sibling = world.rosterEntry(world.lead, 'roster.require', { features: [CELL_ACCESS_FEATURE] }, head.hash,
+    { at: new Date(FIXED_NOW + 9).toISOString() });
+  const siblingPayload = { ...payload, requirement: sibling.hash };
+  const siblingCommitment = buildAccessCommitment(accessRevisionId(world.project, null, sibling.hash, 'cell.access.commit', {}),
+    cells, [], frontierV2Root(siblingPayload));
+  assert.ok(siblingCommitment);
+  assert.equal(await store['checkFrontierV2Fixture']({ ...archive, signed: sign(world.lead, siblingPayload) },
+    { ...selected, opening: siblingCommitment.cellProof(request.stream) }), false);
+
+  const changedPointer = JSON.stringify({ ...JSON.parse(pointer[1]), artifact: 'e'.repeat(64) });
+  await secrets.store(pointer[0], changedPointer);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, selected), false);
+  await secrets.store(pointer[0], pointer[1]);
+  assert.deepEqual([...secrets.values.entries()], before);
+  assert.deepEqual(await readdir(store.dir), directories);
+  assert.equal(await store.appendSnapshot(), expectedSnapshot);
+  assert.equal(await (await open())['checkFrontierV2Fixture'](archive, selected), true);
+
+  const replacement = world.grant(world.lead, { cell: request.stream, roster: labelled.payload.roster, to: [world.lead] });
+  assert.ok('ok' in await store.putGrant(request.stream, 1, replacement));
+  const founding = path.join(store.dir, 'grants', request.stream, `1-${grantHash(labelled)}.json`);
+  await rename(founding, `${founding}.preserved`);
+  assert.equal(await store['checkFrontierV2Fixture'](archive, { ...selected, expectedSnapshot: await store.appendSnapshot() }), false);
+});
 class AmbiguousCaptureSecrets extends MemorySecrets {
   public fault: 'none' | 'read-unavailable' = 'none';
   private didWrite = false;
