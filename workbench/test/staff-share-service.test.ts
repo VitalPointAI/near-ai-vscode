@@ -399,6 +399,119 @@ test('managed hosted Workbench removal challenges the exact current operation be
   assert.equal(synced, 3);
 });
 
+test('managed Workbench Finish reviews one private draft and never falls back on a stale request', async () => {
+  let instant = 1_800_000_000_000;
+  const acr = 'urn:sterling:acr:phishing-resistant';
+  const actions = createPendingActions({ stepUpAcr: acr, windowSeconds: 60, latestAuthTime: () => instant / 1000, clock: { now: () => instant } });
+  const projectId = 'd'.repeat(32);
+  const cell = 'a'.repeat(32);
+  const other = 'b'.repeat(32);
+  const root = '/fictional-finish-share';
+  const secrets = new MemorySecrets();
+  let selected = 'first';
+  let authority = true;
+  let signer = fixedSigner('fixture-finish-person').signer;
+  let synced = 0;
+  let prepares = 0;
+  let refuseCommit = false;
+  const writes: { cell: string; action: string }[] = [];
+  const resolved = new Set<string>();
+  const project = { projectId, deviceWriter: 'c'.repeat(64), state: async () => ({
+    roster: { positions: [selected], required: ['cell-access@1'], members: {} }, fold: {}
+  }) };
+  const live = {
+    projects: () => [{ root, project: projectId }], project: () => project,
+    shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, hosted: { keys: { personSigner: signer } } }),
+    syncNow: () => { synced += 1; }
+  };
+  const wiring = {
+    live: () => live as never, root: async () => root, now: () => new Date(instant), actions,
+    engine: {
+      ...engine,
+      isRosterWriterAt: () => authority,
+      prepareWorkbenchFinish: (_host: never, roster: { positions: string[] }, target: string) => {
+        prepares += 1;
+        if (resolved.has(target)) return undefined;
+        const label = target === cell ? 'Protected A' : 'Protected B';
+        const preview = Buffer.from(JSON.stringify([roster.positions.at(-1), target, 'private-fictional-draft']));
+        return { label, currentBytes: (_current: never, fresh: { positions: string[] }) =>
+          fresh.positions.at(-1) === roster.positions.at(-1) ? Buffer.from(preview) : undefined,
+        async commit(_current: never, action: string) {
+          assert.equal(actions.authorizePayload(action, preview), true);
+          writes.push({ cell: target, action });
+          if (refuseCommit) return { ok: false, reason: 'action-required', message: 'Mock expiry.', notices: [] };
+          resolved.add(target);
+          return { ok: true, message: 'Fictional Finish committed.', notices: [] };
+        } };
+      }
+    } as never
+  };
+  const service = new StaffShareService(wiring);
+  const call = (on: StaffShareService, target: string, requestId?: string): Promise<ServiceResult<ShareOutcome>> => {
+    const finish = Reflect.get(on, 'finishKeyChange');
+    return finish === undefined ? Promise.resolve({ kind: 'refused', reason: 'No per-cell service' }) :
+      Reflect.apply(finish, on, [{ cell: target, requestId }]) as Promise<ServiceResult<ShareOutcome>>;
+  };
+  const challenge = async (target = cell) => {
+    const response = value(await call(service, target), 'request one Finish confirmation');
+    const pending = response.confirmation;
+    assert.ok(pending);
+    assert.deepEqual(Object.keys(pending).sort(), ['requestId', 'url']);
+    assert.equal(JSON.stringify(response).includes('private-fictional-draft'), false);
+    const nonce = pending.url.split('/').at(-1);
+    assert.ok(nonce);
+    assert.deepEqual(actions.summaryOf(nonce), { kind: 'cell.rekey.finish', fields: [{ label: 'Part', value: target === cell ? 'Protected A' : 'Protected B' }] });
+    return { pending, nonce };
+  };
+  const bind = (nonce: string) => {
+    instant += 1000;
+    assert.equal(actions.bindStepUp(nonce, { acr, authTime: instant / 1000, sub: 'fictional', activeSub: 'fictional' }), true);
+  };
+  const first = await challenge();
+  assert.equal((await call(service, cell, first.pending.requestId)).kind, 'refused', 'an early return cannot sign');
+  bind(first.nonce);
+  assert.equal((await call(service, other, first.pending.requestId)).kind, 'refused');
+  assert.equal((await call(new StaffShareService(wiring), cell, first.pending.requestId)).kind, 'refused', 'a backend restart drops the draft');
+  selected = 'changed';
+  assert.equal((await call(service, cell, first.pending.requestId)).kind, 'refused');
+
+  const replaced = await challenge();
+  bind(replaced.nonce);
+  signer = fixedSigner('different-fixture-finish-person').signer;
+  assert.equal((await call(service, cell, replaced.pending.requestId)).kind, 'refused');
+  const canceled = await challenge();
+  const current = await challenge(other);
+  assert.equal((await call(service, cell, canceled.pending.requestId)).kind, 'refused');
+  bind(current.nonce);
+  instant += 61_000;
+  assert.equal((await call(service, other, current.pending.requestId)).kind, 'refused');
+  assert.deepEqual(writes, []);
+  assert.equal(synced, 0);
+
+  const checked = await challenge();
+  bind(checked.nonce);
+  authority = false;
+  assert.equal((await call(service, cell, checked.pending.requestId)).kind, 'refused');
+  authority = true;
+  refuseCommit = true;
+  const expiring = await challenge();
+  bind(expiring.nonce);
+  const beforeResume = prepares;
+  assert.equal((await call(service, cell, expiring.pending.requestId)).kind, 'refused');
+  assert.equal((await call(service, cell, expiring.pending.requestId)).kind, 'refused');
+  assert.equal(prepares, beforeResume, 'a failed resume never generates another draft');
+  assert.equal(writes.length, 1);
+  assert.equal(synced, 0);
+  refuseCommit = false;
+  const renewed = await challenge();
+  bind(renewed.nonce);
+  assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'ok');
+  assert.equal((await call(service, cell, renewed.pending.requestId)).kind, 'refused');
+  assert.equal((await call(service, other, renewed.pending.requestId)).kind, 'refused');
+  assert.deepEqual(writes.map((write) => write.cell), [cell, cell]);
+  assert.equal(synced, 1);
+});
+
 test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {
   const lead = await person('stale', { hosted: true, staff: true });
   try {
