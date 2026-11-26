@@ -2,15 +2,16 @@
 // under gate/organization/, the layered load every decision reads, and the host's accept, Apply and Reset. Real files in temp folders and in-memory
 // secret stores; every key is made at test time from a label (policyFixtures). Fictional names only. The host tests live here: there is no gateHost file.
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import { BUNDLE_FAILURES, bundleHash, defaultBundlePayload } from '../domain/gate/bundle';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
 import { signPayload } from '../domain/team/signedPayload';
+import { setFolderSyncProbe } from '../staff/staffFiles';
 import { writeLastValid } from '../gate/clockMarker';
-import { buildOrganizationLayer, contactShown, fileTextOf, organizationEndedText } from '../domain/gate/enrolment';
+import { buildEnrolment, buildOrganizationLayer, contactShown, fileTextOf, organizationEndedText } from '../domain/gate/enrolment';
 import { GATE_DIR_NAME, POLICY_BUNDLE_FILE, gateDir } from '../gate/bundleStore';
 import { DECISIONS_DIR, INSTALL_LOG_KEY } from '../gate/decisionLog';
 import { GateHost } from '../gate/host';
@@ -869,4 +870,118 @@ test('D-12: a newer signed layer put on disk that loosens the requirements fails
     assert.equal((await later.start()).state, 'valid');
     assert.deepEqual(pinOf(world)?.['requirements'], { 'ca-classified/Secret': ['ClearanceCredential', 'NationalityCredential', 'ServiceCredential'] });
   });
+});
+
+test('a durable handover resumes only the protected exact signed enrollment and layer', async () => {
+  await withWorld(async (world) => {
+    const old = issuerKey('bound-old');
+    const fresh = issuerKey('bound-fresh');
+    const store = new OrganizationStore(world.storage, world.secrets);
+    await store.accept(enrolmentTextFor(old), { wordsConfirmed: true }, FIXED_NOW);
+    const at = FIXED_NOW + DAY_MS;
+    const layer = buildOrganizationLayer(fresh, organizationSections(), { now: at, days: 90 });
+    const handover = (now: number) => JSON.stringify(buildEnrolment(fresh, {
+      organization: EXAMPLE_ORGANIZATION, layer, now, days: 30, serial: 2, rotation: old
+    }));
+    const interrupted = handover(at);
+    const sibling = handover(at + 1);
+    setOrganizationWriteProbe((step, kind) => { if (step === 'layer-written' && kind === 'rotate') throw new Error('fixture interrupted'); });
+    await assert.rejects(store.accept(interrupted, { wordsConfirmed: true }, at), /fixture interrupted/);
+    setOrganizationWriteProbe(undefined);
+    const pending = await world.secrets.get(ORGANIZATION_ISSUER_SECRET);
+    const record = path.join(organizationFolder(world), ENROLMENT_RECORD_FILE);
+    const exactRecord = await readFile(record);
+    const exactLayer = await readFile(layerFile(world));
+    await writeFile(record, sibling);
+    const reopened = new OrganizationStore(world.storage, world.secrets);
+    assert.equal((await reopened.load(at + 2)).state, 'failed');
+    assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), pending);
+    assert.equal(await readFile(record, 'utf8'), sibling);
+    assert.deepEqual(await readFile(layerFile(world)), exactLayer);
+
+    await writeFile(record, exactRecord);
+    setFolderSyncProbe(async (dir) => {
+      if (dir === organizationFolder(world)) await writeFile(record, sibling);
+    });
+    try {
+      assert.equal((await reopened.load(at + 2)).state, 'failed');
+      assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), pending);
+      assert.equal(await readFile(record, 'utf8'), sibling);
+    } finally {
+      setFolderSyncProbe(undefined);
+    }
+
+    await writeFile(record, exactRecord);
+    const completed = await reopened.load(at + 2);
+    assert.equal(completed.state, 'valid');
+    const protectedPin = pinOf(world);
+    assert.equal(protectedPin?.publicKey, fresh.publicKey);
+    assert.ok(protectedPin?.acceptedHandover);
+    assert.equal(protectedPin?.pending, undefined);
+    assert.deepEqual(await readFile(record), exactRecord);
+    assert.deepEqual(await readFile(layerFile(world)), exactLayer);
+    const selected = await world.secrets.get(ORGANIZATION_ISSUER_SECRET);
+    await rename(record, `${record}.fixture-kept`);
+    assert.equal((await reopened.load(at + 2)).state, 'failed');
+    assert.equal(await world.secrets.get(ORGANIZATION_ISSUER_SECRET), selected);
+  });
+});
+
+class AmbiguousRotationSecrets extends MemorySecrets {
+  public fault: 'exact' | 'unavailable' | 'competing' | undefined;
+  public commits = 0;
+  private unreadable = false;
+  constructor(private readonly target: string) { super(); }
+  override async get(key: string): Promise<string | undefined> {
+    if (key === ORGANIZATION_ISSUER_SECRET && this.unreadable && this.fault === 'unavailable') throw new Error('fixture cannot read protected slot');
+    return super.get(key);
+  }
+  override async store(key: string, value: string): Promise<void> {
+    if (key !== ORGANIZATION_ISSUER_SECRET) return super.store(key, value);
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    if (parsed.publicKey !== this.target || parsed.pending !== undefined) return super.store(key, value);
+    this.commits += 1;
+    if (this.fault === 'competing') {
+      const current = { ...parsed, lastIssuedAt: new Date(FIXED_NOW + DAY_MS + 5).toISOString() };
+      await super.store(key, JSON.stringify(current));
+    } else {
+      await super.store(key, value);
+    }
+    if (this.fault === 'unavailable') this.unreadable = true;
+    if (this.fault !== undefined) throw new Error('fixture acknowledges neither outcome');
+  }
+}
+
+test('the handover writer reconciles an exact commit and preserves unresolved or competing state', async () => {
+  for (const fault of ['exact', 'unavailable', 'competing'] as const) {
+    await withWorld(async (world) => {
+      const old = issuerKey(`uncertain-old-${fault}`);
+      const fresh = issuerKey(`uncertain-fresh-${fault}`);
+      const secrets = new AmbiguousRotationSecrets(fresh.publicKey);
+      const store = new OrganizationStore(world.storage, secrets);
+      await store.accept(enrolmentTextFor(old), { wordsConfirmed: true }, FIXED_NOW);
+      const at = FIXED_NOW + DAY_MS;
+      const text = rotationTextFor(old, fresh, { now: at });
+      const record = path.join(organizationFolder(world), ENROLMENT_RECORD_FILE);
+      secrets.fault = fault;
+      if (fault === 'exact') {
+        assert.equal((await store.accept(text, { wordsConfirmed: true }, at)).kind, 'rotate');
+      } else {
+        await assert.rejects(store.accept(text, { wordsConfirmed: true }, at), OrganizationStoreError);
+      }
+      assert.equal(secrets.commits, 1);
+      assert.deepEqual(JSON.parse(await readFile(record, 'utf8')), JSON.parse(text));
+      assert.deepEqual(JSON.parse(await readFile(layerFile(world), 'utf8')), JSON.parse(text).payload.layer);
+      const exact = secrets.values.get(ORGANIZATION_ISSUER_SECRET);
+      assert.ok(exact);
+      const actual = JSON.parse(exact) as Record<string, unknown>;
+      assert.equal(actual.publicKey, fresh.publicKey);
+      assert.equal((actual as { lastIssuedAt: string }).lastIssuedAt, new Date(at + (fault === 'competing' ? 5 : 0)).toISOString());
+      secrets.fault = undefined;
+      const reopened = new OrganizationStore(world.storage, secrets);
+      assert.equal((await reopened.load(at + 10)).state, fault === 'competing' ? 'failed' : 'valid');
+      assert.equal(secrets.commits, 1);
+      assert.equal(await secrets.get(ORGANIZATION_ISSUER_SECRET), exact);
+    });
+  }
 });

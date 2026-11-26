@@ -20,8 +20,9 @@
 //
 // An organization layer that fails for any reason fails the whole policy closed with your organization's own sentence and contact (D-21): there is never
 // a fallback to the personal layer alone, and its failed state never carries the mark that lets a surface offer the personal reset as its fix.
+import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import type { SecretStorageLike } from '../services/auth';
 import { withFileLock } from '../services/stateMirrorLock';
@@ -42,6 +43,8 @@ import type { PolicyContact } from '../domain/gate/sections';
 import { migrateLocalHosts } from '../domain/gate/endpoints';
 import type { MigrationChange } from '../domain/gate/endpoints';
 import { labelKeyShown } from '../domain/gate/labelAlgebra';
+import { canonicalBytes } from '../domain/team/canonical';
+import { syncFolder } from '../staff/staffFiles';
 import { verifyPayload } from '../domain/team/signedPayload';
 import { loadDeviceIdentity } from '../team/identity';
 import { writeFileAtomic } from '../team/teamFile';
@@ -114,6 +117,16 @@ function dateShown(iso: string): string {
 
 export type OrganizationChangeKind = 'enrol' | 'rotate' | 'update';
 
+interface ProtectedHandover {
+  readonly digest: string;
+  readonly previousKey: string;
+  readonly previousSerial: number;
+  readonly previousLayer: string;
+  readonly previousIssue: string;
+  readonly enrolledAt: string;
+  readonly edgeIssue: string;
+}
+
 /** A change being written: the key and serial it will pin, the layer's issuedAt and hash. */
 export interface PendingOrganizationPin {
   readonly kind: OrganizationChangeKind;
@@ -121,6 +134,7 @@ export interface PendingOrganizationPin {
   readonly serial: number;
   readonly issuedAt: string;
   readonly layerHash: string;
+  readonly handover?: ProtectedHandover;
 }
 
 /** The committed pin: the issuer key, its serial, the issuedAt and hash of the layer last accepted, when this computer enrolled. */
@@ -132,6 +146,7 @@ export interface OrganizationPin {
   readonly layerHash: string;
   readonly enrolledAt: string;
   readonly pending?: PendingOrganizationPin;
+  readonly acceptedHandover?: ProtectedHandover;
   /**
    * Phase 71 (D-12): the credentials required by sensitivity of the layer in force, kept beside the pin so a newer layer found on disk is compared with
    * them even after it replaced the file. Absent when the layer in force requires none (every pin written before credentials@1 existed).
@@ -183,15 +198,36 @@ function exactKeys(value: Record<string, unknown>, required: readonly string[], 
   return required.every((key) => keys.includes(key)) && keys.every((key) => required.includes(key) || optional.includes(key));
 }
 
+function handoverOf(value: unknown): ProtectedHandover | undefined {
+  if (!isRecord(value) || !exactKeys(value, ['digest', 'previousKey', 'previousSerial', 'previousLayer', 'previousIssue', 'enrolledAt', 'edgeIssue'])) return undefined;
+  const { digest, previousKey, previousSerial, previousLayer, previousIssue, enrolledAt, edgeIssue } = value;
+  if (!isHash(digest) || !isPublicKey(previousKey) || !isSerial(previousSerial) || !isHash(previousLayer) ||
+    !isTime(previousIssue) || !isTime(enrolledAt) || !isTime(edgeIssue)) return undefined;
+  return Object.freeze({ digest, previousKey, previousSerial, previousLayer, previousIssue, enrolledAt, edgeIssue });
+}
+
+function handoverDigest(envelope: unknown, proof: Omit<ProtectedHandover, 'digest'>): string {
+  const { previousKey, previousSerial, previousLayer, previousIssue, enrolledAt, edgeIssue } = proof;
+  return createHash('sha256').update(canonicalBytes([
+    'near-ai/accepted-organization-handover/1', previousKey, previousSerial, previousLayer, previousIssue, enrolledAt, edgeIssue, envelope
+  ])).digest('hex');
+}
+
+function samePin(a: OrganizationPin, b: OrganizationPin): boolean {
+  return canonicalBytes(a).equals(canonicalBytes(b));
+}
+
 function pendingOf(value: unknown): PendingOrganizationPin | undefined {
-  if (!isRecord(value) || !exactKeys(value, ['kind', 'publicKey', 'serial', 'issuedAt', 'layerHash'])) return undefined;
+  if (!isRecord(value) || !exactKeys(value, ['kind', 'publicKey', 'serial', 'issuedAt', 'layerHash'], ['handover'])) return undefined;
   const kind = own(value, 'kind');
   const publicKey = own(value, 'publicKey');
   const serial = own(value, 'serial');
   const issuedAt = own(value, 'issuedAt');
   const layerHash = own(value, 'layerHash');
   if ((kind !== 'enrol' && kind !== 'rotate' && kind !== 'update') || !isPublicKey(publicKey) || !isSerial(serial) || !isTime(issuedAt) || !isHash(layerHash)) return undefined;
-  return Object.freeze({ kind, publicKey, serial, issuedAt, layerHash });
+  const handover = handoverOf(value.handover);
+  if (Object.hasOwn(value, 'handover') && (kind !== 'rotate' || handover === undefined)) return undefined;
+  return Object.freeze({ kind, publicKey, serial, issuedAt, layerHash, ...(handover === undefined ? {} : { handover }) });
 }
 
 function pinOf(text: string): OrganizationPinRead {
@@ -206,7 +242,7 @@ function pinOf(text: string): OrganizationPinRead {
     const pending = pendingOf(own(value, 'pending'));
     return pending !== undefined && pending.kind === 'enrol' ? { state: 'pending-enrol', pending } : { state: 'damaged' };
   }
-  if (!exactKeys(value, ['v', 'publicKey', 'serial', 'lastIssuedAt', 'layerHash', 'enrolledAt'], ['pending', 'requirements'])) return { state: 'damaged' };
+  if (!exactKeys(value, ['v', 'publicKey', 'serial', 'lastIssuedAt', 'layerHash', 'enrolledAt'], ['pending', 'requirements', 'acceptedHandover'])) return { state: 'damaged' };
   const publicKey = own(value, 'publicKey');
   const serial = own(value, 'serial');
   const lastIssuedAt = own(value, 'lastIssuedAt');
@@ -218,7 +254,10 @@ function pinOf(text: string): OrganizationPinRead {
     requirements = requirementsOf(own(value, 'requirements'));
     if (requirements === undefined) return { state: 'damaged' };
   }
-  const base = { v: 1 as const, publicKey, serial, lastIssuedAt, layerHash, enrolledAt, ...(requirements === undefined ? {} : { requirements }) };
+  const acceptedHandover = handoverOf(value.acceptedHandover);
+  if (Object.hasOwn(value, 'acceptedHandover') && acceptedHandover === undefined) return { state: 'damaged' };
+  const base = { v: 1 as const, publicKey, serial, lastIssuedAt, layerHash, enrolledAt, ...(requirements === undefined ? {} : { requirements }),
+    ...(acceptedHandover === undefined ? {} : { acceptedHandover }) };
   if (!Object.prototype.hasOwnProperty.call(value, 'pending')) return { state: 'pinned', pin: Object.freeze(base) };
   const pending = pendingOf(own(value, 'pending'));
   // A pending first enrolment beside a committed pin is not a state this store writes.
@@ -245,7 +284,8 @@ async function storePinText(secrets: SecretStorageLike, text: string | undefined
 function committedPin(pin: OrganizationPin): OrganizationPin {
   return Object.freeze({
     v: 1, publicKey: pin.publicKey, serial: pin.serial, lastIssuedAt: pin.lastIssuedAt, layerHash: pin.layerHash, enrolledAt: pin.enrolledAt,
-    ...(pin.requirements === undefined ? {} : { requirements: pin.requirements })
+    ...(pin.requirements === undefined ? {} : { requirements: pin.requirements }),
+    ...(pin.acceptedHandover === undefined ? {} : { acceptedHandover: pin.acceptedHandover })
   });
 }
 
@@ -593,6 +633,13 @@ export class OrganizationStore {
     if (read.state === 'absent') return (await this.folderHoldsFiles()) ? damagedPin() : { state: 'none' };
     if (read.state === 'damaged') return damagedPin();
     const pin = read.pin;
+    if (pin.pending?.handover !== undefined) {
+      return withFileLock(gateDir(this.globalStorageDir), BUNDLE_LOCK_FILE, async () => {
+        const exact = await this.prepareHandoverCommit(pin, effective);
+        await this.finishHandover(pin, exact.pin, effective);
+        return { ...this.validOf(exact.layer, exact.pin.publicKey, exact.record), event: updatedEvent(exact.layer.issuedAt, exact.pin.publicKey) };
+      });
+    }
     const pendingKey = pin.pending?.kind === 'rotate' ? pin.pending.publicKey : undefined;
     const record = await this.readRecord(pendingKey === undefined ? [pin.publicKey] : [pin.publicKey, pendingKey]);
     const facts = record === undefined ? {} : { name: record.name, contacts: record.contacts };
@@ -614,7 +661,14 @@ export class OrganizationStore {
     }
     const layer = verifyOrganizationLayer(raw.value, { issuerPublicKey: pin.publicKey, now: effective, lastIssuedAt: pin.lastIssuedAt });
     if (!layer.ok) return failedFromRead(layer, raw.value, record);
-    if (layer.hash === pin.layerHash) return this.validOf(layer, pin.publicKey, record);
+    if (layer.hash === pin.layerHash) {
+      if (pin.acceptedHandover === undefined || pin.pending !== undefined) return this.validOf(layer, pin.publicKey, record);
+      return withFileLock(gateDir(this.globalStorageDir), BUNDLE_LOCK_FILE, async () => {
+        await this.requireExactProtectedPin(pin);
+        const verified = await this.verifyHandoverFiles(pin, effective);
+        return this.validOf(verified.layer, pin.publicKey, verified.record);
+      });
+    }
     if (timeOf(layer.issuedAt) > timeOf(pin.lastIssuedAt)) {
       // Phase 71 (D-12): a newer file put on disk may not lower what sensitive data asks of a person either. The file in force is gone, so the whole
       // policy fails closed rather than run on the looser rules; the pin stays.
@@ -622,7 +676,8 @@ export class OrganizationStore {
         return failedOrganization('credentials-loosened', 'replaced', `${CREDENTIALS_LOOSENED_TEXT} ${askFor(contactShown(record?.contacts))}`, true, facts);
       }
       // A newer layer signed by the pinned key: accepted, and the pin moves to it (D-14).
-      const next: OrganizationPin = withRequirements({ ...committedPin(pin), lastIssuedAt: layer.issuedAt, layerHash: layer.hash }, layer.document);
+      const { acceptedHandover: _oldHandover, ...currentPin } = committedPin(pin);
+      const next: OrganizationPin = withRequirements({ ...currentPin, lastIssuedAt: layer.issuedAt, layerHash: layer.hash }, layer.document);
       await this.commitFound(pin, next);
       return { ...this.validOf(layer, pin.publicKey, record), event: updatedEvent(layer.issuedAt, pin.publicKey) };
     }
@@ -708,6 +763,78 @@ export class OrganizationStore {
     } catch {
       return undefined;
     }
+  }
+
+  private async requireExactProtectedPin(expected: OrganizationPin): Promise<void> {
+    let found: OrganizationPinRead;
+    try {
+      found = await readOrganizationPin(this.secrets);
+    } catch {
+      throw new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable' });
+    }
+    if (found.state !== 'pinned' || !samePin(found.pin, expected)) {
+      throw new OrganizationStoreError('The protected organization handover changed while it was being checked.', { reason: 'write-failed', refused: true });
+    }
+  }
+
+  private async writeExactProtectedPin(expected: OrganizationPin): Promise<void> {
+    try {
+      await this.secrets.store(ORGANIZATION_ISSUER_SECRET, JSON.stringify(expected));
+    } catch {
+      // A provider may have committed before reporting failure. Reconcile only exact protected state.
+    }
+    await this.requireExactProtectedPin(expected);
+  }
+
+  private async verifyHandoverFiles(target: OrganizationPin, effective: number, sync = false) {
+    const proof = target.acceptedHandover;
+    if (proof === undefined || proof.enrolledAt !== target.enrolledAt ||
+      timeOf(proof.previousIssue) > timeOf(target.lastIssuedAt)) throw new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', refused: true });
+    const record = await boundedHandoverFile(this.recordFile, MAX_ENROLMENT_FILE_BYTES, sync);
+    const layerFile = await boundedHandoverFile(this.layerFile, MAX_ORGANIZATION_LAYER_BYTES, sync);
+    const enrollment = readEnrolmentFile(record, { now: timeOf(proof.edgeIssue) });
+    const layer = verifyOrganizationLayer(layerFile, { issuerPublicKey: target.publicKey, now: effective, lastIssuedAt: target.lastIssuedAt });
+    if (!enrollment.ok || classifyEnrolment(enrollment, { publicKey: proof.previousKey, serial: proof.previousSerial }) !== 'rotate' ||
+      enrollment.enrolment.issuer.publicKey !== target.publicKey || enrollment.enrolment.serial !== target.serial ||
+      enrollment.enrolment.issuedAt !== proof.edgeIssue || enrollment.layer.hash !== target.layerHash ||
+      enrollment.layer.issuedAt !== target.lastIssuedAt || !layer.ok || layer.hash !== target.layerHash || layer.issuedAt !== target.lastIssuedAt ||
+      !canonicalBytes(enrollment.enrolment.layer).equals(canonicalBytes(JSON.parse(layerFile))) ||
+      handoverDigest(JSON.parse(record), proof) !== proof.digest) {
+      throw new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', refused: true });
+    }
+    return { layer, record: { name: enrollment.enrolment.organization.name, contacts: enrollment.enrolment.organization.contacts } };
+  }
+
+  private async prepareHandoverCommit(found: OrganizationPin, effective: number) {
+    const next = found.pending;
+    const proof = next?.handover;
+    if (next === undefined || proof === undefined || proof.previousKey !== found.publicKey || proof.previousSerial !== found.serial ||
+      proof.previousLayer !== found.layerHash || proof.previousIssue !== found.lastIssuedAt || proof.enrolledAt !== found.enrolledAt) {
+      throw new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', refused: true });
+    }
+    const candidate: OrganizationPin = { v: 1, publicKey: next.publicKey, serial: next.serial, lastIssuedAt: next.issuedAt, layerHash: next.layerHash,
+      enrolledAt: found.enrolledAt, acceptedHandover: proof };
+    const files = await this.verifyHandoverFiles(candidate, effective);
+    return { ...files, pin: withRequirements(candidate, files.layer.document) };
+  }
+
+  // Caller holds bundle.lock throughout reread, verification, synchronization and protected commit.
+  private async finishHandover(found: OrganizationPin, target: OrganizationPin, effective: number): Promise<void> {
+    const current = await readOrganizationPin(this.secrets);
+    if (current.state === 'pinned' && samePin(current.pin, target)) {
+      await this.verifyHandoverFiles(target, effective);
+      await this.requireExactProtectedPin(target);
+      return;
+    }
+    await this.requireExactProtectedPin(found);
+    await this.verifyHandoverFiles(target, effective, true);
+    await syncFolder(this.folder);
+    await syncFolder(gateDir(this.globalStorageDir));
+    await this.verifyHandoverFiles(target, effective);
+    await this.requireExactProtectedPin(found);
+    await this.writeExactProtectedPin(target);
+    await this.verifyHandoverFiles(target, effective);
+    await this.requireExactProtectedPin(target);
   }
 
   /** Everything a file is read against: the pin, this computer's key, the clock marker and the kept record. Throws when the secret store cannot be read. */
@@ -835,7 +962,38 @@ export class OrganizationStore {
     }
   }
 
+  private async writeProtectedHandover(facts: FileFacts, old: OrganizationPin, effective: number): Promise<void> {
+    const envelope = facts.enrolment;
+    const read = readEnrolmentFile(envelope, { now: effective });
+    if (old.pending !== undefined || !read.ok || classifyEnrolment(read, old) !== 'rotate') {
+      throw new OrganizationStoreError(FILES_NOT_SAVED_TEXT, { reason: 'write-failed', refused: true });
+    }
+    const source = { previousKey: old.publicKey, previousSerial: old.serial, previousLayer: old.layerHash,
+      previousIssue: old.lastIssuedAt, enrolledAt: old.enrolledAt, edgeIssue: read.enrolment.issuedAt };
+    const handover = { ...source, digest: handoverDigest(envelope, source) };
+    const pending: OrganizationPin = { ...committedPin(old), pending: {
+      kind: 'rotate', publicKey: facts.publicKey, serial: facts.serial, issuedAt: facts.issuedAt, layerHash: facts.layerHash, handover
+    } };
+    try {
+      await this.requireExactProtectedPin(old);
+      await this.writeExactProtectedPin(pending);
+      await probeStep('pin-pending', 'rotate');
+      await this.writeKeepingOld([{ file: this.layerFile, text: layerTextOf(facts.layer) }, { file: this.recordFile, text: layerTextOf(envelope) }], effective, [], 'rotate');
+      await probeStep('layer-written', 'rotate');
+      const exact = await this.prepareHandoverCommit(pending, effective);
+      await this.finishHandover(pending, exact.pin, effective);
+      await probeStep('pin-committed', 'rotate');
+    } catch (error) {
+      // Retain the actual protected state and files. Only the same verified transition may finish after interruption.
+      if (error instanceof StoppedByProbe) throw error.cause;
+      throw error instanceof OrganizationStoreError ? error : new OrganizationStoreError(PIN_NOT_SAVED_TEXT, { reason: 'unavailable', cause: error });
+    }
+  }
+
   private async write(facts: FileFacts & { readonly kind: OrganizationChangeKind }, context: ReadContext, nowMs: number, recovering: boolean): Promise<void> {
+    if (facts.kind === 'rotate' && context.pin.state === 'pinned') {
+      return this.writeProtectedHandover(facts, context.pin.pin, effectiveNow(nowMs, context.lastValidAt));
+    }
     let previous: string | undefined;
     try {
       previous = await this.secrets.get(ORGANIZATION_ISSUER_SECRET);
@@ -894,6 +1052,26 @@ interface Touched {
   readonly file: string;
   /** The copy of the file that was there before, when there was one. */
   readonly aside?: string;
+}
+
+async function boundedHandoverFile(file: string, max: number, sync: boolean): Promise<string> {
+  const handle = await open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > max) throw new Error('The retained handover file is unreadable.');
+    const buffer = Buffer.alloc(info.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset !== info.size) throw new Error('The retained handover file changed while it was being read.');
+    if (sync) await handle.sync();
+    return buffer.subarray(0, offset).toString('utf8');
+  } finally {
+    await handle.close();
+  }
 }
 
 function layerTextOf(envelope: unknown): string {
