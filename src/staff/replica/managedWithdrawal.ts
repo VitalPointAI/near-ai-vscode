@@ -18,7 +18,7 @@ import type { AppendOwnResult, ReplicaProject } from './replicaProject';
 export type AuthoredRefusal = { ok: false; reason: 'no-grant-key' | 'action-required' | 'signer-refused' | 'change-not-applied' };
 type Target = { member: string; writer?: string };
 export interface AccessSnapshot { predecessor: string; priorEntry: string; priorRoot: string }
-interface ManagedAccess extends AccessSnapshot {
+export interface ManagedAccess extends AccessSnapshot {
   kind: 'member.remove' | 'device.revoke' | 'cell.rekey' | 'member.update' | 'cell.access.commit';
   operation: object;
   revision: string;
@@ -94,29 +94,35 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
     if (typeof signature !== 'string') return { ok: false, reason: 'signer-refused' };
     permits.push({ permit, signature });
   }
-  const decisions = plan.cells.map(({ evidence, decision, previousEpoch }) => ({
-    cell: evidence.cell, epoch: evidence.epoch, previousEpoch: previousEpoch ?? evidence.epoch, decision,
-    salt: randomBytes(32).toString('hex'), evidence: grantEvidenceHash(evidence) ?? ''
-  }));
-  const commitment = buildAccessCommitment(plan.revision, decisions, permits);
-  if (commitment === undefined) return { ok: false, reason: 'change-not-applied' };
+  const staged = stageManagedAccess(plan, permits);
+  if (staged === undefined) return { ok: false, reason: 'change-not-applied' };
   return project.appendChecked<AuthoredRefusal>(({ roster: fresh }) => {
     const prepared = prepare(fresh);
     if (prepared?.predecessor !== plan.predecessor || prepared.priorEntry !== plan.priorEntry || prepared.priorRoot !== plan.priorRoot) {
       return { ok: false, reason: 'change-not-applied' };
     }
-    return {
-      kind: plan.kind, data: { ...plan.operation, accessRevision: plan.revision, accessRoot: commitment.root },
-      options: { signer, action, at: plan.at, roster: plan.predecessor, stageAccess: (entry) => ({
-        entry,
-        openings: plan.cells.map(({ evidence }) => ({ ...commitment.cellProof(evidence.cell), entry, evidence })),
-        accessProofs: permits.map(({ permit }) => commitment.proof(permit.cell, permit.writer)),
-        ...(plan.founding === undefined ? {} : { founding: plan.founding }),
-        ...(plan.supplemental === undefined ? {} : { supplemental: plan.supplemental })
-      }) },
-      check: () => undefined
-    };
+    return { ...staged, options: { ...staged.options, signer, action }, check: () => undefined };
   });
+}
+
+/** Derive the exact roster data and private evidence from the checked cells and verified permits. */
+export function stageManagedAccess(plan: ManagedAccess, permits: readonly SignedAccessPermit[]) {
+  const decisions = plan.cells.map(({ evidence, decision, previousEpoch }) => ({
+    cell: evidence.cell, epoch: evidence.epoch, previousEpoch: previousEpoch ?? evidence.epoch, decision,
+    salt: randomBytes(32).toString('hex'), evidence: grantEvidenceHash(evidence) ?? ''
+  }));
+  const commitment = buildAccessCommitment(plan.revision, decisions, permits);
+  if (commitment === undefined) return undefined;
+  return {
+    kind: plan.kind, data: { ...plan.operation, accessRevision: plan.revision, accessRoot: commitment.root },
+    options: { at: plan.at, roster: plan.predecessor, stageAccess: (entry: string) => ({
+      entry,
+      openings: plan.cells.map(({ evidence }) => ({ ...commitment.cellProof(evidence.cell), entry, evidence })),
+      accessProofs: permits.map(({ permit }) => commitment.proof(permit.cell, permit.writer)),
+      ...(plan.founding === undefined ? {} : { founding: plan.founding }),
+      ...(plan.supplemental === undefined ? {} : { supplemental: plan.supplemental })
+    }) }
+  };
 }
 
 

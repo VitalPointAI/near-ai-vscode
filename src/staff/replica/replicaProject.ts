@@ -10,6 +10,8 @@ import { identityDir as identityDirOf } from '../../team/identity';
 import type { DeviceIdentity } from '../../team/identity';
 import type { AsyncPayloadSigner, PayloadSigner, SignRefused, SignedPayload } from '../../domain/team/signedPayload';
 import { SESSION_REFUSALS, isPersonKeyKind, requiresActionId } from '../../domain/replica/sessionKeys';
+import type { RoutingTable } from '../../domain/gate/routing';
+import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { buildGrantAsync, grantHash, newEpochKey, openLabel, readGrant } from '../../domain/replica/cellKeys';
 import type { CellGrant } from '../../domain/replica/cellKeys';
@@ -49,6 +51,8 @@ import { canWriteCurrentEpoch } from './wrapPlan';
 import { isSupersededManagedContinuity, openManagedGrantArtifact, previewManagedContinuity, preparePlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
 import type { ManagedPacket, ManagedStagedSend } from './managedSync';
+import { authorizeHostedFinish } from './managedRecovery';
+import type { DescribeFinishCell, HostedFinishDraft, HostedFinishWrite } from './managedRecovery';
 import { managedAccessActionBytes, managedActionCurrent, verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -188,7 +192,6 @@ export class ReplicaProject {
   private recheckKey: string | undefined;
   private ownDecoder: DecodeHost | undefined;
   private tail: Promise<unknown> = Promise.resolve();
-
   private constructor(
     public readonly root: string,
     public readonly anchor: RosterAnchor,
@@ -380,24 +383,18 @@ export class ReplicaProject {
     if (local.kind === 'missing' && !(await writeAnchorFile(projectFile(root), pinned))) return refuse('pin-damaged');
     return joined;
   }
-
   public get projectId(): string {
     return this.anchor.project;
   }
-
-  /** D-60 uses the person signer for person-key entries, with session and device fallback. */
   public signerOf(kind: string): PayloadSigner | AsyncPayloadSigner {
     return (isPersonKeyKind(kind) ? this.deps.personSigner : undefined) ?? this.deps.sessionSigner ?? this.device.identity;
   }
-
   public get deviceWriter(): string {
     return this.device.writer;
   }
-
   public get signer(): DeviceIdentity {
     return this.device.identity;
   }
-  /** Hosted rosters name the person key (D-60, 33-27). */
   public get rosterSigner(): PayloadSigner | AsyncPayloadSigner {
     return this.device.roster;
   }
@@ -414,30 +411,32 @@ export class ReplicaProject {
   public get refolds(): number {
     return this.foldState?.refolds ?? 0;
   }
-
   public context(): ReplicaContext {
     if (this.ctx === undefined) throw new Error('Fold the project with state() before asking for its context.');
     return this.ctx;
   }
 
-  /** Reads what is new in the store, folds the roster and then every stream, and records the roster head in this device's mark. */
   public state(): Promise<ProjectState> {
     return this.exclusive(() => this.foldNow());
   }
-  /** Sign and append using the cited roster and cell epoch, rebuilding when the store snapshot changes. */
   public appendOwn(kind: string, data: unknown, options: AppendOwnOptions = {}): Promise<AppendOwnResult> {
     return this.appendPlanned<never>(() => ({ kind, data, options }));
   }
-  /** Plans and checks a signed write against the current fold, then rechecks it if the store changed. */
   public appendChecked<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
     kind: string; data: unknown; options: AppendOwnOptions; check: (fold: FoldResult, hash: string) => R | undefined
   }): Promise<AppendOwnResult | R> {
     return this.appendPlanned(prepare, true);
   }
-
+  public async finishHostedCell(draft: HostedFinishDraft, action: string, describe: DescribeFinishCell, routing?: RoutingTable): Promise<AppendOwnResult> {
+    const finish = await authorizeHostedFinish(this, draft, action, describe, routing, () => this.now(), () => this.exclusive(async () => {
+      const { roster } = await this.foldNow();
+      return { roster, snapshot: await this.store.appendSnapshot() };
+    }));
+    return finish === undefined ? refuse('action-required') : this.appendPlanned<never>(() => finish, true, finish);
+  }
   private appendPlanned<R extends { ok: false }>(prepare: (state: ProjectState) => R | {
     kind: string; data: unknown; options: AppendOwnOptions; check?: (fold: FoldResult, hash: string) => R | undefined
-  }, checked = false): Promise<AppendOwnResult | R> {
+  }, checked = false, finish?: HostedFinishWrite): Promise<AppendOwnResult | R> {
     return this.exclusive(async () => {
       let race: StoreRefused | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -447,12 +446,21 @@ export class ReplicaProject {
         const write = prepare(state);
         if ('ok' in write) return write;
         const hosted = this.device.roster !== this.device.identity;
-        if (hosted && write.kind === 'cell.rekey' && state.roster.requiredFrom.has(CELL_ACCESS_FEATURE)) return refuse('action-required');
-        const hostedStage = write.options.stageAccess !== undefined && hosted;
+        const finishCurrent = () => finish !== undefined && finish.scope.approved() && finish.matches(state.roster);
+        if (finish !== undefined && (!hosted || !finishCurrent() || finish.snapshot !== expected || !state.roster.requiredFrom.has(CELL_ACCESS_FEATURE))) return refuse('action-required');
+        if (finish === undefined && hosted && write.kind === 'cell.rekey' && state.roster.requiredFrom.has(CELL_ACCESS_FEATURE)) return refuse('action-required');
+        const hostedStage = write.options.stageAccess !== undefined && hosted && finish === undefined;
         const action = hostedStage ? managedAccessActionBytes(state.roster, this.device.writer, write.kind, write.data) : undefined;
         if (hostedStage && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
-        const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
-        if (!('entry' in built)) return built;
+        let matchesEntry: ((entry: BuiltEntry) => boolean) | undefined;
+        const built = await this.buildOwn(state.roster, write.kind, write.data, write.options, finish === undefined ? undefined : async (input) => {
+          const result = await finish.scope.signEntry(input, finish.data.accessRoot, async () =>
+            'ok' in await this.store.refresh() && await this.store.appendSnapshot() === expected && finishCurrent());
+          if ('refused' in result) return result;
+          matchesEntry = result.matches;
+          return result.built;
+        });
+        if (!('entry' in built)) return finish !== undefined && !finishCurrent() ? refuse('action-required') : built;
         if (write.check !== undefined) {
           const prior = this.foldState;
           if (prior === undefined) throw new Error('A checked write requires a current fold.');
@@ -464,14 +472,17 @@ export class ReplicaProject {
         if (write.options.stageAccess !== undefined && (!checked || !verifyManagedStage(built, stage, this.rosterInputs(state.roster)))) return refuse('rekey-pending');
         const writer = built.entry.header.writer;
         const deadline = state.roster.requiredFrom.has(CELL_ACCESS_FEATURE) ? state.roster.sessions.get(writer)?.notAfter : undefined;
-        const mayCommit = deadline === undefined && action === undefined ? undefined : () =>
+        const frozenStage = finish === undefined || stage === undefined ? undefined : canonicalBytes(stage);
+        const mayCommit = deadline === undefined && action === undefined && finish === undefined ? undefined : () =>
           (deadline === undefined || Date.parse(deadline) > this.now().getTime()) &&
-          (action === undefined || managedActionCurrent(this.device.roster, write.options.action, action));
+          (action === undefined || managedActionCurrent(this.device.roster, write.options.action, action)) &&
+          (finish === undefined || (finishCurrent() && matchesEntry?.(built) === true && frozenStage?.equals(canonicalBytes(stage)) === true));
         const result = writer === writerIdOf(this.device.identity.publicKey) ? await this.store.appendOwn([built], expected, mayCommit, stage) : await this.storeSigned(built, expected, mayCommit, stage);
         if ('ok' in result) {
           for (const blob of built.blobs) this.blobCache.set(blob.hash, blob);
           return { ok: true as const, hash: built.hash, built };
         }
+        if (finish !== undefined && result.refused === 'snapshot-changed') return refuse('action-required');
         if (result.refused !== 'out-of-order' && result.refused !== 'snapshot-changed') return storeRefused(result);
         if (action !== undefined && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
         race = result;
@@ -481,7 +492,6 @@ export class ReplicaProject {
     });
   }
 
-  /** This device's own stored entry of a kind whose data the predicate accepts, or undefined. Used so a retried step does not write twice (Pitfall 4). */
   public findOwn(kind: string, predicate: (data: unknown) => boolean): Promise<OwnEntry | undefined> {
     return this.exclusive(async () => {
       // The ring answers only the keys the roster settled, so the roster is folded first.
@@ -543,7 +553,6 @@ export class ReplicaProject {
       return held;
     });
   }
-
   public putGrants(grants: readonly unknown[], evidence: readonly unknown[] = []): Promise<{ ok: true; stored: number; opened: number } | ProjectRefused> {
     return this.exclusive(async () => {
       const own: unknown[] = [];
@@ -778,7 +787,6 @@ export class ReplicaProject {
   public trustCheckpoint(hub: string, newest: SignedCheckpoint | undefined): void {
     (this.trusted ??= new Map()).set(hub, newest);
   }
-
   public checkpoints(): Promise<SignedCheckpoint[]> {
     return this.exclusive(async () => (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint));
   }
@@ -808,7 +816,6 @@ export class ReplicaProject {
     this.tail = run.catch(() => undefined);
     return run;
   }
-
   private decoder(): DecodeHost {
     if (this.deps.decodeHost !== undefined) return this.deps.decodeHost;
     this.ownDecoder ??= new DecodeHost();
@@ -881,7 +888,6 @@ export class ReplicaProject {
       return { ok: false, reason: `The decode check refused this ${body.kind === 'doc.update' ? 'update' : 'compaction'} (${verdict.error}).` };
     };
   }
-
   private now(): Date {
     return this.deps.now?.() ?? new Date();
   }
@@ -905,7 +911,6 @@ export class ReplicaProject {
     if (body.kind === 'version.propose' && isRecord(body.data) && typeof body.data.textBlob === 'string' && HASH_PATTERN.test(body.data.textBlob)) found.push(body.data.textBlob);
     return found;
   }
-
   private async foldNow(): Promise<ProjectState> {
     const refreshed = await this.store.refresh();
     if (!('ok' in refreshed)) throw new ReplicaProjectError(storeRefused(refreshed));
@@ -969,7 +974,6 @@ export class ReplicaProject {
     }
     this.recheckKey = key;
   }
-
   private buildContext(roster: RosterState): ReplicaContext {
     const cellOrder = this.deps.cellOrder?.(roster, this.keys);
     return {
@@ -991,7 +995,6 @@ export class ReplicaProject {
       throw error;
     }
   }
-
   private rosterInputs(roster?: RosterState, entries: readonly SealedEntry[] = this.store.rosterEntries(), reading = roster && this.readingKeys(roster, entries)): RosterFoldInput {
     return { entries, anchor: this.anchor, grants: this.grantList, grantEvidence: this.evidence.map(({ value }) => value), now: this.now(),
       keys: (stream, epoch) => this.keys.epochKey(stream, epoch) ?? (stream === this.anchor.project ? reading?.get(epoch) : undefined),
@@ -1072,7 +1075,6 @@ export class ReplicaProject {
       if (blob !== undefined) this.blobCache.set(name, blob);
     }
   }
-
   private entryByHash(hash: string): SealedEntry | undefined {
     return this.store.entries().find((entry) => entryHash(entry.header) === hash);
   }
@@ -1106,15 +1108,13 @@ export class ReplicaProject {
     this.lamports.set(hash, body.lamport as number);
     return body.lamport as number;
   }
-
   private async storeSigned(built: BuiltEntry, expected: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
     const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit, stage === undefined ? undefined : { root: built.hash, evidence: [stage] });
     // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
     if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
     return result;
   }
-
-  private async buildOwn(roster: RosterState, kind: string, data: unknown, options: AppendOwnOptions): Promise<BuiltEntry | ProjectRefused> {
+  private async buildOwn(roster: RosterState, kind: string, data: unknown, options: AppendOwnOptions, build = buildEntryAsync): Promise<BuiltEntry | ProjectRefused> {
     const stream = options.stream ?? this.anchor.project;
     if (!STREAM_ID_PATTERN.test(stream)) throw new Error('Nothing was written: a stream id is 32 lowercase hex characters.');
     const cited = options.roster ?? roster.positions[roster.positions.length - 1];
@@ -1144,7 +1144,7 @@ export class ReplicaProject {
     const preds = [...(head === undefined ? [] : [head.hash]), ...deps.map((dep) => dep.hash)];
     const lamport = 1 + Math.max(0, ...preds.map((hash) => this.lamportOf(hash)));
     const body = ROSTER_KIND_OWNER[kind] !== undefined && kind !== 'project.genesis' && isRecord(data) && !Object.hasOwn(data, 'rosterPrev') ? { ...data, rosterPrev: cited } : data;
-    const built = await buildEntryAsync({
+    const built = await build({
       signer, key, stream, seq: head === undefined ? 0 : head.seq + 1, prev: head?.hash ?? GENESIS_PREV, epoch,
       body: { deps, roster: cited, lamport, at: options.at ?? this.now().toISOString(), actor: options.actor ?? { kind: 'person' }, kind, data: body }
     });

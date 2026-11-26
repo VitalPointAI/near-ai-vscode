@@ -1,8 +1,9 @@
 import { MAX_GRANT_WRAPS, grantHash, grantProblem, readGrant } from '../../domain/replica/cellKeys';
 import type { CellGrant, RekeyReason } from '../../domain/replica/cellKeys';
 import { wrapFormatOf } from '../../domain/replica/cellWrapV2';
-import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, sha256Hex, writerIdOf } from '../../domain/replica/entry';
-import { grantPagePlan, readGrantPages } from '../../domain/replica/grantPages';
+import { HASH_PATTERN, REPLICA_SIGNED_AT, STREAM_ID_PATTERN, prepareEntrySigning, sha256Hex, writerIdOf } from '../../domain/replica/entry';
+import { buildGrantPagesAsync, grantPagePlan, readGrantPages } from '../../domain/replica/grantPages';
+import type { BuildEntryInput } from '../../domain/replica/entry';
 import type { WrapDevice } from '../../domain/replica/grantPages';
 import { accessPermitBytes, accessRevisionId } from '../../domain/replica/rotationProof';
 import type { AccessPermit, SignedAccessPermit } from '../../domain/replica/rotationProof';
@@ -115,6 +116,7 @@ export function createFinishGrantScope(intent: FinishIntent, signer: AsyncPayloa
   const verified: SignedAccessPermit[] = [];
   let rekey: ReturnType<typeof finishRekey>;
   let inFlight = false;
+  let entrySigned = false;
   const approved = (): boolean => draft !== undefined && isStrictBase64url(publicKey, 32) && fingerprintOf(Buffer.from(publicKey, 'base64url')) === fingerprint &&
     signer.sign === sign && signer.publicKey === publicKey && signer.fingerprint === fingerprint &&
     writerIdOf(publicKey) === draft.context.writer && signer.canSignAction?.(action, Buffer.from(draft.action)) === true;
@@ -149,25 +151,56 @@ export function createFinishGrantScope(intent: FinishIntent, signer: AsyncPayloa
     } };
   }
 
+  function signerFor(role: FinishRole, index: number): AsyncPayloadSigner {
+    return { fingerprint, publicKey, async sign(input) {
+      if (inFlight) return refusal();
+      const step = next(role, index);
+      if (step === undefined || !step.bytes.equals(input)) return refusal();
+      inFlight = true;
+      try {
+        if (!await current()) return refusal();
+        const result = await sign.call(signer, Buffer.from(step.bytes), { action });
+        if (typeof result !== 'string') return result;
+        return await current() && step.accept(result) ? result : refusal();
+      } finally {
+        inFlight = false;
+      }
+    } };
+  }
+
   return {
+    approved,
     permitDrafts: () => rekey?.permits.map((permit) => ({ ...permit })),
     verifiedRekey: () => rekey === undefined || verified.length !== rekey.permits.length ? undefined :
       { operation: { ...rekey.operation }, revision: rekey.revision, permits: verified.map(({ permit, signature }) => ({ permit: { ...permit }, signature })) },
-    signerFor(role: FinishRole, index: number): AsyncPayloadSigner {
-      return { fingerprint, publicKey, async sign(input) {
-        if (inFlight) return refusal();
-        const step = next(role, index);
-        if (step === undefined || !step.bytes.equals(input)) return refusal();
-        inFlight = true;
-        try {
-          if (!await current()) return refusal();
-          const result = await sign.call(signer, Buffer.from(step.bytes), { action });
-          if (typeof result !== 'string') return result;
-          return await current() && step.accept(result) ? result : refusal();
-        } finally {
-          inFlight = false;
-        }
-      } };
+    signerFor,
+    signGrants() {
+      if (draft === undefined || plan === undefined || rekey !== undefined) return Promise.resolve(refusal());
+      return buildGrantPagesAsync({ fingerprint, publicKey, sign(bytes: Buffer) {
+        return (children.length < plan.others.length ? signerFor('child', children.length) : signerFor('founding', 0)).sign(bytes);
+      } }, draft.grant);
+    },
+    async signEntry(input: Omit<BuildEntryInput, 'signer'>, accessRoot: string, currentSnapshot: () => Promise<boolean>) {
+      if (draft === undefined || rekey === undefined || verified.length !== rekey.permits.length || entrySigned || inFlight) return refusal();
+      const { project, predecessor } = draft.context;
+      const expected = { ...rekey.operation, accessRevision: rekey.revision, accessRoot, rosterPrev: predecessor };
+      if (input.stream !== project || input.body.roster !== predecessor || input.body.kind !== 'cell.rekey' || input.body.actor.kind !== 'person' ||
+          !HASH_PATTERN.test(accessRoot) || !canonicalBytes(input.body.data).equals(canonicalBytes(expected))) return refusal();
+      inFlight = true;
+      const currentEntry = async () => approved() && await currentSnapshot() && approved();
+      try {
+        if (!await currentEntry()) return refusal();
+        const prepared = prepareEntrySigning({ ...input, signer: { fingerprint, publicKey } });
+        const result = await sign.call(signer, prepared.signingBytes(), { action });
+        if (typeof result !== 'string') return result;
+        if (!await currentEntry()) return refusal();
+        const built = prepared.finish(result);
+        if (built === undefined) return refusal();
+        entrySigned = true;
+        return { built, matches: prepared.matches };
+      } finally {
+        inFlight = false;
+      }
     }
   };
 }

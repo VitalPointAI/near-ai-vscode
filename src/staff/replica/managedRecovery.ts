@@ -7,16 +7,17 @@ import type { RosterState } from '../../domain/replica/roster';
 import { deviceAt, memberAt, x25519At } from '../../domain/replica/rosterMembers';
 import { advanceGrantEvidence, grantEvidenceHash } from '../../domain/replica/rotationGrants';
 import type { OpenedGrantEvidence } from '../../domain/replica/rotationGrants';
-import { accessRevisionId } from '../../domain/replica/rotationProof';
-import { appendManagedAccess, managedPermitSubjects } from './managedWithdrawal';
-import type { AccessSnapshot, AuthoredRefusal } from './managedWithdrawal';
+import { accessPermitBytes, accessRevisionId } from '../../domain/replica/rotationProof';
+import { appendManagedAccess, managedActionCurrent, managedPermitSubjects, stageManagedAccess } from './managedWithdrawal';
+import type { AccessSnapshot, AuthoredRefusal, ManagedAccess } from './managedWithdrawal';
 import type { RekeyReason } from '../../domain/replica/cellKeys';
 import type { CellInfo, RekeyOutcome } from './membership';
-import { isProjectRefused } from './replicaProject';
 import type { ProjectRefused, ReplicaProject } from './replicaProject';
 import { formatFor, formatForDevice, newEpochGrant, wrapDeviceAt } from './wrapPlan';
+import type { AsyncPayloadSigner, SignedPayload } from '../../domain/team/signedPayload';
+import type { CellGrant } from '../../domain/replica/cellKeys';
 import { canonicalBytes } from '../../domain/team/canonical';
-import { createFinishIntent } from './managedFinishSigning';
+import { createFinishGrantScope, createFinishIntent } from './managedFinishSigning';
 
 type RecoveryRefusal = AuthoredRefusal | ProjectRefused | { ok: false; reason: 'switch-first' | 'rekey-awaiting-keys' };
 
@@ -93,6 +94,8 @@ function finishContext(project: ReplicaProject, roster: RosterState, info: CellI
     ...(info.base ? {} : { label: sha256Hex(canonicalBytes(info.raw)) }), recipients, continuity } };
 }
 
+const hostedDraftProjects = new WeakMap<object, ReplicaProject>();
+
 /** Prepare one private hosted review without signing or changing the store. */
 export function prepareHostedFinish(project: ReplicaProject, roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, now: Date) {
   if (project.rosterSigner === project.signer) return undefined;
@@ -106,7 +109,7 @@ export function prepareHostedFinish(project: ReplicaProject, roster: RosterState
   if (intent === undefined) return undefined;
   const binding = intent.actionBytes();
   const cell = info.cell;
-  return Object.freeze({
+  const draft = Object.freeze({
     intent,
     epochKey: () => Buffer.from(next.key),
     matches(fresh: RosterState, part: CellInfo, rules: RoutingTable | undefined, time: Date): boolean {
@@ -115,6 +118,8 @@ export function prepareHostedFinish(project: ReplicaProject, roster: RosterState
       return current !== undefined && createFinishIntent(current.context, intent.unsignedGrant())?.actionBytes().equals(binding) === true;
     }
   });
+  hostedDraftProjects.set(draft, project);
+  return draft;
 }
 
 async function recoverCell(project: ReplicaProject, roster: RosterState, info: CellInfo, routing: RoutingTable | undefined, now: Date):
@@ -124,29 +129,84 @@ async function recoverCell(project: ReplicaProject, roster: RosterState, info: C
   if (signer !== project.signer) return { ok: false, reason: 'action-required' };
   const selected = recoveryInputs(project, roster, info);
   if (!selected.ok) return selected;
-  const { snapshot, prior, writers, epoch, reason } = selected;
-  const next = recoverGrant(roster, info, routing, epoch, writers);
+  const next = recoverGrant(roster, info, routing, selected.epoch, selected.writers);
   if (!next.ok) return next;
-  const { grant, key } = next;
-  const pages = await project.signGrantPages(grant);
+  const pages = await project.signGrantPages(next.grant);
+  const plan = recoveryWritePlan(project, roster, selected, pages, next.key);
+  if ('ok' in plan) return plan;
+  const result = await appendManagedAccess(project, roster, plan, now, (fresh) => selectedManagedAccess(fresh, authority));
+  return 'refused' in result || !result.ok ? result : undefined;
+}
+
+type RecoveryInputs = Extract<ReturnType<typeof recoveryInputs>, { ok: true }>;
+function recoveryWritePlan(project: ReplicaProject, roster: RosterState, selected: RecoveryInputs, pages: readonly SignedPayload<CellGrant>[], key: Buffer):
+  ManagedAccess | Extract<RecoveryRefusal, { ok: false }> {
+  const { snapshot, prior, writers, epoch, reason } = selected;
+  const authority = project.deviceWriter;
+  const cell = prior.evidence.cell;
   const [founding, ...rest] = pages;
   const parsed = rest.length === 0 ? readGrant(founding) : readGrantPages(founding, rest);
-  if (!parsed.ok || parsed.signer.writer !== authority || !project.keys.readingCandidates(info.cell, pages)
+  if (!parsed.ok || parsed.signer.writer !== authority || !project.keys.readingCandidates(cell, pages)
     .some((candidate) => !candidate.own && candidate.epoch === epoch && candidate.key.equals(key))) return { ok: false, reason: 'rekey-awaiting-keys' };
   const evidence = advanceGrantEvidence(prior.evidence, { epoch, grants: [{
     hash: parsed.hash, pages: parsed.grant.pages ?? [], recipients: parsed.grant.wraps.map(({ writer }) => writer).sort()
   }], excluded: [] });
   if (evidence === undefined) return { ok: false, reason: 'change-not-applied' };
-  const operation = { cell: info.cell, epoch, reason, grant: parsed.hash };
+  const operation = { cell, epoch, reason, grant: parsed.hash };
   const kind = 'cell.rekey';
   const revision = accessRevisionId(roster.anchor.project, roster.accessRevision?.id ?? null, snapshot.predecessor, kind, operation);
   const cells = snapshot.cells.map((item) => item === prior ? {
     evidence, decision: 'continues' as const, previousEpoch: prior.evidence.epoch, recipients: writers
   } : { evidence: item.evidence, decision: item.decision, recipients: managedRecipients(roster, item) });
-  const result = await appendManagedAccess(project, roster, { ...snapshot, kind, operation, revision, cells, founding: { cell: info.cell, grants: pages } },
-    now, (fresh) => selectedManagedAccess(fresh, authority));
-  return isProjectRefused(result) || !result.ok ? result : undefined;
+  return { ...snapshot, kind, operation, revision, cells, founding: { cell, grants: pages } };
 }
+
+export type HostedFinishDraft = NonNullable<ReturnType<typeof prepareHostedFinish>>;
+export type DescribeFinishCell = (roster: RosterState, cell: string) => CellInfo | undefined;
+
+/** A draft belongs to one engine and its exact pending approval, and is consumed when signing starts. */
+export async function authorizeHostedFinish(project: ReplicaProject, draft: HostedFinishDraft, action: string,
+  describe: DescribeFinishCell, routing: RoutingTable | undefined, now: () => Date,
+  capture: () => Promise<{ roster: RosterState; snapshot: string }>) {
+  if (hostedDraftProjects.get(draft) !== project || !managedActionCurrent(project.rosterSigner, action, draft.intent.actionBytes())) return undefined;
+  const signer = project.rosterSigner as AsyncPayloadSigner;
+  const cell = draft.intent.unsignedGrant().cell;
+  const selected = await capture();
+  const matches = (roster: RosterState): boolean => {
+    const part = describe(roster, cell);
+    return part !== undefined && draft.matches(roster, part, routing, now());
+  };
+  // Concurrent attempts can both refresh the store. Only the first current one may use this draft.
+  if (hostedDraftProjects.get(draft) !== project || !matches(selected.roster)) return undefined;
+  const scope = createFinishGrantScope(draft.intent, signer, action, async () => {
+    const fresh = await capture();
+    return fresh.snapshot === selected.snapshot && matches(fresh.roster);
+  });
+  if (!scope.approved()) return undefined;
+  hostedDraftProjects.delete(draft);
+  const pages = await scope.signGrants();
+  if ('refused' in pages) return undefined;
+  const permits = scope.permitDrafts();
+  if (permits === undefined) return undefined;
+  for (const [index, permit] of permits.entries()) {
+    if (typeof await scope.signerFor('permit', index).sign(accessPermitBytes(permit)) !== 'string') return undefined;
+  }
+  const signed = scope.verifiedRekey();
+  if (signed === undefined) return undefined;
+  const checked = await capture();
+  if (checked.snapshot !== selected.snapshot || !matches(checked.roster)) return undefined;
+  const info = describe(checked.roster, cell);
+  if (info === undefined) return undefined;
+  const plan = recoveryInputs(project, checked.roster, info);
+  if (!plan.ok) return undefined;
+  const write = recoveryWritePlan(project, checked.roster, plan, pages, draft.epochKey());
+  if ('ok' in write || signed.revision !== write.revision || !canonicalBytes(signed.operation).equals(canonicalBytes(write.operation))) return undefined;
+  const staged = stageManagedAccess(write, signed.permits);
+  if (staged === undefined) return undefined;
+  return { ...staged, options: { ...staged.options, signer, action }, scope, matches, snapshot: selected.snapshot };
+}
+
+export type HostedFinishWrite = NonNullable<Awaited<ReturnType<typeof authorizeHostedFinish>>>;
 
 /** One checked commit per pending cell. A waiting cell does not block work for its siblings. */
 export async function finishManagedRekeys(project: ReplicaProject, roster: RosterState, describe: (roster: RosterState, cell: string) => CellInfo | undefined,

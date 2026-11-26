@@ -45,7 +45,7 @@ import { setFolderSyncProbe } from '../staff/staffFiles';
 import { fixedSigner } from './helpers/replicaWorld';
 import { managedRecipients, prepareHostedFinish, selectedManagedAccess } from '../staff/replica/managedRecovery';
 import { appendManagedAccess, appendManagedWithdrawal, managedAccessActionBytes } from '../staff/replica/managedWithdrawal';
-import type { ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
+import type { AppendOwnResult, ProjectRefused, ReplicaProjectDeps } from '../staff/replica/replicaProject';
 
 class MemorySecrets implements SecretStorageLike {
   public readonly values = new Map<string, string>();
@@ -991,9 +991,11 @@ test('managed removal stages continuity and Finish recovers the affected cell af
   assert.equal((await head(recovered)).hash, current.hash);
 });
 
-test('hosted managed withdrawal refuses an action that expires at the locked commit boundary', async () => {
+test('hosted managed withdrawal and Finish retain exact authority at the locked commit boundary', async () => {
   const lead = await founded('hosted-access-expiry');
-  const peer = await bringIn(lead, 'hosted-removed-peer', 'Mo Analyst', OFFICIAL);
+  const peer = await bringIn(lead, 'hosted-removed-peer', 'Mo Analyst', CLEARED_X);
+  assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
+  const protectedCell = await createCell(lead, LABEL_X, [lead.p.deviceWriter, peer.writer]);
   const unaffected = await createCell(lead, LABEL_Z, [lead.p.deviceWriter]);
   const session = fixedSigner('managed-withdrawal-session');
   const initial = await head(lead.p);
@@ -1002,7 +1004,7 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   const cert = sessionCertifyData({ project: lead.p.projectId, member: 'mbr-lead', device: lead.p.deviceWriter,
     sessionKey: session.publicKey, slot, notAfter: new Date(NOW.getTime() + DAY_MS).toISOString() }, (bytes) => session.signer.sign(bytes));
   assert.ok('ok' in await lead.p.appendOwn('session.certify', cert));
-  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, unaffected]);
+  const { seed, receipts } = await seedManagedAccess(lead, [lead.p.projectId, protectedCell, unaffected]);
   assert.ok('ok' in await lead.p.putGrants([], receipts));
   const encoding = await loadOrCreateEncryptionKey(lead.at.secrets, { identityDir: identityDir(lead.at.global), identity: lead.p.signer });
   const kem = await loadOrCreateKemKeys(lead.at.secrets, { identityDir: identityDir(lead.at.global) });
@@ -1011,12 +1013,16 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   let approvedPayload: Buffer | undefined;
   const authorized = (id: string) => id === confirmed && lead.at.clock.now.getTime() < expires;
   const signedActions: string[] = [];
+  let whileSigning: (() => Promise<void>) | undefined;
   const signer = {
     fingerprint: lead.p.signer.fingerprint, publicKey: lead.p.signer.publicKey,
     canSignAction: (id: string, payload: Uint8Array) => authorized(id) && approvedPayload?.equals(payload) === true,
     async sign(bytes: Buffer, options?: SignOptions) {
       if (options?.action === undefined || !authorized(options.action)) return { refused: 'Confirm this test action first.' };
       signedActions.push(options.action);
+      const race = whileSigning;
+      whileSigning = undefined;
+      await race?.();
       return lead.p.signer.sign(bytes);
     }
   };
@@ -1066,7 +1072,7 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   assert.equal(committed.roster.accessGrants.get(lead.p.projectId)?.decision, 'pending');
   const beforeDraft = signedActions.length;
   const headsBeforeDraft = await hosted.heads();
-  const part = { cell: lead.p.projectId, base: true, known: true };
+  const part = { cell: protectedCell, base: false, known: true, label: LABEL_X, raw: LABEL_X };
   const draft = prepareHostedFinish(hosted, committed.roster, part, undefined, lead.at.clock.now);
   assert.ok(draft);
   const unsigned = draft.intent.unsignedGrant();
@@ -1096,14 +1102,12 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   assert.ok('ok' in written);
   assert.equal(written.built.entry.header.writer, writerIdOf(session.publicKey));
 
-  const runFinish = async (pending: NonNullable<typeof draft>, action: string) => {
-    const method = Reflect.get(hosted, 'finishHostedCell');
-    return method === undefined ? { refused: 'action-required' } :
-      await Reflect.apply(method, hosted, [pending, action, (_roster: RosterState, cell: string) => cell === part.cell ? part : undefined]);
-  };
+  const runFinish = (pending: NonNullable<typeof draft>, action: string): Promise<AppendOwnResult> =>
+    hosted.finishHostedCell(pending, action, (_roster, cell) => cell === part.cell ? part : undefined);
   confirmed = 'fictional-reviewed-finish';
   const countBeforeFinish = signedActions.length;
-  assert.equal((await runFinish(draft, confirmed)).refused, 'action-required');
+  const wrongReview = await runFinish(draft, confirmed);
+  assert.equal(isProjectRefused(wrongReview) && wrongReview.refused, 'action-required');
   assert.equal(signedActions.length, countBeforeFinish);
   approvedPayload = draft.intent.actionBytes();
   let finishSynced = false;
@@ -1114,7 +1118,7 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   });
   try {
     const ended = await runFinish(draft, confirmed);
-    assert.equal(ended.refused, 'action-required');
+    assert.equal(isProjectRefused(ended) && ended.refused, 'action-required');
   } finally {
     setFolderSyncProbe(undefined);
   }
@@ -1125,21 +1129,40 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   assert.ok(signedActions.slice(countBeforeFinish).every((id) => id === confirmed));
 
   expires += 1000;
+  confirmed = 'fictional-racing-finish';
+  const racing = prepareHostedFinish(hosted, (await head(hosted)).roster, part, undefined, lead.at.clock.now);
+  assert.ok(racing);
+  approvedPayload = racing.intent.actionBytes();
+  const beforeRace = signedActions.length;
+  whileSigning = async () => {
+    const side = await lead.p.appendOwn('doc.client', {
+      product: 'intel-estimate', clientId: clientIdOf(slot, 2), actor: { kind: 'person' }
+    }, { stream: unaffected });
+    assert.ok('ok' in side);
+  };
+  const lost = await runFinish(racing, confirmed);
+  assert.equal(isProjectRefused(lost) && lost.refused, 'action-required');
+  assert.equal(signedActions.length, beforeRace + 1, 'the checked snapshot stops the signing sequence after a cross-window change');
+  assert.equal((await head(hosted)).hash, committed.hash);
+
   confirmed = 'fictional-second-reviewed-finish';
   const fresh = await head(hosted);
   const nextDraft = prepareHostedFinish(hosted, fresh.roster, part, undefined, lead.at.clock.now);
   assert.ok(nextDraft);
   approvedPayload = nextDraft.intent.actionBytes();
   const ended = await runFinish(nextDraft, confirmed);
-  assert.equal(ended.ok, true, 'one exact authorized cell commits');
+  assert.ok('ok' in ended, 'one exact authorized cell commits');
   const atCommit = signedActions.length;
-  assert.equal((await runFinish(nextDraft, confirmed)).refused, 'action-required');
+  const replay = await runFinish(nextDraft, confirmed);
+  assert.equal(isProjectRefused(replay) && replay.refused, 'action-required');
   assert.equal(signedActions.length, atCommit);
   const reopened = project(await ReplicaProject.open(lead.at.root, deps));
   const recovered = await head(reopened);
   assert.equal(recovered.hash, ended.hash);
   assert.equal(recovered.roster.accessGrants.get(part.cell)?.decision, 'continues');
   assert.deepEqual(reopened.keys.epochKey(part.cell, 2), nextDraft.epochKey());
+  assert.equal(recovered.roster.accessGrants.get(lead.p.projectId)?.decision, 'pending', 'a second cell still needs its own approval');
+  assert.equal(reopened.keys.holds(lead.p.projectId, 2), false);
   assert.ok('ok' in await reopened.appendOwn('doc.client', {
     product: 'intel-estimate', clientId: clientIdOf(slot, 1), actor: { kind: 'person' }
   }, { stream: unaffected }));
