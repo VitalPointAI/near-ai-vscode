@@ -40,6 +40,7 @@ import { hubMemoryOf, syncOnce } from '../staff/replica/hubSync';
 import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
+import { managedIssuanceCurrent, prepareManagedIssuance, readManagedIssuance } from '../staff/replica/managedIssuance';
 import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { fixedSigner } from './helpers/replicaWorld';
@@ -892,10 +893,10 @@ test('a signed clearance transition pauses the affected cell and its verified un
   assert.ok(continuity && secondContinuity);
   const receipt = { entry: promoted.hash, accessProofs: [continuity, secondContinuity] };
   const selected = (await head(reopened)).roster;
-  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, entry: afterNote.hash }, NOW) === undefined, true);
-  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, accessProofs: [continuity, continuity] }, NOW) === undefined, true);
-  assert.equal(sealManagedContinuityDelivery(selected, member.writer, receipt, NOW) === undefined, true);
-  const delivery = sealManagedContinuityDelivery(selected, p.deviceWriter, receipt, NOW);
+  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, entry: afterNote.hash }, NOW, { authority: p.deviceWriter, signer: p.signer }) === undefined, true);
+  assert.equal(sealManagedContinuityDelivery(selected, p.deviceWriter, { ...receipt, accessProofs: [continuity, continuity] }, NOW, { authority: p.deviceWriter, signer: p.signer }) === undefined, true);
+  assert.equal(sealManagedContinuityDelivery(selected, member.writer, receipt, NOW, { authority: p.deviceWriter, signer: p.signer }) === undefined, true);
+  const delivery = sealManagedContinuityDelivery(selected, p.deviceWriter, receipt, NOW, { authority: p.deviceWriter, signer: p.signer });
   assert.ok(delivery);
   assert.equal(JSON.stringify(delivery).includes(secondContinuity.signed.signature), false);
   assert.ok('ok' in await reopened.ingestManagedGrantDelivery(delivery));
@@ -1477,7 +1478,8 @@ test('managed sender retries the exact staged opaque packet across restart and r
     const reopened = project(await ReplicaProject.open(lead.at.root, lead.at.deps));
     return exchangeManaged({
       offers: async () => offers, pending: async () => [], accepted: async () => undefined,
-      published: async (_offer, handle) => {
+      published: async (_offer, handle, expiresAt) => {
+        assert.equal(expiresAt, NOW.getTime() + DAY_MS);
         notifications.push(handle);
         if (!notifySucceeds) throw new Error('Fictional confidential handoff failed');
       }
@@ -1582,6 +1584,7 @@ test('a local managed inbox resumes only distinct unexpired handles across resta
   };
   const restored = handoffs(await reopen());
   const fetched = await fetchManaged(restored, route);
+  assert.deepEqual(fetched.packets.map(({ expectedExpiry }) => expectedExpiry), [expiresAt, expiresAt]);
   assert.deepEqual([...requests].sort(), [ready, obsolete, waiting].sort(), 'the reopened inbox asks for live opaque handles only');
   const local = {
     seal: async () => undefined,
@@ -1790,7 +1793,7 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   };
   const prepare = (roster: RosterState, candidate: unknown = accessProof) => {
     const options = { ...handoff, accessProof: candidate };
-    return sealManagedGrantDelivery(roster, options);
+    return sealManagedGrantDelivery(roster, options, { authority: p.deviceWriter, signer: p.signer });
   };
   assert.equal(prepare((await head(p)).roster), undefined, 'delivery waits for the grant and proof to be placed');
   assert.ok('ok' in await p.putGrants([], [opening]));
@@ -1818,7 +1821,46 @@ test('a managed supplemental wrap stays staged and outside grant delivery before
   assert.deepEqual(delivered.grants.map(grantHash), [hash]);
   assert.deepEqual(delivered.opening, opening);
   assert.deepEqual('accessProof' in delivered && delivered.accessProof, accessProof);
-  const grantOnly = sealManagedGrantDelivery((await head(p)).roster, handoff);
+  const selectedRoster = (await head(p)).roster;
+  const nowMs = NOW.getTime();
+  const localIssuer = { authority: p.deviceWriter, signer: p.signer };
+  const issuance = prepareManagedIssuance(selectedRoster, localIssuer, peer.writer, nowMs, delivered)?.issue(sealed.handle);
+  assert.ok(issuance);
+  const scope = { project: p.projectId, recipient: peer.writer, handle: sealed.handle, now: nowMs, expectedExpiry: nowMs + DAY_MS };
+  assert.ok(readManagedIssuance(issuance, scope));
+  assert.equal(managedIssuanceCurrent(selectedRoster, issuance, NOW), true);
+  const history = new Map(selectedRoster.accessHistory);
+  history.set(issuance.issuance.entry, { ...history.get(issuance.issuance.entry)!, root: 'e'.repeat(64) });
+  assert.equal(managedIssuanceCurrent({ ...selectedRoster, accessHistory: history }, issuance, NOW), false);
+  for (const altered of [{ ...scope, handle: rival.handle }, { ...scope, expectedExpiry: nowMs + DAY_MS - 1 }, { ...scope, now: nowMs + DAY_MS }]) {
+    assert.equal(readManagedIssuance(issuance, altered), undefined);
+  }
+  assert.equal(readManagedIssuance({ artifact: delivered }, scope), undefined);
+  for (const change of [{ root: 'e'.repeat(64) }, { recipient: p.deviceWriter }, { authority: peer.writer }, { expiresAt: scope.expectedExpiry - 1 }]) {
+    assert.equal(readManagedIssuance({ ...issuance, issuance: { ...issuance.issuance, ...change } }, { ...scope, expectedExpiry: undefined }), undefined);
+  }
+  assert.equal(readManagedIssuance({ ...issuance, artifact: { ...delivered, grants: [] } }, scope), undefined);
+  const outsider = fixedSigner('fictional-unadmitted-issuer');
+  assert.equal(prepareManagedIssuance(selectedRoster, { authority: p.deviceWriter, signer: outsider.signer }, peer.writer, nowMs, delivered), undefined);
+
+  const session = fixedSigner('fictional-managed-delivery-session');
+  const slot = deviceAt(selectedRoster.members, p.deviceWriter, selectedRoster.positions.length - 1)?.slot;
+  assert.ok(slot !== undefined);
+  const stop = nowMs + 10_000;
+  const cert = sessionCertifyData({ project: p.projectId, member: 'mbr-lead', device: p.deviceWriter,
+    sessionKey: session.publicKey, slot, notAfter: new Date(stop).toISOString() }, (bytes) => session.signer.sign(bytes));
+  assert.ok('ok' in await p.appendOwn('session.certify', cert));
+  const certified = (await head(p)).roster;
+  const sessionPlan = prepareManagedIssuance(certified, { authority: p.deviceWriter, signer: session.signer }, peer.writer, nowMs, delivered);
+  assert.ok(sessionPlan && sessionPlan.binding.certificate);
+  assert.equal(sessionPlan.expiresAt, stop);
+  const sessionIssue = sessionPlan.issue(sealed.handle);
+  assert.ok(sessionIssue);
+  assert.equal(managedIssuanceCurrent(certified, sessionIssue, NOW), true);
+  assert.equal(managedIssuanceCurrent(certified, sessionIssue, new Date(stop)), false);
+  assert.equal(managedIssuanceCurrent(selectedRoster, sessionIssue, NOW), false);
+
+  const grantOnly = sealManagedGrantDelivery((await head(p)).roster, handoff, { authority: p.deviceWriter, signer: p.signer });
   assert.ok(grantOnly);
   const oldShape = openManagedGrantDelivery(p.projectId, device, grantOnly.handle, grantOnly.packet, NOW);
   assert.ok(oldShape && !('accessProof' in oldShape));

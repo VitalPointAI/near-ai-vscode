@@ -10,7 +10,7 @@ export interface ManagedSyncRoute {
 export interface ManagedSyncHandoffs {
   offers(): Promise<readonly ManagedHandoff[]>;
   pending(): Promise<readonly string[] | ManagedPendingBatch>;
-  published(offer: ManagedHandoff, handle: string): Promise<void>;
+  published(offer: ManagedHandoff, handle: string, expiresAt?: number): Promise<void>;
   accepted(handle: string): Promise<void>;
   superseded?(handle: string): Promise<void>;
 }
@@ -23,14 +23,14 @@ export interface ManagedSyncLocal {
 }
 
 export type ManagedStagedSend =
-  | { handle: string; state: 'published' }
-  | { handle: string; state: 'uploaded'; published(): Promise<void> }
-  | { handle: string; state: 'queued'; packet: unknown; uploaded(): Promise<boolean>; published(): Promise<void> };
+  | { handle: string; expiresAt: number; state: 'published' }
+  | { handle: string; expiresAt: number; state: 'uploaded'; published(): Promise<void> }
+  | { handle: string; expiresAt: number; state: 'queued'; packet: unknown; uploaded(): Promise<boolean>; published(): Promise<void> };
 
-export interface ManagedPacket { handle: string; packet: unknown }
+export interface ManagedPacket { handle: string; packet: unknown; expectedExpiry?: number }
 export interface ManagedInbox { packets: readonly ManagedPacket[]; waiting: boolean }
 
-export interface ManagedPendingBatch { handles: readonly string[]; waiting: boolean }
+export interface ManagedPendingBatch { handles: readonly string[]; waiting: boolean; deadlines?: ReadonlyMap<string, number> }
 
 export const MAX_MANAGED_BATCH = 16;
 export const MANAGED_HANDOFF_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -40,13 +40,16 @@ export async function fetchManaged(handoffs: ManagedSyncHandoffs, route: Managed
   const packets: ManagedPacket[] = [];
   try {
     const pending = await handoffs.pending();
-    const batch = 'handles' in pending ? pending : { handles: pending, waiting: false };
+    const batch: ManagedPendingBatch = 'handles' in pending ? pending : { handles: pending, waiting: false };
     const handles = [...new Set(batch.handles.filter((handle) => HASH_PATTERN.test(handle)))];
     let waiting = batch.waiting || handles.length > MAX_MANAGED_BATCH;
     for (const handle of handles.slice(0, MAX_MANAGED_BATCH)) {
       const packet = await getManagedPacket(route, handle);
       if (packet === undefined) waiting = true;
-      else packets.push({ handle, packet });
+      else {
+        const expectedExpiry = batch.deadlines?.get(handle);
+        packets.push({ handle, packet, ...(expectedExpiry === undefined ? {} : { expectedExpiry }) });
+      }
     }
     return { packets, waiting };
   } catch {
@@ -98,7 +101,7 @@ async function offerManaged(handoffs: ManagedSyncHandoffs, local: ManagedSyncLoc
       if (!await route.put(staged.handle, staged.packet)) return false;
       if (!await staged.uploaded()) return false;
     }
-    await handoffs.published(offer, staged.handle);
+    await handoffs.published(offer, staged.handle, staged.expiresAt);
     await staged.published();
     return true;
   } catch {

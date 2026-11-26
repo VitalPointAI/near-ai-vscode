@@ -48,8 +48,9 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { isSupersededManagedContinuity, openManagedGrantArtifact, previewManagedContinuity, preparePlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
+import { isSupersededManagedContinuity, previewManagedContinuity, preparePlacedManagedHandoff } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
+import { ingestManagedDelivery, promoteManagedDeliveries } from './managedGrantIntake';
 import type { ManagedPacket, ManagedStagedSend } from './managedSync';
 import { authorizeHostedFinish } from './managedRecovery';
 import type { DescribeFinishCell, HostedFinishDraft, HostedFinishWrite } from './managedRecovery';
@@ -415,7 +416,6 @@ export class ReplicaProject {
     if (this.ctx === undefined) throw new Error('Fold the project with state() before asking for its context.');
     return this.ctx;
   }
-
   public state(): Promise<ProjectState> {
     return this.exclusive(() => this.foldNow());
   }
@@ -491,7 +491,6 @@ export class ReplicaProject {
       return storeRefused({ refused: 'out-of-order', message: 'This update does not follow the last one this device wrote to the shared history, so nothing was written. Nothing was changed.' });
     });
   }
-
   public findOwn(kind: string, predicate: (data: unknown) => boolean): Promise<OwnEntry | undefined> {
     return this.exclusive(async () => {
       // The ring answers only the keys the roster settled, so the roster is folded first.
@@ -588,7 +587,9 @@ export class ReplicaProject {
     return this.exclusive(async () => {
       const { roster } = await this.foldNow();
       if (!isRosterWriterAt(roster, this.device.writer, roster.positions.length - 1)) return undefined;
-      const prepared = preparePlacedManagedHandoff(roster, this.evidence.map(({ value }) => value), input, this.now());
+      const signer = this.deps.sessionSigner ?? (this.device.roster === this.device.identity ? this.device.identity : undefined);
+      const prepared = signer === undefined ? undefined : preparePlacedManagedHandoff(roster, this.evidence.map(({ value }) => value),
+        input, this.now(), { authority: this.device.writer, signer });
       if (!durable || prepared === undefined) return prepared?.seal();
       return this.store.managedHandoffs(this.projectId, this.device.writer, () => this.now()).stage(prepared, await this.store.appendSnapshot());
     });
@@ -604,18 +605,13 @@ export class ReplicaProject {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
       const { writer, privateKey: x25519, kem } = ringDevice(this.device);
-      const delivery = openManagedGrantArtifact(this.projectId, { writer, x25519, kem }, file, this.now());
-      if (delivery === undefined) return refuse('welcome-refused');
-      const roster = source === 'peer' ? (await this.foldNow()).roster : undefined;
-      const expected = roster === undefined ? undefined : await this.store.appendSnapshot();
-      const checked = roster === undefined ? true : verifySelectedManagedArtifact(roster, writer, delivery, this.now());
-      if (checked === undefined) return refuse('welcome-refused');
-      const staged = await this.store.putAccessEvidence(delivery, expected);
-      if (!('ok' in staged)) return storeRefused(staged);
+      const { roster } = await this.foldNow();
+      const result = await ingestManagedDelivery(this.store, roster, this.evidence, { writer, x25519, kem }, file, source, () => this.now());
+      if ('refused' in result) return 'message' in result ? storeRefused(result) : refuse(result.refused);
+      const checked = result.verified;
       return await this.settledFold() ?? (checked === true || this.keys.holds(checked.cell, checked.epoch) ? { ok: true as const } : refuse('no-key'));
     });
   }
-
   public ingestWelcome(welcome: unknown): Promise<WelcomeResult> {
     return this.exclusive(async () => {
       const read = readWelcome(welcome, { genesisHash: this.anchor.genesisHash, writer: this.device.writer });
@@ -623,7 +619,6 @@ export class ReplicaProject {
       return this.receiveWelcome(read.welcome, read.entries);
     });
   }
-
   public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], packets: readonly ManagedPacket[] = []):
     Promise<(IngestResult & { paired?: readonly string[] }) | ProjectRefused> {
     return this.exclusive(async () => {
@@ -632,12 +627,13 @@ export class ReplicaProject {
       const expected = current === undefined ? undefined : await this.store.appendSnapshot();
       const { writer, privateKey: x25519, kem } = ringDevice(this.device);
       const pair = current === undefined ? undefined : previewManagedContinuity(this.rosterInputs(current), current, entries, { writer, x25519, kem }, packets);
-      const result = await this.store.ingestForeign(entries, blobs, check, pair === undefined ? undefined : expected, undefined, pair);
+      const result = await this.store.ingestForeign(entries, blobs, check, pair === undefined ? undefined : expected,
+        pair === undefined ? undefined : () => this.now().getTime() < pair.expiresAt, pair);
       if (!('ok' in result)) return storeRefused(result);
-      return pair !== undefined && (await this.foldNow()).roster.accessRevision?.entry === pair.root ? { ...result, paired: pair.handles } : result;
+      if (pair === undefined || (await this.foldNow()).roster.accessRevision?.entry !== pair.root) return result;
+      return { ...result, paired: pair.handles.filter(({ digest }) => this.evidence.some(({ hash }) => hash === digest)).map(({ handle }) => handle) };
     });
   }
-
   public heldForCheck(): Array<{ hash: string; reason: string }> {
     return this.store.heldForCheck();
   }
@@ -693,7 +689,6 @@ export class ReplicaProject {
       return this.store.head(stream, writer);
     });
   }
-
   public holds(hashes: readonly string[]): Promise<Set<string>> {
     return this.exclusive(async () => {
       await this.refreshed();
@@ -1010,6 +1005,12 @@ export class ReplicaProject {
     // Each turn reaches at least one more base epoch or ends the loop, so the bound only stops a roster that keeps changing its mind.
     const epochs = new Set(entries.filter((entry) => entry.header.stream === project).map((entry) => entry.header.epoch)).size;
     for (let turn = 0; turn < 2 * epochs + 2; turn += 1) {
+      const { writer, privateKey: x25519, kem } = ringDevice(this.device);
+      if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) === true &&
+          await promoteManagedDeliveries(this.store, roster, this.evidence, { writer, x25519, kem }, () => this.now())) {
+        this.evidence = await this.store.accessEvidence();
+        roster = fold();
+      }
       const settled = await this.keys.settle(roster.cells);
       const next = this.readingKeys(roster, entries);
       if (settled === 0 && sameReadingKeys(next, reading)) break;
@@ -1049,7 +1050,6 @@ export class ReplicaProject {
     }
     return keys;
   }
-
   /** Grants new on disk since the last look, kept for the roster fold. Only the grants the fold places are opened into the key ring (settle). */
   private async loadGrants(): Promise<void> {
     const { grants } = await this.store.grants();

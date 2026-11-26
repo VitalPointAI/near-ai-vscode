@@ -66,7 +66,7 @@ export function openManagedHandoffs(
         return reservation(queued);
       }
       if (row.expiresAt <= now || row.state === 'expired') return undefined;
-      if (row.state === 'published') return { handle: row.handle, state: 'published' };
+      if (row.state === 'published') return { handle: row.handle, expiresAt: row.expiresAt, state: 'published' };
       if (row.attempts >= MAX_HANDOFF_ATTEMPTS || row.nextAt > now) return undefined;
       rows[index] = { ...row, attempts: row.attempts + 1, nextAt: nextHandoffRetry(row.expiresAt, row.attempts, now) };
       return reservation(rows[index]);
@@ -75,8 +75,8 @@ export function openManagedHandoffs(
 
   function reservation(row: Send): ManagedStagedSend {
     const published = async () => { await advance(row, 'published'); };
-    if (row.state === 'queued') return { handle: row.handle, state: 'queued', packet: row.packet, uploaded: () => advance(row, 'uploaded'), published };
-    return { handle: row.handle, state: 'uploaded', published };
+    if (row.state === 'queued') return { handle: row.handle, expiresAt: row.expiresAt, state: 'queued', packet: row.packet, uploaded: () => advance(row, 'uploaded'), published };
+    return { handle: row.handle, expiresAt: row.expiresAt, state: 'uploaded', published };
   }
 
   function advance(row: Send, state: 'uploaded' | 'published'): Promise<boolean> {

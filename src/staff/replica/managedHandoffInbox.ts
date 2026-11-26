@@ -128,7 +128,7 @@ export function openManagedHandoffInbox(
         const nextAt = nextHandoffRetry(row.expiresAt, row.attempts, now);
         rows[index] = { ...row, nextAt, attempts: row.attempts + 1 };
       }
-      return { handles: due.map(({ row }) => row.handle), waiting: active.length > due.length };
+      return { handles: due.map(({ row }) => row.handle), waiting: active.length > due.length, deadlines: new Map(due.map(({ row }) => [row.handle, row.expiresAt])) };
     }),
     accepted: (handle) => settle(handle, 'accepted'),
     superseded: (handle) => settle(handle, 'superseded')

@@ -71,6 +71,7 @@ import { readWhole, syncFolder } from '../staffFiles';
 import { MARK_LISTS_DIR, MAX_MARK_LISTED, MAX_MARK_WAITING, compareWithMark, digestOf, heldReason, readMark, writeMark } from './marks';
 import type { MarkFileState, MarkHead, ReplicaMark, WaitReason } from './marks';
 import * as startAgainCheck from './startAgainCheck';
+import { MANAGED_PACKET_STAGE_MAX_BYTES, isManagedPacketStage } from './managedGrantDelivery';
 import { openManagedHandoffs } from './managedHandoffOutbox';
 import { readHashedArtifacts, readStoredArtifact } from './storeArtifacts';
 
@@ -1204,13 +1205,13 @@ export class ReplicaStore {
       return [];
     }
   }
-
-  public async putAccessEvidence(evidence: unknown, expectedSnapshot?: string): Promise<{ ok: true; hash: string } | StoreRefused> {
+  public async putAccessEvidence(evidence: unknown, expectedSnapshot?: string, mayCommit?: () => boolean): Promise<{ ok: true; hash: string } | StoreRefused> {
     const bytes = canonicalBytes(evidence);
-    if (bytes.length > BLOB_MAX_BYTES) return refusal('blob-too-large');
+    if (bytes.length > (isManagedPacketStage(evidence) ? MANAGED_PACKET_STAGE_MAX_BYTES : BLOB_MAX_BYTES)) return refusal('blob-too-large');
     const hash = sha256Hex(bytes);
     return this.putSigned(['access-evidence'], `${hash}.json`, bytes, hash, expectedSnapshot === undefined ? undefined : async () => {
       await this.verifyAppendSnapshot(expectedSnapshot);
+      if (mayCommit?.() === false) throw new Refusal('snapshot-changed');
       await this.writeAccessStage(evidence);
     });
   }
@@ -1225,24 +1226,23 @@ export class ReplicaStore {
     if (await this.appendSnapshot() !== expected) throw new Refusal('snapshot-changed');
   }
   public async accessEvidence(): Promise<Array<{ hash: string; value: unknown }>> {
-    return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), BLOB_MAX_BYTES);
+    return readHashedArtifacts(path.join(this.dir, 'access-evidence'), await this.listDir(['access-evidence'], []), MANAGED_PACKET_STAGE_MAX_BYTES);
   }
   private readSigned(relative: string, matches: (value: unknown) => boolean, maxBytes = SIGNED_FILE_MAX_BYTES): Promise<{ value: unknown } | { reason: string }> {
     return readStoredArtifact(path.join(this.dir, relative), maxBytes, matches);
   }
-
   private async writeAccessStage(stage: unknown): Promise<void> {
     const bytes = canonicalBytes(stage);
-    if (bytes.length > BLOB_MAX_BYTES) throw new Refusal('blob-too-large');
+    const limit = isManagedPacketStage(stage) ? MANAGED_PACKET_STAGE_MAX_BYTES : BLOB_MAX_BYTES;
+    if (bytes.length > limit) throw new Refusal('blob-too-large');
     const hash = sha256Hex(bytes);
     const file = `${hash}.json`;
     await this.writeSigned(['access-evidence'], file, bytes, 0o600);
-    const stored = await this.readSigned(`access-evidence/${file}`, (value) => sha256Hex(canonicalBytes(value)) === hash, BLOB_MAX_BYTES);
+    const stored = await this.readSigned(`access-evidence/${file}`, (value) => sha256Hex(canonicalBytes(value)) === hash, limit);
     if (!('value' in stored)) throw new Refusal('unreadable');
     await syncFolder(path.join(this.dir, 'access-evidence'));
     await syncFolder(this.dir);
   }
-
   private async writeSigned(parts: readonly string[], name: string, bytes: Buffer, mode?: number): Promise<void> {
     const file = path.join(await ensureDir(this.dir, parts), name);
     try {
