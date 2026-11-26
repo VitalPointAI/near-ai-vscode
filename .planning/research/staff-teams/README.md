@@ -20,5 +20,5 @@ Notes are numbered by topic, and the J sections share files, so there is no note
 | 14 | [Information stewardship, business IT and civil liaison](14-staff-information-services-and-civil-liaison.md) |
 | 15 | [Coordination, institutional planning and education](15-staff-coordination-institutional-planning-and-learning.md) |
 | 16 | [Adversarial review and assurance](16-joint-staff-support-assurance.md) |
+| 17 | [US, NATO and Canadian staff requirements by echelon](17-staff-doctrine-by-echelon.md) |
 | ux/ | The Staff Room experience concept and the war-room prototype |
-- [US, NATO and Canadian staff requirements by echelon](17-staff-doctrine-by-echelon.md)

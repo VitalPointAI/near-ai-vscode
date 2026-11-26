@@ -32,10 +32,11 @@ and effects are independently authorized.
 The inventories distinguish a function supported by doctrine or policy from the proposed
 workflows that would implement it in SovAI. Even a documented function can move between
 directorates, a joint task force, a national department and a smaller headquarters. Treat
-J-numbers as mapping labels. Use the existing staff sections `command`, `j1` through `j9`,
-and `special-staff`. Map CG and SS duties to Command Group and Special Staff. J2-IS,
-J6-IT and J9-CL are duty families within their existing sections. Enroll a locally named accountable position, deputy or substitute,
-and distinct reviewers before publishing the associated workflow.
+J-numbers as mapping labels. Map duties to the existing [staff section IDs](../../../src/domain/staff/doctrine.ts#L415)
+`command`, `j1` through `j9`, and `special-staff`. Map CG and SS duties to Command Group
+and Special Staff. J2-IS, J6-IT and J9-CL are duty families within their existing sections.
+Enroll a locally named accountable position, deputy or substitute, and distinct reviewers
+before publishing the associated workflow.
 
 ## Evidence and interpretation
 
@@ -152,7 +153,7 @@ specific human release authorization.
 | J1 and specialist advisers | Draft and review on public or synthetic data | Any named personnel-case, health, legal or complaint connector needs separate authority and assessment. Begin with public directories and approved aggregates | Responsible professional, privacy and records authorities |
 
 See the [existing staff teams design](10-STAFF-TEAMS-DESIGN.md) and the repository's
-[staff release contract](../../../src/domain/staff/release.ts) for the current release structure.
+[staff release contract](../../../src/domain/staff/release.ts#L18) for the current release events and human-only decisions.
 The tables in this blueprint propose role-specific capabilities and production acceptance.
 
 ## Cross-branch handoffs
