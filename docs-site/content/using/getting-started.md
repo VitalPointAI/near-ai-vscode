@@ -45,8 +45,11 @@ node scripts/launch-local-workbench.mjs --image "$IMAGE"
 The launcher checks the host architecture, runtime and image before starting a container. The image
 must already be local. Add `--repair` to allow it to fetch that exact digest if it is missing. If the
 launcher reports a Docker install, upgrade or access requirement, resolve it through your host's
-administrator or software manager. Use the URL it prints after the health check succeeds. Running
-the command again with the same digest keeps the same container and workspace volume.
+administrator or software manager. Open the URL the launcher prints after the health check
+succeeds, then [set up your first project](#set-up-your-first-project).
+
+To stop the Workbench, run `docker stop sterling-local-workbench`. To start it again, rerun the
+same launcher command with the same image digest. It reuses the container and workspace volume.
 
 ### Start manually
 
@@ -70,14 +73,21 @@ expose a port published to localhost to machines on the same network segment.
    ```
 
 3. Open [http://localhost:3000/](http://localhost:3000/). Use `localhost`, so the workbench can give
-   each page of the extension its own origin.
-4. Open or create a project folder. In **SovAI Chat**, choose **Set up a new profile**, or run
+   each page of the extension its own origin. Then [set up your first project](#set-up-your-first-project).
+
+To stop the Workbench, run `docker stop sterling`. Run `docker start sterling` to restart the same
+container. If you want to work with a folder from your computer, mount it explicitly when you
+create the container.
+
+### Set up your first project
+
+1. Open or create a project folder. In **SovAI Chat**, choose **Set up a new profile**, or run
    **SovAI: Set Up a New Profile** from the Command Palette. Choose a local runtime and enter the
    address of an approved compatible model server that the container can reach. For this local
    preview, use a server that accepts requests without an API key. `localhost` inside the container
    refers to the container itself. Use an approved HTTPS address when the server runs outside that
    container's loopback interface.
-5. Start chatting when the connection check passes. You can also set up a project team or explore
+2. Start chatting when the connection check passes. You can also set up a project team or explore
    a sample team.
 
 The workbench opens the Sterling Get Started page for the Canadian Defence Edition, or the page of
@@ -95,13 +105,9 @@ sidebar you can open:
 The SovAI extension is also inside, so **SovAI: Set Up a New Profile** and the other SovAI
 commands are in the Command Palette.
 
-Keep in mind:
-
-- The workspace lives inside the container, at `/home/sterling/workspace`. To work with a folder
-  from your computer, mount it explicitly when you create the container.
-- The local preview has no secret store. Profiles that need a saved API key cannot finish setup
-  here. The planned hosted workbench uses your organization's secret store.
-- `docker stop sterling` and `docker start sterling` stop and restart the same container.
+The workspace opens at `/home/sterling/workspace`. The local preview has no secret store.
+Profiles that need a saved API key cannot finish setup here. The planned hosted workbench uses
+your organization's secret store.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
 and not yet released. See [Hosting for many people](../architecture/overview.md#hosting-for-many-people-planned-not-yet-released).
