@@ -36,6 +36,22 @@ test('the rail carries every shortcut, the planned ones disabled, and the native
     await rail(page).getByRole('button', { name: label, exact: true }).click();
     await expect(currentTab(page)).toHaveText(title);
   }
+  if (process.env.STERLING_BUNDLED_EXTENSION === '0') {
+    const shortcuts = rail(page);
+    const chat = shortcuts.getByRole('button', { name: 'Chat', exact: true });
+    const chatMessage = 'Could not open Chat. Wait a moment and try again.';
+    const toasts = page.locator('.theia-notification-toasts .theia-notification-list-item');
+    await chat.press('Enter');
+    await expect(toasts.filter({ hasText: chatMessage })).toBeVisible();
+    await expect(shortcuts.getByRole('status')).toHaveText(chatMessage);
+    await expect(chat).toBeFocused();
+    await expect(chat).toBeEnabled();
+
+    await shortcuts.getByRole('button', { name: 'Team Studio', exact: true }).click();
+    await expect(toasts.filter({
+      hasText: 'Could not open Team Studio. Wait a moment and try again.'
+    })).toBeVisible();
+  }
 });
 
 test('Get Started shows the setup actions, and each work-area card opens its own page', async ({ page }) => {
