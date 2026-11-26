@@ -8,8 +8,8 @@ import { BLOB_MAX_BYTES, SEALED_OVERHEAD, blobBytesHash, openBlob, sealBlob, sha
 import type { SealedBlob } from '../../domain/replica/entry';
 import { readGrantPages, wrapsFor } from '../../domain/replica/grantPages';
 import type { WrapDevice } from '../../domain/replica/grantPages';
-import { isRosterWriterAt, managedWriteAllowed } from '../../domain/replica/roster';
-import type { RosterState } from '../../domain/replica/roster';
+import { foldRoster, isRosterWriterAt, managedWriteAllowed } from '../../domain/replica/roster';
+import type { RosterFoldInput, RosterState } from '../../domain/replica/roster';
 import { addGrant, epochAt } from '../../domain/replica/rosterCells';
 import { deviceAt } from '../../domain/replica/rosterMembers';
 import { matchesGrantEvidence, openGrantEvidence, readAuthoredAccessStage, readContinuityReceipt, readGrantDelivery } from '../../domain/replica/rotationGrants';
@@ -20,6 +20,7 @@ import { canonicalBytes } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 import type { WrapCell } from './wrapPlan';
+import type { ManagedPacket } from './managedSync';
 
 const HANDLE = /^[0-9a-f]{64}$/;
 const B64 = /^[A-Za-z0-9_-]+$/;
@@ -231,4 +232,23 @@ export function verifySelectedManagedArtifact(roster: RosterState, recipient: st
     admitted: (writer) => deviceAt(roster.members, writer, issuedAt) !== undefined });
   if (placement.status !== 'applied' || (delivery.accessProof !== undefined && !permits({ ...roster, cells }, delivery.accessProof))) return undefined;
   return { cell, epoch };
+}
+
+
+/** Pair only continuity authenticated by the roster preview for this exact batch. */
+export function previewManagedContinuity(input: RosterFoldInput, current: RosterState, entries: readonly unknown[], device: DeliveryDevice,
+  packets: readonly ManagedPacket[]) {
+  const pending = foldRoster({ ...input, entries: [...input.entries, ...entries] });
+  const entry = pending.accessRevision?.entry;
+  if (entry === undefined || entry === current.accessRevision?.entry) return undefined;
+  const evidence: unknown[] = [];
+  const handles: string[] = [];
+  for (const packet of packets) {
+    const artifact = openManagedGrantArtifact(input.anchor.project, device, packet, input.now);
+    const receipt = readContinuityReceipt(artifact);
+    if (receipt?.entry !== entry || verifySelectedManagedArtifact(pending, device.writer, receipt, input.now) !== true) continue;
+    evidence.push(receipt);
+    handles.push(packet.handle);
+  }
+  return evidence.length > 0 ? { root: entry, evidence, handles } : undefined;
 }

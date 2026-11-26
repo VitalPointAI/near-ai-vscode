@@ -1,23 +1,8 @@
-// A multi-user staff project on this machine (D-07, D-19, D-24, D-44, D-46): where the replica store (WP-R2) and the roster and cell keys (WP-R1)
-// meet. Node I/O only; never imports vscode. Every later host flow (migration, membership, the staff host's shared mode, the Single-Machine Copy)
-// goes through one ReplicaProject instead of building its own context.
-//
-// What it does:
-// - Pins the project's genesis in extension storage outside the project, at <globalStorage>/staff-replica/<project>/genesis.json, the way Team
-//   Mode keeps its trust pin; .planning/staff/replica/project.json is only a convenience copy, and a copy that disagrees with the pin is refused
-//   (D-46). The pin is written only when this device creates the project or joins it, never when a folder is opened.
-// - Opens the store, then folds in two passes (D-44): the roster stream alone from the pinned anchor, then every stream with the real RosterView.
-// - Keeps one ReplicaContext object and reuses it until the roster, this device's key ring or the blob set changes, and grows the fold with
-//   addEntries, so a call with nothing new refolds nothing (Pitfall 1).
-// - Builds and appends this device's own entries with the right seq, prev, lamport, roster and epoch key.
-//
-// The state of one ReplicaProject object:
-//   unfolded --state()--> folded (context built) --state() with nothing new--> folded (same context, no refold)
-//   folded --entries, grants or blobs arrive--> folded (roster refolded; the context is replaced only when the roster, the key ring or the blob set
-//   changed; otherwise new entries are appended to the fold)
-//
-// No private key, opened epoch key or join secret is written to the project folder, a log, an error message or any file (P-31-23): keys stay in
-// SecretStorage and memory (keyring.ts); the pin and project.json hold only public keys and hashes.
+// ReplicaProject joins the local store and the roster/key folds for a shared project (D-07, D-19, D-24, D-44, D-46).
+// Its genesis pin lives outside the project and is set only by creation or admission. The project.json copy must match it (D-46).
+// It folds the roster first, then reuses the main fold context until the roster, keys or available blobs change (Pitfall 1).
+// Writes derive seq, prev, lamport, roster and epoch from that checked state.
+// Private keys, unwrapped epoch keys and join secrets remain in SecretStorage and memory (P-31-23).
 import { randomBytes } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import * as path from 'node:path';
@@ -61,8 +46,9 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { openManagedGrantArtifact, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
+import { openManagedGrantArtifact, previewManagedContinuity, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
+import type { ManagedPacket } from './managedSync';
 import { verifyManagedStage } from './managedWithdrawal';
 
 // The pin and project.json helpers live in anchorFile.ts; they are re-exported here so existing imports keep working.
@@ -620,22 +606,25 @@ export class ReplicaProject {
     });
   }
 
-  public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[]): Promise<IngestResult | ProjectRefused> {
+  public ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], packets: readonly ManagedPacket[] = []):
+    Promise<(IngestResult & { paired?: readonly string[] }) | ProjectRefused> {
     return this.exclusive(async () => {
-      const result = await this.store.ingestForeign(entries, blobs, this.foreignCheck(blobs));
-      return 'ok' in result ? result : storeRefused(result);
+      const check = this.foreignCheck(blobs);
+      const current = packets.length > 0 && this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) === true ? (await this.foldNow()).roster : undefined;
+      const expected = current === undefined ? undefined : await this.store.appendSnapshot();
+      const { writer, privateKey: x25519, kem } = ringDevice(this.device);
+      const pair = current === undefined ? undefined : previewManagedContinuity(this.rosterInputs(current), current, entries, { writer, x25519, kem }, packets);
+      const result = await this.store.ingestForeign(entries, blobs, check, pair === undefined ? undefined : expected, undefined, pair);
+      if (!('ok' in result)) return storeRefused(result);
+      return pair !== undefined && (await this.foldNow()).roster.accessRevision?.entry === pair.root ? { ...result, paired: pair.handles } : result;
     });
   }
 
-  /** Entries from outside the decode check held back, with its reason. They stay in the store and out of the fold. */
   public heldForCheck(): Array<{ hash: string; reason: string }> {
     return this.store.heldForCheck();
   }
 
-  /**
-   * The welcome file for one admitted device (D-15, D-45): the genesis, every roster entry with its blobs, and only the grants of the given cells
-   * whose every wrap names that device. Built from this device's store, so it carries what this device holds.
-   */
+  /** Build one admitted device's welcome with only its permitted grants. */
   public welcomeFor(writer: string, cells: readonly string[]): Promise<WelcomeFile> {
     return this.exclusive(async () => {
       const own = this.store.entries().filter((entry) => entry.header.stream === this.anchor.project);
@@ -1111,7 +1100,7 @@ export class ReplicaProject {
   }
 
   private async storeSigned(built: BuiltEntry, expected: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
-    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit, stage);
+    const result = await this.store.ingestForeign([built.entry], built.blobs, this.foreignCheck(built.blobs), expected, mayCommit, stage === undefined ? undefined : { root: built.hash, evidence: [stage] });
     // This device built it with keys it holds, so a held or waiting answer is a broken invariant, never a race to retry.
     if ('ok' in result && result.held.length + result.waiting.length > 0) throw new ReplicaProjectError(refuse('store-refused'));
     return result;
@@ -1182,9 +1171,11 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
       seal: (offer) => project.sealManagedHandoff(offer),
       stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer'))
     },
-    async ingest(entries, blobs) {
-      const result = settle(await project.ingestForeign(entries, blobs));
-      return { added: result.added, notStored: result.deferred + result.flooded + result.dropped };
+    async ingest(entries, blobs, packets) {
+      const received = await project.ingestForeign(entries, blobs, packets);
+      if (isProjectRefused(received) && received.store === 'snapshot-changed' && packets?.length) return { added: 0, notStored: entries.length };
+      const result = settle(received);
+      return { added: result.added, notStored: result.deferred + result.flooded + result.dropped, paired: result.paired };
     },
     async putGrants(grants) {
       settle(await project.putGrants(grants));

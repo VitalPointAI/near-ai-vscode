@@ -1003,7 +1003,7 @@ export class ReplicaStore {
   }
 
   /** Check foreign entries and stage valid blobs. Bound waiting and held entries and defer flooded writers (D-14). */
-  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: unknown): Promise<IngestResult | StoreRefused> {
+  public async ingestForeign(entries: readonly unknown[], blobs: readonly SealedBlob[], check: ForeignCheck, expectedSnapshot?: string, mayCommit?: () => boolean, stage?: { root: string; evidence: readonly unknown[] }): Promise<IngestResult | StoreRefused> {
     let dropped = 0;
     let duplicates = 0;
     const seen = new Set<string>();
@@ -1041,8 +1041,8 @@ export class ReplicaStore {
         await this.catchUp();
         await this.syncMark();
         if ((expectedSnapshot !== undefined && await this.appendSnapshot() !== expectedSnapshot) || mayCommit?.() === false) return refusal('snapshot-changed');
-        if (stage !== undefined && (fresh.length !== 1 || verdicts.get(fresh[0].hash)?.kind !== 'pass' ||
-          this.byHash.has(fresh[0].hash) || this.floodedFiles.has(fileId(fresh[0].entry.header.stream, fresh[0].entry.header.writer)))) return refusal('snapshot-changed');
+        if (stage !== undefined && (expectedSnapshot === undefined || !fresh.some(({ entry, hash }) => hash === stage.root && verdicts.get(hash)?.kind === 'pass' &&
+          !this.byHash.has(hash) && !this.floodedFiles.has(fileId(entry.header.stream, entry.header.writer))))) return refusal('snapshot-changed');
         const toWrite: typeof fresh = [];
         const held: IngestResult['held'] = [];
         const waiting: IngestResult['waiting'] = [];
@@ -1070,7 +1070,7 @@ export class ReplicaStore {
           }
           toWrite.push(item);
         }
-        if (stage !== undefined) await this.writeAccessStage(stage);
+        for (const artifact of stage?.evidence ?? []) await this.writeAccessStage(artifact);
         let blobsAdded = 0;
         for (const [hash, wire] of goodBlobs) if (await this.putBlobBytes(hash, wire)) blobsAdded += 1;
         if (toWrite.length > 0) {
