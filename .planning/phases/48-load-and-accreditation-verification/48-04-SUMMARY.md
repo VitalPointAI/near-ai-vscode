@@ -106,8 +106,10 @@ browser share an isolated loopback namespace.
 
 The two measured Task 1 commits and their files are present on the
 execution branch. The measured execution metadata above records Task 1.
-The Task 2 checkpoint changes only this record. Task 3A is ready for
-independent review, with no browser or stage execution.
+The Task 2 checkpoint changes only this record. Independent source and
+evidence review passed Task 3A at `12f26985` and `edb0a5d2`. The namespace
+blocked an npm update metadata check. Package installation used the local
+cache, with no browser or stage execution.
 
 ## Open conditions
 
