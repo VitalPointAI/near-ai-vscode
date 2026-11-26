@@ -302,8 +302,8 @@ test('the lab storage preview accounts for rendered requests and manual reservat
 test('the lab storage preview refuses incomplete, oversized and underfunded plans before invoking Helm', (t) => {
   const { budget, run, scratch } = labStorageFixture(t);
   const noHelm = path.join(scratch, 'missing-helm');
-  const { secretTokens, ...incomplete } = budget.volumesMiB;
-  assert.equal(secretTokens, 14);
+  const incomplete = { ...budget.volumesMiB };
+  delete incomplete.secretTokens;
   for (const [value, message] of [
     [{ ...budget, volumesMiB: incomplete }, /storage plan.*volumesMiB/i],
     [{ ...budget, volumesMiB: { ...budget.volumesMiB, registry: 2 ** 43 } }, /storage plan.*registry/i],
@@ -317,19 +317,26 @@ test('the lab storage preview refuses incomplete, oversized and underfunded plan
   }
 });
 
-test('the lab storage preview refuses an unexpected rendered PVC reference', (t) => {
+test('the lab storage preview refuses missing and unexpected rendered PVC references', (t) => {
   const { run, scratch } = labStorageFixture(t);
-  const fixtureHelm = path.join(scratch, 'fixture-helm');
-  writeFileSync(fixtureHelm, [
-    `#!${process.execPath}`,
-    "const { spawnSync } = require('node:child_process');",
-    `const result = spawnSync(${JSON.stringify(HELM)}, process.argv.slice(2), { encoding: 'utf8' });`,
-    "process.stdout.write(result.stdout.replace('claimName: openbao-lab-tokens', 'claimName: unbudgeted-test-volume'));",
-    "process.stderr.write(result.stderr);",
-    "process.exitCode = result.status;",
-  ].join('\n'), { mode: 0o700 });
-  const refused = run(undefined, fixtureHelm);
-  assert.equal(refused.status, 1);
-  assert.equal(refused.stdout, '');
-  assert.match(refused.stderr, /unbudgeted-test-volume/);
+  const fixtureHelm = path.join(scratch, 'fixture-helm.cjs');
+  for (const [mutation, message] of [
+    ["doc.replace('claimName: openbao-lab-tokens', 'claimName: unbudgeted-test-volume')", /unbudgeted-test-volume/],
+    ["doc.replace(/persistentVolumeClaim:\\n +claimName: openbao-lab-tokens/, 'emptyDir: {}')", /openbao-lab-tokens/],
+    ["doc.replace(/persistentVolumeClaim:\\n +claimName: openbao-lab-tokens/, '\"persistentVolumeClaim\": {claimName: openbao-lab-tokens}')", /unsupported.*storage.*layout/i],
+  ]) {
+    writeFileSync(fixtureHelm, [
+      `#!${process.execPath}`,
+      "const { spawnSync } = require('node:child_process');",
+      `const result = spawnSync(${JSON.stringify(HELM)}, process.argv.slice(2), { encoding: 'utf8' });`,
+      `const docs = result.stdout.split(/^---$/m).map((doc) => /^kind: StatefulSet$/m.test(doc) ? ${mutation} : doc);`,
+      "process.stdout.write(docs.join('---'));",
+      "process.stderr.write(result.stderr);",
+      "process.exitCode = result.status;",
+    ].join('\n'), { mode: 0o700 });
+    const refused = run(undefined, fixtureHelm);
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, '');
+    assert.match(refused.stderr, message);
+  }
 });
