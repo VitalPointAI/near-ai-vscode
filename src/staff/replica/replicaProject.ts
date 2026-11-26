@@ -46,7 +46,7 @@ import { UPDATE_SENTENCE, ensureRequireArmed, requireProblem } from './requireGa
 import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDevice';
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
-import { openManagedGrantArtifact, previewManagedContinuity, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
+import { isSupersededManagedContinuity, openManagedGrantArtifact, previewManagedContinuity, sealPlacedManagedHandoff, verifySelectedManagedArtifact } from './managedGrantDelivery';
 import type { ManagedHandoff } from './managedGrantDelivery';
 import type { ManagedPacket } from './managedSync';
 import { managedAccessActionBytes, managedActionCurrent, verifyManagedStage } from './managedWithdrawal';
@@ -419,7 +419,6 @@ export class ReplicaProject {
     return this.foldState?.refolds ?? 0;
   }
 
-  /** The context the last state() folded with. The same object until the roster, the key ring or the blob set changes. */
   public context(): ReplicaContext {
     if (this.ctx === undefined) throw new Error('Fold the project with state() before asking for its context.');
     return this.ctx;
@@ -430,11 +429,7 @@ export class ReplicaProject {
     return this.exclusive(() => this.foldNow());
   }
 
-  /**
-   * Builds, signs and appends one entry of this device. The stream is the base cell unless given; it cites the roster head unless given, and is
-   * sealed under the stream's current epoch key at that roster. A roster kind gets rosterPrev equal to the cited roster when its data has none.
-   * Refused no-key when this device does not hold that key; when another window of this install wrote first, it is built again on the new head.
-   */
+  /** Sign and append using the cited roster and cell epoch, rebuilding when the store snapshot changes. */
   public appendOwn(kind: string, data: unknown, options: AppendOwnOptions = {}): Promise<AppendOwnResult> {
     return this.appendPlanned<never>(() => ({ kind, data, options }));
   }
@@ -588,6 +583,14 @@ export class ReplicaProject {
     });
   }
 
+  public supersededManagedContinuity(value: unknown): Promise<boolean> {
+    return this.exclusive(async () => {
+      if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return false;
+      const { writer, privateKey: x25519, kem } = ringDevice(this.device);
+      return isSupersededManagedContinuity((await this.foldNow()).roster, { writer, x25519, kem }, value, this.now());
+    });
+  }
+
   public ingestManagedGrantDelivery(file: unknown, source: 'file' | 'peer' = 'file'): Promise<{ ok: true } | ProjectRefused> {
     return this.exclusive(async () => {
       if (this.deps.knownFeatures?.includes(CELL_ACCESS_FEATURE) !== true) return refuse('needs-update');
@@ -682,7 +685,6 @@ export class ReplicaProject {
     });
   }
 
-  /** Which of these entry hashes the store holds. */
   public holds(hashes: readonly string[]): Promise<Set<string>> {
     return this.exclusive(async () => {
       await this.refreshed();
@@ -1175,7 +1177,8 @@ export function syncLocalOf(project: ReplicaProject): SyncLocal {
     grants: () => project.signedGrants(),
     managed: {
       seal: (offer) => project.sealManagedHandoff(offer),
-      stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer'))
+      stage: async (value) => !isProjectRefused(await project.ingestManagedGrantDelivery(value, 'peer')),
+      superseded: (value) => project.supersededManagedContinuity(value)
     },
     async ingest(entries, blobs, packets) {
       const received = await project.ingestForeign(entries, blobs, packets);

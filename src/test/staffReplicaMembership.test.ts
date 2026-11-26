@@ -1479,6 +1479,8 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
   assert.deepEqual([...retired], [superseded.handle]);
   assert.equal(taken.has(superseded.handle), false);
   assert.equal(taken.has(latest.handle), true);
+  assert.equal(await local.managed.superseded?.({ handle: latest.handle, packet: latest.packet }), false);
+  assert.equal(await local.managed.superseded?.({ handle: latest.handle, packet: superseded.packet }), false);
   const directory = path.join(peer.at.root, REPLICA_DIR, 'access-evidence');
   const entries = readdirSync(directory).map((name) => JSON.parse(readFileSync(path.join(directory, name), 'utf8')) as { entry?: string });
   assert.equal(entries.some(({ entry }) => entry === superseded.hash), false, 'retirement must not store an obsolete proof');

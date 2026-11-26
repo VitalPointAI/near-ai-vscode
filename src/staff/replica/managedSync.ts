@@ -12,11 +12,13 @@ export interface ManagedSyncHandoffs {
   pending(): Promise<readonly string[]>;
   published(offer: ManagedHandoff, handle: string): Promise<void>;
   accepted(handle: string): Promise<void>;
+  superseded?(handle: string): Promise<void>;
 }
 
 export interface ManagedSyncLocal {
   seal(offer: ManagedHandoff): Promise<{ handle: string; packet: unknown } | undefined>;
   stage(value: unknown): Promise<boolean>;
+  superseded?(value: unknown): Promise<boolean>;
 }
 
 export interface ManagedPacket { handle: string; packet: unknown }
@@ -56,11 +58,9 @@ export async function exchangeManaged(handoffs: ManagedSyncHandoffs, local: Mana
       await handoffs.published(offer, sealed.handle);
     }
     for (const packet of inbox.packets) {
-      if (!paired.has(packet.handle) && !await local.stage(packet)) {
-        waiting = true;
-        continue;
-      }
-      await handoffs.accepted(packet.handle);
+      if (paired.has(packet.handle) || await local.stage(packet)) await handoffs.accepted(packet.handle);
+      else if (handoffs.superseded !== undefined && await local.superseded?.(packet)) await handoffs.superseded(packet.handle);
+      else waiting = true;
     }
     return waiting ? 'waiting' : 'complete';
   } catch {

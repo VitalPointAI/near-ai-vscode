@@ -235,6 +235,20 @@ export function verifySelectedManagedArtifact(roster: RosterState, recipient: st
 }
 
 
+/** A valid receipt for a selected historical root may be discarded. It grants no authority at the new root. */
+export function isSupersededManagedContinuity(roster: RosterState, device: DeliveryDevice, value: unknown, now: Date): boolean {
+  if (roster.pending.length > 0 || deviceAt(roster.members, device.writer, roster.positions.length - 1) === undefined) return false;
+  const decoded = openManagedGrantArtifact(roster.anchor.project, device, value, now);
+  const receipt = readContinuityReceipt(decoded);
+  if (receipt === undefined || roster.accessRevision === undefined) return false;
+  const revision = roster.accessHistory.get(receipt.entry);
+  const older = roster.positionOf.get(receipt.entry);
+  const latest = roster.positionOf.get(roster.accessRevision.entry);
+  if (revision === undefined || older === undefined || latest === undefined || older >= latest) return false;
+  const historical = { ...roster, positions: roster.positions.slice(0, older + 1), accessRevision: revision };
+  return verifySelectedManagedArtifact(historical, device.writer, receipt, now) === true;
+}
+
 /** Pair only continuity authenticated by the roster preview for this exact batch. */
 export function previewManagedContinuity(input: RosterFoldInput, current: RosterState, entries: readonly unknown[], device: DeliveryDevice,
   packets: readonly ManagedPacket[]) {
