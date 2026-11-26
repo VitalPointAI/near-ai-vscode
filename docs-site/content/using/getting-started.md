@@ -5,64 +5,46 @@ sidebar_position: 1
 
 # Getting started
 
-There are two ways to try the product: the **Sterling Sovereign AI** extension in your own VS Code,
-or the **Sterling workbench**, a browser-based editor that runs from a container image with the
-same extension inside it. Both come from the same release.
-
-A guided setup that asks a few plain questions and lands you where your work is is being built.
-Until it ships, the steps below and in the README are the way in:
-[Get started in two minutes](./features.synced.md#get-started-in-two-minutes).
-
-## Where each release is
-
-Releases are no longer published to the Visual Studio Marketplace. Each release from 0.4.38 on is
-on the repository's [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases)
-with:
-
-- the extension package, `near-ai-vscode-X.Y.Z.vsix`, and its SHA-256 checksum;
-- the Sterling workbench image, recorded by its digest in `sterling-image.txt` and in the release
-  notes;
-- the assessor package for your organization's security assessment.
-
-## Use the extension in VS Code
-
-You need VS Code 1.101 or newer.
-
-1. Download `near-ai-vscode-X.Y.Z.vsix` and `near-ai-vscode-X.Y.Z.vsix.sha256` from the release.
-2. Check the download: `sha256sum --check near-ai-vscode-X.Y.Z.vsix.sha256` should print `OK`.
-3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette and choose the file.
-4. Open a project folder, open the **SovAI** chat and set up a profile: your NEAR AI key, a model
-   runtime on this computer, or both.
-5. Once it connects, the chat suggests what to do next, starting with a team for your project.
-
-Then pick the guide for your role from the menu: software projects, staff teams, data and
-connections, or administration and your organization's rules.
+The **Sterling workbench** runs on your computer in a container. Open it in your local browser.
+The release image includes Eclipse Theia and the SovAI extension. The release build uses the VSIX
+to bundle the extension into the image, so workstation setup requires only the container image.
 
 ## Run the Sterling workbench image
 
 The image is a **local preview** for one person on one computer. It has no sign-in of its own and
 includes a terminal, so anyone who can reach its port gets a shell inside the container. Publish
-it on `127.0.0.1` only, never on a shared address. The image refuses to start until you pass
-`STERLING_PREVIEW_NO_SIGN_IN=accept` to confirm this.
+it on `127.0.0.1` only. The internal listen address used below requires
+`STERLING_PREVIEW_NO_SIGN_IN=accept`.
 
 You need Docker, or another tool that runs container images, on a 64-bit Intel or AMD (`linux/amd64`)
 computer. If the registry asks you to sign in, run `docker login ghcr.io` with a GitHub account
 that can read the repository's packages.
 
-1. Copy the image reference from `sterling-image.txt` on the release. It looks like
+1. On the [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases), open the version
+   you want and copy the image reference from `sterling-image.txt`. It looks like
    `ghcr.io/vitalpointai/near-ai-vscode@sha256:...`. Pulling by digest gets exactly the image that
    was tested; the tag `ghcr.io/vitalpointai/near-ai-vscode:vX.Y.Z` names the same release.
 2. Start it, published on this computer only:
 
    ```bash
+   IMAGE='ghcr.io/vitalpointai/near-ai-vscode@sha256:REPLACE_WITH_RELEASE_DIGEST'
    docker run --detach --name sterling \
+     --env STERLING_LISTEN_HOST=0.0.0.0 \
      --env STERLING_PREVIEW_NO_SIGN_IN=accept \
      --publish 127.0.0.1:3000:3000 \
-     ghcr.io/vitalpointai/near-ai-vscode@sha256:<digest from sterling-image.txt>
+     "$IMAGE"
    ```
 
 3. Open [http://localhost:3000/](http://localhost:3000/). Use `localhost`, so the workbench can give
    each page of the extension its own origin.
+4. Open or create a project folder. In **SovAI Chat**, choose **Set up a new profile**, or run
+   **SovAI: Set Up a New Profile** from the Command Palette. Choose a local runtime and enter the
+   address of an approved compatible model server that the container can reach. For this local
+   preview, use a server that accepts requests without an API key. `localhost` inside the container
+   refers to the container itself. Use an approved HTTPS address when the server runs outside that
+   container's loopback interface.
+5. Start chatting when the connection check passes. You can also set up a project team or explore
+   a sample team.
 
 The workbench opens the Sterling Get Started page for the Canadian Defence Edition, or the page of
 the work area you open. Get Started has **Set up Sterling**, **Open Chat** and **Explore a sample
@@ -81,14 +63,23 @@ commands are in the Command Palette.
 
 Keep in mind:
 
-- The workspace lives inside the container, at `/home/node/workspace`. Nothing on your computer is
-  shared with it unless you mount it yourself.
-- Secrets you enter may not survive a restart of the container yet. Durable secrets for each person
-  come with hosting at your organization's sites.
+- The workspace lives inside the container, at `/home/sterling/workspace`. To work with a folder
+  from your computer, mount it explicitly when you create the container.
+- The local preview has no secret store. Profiles that need a saved API key cannot finish setup
+  here. The planned hosted workbench uses your organization's secret store.
 - `docker stop sterling` and `docker start sterling` stop and restart the same container.
 
 Hosting the workbench for many people, with sign-in, at your organization's own sites is planned
 and not yet released. See [Hosting for many people](../architecture/overview.md#hosting-for-many-people-planned-not-yet-released).
+
+## Optional hub for shared staff projects
+
+You can use your local workbench without a hub. Your organization's administrator runs the hub on a
+shared server that participating workstations can reach. The current release lets administrators
+deploy and prepare the hub. Connecting an editor project to the hub arrives in a later release.
+See the [hub operator guide](https://github.com/VitalPointAI/near-ai-vscode/blob/main/relay/README.md#your-organizations-sync-hub).
+The hosted site deployment in the repository includes a
+[Helm definition for the hub](https://github.com/VitalPointAI/near-ai-vscode/tree/main/deploy/hub).
 
 ## More help
 
