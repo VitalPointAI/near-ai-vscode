@@ -126,7 +126,7 @@ covered_files:
   - src/test/gateTrustBadge.test.ts
   - src/test/gateVocabulary.test.ts
   - src/test/teamBoundaries.test.ts
-covered_digest: "v4:sha256:e72dc2a16197fca8f8b5804e4065e94a19868b837c90a8d257d0efd529b20d2a"
+covered_digest: "v4:sha256:6c7990e253ef8676be1bc3f3b69acc78ee7340036c9477ef31b004adb8941f61"
 ---
 
 # Phase 70 verification
@@ -135,9 +135,11 @@ covered_digest: "v4:sha256:e72dc2a16197fca8f8b5804e4065e94a19868b837c90a8d257d0e
 
 **Implementation verified at** `99373e04` (main). **Human verification remains open.** The eight roadmap success criteria have implementation and automated evidence covering all 18 assigned requirements. Five manual checks are recorded separately below. Phase 70.1's proposal classifier is outside this phase.
 
+At `b0e2fb57`, a static review checked the README changes that describe browser setup and Workbench requirements. The policy and MCP guidance and approval-mode notes cited by this report match the evidence at `99373e04`. The test results below are from the November 25 run.
+
 ## Goal achievement and requirements
 
-Source and test paths below are relative to the repository root. The named suites include historical coverage. The exact list of suites rerun at this commit is under Fresh verification.
+Source and test paths below are relative to the repository root. The named suites include historical coverage. The suites rerun at `99373e04` appear under Automated verification.
 
 | Roadmap criterion | Requirements | Source and behavior inspected | Automated evidence |
 | --- | --- | --- | --- |
@@ -169,7 +171,7 @@ Git confirms every merge commit below is an ancestor of `99373e04`.
 
 The historical 4e close-out records lint, 3,853 unit tests passing with nine skips, 22 desktop end-to-end tests passing, release-content verification and a clean range secret scan. The desktop run included the real chat page badge and reload test. [Coverage](COVERAGE.md) and the [validation strategy](70-VALIDATION.md) are the historical requirement and test maps. The strategy's draft sign-off is separate from the results recorded here.
 
-## Fresh verification
+## Automated verification at `99373e04`
 
 Node 24.22.3. Offline lockfile install with lifecycle scripts disabled, followed by `npm run compile` and the repository test runner under the shared lock and the 6 GB systemd cap. **470 passed, zero failed, zero skipped.**
 
