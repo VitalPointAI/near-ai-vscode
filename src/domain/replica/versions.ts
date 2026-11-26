@@ -27,7 +27,7 @@ import { PRODUCT_CELL_REFUSALS, pinProblem } from './productCells';
 import type { PinCandidate } from './productCells';
 import type { DecisionAct, DecisionClass, DecisionOutcome, DecisionResult } from './decisions';
 import type { FamilyReducer, FoldView, ReduceOutcome } from './reducers';
-import type { RosterView } from './rosterView';
+import type { ReplicaContext, RosterView } from './rosterView';
 import type { TextState } from './textFold';
 import type { VerifiedEntry } from './verify';
 import { isRecord } from '../team/validate';
@@ -242,13 +242,13 @@ function refused(reason: VersionRefusalReason): ReduceOutcome {
 }
 
 // tooLarge: the blob is the named one and its sealed length is over the state limit, so it is refused without being opened.
-function readBlobText(view: FoldView, entry: VerifiedEntry, blobHash: string): { ok: true; text: string; header: Record<string, unknown> } | { ok: false; hold: boolean; tooLarge?: true } {
-  const blob = view.ctx.blobs(blobHash);
+export function readVersionBlob(ctx: ReplicaContext, entry: VerifiedEntry, blobHash: string): { ok: true; text: string; header: Record<string, unknown> } | { ok: false; hold: boolean; tooLarge?: true } {
+  const blob = ctx.blobs(blobHash);
   if (blob === undefined || blobBytesHash(blob) !== blobHash) return { ok: false, hold: true };
   // The size gate (31-RESEARCH new defect 1, D-43), from the base64url length and before the key is fetched or the blob decrypted. The blob matched
   // its name, so the answer does not depend on which copy this machine holds.
   if (!sealedBlobWithin(blob, MAX_STATE_BYTES)) return { ok: false, hold: false, tooLarge: true };
-  const key = view.ctx.keys(entry.header.stream, entry.header.epoch);
+  const key = ctx.keys(entry.header.stream, entry.header.epoch);
   if (key === undefined) return { ok: false, hold: true };
   const opened = openBlob(key, entry.header.stream, entry.header.epoch, blob);
   if (opened === undefined) return { ok: false, hold: false };
@@ -301,7 +301,7 @@ function checkProposal(state: VersionsState, product: ProductEntry, entry: Verif
     const problem = pinProblem(entry.header.stream, data.pins, pinCandidates(state), (citing, cited) => view.ctx.cellOrder?.(citing, cited) === true);
     if (problem !== undefined) return refused(problem);
   }
-  const read = readBlobText(view, entry, data.textBlob);
+  const read = readVersionBlob(view.ctx, entry, data.textBlob);
   if (!read.ok) return read.hold ? held('missing-blob') : refused(read.tooLarge === true ? 'too-large' : 'bad-blob');
   const pins = data.pins.map((pin) => ({ product: pin.product, hash: pin.hash }));
   if (replicaVersionHash(read.text, pins) !== data.hash) return refused('hash-mismatch');

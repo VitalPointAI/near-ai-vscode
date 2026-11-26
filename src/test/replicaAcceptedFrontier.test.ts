@@ -3,9 +3,12 @@ import test from 'node:test';
 import { buildFrontierMembership, frontierRoot, frontierSigningBytes, verifiesFrontierCustody, verifiesFrontierMembership } from '../domain/replica/acceptedFrontier';
 import type { FrontierLeaf, FrontierStatement } from '../domain/replica/acceptedFrontier';
 
+import { openAcceptedFrontier } from '../domain/replica/acceptedFrontier';
+import { sealBlob } from '../domain/replica/entry';
 import { grantHash } from '../domain/replica/cellKeys';
 import { accessRevisionId, buildAccessCommitment } from '../domain/replica/rotationProof';
 import { SCALE_PRESETS } from '../domain/gate/labels';
+import type { RosterWorld } from './helpers/replicaRosterWorld';
 import { createRosterWorld, INVITE_EXPIRES } from './helpers/replicaRosterWorld';
 
 const hash = (char: string) => char.repeat(64);
@@ -47,7 +50,7 @@ test('frontier membership checks exact sequence occupancy, counts and bounded pa
   assert.equal(empty.proof(first), undefined);
 });
 
-test('custody requires the selected fence and evaluates the device at that fence after a handover', () => {
+function custodyFixture(inventory: (world: RosterWorld, cell: string, at: string) => readonly FrontierLeaf[] = () => [first]) {
   const world = createRosterWorld();
   const cell = '2'.repeat(32);
   const incoming = world.device('next-custodian', 'mbr-next');
@@ -61,11 +64,12 @@ test('custody requires the selected fence and evaluates the device at that fence
     seat: 'j2-chief', roles: ['member'], clearance, device: incoming.descriptor(2), agentSeats: [] }, invited.hash);
   const grant = world.grant(world.lead, { cell, to: [world.lead, incoming], roster: admitted.hash });
   const pre = world.rosterEntry(world.lead, 'cell.create', { cell, epoch: 1, grant: grantHash(grant) }, admitted.hash);
+  const leaves = inventory(world, cell, pre.hash);
   const fence = world.rosterEntry(world.lead, 'roster.require', { features: ['cell-access@1'] }, pre.hash);
-  const contents = buildFrontierMembership([first]);
+  const contents = buildFrontierMembership(leaves);
   assert.ok(contents);
   const payload: FrontierStatement = { version: 1, project: world.project, genesis, stream: cell, before: pre.hash,
-    requirement: fence.hash, heads: [{ writer: first.writer, sequence: 0, hash: first.hash }], membership: contents.commitment };
+    requirement: fence.hash, heads: leaves.flatMap((leaf) => leaf.kind === 'entry' ? [{ writer: leaf.writer, sequence: leaf.sequence, hash: leaf.hash }] : []), membership: contents.commitment };
   const root = frontierRoot(payload);
   assert.ok(root);
   const id = accessRevisionId(world.project, null, fence.hash, 'cell.access.commit', {});
@@ -86,6 +90,11 @@ test('custody requires the selected fence and evaluates the device at that fence
   const context = { roster, opening, pin: { project: world.project, genesis }, accessEntry: selected.hash,
     historicalPolicyAt: (stream: string, at: string, epoch: number) =>
       stream === cell && at === pre.hash && epoch === 1 ? { label, context: within } : undefined };
+  return { world, cell, incoming, context, id, cells, signed, payload, after, contents };
+}
+
+test('custody requires the selected fence and evaluates the device at that fence after a handover', () => {
+  const { world, cell, incoming, context, id, cells, signed, payload, after } = custodyFixture();
   assert.equal(verifiesFrontierCustody(signed(world.lead), context), true);
   assert.equal(verifiesFrontierCustody(signed(incoming), context), false);
   assert.equal(verifiesFrontierCustody(signed(world.lead), { ...context, historicalPolicyAt: () => undefined }), false);
@@ -98,4 +107,54 @@ test('custody requires the selected fence and evaluates the device at that fence
   assert.equal(verifiesFrontierCustody({
     payload: mismatched, writer: world.lead.writer, signature: world.lead.signer.sign(frontierSigningBytes(mismatched, world.lead.writer))
   }, context), false);
+});
+
+test('a read-only frontier requires every signed nested reference after opening the overflow body', () => {
+  const fixture = (commitNested: boolean) => {
+    const result = custodyFixture((world, cell, at) => {
+      const nested = sealBlob(world.epochKeyOf(cell, 1), cell, 1, Buffer.from(JSON.stringify({ text: 'Archived text', header: {} })));
+      const written = world.write(world.lead, { stream: cell, kind: 'version.propose', roster: at,
+        data: { product: 'archive-fixture', hash: hash('a'), textBlob: nested.hash, snapshot: Buffer.alloc(13_000).toString('base64url'), pins: [] } });
+      const overflow = [...world.blobs.values()].at(-1);
+      assert.ok(overflow);
+      world.blobs.set(nested.hash, nested);
+      const leaves: FrontierLeaf[] = [
+        { kind: 'entry', writer: written.writer, sequence: written.seq, hash: written.hash },
+        { kind: 'blob', entry: written.hash, hash: overflow.hash }
+      ];
+      if (commitNested) leaves.push({ kind: 'blob', entry: written.hash, hash: nested.hash });
+      return leaves;
+    });
+    const { world, cell, contents, signed, context } = result;
+    const entries = world.entries.filter((entry) => entry.header.stream === cell);
+    const { heads } = result.payload;
+    const blobs = [...world.blobs.values()];
+    const leaves: FrontierLeaf[] = [
+      ...heads.map((head) => ({ kind: 'entry' as const, ...head })),
+      ...blobs.map((blob) => ({ kind: 'blob' as const, entry: heads[0].hash, hash: blob.hash }))
+    ];
+    const proofs = leaves.flatMap((leaf) => {
+      const proof = contents.proof(leaf);
+      return proof === undefined ? [] : [{ leaf, proof }];
+    });
+    const file = { signed: signed(world.lead), entries, blobs: commitNested ? blobs : blobs.slice(0, 1), proofs };
+    const complete = { ...context, historicalKey: (stream: string, epoch: number) => stream === cell && epoch === 1 ? world.epochKeyOf(cell, 1) : undefined };
+    return { file, complete };
+  };
+  const { file, complete } = fixture(true);
+  assert.equal(file.blobs.length, 2);
+  const opened = openAcceptedFrontier(file, complete);
+  assert.equal(opened.status, 'ready');
+  if (opened.status === 'ready') {
+    assert.equal(opened.entries.length, 1);
+    assert.equal(opened.blobs.length, 2);
+    assert.equal(Object.isFrozen(opened.entries[0]), true);
+  }
+  assert.equal(openAcceptedFrontier(JSON.parse(JSON.stringify(file)), complete).status, 'ready');
+  assert.equal(openAcceptedFrontier({ ...file, blobs: file.blobs.slice(0, 1) }, complete).status, 'waiting');
+  assert.equal(openAcceptedFrontier(file, { ...complete, historicalKey: () => undefined }).status, 'waiting');
+
+  const omitted = fixture(false);
+  assert.equal(verifiesFrontierCustody(omitted.file.signed, omitted.complete), true);
+  assert.equal(openAcceptedFrontier(omitted.file, omitted.complete).status, 'refused');
 });

@@ -5,13 +5,21 @@ import type { DominanceContext } from '../gate/dominance';
 import { parseClearance, parseLabel } from '../gate/labels';
 import { canonicalBytes, verifySignature } from '../team/canonical';
 import { isRecord } from '../team/validate';
-import { HASH_PATTERN, STREAM_ID_PATTERN } from './entry';
+import { BLOB_MAX_BYTES, GENESIS_PREV, HASH_PATTERN, SEALED_OVERHEAD, STREAM_ID_PATTERN, blobBytesHash, entryHash, openBlob } from './entry';
+import type { SealedBlob, SealedEntry } from './entry';
+import { buildFromCompaction, inspectState } from './doc';
+import { MAX_STATE_BYTES } from './kindSchemas/doc';
 import { CELL_ACCESS_FEATURE } from './features';
-import { isRosterWriterAt } from './roster';
+import { isRosterWriterAt, rosterView } from './roster';
 import type { RosterState } from './roster';
 import { epochAt, granteesAt } from './rosterCells';
 import { deviceAt, memberAt } from './rosterMembers';
 import { verifiedCellAccess } from './rotationProof';
+import type { KeyRing, ReplicaContext } from './rosterView';
+import { sealedBlobWithin } from './updateGuard';
+import { verifyEntry } from './verify';
+import type { VerifiedEntry } from './verify';
+import { readVersionBlob } from './versions';
 
 const MAX_LEAVES = 65_536;
 
@@ -198,4 +206,119 @@ export function verifiesFrontierCustody(value: unknown, context: FrontierCustody
   const clearance = parseClearance(fields, historical.context.scales);
   const label = parseLabel(historical.label, historical.context.scales);
   return clearance.ok && label.ok && dominates(clearance.value, label.value, historical.context);
+}
+
+type FrontierArchiveResult =
+  | { status: 'waiting' | 'refused' }
+  | { status: 'ready'; entries: readonly SealedEntry[]; blobs: readonly SealedBlob[] };
+
+const WAITING = Object.freeze({ status: 'waiting' } as const);
+const REFUSED = Object.freeze({ status: 'refused' } as const);
+
+function archivedBlob(value: unknown): SealedBlob | undefined {
+  if (!closed(value, ['hash', 'bytes'])) return undefined;
+  const { hash, bytes } = value;
+  if (!isHash(hash) || typeof bytes !== 'string') return undefined;
+  const blob = { hash, bytes };
+  if (!sealedBlobWithin(blob, BLOB_MAX_BYTES - SEALED_OVERHEAD) || !/^[A-Za-z0-9_-]+$/.test(bytes) ||
+    Buffer.from(bytes, 'base64url').toString('base64url') !== bytes || blobBytesHash(blob) !== hash) return undefined;
+  return Object.freeze(blob);
+}
+
+type NestedReference = { kind: 'compaction' | 'version'; hash: string };
+function nestedReference(entry: VerifiedEntry): NestedReference | 'unsupported' | undefined {
+  const { kind } = entry.body;
+  if (kind === 'obs.segment' || kind === 'obs.coalesced') return 'unsupported';
+  if (kind !== 'doc.compact' && kind !== 'version.propose') return undefined;
+  if (!isRecord(entry.data)) return 'unsupported';
+  const hash = kind === 'doc.compact' ? entry.data.stateBlob : entry.data.textBlob;
+  if (!isHash(hash)) return 'unsupported';
+  return { kind: kind === 'doc.compact' ? 'compaction' : 'version', hash };
+}
+
+function validNested(reference: NestedReference, entry: VerifiedEntry, ctx: ReplicaContext): boolean {
+  if (reference.kind === 'version') return readVersionBlob(ctx, entry, reference.hash).ok;
+  const { stream, epoch } = entry.header;
+  const key = ctx.keys(stream, epoch);
+  const blob = ctx.blobs(reference.hash);
+  if (key === undefined || blob === undefined || !sealedBlobWithin(blob, MAX_STATE_BYTES)) return false;
+  const plain = openBlob(key, stream, epoch, blob);
+  if (plain === undefined) return false;
+  const result = inspectState(plain);
+  return !('error' in result) && result.structs.every((struct) => struct.parentOk) && buildFromCompaction(plain, []) !== undefined;
+}
+
+function completeChain(entries: readonly SealedEntry[], heads: readonly EntryHead[]): boolean {
+  const ordered = [...entries].sort((a, b) => a.header.writer === b.header.writer
+    ? a.header.seq - b.header.seq : a.header.writer < b.header.writer ? -1 : 1);
+  let offset = 0;
+  for (const head of heads) {
+    let prev = GENESIS_PREV;
+    for (let seq = 0; seq <= head.sequence; seq += 1) {
+      const sealed = ordered[offset];
+      if (sealed === undefined || sealed.header.writer !== head.writer || sealed.header.seq !== seq || sealed.header.prev !== prev) return false;
+      prev = entryHash(sealed.header);
+      offset += 1;
+    }
+    if (prev !== head.hash) return false;
+  }
+  return offset === ordered.length;
+}
+
+/** Opens private historical objects from an independently authenticated, selected file. No live store or key-settlement path is involved. */
+export function openAcceptedFrontier(file: unknown, context: FrontierCustodyContext & { historicalKey: KeyRing }): FrontierArchiveResult {
+  if (!closed(file, ['signed', 'entries', 'blobs', 'proofs']) || !isRecord(file.signed) ||
+    !validStatement(file.signed.payload) || !Array.isArray(file.entries) || !Array.isArray(file.blobs) || !Array.isArray(file.proofs) ||
+    !verifiesFrontierCustody(file.signed, context)) return REFUSED;
+  const { membership, heads, stream, before } = file.signed.payload;
+  if (file.entries.length > membership.entries || file.blobs.length > membership.blobs ||
+    file.proofs.length > membership.entries + membership.blobs) return REFUSED;
+  if (file.entries.length < membership.entries || file.proofs.length < membership.entries + membership.blobs) return WAITING;
+
+  const proofs = new Set<string>();
+  const leaves: FrontierLeaf[] = [];
+  for (const row of file.proofs) {
+    if (!closed(row, ['leaf', 'proof']) || !validLeaf(row.leaf) || !verifiesFrontierMembership(membership, row.leaf, row.proof)) return REFUSED;
+    const hash = leafDigest(row.leaf);
+    if (proofs.has(hash)) return REFUSED;
+    proofs.add(hash);
+    leaves.push(row.leaf);
+  }
+  const canonical = buildFrontierMembership(leaves);
+  if (canonical?.commitment.root !== membership.root) return REFUSED;
+
+  const blobs = new Map<string, SealedBlob>();
+  for (const value of file.blobs) {
+    const blob = archivedBlob(value);
+    if (blob === undefined || blobs.has(blob.hash)) return REFUSED;
+    blobs.set(blob.hash, blob);
+  }
+  const ctx: ReplicaContext = { roster: rosterView(context.roster), keys: context.historicalKey, blobs: (hash) => blobs.get(hash), now: new Date(0) };
+  const foundBlobs = new Set<string>();
+  const entries: SealedEntry[] = [];
+  const prefixPosition = ctx.roster.rosterPosition(before);
+  if (prefixPosition === undefined) return REFUSED;
+  for (const value of file.entries) {
+    if (!closed(value, ['header', 'body']) || typeof value.body !== 'string') return REFUSED;
+    const checked = verifyEntry(value, ctx);
+    if (checked.status === 'held') return checked.reason === 'missing-blob' || checked.reason === 'missing-key' ? WAITING : REFUSED;
+    if (checked.status !== 'verified' || checked.entry.keep !== undefined) return REFUSED;
+    const { header, hash, body } = checked.entry;
+    if (header.stream !== stream || (ctx.roster.rosterPosition(body.roster) ?? Infinity) > prefixPosition ||
+      !proofs.delete(leafDigest({ kind: 'entry', writer: header.writer, sequence: header.seq, hash }))) return REFUSED;
+
+    const nested = nestedReference(checked.entry);
+    if (nested === 'unsupported') return REFUSED;
+    const referred = new Set([body.blob, nested?.hash]);
+    for (const ref of referred) {
+      if (ref === undefined) continue;
+      if (!proofs.delete(leafDigest({ kind: 'blob', entry: hash, hash: ref }))) return REFUSED;
+      if (!blobs.has(ref)) return WAITING;
+      foundBlobs.add(ref);
+    }
+    if (nested !== undefined && !validNested(nested, checked.entry, ctx)) return REFUSED;
+    entries.push(Object.freeze({ header: Object.freeze({ ...header, body: Object.freeze({ ...header.body }) }), body: value.body }));
+  }
+  if (proofs.size !== 0 || foundBlobs.size !== blobs.size || !completeChain(entries, heads)) return REFUSED;
+  return Object.freeze({ status: 'ready', entries: Object.freeze(entries), blobs: Object.freeze([...blobs.values()]) });
 }
