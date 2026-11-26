@@ -1095,6 +1095,55 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   }, { stream: unaffected });
   assert.ok('ok' in written);
   assert.equal(written.built.entry.header.writer, writerIdOf(session.publicKey));
+
+  const runFinish = async (pending: NonNullable<typeof draft>, action: string) => {
+    const method = Reflect.get(hosted, 'finishHostedCell');
+    return method === undefined ? { refused: 'action-required' } :
+      await Reflect.apply(method, hosted, [pending, action, (_roster: RosterState, cell: string) => cell === part.cell ? part : undefined]);
+  };
+  confirmed = 'fictional-reviewed-finish';
+  const countBeforeFinish = signedActions.length;
+  assert.equal((await runFinish(draft, confirmed)).refused, 'action-required');
+  assert.equal(signedActions.length, countBeforeFinish);
+  approvedPayload = draft.intent.actionBytes();
+  let finishSynced = false;
+  setFolderSyncProbe((dir) => {
+    if (path.basename(dir) !== 'access-evidence') return;
+    finishSynced = true;
+    lead.at.clock.now = new Date(expires);
+  });
+  try {
+    const ended = await runFinish(draft, confirmed);
+    assert.equal(ended.refused, 'action-required');
+  } finally {
+    setFolderSyncProbe(undefined);
+  }
+  assert.equal(finishSynced, true, 'the reviewed Finish reaches the checked access sidecar');
+  assert.equal((await head(hosted)).hash, committed.hash);
+  assert.equal(hosted.keys.holds(part.cell, 2), false);
+  assert.ok(signedActions.slice(countBeforeFinish).length >= 3);
+  assert.ok(signedActions.slice(countBeforeFinish).every((id) => id === confirmed));
+
+  expires += 1000;
+  confirmed = 'fictional-second-reviewed-finish';
+  const fresh = await head(hosted);
+  const nextDraft = prepareHostedFinish(hosted, fresh.roster, part, undefined, lead.at.clock.now);
+  assert.ok(nextDraft);
+  approvedPayload = nextDraft.intent.actionBytes();
+  const ended = await runFinish(nextDraft, confirmed);
+  assert.equal(ended.ok, true, 'one exact authorized cell commits');
+  const atCommit = signedActions.length;
+  assert.equal((await runFinish(nextDraft, confirmed)).refused, 'action-required');
+  assert.equal(signedActions.length, atCommit);
+  const reopened = project(await ReplicaProject.open(lead.at.root, deps));
+  const recovered = await head(reopened);
+  assert.equal(recovered.hash, ended.hash);
+  assert.equal(recovered.roster.accessGrants.get(part.cell)?.decision, 'continues');
+  assert.deepEqual(reopened.keys.epochKey(part.cell, 2), nextDraft.epochKey());
+  assert.ok('ok' in await reopened.appendOwn('doc.client', {
+    product: 'intel-estimate', clientId: clientIdOf(slot, 1), actor: { kind: 'person' }
+  }, { stream: unaffected }));
+
 });
 
 test('managed clearance reduction commits decisions using the lead’s custom scale mapping', async () => {
