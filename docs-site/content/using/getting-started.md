@@ -33,23 +33,26 @@ no Docker changes. If your shell says `node` is missing, install the supported N
 node scripts/launch-local-workbench.mjs --check
 ```
 
-To start the Workbench, pass the exact approved image reference for the platform the check reports.
-The current `sterling-image.txt` supplies the Linux x86-64 release. A signed Linux ARM64 release image
-is pending.
+On the [releases page](https://github.com/VitalPointAI/near-ai-vscode/releases), open the approved
+release and copy the image reference from `sterling-image.txt`. The current file points to the
+Linux x86-64 image. A signed Linux ARM64 release image is pending.
+
+On a fresh workstation, use `--repair` so the launcher can download that exact image if needed.
+Replace the example value of `IMAGE` with the reference you copied.
 
 ```bash
 IMAGE='ghcr.io/vitalpointai/near-ai-vscode@sha256:REPLACE_WITH_RELEASE_DIGEST'
-node scripts/launch-local-workbench.mjs --image "$IMAGE"
+node scripts/launch-local-workbench.mjs --image "$IMAGE" --repair
 ```
 
-The launcher checks the host architecture, runtime and image before starting a container. The image
-must already be local. Add `--repair` to allow it to fetch that exact digest if it is missing. If the
-launcher reports a Docker install, upgrade or access requirement, resolve it through your host's
-administrator or software manager. Open the URL the launcher prints after the health check
-succeeds, then [set up your first project](#set-up-your-first-project).
+Open the URL the launcher prints after the health check succeeds, then
+[set up your first project](#set-up-your-first-project). If the launcher reports a Docker install,
+upgrade or access requirement, resolve it through your administrator or software manager.
 
-To stop the Workbench, run `docker stop sterling-local-workbench`. To start it again, rerun the
-same launcher command with the same image digest. It reuses the container and workspace volume.
+To stop the Workbench, run `docker stop sterling-local-workbench`. To restart it or launch with an
+image that is already available locally, set `IMAGE` to the same approved reference and run
+`node scripts/launch-local-workbench.mjs --image "$IMAGE"`. The launcher reuses the container and
+its workspace volume when they already exist.
 
 ### Start manually
 
