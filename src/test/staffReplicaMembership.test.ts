@@ -1277,7 +1277,7 @@ test('private founding file waits through reopening for the matching signed rost
 test('normal managed catch-up keeps an unaffected cell writable with matching proofs and resumes after a delay', async () => {
   const lead = await founded('managed-catchup');
   const compartments = ['KESTREL', 'OSPREY', 'RAVEN', 'LARK'];
-  const clearance = { ...CLEARED_X, compartments };
+  const clearance = { ...CLEARED_X, compartments: [...compartments].sort() };
   ok(await updateMember(lead.host, { member: 'mbr-lead', clearance }), 'declare lead clearance');
   const peer = await bringIn(lead, 'continuity-peer', 'Mo Analyst', clearance);
   assert.ok('ok' in await lead.p.appendOwn('roster.require', { features: ['wrap@2'] }));
@@ -1292,7 +1292,7 @@ test('normal managed catch-up keeps an unaffected cell writable with matching pr
   const offer = { recipient: peer.writer, continuity: [base] };
   const revise = async (label: typeof LABEL_X) => {
     const placed = await ensureLabelCell(lead.host, label);
-    assert.ok(placed.ok && placed.granted.includes(peer.writer));
+    assert.ok(placed.ok && placed.granted.includes(peer.writer), JSON.stringify(placed));
     const authorization = await head(lead.p);
     const selected = (await lead.p.welcomeFor(peer.writer, [])).roster.find((entry) => entryHash(entry.header) === authorization.hash);
     const packet = await lead.p.sealManagedHandoff(offer);
