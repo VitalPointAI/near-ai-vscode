@@ -6,6 +6,9 @@
  */
 import type { ServiceResult } from './service-result.js';
 
+export const MANAGED_KEY_FILE_EXTENSION = '.near-staff-keys';
+export const MANAGED_KEY_FILE_MAX_BYTES = 12 * 1024 * 1024;
+
 export const STAFF_SHARE_PATH = '/services/sterling-staff-share';
 export const StaffShareServer = Symbol('StaffShareServer');
 
@@ -39,11 +42,21 @@ export interface ShareView {
   readonly lead: boolean;
   readonly people: readonly SharePerson[];
   readonly parts: readonly SharePart[];
+  readonly managedKeyFiles?: readonly ManagedKeyFileChoice[];
+  readonly canOpenManagedKeyFile?: true;
   readonly keyChanges?: readonly Pick<SharePart, 'cell' | 'label'>[];
   readonly server?: ShareServer;
   /** "Show others what I am working on" (D-21), on unless the person turned it off. */
   readonly showWork: boolean;
 }
+
+export interface ManagedKeyFileChoice {
+  readonly cell: string;
+  readonly label: string;
+  readonly recipients: readonly { readonly writer: string; readonly label: string }[];
+}
+export interface SaveManagedKeyFileInput { readonly project: string; readonly cell: string; readonly recipient: string; readonly repeat?: string }
+export interface OpenManagedKeyFileInput { readonly project: string; readonly text: string }
 
 /** An uncommitted action review page. */
 export interface ShareConfirmation { readonly requestId: string; readonly url: string }
@@ -53,6 +66,7 @@ export interface ShareOutcome {
   readonly confirmation?: ShareConfirmation;
   readonly message: string;
   readonly notices: readonly string[];
+  readonly fileRepeat?: string;
   readonly file?: { readonly name: string; readonly text: string };
   readonly safetyWords?: readonly string[];
   /** Conversion only: each product left out with the way out (conversionNotice.ts, D-31). */
@@ -90,6 +104,8 @@ export interface StaffShareServer {
   /** Admits the person of a join request; refused unless the lead confirmed the six words matched. */
   admit(input: { readonly request: string; readonly codeMatched: boolean }): Promise<ServiceResult<ShareOutcome>>;
   remove(input: { readonly member: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>>;
+  saveManagedKeys(input: SaveManagedKeyFileInput): Promise<ServiceResult<ShareOutcome>>;
+  openManagedKeys(input: OpenManagedKeyFileInput): Promise<ServiceResult<ShareOutcome>>;
   finishKeyChange(input: { readonly cell: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>>;
   /** Gives your organization's server one part; refused unless the lead confirmed STAFF_SHARE_TEXT.tradeOff, shown word for word first. */
   grant(input: { readonly cell: string; readonly confirmed: boolean }): Promise<ServiceResult<ShareOutcome>>;
@@ -125,6 +141,16 @@ export const STAFF_SHARE_TEXT = {
   finishRemoval: 'Finish removal',
   removalReady: 'Review and confirm the removal, then return here to finish it.',
   removalNeedsReview: 'Start the removal again to confirm it for the current shared work.',
+  managedKeyFiles: 'Key files',
+  managedKeyRecipient: 'Device',
+  saveManagedKeys: 'Save key file',
+  repeatManagedKeys: 'Save the same key file again',
+  openManagedKeys: 'Open a key file',
+  managedKeyFileTooLarge: 'This key file is too large to open.',
+  managedKeyFileProjectChanged: 'Open the shared work you selected and try the key file again.',
+  managedKeyFileUnavailable: 'A key file is unavailable for this part and device in the current shared work.',
+  managedKeyFileRepeatUnavailable: 'This copy is no longer available. Select the part and device to prepare a new file.',
+  managedKeyFileSaved: 'Give this key file directly to the selected device’s owner.',
   keyChanges: 'Pending key changes',
   startKeyChange: 'Start key change',
   reviewKeyChange: 'Review key change',

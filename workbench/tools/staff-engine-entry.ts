@@ -5,10 +5,14 @@
 // person's key store. 33-24 adds the replica project and the live replicator here, with the decode worker and the vendored Yjs they load by path.
 import { labelKeyShownWithMarkings as finishLabel } from '../../src/domain/gate/labelAlgebra';
 import { multiUserNoticeLines } from '../../src/domain/staff/multiUser';
+import { deviceAt, memberAt as managedFileMemberAt } from '../../src/domain/replica/rosterMembers';
+import { isRosterWriterAt as canSendManagedFile } from '../../src/domain/replica/roster';
 import type { RosterState } from '../../src/domain/replica/roster';
 import { cellsAt as finishCellsAt, gateOf } from '../../src/staff/replica/membership';
 import type { CellInfo, SharedProjectHost } from '../../src/staff/replica/membership';
-import { pendingManagedCells, prepareHostedFinish } from '../../src/staff/replica/managedRecovery';
+import { managedRecipients, pendingManagedCells, prepareHostedFinish, selectedManagedAccess } from '../../src/staff/replica/managedRecovery';
+
+import { readManagedKeyFile } from '../../src/staff/replica/managedGrantDelivery';
 
 export { certifiedWriter, isPersonKeyKind, PERSON_KEY_KINDS, SESSION_DEFAULT_LIFETIME_MS, SESSION_MAX_LIFETIME_MS, sessionBindingBytes, sessionCertifyData } from '../../src/domain/replica/sessionKeys';
 export { writerIdOf } from '../../src/domain/replica/entry';
@@ -95,4 +99,37 @@ export function prepareWorkbenchFinish(host: SharedProjectHost, roster: RosterSt
         { ok: true, message: 'This part now uses its new key.', notices: multiUserNoticeLines() };
     }
   };
+}
+
+export function workbenchManagedFileChoices(host: SharedProjectHost, roster: RosterState) {
+  const { project } = host;
+  const head = roster.positions.length - 1;
+  const selected = selectedManagedAccess(roster, project.deviceWriter);
+  if (selected === undefined) return [];
+  return finishCellInfo(host, roster).flatMap((info) => {
+    const evidence = selected.cells.find((item) => item.evidence.cell === info.cell && item.decision === 'continues');
+    if (!info.known || evidence === undefined) return [];
+    const recipients = managedRecipients(roster, evidence).flatMap((writer) => {
+      const device = deviceAt(roster.members, writer, head);
+      const member = device?.kind === 'person' ? managedFileMemberAt(roster.members, device.member, head) : undefined;
+      return member === undefined || device === undefined ? [] : [{ writer, label: device.slot === undefined ? member.name : `${member.name}, device ${device.slot}` }];
+    });
+    return recipients.length === 0 ? [] : [{ cell: info.cell, label: pendingPartLabel(host, info), recipients }];
+  });
+}
+
+export async function exportWorkbenchManagedFile(host: SharedProjectHost, cell: string, recipient: string, repeat?: string) {
+  const { project } = host;
+  const { roster } = await project.state();
+  if (!canSendManagedFile(roster, project.deviceWriter, roster.positions.length - 1)) return undefined;
+  const info = finishCellInfo(host, roster).find((part) => part.cell === cell && part.known);
+  return info === undefined ? undefined : project.sealManagedHandoff({ cell, recipient, info, routing: host.routing }, 'file', repeat);
+}
+
+export async function openWorkbenchManagedFile({ project }: SharedProjectHost, text: unknown) {
+  const packet = readManagedKeyFile(text);
+  if (packet === undefined) return { ok: false, message: 'This file is not a key file SovAI can open.', notices: [] };
+  const result = await project.ingestManagedGrantDelivery(packet);
+  return 'refused' in result ? { ok: false, reason: result.refused, message: result.message, notices: [] } :
+    { ok: true, message: 'The key file was checked. The key becomes available when this computer has the matching shared record.', notices: [] };
 }

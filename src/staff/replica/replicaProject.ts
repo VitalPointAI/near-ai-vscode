@@ -49,7 +49,7 @@ import { deviceKeys, ringDevice, storeDeps, wrapV2AtCreation } from './projectDe
 import type { DeviceKeys, LocalDevice, ReplicaProjectDeps } from './projectDevice';
 import { canWriteCurrentEpoch } from './wrapPlan';
 import { isSupersededManagedContinuity, previewManagedContinuity, preparePlacedManagedHandoff } from './managedGrantDelivery';
-import type { ManagedHandoff } from './managedGrantDelivery';
+import type { ManagedHandoff, ManagedKeyFile } from './managedGrantDelivery';
 import { ingestManagedDelivery, promoteManagedDeliveries } from './managedGrantIntake';
 import type { ManagedPacket, ManagedStagedSend } from './managedSync';
 import { authorizeHostedFinish } from './managedRecovery';
@@ -583,7 +583,8 @@ export class ReplicaProject {
   }
   public sealManagedHandoff(input: ManagedHandoff): Promise<ManagedPacket | undefined>;
   public sealManagedHandoff(input: ManagedHandoff, durable: true): Promise<ManagedStagedSend | undefined>;
-  public sealManagedHandoff(input: ManagedHandoff, durable = false): Promise<ManagedPacket | ManagedStagedSend | undefined> {
+  public sealManagedHandoff(input: ManagedHandoff, durable: 'file', repeat?: string): Promise<ManagedKeyFile | undefined>;
+  public sealManagedHandoff(input: ManagedHandoff, durable: boolean | 'file' = false, repeat?: string): Promise<ManagedPacket | ManagedStagedSend | ManagedKeyFile | undefined> {
     return this.exclusive(async () => {
       const { roster } = await this.foldNow();
       if (!isRosterWriterAt(roster, this.device.writer, roster.positions.length - 1)) return undefined;
@@ -591,7 +592,9 @@ export class ReplicaProject {
       const prepared = signer === undefined ? undefined : preparePlacedManagedHandoff(roster, this.evidence.map(({ value }) => value),
         input, this.now(), { authority: this.device.writer, signer });
       if (!durable || prepared === undefined) return prepared?.seal();
-      return this.store.managedHandoffs(this.projectId, this.device.writer, () => this.now()).stage(prepared, await this.store.appendSnapshot());
+      const handoffs = this.store.managedHandoffs(this.projectId, this.device.writer, () => this.now());
+      const snapshot = await this.store.appendSnapshot();
+      return durable === 'file' ? handoffs.exportFile(prepared, snapshot, repeat) : handoffs.stage(prepared, snapshot);
     });
   }
   public supersededManagedContinuity(value: unknown): Promise<boolean> {
@@ -892,7 +895,6 @@ export class ReplicaProject {
     const refreshed = await this.store.refresh();
     if (!('ok' in refreshed)) throw new ReplicaProjectError(storeRefused(refreshed));
   }
-
   /** The blobs an entry's body names, when this device can open it: the body's own blob and a compaction's state blob. */
   private citedBlobs(entry: SealedEntry): string[] {
     const key = this.keys.epochKey(entry.header.stream, entry.header.epoch);
@@ -948,7 +950,6 @@ export class ReplicaProject {
     }
     return { roster, fold: this.foldState.result };
   }
-
   /** The stored checkpoints the witness of an admitted hub trusts (foldCheckpoints.ts); the witness memory is read once, at the first fold. */
   private async usableCheckpoints(roster: RosterState): Promise<SignedCheckpoint[]> {
     this.stored ??= (await this.store.checkpoints()).checkpoints.map((item) => item.signed as SignedCheckpoint);
@@ -995,7 +996,6 @@ export class ReplicaProject {
       keys: (stream, epoch) => this.keys.epochKey(stream, epoch) ?? (stream === this.anchor.project ? reading?.get(epoch) : undefined),
       blobs: (hash) => this.blobCache.get(hash) };
   }
-
   /** Settle the roster and its placed keys in turns (CR-01, D-44). Temporary reading keys are never used for writes. */
   private async foldRosterAndKeys(entries: readonly SealedEntry[]): Promise<RosterState> {
     const project = this.anchor.project;

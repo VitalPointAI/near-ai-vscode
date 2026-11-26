@@ -1,8 +1,8 @@
-import { HASH_PATTERN } from '../../domain/replica/entry';
-import { canonicalize } from '../../domain/team/canonical';
+import { HASH_PATTERN, sha256Hex } from '../../domain/replica/entry';
+import { canonicalBytes, canonicalize } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
-import { deliveryPacket } from './managedGrantDelivery';
-import type { PreparedManagedHandoff } from './managedGrantDelivery';
+import { MANAGED_KEY_FILE_NAME, deliveryPacket, managedKeyFile, readManagedKeyFile } from './managedGrantDelivery';
+import type { ManagedKeyFile, PreparedManagedHandoff } from './managedGrantDelivery';
 import { managedHandoffFile, MAX_HANDOFF_ATTEMPTS, nextHandoffRetry, openManagedHandoffInbox, validTime } from './managedHandoffInbox';
 import type { ManagedHandoffFiles } from './managedHandoffInbox';
 import type { ManagedStagedSend } from './managedSync';
@@ -39,11 +39,55 @@ function readSends(value: unknown): Send[] | undefined {
   return new Set(rows.map(({ id }) => id)).size === rows.length && new Set(rows.map(({ handle }) => handle)).size === rows.length ? rows : undefined;
 }
 
+interface FileExport { id: string; handle: string; reservedAt: number; expiresAt: number; text: string; digest: string }
+
+function fileDigest({ id, handle, reservedAt, expiresAt, text }: Omit<FileExport, 'digest'>): string {
+  return sha256Hex(canonicalBytes([id, handle, reservedAt, expiresAt, text]));
+}
+
+function isFileExport(value: unknown): value is FileExport {
+  if (!isRecord(value) || Object.keys(value).length !== 6 || typeof value.id !== 'string' || !HASH_PATTERN.test(value.id) ||
+      typeof value.handle !== 'string' || !HASH_PATTERN.test(value.handle) || !validTime(value.reservedAt) ||
+      !validTime(value.expiresAt) || value.expiresAt <= value.reservedAt || typeof value.text !== 'string' ||
+      typeof value.digest !== 'string' || !HASH_PATTERN.test(value.digest)) return false;
+  const file = readManagedKeyFile(value.text);
+  return file?.handle === value.handle && fileDigest({ id: value.id, handle: value.handle, reservedAt: value.reservedAt,
+    expiresAt: value.expiresAt, text: value.text }) === value.digest;
+}
+
+function readFileExports(value: unknown): FileExport[] | undefined {
+  if (!isRecord(value) || Object.keys(value).length !== 2 || value.v !== 1 || !Array.isArray(value.rows) ||
+      value.rows.length > MAX_ROWS || !value.rows.every(isFileExport)) return undefined;
+  const rows: FileExport[] = value.rows;
+  return new Set(rows.map(({ id }) => id)).size === rows.length && new Set(rows.map(({ handle }) => handle)).size === rows.length ? rows : undefined;
+}
+
 export function openManagedHandoffs(
   store: string, project: string, writer: string, clock: () => Date, files: ManagedHandoffFiles,
   verifySnapshot: (expected: string) => Promise<void>
 ) {
   const update = managedHandoffFile(store, project, writer, clock, files, 'outbox', MAX_BYTES, readSends);
+  const updateFiles = managedHandoffFile(store, project, writer, clock, files, 'file-export', MAX_BYTES, readFileExports);
+
+  function exportFile(plan: PreparedManagedHandoff, snapshot: string, repeat?: string): Promise<ManagedKeyFile | undefined> {
+    return updateFiles((rows, now) => {
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (rows[index].expiresAt <= now) rows.splice(index, 1);
+      }
+      const existing = rows.find(({ id }) => id === plan.id);
+      if (existing !== undefined) {
+        if (existing.reservedAt > now || existing.expiresAt > plan.expiresAt || (repeat !== undefined && repeat !== existing.handle)) return undefined;
+        return { name: MANAGED_KEY_FILE_NAME, text: existing.text, repeat: existing.handle };
+      }
+      if (repeat !== undefined || rows.length >= MAX_ROWS || plan.expiresAt <= now) return undefined;
+      const sealed = plan.seal();
+      if (sealed === undefined) return undefined;
+      const file = managedKeyFile(sealed);
+      const row = { id: plan.id, handle: sealed.handle, reservedAt: now, expiresAt: plan.expiresAt, text: file.text };
+      rows.push({ ...row, digest: fileDigest(row) });
+      return file;
+    }, () => verifySnapshot(snapshot));
+  }
 
   function stage(plan: PreparedManagedHandoff, snapshot: string): Promise<ManagedStagedSend | undefined> {
     return update((rows, now): ManagedStagedSend | undefined => {
@@ -92,5 +136,5 @@ export function openManagedHandoffs(
     });
   }
 
-  return { inbox: () => openManagedHandoffInbox(store, project, writer, clock, files), stage };
+  return { inbox: () => openManagedHandoffInbox(store, project, writer, clock, files), stage, exportFile };
 }

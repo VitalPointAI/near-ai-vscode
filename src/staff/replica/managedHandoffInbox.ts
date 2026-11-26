@@ -68,9 +68,9 @@ async function readRowsFile<Row>(file: string, maxBytes: number, parse: (value: 
 
 export function managedHandoffFile<Row extends { expiresAt: number }>(
   store: string, project: string, writer: string, clock: () => Date, files: ManagedHandoffFiles,
-  name: 'inbox' | 'outbox', maxBytes: number, parse: (value: unknown) => Row[] | undefined
+  name: 'inbox' | 'outbox' | 'file-export', maxBytes: number, parse: (value: unknown) => Row[] | undefined
 ) {
-  const scope = sha256Hex(canonicalBytes([name === 'inbox' ? 'near-ai/managed-handoff-inbox/1' : 'near-ai/managed-handoff-outbox/1', project, writer]));
+  const scope = sha256Hex(canonicalBytes([`near-ai/managed-handoff-${name}/1`, project, writer]));
   return function update<T>(operation: (rows: Row[], now: number) => T, check?: () => Promise<void>): Promise<T> {
     return files.locked(async () => {
       await check?.();

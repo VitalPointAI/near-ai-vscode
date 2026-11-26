@@ -16,8 +16,8 @@
  * roster change, a grant, an invitation or a join request (D-60). A refused confirmation comes back as the Staff Room's sentence with its fix.
  * Nothing here imports Theia; no log line holds a name, a key or a file.
  */
-import type { ShareJoinRequest, ShareOutcome, SharePart, SharePerson, ShareView, StaffShareServer, InviteInput } from '../../common/staff-share.js';
-import { STAFF_SHARE_TEXT } from '../../common/staff-share.js';
+import type { ShareJoinRequest, ShareOutcome, SharePart, SharePerson, ShareView, StaffShareServer, InviteInput, ManagedKeyFileChoice, OpenManagedKeyFileInput, SaveManagedKeyFileInput } from '../../common/staff-share.js';
+import { MANAGED_KEY_FILE_MAX_BYTES, STAFF_SHARE_TEXT } from '../../common/staff-share.js';
 import { actionStepUpUrl, isActionNonce } from '../../common/session-identity.js';
 import type { PendingActions } from './person-signer.js';
 import { KEY_SERVICE_TEXT } from '../../common/key-service.js';
@@ -59,6 +59,9 @@ export interface StaffShareApi {
   removeFromProject(shared: never, input: { readonly member: string }, action?: string): Promise<EngineResult>;
   managedWithdrawalActionBytes(roster: never, authority: string, input: { readonly member: string }): Buffer | undefined;
   readonly CELL_ACCESS_FEATURE: string;
+  workbenchManagedFileChoices(shared: never, roster: never): readonly ManagedKeyFileChoice[];
+  exportWorkbenchManagedFile(shared: never, cell: string, recipient: string, repeat?: string): Promise<{ name: string; text: string; repeat: string } | undefined>;
+  openWorkbenchManagedFile(shared: never, text: string): Promise<EngineResult>;
   pendingWorkbenchFinishParts(shared: never, roster: never): NonNullable<ShareView['keyChanges']>;
   prepareWorkbenchFinish(shared: never, roster: never, cell: string, now: Date): WorkbenchFinishDraft | undefined;
   grantCellToHub(shared: never, input: { readonly cell: string; readonly confirmed: boolean }): Promise<EngineResult>;
@@ -193,8 +196,11 @@ export class StaffShareService implements StaffShareServer {
         server = { hub: hub.hub, standing: hub.standing, words: engine.serverPinWords(hub.certPin), ...(address === undefined ? {} : { address: address.address }) };
       }
       const keyChanges = this.mayReviewFinish(shared) ? engine.pendingWorkbenchFinishParts(this.host(shared), roster as never) : [];
+      const managed = roster.required?.includes(engine.CELL_ACCESS_FEATURE) === true;
+      const managedKeyFiles = managed && lead ? engine.workbenchManagedFileChoices(this.host(shared), roster as never) : [];
       return ok({ state: 'shared', project: project.projectId, lead, people: people.sort((a, b) => a.name.localeCompare(b.name)), parts,
-        ...(keyChanges.length === 0 ? {} : { keyChanges }), ...(server === undefined ? {} : { server }), showWork });
+        ...(keyChanges.length === 0 ? {} : { keyChanges }), ...(server === undefined ? {} : { server }),
+        ...(managed ? { canOpenManagedKeyFile: true } : {}), ...(managedKeyFiles.length === 0 ? {} : { managedKeyFiles }), showWork });
     });
   }
 
@@ -323,6 +329,32 @@ export class StaffShareService implements StaffShareServer {
       if (result.ok) shared.live.syncNow(shared.project.projectId);
       return result.reason === 'action-required' ? refused(STAFF_SHARE_TEXT.removalNeedsReview) : outcome(result);
     });
+  }
+
+  public saveManagedKeys(input: SaveManagedKeyFileInput): Promise<ServiceResult<ShareOutcome>> {
+    return this.shared(async (shared) => {
+      if (!this.selectedManagedFileProject(shared, input.project)) return refused(STAFF_SHARE_TEXT.managedKeyFileProjectChanged);
+      if (!shared.lead) return refused(STAFF_SHARE_TEXT.notLead);
+      if (input.repeat !== undefined && !/^[0-9a-f]{64}$/.test(input.repeat)) return refused(STAFF_SHARE_TEXT.managedKeyFileRepeatUnavailable);
+      const file = await this.options.engine.exportWorkbenchManagedFile(this.host(shared), input.cell, input.recipient, input.repeat);
+      if (file === undefined) return refused(input.repeat === undefined ? STAFF_SHARE_TEXT.managedKeyFileUnavailable : STAFF_SHARE_TEXT.managedKeyFileRepeatUnavailable);
+      if (await this.options.root() !== shared.root || !this.selectedManagedFileProject(shared, input.project)) return refused(STAFF_SHARE_TEXT.managedKeyFileProjectChanged);
+      return ok({ message: STAFF_SHARE_TEXT.managedKeyFileSaved, notices: [], file: { name: file.name, text: file.text }, fileRepeat: file.repeat });
+    });
+  }
+
+  public openManagedKeys(input: OpenManagedKeyFileInput): Promise<ServiceResult<ShareOutcome>> {
+    return this.shared(async (shared) => {
+      if (!this.selectedManagedFileProject(shared, input.project)) return refused(STAFF_SHARE_TEXT.managedKeyFileProjectChanged);
+      if (typeof input.text !== 'string' || input.text.length > MANAGED_KEY_FILE_MAX_BYTES ||
+          Buffer.byteLength(input.text) > MANAGED_KEY_FILE_MAX_BYTES) return refused(STAFF_SHARE_TEXT.managedKeyFileTooLarge);
+      return outcome(await this.options.engine.openWorkbenchManagedFile(this.host(shared), input.text));
+    });
+  }
+
+  private selectedManagedFileProject(shared: Shared, project: string): boolean {
+    return shared.project.projectId === project && this.options.live() === shared.live && shared.live.project(project) === shared.project &&
+      shared.roster.required?.includes(this.options.engine.CELL_ACCESS_FEATURE) === true;
   }
 
   public finishKeyChange(input: { readonly cell: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>> {

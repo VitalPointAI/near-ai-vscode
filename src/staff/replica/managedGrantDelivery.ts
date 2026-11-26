@@ -16,7 +16,7 @@ import { matchesGrantEvidence, openGrantEvidence, readAuthoredAccessStage, readC
 import { readAccessWriteProof } from '../../domain/replica/rotationProof';
 import type { AccessWriteProof } from '../../domain/replica/rotationProof';
 import { WRAP_FEATURE, wrapFormatProblem } from '../../domain/replica/wrapFormat';
-import { canonicalBytes } from '../../domain/team/canonical';
+import { canonicalBytes, canonicalize } from '../../domain/team/canonical';
 import { isRecord } from '../../domain/team/validate';
 import { formatFor, formatForDevice, wrapDeviceAt } from './wrapPlan';
 import type { WrapCell } from './wrapPlan';
@@ -185,6 +185,22 @@ export function deliveryPacket(value: unknown): value is Packet {
       !isRecord(value.body) || Object.keys(value.body).length !== 2 || typeof value.body.hash !== 'string' || !HANDLE.test(value.body.hash) ||
       typeof value.body.bytes !== 'string' || value.body.bytes.length > MAX_BODY_TEXT || !B64.test(value.body.bytes)) return false;
   return true;
+}
+
+export const MANAGED_KEY_FILE_NAME = 'shared-keys.near-staff-keys';
+export interface ManagedKeyFile { name: string; text: string; repeat: string }
+
+export function readManagedKeyFile(text: unknown): ManagedPacket | undefined {
+  if (typeof text !== 'string' || text.length > MANAGED_PACKET_STAGE_MAX_BYTES || Buffer.byteLength(text) > MANAGED_PACKET_STAGE_MAX_BYTES) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(text); } catch { return undefined; }
+  return isRecord(value) && Object.keys(value).length === 2 && typeof value.handle === 'string' && HANDLE.test(value.handle) &&
+    deliveryPacket(value.packet) && blobBytesHash(value.packet.body) === value.packet.body.hash ? { handle: value.handle, packet: value.packet } : undefined;
+}
+
+/** One opaque file format, separate from invitation and welcome files. */
+export function managedKeyFile({ handle, packet }: ManagedPacket): ManagedKeyFile {
+  return { name: MANAGED_KEY_FILE_NAME, text: canonicalize({ handle, packet }), repeat: handle };
 }
 
 export function isManagedPacketStage(value: unknown): boolean {

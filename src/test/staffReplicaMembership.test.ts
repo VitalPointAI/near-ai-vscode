@@ -41,7 +41,7 @@ import type { SyncLocal, SyncTransport } from '../staff/replica/hubSync';
 import { ReplicaProject, genesisPinFile, isProjectRefused, syncLocalOf } from '../staff/replica/replicaProject';
 import { newEpochPages } from '../staff/replica/wrapPlan';
 import { managedIssuanceCurrent, prepareManagedIssuance, readManagedIssuance } from '../staff/replica/managedIssuance';
-import { openManagedGrantDelivery, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
+import { openManagedGrantDelivery, readManagedKeyFile, sealManagedContinuityDelivery, sealManagedGrantDelivery } from '../staff/replica/managedGrantDelivery';
 import { setFolderSyncProbe } from '../staff/staffFiles';
 import { fixedSigner } from './helpers/replicaWorld';
 import { managedRecipients, prepareHostedFinish, selectedManagedAccess } from '../staff/replica/managedRecovery';
@@ -1533,12 +1533,7 @@ test('private founding file waits through reopening for the matching signed rost
 test('a managed file repeats identical private bytes across reopening and refuses a stale repeat', async () => {
   const { lead, peer, withdrawn, cell, selected } = await foundingHandoffFixture();
   const request = { cell, recipient: peer.writer, info: { base: false, label: LABEL_X } };
-  const save = async (p: ReplicaProject, offer: typeof request, repeat?: string): Promise<{ name: string; text: string; repeat: string } | undefined> => {
-    const method = Reflect.get(p, 'sealManagedHandoffFile');
-    if (method !== undefined) return await Reflect.apply(method, p, [offer, repeat]) as { name: string; text: string; repeat: string } | undefined;
-    const sealed = await p.sealManagedHandoff(offer);
-    return sealed === undefined ? undefined : { name: 'shared-keys.near-staff-keys', text: JSON.stringify(sealed), repeat: sealed.handle };
-  };
+  const save = (p: ReplicaProject, offer: typeof request, repeat?: string) => p.sealManagedHandoff(offer, 'file', repeat);
   const first = await save(lead.p, request);
   assert.ok(first);
   assert.equal(first.name, 'shared-keys.near-staff-keys');
@@ -1548,13 +1543,32 @@ test('a managed file repeats identical private bytes across reopening and refuse
   assert.equal(repeated.text === first.text, true, 'reopening can save the exact original private file');
   assert.equal(await save(sender, { ...request, recipient: withdrawn.writer }, first.repeat), undefined);
   assert.equal(await save(sender, request, '0'.repeat(64)), undefined);
+  const cacheRoot = path.join(lead.at.root, REPLICA_DIR, 'managed-handoffs');
+  const [cache] = readdirSync(cacheRoot);
+  const cachePath = path.join(cacheRoot, cache);
+  const state = readFileSync(cachePath, 'utf8');
+  const tampered = JSON.parse(state) as { rows: { text: string }[] };
+  tampered.rows[0].text = first.text.replace(first.repeat, 'f'.repeat(64));
+  writeFileSync(cachePath, JSON.stringify(tampered));
+  try {
+    await assert.rejects(save(sender, request, first.repeat), /handoff state is unreadable/);
+  } finally {
+    writeFileSync(cachePath, state);
+  }
   const automatic = await sender.sealManagedHandoff(request, true);
   assert.ok(automatic?.state === 'queued');
   assert.notEqual(automatic.handle, first.repeat);
   const root = await stageManagedPredecessors(lead, peer, selected.hash);
   assert.ok('ok' in await peer.p.ingestForeign([root], []));
-  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(JSON.parse(first.text)));
-  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(JSON.parse(repeated.text)));
+  const receivedFile = readManagedKeyFile(first.text);
+  const copy = readManagedKeyFile(repeated.text);
+  assert.ok(receivedFile && copy);
+  assert.equal(readManagedKeyFile(JSON.stringify({ ...copy, expectedExpiry: NOW.getTime() + DAY_MS })), undefined);
+  assert.equal(isProjectRefused(await peer.p.ingestManagedGrantDelivery({ ...receivedFile, handle: automatic.handle })), true);
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(receivedFile));
+  const beforeCopy = await peer.p.heads();
+  assert.ok('ok' in await peer.p.ingestManagedGrantDelivery(copy));
+  assert.deepEqual(await peer.p.heads(), beforeCopy);
   assert.equal(peer.p.keys.holds(cell, 2), true);
 
   lead.at.clock.now = new Date(NOW.getTime() + DAY_MS);

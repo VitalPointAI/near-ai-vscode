@@ -538,17 +538,20 @@ test('Share file save and open stay bound to the selected project and exact reci
   const text = '{"handle":"fictional","packet":"ciphertext-only"}';
   const calls: string[] = [];
   let lead = true;
+  let activeRoot = root;
+  let switchWhileSaving = false;
   const project = { projectId, deviceWriter: 'e'.repeat(64), state: async () => ({
     roster: { positions: ['selected'], required: ['cell-access@1'], members: {} }, fold: {}
   }) };
   const live = { projects: () => [{ root, project: projectId }], project: () => project,
     shareContext: () => ({ deps: {}, secrets: new MemorySecrets(), globalStorageDir: root }), syncNow: () => undefined };
   const service = new StaffShareService({
-    live: () => live as never, root: async () => root,
+    live: () => live as never, root: async () => activeRoot,
     engine: { ...engine, isRosterWriterAt: () => lead,
       exportWorkbenchManagedFile: async (_host: never, cell: string, target: string, prior?: string) => {
         calls.push('save');
         if (cell !== part || target !== recipient || (prior !== undefined && prior !== repeat)) return undefined;
+        if (switchWhileSaving) activeRoot = '/fictional-different-project';
         return { name: 'shared-keys.near-staff-keys', text, repeat };
       },
       openWorkbenchManagedFile: async (_host: never, file: string) => {
@@ -558,24 +561,24 @@ test('Share file save and open stay bound to the selected project and exact reci
       }
     } as never
   });
-  const call = (name: string, input: object): Promise<ServiceResult<ShareOutcome>> => {
-    const method = Reflect.get(service, name);
-    return method === undefined ? Promise.resolve({ kind: 'refused', reason: 'No private file service' }) :
-      Reflect.apply(method, service, [input]) as Promise<ServiceResult<ShareOutcome>>;
-  };
-  assert.equal((await call('saveManagedKeys', { project: 'wrong', cell: part, recipient })).kind, 'refused');
-  assert.equal((await call('openManagedKeys', { project: 'wrong', text })).kind, 'refused');
-  assert.deepEqual(calls, []);
-  const saved = value(await call('saveManagedKeys', { project: projectId, cell: part, recipient }), 'save exact managed file');
+  assert.equal((await service.saveManagedKeys({ project: 'wrong', cell: part, recipient })).kind, 'refused');
+  assert.equal((await service.openManagedKeys({ project: 'wrong', text })).kind, 'refused');
+  assert.equal(calls.length, 0);
+  const saved = value(await service.saveManagedKeys({ project: projectId, cell: part, recipient }), 'save exact managed file');
   assert.deepEqual(saved.file, { name: 'shared-keys.near-staff-keys', text });
-  const again = value(await call('saveManagedKeys', { project: projectId, cell: part, recipient, repeat }), 'repeat exact file');
+  assert.equal(saved.fileRepeat, repeat);
+  const again = value(await service.saveManagedKeys({ project: projectId, cell: part, recipient, repeat }), 'repeat exact file');
   assert.deepEqual(again.file, saved.file);
-  assert.equal((await call('saveManagedKeys', { project: projectId, cell: part, recipient: 'f'.repeat(64), repeat })).kind, 'refused');
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient: 'f'.repeat(64), repeat })).kind, 'refused');
+  switchWhileSaving = true;
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient, repeat })).kind, 'refused');
+  activeRoot = root;
+  switchWhileSaving = false;
   lead = false;
-  assert.equal((await call('saveManagedKeys', { project: projectId, cell: part, recipient })).kind, 'refused');
-  assert.equal((await call('openManagedKeys', { project: projectId, text })).kind, 'ok');
-  assert.equal((await call('openManagedKeys', { project: projectId, text: '{}' })).kind, 'refused');
-  assert.deepEqual(calls, ['save', 'save', 'save', 'open', 'open']);
+  assert.equal((await service.saveManagedKeys({ project: projectId, cell: part, recipient })).kind, 'refused');
+  assert.equal((await service.openManagedKeys({ project: projectId, text })).kind, 'ok');
+  assert.equal((await service.openManagedKeys({ project: projectId, text: '{}' })).kind, 'refused');
+  assert.deepEqual(calls, ['save', 'save', 'save', 'save', 'open', 'open']);
 });
 
 test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {
