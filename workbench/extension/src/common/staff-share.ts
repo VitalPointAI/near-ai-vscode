@@ -1,7 +1,7 @@
 /**
  * Share with people (Phase 33 D-10, D-13, D-21, D-42, D-58; 33-27), as the browser sees it: the RPC path, the view of the open staff project's
  * sharing and the actions. Every action runs in the backend over the executed Phase 31 and 32 flows and the Phase 33 server actions; the browser
- * sends only what a person typed or chose and receives sentences, safety words and files to save. No key, token or grant crosses. Nothing here
+ * sends choices and opaque confirmation requests, and receives sentences, safety words and files to save. No key, token or grant crosses. Nothing here
  * imports Theia.
  */
 import type { ServiceResult } from './service-result.js';
@@ -44,8 +44,12 @@ export interface ShareView {
   readonly showWork: boolean;
 }
 
-/** What an action did: its sentence, the notices every shared-work result shows, and a file or safety words when it made them. */
+/** The backend review page for an uncommitted removal. */
+export interface RemovalConfirmation { readonly requestId: string; readonly url: string }
+
+/** An action result with any associated notices, file, safety words, or confirmation. */
 export interface ShareOutcome {
+  readonly confirmation?: RemovalConfirmation;
   readonly message: string;
   readonly notices: readonly string[];
   readonly file?: { readonly name: string; readonly text: string };
@@ -84,7 +88,7 @@ export interface StaffShareServer {
   joinRequests(): Promise<ServiceResult<readonly ShareJoinRequest[]>>;
   /** Admits the person of a join request; refused unless the lead confirmed the six words matched. */
   admit(input: { readonly request: string; readonly codeMatched: boolean }): Promise<ServiceResult<ShareOutcome>>;
-  remove(input: { readonly member: string }): Promise<ServiceResult<ShareOutcome>>;
+  remove(input: { readonly member: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>>;
   /** Gives your organization's server one part; refused unless the lead confirmed STAFF_SHARE_TEXT.tradeOff, shown word for word first. */
   grant(input: { readonly cell: string; readonly confirmed: boolean }): Promise<ServiceResult<ShareOutcome>>;
   /** Removes your organization's server from this shared work; every part it held moves to a new key. */
@@ -115,6 +119,11 @@ export const STAFF_SHARE_TEXT = {
   admit: 'Admit',
   wordsMatch: 'The six words match',
   remove: 'Remove',
+  reviewRemoval: 'Review removal',
+  finishRemoval: 'Finish removal',
+  removalReady: 'Review and confirm the removal, then return here to finish it.',
+  removalNeedsReview: 'Start the removal again to confirm it for the current shared work.',
+  removalUnavailable: 'This computer cannot prepare the removal from the current record of who has access.',
   grant: 'Give this part to the server',
   revoke: 'Remove your organization\'s server',
   changeAddress: 'Change your organization\'s server address',

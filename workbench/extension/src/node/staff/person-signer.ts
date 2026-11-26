@@ -201,6 +201,7 @@ export const ACTION_STEP_UP_TEXT = {
 
 /** One fixed action line per kind. A kind not listed gets ACTION_STEP_UP_TEXT.defaultLine. */
 export const ACTION_LINES: Readonly<Record<string, string>> = Object.freeze({
+  'member.remove': 'You are about to remove a person from this shared work.',
   'position.create': 'You are about to create a position.',
   'position.update': 'You are about to change a position.',
   'position.disestablish': 'You are about to close a position.',

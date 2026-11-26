@@ -24,13 +24,14 @@ export { projectionInputOf } from '../../src/staff/replica/migrate';
 export { compactAfterCheckpoint } from '../../src/staff/replica/compactor';
 export { syncStatusFor } from '../../src/services/staffSyncStatus';
 export { syncSentence } from '../../src/domain/staff/liveSentences';
-export { UPDATE_SENTENCE } from '../../src/domain/replica/features';
+export { CELL_ACCESS_FEATURE, UPDATE_SENTENCE } from '../../src/domain/replica/features';
 export { isRosterWriterAt } from '../../src/domain/replica/roster';
 export { cellOrderHook } from '../../src/staff/replica/membership';
 // 33-27: Share with people (extension/src/node/staff/share-service.ts StaffShareApi). The executed conversion, membership and hub flows, the
 // single-machine copy, the hub address, re-admission and the server's twelve words.
 export { makeMultiUser } from '../../src/staff/replica/migrate';
 export { admitJoinRequest, cellsAt, inviteToProject, joinFromInvite, openWelcome, removeFromProject, reviewJoinRequest } from '../../src/staff/replica/membership';
+export { managedWithdrawalActionBytes } from '../../src/staff/replica/managedWithdrawal';
 export { HUB_GRANT_TRADE_OFF, openHubTransport, connectProjectToHub, fetchJoinRequests, grantCellToHub, inviteThroughHub, revokeHub, sendJoinRequestThroughHub } from '../../src/staff/replica/hubMembership';
 export { readmitHub } from '../../src/staff/replica/hubReadmit';
 export { writeHubAddress } from '../../src/staff/replica/hubAddress';

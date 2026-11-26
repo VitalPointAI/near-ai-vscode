@@ -18,6 +18,8 @@
  */
 import type { ShareJoinRequest, ShareOutcome, SharePart, SharePerson, ShareView, StaffShareServer, InviteInput } from '../../common/staff-share.js';
 import { STAFF_SHARE_TEXT } from '../../common/staff-share.js';
+import { actionStepUpUrl, isActionNonce } from '../../common/session-identity.js';
+import type { PendingActions } from './person-signer.js';
 import { KEY_SERVICE_TEXT } from '../../common/key-service.js';
 import { ok, refused, type ServiceResult } from '../../common/service-result.js';
 import type { SecretStorageLike } from './keystore-secrets.js';
@@ -54,7 +56,9 @@ export interface StaffShareApi {
   fetchJoinRequests(shared: never, endpoint: { readonly address: string; readonly hub?: string }, open?: never): Promise<EngineResult>;
   reviewJoinRequest(shared: never, requestText: unknown): Promise<EngineResult>;
   admitJoinRequest(shared: never, requestText: unknown, input: { readonly codeMatched: boolean }): Promise<EngineResult>;
-  removeFromProject(shared: never, input: { readonly member: string }): Promise<EngineResult>;
+  removeFromProject(shared: never, input: { readonly member: string }, action?: string): Promise<EngineResult>;
+  managedWithdrawalActionBytes(roster: never, authority: string, input: { readonly member: string }): Buffer | undefined;
+  readonly CELL_ACCESS_FEATURE: string;
   grantCellToHub(shared: never, input: { readonly cell: string; readonly confirmed: boolean }): Promise<EngineResult>;
   revokeHub(shared: never, input: { readonly hub?: string }): Promise<EngineResult>;
   readmitHub(shared: never, input: { readonly hub?: string; readonly certPin: string; readonly words: string }): Promise<EngineResult>;
@@ -97,6 +101,7 @@ export interface StaffShareServiceOptions {
   readonly engine: StaffShareApi & Pick<StaffEngine, 'hubStanding' | 'readHubAddress' | 'isRosterWriterAt' | 'writerIdOf'> & { x25519BindingBytes(rawX25519: string, writer: string): Buffer };
   /** The session's live engine, once it has started. */
   readonly live: () => ShareLive | undefined;
+  readonly actions?: Pick<PendingActions, 'beginAction' | 'resumeAction'>;
   /** The open staff project's folder (the workspace folder). */
   readonly root: () => Promise<string | undefined>;
   /** The hub transport factory; the engine's own when absent (tests pass one with short limits). */
@@ -267,8 +272,35 @@ export class StaffShareService implements StaffShareServer {
     return this.lead(async (shared) => outcome(await this.options.engine.admitJoinRequest(this.host(shared), input.request, { codeMatched: input.codeMatched === true })));
   }
 
-  public remove(input: { readonly member: string }): Promise<ServiceResult<ShareOutcome>> {
-    return this.lead(async (shared) => outcome(await this.options.engine.removeFromProject(this.host(shared), { member: input.member })));
+  public remove(input: { readonly member: string; readonly requestId?: string }): Promise<ServiceResult<ShareOutcome>> {
+    return this.shared(async (shared) => {
+      if (!shared.lead) return refused(STAFF_SHARE_TEXT.notLead);
+      const { engine, actions } = this.options;
+      const target = { member: input.member };
+      if (shared.context.hosted === undefined || !shared.roster.required?.includes(engine.CELL_ACCESS_FEATURE)) {
+        if (input.requestId !== undefined) return refused(STAFF_SHARE_TEXT.removalNeedsReview);
+        const result = await engine.removeFromProject(this.host(shared), target);
+        shared.live.syncNow(shared.project.projectId);
+        return outcome(result);
+      }
+
+      if (actions === undefined) return refused(SESSION_KEY_TEXT.stepUp, KEY_SERVICE_TEXT.confirm);
+      const payload = engine.managedWithdrawalActionBytes(shared.roster as never, shared.project.deviceWriter, target);
+      if (payload === undefined) return refused(STAFF_SHARE_TEXT.removalUnavailable);
+      if (input.requestId === undefined) {
+        const record = engine.memberAt(shared.roster.members as never, input.member, shared.roster.positions.length - 1);
+        if (record === undefined) return refused(STAFF_SHARE_TEXT.removalUnavailable);
+        const fields = [{ label: 'Person', value: record.name }, ...(record.seat === undefined ? [] : [{ label: 'Position', value: record.seat }])];
+        const { requestId, nonce } = actions.beginAction(payload, { kind: 'member.remove', fields });
+        return ok({ message: STAFF_SHARE_TEXT.removalReady, notices: [], confirmation: { requestId, url: actionStepUpUrl(nonce) } });
+      }
+
+      const action = isActionNonce(input.requestId) ? actions.resumeAction(input.requestId, payload) : undefined;
+      if (action === undefined) return refused(STAFF_SHARE_TEXT.removalNeedsReview);
+      const result = await engine.removeFromProject(this.host(shared), target, action);
+      if (result.ok) shared.live.syncNow(shared.project.projectId);
+      return result.reason === 'action-required' ? refused(STAFF_SHARE_TEXT.removalNeedsReview) : outcome(result);
+    });
   }
 
   public grant(input: { readonly cell: string; readonly confirmed: boolean }): Promise<ServiceResult<ShareOutcome>> {

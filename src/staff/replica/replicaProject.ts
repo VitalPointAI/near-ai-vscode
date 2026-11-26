@@ -458,7 +458,7 @@ export class ReplicaProject {
         const write = prepare(state);
         if ('ok' in write) return write;
         const hostedStage = write.options.stageAccess !== undefined && this.device.roster !== this.device.identity;
-        const action = hostedStage ? managedAccessActionBytes(state.roster, write.kind, write.data) : undefined;
+        const action = hostedStage ? managedAccessActionBytes(state.roster, this.device.writer, write.kind, write.data) : undefined;
         if (hostedStage && !managedActionCurrent(this.device.roster, write.options.action, action)) return refuse('action-required');
         const built = await this.buildOwn(state.roster, write.kind, write.data, write.options);
         if (!('entry' in built)) return built;

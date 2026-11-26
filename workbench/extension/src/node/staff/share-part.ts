@@ -8,6 +8,8 @@ import type { interfaces } from '@theia/core/shared/inversify';
 import { WorkspaceServer } from '@theia/workspace/lib/common/workspace-protocol.js';
 import { STAFF_SHARE_PATH, StaffShareServer } from '../../common/staff-share.js';
 import { bindBackendService } from '../backend-service.js';
+import { PendingActionsKey } from '../session-identity-backend-module.js';
+import type { PendingActions } from './person-signer.js';
 import { StaffLiveSessionId } from '../staff-backend-module.js';
 import { StaffShareService, type StaffShareApi } from './share-service.js';
 import { loadStaffEngine, type StaffEngine } from './staff-engine.js';
@@ -24,6 +26,7 @@ export function bindSharePart(bind: interfaces.Bind): void {
   bindBackendService<StaffShareService>(bind, StaffShareServer, STAFF_SHARE_PATH, (context) => new StaffShareService({
     engine: loadStaffEngine<StaffEngine & StaffShareApi & { x25519BindingBytes(rawX25519: string, writer: string): Buffer }>(),
     live: () => context.container.get<StaffLiveSession>(StaffLiveSessionId).current,
+    actions: context.container.isBound(PendingActionsKey) ? context.container.get<PendingActions>(PendingActionsKey) : undefined,
     root: () => workspaceFolder(context.container.get<WorkspaceServer>(WorkspaceServer)),
     log: (line) => console.info(line),
   }));

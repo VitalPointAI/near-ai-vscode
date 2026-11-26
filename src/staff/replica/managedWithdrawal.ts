@@ -29,12 +29,18 @@ interface ManagedAccess extends AccessSnapshot {
 }
 
 /** Exact operation presented for step-up, bound to its selected roster and private access root. */
-export function managedAccessActionBytes(roster: RosterState, kind: string, data: unknown): Buffer | undefined {
+export function managedAccessActionBytes(roster: RosterState, authority: string, kind: string, data: unknown): Buffer | undefined {
   const revision = roster.accessRevision;
   if (revision === undefined || !isRecord(data)) return undefined;
   const { accessRevision: _revision, accessRoot: _root, rosterPrev: _roster, ...operation } = data;
   return canonicalBytes({ purpose: 'near-ai/cell-access/1/hosted-action', project: roster.anchor.project,
-    roster: roster.positions.at(-1), entry: revision.entry, root: revision.root, kind, operation });
+    roster: roster.positions.at(-1), entry: revision.entry, root: revision.root, authority, kind, operation });
+}
+
+/** The managed withdrawal a person can confirm from this roster. */
+export function managedWithdrawalActionBytes(roster: RosterState, authority: string, input: Target): Buffer | undefined {
+  const plan = prepareManagedWithdrawal(roster, authority, input);
+  return plan === undefined ? undefined : managedAccessActionBytes(roster, authority, plan.kind, plan.operation);
 }
 
 export function managedActionCurrent(signer: PayloadSigner | AsyncPayloadSigner, action: string | undefined, payload: Uint8Array | undefined): boolean {
@@ -71,7 +77,7 @@ export async function appendManagedAccess(project: ReplicaProject, roster: Roste
   prepare: (fresh: RosterState) => AccessSnapshot | undefined, action?: string): Promise<AppendOwnResult | AuthoredRefusal> {
   const signer = project.rosterSigner;
   const authority = writerIdOf(signer.publicKey);
-  if (signer !== project.signer && !managedActionCurrent(signer, action, managedAccessActionBytes(roster, plan.kind, plan.operation))) {
+  if (signer !== project.signer && !managedActionCurrent(signer, action, managedAccessActionBytes(roster, authority, plan.kind, plan.operation))) {
     return { ok: false, reason: 'action-required' };
   }
   if (authority !== project.deviceWriter) return { ok: false, reason: 'no-grant-key' };

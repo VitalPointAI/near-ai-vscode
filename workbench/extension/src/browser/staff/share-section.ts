@@ -5,7 +5,7 @@
  * STAFF_SHARE_TEXT and the engine's own result sentences.
  */
 import type { ServiceResult } from '../../common/service-result.js';
-import { STAFF_SHARE_TEXT, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
+import { STAFF_SHARE_TEXT, type RemovalConfirmation, type ShareOutcome, type ShareView, type StaffShareServer } from '../../common/staff-share.js';
 import type { InvitationOpened } from './invite-open-handler.js';
 import '../sterling-share.css';
 
@@ -78,6 +78,7 @@ export class ShareWithPeopleSection {
   private readonly body = el('div', undefined, 'sterling-share-body');
   private readonly status = el('p', undefined, 'sterling-share-status');
   private invitation: InvitationOpened | undefined;
+  private removal: { project: string | undefined; member: string; confirmation: RemovalConfirmation } | undefined;
   private disposed = false;
 
   constructor(private readonly server: StaffShareServer) {
@@ -197,13 +198,40 @@ export class ShareWithPeopleSection {
     return card;
   }
 
+  private async removeMember(project: string | undefined, member: string, requestId?: string): Promise<void> {
+    const answer = await this.server.remove({ member, ...(requestId === undefined ? {} : { requestId }) }).catch(() => undefined);
+    if (this.disposed) return;
+    if (answer === undefined) { this.say(STAFF_SHARE_TEXT.noBackend); return; }
+    if (answer.kind === 'ok' && answer.value.confirmation !== undefined) {
+      this.removal = { project, member, confirmation: answer.value.confirmation };
+      await this.refresh();
+      this.say(answer.value.message);
+      return;
+    }
+    if (requestId !== undefined) {
+      this.removal = undefined;
+      if (answer.kind === 'refused') await this.refresh();
+    }
+    await this.shown(Promise.resolve(answer));
+  }
+
   private peopleCard(view: ShareView): HTMLElement {
     const card = this.card('People', 'person');
     const list = el('ul', undefined, 'sterling-share-list');
     for (const person of view.people) {
       const item = el('li', undefined, 'sterling-share-row');
       item.append(el('span', person.seat === undefined ? person.name : `${person.name}, ${person.seat}`));
-      if (view.lead) item.append(this.button(STAFF_SHARE_TEXT.remove, 'trash', () => this.shown(this.server.remove({ member: person.member }))));
+      if (view.lead) {
+        const pending = this.removal?.project === view.project && this.removal?.member === person.member ? this.removal.confirmation : undefined;
+        if (pending === undefined) item.append(this.button(STAFF_SHARE_TEXT.remove, 'trash', () => this.removeMember(view.project, person.member)));
+        else {
+          const review = el('a', STAFF_SHARE_TEXT.reviewRemoval);
+          review.href = pending.url;
+          review.target = '_blank';
+          review.rel = 'noopener noreferrer';
+          item.append(review, this.button(STAFF_SHARE_TEXT.finishRemoval, 'trash', () => this.removeMember(view.project, person.member, pending.requestId)));
+        }
+      }
       list.append(item);
     }
     card.append(list);

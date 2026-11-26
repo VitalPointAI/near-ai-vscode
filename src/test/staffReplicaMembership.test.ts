@@ -1023,7 +1023,7 @@ test('hosted managed withdrawal refuses an action that expires at the locked com
   const before = await head(hosted);
   assert.equal(before.hash, seed.hash);
   assert.ok(before.roster.sessions.has(writerIdOf(session.publicKey)));
-  approvedPayload = managedAccessActionBytes(before.roster, 'member.remove', { member: peer.member });
+  approvedPayload = managedAccessActionBytes(before.roster, hosted.deviceWriter, 'member.remove', { member: peer.member });
   assert.ok(approvedPayload);
   const host = { ...lead.host, project: hosted, deps };
   const mismatched = await removeFromProject(host, { member: peer.member, writer: peer.writer }, confirmed);

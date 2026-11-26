@@ -316,6 +316,9 @@ test('managed hosted Workbench removal challenges the exact current operation be
   const acr = 'urn:sterling:acr:phishing-resistant';
   const actions = createPendingActions({ stepUpAcr: acr, windowSeconds: 60, latestAuthTime: () => instant / 1000, clock: { now: () => instant } });
   let selected = 'a'.repeat(64);
+  let actor = 'b'.repeat(64);
+  let hosted = true;
+  let required = ['cell-access@1'];
   const projectId = 'd'.repeat(32);
   const member = 'mbr-fictional';
   const root = '/fictional-managed-share';
@@ -323,16 +326,16 @@ test('managed hosted Workbench removal challenges the exact current operation be
   let synced = 0;
   const writes: { target: string; action?: string }[] = [];
   const project = {
-    projectId, deviceWriter: 'b'.repeat(64),
-    state: async () => ({ roster: { positions: [selected], required: ['cell-access@1'], members: {} }, fold: {} })
+    projectId, get deviceWriter() { return actor; },
+    state: async () => ({ roster: { positions: [selected], required, members: {} }, fold: {} })
   };
   const wiring = {
     engine: {
       ...engine,
       isRosterWriterAt: () => true,
       memberAt: (_state: never, target: string) => ({ name: target === member ? 'Mo Analyst' : 'Nell Planner' }),
-      managedWithdrawalActionBytes: (roster: { positions: readonly string[] }, _writer: string, input: { member: string }) =>
-        Buffer.from(JSON.stringify([projectId, roster.positions.at(-1), input.member])),
+      managedWithdrawalActionBytes: (roster: { positions: readonly string[] }, writer: string, input: { member: string }) =>
+        Buffer.from(JSON.stringify([projectId, roster.positions.at(-1), writer, input.member])),
       removeFromProject: async (_shared: never, input: { member: string }, action?: string) => {
         writes.push({ target: input.member, action });
         return { ok: true, message: 'Fictional withdrawal committed.', notices: [] };
@@ -340,7 +343,7 @@ test('managed hosted Workbench removal challenges the exact current operation be
     } as never,
     live: () => ({
       projects: () => [{ root, project: projectId }], project: () => project,
-      shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, hosted: {} }),
+      shareContext: () => ({ deps: {}, secrets, globalStorageDir: root, ...(hosted ? { hosted: {} } : {}) }),
       syncNow: () => { synced += 1; }
     }) as never,
     root: async () => root, actions
@@ -348,11 +351,12 @@ test('managed hosted Workbench removal challenges the exact current operation be
   const service = new StaffShareService(wiring);
   const challenge = async () => {
     const answer = value(await service.remove({ member }), 'request withdrawal confirmation');
-    const pending = Reflect.get(answer, 'confirmation') as { requestId: string; url: string } | undefined;
+    const pending = answer.confirmation;
     assert.ok(pending, 'a hosted managed request returns a challenge before calling the writer');
     const nonce = pending.url.split('/').at(-1);
     assert.ok(nonce);
     assert.deepEqual(actions.summaryOf(nonce)?.fields, [{ label: 'Person', value: 'Mo Analyst' }]);
+    assert.equal((await service.remove({ member, requestId: pending.requestId })).kind, 'refused');
     instant += 1000;
     assert.equal(actions.bindStepUp(nonce, { acr, authTime: instant / 1000, sub: 'fictional', activeSub: 'fictional' }), true);
     return pending;
@@ -363,6 +367,9 @@ test('managed hosted Workbench removal challenges the exact current operation be
   assert.equal(synced, 0);
   const wrongMember = { member: 'mbr-other-fictional', requestId: first.requestId };
   assert.equal((await service.remove(wrongMember)).kind, 'refused');
+  actor = 'f'.repeat(64);
+  assert.equal((await service.remove({ member, requestId: first.requestId })).kind, 'refused');
+  actor = 'b'.repeat(64);
   selected = 'c'.repeat(64);
   const stale = { member, requestId: first.requestId };
   assert.equal((await service.remove(stale)).kind, 'refused');
@@ -378,6 +385,18 @@ test('managed hosted Workbench removal challenges the exact current operation be
   assert.equal((await service.remove(resume)).kind, 'refused');
   assert.equal(writes.length, 1);
   assert.equal(synced, 1);
+
+  hosted = false;
+  assert.equal((await service.remove(resume)).kind, 'refused');
+  const local = value(await service.remove({ member }), 'local withdrawal');
+  assert.equal(local.confirmation, undefined);
+  assert.deepEqual(writes[1], { target: member, action: undefined });
+  hosted = true;
+  required = [];
+  const legacy = value(await service.remove({ member }), 'legacy hosted withdrawal');
+  assert.equal(legacy.confirmation, undefined);
+  assert.deepEqual(writes[2], { target: member, action: undefined });
+  assert.equal(synced, 3);
 });
 
 test('a hosted person key without a fresh confirmation signs nothing: the action is refused with the Staff Room sentence and its fix', async () => {
