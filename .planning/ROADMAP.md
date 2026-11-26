@@ -2233,6 +2233,39 @@ Also carried: the shared code-server follow-ups (owner, 2026-11-05). Phase 27 al
 **Research flags**: Theia AI's agent, skill and MCP formats (they already read `agent.md`, `SKILL.md` and MCP); which of today's webviews to rebuild first.
 **Phases**: TBD.
 
+## Institutional staff support
+
+### Phase 102: Institutional joint staff teams
+
+**Goal**: Provision the institutional joint staff teams in Workbench with
+branch-specific skills, constrained tools and clear human ownership for all
+149 duties in the reviewed blueprint. Support unit, brigade and division
+profiles for the US, NATO and Canada.
+
+**Depends on**: The staff product and Team Studio foundations, plus publication
+of the reviewed institutional blueprint. Local synthetic development can use
+the exact reviewed blueprint commit while the merge queue is held. Live source,
+delegation and delivery acceptance retain their own prerequisites.
+
+**Success criteria**:
+
+1. A person can provision the institutional Command Group, J3 and J7 teams and
+   run the first fictional decision, action and lessons handoffs through the
+   ordinary Workbench staff experience.
+2. Every J1–J9, Command Group and Special Staff duty has a tested agent
+   contribution, accountable human, draft output and scoped tool contract.
+3. Changes to source authority or review version hold the relevant handoff.
+   Human decision and release remain distinct and verifiable.
+
+See [Phase 102 context](phases/102-institutional-joint-staff-teams/102-CONTEXT.md)
+for the duty inventory and build order.
+
+Plans:
+- [ ] First synthetic Command Group, J3 and J7 handoffs
+- [ ] J2/J6 stewardship and J5/J9 institutional drafts
+- [ ] J4/J8 ordinary resource and reconciliation workflows
+- [ ] J1/Special Staff administrative support and full profile acceptance
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
