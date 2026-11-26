@@ -50,6 +50,7 @@
 !docs-site/static/
 !docs-site/static/img/
 !docs-site/static/img/sovai-data-flows.webp
+!docs-site/static/img/sovai-physical-layout.webp
 !docs-site/content/releases/
 !docs-site/content/releases/versions.md
 !docs-site/content/security/

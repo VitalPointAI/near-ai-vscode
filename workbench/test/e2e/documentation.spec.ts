@@ -46,7 +46,10 @@ test('bundled figures and architecture flows render offline and remain usable ac
   await openTopic(page, 'Architecture overview');
   const article = page.locator('.sterling-documentation article');
   const illustration = article.getByRole('img', { name: /^System blueprint of Sterling Sovereign AI/ });
+  const physicalLayout = article.getByRole('img', { name: /^Physical deployment of Sterling Sovereign AI/ });
   const flows = article.locator('table').filter({ hasText: MISSION_HUB_STEP });
+  await expect(physicalLayout).toHaveCount(1);
+  await expect(physicalLayout).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
   await expect(illustration).toHaveCount(1);
   await expect(illustration).toHaveAttribute('src', /^sterling-documentation\/[0-9a-f]{16}\.webp$/);
   await expect(flows.locator('tbody tr')).toHaveCount(9);
@@ -54,15 +57,17 @@ test('bundled figures and architecture flows render offline and remain usable ac
 
   for (const width of [1600, 640]) {
     await page.setViewportSize({ width, height: 900 });
-    await illustration.scrollIntoViewIfNeeded();
-    await expect(illustration).toBeVisible();
-    await expect.poll(() => illustration.evaluate((node) => {
-      const image = node as HTMLImageElement;
-      if (!image.complete || image.naturalWidth === 0) return false;
-      const box = image.getBoundingClientRect();
-      const container = image.closest('article')!.getBoundingClientRect();
-      return box.width > 0 && box.left >= container.left - 1 && box.right <= container.right + 1;
-    }), { message: `the bundled illustration loads and fits at ${width}px` }).toBe(true);
+    for (const blueprint of [physicalLayout, illustration]) {
+      await blueprint.scrollIntoViewIfNeeded();
+      await expect(blueprint).toBeVisible();
+      await expect.poll(() => blueprint.evaluate((node) => {
+        const image = node as HTMLImageElement;
+        if (!image.complete || image.naturalWidth === 0) return false;
+        const box = image.getBoundingClientRect();
+        const container = image.closest('article')!.getBoundingClientRect();
+        return box.width > 0 && box.left >= container.left - 1 && box.right <= container.right + 1;
+      }), { message: `the bundled blueprint loads and fits at ${width}px` }).toBe(true);
+    }
   }
   await page.setViewportSize({ width: 1600, height: 900 });
 

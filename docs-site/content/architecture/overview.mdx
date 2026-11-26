@@ -13,13 +13,21 @@ The browser Workbench runs on a workstation today. Organization-hosted sessions 
 ## How the parts fit
 
 <SystemArchitectureMap>
-<img src="/img/sovai-data-flows.webp" alt="System blueprint of Sterling Sovereign AI. It maps named components inside nine system boundaries, with arrows for operational and planned exchanges. The sections below describe each component and flow." />
+<img src="/img/sovai-physical-layout.webp" width="3500" height="2090" alt="Physical deployment of Sterling Sovereign AI. Staff devices, optional service hosts, the on-premises pilot, connected external services, site support hardware and the single-machine lab are shown with their software and connections." />
+<img src="/img/sovai-data-flows.webp" width="3500" height="2280" alt="System blueprint of Sterling Sovereign AI. It maps named components inside nine system boundaries, with arrows for operational and planned exchanges. The sections below describe each component and flow." />
 </SystemArchitectureMap>
+
+The physical layout shows a standalone workstation and the optional shared services around it.
+The hosted pilot and the single-machine lab are separate configurations. Pilot services share
+the cluster nodes, with approved storage and key-custody hardware attached where required. An
+isolated site receives verified software via its import host. Connected inference is subject
+to the organization's destination policy.
 
 In the component descriptions, **Available** means the capability is part of the current
 product or operator release. **Implemented** means the repository contains the component or
 foundation. **Verified offline** describes a particular render or fixture. **Planned** describes the
-intended system. A single area can contain components at several of these stages.
+intended system. Letter markers on the component blueprint apply to the item shown.
+An item can show an implemented foundation while its wider rollout remains planned.
 
 ### Paths through the system
 
@@ -204,7 +212,7 @@ describe model trust and the proposed workflow.
 Update the component descriptions and their source references when the roadmap changes.
 The illustrated areas link directly to these sections. Update the blueprint source at
 `docs-site/scripts/draw-system-blueprint.py` when the component boundaries or flow
-directions change. Regenerate the bundled image with Python, Pillow and Lato. The generated component catalogue continues to track individual
+directions change. Regenerate the bundled images with Python, Pillow and Lato. The generated component catalogue continues to track individual
 third-party dependencies and their pins.
 
 ## Decision records

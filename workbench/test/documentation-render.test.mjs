@@ -148,9 +148,11 @@ test('the bundled architecture guide renders its illustration and searchable flo
   const { readFile } = await import('node:fs/promises');
   const source = 'docs-site/content/architecture/overview.mdx';
   const overview = renderer.render(source, await readFile(path.join(repositoryRoot, source), 'utf8'));
-  const illustration = overview.html.match(/<figure class="sterling-doc-figure"><img src="sterling-documentation\/([0-9a-f]{16}\.webp)" alt="System blueprint of Sterling Sovereign AI[^"]*"/);
-  assert.ok(illustration, 'the overview renders a same-origin illustrated figure');
-  assert.equal(renderer.assets.get(illustration[1]), path.join(repositoryRoot, 'docs-site/static/img/sovai-data-flows.webp'));
+  const blueprints = [...overview.html.matchAll(/<img src="sterling-documentation\/([0-9a-f]{16}\.webp)" alt="(Physical deployment|System blueprint) of Sterling Sovereign AI[^"]*"/g)];
+  assert.deepEqual(blueprints.map(([, asset, name]) => [name, renderer.assets.get(asset)]), [
+    ['Physical deployment', path.join(repositoryRoot, 'docs-site/static/img/sovai-physical-layout.webp')],
+    ['System blueprint', path.join(repositoryRoot, 'docs-site/static/img/sovai-data-flows.webp')],
+  ]);
   const flow = [...overview.html.matchAll(/<table>[\s\S]*?<\/table>/g)]
     .map(([table]) => table)
     .find((table) => table.includes('Mission hub validates sealed changes'));

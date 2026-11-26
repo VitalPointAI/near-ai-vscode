@@ -41,18 +41,25 @@ const areas = [
   },
 ];
 
-export default function SystemArchitectureMap({ children }) {
-  const artwork = useBaseUrl('/img/sovai-system-architecture.webp');
-  const blueprint = React.Children.only(children);
+function BlueprintFigure({ blueprint, caption }) {
   const imageUrl = useBaseUrl(blueprint.props.src);
   return (
+    <figure className={styles.blueprint}>
+      <a href={imageUrl} aria-label={`Open ${caption.toLowerCase()} at full resolution`}>
+        {React.cloneElement(blueprint, { src: imageUrl })}
+      </a>
+      <figcaption>{caption} · Open for full resolution</figcaption>
+    </figure>
+  );
+}
+
+export default function SystemArchitectureMap({ children }) {
+  const artwork = useBaseUrl('/img/sovai-system-architecture.webp');
+  const [physical, system] = React.Children.toArray(children);
+  return (
     <div className={styles.map}>
-      <figure className={styles.blueprint}>
-        <a href={imageUrl} aria-label="Open the system blueprint at full resolution">
-          {React.cloneElement(blueprint, { src: imageUrl, width: 3500, height: 2280 })}
-        </a>
-        <figcaption>Open the blueprint for full resolution.</figcaption>
-      </figure>
+      <BlueprintFigure blueprint={physical} caption="Physical deployment blueprint" />
+      <BlueprintFigure blueprint={system} caption="System architecture blueprint" />
       <figure className={styles.navigation}>
         <figcaption>Choose an area to see its components and responsibilities.</figcaption>
         <ul className={styles.areas}>

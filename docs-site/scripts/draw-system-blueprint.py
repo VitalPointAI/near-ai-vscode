@@ -127,7 +127,7 @@ groups = {
         ("Approved transfer / guard", "Checks markings and enforceable route"),
         ("Destination verification", "Quarantine, review and acceptance receipt"),
         ("Managed workstation setup", "Inventory, prerequisites and hub enrollment"),
-    ], [(0, 1, False, True), (2, 3, True), (6, 7, True), (7, 8, True)]),
+    ], [(0, 1, True, True), (2, 3, True), (6, 7, True), (7, 8, True)]),
     "inference": ("Approved inference endpoints", "EACH DESTINATION HAS SEPARATE POLICY ELIGIBILITY", AQUA, [
         ("Model and tool routing", "Policy and endpoint eligibility"),
         ("Local runtime", "Same-computer-only when required"),
@@ -176,6 +176,33 @@ groups = {
         (5, 7, True), (7, 8, True), (7, 6, True), (9, 8, True)]),
 }
 
+# Status applies to the named tile. For mixed tiles, show the maturity of the
+# implemented foundation and state its remaining work in the caption or overview.
+status_styles = {
+    "A": (GREEN, "Available"),
+    "I": ("#9fc7ff", "Implemented"),
+    "V": (GOLD, "Verified offline"),
+    "P": (VIOLET, "Planned"),
+}
+group_status = {
+    "release": "AAAAAAVP",
+    "workbench": "AAAIIIIIII",
+    "trust": "IIIIIIIIII",
+    "hosted": "VVPPVVPVPP",
+    "mission": "IIPPPIPPPP",
+    "inference": "AAAAAPII",
+    "assurance": "AIIAIAIA",
+    "data": "PPPVPPPPVP",
+    "factory": "PPPPPPVPPP",
+}
+
+
+def status_badge(x, y, code):
+    color, _ = status_styles[code]
+    draw.rounded_rectangle((x, y, x + 25, y + 24), 6, fill=color)
+    text(x + 7, y + 2, code, 16, BACKGROUND, True)
+
+
 PANEL_WIDTH, PANEL_HEIGHT = 960, 503
 POSITIONS = {
     key: (70 + (index % 3) * 1200, 206 + (index // 3) * 643)
@@ -197,10 +224,13 @@ def group(key, title, scope, color, tiles, links):
     draw.line((x + 25, y + 84, x + PANEL_WIDTH - 25, y + 84), fill="#31516a")
     text(x + 24, y + 12, title, 37, heavy=True, width=910)
     text(x + 26, y + 60, scope, 17, color, True, width=906)
-    for index, (name, description) in enumerate(tiles):
+    for index, ((name, description), status) in enumerate(zip(tiles, group_status[key], strict=True)):
         a, b, c, d = tile_box(x, y, index)
         draw.rounded_rectangle((a, b, c, d), 8, fill=INSET, outline="#31516a")
-        text(a + 13, b + 3, name, 23, heavy=True, width=TILE_WIDTH - 26)
+        title_room = TILE_WIDTH - 56
+        size = 23 if draw.textlength(name, font=font(23, True)) <= title_room else 21
+        text(a + 13, b + 4, name, size, heavy=True, width=title_room)
+        status_badge(c - 36, b + 6, status)
         text(a + 13, b + 31, description, 19, MUTED, width=TILE_WIDTH - 26)
     for start, end, *flags in links:
         a, b, c, d = tile_box(x, y, start)
@@ -237,6 +267,11 @@ arrow([(2420, 130), (2520, 130)], VIOLET, True)
 text(2536, 112, "Planned path", 27, MUTED)
 arrow([(3050, 86), (3145, 86)], AQUA, two_way=True)
 text(3161, 68, "Two-way exchange", 27, MUTED)
+text(2068, 153, "COMPONENT STATUS", 20, MUTED, True)
+for index, (code, (_, name)) in enumerate(status_styles.items()):
+    x = 2280 + 290 * index
+    status_badge(x, 153, code)
+    text(x + 36, 149, name, 25, WHITE, width=236)
 
 for key, parameters in groups.items():
     group(key, *parameters)
@@ -248,7 +283,7 @@ connections = [
     ([(2230, 410), (2470, 410)], (2350, 347), ["Task + scoped", "context"], AQUA, False, False),
     ([(2470, 543), (2230, 543)], (2350, 479), ["Decision, result", "and provenance"], AQUA, False, False),
     ([(366, 709), (366, 849)], (366, 750), ["Signed offline bundle", "via import host"], GOLD, False, False),
-    ([(1668, 709), (1668, 849)], (1668, 748), ["Signed sealed changes", "and eligible replicas"], AQUA, False, True),
+    ([(1668, 709), (1668, 849)], (1668, 748), ["Planned editor pairing", "Signed sealed replicas"], VIOLET, True, True),
     ([(2710, 709), (2710, 849)], (2710, 746), ["Authorized model input"], AQUA, False, False),
     ([(3150, 849), (3150, 709)], (3150, 780), ["Result + provenance"], AQUA, False, False),
     ([(360, 1352), (360, 1492)], (360, 1390), ["Redacted logs +", "site evidence"], GREEN, False, False),
@@ -278,9 +313,267 @@ future = [
 ]
 for index, (name, description) in enumerate(future):
     x = 93 + index * 670
-    text(x, 2110, name, 28, heavy=True, width=638)
+    status_badge(x, 2114, "P")
+    text(x + 38, 2110, name, 28, heavy=True, width=600)
     text(x, 2154, description, 23, MUTED, width=638)
 
 destination = Path(__file__).resolve().parents[1] / "static/img/sovai-data-flows.webp"
+image.save(destination, "WEBP", quality=94, method=6)
+print(destination)
+
+
+def hardware_icon(kind, x, y, color):
+    """Draw a hardware symbol in a 64-pixel square."""
+    def line(points):
+        draw.line([(x + a, y + b) for a, b in points], fill=color, width=3, joint="curve")
+
+    def box(a, b, c, d, radius=5):
+        draw.rounded_rectangle((x + a, y + b, x + c, y + d), radius, outline=color, width=3)
+
+    def dot(a, b):
+        draw.ellipse((x + a - 2, y + b - 2, x + a + 2, y + b + 2), fill=color)
+
+    if kind == "workstation":
+        box(4, 5, 59, 43)
+        line([(8, 36), (55, 36)])
+        line([(31, 44), (31, 55), (19, 55), (44, 55)])
+    elif kind == "server":
+        for top in (8, 25, 42):
+            box(5, top, 59, top + 13, 3)
+            dot(49, top + 6)
+            line([(13, top + 6), (23, top + 6)])
+    elif kind == "storage":
+        for top in (7, 20, 33):
+            draw.arc((x + 9, y + top, x + 55, y + top + 20), 0, 180, fill=color, width=3)
+        draw.ellipse((x + 9, y + 7, x + 55, y + 27), outline=color, width=3)
+        line([(9, 17), (9, 43)])
+        line([(55, 17), (55, 43)])
+    elif kind == "accelerator":
+        box(10, 10, 54, 54)
+        box(20, 20, 44, 44, 2)
+        for pin in (19, 27, 36, 44):
+            line([(pin, 5), (pin, 10)])
+            line([(pin, 54), (pin, 59)])
+            line([(5, pin), (10, pin)])
+            line([(54, pin), (59, pin)])
+    elif kind == "custody":
+        box(9, 27, 55, 55)
+        draw.arc((x + 19, y + 5, x + 45, y + 41), 180, 360, fill=color, width=3)
+        line([(19, 23), (19, 27)])
+        line([(45, 23), (45, 27)])
+        dot(32, 39)
+        line([(32, 39), (32, 47)])
+    elif kind == "media":
+        box(18, 18, 49, 57)
+        box(23, 5, 44, 18, 1)
+        dot(31, 41)
+        line([(31, 44), (31, 51)])
+    else:
+        for a, b in ((14, 35), (31, 13), (50, 35), (32, 53)):
+            box(a - 5, b - 5, a + 5, b + 5, 1)
+        line([(17, 31), (27, 18)])
+        line([(35, 18), (46, 31)])
+        line([(45, 39), (36, 49)])
+        line([(27, 49), (18, 39)])
+
+
+def hardware_card(x, y, width, height, kind, title, lines, color=AQUA):
+    draw.rounded_rectangle((x, y, x + width, y + height), 17, fill=INSET, outline="#3a5772", width=2)
+    draw.rounded_rectangle((x + 16, y + 17, x + 93, y + 94), 13, fill=BACKGROUND)
+    hardware_icon(kind, x + 23, y + 23, color)
+    text(x + 111, y + 19, title, 30, heavy=True, width=width - 130)
+    for row, line in enumerate(lines):
+        text(x + 111, y + 62 + row * 31, line, 23, MUTED, width=width - 130)
+
+
+def hardware_zone(box, title, detail, color):
+    x, y, right, bottom = box
+    draw.rounded_rectangle(box, 24, fill=PANEL, outline=color, width=2)
+    text(x + 24, y + 17, title, 37, heavy=True, width=right - x - 48)
+    text(x + 26, y + 62, detail, 18, color, True, width=right - x - 50)
+    draw.line((x + 25, y + 91, right - 25, y + 91), fill="#31516a")
+
+
+PHYSICAL_HEIGHT = 2090
+image = Image.new("RGB", (WIDTH, PHYSICAL_HEIGHT), BACKGROUND)
+draw = ImageDraw.Draw(image)
+for x in range(20, WIDTH, 29):
+    for y in range(20, PHYSICAL_HEIGHT, 29):
+        draw.point((x, y), fill="#294259")
+
+text(70, 32, "STERLING SOVEREIGN AI", 24, AQUA, True)
+text(68, 59, "Physical deployment blueprint", 69, heavy=True)
+text(73, 146, "Hardware placement, network boundaries and software on each host", 31, MUTED)
+arrow([(2440, 84), (2540, 84)], AQUA, two_way=True)
+text(2556, 66, "Network exchange / both directions", 27, MUTED)
+arrow([(2440, 128), (2540, 128)], VIOLET, True)
+text(2556, 110, "Planned deployment or integration", 27, MUTED)
+arrow([(3050, 128), (3150, 128)], GOLD)
+text(3166, 110, "Signed artifact transfer", 27, MUTED)
+
+hardware_zone((70, 225, 833, 1470), "Staff and edge devices",
+              "ORGANIZATION MANAGED / BROWSER-BASED ACCESS", AQUA)
+hardware_card(94, 345, 715, 196, "workstation", "Staff workstation A", [
+    "Linux Intel / AMD PC and local SSD",
+    "Browser, Docker, launcher and Theia container",
+    "Local project, policy gate and optional inference",
+])
+hardware_card(94, 565, 715, 193, "workstation", "Staff workstation B", [
+    "Separate computer with its own project replica",
+    "Optional hub connection; standalone still works",
+    "Managed endpoint collector is planned",
+])
+hardware_card(94, 782, 715, 192, "workstation", "Same-machine development", [
+    "One PC can host Workbench and an optional hub",
+    "Separate containers and persistent volumes",
+    "Local inference can share the PC if it fits",
+])
+hardware_card(94, 998, 715, 187, "network", "Edge or remote site", [
+    "Authorized workstations and optional separate hub",
+    "Local replicas and later approved exchange",
+    "Wider disconnected federation is planned",
+], VIOLET)
+hardware_card(94, 1208, 715, 188, "custody", "Hosted browser and sign-in", [
+    "Staff may use a browser-only client at a site",
+    "Passkey or approved hardware key if required",
+    "Hosted workspace runs inside the site cluster",
+], VIOLET)
+
+hardware_zone((1105, 225, 2460, 990), "Organization service hosts",
+              "SEPARATE HOST ROLES / CO-LOCATE WHERE CAPACITY AND POLICY PERMIT", AQUA)
+hardware_card(1129, 345, 640, 183, "server", "Mission hub VM or server", [
+    "Hub service, roster and sealed sync",
+    "Encrypted persistent state",
+    "Per-mission membership and trust",
+])
+hardware_card(1796, 345, 640, 183, "accelerator", "Approved inference host", [
+    "Model runtime and approved weights",
+    "CPU, GPU or other supported hardware",
+    "Can run locally or on a separate host",
+])
+hardware_card(1129, 553, 640, 184, "server", "Data Platform host", [
+    "Connectors, extraction and query service",
+    "Governed PostgreSQL catalogue and search",
+    "Authorized datasets and derived artifacts",
+], VIOLET)
+hardware_card(1796, 553, 640, 184, "accelerator", "Approved training host", [
+    "Model Factory chooses eligible hardware",
+    "Isolated trainer and accelerator resources",
+    "No off-host trainer calls; activation separate",
+], VIOLET)
+hardware_card(1129, 761, 640, 184, "server", "Optional relay VM", [
+    "Private queue and authorized integration",
+    "Independent of the mission hub",
+    "Wider messaging integrations planned",
+])
+hardware_card(1796, 761, 640, 184, "storage", "Approved source systems", [
+    "File share, organization NAS or database",
+    "Other approved connected source services",
+    "Source permissions remain authoritative",
+], VIOLET)
+
+hardware_zone((1105, 1101, 2460, 1862), "On-premises hosted site pilot",
+              "PLANNED / CONNECTED OR AIR-GAPPED / OFFLINE CONFIGURATION VERIFIED IN PART", VIOLET)
+for index in range(3):
+    x = 1133 + 436 * index
+    draw.rounded_rectangle((x, 1215, x + 406, 1327), 13, fill=INSET, outline="#3a5772", width=2)
+    hardware_icon("server", x + 20, 1238, VIOLET)
+    text(x + 100, 1236, f"Cluster node {index + 1}", 27, heavy=True)
+    text(x + 100, 1273, "Linux server or VM", 23, MUTED)
+text(1135, 1352, "Shared service pool across the cluster", 29, heavy=True)
+site_software = [
+    ("RKE2 / etcd and admission", "Kyverno, HAProxy, cluster DNS and policies"),
+    ("Identity and hosted sessions", "Keycloak, PostgreSQL, oauth2-proxy, Theia Cloud"),
+    ("Site trust and image supply", "OpenBao, cert-manager and Harbor or Zot"),
+    ("Operations and service workloads", "Hubs, Fluent Bit, OpenSearch, Prometheus, alerts"),
+    ("Encrypted persistent volumes", "Longhorn or approved storage for PVs and workspaces"),
+    ("Pilot failure domains", "Place VMs on separate hosts for host-failure tests"),
+]
+for index, (title, line) in enumerate(site_software):
+    x = 1130 + (index % 2) * 666
+    y = 1410 + (index // 2) * 119
+    draw.rounded_rectangle((x, y, x + 637, y + 101), 13, fill=INSET, outline="#31516a", width=2)
+    text(x + 18, y + 12, title, 27, heavy=True, width=600)
+    text(x + 18, y + 55, line, 22, MUTED, width=600)
+text(1134, 1790, "Services can move between nodes. Each tile above is a host, not a dedicated appliance per service.",
+     25, MUTED, width=1294)
+
+hardware_zone((2660, 225, 3430, 988), "Connected external services",
+              "OUTSIDE THE ORGANIZATION'S HOSTED SITE", GOLD)
+hardware_card(2684, 345, 722, 170, "network", "GitHub CI and registry", [
+    "Build, independent review and owner release",
+    "Published digest or signed site bundle",
+], GOLD)
+hardware_card(2684, 539, 722, 170, "network", "Approved external inference", [
+    "NEAR AI private / forwarded and vault routes",
+    "Only when destination and network are approved",
+], GOLD)
+hardware_card(2684, 733, 722, 197, "media", "Approved offline transfer media", [
+    "Carries the exact signed software bundle",
+    "Verification roots use separately trusted media",
+    "No direct Internet connection to an isolated site",
+], GOLD)
+
+hardware_zone((2660, 1035, 3430, 1862), "Site support hardware",
+              "CUSTODY, STORAGE AND RECOVERY / AS APPROVED", GREEN)
+hardware_card(2684, 1143, 722, 118, "workstation", "Site-side import host", [
+    "Verifies bundle, then loads the site registry",
+], GOLD)
+hardware_card(2684, 1273, 722, 135, "custody", "Optional hardware security module", [
+    "Site key custody for OpenBao where selected",
+    "Offline root, escrow and approved ceremony",
+], GREEN)
+hardware_card(2684, 1418, 722, 135, "storage", "Optional encrypted NAS / storage", [
+    "Datasets or backups; live volumes if validated",
+    "Network storage is optional for live volumes",
+], GREEN)
+hardware_card(2684, 1563, 722, 135, "server", "Site time, network and DNS", [
+    "Authoritative site time and DNS services",
+    "Switching and routing stay in site control",
+], GREEN)
+
+hardware_card(2684, 1708, 722, 135, "storage", "Independent backup destination", [
+    "Recovery copy in a separate failure domain",
+    "Dedicated backup storage or separate-site copy",
+], GREEN)
+
+hardware_zone((70, 1550, 833, 1862), "Single-machine site lab",
+              "ALTERNATIVE TO PILOT FOR OFFLINE REHEARSAL", VIOLET)
+hardware_card(94, 1660, 715, 173, "server", "Physical KVM host → one guest", [
+    "Linux PC hosts one RHEL-compatible lab VM",
+    "Zot, encrypted volumes, hub and test session",
+    "Live signed installation remains to be verified",
+], VIOLET)
+
+physical_links = [
+    ([(809, 410), (1129, 410)], (969, 347), ["Planned Workbench", "hub pairing"], VIOLET, True, True),
+    ([(809, 605), (1129, 605)], (969, 542), ["Approved lookup", "and result"], VIOLET, True, True),
+    ([(809, 495), (1007, 495), (1007, 325), (2070, 325), (2070, 345)],
+     (1495, 317), ["Approved model request and result"], AQUA, False, True),
+    ([(809, 373), (870, 373), (870, 203), (2607, 203), (2607, 617), (2684, 617)],
+     (1690, 194), ["Connected users only: approved inference"], AQUA, False, True),
+    ([(3406, 438), (3418, 438), (3418, 830), (3406, 830)],
+     (3147, 706), ["Signed site bundle"], GOLD, False, False),
+    ([(833, 1284), (1105, 1284)], (969, 1218), ["Browser HTTPS", "to site ingress"], VIOLET, True, True),
+    ([(3300, 930), (3300, 1035), (3420, 1035), (3420, 1201), (3406, 1201)],
+     (3180, 992), ["Air-gap crossing by media"], GOLD, False, False),
+    ([(2684, 1195), (2460, 1195)], (2565, 1133), ["Verified load", "to site registry"], GOLD, False, False),
+    ([(2070, 553), (2070, 528)], (2225, 536), ["Approved model only"], VIOLET, True, False),
+    ([(1769, 695), (1782, 695), (1782, 835), (1796, 835)],
+     (1520, 739), ["Scoped source reads"], VIOLET, True, True),
+    ([(2460, 1345), (2660, 1345)], (2560, 1292), ["Key custody"], GREEN, True, True),
+    ([(2460, 1485), (2660, 1485)], (2560, 1421), ["Volumes /", "backups"], GREEN, True, True),
+    ([(2460, 1758), (2660, 1758)], (2560, 1695), ["Recovery", "copy"], GREEN, True, False),
+    ([(2660, 1625), (2460, 1625)], (2560, 1563), ["Site DNS", "and time"], GREEN, True, False),
+]
+for points, position, lines, color, planned, two_way in physical_links:
+    arrow(points, color, planned, two_way)
+    label(*position, lines, color)
+
+draw.rounded_rectangle((70, 1915, 3430, 2037), 17, fill=PANEL, outline="#31516a", width=2)
+text(96, 1932, "Placement options", 26, AQUA, True)
+text(96, 1972, "Separate drawings denote host roles or trust boundaries. Your organization can co-locate eligible roles or isolate them on different hardware.",
+     27, MUTED, width=3290)
+destination = destination.with_name("sovai-physical-layout.webp")
 image.save(destination, "WEBP", quality=94, method=6)
 print(destination)
